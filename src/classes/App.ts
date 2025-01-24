@@ -11,8 +11,8 @@ import { IMethodMetadata, IRequest, IResponse } from '../interfaces';
 import { Cache } from '../cache/Cache';
 import { ILogger } from '../interfaces';
 import { Logger } from '../utils/Logger';
-import { MetadataManager } from 'src/decorators';
-import { Container } from 'src/utils/Container';
+import { MetadataManager } from '../decorators';
+import { Container } from '../utils/Container';
 
 // define RouteHandler type
 type RouteHandler = (req: Request, res: Response) => Promise<void>;
