@@ -1,0 +1,16 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "out": "docs",
+  "exclude": ["**/*.test.ts", "**/internal/**"],
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "includeVersion": true,
+  "tsconfig": "tsconfig.json",
+  "theme": "default",
+  "readme": "none",
+  "hideGenerator": true,
+  "gitRevision": "main",
+  "categoryOrder": ["Classes", "Utilities", "API"],
+  "categorizeByGroup": true
+}

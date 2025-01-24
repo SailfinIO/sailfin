@@ -1,0 +1,29 @@
+// src/enums/DERTag.ts
+
+/**
+ * DER tag types
+ */
+export enum DERTag {
+  NONE = 0x00,
+  BOOLEAN = 0x01,
+  INTEGER = 0x02,
+  BIT_STRING = 0x03,
+  OCTET_STRING = 0x04,
+  NULL = 0x05,
+  OBJECT_IDENTIFIER = 0x06,
+  OBJECT_DESCRIPTOR = 0x07,
+  EXTERNAL = 0x08,
+  REAL = 0x09,
+  ENUMERATED = 0x0a,
+  EMBEDDED_PDV = 0x0b,
+  UTF8_STRING = 0x0c,
+  RELATIVE_OID = 0x0d,
+  SEQUENCE = 0x30,
+  SET = 0x31,
+  PRINTABLE_STRING = 0x13,
+  IA5_STRING = 0x16,
+  UTCTime = 0x17,
+  GENERALIZED_TIME = 0x18,
+  BMP_STRING = 0x1e,
+  CONSTRUCTED = 0xa0,
+}
