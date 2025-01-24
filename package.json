@@ -1,6 +1,6 @@
 {
   "name": "@sailfin/sailfin",
-  "version": "0.0.1",
+  "version": "0.0.2-beta.1",
   "description": "A framework for building Sailfin applications",
   "author": "Michael Curtis <michael@sailfin.io>",
   "readme": "README.md",
