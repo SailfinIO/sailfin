@@ -1,0 +1,9 @@
+// examples/basics/finally.sfn
+
+try {
+    // Risky operation
+} catch (SpecificError e) {
+    // Handle specific error
+} finally {
+    // Cleanup code
+}

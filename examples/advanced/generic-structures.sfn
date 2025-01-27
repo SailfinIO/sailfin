@@ -1,0 +1,16 @@
+// examples/advanced/generic-structures.sfn
+
+struct List<T> {
+    items -> T[];
+
+    fn add(self, item -> T) -> void {
+        self.items.append(item);
+    }
+
+    fn get(self, index -> number) -> T | null {
+        if index < 0 || index >= self.items.length {
+            return null;
+        }
+        return self.items[index];
+    }
+}

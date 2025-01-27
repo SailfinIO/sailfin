@@ -1,0 +1,37 @@
+// examples/basics/struct-composition.sfn
+
+interface Driveable {
+    fn drive(self) -> string;
+}
+
+struct Car {
+    brand -> string;
+
+    fn new(brand -> string) -> Car {
+        return Car { brand };
+    }
+
+    fn drive(self) -> string {
+        return "Driving a {{self.brand}} car.";
+    }
+}
+
+struct Bike {
+    brand -> string;
+
+    fn new(brand -> string) -> Bike {
+        return Bike { brand };
+    }
+
+    fn drive(self) -> string {
+        return "Riding a {{self.brand}} bike.";
+    }
+}
+
+fn main() {
+    let vehicle1: Driveable = Car.new("Tesla");
+    let vehicle2: Driveable = Bike.new("Yamaha");
+
+    print.info(vehicle1.drive()); // Outputs: Driving a Tesla car.
+    print.info(vehicle2.drive()); // Outputs: Riding a Yamaha bike.
+}

@@ -1,0 +1,6 @@
+fn main() {
+    let future1 = async { computeTask1() };
+    let future2 = async { computeTask2() };
+    let results = await [future1, future2];
+    print.info("Results: {{results}}");
+}

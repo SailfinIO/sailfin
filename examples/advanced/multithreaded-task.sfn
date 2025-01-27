@@ -1,0 +1,21 @@
+// examples/advanced/multithreaded-task.sfn
+
+fn computeTask(id -> number) -> string {
+    print.info("Task {{id}} started on thread {{thread.id()}}");
+    sleep(1000); // Simulate a 1-second task
+    return "Result from Task {{id}}";
+}
+
+fn main() {
+    // Launch multiple tasks using routines
+    let results = parallel [
+        fn() -> string { return computeTask(1); },
+        fn() -> string { return computeTask(2); },
+        fn() -> string { return computeTask(3); }
+    ];
+
+    print.info("All tasks completed:");
+    for result in results {
+        print.info(result);
+    }
+}

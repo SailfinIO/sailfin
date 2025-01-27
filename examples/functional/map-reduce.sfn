@@ -1,0 +1,10 @@
+// examples/functional/map-reduce.sfn
+
+fn main() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    let squares = numbers.map(fn(x) -> number { return x * x; });
+    let sum = squares.reduce(0, fn(acc, x) -> number { return acc + x; });
+
+    print.info("Sum of squares: {{sum}}"); // Outputs: 55
+}

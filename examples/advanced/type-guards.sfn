@@ -1,0 +1,18 @@
+// examples/advanced/type-guards.sfn
+
+fn process(input: string | number) {
+    if input is string {
+        print.info("It's a string: {{input}}");
+    } else {
+        print.info("It's a number: {{input}}");
+    }
+}
+
+process("Sail");
+process(42);
+
+match user {
+    User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
+    User { name, age } => print.info("Minor user: {{name}}"),
+    _ => print.info("Unknown entity"),
+}

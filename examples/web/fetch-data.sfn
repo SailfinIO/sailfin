@@ -1,0 +1,18 @@
+// examples/web/fetch-data.sfn
+
+import { http } from "sail/net";
+
+fn fetchData(url -> string) -> string {
+    let response = await http.get(url);
+    if response.status == 200 {
+        return response.body;
+    } else {
+        return "Error: {{response.status}}";
+    }
+}
+
+fn main() {
+    let url -> string = "https://jsonplaceholder.typicode.com/posts/1";
+    let data = fetchData(url);
+    print.info("Fetched data: {{data}}");
+}

@@ -1,0 +1,21 @@
+// examples/concurrency/producer-consumer.sfn
+
+let buffer -> channel[number] = channel(10); // A bounded buffer
+
+// Producer
+routine {
+    for i in 1..20 {
+        print.info("Producing {{i}}");
+        buffer.send(i);
+        sleep(500);
+    }
+}
+
+// Consumer
+routine {
+    while true {
+        let item = await buffer.receive();
+        print.info("Consumed {{item}}");
+        sleep(1000);
+    }
+}

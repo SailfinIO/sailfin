@@ -1,0 +1,11 @@
+// examples/web/async.sfn
+
+async fn fetchData(url -> string) -> string {
+    let response = await http.get(url);
+    return response.body;
+}
+
+fn main() {
+    let data = await fetchData("https://example.com");
+    print.info("Data: {{data}}");
+}

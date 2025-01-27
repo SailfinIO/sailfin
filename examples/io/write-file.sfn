@@ -1,0 +1,8 @@
+// examples/io/write-file.sfn
+
+import { fs } from "sail/io";
+
+fn main() {
+    fs.writeFile("output.txt", "Hello, Sail!");
+    print.info("File written successfully.");
+}

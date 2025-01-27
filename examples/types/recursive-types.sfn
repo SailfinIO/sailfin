@@ -1,0 +1,24 @@
+// examples/types/recursive-types.sfn
+
+struct TreeNode {
+    value -> number;
+    left -> TreeNode?;
+    right -> TreeNode?;
+}
+
+fn traverse(node -> TreeNode?) {
+    if node == null { return; }
+    traverse(node.left);
+    print.info("{{node.value}}");
+    traverse(node.right);
+}
+
+fn main() {
+    let root -> TreeNode = TreeNode {
+        value: 10,
+        left: TreeNode { value: 5, left: null, right: null },
+        right: TreeNode { value: 15, left: null, right: null },
+    };
+
+    traverse(root);
+}

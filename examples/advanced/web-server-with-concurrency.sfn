@@ -1,0 +1,25 @@
+// examples/advanced/web-server-with-concurrency.sfn
+
+import { serve } from "sail/http";
+
+fn handleRequest(req, res) {
+    if req.path == "/compute" {
+        routine {
+            let result = computeHeavyTask();
+            res.send("Computed result: {{result}}");
+        }
+    } else {
+        res.send("Welcome to Sail!", 200);
+    }
+}
+
+fn computeHeavyTask() -> number {
+    // Simulate a heavy task
+    sleep(2000); // Simulate processing
+    return 42;
+}
+
+fn main() {
+    serve(handleRequest, { port: 8080 });
+    print.info("Server is running on http://localhost:8080");
+}

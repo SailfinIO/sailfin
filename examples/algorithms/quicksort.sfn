@@ -1,0 +1,17 @@
+// examples/algorithms/quicksort.sfn
+
+fn quicksort(arr -> number[]) -> number[] {
+    if arr.length <= 1 { return arr; }
+
+    let pivot = arr[0];
+    let less = arr.filter(fn(x) -> boolean { return x < pivot; });
+    let equal = arr.filter(fn(x) -> boolean { return x == pivot; });
+    let greater = arr.filter(fn(x) -> boolean { return x > pivot; });
+
+    return quicksort(less).concat(equal).concat(quicksort(greater));
+}
+
+fn main() {
+    let nums = [10, 7, 8, 9, 1, 5];
+    print.info("Sorted: {{quicksort(nums)}}");
+}

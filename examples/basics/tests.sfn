@@ -1,0 +1,10 @@
+// examples/basics/tests.sfn
+
+fn add(x -> number, y -> number) -> number {
+    return x + y;
+}
+
+test "add function should return correct sum" {
+    assert add(2, 3) == 5;
+    assert add(-1, 1) == 0;
+}

@@ -1,0 +1,11 @@
+// examples/basics/variables.sfn
+
+let name -> string = "Sail"; // Immutable by default
+mut age -> number = 25;      // Mutable variable
+
+fn increment() -> void {
+    age += 1;
+}
+
+increment();
+print.info("Age is now {{age}}"); // Unique string interpolation syntax

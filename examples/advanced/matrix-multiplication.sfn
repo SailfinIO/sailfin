@@ -1,0 +1,21 @@
+// examples/advanced/matrix-multiplication.sfn
+
+fn multiply(a: number[][], b: number[][]) -> number[][] {
+    let rowsA = a.length;
+    let colsA = a[0].length;
+    let colsB = b[0].length;
+
+    return (0..rowsA).map(fn(row) -> number[] {
+        return (0..colsB).map(fn(col) -> number {
+            return (0..colsA).reduce(0, fn(acc, k) {
+                return acc + a[row][k] * b[k][col];
+            });
+        });
+    });
+}
+
+// Example usage
+let a = [[1, 2], [3, 4]];
+let b = [[5, 6], [7, 8]];
+let result = multiply(a, b);
+print.info("Result: {{result}}");

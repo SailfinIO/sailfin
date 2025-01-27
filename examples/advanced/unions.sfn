@@ -1,0 +1,23 @@
+// examples/advanced/unions.sfn
+
+fn print.infoValue(value: string | number) {
+    if value is string {
+        print.info("It's a string: {{value}}");
+    } else {
+        print.info("It's a number: {{value}}");
+    }
+}
+
+// Intersection
+interface Admin {
+    isAdmin -> boolean;
+}
+
+interface User {
+    name -> string;
+}
+
+type AdminUser = Admin & User;
+
+let admin -> AdminUser = { name: "Alice", isAdmin: true };
+print.info("Admin: {{admin.name}}");

@@ -1,0 +1,16 @@
+// examples/basics/tagged-enum.sfn
+
+enum Shape {
+    Circle { radius -> number },
+    Rectangle { width -> number, height -> number },
+}
+
+fn area(shape -> Shape) -> number {
+    match shape {
+        Shape.Circle { radius } => return 3.14 * radius * radius,
+        Shape.Rectangle { width, height } => return width * height,
+    }
+}
+
+let circle -> Shape = Shape.Circle { radius: 5 };
+print.info("Area: {{area(circle)}}"); // Outputs: Area: 78.5
