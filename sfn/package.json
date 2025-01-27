@@ -16,6 +16,36 @@
       {
         "command": "sfn.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "sfn.compileCode",
+        "title": "Compile Code"
+      }
+    ],
+    "languages": [
+      {
+        "id": "sfn",
+        "extensions": [
+          ".sfn"
+        ],
+        "aliases": [
+          "Sailfin",
+          "sfn"
+        ],
+        "configuration": "./src/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sfn",
+        "scopeName": "source.sfn",
+        "path": "./src/syntaxes/sailfin.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "sfn",
+        "path": "./src/snippets/sfn.json"
       }
     ]
   },
