@@ -1,15 +1,15 @@
 // examples/basics/functions.sfn
 
 fn add(x -> number, y -> number) -> number {
-    return x + y;
+  return x + y;
 }
 
 fn greet(name -> string = "Sail") -> string {
-    return "Hello, {{name}}!";
+  return "Hello, {{name}}!";
 }
 
 fn main() {
-    print.info(add(3, 5)); // Outputs: 8
-    print.info(greet());   // Outputs: Hello, Sail!
-    print.info(greet("Alice")); // Outputs: Hello, Alice!
+  print.info(add(3, 5)); // Outputs: 8
+  print.info(greet());   // Outputs: Hello, Sail!
+  print.info(greet("Alice")); // Outputs: Hello, Alice!
 }

@@ -41,4 +41,4 @@ If you encounter any issues or have suggestions for improving the Sailfin extens
 
 ## License
 
-This extension is licensed under the [MIT License](LICENSE).
+This extension is licensed under the [MIT License](https://github.com/SailfinIO/sailfin/LICENSE).

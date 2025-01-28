@@ -2,5 +2,5 @@
 
 @logExecution
 fn compute(x -> number) -> number {
-    return x * x;
+  return x * x;
 }

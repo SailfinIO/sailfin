@@ -9,6 +9,10 @@
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git@github.com/SailfinIO/sailfin.git"
+  },
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
