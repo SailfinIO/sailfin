@@ -36,20 +36,20 @@
           "Sailfin",
           "sfn"
         ],
-        "configuration": "./sfn/src/language-configuration.json"
+        "configuration": "./vscode/src/language-configuration.json"
       }
     ],
     "grammars": [
       {
         "language": "sfn",
         "scopeName": "source.sfn",
-        "path": "./sfn/src/syntaxes/sailfin.tmLanguage.json"
+        "path": "./vscode/src/syntaxes/sailfin.tmLanguage.json"
       }
     ],
     "snippets": [
       {
         "language": "sfn",
-        "path": "./sfn/src/snippets/sfn.json"
+        "path": "./vscode/src/snippets/sfn.json"
       }
     ],
     "debuggers": [
