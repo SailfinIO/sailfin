@@ -47,6 +47,24 @@
         "language": "sfn",
         "path": "./src/snippets/sfn.json"
       }
+    ],
+    "debuggers": [
+      {
+        "type": "sfn",
+        "label": "Sailfin Debug",
+        "program": "./dist/extension.js",
+        "runtime": "node",
+        "runtimeArgs": [
+          "--inspect-brk=9229"
+        ],
+        "languages": [
+          "sfn"
+        ]
+      }
+    ],
+    "activationEvents": [
+      "onLanguage:sfn",
+      "onCommand:sfn.compileCode"
     ]
   },
   "scripts": {

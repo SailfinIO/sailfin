@@ -3,17 +3,33 @@
   "patterns": [
     {
       "name": "keyword.control.sfn",
-      "match": "\\b(if|else|for|while|return)\\b"
+      "match": "\\b(if|else|for|while|return|try|catch|finally|async|await|throw|import|export)\\b"
     },
     {
-      "name": "variable.sfn",
-      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"
+      "name": "storage.type.sfn",
+      "match": "\\b(fn|struct|mut|let|const|interface|enum|type)\\b"
+    },
+    {
+      "name": "support.type.sfn",
+      "match": "\\b(string|number|boolean|void|any|T)\\b"
+    },
+    {
+      "name": "meta.decorator.sfn",
+      "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    {
+      "name": "constant.character.sfn",
+      "match": "->|=>|="
+    },
+    {
+      "name": "string.interpolated.sfn",
+      "begin": "\\{\\{",
+      "end": "\\}\\}"
     },
     {
       "name": "string.quoted.double.sfn",
       "begin": "\"",
       "end": "\""
     }
-  ],
-  "repository": {}
+  ]
 }

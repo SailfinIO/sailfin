@@ -8,5 +8,38 @@
     "prefix": "if",
     "body": ["if ($1) {", "\t$2", "}"],
     "description": "If statement"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:functionName}(${2:params}) -> ${3:returnType} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Create a function"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:StructName} {", "    ${2:field} -> ${3:type};", "}"],
+    "description": "Define a struct"
+  },
+  "Async Function": {
+    "prefix": "asyncfn",
+    "body": [
+      "async fn ${1:functionName}(${2:params}) -> ${3:returnType} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Create an asynchronous function"
+  },
+  "Match Statement": {
+    "prefix": "match",
+    "body": [
+      "match ${1:expression} {",
+      "    ${2:pattern} => ${3:action},",
+      "    _ => ${4:defaultAction},",
+      "}"
+    ],
+    "description": "Match statement"
   }
 }

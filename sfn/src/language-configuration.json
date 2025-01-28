@@ -21,5 +21,15 @@
     { "open": "(", "close": ")" },
     { "open": "\"", "close": "\"" },
     { "open": "'", "close": "'" }
-  ]
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "(\\{[^}\"']*|\\([^)\"']*|\\[[^\\]\"']*)$",
+    "decreaseIndentPattern": "^(\\s*[\\}\\]\\)])"
+  },
+  "folding": {
+    "markers": {
+      "start": "^\\s*// #region",
+      "end": "^\\s*// #endregion"
+    }
+  }
 }
