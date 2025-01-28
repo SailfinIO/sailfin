@@ -1,0 +1,77 @@
+name: Build and Publish VS Code Extension
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      # Install dependencies
+      - name: Install dependencies
+        working-directory: ./extension
+        run: npm install
+
+      # Lint and test (optional, ensure the code quality)
+      - name: Run linting
+        working-directory: ./extension
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: ./extension
+        run: npm test
+
+      # Build the VSIX package
+      - name: Package the extension
+        working-directory: ./extension
+        run: npx vsce package
+
+      # Upload the packaged extension as an artifact
+      - name: Upload VSIX Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-extension
+          path: ./extension/*.vsix
+
+  publish:
+    name: Publish Extension
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Install dependencies
+      - name: Install dependencies
+        working-directory: ./extension
+        run: npm install
+
+      # Publish the extension to the Visual Studio Code Marketplace
+      - name: Publish to VS Code Marketplace
+        working-directory: ./extension
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: npx vsce publish
