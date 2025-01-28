@@ -2,7 +2,7 @@
   "name": "sfn",
   "displayName": "sailfin",
   "description": "sailfin programming language",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.96.0"
   },
@@ -36,20 +36,20 @@
           "Sailfin",
           "sfn"
         ],
-        "configuration": "./src/language-configuration.json"
+        "configuration": "./sfn/src/language-configuration.json"
       }
     ],
     "grammars": [
       {
         "language": "sfn",
         "scopeName": "source.sfn",
-        "path": "./src/syntaxes/sailfin.tmLanguage.json"
+        "path": "./sfn/src/syntaxes/sailfin.tmLanguage.json"
       }
     ],
     "snippets": [
       {
         "language": "sfn",
-        "path": "./src/snippets/sfn.json"
+        "path": "./sfn/src/snippets/sfn.json"
       }
     ],
     "debuggers": [
