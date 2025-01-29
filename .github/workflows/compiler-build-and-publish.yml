@@ -1,0 +1,111 @@
+name: Compiler Build and Publish
+
+on:
+  push:
+    branches:
+      - main # Adjust if your default branch is different
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # 2. Set up Python
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13" # Ensure this matches your `pyproject.toml`
+
+      # 3. Install Poetry
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "::add-path::$HOME/.local/bin"
+
+      # 4. Configure Poetry to not create a virtual environment
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+
+      # 5. Install Dependencies
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      # 6. Build the Executable with PyInstaller
+      - name: Build Executable with PyInstaller
+        run: |
+          pyinstaller --onefile --name sfn bootstrap/sfn.py
+        working-directory: bootstrap
+        # This will create the executable in the `bootstrap/dist/` directory
+
+      # 7. Prepare Package Metadata
+      - name: Prepare Package Metadata
+        id: package_metadata
+        run: |
+          VERSION=$(poetry version -s)
+          PACKAGE_NAME="bootstrap"
+          PACKAGE_VERSION="$VERSION"
+          PACKAGE_FILENAME="dist/sfn"
+          PACKAGE_CONTENT_TYPE="application/octet-stream"  # Generic binary
+          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          echo "filename=$PACKAGE_FILENAME" >> $GITHUB_OUTPUT
+        working-directory: bootstrap
+
+      # 8. Publish to GitHub Packages
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Ensure this token has the necessary scopes
+          PACKAGE_NAME: ${{ github.repository_owner }}/bootstrap
+          PACKAGE_VERSION: ${{ steps.package_metadata.outputs.version }}
+          PACKAGE_FILENAME: bootstrap/${{ steps.package_metadata.outputs.filename }}
+          PACKAGE_TYPE: generic
+        run: |
+          # Create a new generic package version
+          RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/user/packages/generic/$PACKAGE_NAME/$PACKAGE_VERSION -d '{
+              "name": "sfn",
+              "description": "Executable for the Sailfin Language Compiler",
+              "package_type": "generic"
+            }')
+
+          # Extract the upload URL
+          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url' | sed -e "s/{?name,label}//")
+
+          # Upload the package
+          curl -s --data-binary @"$PACKAGE_FILENAME" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: $PACKAGE_CONTENT_TYPE" \
+            "$UPLOAD_URL?name=sfn"
+        # Note: `jq` is used for parsing JSON. Ensure it's available on the runner (default on Ubuntu).
+
+      # 9. Optional: Create a GitHub Release (Recommended for Binary Assets)
+      # If you prefer to attach the executable to a GitHub Release instead of GitHub Packages,
+      # uncomment the following steps and comment out the "Publish to GitHub Packages" step.
+
+      # - name: Create Release
+      #   id: create_release
+      #   uses: actions/create-release@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     tag_name: v${{ steps.package_metadata.outputs.version }}
+      #     release_name: Release v${{ steps.package_metadata.outputs.version }}
+      #     draft: false
+      #     prerelease: false
+
+      # - name: Upload Executable to Release
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: bootstrap/dist/sfn
+      #     asset_name: sfn
+      #     asset_content_type: application/octet-stream
