@@ -15,7 +15,7 @@ fn main() {
     let result = safeDivide(10, 0);
 
     match result {
-        DivisionError { message } => print.info("Error: {{message}}"),
-        _ => print.info("Result: {{result}}"),
+        DivisionError { message } -> print.info("Error: {{message}}"),
+        _ -> print.info("Result: {{result}}"),
     }
 }

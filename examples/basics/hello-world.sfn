@@ -1,5 +1,5 @@
 // examples/basics/hello-world.sfn
 
 fn main() {
-    print.info("Hello, Sail!");
+  print.info("Hello, Sailfin!");
 }
