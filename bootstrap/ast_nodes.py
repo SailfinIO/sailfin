@@ -34,12 +34,13 @@ class ConstantDeclaration(ASTNode):
 
 
 class FunctionDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None):
+    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
         self.name = name
         self.params = params  # List of tuples: (param_name, param_type)
         self.return_type = return_type
         self.body = body  # List of statements
         self.decorators = decorators if decorators else []  # List of decorator names
+        self.is_async = is_async  # Indicates if the function is asynchronous
 
 
 class BinOp(Expression):
@@ -108,12 +109,18 @@ class Assignment(ASTNode):
 
 
 class MethodDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None):
+    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
         self.name = name
         self.params = params  # List of tuples: (param_name, param_type)
         self.return_type = return_type
         self.body = body  # List of statements
         self.decorators = decorators if decorators else []
+        self.is_async = is_async  # Indicates if the method is asynchronous
+
+
+class Await(Expression):
+    def __init__(self, expression):
+        self.expression = expression
 
 
 class EnumDeclaration(ASTNode):
@@ -175,3 +182,9 @@ class WildcardPattern(ASTNode):
 class ArrayLiteral(Expression):
     def __init__(self, elements):
         self.elements = elements  # List of expressions
+
+
+class TryFinally(ASTNode):
+    def __init__(self, try_block, finally_block):
+        self.try_block = try_block  # List of statements
+        self.finally_block = finally_block  # List of statements

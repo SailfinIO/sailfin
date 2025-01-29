@@ -4,7 +4,7 @@ import sys
 import ply.yacc as yacc
 from lexer import tokens
 from ast_nodes import (
-    ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern
@@ -363,6 +363,56 @@ def p_mut_opt_empty(p):
 # Function Declaration
 
 
+def p_function_declaration_async_with_decorators(p):
+    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
+    p[0] = FunctionDeclaration(
+        name=p[4],
+        params=p[6],
+        return_type=p[9],
+        body=p[11],
+        decorators=p[1],
+        is_async=True
+    )
+
+
+def p_function_declaration_async_with_decorators_no_return(p):
+    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
+    p[0] = FunctionDeclaration(
+        name=p[4],
+        params=p[6],
+        return_type='void',  # Default return type
+        body=p[8],
+        decorators=p[1],
+        is_async=True
+    )
+
+
+def p_function_declaration_async_without_decorators(p):
+    '''function_declaration : ASYNC FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
+    p[0] = FunctionDeclaration(
+        name=p[3],
+        params=p[5],
+        return_type=p[8],
+        body=p[10],
+        decorators=[],
+        is_async=True
+    )
+
+
+def p_function_declaration_async_without_decorators_no_return(p):
+    '''function_declaration : ASYNC FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
+    p[0] = FunctionDeclaration(
+        name=p[3],
+        params=p[5],
+        return_type='void',
+        body=p[7],
+        decorators=[],
+        is_async=True
+    )
+
+# EXISTING: Function Declaration without 'async'
+
+
 def p_function_declaration_with_decorators(p):
     '''function_declaration : decorators FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
     p[0] = FunctionDeclaration(
@@ -370,7 +420,8 @@ def p_function_declaration_with_decorators(p):
         params=p[5],
         return_type=p[8],
         body=p[10],
-        decorators=p[1]
+        decorators=p[1],
+        is_async=False
     )
 
 
@@ -379,9 +430,10 @@ def p_function_declaration_with_decorators_no_return(p):
     p[0] = FunctionDeclaration(
         name=p[3],
         params=p[5],
-        return_type='void',  # Default return type
+        return_type='void',
         body=p[8],
-        decorators=p[1]
+        decorators=p[1],
+        is_async=False
     )
 
 
@@ -391,7 +443,9 @@ def p_function_declaration_without_decorators(p):
         name=p[2],
         params=p[4],
         return_type=p[7],
-        body=p[9]
+        body=p[9],
+        decorators=[],
+        is_async=False
     )
 
 
@@ -400,9 +454,16 @@ def p_function_declaration_without_decorators_no_return(p):
     p[0] = FunctionDeclaration(
         name=p[2],
         params=p[4],
-        return_type='void',  # Default return type
-        body=p[7]
+        return_type='void',
+        body=p[7],
+        decorators=[],
+        is_async=False
     )
+
+
+def p_expression_await(p):
+    '''expression : AWAIT expression'''
+    p[0] = Await(expression=p[2])
 
 
 # Print Statement

@@ -6,22 +6,31 @@ import uuid
 from ast_nodes import (
     ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement,
     LambdaExpression, MatchStatement, MethodDeclaration, NumberPattern, Program,
-    FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    FunctionDeclaration, TryFinally, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
-    MemberAccess, Assignment, WildcardPattern
+    MemberAccess, Assignment, WildcardPattern, Await
 )
+from http_client_def import http_client_def
 
 
 class CodeGenerator:
     def __init__(self):
         self.imports_set = set()
         self.global_code = []
+        self.has_async = False  # Flag to indicate presence of async features
+        self.async_functions = set()  # Set of async function names
+        self.requires_http = False  # Flag to indicate if 'http' is used
+        self.async_stack = []  # Stack to track async context
 
     def generate_code(self, ast, indent_level=0, top_level=True, global_vars=None):
         if top_level:
-            # Reset imports_set for each top-level generation
+            # Reset imports_set and flags for each top-level generation
             self.imports_set.clear()
+            self.has_async = False
+            self.async_functions.clear()
+            self.requires_http = False  # Reset the flag
+            self.async_stack = []
 
         if global_vars is None:
             global_vars = set()
@@ -32,30 +41,76 @@ class CodeGenerator:
                 if isinstance(stmt, VariableDeclaration) or isinstance(stmt, ConstantDeclaration):
                     global_vars.add(stmt.name)
 
+        # **Move the main function modification BEFORE code generation loop**
+        if top_level:
+            main_func = next((stmt for stmt in ast.statements if isinstance(
+                stmt, FunctionDeclaration) and stmt.name == 'main'), None)
+            if main_func:
+                if main_func.is_async:
+                    self.has_async = True
+                    self.async_functions.add(main_func.name)
+                    # Preserve original body
+                    original_body = main_func.body.copy()
+                    # Modify main_func.body to include init and close
+                    main_func.body = [
+                        Await(
+                            expression=FunctionCall(
+                                func_name=Identifier('http.init'),
+                                arguments=[]
+                            )
+                        ),
+                        TryFinally(
+                            try_block=original_body,
+                            finally_block=[
+                                Await(
+                                    expression=FunctionCall(
+                                        func_name=Identifier('http.close'),
+                                        arguments=[]
+                                    )
+                                )
+                            ]
+                        )
+                    ]
+
         # Generate code for statements
         code = ""
         for stmt in ast.statements:
             code += self.generate_statement(stmt, indent_level, global_vars)
 
-        # Only at the very end (top-level = True) do we prepend imports & global lambdas
+        # Only at the very end (top_level = True) do we prepend imports & global lambdas
         if top_level:
+            # Handle imports
+            if self.has_async:
+                self.imports_set.add("import asyncio")
+            if self.requires_http:
+                self.imports_set.add("import aiohttp")
+
+            # Prepend imports
             if self.imports_set:
                 sorted_imports = sorted(self.imports_set)
                 print(f"Imports to prepend: {sorted_imports}")  # Debugging
                 imports_str = "\n".join(sorted_imports) + "\n\n"
-                code = imports_str + code
             else:
                 print("No imports to prepend.")
+                imports_str = ""
 
-            if self.global_code:
-                print(f"Global code to prepend: {
-                      self.global_code}")  # Debugging
-                code = "".join(self.global_code) + "\n" + code
+            # Inject 'HTTPClient' class definition
+            if self.requires_http:
+                http_def = http_client_def()
+                self.global_code.append(http_def)
+                print("Injected HTTPClient definitions.")  # Debugging
 
-            # And if there's a main, add the "if __name__..." snippet
-            if any(isinstance(stmt, FunctionDeclaration) and stmt.name == 'main'
-                   for stmt in ast.statements):
-                code += '\nif __name__ == "__main__":\n    main()\n'
+            # Combine imports and global code
+            global_code_str = "".join(
+                self.global_code) + "\n" if self.global_code else ""
+            code = imports_str + global_code_str + code
+
+            # Adjust main execution based on whether 'main' is async
+            if main_func:
+                if main_func.is_async:
+                    code += '\nif __name__ == "__main__":\n    asyncio.run(main())\n'
+                else:
+                    code += '\nif __name__ == "__main__":\n    main()\n'
 
         return code
 
@@ -76,13 +131,38 @@ class CodeGenerator:
             var = stmt.name
             value = self.generate_expression(stmt.value)
             code += f"{indent}{var} = {value}  # Constant\n"
+        elif isinstance(stmt, TryFinally):
+            code += f"{indent}try:\n"
+            if not stmt.try_block:
+                code += f"{indent}    pass\n"
+            else:
+                try_block_ast = Program(stmt.try_block)
+                code += self.generate_code(try_block_ast, indent_level + 1,
+                                           top_level=False, global_vars=global_vars)
+            code += f"{indent}finally:\n"
+            if not stmt.finally_block:
+                code += f"{indent}    pass\n"
+            else:
+                finally_block_ast = Program(stmt.finally_block)
+                code += self.generate_code(finally_block_ast, indent_level + 1,
+                                           top_level=False, global_vars=global_vars)
         elif isinstance(stmt, FunctionDeclaration):
+            if stmt.is_async:
+                self.has_async = True
+                self.async_functions.add(stmt.name)
+                self.async_stack.append(True)
+            else:
+                self.async_stack.append(False)
             decorators = ""
             for decorator in stmt.decorators:
                 decorators += f"{indent}@{decorator}\n"
             params = ", ".join([param[0] for param in stmt.params])
-            code += decorators
-            code += f"{indent}def {stmt.name}({params}):\n"
+            if stmt.is_async:
+                code += decorators
+                code += f"{indent}async def {stmt.name}({params}):\n"
+            else:
+                code += decorators
+                code += f"{indent}def {stmt.name}({params}):\n"
             if not stmt.body:
                 code += f"{indent}    pass\n"
             else:
@@ -95,9 +175,16 @@ class CodeGenerator:
                         code += f"{indent}    global {var}\n"
                 # Recursively generate code for the function body with increased indentation
                 function_body_ast = Program(stmt.body)
-                code += self.generate_code(function_body_ast,
-                                           indent_level + 1, top_level=False, global_vars=global_vars)
+                code += self.generate_code(function_body_ast, indent_level + 1,
+                                           top_level=False, global_vars=global_vars)
+            self.async_stack.pop()
         elif isinstance(stmt, MethodDeclaration):
+            if stmt.is_async:
+                self.has_async = True
+                self.async_functions.add(stmt.name)
+                self.async_stack.append(True)
+            else:
+                self.async_stack.append(False)
             decorators = ""
             for decorator in stmt.decorators:
                 decorators += f"{indent}@{decorator}\n"
@@ -105,14 +192,19 @@ class CodeGenerator:
             # Ensure 'self' is included
             if not method_params.startswith('self'):
                 method_params = "self, " + method_params
-            code += decorators
-            code += f"{indent}def {stmt.name}({method_params}):\n"
+            if stmt.is_async:
+                code += decorators
+                code += f"{indent}async def {stmt.name}({method_params}):\n"
+            else:
+                code += decorators
+                code += f"{indent}def {stmt.name}({method_params}):\n"
             if not stmt.body:
                 code += f"{indent}    pass\n"
             else:
                 method_body_ast = Program(stmt.body)
-                code += self.generate_code(method_body_ast,
-                                           indent_level + 2, top_level=False, global_vars=global_vars)
+                code += self.generate_code(
+                    method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
+            self.async_stack.pop()
         elif isinstance(stmt, IfStatement):
             condition = self.generate_expression(stmt.condition)
             code += f"{indent}if {condition}:\n"
@@ -120,13 +212,13 @@ class CodeGenerator:
                 code += f"{indent}    pass\n"
             else:
                 then_branch_ast = Program(stmt.then_branch)
-                code += self.generate_code(then_branch_ast,
-                                           indent_level + 1, global_vars=global_vars, top_level=False)
+                code += self.generate_code(then_branch_ast, indent_level + 1,
+                                           global_vars=global_vars, top_level=False)
             if stmt.else_branch:
                 code += f"{indent}else:\n"
                 else_branch_ast = Program(stmt.else_branch)
-                code += self.generate_code(else_branch_ast,
-                                           indent_level + 1, global_vars=global_vars, top_level=False)
+                code += self.generate_code(else_branch_ast, indent_level + 1,
+                                           global_vars=global_vars, top_level=False)
         elif isinstance(stmt, EnumDeclaration):
             # Add import enum to imports_set
             self.imports_set.add("import enum")
@@ -177,6 +269,12 @@ class CodeGenerator:
 
                 # Methods
                 for method in methods:
+                    if method.is_async:
+                        self.has_async = True
+                        self.async_functions.add(method.name)
+                        self.async_stack.append(True)
+                    else:
+                        self.async_stack.append(False)
                     method_decorators = ""
                     for decorator in method.decorators:
                         method_decorators += f"{indent}    @{decorator}\n"
@@ -185,15 +283,21 @@ class CodeGenerator:
                     # Ensure 'self' is included
                     if not method_params.startswith('self'):
                         method_params = "self, " + method_params
-                    code += method_decorators
-                    code += f"{indent}    def {
-                        method.name}({method_params}):\n"
+                    if method.is_async:
+                        code += method_decorators
+                        code += f"{indent}    async def {
+                            method.name}({method_params}):\n"
+                    else:
+                        code += method_decorators
+                        code += f"{indent}    def {
+                            method.name}({method_params}):\n"
                     if not method.body:
                         code += f"{indent}        pass\n"
                     else:
                         method_body_ast = Program(method.body)
-                        code += self.generate_code(method_body_ast,
-                                                   indent_level + 2, global_vars=global_vars, top_level=False)
+                        code += self.generate_code(
+                            method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
+                    self.async_stack.pop()
                 # Add __repr__ method for better debugging
                 code += f"{indent}    def __repr__(self):\n"
                 repr_fields = ", ".join(
@@ -210,23 +314,34 @@ class CodeGenerator:
         elif isinstance(stmt, ImportStatement):
             items = ", ".join(stmt.items)
             source = stmt.source
-            code += f"{indent}from {source} import {items}\n"
+            if source == "aiohttp":
+                # Special handling for aiohttp if needed
+                self.imports_set.add("import aiohttp")
+                code += f"{indent}import aiohttp\n"
+            else:
+                code += f"{indent}from {source} import {items}\n"
         elif isinstance(stmt, TypeAliasDeclaration):
             code += f"{indent}{stmt.name} = {stmt.aliased_type}  # Type Alias\n"
         elif isinstance(stmt, MatchStatement):
-            # Use stmt.condition instead of stmt.value
             cond_expr = self.generate_expression(stmt.condition)
             code += f"{indent}match {cond_expr}:\n"
 
-            # Loop over stmt.arms (not stmt.cases)
             for arm in stmt.arms:
                 pattern_code = self.generate_pattern_expression(arm.pattern)
                 code += f"{indent}    case {pattern_code}:\n"
 
                 # Generate code for the arm's body
                 case_body_ast = Program(arm.body)
-                code += self.generate_code(case_body_ast,
-                                           indent_level + 2, global_vars=global_vars, top_level=False)
+                code += self.generate_code(case_body_ast, indent_level + 2,
+                                           global_vars=global_vars, top_level=False)
+        elif isinstance(stmt, Await):
+            # Direct Await statement, rare outside expressions
+            if not any(self.async_stack):
+                raise SyntaxError(
+                    f"'await' used outside of an async function.")
+            self.has_async = True
+            expr_code = self.generate_expression(stmt.expression)
+            code += f"{indent}await {expr_code}\n"
         else:
             # Debugging aid
             print(f"Unhandled statement type: {type(stmt).__name__}")
@@ -239,6 +354,12 @@ class CodeGenerator:
             left = self.generate_expression(expr.left)
             right = self.generate_expression(expr.right)
             return f"({left} {expr.operator} {right})"
+        elif isinstance(expr, Await):
+            if not any(self.async_stack):
+                raise SyntaxError("'await' used outside of an async function")
+            self.has_async = True
+            inner_expr = self.generate_expression(expr.expression)
+            return f"await {inner_expr}"
         elif isinstance(expr, Number):
             return str(expr.value)
         elif isinstance(expr, String):
@@ -253,23 +374,30 @@ class CodeGenerator:
             else:
                 return f"\"{expr.value}\""
         elif isinstance(expr, Identifier):
+            if expr.name == 'http':
+                self.requires_http = True
             return expr.name
         elif isinstance(expr, FunctionCall):
+            if isinstance(expr.func_name, MemberAccess):
+                if isinstance(expr.func_name.object, Identifier) and expr.func_name.object.name == 'http':
+                    self.requires_http = True
+            elif isinstance(expr.func_name, Identifier) and expr.func_name.name == 'http':
+                self.requires_http = True
+            # Handle other function calls as before
             if isinstance(expr.func_name, MemberAccess):
                 obj_code = self.generate_expression(expr.func_name.object)
                 member = expr.func_name.member
                 if member == 'map':
                     # Handle map: map(fn, obj)
                     fn_code = self.generate_expression(expr.arguments[0])
-                    # No additional imports needed for map
                     return f"list(map({fn_code}, {obj_code}))"
                 elif member == 'reduce':
                     # Handle reduce: functools.reduce(fn, obj, initial)
                     if len(expr.arguments) != 2:
                         raise NotImplementedError(
-                            "reduce requires two arguments: initial and function")
-                    initial = self.generate_expression(expr.arguments[0])
-                    fn_code = self.generate_expression(expr.arguments[1])
+                            "reduce requires two arguments: function and initial")
+                    initial = self.generate_expression(expr.arguments[1])
+                    fn_code = self.generate_expression(expr.arguments[0])
                     self.imports_set.add("import functools")
                     return f"functools.reduce({fn_code}, {obj_code}, {initial})"
                 else:

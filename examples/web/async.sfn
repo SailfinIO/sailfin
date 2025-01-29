@@ -5,7 +5,7 @@ async fn fetchData(url -> string) -> string {
     return response.body;
 }
 
-fn main() {
+async fn main() -> void {
     let data = await fetchData("https://example.com");
     print.info("Data: {{data}}");
 }
