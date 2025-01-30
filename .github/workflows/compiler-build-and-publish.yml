@@ -33,6 +33,7 @@ jobs:
       - name: Configure Poetry
         run: |
           poetry config virtualenvs.create false
+        working-directory: bootstrap
 
       # 5. Cache Poetry Dependencies
       - name: Cache Poetry Dependencies
@@ -41,7 +42,7 @@ jobs:
           path: |
             ~/.cache/pypoetry
             ~/.cache/pip
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
+          key: ${{ runner.os }}-poetry-${{ hashFiles('bootstrap/pyproject.toml', 'bootstrap/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
@@ -49,28 +50,19 @@ jobs:
       - name: Install Dependencies
         run: |
           poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
 
       # 7. Build the Executable with PyInstaller
       - name: Build Executable with PyInstaller
         run: |
           pyinstaller --onefile --name sfn bootstrap.py
+        working-directory: bootstrap
         # This will create the executable in the `bootstrap/dist/` directory
 
-      # 8. Prepare Package Metadata (Optional: Can be handled by semantic-release)
-      - name: Prepare Package Metadata
-        id: package_metadata
-        run: |
-          VERSION=$(poetry version -s)
-          PACKAGE_NAME="sfn" # Changed from "bootstrap" to "sfn"
-          PACKAGE_VERSION="$VERSION"
-          PACKAGE_FILENAME="dist/sfn"
-          PACKAGE_CONTENT_TYPE="application/octet-stream"  # Generic binary
-          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-          echo "filename=$PACKAGE_FILENAME" >> $GITHUB_OUTPUT
-
-      # 9. Semantic Release
+      # 8. Semantic Release
       - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           poetry run semantic-release publish
+        working-directory: bootstrap
