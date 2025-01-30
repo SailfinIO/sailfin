@@ -26,17 +26,34 @@ python-semantic-release = "^9.17.0"
 version_source = "tag"
 upload_to_pypi = false
 
-[tool.semantic_release.branches]
-main = { name = "main", prerelease = false }
-beta = { name = "beta", prerelease = true }
+branches = [
+    { name = "main", prerelease = false },
+    { name = "beta", prerelease = true }
+]
 
-[tool.semantic_release.commit_parser]
-type_enforced = true
-body_required = false
-merge_message_pattern = "^Merge pull request #\\d+ from .+$"
+plugins = [
+    [
+        "semantic_release.commit_parser",
+        {
+            "type_enforced": true,
+            "body_required": false,
+            "merge_message_pattern": "^Merge pull request #\\d+ from .+$"
+        }
+    ],
+    "semantic_release.release",
+    "semantic_release.changelog",
+    "semantic_release.github",
+    [
+        "semantic_release.git",
+        {
+            "message": "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}",
+            "assets": ["bootstrap/dist/sfn"]
+        }
+    ]
+]
 
 [tool.semantic_release.changelog]
-directory = "CHANGELOG.md"
+directory = "bootstrap"
 filename = "CHANGELOG.md"
 include_v_prefix = true
 version_variable = "__version__"
@@ -46,7 +63,4 @@ tag_template = "v{version}"
 commit_author = "semantic-release-bot <bot@example.com>"
 
 [tool.semantic_release.github]
-assets = [
-    { path = "bootstrap/dist/sfn", label = "sfn executable" }
-]
 release_method = "github"
