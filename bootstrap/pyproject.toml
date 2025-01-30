@@ -31,15 +31,20 @@ commit_parser = "semantic_release.commit_parser.AngularCommitParser"
 match = "(main|master)"
 prerelease = false
 
-[tool.semantic_release.branches."0.x.x"]
-match = "0.x.x"
+[tool.semantic_release.branches.rc]
+match = "rc"
 prerelease = true
 prerelease_token = "rc"
 
-[tool.semantic_release.branches."0.x.x New Features"]
-match = "next-\\w+-prj-\\d+"
+[tool.semantic_release.branches.alpha]
+match = "alpha"
 prerelease = true
 prerelease_token = "alpha"
+
+[tool.semantic_release.branches.beta]
+match = "beta"
+prerelease = true
+prerelease_token = "beta"
 
 [tool.semantic_release.commit_parser_options]
 type_enforced = true
