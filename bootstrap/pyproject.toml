@@ -63,7 +63,7 @@ commit_author = "semantic-release-bot <bot@example.com>"
 
 [tool.semantic_release.github]
 assets = [
-    { path = "bootstrap/dist/sfn", label = "sfn executable" }
+    { path = "bootstrap/dist/sfn", label = "sfn" }
 ]
 release_method = "github"
 
