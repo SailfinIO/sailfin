@@ -26,29 +26,26 @@ python-semantic-release = "^9.17.0"
 version_source = "tag"
 upload_to_pypi = false
 
-branches = [
-    { name = "main", prerelease = false },
-    { name = "beta", prerelease = true }
-]
+# Define branch configuration properly in TOML
+[[tool.semantic_release.branches]]
+name = "main"
+prerelease = false
+
+[[tool.semantic_release.branches]]
+name = "beta"
+prerelease = true
 
 plugins = [
     [
         "semantic_release.commit_parser",
-        {
-            "type_enforced": true,
-            "body_required": false,
-            "merge_message_pattern": "^Merge pull request #\\d+ from .+$"
-        }
+        { type_enforced = true, body_required = false, merge_message_pattern = "^Merge pull request #\\d+ from .+$" }
     ],
     "semantic_release.release",
     "semantic_release.changelog",
     "semantic_release.github",
     [
         "semantic_release.git",
-        {
-            "message": "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}",
-            "assets": ["bootstrap/dist/sfn"]
-        }
+        { message = "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}", assets = ["bootstrap/dist/sfn"] }
     ]
 ]
 
