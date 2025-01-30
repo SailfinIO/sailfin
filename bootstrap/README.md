@@ -7,7 +7,7 @@ This directory contains the bootstrap compiler for the Sailfin language. The boo
 To compile the Sailfin compiler, run the following command:
 
 ```bash
-python3 sfn.py
+pyinstaller --onefile --name sfn bootstrap/bootstrap.py
 ```
 
 This will generate the `sfn` executable in the /dist directory.
