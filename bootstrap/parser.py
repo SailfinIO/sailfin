@@ -4,7 +4,7 @@ import sys
 import ply.yacc as yacc
 from lexer import tokens
 from ast_nodes import (
-    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration, InterfaceMethod, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, StructInstantiation, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern
@@ -19,7 +19,9 @@ precedence = (
     ('left', 'PLUS', 'MINUS'),
     ('left', 'MULTIPLY', 'DIVIDE'),
     ('left', 'DOT'),
-    ('left', 'LPAREN', 'RPAREN'),  # Added for function calls
+    ('left', 'LPAREN', 'RPAREN'),
+    ('right', 'FAT_ARROW'),
+    ('right', 'ARROW'),
     ('right', 'UMINUS'),
 )
 
@@ -45,6 +47,7 @@ def p_statement_declaration(p):
                  | function_declaration
                  | struct_declaration
                  | enum_declaration
+                 | interface_declaration
                  | print_statement
                  | if_statement
                  | return_statement
@@ -55,25 +58,32 @@ def p_statement_declaration(p):
     p[0] = p[1]
 
 
+# Define match_pattern rules first
+def p_match_pattern_number(p):
+    '''match_pattern : NUMBER
+                     | MINUS NUMBER'''
+    value = p[1] if len(p) == 2 else -p[2]
+    print(f"Parsing MatchPattern with value: {value}")  # Debugging
+    p[0] = NumberPattern(value)
+
+
+def p_match_pattern_wildcard(p):
+    '''match_pattern : UNDERSCORE'''
+    print("Parsing WildcardMatchPattern")  # Debugging
+    p[0] = WildcardPattern()
+
+# Match Statement Rules
+
+
 def p_match_statement(p):
     '''match_statement : MATCH expression LBRACE match_arms RBRACE'''
     p[0] = MatchStatement(condition=p[2], arms=p[4])
 
 
 def p_match_arms(p):
-    '''
-    match_arms :
-               | match_arm_list maybe_comma
-    '''
-    # Two possibilities:
-    # 1) Empty match arms (no arms at all).
-    # 2) One or more arms, followed by an optional trailing comma.
-    if len(p) == 1:
-        # Empty production => []
-        p[0] = []
-    else:
-        # match_arm_list maybe_comma => the actual list of arms
-        p[0] = p[1]
+    '''match_arms : match_arm_list
+                 | match_arm_list COMMA'''
+    p[0] = p[1]
 
 
 def p_match_arm_list_single(p):
@@ -86,28 +96,22 @@ def p_match_arm_list_multiple(p):
     p[0] = p[1] + [p[3]]
 
 
-def p_maybe_comma(p):
-    '''maybe_comma : COMMA
-                   | empty
-    '''
-    # Optional trailing comma. We do nothing with it, just allow it syntactically.
-    pass
-
-
 def p_match_arm(p):
-    '''match_arm : pattern ARROW inline_statement'''
+    '''match_arm : match_pattern FAT_ARROW inline_statement'''
+    print("Parsing match_arm")  # Debugging
     p[0] = MatchArm(pattern=p[1], body=[p[3]])
+
+# Inline Statement Rules
 
 
 def p_inline_statement_print(p):
     '''inline_statement : PRINT DOT INFO LPAREN expression RPAREN'''
+    print("Parsing PrintStatement")  # Debugging
     p[0] = PrintStatement(expression=p[5])
 
 
 def p_inline_statement_assignment(p):
     '''inline_statement : assignment_expression'''
-    # But note: assignment_expression is returning an Assignment AST node,
-    # which is a statement-level node in your AST.
     p[0] = p[1]
 
 
@@ -116,20 +120,7 @@ def p_inline_statement_expression(p):
     p[0] = ExpressionStatement(expression=p[1])
 
 
-def p_pattern_negative_number(p):
-    '''pattern : MINUS NUMBER'''
-    p[0] = NumberPattern(-p[2])
-
-
-def p_pattern_number(p):
-    '''pattern : NUMBER'''
-    p[0] = NumberPattern(value=p[1])
-
-
-def p_pattern_wildcard(p):
-    '''pattern : UNDERSCORE'''
-    p[0] = WildcardPattern()
-
+# Assignment Expression Rules
 
 def p_assignment_expression(p):
     '''assignment_expression : lvalue ASSIGN expression
@@ -155,21 +146,46 @@ def p_assignment_expression(p):
         raise NotImplementedError(f"Assignment operator {
                                   p[2]} not implemented")
 
+# Interface Declaration
 
-# Type Alias Declaration
+
+def p_interface_declaration(p):
+    '''interface_declaration : INTERFACE IDENTIFIER LBRACE interface_members RBRACE'''
+    p[0] = InterfaceDeclaration(name=p[2], methods=p[4])
 
 
-def p_type_alias_declaration(p):
-    '''type_alias_declaration : TYPE IDENTIFIER ASSIGN type SEMICOLON'''
-    p[0] = TypeAliasDeclaration(name=p[2], aliased_type=p[4])
+def p_interface_members_multiple(p):
+    '''interface_members : interface_members interface_member'''
+    p[0] = p[1] + [p[2]]
+
+
+def p_interface_members_single(p):
+    '''interface_members : interface_member'''
+    p[0] = [p[1]]
+
+
+def p_interface_member(p):
+    '''interface_member : FN IDENTIFIER LPAREN parameters RPAREN ARROW type SEMICOLON
+                        | FN IDENTIFIER LPAREN parameters RPAREN SEMICOLON'''
+    if len(p) == 9:
+        # Method with return type
+        p[0] = InterfaceMethod(name=p[2], params=p[4], return_type=p[7])
+    else:
+        # Method without return type (default to 'void' or similar)
+        p[0] = InterfaceMethod(name=p[2], params=p[4], return_type='void')
+
+
+def p_interface_list_multiple(p):
+    '''interface_list : interface_list COMMA IDENTIFIER'''
+    p[0] = p[1] + [p[3]]
+
+
+def p_interface_list_single(p):
+    '''interface_list : IDENTIFIER'''
+    p[0] = [p[1]]
+
 
 # Struct Declaration
-
-
-def p_struct_declaration(p):
-    '''struct_declaration : STRUCT IDENTIFIER LBRACE struct_members RBRACE'''
-    p[0] = StructDeclaration(name=p[2], members=p[4])
-
 
 def p_struct_members_multiple(p):
     '''struct_members : struct_members struct_member'''
@@ -181,11 +197,62 @@ def p_struct_members_single(p):
     p[0] = [p[1]]
 
 
+def p_struct_member_field(p):
+    '''struct_member_field : mut_opt IDENTIFIER ARROW type SEMICOLON'''
+    p[0] = FieldDeclaration(name=p[2], field_type=p[4], mutable=p[1])
+
+
 def p_struct_member(p):
     '''struct_member : mut_field_declaration
                      | field_declaration
-                     | method_declaration'''
+                     | method_declaration
+                     | struct_member_field'''
     p[0] = p[1]
+
+
+def p_expression_struct_instantiation(p):
+    '''expression : IDENTIFIER LBRACE struct_initializers RBRACE'''
+    p[0] = StructInstantiation(struct_name=p[1], fields=p[3])
+
+
+def p_struct_initializers_multiple(p):
+    '''struct_initializers : struct_initializers COMMA struct_initializer'''
+    p[0] = p[1]
+    key, value = p[3]
+    p[0][key] = value
+
+
+def p_struct_initializers_single(p):
+    '''struct_initializers : struct_initializer'''
+    p[0] = {}
+    key, value = p[1]
+    p[0][key] = value
+
+
+def p_struct_initializers_empty(p):
+    '''struct_initializers : '''
+    p[0] = {}
+
+
+def p_struct_initializer(p):
+    '''struct_initializer : IDENTIFIER COLON expression'''
+    p[0] = (p[1], p[3])
+
+
+def p_struct_declaration(p):
+    '''struct_declaration : STRUCT IDENTIFIER implements_clause LBRACE struct_members RBRACE'''
+    p[0] = StructDeclaration(name=p[2], members=p[5], interfaces=p[3])
+
+
+def p_implements_clause_multiple(p):
+    '''implements_clause : IMPLEMENTS interface_list'''
+    p[0] = p[2]
+
+
+def p_implements_clause_empty(p):
+    '''implements_clause : '''
+    p[0] = []
+
 
 # Method Declaration (within Struct)
 
@@ -210,6 +277,7 @@ def p_method_declaration_without_decorators(p):
         body=p[9]
     )
 
+
 # Field Declarations
 
 
@@ -222,12 +290,14 @@ def p_field_declaration(p):
     '''field_declaration : LET IDENTIFIER ARROW type SEMICOLON'''
     p[0] = FieldDeclaration(name=p[2], field_type=p[4], mutable=False)
 
+
 # Enum Declaration
 
 
 def p_enum_declaration(p):
     '''enum_declaration : ENUM IDENTIFIER LBRACE enum_variants_opt RBRACE'''
     p[0] = EnumDeclaration(name=p[2], variants=p[4])
+
 
 # `enum_variants_opt` can be either a list of variants or empty.
 
@@ -238,6 +308,7 @@ def p_enum_variants_opt(p):
     # If it's empty, return an empty list so we don't break code that expects a list.
     p[0] = p[1] if p[1] is not None else []
 
+
 # `enum_variants` requires at least one variant (with possible trailing comma).
 
 
@@ -246,6 +317,7 @@ def p_enum_variants(p):
     # This rule ensures we collect the actual variants
     # in `enum_variant_list` and ignore the optional trailing comma.
     p[0] = p[1]
+
 
 # One or more variants, separated by commas, but no trailing comma here.
 
@@ -258,6 +330,7 @@ def p_enum_variant_list_single(p):
 def p_enum_variant_list_multiple(p):
     '''enum_variant_list : enum_variant_list COMMA enum_variant'''
     p[0] = p[1] + [p[3]]
+
 
 # An optional trailing comma is either a `,` or empty.
 
@@ -296,12 +369,14 @@ def p_decorator(p):
     '''decorator : AT IDENTIFIER'''
     p[0] = p[2]
 
+
 # Constant Declaration
 
 
 def p_constant_declaration(p):
     '''constant_declaration : CONST LET IDENTIFIER ARROW type ASSIGN expression SEMICOLON'''
     p[0] = ConstantDeclaration(name=p[3], var_type=p[5], value=p[7])
+
 
 # Variable Declaration
 
@@ -476,9 +551,10 @@ def p_print_statement(p):
 
 # Import Statement
 
+
 def p_import_statement(p):
     '''import_statement : IMPORT LBRACE import_items RBRACE FROM STRING SEMICOLON'''
-    p[0] = ImportStatement(items=p[3], source=p[5])
+    p[0] = ImportStatement(items=p[3], source=p[6])
 
 
 def p_import_items_multiple(p):
@@ -494,6 +570,7 @@ def p_import_items_single(p):
 def p_import_items_empty(p):
     '''import_items : '''
     p[0] = []
+
 
 # If Statement
 
@@ -549,6 +626,7 @@ def p_return_statement(p):
     else:
         p[0] = ReturnStatement()
 
+
 # Assignment
 
 
@@ -565,6 +643,7 @@ def p_lvalue_identifier(p):
 def p_lvalue_member_access(p):
     '''lvalue : expression DOT IDENTIFIER'''
     p[0] = MemberAccess(object_=p[1], member=p[3])
+
 
 # Expression Statement
 
@@ -584,6 +663,7 @@ def p_expression_lambda_no_return(p):
 def p_expression_statement(p):
     '''expression_statement : expression SEMICOLON'''
     p[0] = ExpressionStatement(expression=p[1])
+
 
 # Parameters
 
@@ -611,12 +691,14 @@ def p_parameter_with_type(p):
     'parameter : IDENTIFIER ARROW type'
     p[0] = (p[1], p[3])
 
+
 # Allow parameters without type annotations
 
 
 def p_parameter_without_type(p):
     'parameter : IDENTIFIER'
     p[0] = (p[1], None)
+
 
 # Type Definitions
 
@@ -638,6 +720,7 @@ def p_type_list_multiple(p):
 def p_type_list_single(p):
     '''type_list : type'''
     p[0] = [p[1]]
+
 
 # Expressions
 
@@ -755,4 +838,4 @@ def p_error(p):
 
 
 # Build the parser
-parser = yacc.yacc()
+parser = yacc.yacc(debug=True)

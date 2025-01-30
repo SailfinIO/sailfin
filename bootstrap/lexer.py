@@ -14,19 +14,14 @@ reserved = {
     'else': 'ELSE',
     'match': 'MATCH',
     'const': 'CONST',
-    'routine': 'ROUTINE',
     'async': 'ASYNC',
     'await': 'AWAIT',
     'import': 'IMPORT',
     'from': 'FROM',
-    'type': 'TYPE',
     'struct': 'STRUCT',
     'enum': 'ENUM',
     'interface': 'INTERFACE',
     'implements': 'IMPLEMENTS',
-    'true': 'TRUE',
-    'false': 'FALSE',
-    'null': 'NULL',
 }
 
 
@@ -50,6 +45,7 @@ tokens = [
     'LBRACKET',
     'RBRACKET',
     'SEMICOLON',
+    'FAT_ARROW',
     'ARROW',
     'COMMA',
     'DOT',
@@ -62,10 +58,7 @@ tokens = [
     'AND',
     'OR',
     'AT',
-    'PIPE',
     'COLON',
-    'AMPERSAND',
-    'QUESTION_MARK',
     'UNDERSCORE',
 ] + list(reserved.values())
 
@@ -93,13 +86,11 @@ t_RBRACE = r'\}'
 t_LBRACKET = r'\['
 t_RBRACKET = r'\]'
 t_SEMICOLON = r';'
+t_FAT_ARROW = r'=>'
 t_ARROW = r'->'
 t_COMMA = r','
 t_DOT = r'\.'
 t_COLON = r':'
-t_PIPE = r'\|'
-t_AMPERSAND = r'&'
-t_QUESTION_MARK = r'\?'
 t_AT = r'@'
 t_UNDERSCORE = r'_'
 

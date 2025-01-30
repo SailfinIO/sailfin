@@ -1,6 +1,6 @@
 // examples/io/read-file.sfn
 
-import { fs } from "sail/io";
+import { fs } from "sailfin/io";
 
 fn main() {
     let content = fs.readFile("example.txt");

@@ -1,6 +1,6 @@
 // examples/web/http-server.sfn
 
-import { serve } from "sail/http";
+import { serve } from "sailfin/http";
 
 serve(fn(req, res) {
     if req.path == "/" {

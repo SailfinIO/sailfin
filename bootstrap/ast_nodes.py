@@ -78,9 +78,16 @@ class ReturnStatement(ASTNode):
 
 
 class StructDeclaration(ASTNode):
-    def __init__(self, name, members):
+    def __init__(self, name, members, interfaces=None):
         self.name = name
-        self.members = members  # List of FieldDeclaration
+        self.members = members  # List of FieldDeclaration and MethodDeclaration
+        self.interfaces = interfaces if interfaces else []  # List of interface names
+
+
+class StructInstantiation(Expression):
+    def __init__(self, struct_name, fields):
+        self.struct_name = struct_name  # Identifier
+        self.fields = fields            # Dictionary of field names to expressions
 
 
 class FieldDeclaration(ASTNode):
@@ -188,3 +195,16 @@ class TryFinally(ASTNode):
     def __init__(self, try_block, finally_block):
         self.try_block = try_block  # List of statements
         self.finally_block = finally_block  # List of statements
+
+
+class InterfaceDeclaration(ASTNode):
+    def __init__(self, name, methods):
+        self.name = name
+        self.methods = methods  # List of InterfaceMethod
+
+
+class InterfaceMethod(ASTNode):
+    def __init__(self, name, params, return_type):
+        self.name = name
+        self.params = params  # List of tuples: (param_name, param_type)
+        self.return_type = return_type
