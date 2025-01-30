@@ -10,7 +10,7 @@ To compile the Sailfin compiler, run the following command:
 python3 sfn.py
 ```
 
-This will generate the `sfn` executable in the root directory of the project.
+This will generate the `sfn` executable in the /dist directory.
 
 ## Development
 
