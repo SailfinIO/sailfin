@@ -52,7 +52,7 @@ jobs:
       # 7. Build the Executable with PyInstaller
       - name: Build Executable with PyInstaller
         run: |
-          pyinstaller --onefile --name sfn bootstrap.py
+          pyinstaller --onefile --name sfn bootstrap/sfn.py
         working-directory: bootstrap
         # This will create the executable in the `bootstrap/dist/` directory
 
@@ -61,7 +61,7 @@ jobs:
         id: package_metadata
         run: |
           VERSION=$(poetry version -s)
-          PACKAGE_NAME="bootstrap"
+          PACKAGE_NAME="sfn"
           PACKAGE_VERSION="$VERSION"
           PACKAGE_FILENAME="dist/sfn"
           PACKAGE_CONTENT_TYPE="application/octet-stream"  # Generic binary
@@ -69,37 +69,7 @@ jobs:
           echo "filename=$PACKAGE_FILENAME" >> $GITHUB_OUTPUT
         working-directory: bootstrap
 
-      # 9. Publish to GitHub Packages
-      - name: Publish to GitHub Packages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Ensure this token has the necessary scopes
-          PACKAGE_NAME: ${{ github.repository_owner }}/bootstrap
-          PACKAGE_VERSION: ${{ steps.package_metadata.outputs.version }}
-          PACKAGE_FILENAME: bootstrap/${{ steps.package_metadata.outputs.filename }}
-          PACKAGE_TYPE: generic
-        run: |
-          # Create a new generic package version
-          RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/user/packages/generic/$PACKAGE_NAME/$PACKAGE_VERSION -d '{
-              "name": "sfn",
-              "description": "Executable for the Sailfin Language Compiler",
-              "package_type": "generic"
-            }')
-
-          # Extract the upload URL
-          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url' | sed -e "s/{?name,label}//")
-
-          # Upload the package
-          curl -s --data-binary @"$PACKAGE_FILENAME" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Content-Type: $PACKAGE_CONTENT_TYPE" \
-            "$UPLOAD_URL?name=sfn"
-
-      # 10. Optional: Create GitHub Release and Upload Asset
-      # If you prefer to attach the executable to a GitHub Release instead of GitHub Packages,
-      # uncomment the following steps and comment out the "Publish to GitHub Packages" step.
-
+      # 9. Create GitHub Release
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -111,6 +81,7 @@ jobs:
           draft: false
           prerelease: false
 
+      # 10. Upload Executable to Release
       - name: Upload Executable to Release
         uses: actions/upload-release-asset@v1
         env:
