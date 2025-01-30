@@ -1,6 +1,6 @@
 [project]
 name = "bootstrap"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 description = "Bootstrap compiler for the Sailfin Language"
 authors = [
     { name = "Michael Curtis", email = "michael@sailfin.io" }
@@ -41,6 +41,7 @@ prerelease = true
 prerelease_token = "alpha"
 
 [tool.semantic_release.commit_parser]
+parser = "semantic_release.commit_parser. AngularCommitParser"
 type_enforced = true
 body_required = false
 merge_message_pattern = "^Merge pull request #\\d+ from .+$"
