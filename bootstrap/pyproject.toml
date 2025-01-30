@@ -1,6 +1,6 @@
 [project]
 name = "bootstrap"
-version = "0.0.1-alpha.1"
+version = "0.0.2-alpha.1"
 description = "Bootstrap compiler for the Sailfin Language"
 authors = [
     { name = "Michael Curtis", email = "michael@sailfin.io" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=2.0.0,<3.0.0", "poetry-dynamic-versioning"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
@@ -55,7 +55,6 @@ merge_message_pattern = "^Merge pull request #\\d+ from .+$"
 directory = "CHANGELOG.md"
 filename = "CHANGELOG.md"
 include_v_prefix = true
-version_variable = "__version__"
 
 [tool.semantic_release.git]
 tag_template = "v{version}"
@@ -66,3 +65,6 @@ assets = [
     { path = "bootstrap/dist/sfn", label = "sfn executable" }
 ]
 release_method = "github"
+
+[tool.poetry-dynamic-versioning]
+enable = true
