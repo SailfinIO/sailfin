@@ -13,55 +13,52 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0 # Required for semantic-release to access full git history
 
-      # 2. Set up Python
       - name: Set up Python 3.13
         uses: actions/setup-python@v4
         with:
           python-version: "3.13"
 
-      # 3. Install Poetry
       - name: Install Poetry
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH  # Correctly append to PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      # 4. Configure Poetry to not create a virtual environment
       - name: Configure Poetry
         run: |
           poetry config virtualenvs.create false
         working-directory: bootstrap
 
-      # 5. Cache Poetry Dependencies
-      - name: Cache Poetry Dependencies
+      - name: Cache PyInstaller and Poetry Dependencies
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/pypoetry
-            ~/.cache/pip
+            bootstrap/dist
           key: ${{ runner.os }}-poetry-${{ hashFiles('bootstrap/pyproject.toml', 'bootstrap/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
-      # 6. Install Dependencies
       - name: Install Dependencies
         run: |
           poetry install --no-interaction --no-ansi
         working-directory: bootstrap
 
-      # 7. Build the Executable with PyInstaller
       - name: Build Executable with PyInstaller
         run: |
           pyinstaller --onefile --name sfn bootstrap.py
         working-directory: bootstrap
-        # This will create the executable in the `bootstrap/dist/` directory
 
-      # 8. Semantic Release
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: sfn
+          path: bootstrap/dist/sfn
+
       - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
