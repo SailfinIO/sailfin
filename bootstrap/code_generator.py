@@ -4,9 +4,9 @@ import enum
 import re
 import uuid
 from ast_nodes import (
-    ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement,
+    ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration,
     LambdaExpression, MatchStatement, MethodDeclaration, NumberPattern, Program,
-    FunctionDeclaration, TryFinally, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    FunctionDeclaration, StructInstantiation, TryFinally, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern, Await
@@ -22,15 +22,33 @@ class CodeGenerator:
         self.async_functions = set()  # Set of async function names
         self.requires_http = False  # Flag to indicate if 'http' is used
         self.async_stack = []  # Stack to track async context
+        self.interfaces = {}  # Dictionary to store interface declarations
+
+    def map_type(self, type_name):
+        """
+        Maps your language's types to Python's types.
+        Extend this method as needed for additional type mappings.
+        """
+        type_mappings = {
+            'string': 'str',
+            'number': 'float',  # or 'int', depending on your language's semantics
+            'bool': 'bool',
+            'void': 'None',
+            # Add more mappings as needed
+        }
+        # Default to the same name if not mapped
+        return type_mappings.get(type_name, type_name)
 
     def generate_code(self, ast, indent_level=0, top_level=True, global_vars=None):
         if top_level:
             # Reset imports_set and flags for each top-level generation
             self.imports_set.clear()
+            self.global_code.clear()  # Ensure global_code is reset
             self.has_async = False
             self.async_functions.clear()
-            self.requires_http = False  # Reset the flag
+            self.requires_http = False
             self.async_stack = []
+            self.interfaces = {}  # Reset interfaces
 
         if global_vars is None:
             global_vars = set()
@@ -72,10 +90,27 @@ class CodeGenerator:
                         )
                     ]
 
+        # First pass: Collect interface declarations
+        if top_level:
+            for stmt in ast.statements:
+                if isinstance(stmt, InterfaceDeclaration):
+                    self.interfaces[stmt.name] = stmt
+
         # Generate code for statements
         code = ""
         for stmt in ast.statements:
-            code += self.generate_statement(stmt, indent_level, global_vars)
+            if isinstance(stmt, InterfaceDeclaration):
+                code += self.generate_statement(stmt,
+                                                indent_level, global_vars)
+                code += "\n"
+            elif isinstance(stmt, StructDeclaration):
+                code += self.generate_statement(stmt,
+                                                indent_level, global_vars)
+                code += "\n"
+            else:
+                code += self.generate_statement(stmt,
+                                                indent_level, global_vars)
+                code += "\n"
 
         # Only at the very end (top_level = True) do we prepend imports & global lambdas
         if top_level:
@@ -84,6 +119,8 @@ class CodeGenerator:
                 self.imports_set.add("import asyncio")
             if self.requires_http:
                 self.imports_set.add("import aiohttp")
+            if self.interfaces:
+                self.imports_set.add("from abc import ABC, abstractmethod")
 
             # Prepend imports
             if self.imports_set:
@@ -120,6 +157,10 @@ class CodeGenerator:
         if isinstance(stmt, PrintStatement):
             expr = self.generate_expression(stmt.expression)
             code += f"{indent}print({expr})\n"
+        elif isinstance(stmt, InterfaceDeclaration):
+            # Handle Interface Declaration
+            code += self.generate_interface(stmt, indent_level)
+            return code
         elif isinstance(stmt, VariableDeclaration):
             var = stmt.name
             value = self.generate_expression(stmt.value)
@@ -244,66 +285,9 @@ class CodeGenerator:
             else:
                 code += f"{indent}return\n"
         elif isinstance(stmt, StructDeclaration):
-            code += f"{indent}class {stmt.name}:\n"
-            if not stmt.members:
-                code += f"{indent}    pass\n"
-            else:
-                # Separate fields and methods
-                fields = [m for m in stmt.members if isinstance(
-                    m, FieldDeclaration)]
-                methods = [m for m in stmt.members if isinstance(
-                    m, MethodDeclaration)]
-
-                # Constructor
-                init_params = ['self']
-                init_body = ""
-                for field in fields:
-                    init_params.append(field.name)
-                    init_body += f"{indent}        self.{field.name} = {field.name}\n"
-                params_str = ", ".join(init_params)
-                code += f"{indent}    def __init__({params_str}):\n"
-                if not init_body:
-                    code += f"{indent}        pass\n"
-                else:
-                    code += init_body
-
-                # Methods
-                for method in methods:
-                    if method.is_async:
-                        self.has_async = True
-                        self.async_functions.add(method.name)
-                        self.async_stack.append(True)
-                    else:
-                        self.async_stack.append(False)
-                    method_decorators = ""
-                    for decorator in method.decorators:
-                        method_decorators += f"{indent}    @{decorator}\n"
-                    method_params = ", ".join(
-                        [param[0] for param in method.params])
-                    # Ensure 'self' is included
-                    if not method_params.startswith('self'):
-                        method_params = "self, " + method_params
-                    if method.is_async:
-                        code += method_decorators
-                        code += f"{indent}    async def {
-                            method.name}({method_params}):\n"
-                    else:
-                        code += method_decorators
-                        code += f"{indent}    def {
-                            method.name}({method_params}):\n"
-                    if not method.body:
-                        code += f"{indent}        pass\n"
-                    else:
-                        method_body_ast = Program(method.body)
-                        code += self.generate_code(
-                            method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
-                    self.async_stack.pop()
-                # Add __repr__ method for better debugging
-                code += f"{indent}    def __repr__(self):\n"
-                repr_fields = ", ".join(
-                    [f"{field.name}={{self.{field.name}!r}}" for field in fields])
-                code += f"{indent}        return f\"{
-                    stmt.name}({repr_fields})\"\n"
+            # Handle Struct Declaration (possibly implementing interfaces)
+            code += self.generate_struct(stmt, indent_level, global_vars)
+            return code
         elif isinstance(stmt, Assignment):
             target = self.generate_expression(stmt.target)
             value = self.generate_expression(stmt.value)
@@ -360,11 +344,16 @@ class CodeGenerator:
             self.has_async = True
             inner_expr = self.generate_expression(expr.expression)
             return f"await {inner_expr}"
+        elif isinstance(expr, StructInstantiation):
+            struct_name = self.generate_expression(expr.struct_name)
+            fields = ", ".join([f"{key}={self.generate_expression(
+                value)}" for key, value in expr.fields.items()])
+            return f"{struct_name}({fields})"
         elif isinstance(expr, Number):
             return str(expr.value)
         elif isinstance(expr, String):
             # Detect interpolation patterns like {{variable}}
-            pattern = re.compile(r'\{\{(\w+)\}\}')
+            pattern = re.compile(r'\{\{([^{}]+)\}\}')
             matches = pattern.findall(expr.value)
             if matches:
                 # Replace all occurrences of {{variable}} with {variable}
@@ -437,6 +426,8 @@ class CodeGenerator:
             elements = ", ".join([self.generate_expression(el)
                                  for el in expr.elements])
             return f"[{elements}]"
+        elif isinstance(expr, str):
+            return expr
         else:
             raise NotImplementedError(
                 f"Expression type {type(expr).__name__} not implemented.")
@@ -485,3 +476,125 @@ class CodeGenerator:
             return None
         else:
             return None
+
+    def generate_interface(self, interface_decl, indent_level):
+        """
+        Generates Python code for an interface using Abstract Base Classes.
+        """
+        indent = "    " * indent_level
+        code = ""
+        # Ensure the ABC module is imported
+        self.imports_set.add("from abc import ABC, abstractmethod")
+
+        # Start class definition
+        parents = interface_decl.parents.copy() if hasattr(
+            interface_decl, 'parents') else []
+        if parents:
+            parents_str = f"({', '.join(parents)}, ABC)"
+        else:
+            parents_str = "(ABC)"
+        code += f"{indent}class {interface_decl.name}{parents_str}:\n"
+
+        if not interface_decl.methods:
+            code += f"{indent}    pass\n"
+        else:
+            for method in interface_decl.methods:
+                code += f"{indent}    @abstractmethod\n"
+                params = ", ".join([param[0] for param in method.params])
+                if not params.startswith('self'):
+                    params = "self, " + params
+                return_type = self.map_type(method.return_type)
+                code += f"{indent}    def {method.name}({params}) -> {
+                    return_type}:\n"
+                code += f"{indent}        pass\n\n"
+
+        return code
+
+    def generate_struct(self, struct_decl, indent_level, global_vars):
+        """
+        Generates Python code for a struct, handling interface implementations.
+        """
+        indent = "    " * indent_level
+        code = ""
+
+        # Handle interface inheritance
+        base_classes = struct_decl.interfaces.copy() if hasattr(
+            struct_decl, 'interfaces') else []
+        if base_classes:
+            base_classes_str = f"({', '.join(base_classes)})"
+        else:
+            base_classes_str = ""
+
+        code += f"{indent}class {struct_decl.name}{base_classes_str}:\n"
+
+        if not struct_decl.members:
+            code += f"{indent}    pass\n"
+            return code
+
+        # Separate fields and methods
+        fields = [m for m in struct_decl.members if isinstance(
+            m, FieldDeclaration)]
+        methods = [m for m in struct_decl.members if isinstance(
+            m, MethodDeclaration)]
+
+        # Constructor (__init__)
+        if fields:
+            init_params = ['self']
+            init_body = ""
+            for field in fields:
+                init_params.append(field.name)
+                init_body += f"{indent}        self.{field.name} = {field.name}\n"
+            params_str = ", ".join(init_params)
+            code += f"{indent}    def __init__({params_str}):\n"
+            code += init_body
+        else:
+            code += f"{indent}    pass\n"
+
+        # Methods
+        for method in methods:
+            if method.is_async:
+                self.has_async = True
+                self.async_functions.add(method.name)
+                self.async_stack.append(True)
+            else:
+                self.async_stack.append(False)
+
+            decorators = ""
+            for decorator in method.decorators:
+                decorators += f"{indent}    @{decorator}\n"
+
+            method_params = ", ".join([param[0] for param in method.params])
+            if not method_params.startswith('self'):
+                method_params = "self, " + method_params
+
+            return_type = self.map_type(method.return_type)
+
+            if method.is_async:
+                code += decorators
+                code += f"{indent}    async def {method.name}({method_params}) -> {
+                    return_type}:\n"
+            else:
+                code += decorators
+                code += f"{indent}    def {method.name}({method_params}) -> {
+                    return_type}:\n"
+
+            if not method.body:
+                code += f"{indent}        pass\n"
+            else:
+                # Recursively generate code for the method body with increased indentation
+                method_body_ast = Program(method.body)
+                method_body_code = self.generate_code(
+                    method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
+                code += method_body_code
+
+            self.async_stack.pop()
+
+        # Add __repr__ method for better debugging (optional)
+        if fields:
+            repr_fields = ", ".join(
+                [f"{field.name}={{self.{field.name}!r}}" for field in fields])
+            code += f"{indent}    def __repr__(self):\n"
+            code += f"{indent}        return f\"{
+                struct_decl.name}({repr_fields})\"\n"
+
+        return code

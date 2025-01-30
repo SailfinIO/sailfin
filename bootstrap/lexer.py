@@ -62,10 +62,7 @@ tokens = [
     'AND',
     'OR',
     'AT',
-    'PIPE',
     'COLON',
-    'AMPERSAND',
-    'QUESTION_MARK',
     'UNDERSCORE',
 ] + list(reserved.values())
 
@@ -97,9 +94,6 @@ t_ARROW = r'->'
 t_COMMA = r','
 t_DOT = r'\.'
 t_COLON = r':'
-t_PIPE = r'\|'
-t_AMPERSAND = r'&'
-t_QUESTION_MARK = r'\?'
 t_AT = r'@'
 t_UNDERSCORE = r'_'
 

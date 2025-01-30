@@ -4,7 +4,7 @@ import sys
 import ply.yacc as yacc
 from lexer import tokens
 from ast_nodes import (
-    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration, InterfaceMethod, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, StructInstantiation, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern
@@ -45,6 +45,7 @@ def p_statement_declaration(p):
                  | function_declaration
                  | struct_declaration
                  | enum_declaration
+                 | interface_declaration
                  | print_statement
                  | if_statement
                  | return_statement
@@ -163,13 +164,46 @@ def p_type_alias_declaration(p):
     '''type_alias_declaration : TYPE IDENTIFIER ASSIGN type SEMICOLON'''
     p[0] = TypeAliasDeclaration(name=p[2], aliased_type=p[4])
 
+# Interface Declaration
+
+
+def p_interface_declaration(p):
+    '''interface_declaration : INTERFACE IDENTIFIER LBRACE interface_members RBRACE'''
+    p[0] = InterfaceDeclaration(name=p[2], methods=p[4])
+
+
+def p_interface_members_multiple(p):
+    '''interface_members : interface_members interface_member'''
+    p[0] = p[1] + [p[2]]
+
+
+def p_interface_members_single(p):
+    '''interface_members : interface_member'''
+    p[0] = [p[1]]
+
+
+def p_interface_member(p):
+    '''interface_member : FN IDENTIFIER LPAREN parameters RPAREN ARROW type SEMICOLON
+                        | FN IDENTIFIER LPAREN parameters RPAREN SEMICOLON'''
+    if len(p) == 9:
+        # Method with return type
+        p[0] = InterfaceMethod(name=p[2], params=p[4], return_type=p[7])
+    else:
+        # Method without return type (default to 'void' or similar)
+        p[0] = InterfaceMethod(name=p[2], params=p[4], return_type='void')
+
+
+def p_interface_list_multiple(p):
+    '''interface_list : interface_list COMMA IDENTIFIER'''
+    p[0] = p[1] + [p[3]]
+
+
+def p_interface_list_single(p):
+    '''interface_list : IDENTIFIER'''
+    p[0] = [p[1]]
+
+
 # Struct Declaration
-
-
-def p_struct_declaration(p):
-    '''struct_declaration : STRUCT IDENTIFIER LBRACE struct_members RBRACE'''
-    p[0] = StructDeclaration(name=p[2], members=p[4])
-
 
 def p_struct_members_multiple(p):
     '''struct_members : struct_members struct_member'''
@@ -181,11 +215,66 @@ def p_struct_members_single(p):
     p[0] = [p[1]]
 
 
+def p_struct_member_field(p):
+    '''struct_member_field : mut_opt IDENTIFIER ARROW type SEMICOLON'''
+    p[0] = FieldDeclaration(name=p[2], field_type=p[4], mutable=p[1])
+
+
 def p_struct_member(p):
     '''struct_member : mut_field_declaration
                      | field_declaration
-                     | method_declaration'''
+                     | method_declaration
+                     | struct_member_field'''
     p[0] = p[1]
+
+
+def p_expression_struct_instantiation(p):
+    '''expression : IDENTIFIER LBRACE struct_initializers RBRACE'''
+    p[0] = StructInstantiation(struct_name=p[1], fields=p[3])
+
+
+def p_struct_initializers_multiple(p):
+    '''struct_initializers : struct_initializers COMMA struct_initializer'''
+    p[0] = p[1]
+    key, value = p[3]
+    p[0][key] = value
+
+
+def p_struct_initializers_single(p):
+    '''struct_initializers : struct_initializer'''
+    p[0] = {}
+    key, value = p[1]
+    p[0][key] = value
+
+
+def p_struct_initializers_empty(p):
+    '''struct_initializers : '''
+    p[0] = {}
+
+
+def p_struct_initializer(p):
+    '''struct_initializer : IDENTIFIER COLON expression'''
+    p[0] = (p[1], p[3])
+
+
+def p_struct_declaration_with_implements(p):
+    '''struct_declaration : STRUCT IDENTIFIER IMPLEMENTS interface_list LBRACE struct_members RBRACE'''
+    p[0] = StructDeclaration(name=p[2], members=p[6], interfaces=p[4])
+
+
+def p_struct_declaration(p):
+    '''struct_declaration : STRUCT IDENTIFIER implements_clause LBRACE struct_members RBRACE'''
+    p[0] = StructDeclaration(name=p[2], members=p[5], interfaces=p[3])
+
+
+def p_implements_clause_multiple(p):
+    '''implements_clause : IMPLEMENTS interface_list'''
+    p[0] = p[2]
+
+
+def p_implements_clause_empty(p):
+    '''implements_clause : '''
+    p[0] = []
 
 # Method Declaration (within Struct)
 
@@ -755,4 +844,4 @@ def p_error(p):
 
 
 # Build the parser
-parser = yacc.yacc()
+parser = yacc.yacc(debug=True)

@@ -38,6 +38,12 @@ def validate_ast(node):
                     validate_ast(item)
             elif isinstance(value, ASTNode):
                 validate_ast(value)
+            elif isinstance(value, dict):
+                for key, val in value.items():
+                    if not isinstance(key, str):
+                        raise TypeError(f"Invalid key type in dict: {
+                                        type(key).__name__}")
+                    validate_ast(val)
             elif value is not None and not isinstance(value, (int, float, str, bool, tuple)):
                 # If it's not None, not an ASTNode, and not a basic type/tuple we accept
                 raise TypeError(f"Invalid AST node type: {
