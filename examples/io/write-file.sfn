@@ -1,8 +1,8 @@
 // examples/io/write-file.sfn
 
-import { fs } from "sail/io";
+import { fs } from "sailfin/io";
 
 fn main() {
-    fs.writeFile("output.txt", "Hello, Sail!");
+    fs.writeFile("output.txt", "Hello, Sailfin!");
     print.info("File written successfully.");
 }

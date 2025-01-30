@@ -11,6 +11,7 @@ from ast_nodes import (
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern, Await
 )
+from fs_class_def import fs_class_def
 from http_client_def import http_client_def
 
 
@@ -23,6 +24,7 @@ class CodeGenerator:
         self.requires_http = False  # Flag to indicate if 'http' is used
         self.async_stack = []  # Stack to track async context
         self.interfaces = {}  # Dictionary to store interface declarations
+        self.built_in_included_modules = set()  # Set to store built-in modules
 
     def map_type(self, type_name):
         """
@@ -31,7 +33,7 @@ class CodeGenerator:
         """
         type_mappings = {
             'string': 'str',
-            'number': 'float',  # or 'int', depending on your language's semantics
+            'number': 'float',
             'bool': 'bool',
             'void': 'None',
             # Add more mappings as needed
@@ -297,13 +299,22 @@ class CodeGenerator:
             code += f"{indent}{expr_code}\n"
         elif isinstance(stmt, ImportStatement):
             items = ", ".join(stmt.items)
-            source = stmt.source
-            if source == "aiohttp":
-                # Special handling for aiohttp if needed
-                self.imports_set.add("import aiohttp")
-                code += f"{indent}import aiohttp\n"
+            # Replace slashes with dots for Python imports
+            source = stmt.source.replace('/', '.')
+
+            if source == "sailfin.io":
+                # Inject the fs class code directly
+                if "sailfin.io" not in self.built_in_included_modules:
+                    self.global_code.append(fs_class_def())
+                    self.built_in_included_modules.add("sailfin.io")
+                # No need to generate an import statement
             else:
-                code += f"{indent}from {source} import {items}\n"
+                # Handle other imports normally
+                if source == "aiohttp":
+                    self.imports_set.add("import aiohttp")
+                    code += f"{indent}import aiohttp\n"
+                else:
+                    code += f"{indent}from {source} import {items}\n"
         elif isinstance(stmt, TypeAliasDeclaration):
             code += f"{indent}{stmt.name} = {stmt.aliased_type}  # Type Alias\n"
         elif isinstance(stmt, MatchStatement):
@@ -316,8 +327,10 @@ class CodeGenerator:
 
                 # Generate code for the arm's body
                 case_body_ast = Program(arm.body)
-                code += self.generate_code(case_body_ast, indent_level + 2,
-                                           global_vars=global_vars, top_level=False)
+                case_body_code = self.generate_code(
+                    case_body_ast, indent_level + 2,
+                    global_vars=global_vars, top_level=False)
+                code += case_body_code
         elif isinstance(stmt, Await):
             # Direct Await statement, rare outside expressions
             if not any(self.async_stack):
