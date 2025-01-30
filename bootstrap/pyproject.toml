@@ -21,6 +21,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
 python-semantic-release = "^9.17.0"
+poetry-dynamic-versioning = "^1.7.1"
 
 [tool.semantic_release]
 version_source = "tag"
