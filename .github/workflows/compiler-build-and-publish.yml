@@ -3,11 +3,11 @@ name: Compiler Build and Publish
 on:
   push:
     branches:
-      - main # Adjust if your default branch is different
+      - main
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest # Use 'self-hosted' if building on an ARM64 machine
+    runs-on: ubuntu-latest
 
     steps:
       # 1. Checkout the repository
@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python 3.13
         uses: actions/setup-python@v4
         with:
-          python-version: "3.13" # Ensure this matches your `pyproject.toml`
+          python-version: "3.13"
 
       # 3. Install Poetry
       - name: Install Poetry
@@ -61,7 +61,7 @@ jobs:
         id: package_metadata
         run: |
           VERSION=$(poetry version -s)
-          PACKAGE_NAME="sfn"
+          PACKAGE_NAME="sfn" # Changed from "bootstrap" to "sfn"
           PACKAGE_VERSION="$VERSION"
           PACKAGE_FILENAME="dist/sfn"
           PACKAGE_CONTENT_TYPE="application/octet-stream"  # Generic binary
