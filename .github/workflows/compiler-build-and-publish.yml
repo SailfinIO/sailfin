@@ -25,7 +25,6 @@ jobs:
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH  # Correctly append to PATH
-        # No working-directory needed as Poetry is installed globally
 
       # 4. Configure Poetry to not create a virtual environment
       - name: Configure Poetry
@@ -33,7 +32,7 @@ jobs:
           poetry config virtualenvs.create false
         working-directory: bootstrap
 
-      # 5. Cache Poetry Dependencies (Optional but recommended)
+      # 5. Cache Poetry Dependencies (Corrected)
       - name: Cache Poetry Dependencies
         uses: actions/cache@v3
         with:
@@ -97,7 +96,7 @@ jobs:
             -H "Content-Type: $PACKAGE_CONTENT_TYPE" \
             "$UPLOAD_URL?name=sfn"
 
-      # 10. Optional: Create a GitHub Release and Upload Asset
+      # 10. Optional: Create GitHub Release and Upload Asset
       # If you prefer to attach the executable to a GitHub Release instead of GitHub Packages,
       # uncomment the following steps and comment out the "Publish to GitHub Packages" step.
 
