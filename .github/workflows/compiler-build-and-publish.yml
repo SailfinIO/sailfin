@@ -52,7 +52,7 @@ jobs:
       # 7. Build the Executable with PyInstaller
       - name: Build Executable with PyInstaller
         run: |
-          pyinstaller --onefile --name sfn bootstrap/bootstrap.py
+          pyinstaller --onefile --name sfn bootstrap.py
         working-directory: bootstrap
         # This will create the executable in the `bootstrap/dist/` directory
 
