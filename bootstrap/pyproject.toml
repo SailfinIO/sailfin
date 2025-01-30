@@ -25,6 +25,8 @@ python-semantic-release = "^9.17.0"
 [tool.semantic_release]
 version_source = "tag"
 upload_to_pypi = false
+commit_parser = "semantic_release.commit_parser.AngularCommitParser"
+changelog = "CHANGELOG.md"
 
 [tool.semantic_release.branches.main]
 match = "(main|master)"
@@ -40,8 +42,7 @@ match = "next-\\w+-prj-\\d+"
 prerelease = true
 prerelease_token = "alpha"
 
-[tool.semantic_release.commit_parser]
-parser = "semantic_release.commit_parser. AngularCommitParser"
+[tool.semantic_release.commit_parser_options]
 type_enforced = true
 body_required = false
 merge_message_pattern = "^Merge pull request #\\d+ from .+$"
