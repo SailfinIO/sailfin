@@ -26,31 +26,27 @@ python-semantic-release = "^9.17.0"
 version_source = "tag"
 upload_to_pypi = false
 
-# Define branch configuration properly in TOML
-[[tool.semantic_release.branches]]
-name = "main"
+[tool.semantic_release.branches.main]
+match = "(main|master)"
 prerelease = false
 
-[[tool.semantic_release.branches]]
-name = "beta"
+[tool.semantic_release.branches."0.x.x"]
+match = "0.x.x"
 prerelease = true
+prerelease_token = "rc"
 
-plugins = [
-    [
-        "semantic_release.commit_parser",
-        { type_enforced = true, body_required = false, merge_message_pattern = "^Merge pull request #\\d+ from .+$" }
-    ],
-    "semantic_release.release",
-    "semantic_release.changelog",
-    "semantic_release.github",
-    [
-        "semantic_release.git",
-        { message = "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}", assets = ["bootstrap/dist/sfn"] }
-    ]
-]
+[tool.semantic_release.branches."0.x.x New Features"]
+match = "next-\\w+-prj-\\d+"
+prerelease = true
+prerelease_token = "alpha"
+
+[tool.semantic_release.commit_parser]
+type_enforced = true
+body_required = false
+merge_message_pattern = "^Merge pull request #\\d+ from .+$"
 
 [tool.semantic_release.changelog]
-directory = "bootstrap"
+directory = "CHANGELOG.md"
 filename = "CHANGELOG.md"
 include_v_prefix = true
 version_variable = "__version__"
@@ -60,4 +56,7 @@ tag_template = "v{version}"
 commit_author = "semantic-release-bot <bot@example.com>"
 
 [tool.semantic_release.github]
+assets = [
+    { path = "bootstrap/dist/sfn", label = "sfn executable" }
+]
 release_method = "github"
