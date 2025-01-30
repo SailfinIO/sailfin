@@ -1,6 +1,6 @@
 [project]
 name = "bootstrap"
-version = "0.0.2-alpha.1"
+version = "0.0.1-alpha.1"
 description = "Bootstrap compiler for the Sailfin Language"
 authors = [
     { name = "Michael Curtis", email = "michael@sailfin.io" }
@@ -26,7 +26,7 @@ poetry-dynamic-versioning = "^1.7.1"
 [tool.semantic_release]
 version_source = "tag"
 upload_to_pypi = false
-commit_parser = "semantic_release.commit_parser.AngularCommitParser"
+commit_parser = "semantic_release.commit_parser:AngularCommitParser"
 
 [tool.semantic_release.branches.main]
 match = "(main|master)"
