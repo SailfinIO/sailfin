@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - beta # Include beta branch if needed
 
 jobs:
   build-and-publish:
@@ -13,6 +14,8 @@ jobs:
       # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Required for semantic-release to access full git history
 
       # 2. Set up Python
       - name: Set up Python 3.13
@@ -30,16 +33,15 @@ jobs:
       - name: Configure Poetry
         run: |
           poetry config virtualenvs.create false
-        working-directory: bootstrap
 
-      # 5. Cache Poetry Dependencies (Corrected)
+      # 5. Cache Poetry Dependencies
       - name: Cache Poetry Dependencies
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/pypoetry
             ~/.cache/pip
-          key: ${{ runner.os }}-poetry-${{ hashFiles('bootstrap/pyproject.toml', 'bootstrap/poetry.lock') }}
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
@@ -47,16 +49,14 @@ jobs:
       - name: Install Dependencies
         run: |
           poetry install --no-interaction --no-ansi
-        working-directory: bootstrap
 
       # 7. Build the Executable with PyInstaller
       - name: Build Executable with PyInstaller
         run: |
           pyinstaller --onefile --name sfn bootstrap.py
-        working-directory: bootstrap
         # This will create the executable in the `bootstrap/dist/` directory
 
-      # 8. Prepare Package Metadata
+      # 8. Prepare Package Metadata (Optional: Can be handled by semantic-release)
       - name: Prepare Package Metadata
         id: package_metadata
         run: |
@@ -67,27 +67,10 @@ jobs:
           PACKAGE_CONTENT_TYPE="application/octet-stream"  # Generic binary
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
           echo "filename=$PACKAGE_FILENAME" >> $GITHUB_OUTPUT
-        working-directory: bootstrap
 
-      # 9. Create GitHub Release
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      # 9. Semantic Release
+      - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.package_metadata.outputs.version }}
-          release_name: Release v${{ steps.package_metadata.outputs.version }}
-          draft: false
-          prerelease: false
-
-      # 10. Upload Executable to Release
-      - name: Upload Executable to Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: bootstrap/dist/sfn
-          asset_name: sfn
-          asset_content_type: application/octet-stream
+        run: |
+          poetry run semantic-release publish
