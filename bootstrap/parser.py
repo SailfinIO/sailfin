@@ -4,7 +4,7 @@ import sys
 import ply.yacc as yacc
 from lexer import tokens
 from ast_nodes import (
-    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration, InterfaceMethod, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, StructInstantiation, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration, InterfaceMethod, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, StructInstantiation, TypeAliasDeclaration, UnaryOp, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern
@@ -12,6 +12,7 @@ from ast_nodes import (
 
 # Precedence rules
 precedence = (
+    ('right', 'NOT'),
     ('left', 'OR'),
     ('left', 'AND'),
     ('left', 'EQ', 'NEQ'),
@@ -58,7 +59,13 @@ def p_statement_declaration(p):
     p[0] = p[1]
 
 
+def p_expression_not(p):
+    '''expression : NOT expression'''
+    p[0] = UnaryOp(operator='not', operand=p[2])
+
 # Define match_pattern rules first
+
+
 def p_match_pattern_number(p):
     '''match_pattern : NUMBER
                      | MINUS NUMBER'''

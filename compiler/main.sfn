@@ -1,0 +1,9 @@
+import { fs } from "sailfin/io";
+import { tokenize } from "./lexer/lexer.sfn";
+
+fn main() {
+    let source -> string = fs.readFile("./hello-world.sfn");
+    let tokens -> array<Token> = tokenize(source);
+
+    print.info("Tokens: {{tokens}}");
+}

@@ -1,12 +1,13 @@
 # bootstrap/code_generator.py
 
 import enum
+import os
 import re
 import uuid
 from ast_nodes import (
     ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration,
     LambdaExpression, MatchStatement, MethodDeclaration, NumberPattern, Program,
-    FunctionDeclaration, StructInstantiation, TryFinally, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
+    FunctionDeclaration, StructInstantiation, TryFinally, TypeAliasDeclaration, UnaryOp, VariableDeclaration, ConstantDeclaration,
     PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
     FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
     MemberAccess, Assignment, WildcardPattern, Await
@@ -299,22 +300,33 @@ class CodeGenerator:
             code += f"{indent}{expr_code}\n"
         elif isinstance(stmt, ImportStatement):
             items = ", ".join(stmt.items)
-            # Replace slashes with dots for Python imports
-            source = stmt.source.replace('/', '.')
+            source = stmt.source.strip('"')  # Strip quotes
 
-            if source == "sailfin.io":
-                # Inject the fs class code directly
-                if "sailfin.io" not in self.built_in_included_modules:
-                    self.global_code.append(fs_class_def())
-                    self.built_in_included_modules.add("sailfin.io")
-                # No need to generate an import statement
+            # Handle local relative imports
+            if source.startswith("../") or source.startswith("./"):
+                source_path = os.path.normpath(source)  # Normalize the path
+                module_parts = source_path.split(os.sep)
+
+                # If it ends with ".sfn", assume it’s a compiled Python module
+                if module_parts[-1].endswith(".sfn"):
+                    # Remove .sfn extension
+                    module_parts[-1] = module_parts[-1].replace(".sfn", "")
+
+                # Generate relative import
+                # Determine relative dots
+                relative_prefix = "." * module_parts.count("..")
+                cleaned_parts = [
+                    part for part in module_parts if part not in ["..", "."]]
+                module_path = ".".join(cleaned_parts)
+
+                # Python relative import
+                code += f"{indent}from {relative_prefix}{module_path} import {items}\n"
+
+            # Handle normal or built-in imports
             else:
-                # Handle other imports normally
-                if source == "aiohttp":
-                    self.imports_set.add("import aiohttp")
-                    code += f"{indent}import aiohttp\n"
-                else:
-                    code += f"{indent}from {source} import {items}\n"
+                code += f"{indent}from {source.replace('/', '.')} import {
+                    items}\n"
+
         elif isinstance(stmt, TypeAliasDeclaration):
             code += f"{indent}{stmt.name} = {stmt.aliased_type}  # Type Alias\n"
         elif isinstance(stmt, MatchStatement):
@@ -357,6 +369,13 @@ class CodeGenerator:
             self.has_async = True
             inner_expr = self.generate_expression(expr.expression)
             return f"await {inner_expr}"
+        elif isinstance(expr, UnaryOp):
+            operand = self.generate_expression(expr.operand)
+            if expr.operator == 'not':
+                return f"(not {operand})"
+            else:
+                raise NotImplementedError(
+                    f"Unary operator '{expr.operator}' not implemented.")
         elif isinstance(expr, StructInstantiation):
             struct_name = self.generate_expression(expr.struct_name)
             fields = ", ".join([f"{key}={self.generate_expression(

@@ -78,19 +78,4 @@ class fs:
         except Exception as e:
             print(f"Error reading binary file '{{filename}}': {{e}}")
             return b""
-    @staticmethod
-    def getAbsolutePath(path):
-        \"\"\"
-        Returns the absolute path of the given path.
-
-        :param path: Relative or absolute path.
-        :return: Absolute path.
-        \"\"\"
-        try:
-            abs_path = os.path.abspath(path)
-            return abs_path
-        except Exception as e:
-            print(f"Error getting absolute path for '{{path}}': {{e}}")
-            return ""
-
 """

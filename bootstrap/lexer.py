@@ -60,6 +60,7 @@ tokens = [
     'AT',
     'COLON',
     'UNDERSCORE',
+    'NOT',
 ] + list(reserved.values())
 
 # Regular expression rules for tokens
@@ -93,6 +94,7 @@ t_DOT = r'\.'
 t_COLON = r':'
 t_AT = r'@'
 t_UNDERSCORE = r'_'
+t_NOT = r'!'
 
 # Compound assignment operators
 t_PLUS_ASSIGN = r'\+='

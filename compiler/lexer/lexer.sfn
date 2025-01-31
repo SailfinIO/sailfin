@@ -1,0 +1,177 @@
+struct Token {
+    type -> string;
+    value -> string;
+    line -> number;
+    column -> number;
+}
+
+fn is_whitespace(c -> string) -> bool {
+    return c == " " || c == "\t" || c == "\n";
+}
+
+fn is_digit(c -> string) -> bool {
+    return "0" <= c && c <= "9";
+}
+
+fn is_letter(c -> string) -> bool {
+    return ("a" <= c && c <= "z") || ("A" <= c && c <= "Z") || c == "_";
+}
+
+fn is_operator(c -> string) -> bool {
+    return c == "+" || c == "-" || c == "*" || c == "/" || c == "=" ||
+           c == "<" || c == ">" || c == "!" || c == "&" || c == "|" ||
+           c == ":" || c == "." || c == "@" || c == ",";
+}
+
+let reserved -> map<string, string> = {
+    "fn": "FN",
+    "print": "PRINT",
+    "info": "INFO",
+    "let": "LET",
+    "mut": "MUT",
+    "return": "RETURN",
+    "if": "IF",
+    "else": "ELSE",
+    "match": "MATCH",
+    "const": "CONST",
+    "async": "ASYNC",
+    "await": "AWAIT",
+    "import": "IMPORT",
+    "from": "FROM",
+    "struct": "STRUCT",
+    "enum": "ENUM",
+    "interface": "INTERFACE",
+    "implements": "IMPLEMENTS"
+};
+
+fn tokenize(input -> string) -> array<Token> {
+    let tokens -> array<Token> = [];
+    let pos -> number = 0;
+    let line -> number = 1;
+    let col -> number = 1;
+
+    while pos < input.len() {
+        let c -> string = input[pos:pos + 1];
+
+        // Skip whitespace
+        if is_whitespace(c) {
+            if c == "\n" {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Identify numbers
+        if is_digit(c) {
+            let start -> number = pos;
+            while pos < input.len() && is_digit(input[pos:pos + 1]) {
+                pos += 1;
+                col += 1;
+            }
+            if pos < input.len() && input[pos:pos + 1] == "." {
+                pos += 1;
+                col += 1;
+                while pos < input.len() && is_digit(input[pos:pos + 1]) {
+                    pos += 1;
+                    col += 1;
+                }
+            }
+            let value -> string = input[start:pos];
+            tokens.push(Token { type: "NUMBER", value: value, line: line, column: col });
+            continue;
+        }
+
+        // Identify identifiers or reserved words
+        if is_letter(c) {
+            let start -> number = pos;
+            while pos < input.len() && (is_letter(input[pos:pos + 1]) || is_digit(input[pos:pos + 1])) {
+                pos += 1;
+                col += 1;
+            }
+            let value -> string = input[start:pos];
+            let token_type -> string = reserved.getOrDefault(value, "IDENTIFIER");
+            tokens.push(Token { type: token_type, value: value, line: line, column: col });
+            continue;
+        }
+
+        // Identify strings
+        if c == "\"" {
+            let start -> number = pos + 1;
+            pos += 1;
+            col += 1;
+            while pos < input.len() && input[pos:pos + 1] != "\"" {
+                pos += 1;
+                col += 1;
+            }
+            if pos < input.len() {
+                pos += 1; // Consume closing quote
+                col += 1;
+                let value -> string = input[start:pos - 1];
+                tokens.push(Token { type: "STRING", value: value, line: line, column: col });
+            } else {
+                print.error("Unterminated string at line {{line}}, column {{col}}");
+            }
+            continue;
+        }
+
+        // Identify operators and punctuation
+        if is_operator(c) {
+            let op -> string = c;
+            pos += 1;
+            col += 1;
+
+            // Handle compound operators
+            if pos < input.len() && (
+                (c == "=" && input[pos:pos + 1] == "=") ||
+                (c == "!" && input[pos:pos + 1] == "=") ||
+                (c == "&" && input[pos:pos + 1] == "&") ||
+                (c == "|" && input[pos:pos + 1] == "|")
+            ) {
+                op += input[pos:pos + 1];
+                pos += 1;
+                col += 1;
+            }
+
+            tokens.push(Token { type: op, value: op, line: line, column: col });
+            continue;
+        }
+
+        // Handle comments
+        if c == "/" && pos + 1 < input.len() {
+            if input[pos + 1:pos + 2] == "/" {
+                // Single-line comment
+                while pos < input.len() && input[pos:pos + 1] != "\n" {
+                    pos += 1;
+                    col += 1;
+                }
+                continue;
+            } else if input[pos + 1:pos + 2] == "*" {
+                // Multi-line comment
+                pos += 2;
+                col += 2;
+                while pos + 1 < input.len() && !(input[pos:pos + 1] == "*" && input[pos + 1:pos + 2] == "/") {
+                    if input[pos:pos + 1] == "\n" {
+                        line += 1;
+                        col = 1;
+                    } else {
+                        col += 1;
+                    }
+                    pos += 1;
+                }
+                pos += 2; // Consume closing */
+                col += 2;
+                continue;
+            }
+        }
+
+        print.error("Unknown character '{{c}}' at line {{line}}, column {{col}}");
+        pos += 1;
+        col += 1;
+    }
+
+    return tokens;
+}

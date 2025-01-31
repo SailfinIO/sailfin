@@ -8,6 +8,12 @@ class Expression(ASTNode):
     pass
 
 
+class UnaryOp(Expression):
+    def __init__(self, operator, operand):
+        self.operator = operator
+        self.operand = operand
+
+
 class Program(ASTNode):
     def __init__(self, statements):
         self.statements = statements

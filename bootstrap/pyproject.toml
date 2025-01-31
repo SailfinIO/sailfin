@@ -1,6 +1,6 @@
 [project]
 name = "bootstrap"
-version = "0.0.1-alpha.3"
+version = "0.0.1-alpha.4"
 description = "Bootstrap compiler for the Sailfin Language"
 authors = [
     { name = "Michael Curtis", email = "michael@sailfin.io" }
