@@ -25,6 +25,36 @@ class ASTValidator:
                         f"Invalid parameter type: {param_type}")
             for stmt in node.body:
                 ASTValidator.validate(stmt)
+        elif isinstance(node, MethodDeclaration):
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid method name: {node.name}")
+            # Method parameters are defined as (param_name, param_type, default)
+            for param in node.params:
+                # Unpack assuming a three-element tuple; this handles parameters like ('self', None, None)
+                if len(param) == 3:
+                    param_name, param_type, _ = param
+                else:
+                    # Fallback if your design changes in the future
+                    param_name, param_type = param[0], param[1]
+                if not param_name.isidentifier():
+                    raise ValidationError(
+                        f"Invalid method parameter name: {param_name}")
+                if param_type and not param_type.isidentifier():
+                    raise ValidationError(
+                        f"Invalid method parameter type: {param_type}")
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
+        elif isinstance(node, StructDeclaration):
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid struct name: {node.name}")
+            # Validate each member, which can be a field or a method
+            for member in node.members:
+                ASTValidator.validate(member)
+        elif isinstance(node, FieldDeclaration):
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid field name: {node.name}")
+            if not node.field_type.isidentifier():
+                raise ValidationError(f"Invalid field type: {node.field_type}")
         elif isinstance(node, PrintStatement):
             ASTValidator.validate(node.expression)
         elif isinstance(node, Assignment):
@@ -86,7 +116,7 @@ class ASTValidator:
             for stmt in node.body:
                 ASTValidator.validate(stmt)
         elif isinstance(node, LambdaExpression):
-            # Validate each parameter: expect a tuple (name, type)
+            # Validate each lambda parameter: expect a tuple (name, type)
             for param in node.params:
                 param_name, param_type = param
                 if not param_name.isidentifier():
@@ -95,16 +125,22 @@ class ASTValidator:
                 if param_type and not param_type.isidentifier():
                     raise ValidationError(
                         f"Invalid lambda parameter type: {param_type}")
-            # Optionally, validate the return type if provided
             if node.return_type and not node.return_type.isidentifier():
                 raise ValidationError(
                     f"Invalid lambda return type: {node.return_type}")
-            # Validate the lambda body (list of statements)
             for stmt in node.body:
                 ASTValidator.validate(stmt)
         elif isinstance(node, ReturnStatement):
-            # Validate the return expression if it exists
             if node.expression is not None:
                 ASTValidator.validate(node.expression)
+        elif isinstance(node, StructInstantiation):
+            if not node.struct_name.isidentifier():
+                raise ValidationError(
+                    f"Invalid struct instantiation name: {node.struct_name}")
+            for field_name, expr in node.field_inits:
+                if not field_name.isidentifier():
+                    raise ValidationError(
+                        f"Invalid field name in struct instantiation: {field_name}")
+                ASTValidator.validate(expr)
         else:
             raise ValidationError(f"Unknown AST node: {type(node).__name__}")

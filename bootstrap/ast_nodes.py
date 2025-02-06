@@ -109,6 +109,12 @@ class StructDeclaration(ASTNode):
 
 
 @dataclass
+class StructInstantiation(Expression):
+    struct_name: str
+    field_inits: List[Tuple[str, Expression]]
+
+
+@dataclass
 class FieldDeclaration(ASTNode):
     name: str
     field_type: str

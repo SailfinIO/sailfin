@@ -18,10 +18,23 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def indent(self):
         return '    ' * self.indent_level
 
+    def map_type(self, t: str) -> str:
+        type_mapping = {
+            "number": "int",   # or "float" depending on your design
+            "string": "str",
+            # add additional mappings as needed
+        }
+        return type_mapping.get(t, t)
+
     def visit(self, node):
+        if isinstance(node, list):
+            return self.visit_list(node)
         method_name = f'visit_{type(node).__name__}'
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
+
+    def visit_list(self, nodes):
+        return ', '.join([self.visit(node) for node in nodes])
 
     def generic_visit(self, node):
         raise NotImplementedError(f"No visit_{type(node).__name__} method")
@@ -53,6 +66,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_PrintStatement(self, node: PrintStatement):
         expr = self.visit(node.expression)
         self.code.append(f"{self.indent()}print({expr})")
+
+    def visit_ExpressionStatement(self, node: ExpressionStatement):
+        # Handle ExpressionStatement nodes by visiting the inner expression.
+        expr = self.visit(node.expression)
+        self.code.append(f"{self.indent()}{expr}")
 
     def visit_Number(self, node: Number):
         return str(node.value)
@@ -87,8 +105,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         value = self.visit(node.value)
         comment = "  # Mutable" if node.mutable else ""
         if var_type:
+            py_type = self.map_type(var_type)
             self.code.append(f"{self.indent()}{name}: {
-                             var_type} = {value}{comment}")
+                             py_type} = {value}{comment}")
         else:
             self.code.append(f"{self.indent()}{name} = {value}{comment}")
 
@@ -206,8 +225,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     var_type = member.field_type
                     name = member.name
                     comment = "  # Mutable" if mutable else ""
+                    py_type = self.map_type(var_type)
                     self.code.append(f"{self.indent()}{name}: {
-                                     var_type}{comment}")
+                                     py_type}{comment}")
+
                 elif isinstance(member, MethodDeclaration):
                     self.visit(member)
         self.indent_level -= 1
@@ -216,10 +237,24 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_MethodDeclaration(self, node: MethodDeclaration):
         decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
         async_str = 'async ' if node.is_async else ''
-        params = ', '.join([param[0] for param in node.params])
-        return_type = f" -> {node.return_type}" if node.return_type else ""
-        self.code.append(f"{decorators}{self.indent()}{async_str}def {
-                         node.name}(self, {params}){return_type}:")
+        # If the first parameter is "self", don't duplicate it.
+        if node.params and node.params[0][0] == "self":
+            params_list = [param[0] for param in node.params[1:]]
+        else:
+            params_list = [param[0] for param in node.params]
+        params = ', '.join(params_list)
+        # Map the return type if provided and not 'void'
+        if node.return_type and node.return_type != 'void':
+            return_type = f" -> {self.map_type(node.return_type)}"
+        else:
+            return_type = ""
+        # If there are additional parameters, include a comma after 'self'
+        if params:
+            method_signature = f"def {node.name}(self, {params}){return_type}:"
+        else:
+            method_signature = f"def {node.name}(self){return_type}:"
+        self.code.append(f"{decorators}{self.indent()}{
+                         async_str}{method_signature}")
         self.indent_level += 1
         if not node.body:
             self.code.append(f"{self.indent()}pass")
@@ -339,7 +374,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Ensure that thrown expressions are wrapped in Exception
         self.code.append(f"{self.indent()}raise Exception({expr})")
 
-    # -------------------- NEW: Lambda Expression -------------------- #
+    def visit_StructInstantiation(self, node: StructInstantiation):
+        # For example, generate a call to a constructor function
+        fields = ', '.join(
+            [f"{name}={self.visit(expr)}" for name, expr in node.field_inits])
+        return f"{node.struct_name}({fields})"
+
     def visit_LambdaExpression(self, node: LambdaExpression):
         # If the lambda's body consists of a single ReturnStatement, generate an inline lambda.
         if len(node.body) == 1 and isinstance(node.body[0], ReturnStatement) and node.body[0].expression is not None:

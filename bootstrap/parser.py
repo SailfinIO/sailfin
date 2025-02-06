@@ -525,8 +525,6 @@ def p_import_items(p):
 
 # -------------------- Lambda Expressions -------------------- #
 
-# Updated: lambda parameters now use COLON for type annotations.
-
 
 def p_expression_lambda(p):
     '''expression : LPAREN FN LPAREN lambda_parameters RPAREN opt_lambda_return block RPAREN'''
@@ -541,8 +539,6 @@ def p_lambda_parameters_multiple(p):
 def p_lambda_parameters_single(p):
     '''lambda_parameters : lambda_parameter'''
     p[0] = [p[1]]
-
-# Updated: lambda_parameter uses COLON instead of ARROW.
 
 
 def p_lambda_parameter(p):
@@ -605,15 +601,20 @@ def p_parameters_empty(p):
     '''parameters : empty'''
     p[0] = []
 
-# Updated: parameter now uses COLON instead of ARROW for type annotations.
-
 
 def p_parameter(p):
-    '''parameter : IDENTIFIER COLON type default_opt'''
-    name = p[1]
-    param_type = p[3]
-    default = p[4]
-    p[0] = (name, param_type, default)
+    '''parameter : IDENTIFIER COLON type default_opt
+                 | IDENTIFIER'''
+    if len(p) == 2:
+        # This branch matches if the parameter is specified without a type.
+        if p[1] == "self":
+            p[0] = (p[1], None, None)
+        else:
+            # You might want to raise an error or force a type annotation for non-self parameters.
+            raise ParserError(
+                "Missing type annotation for parameter '{}'".format(p[1]), p.lineno(1))
+    else:
+        p[0] = (p[1], p[3], p[4])
 
 
 def p_default_opt(p):
@@ -648,18 +649,21 @@ def p_test_declaration(p):
 
 
 def p_primary_expression(p):
-    '''primary_expression : IDENTIFIER
+    '''primary_expression : IDENTIFIER struct_instantiation_opt
                           | NUMBER
                           | STRING
                           | LPAREN expression RPAREN'''
-    if len(p) == 2:
-        if isinstance(p[1], (int, float)):
-            p[0] = Number(value=p[1])
-        elif p.slice[1].type == "STRING":
-            p[0] = String(value=p[1])
+    if p.slice[1].type == "IDENTIFIER":
+        # If the optional part is present, p[2] will be non-None.
+        if p[2] is not None:
+            p[0] = StructInstantiation(struct_name=p[1], field_inits=p[2])
         else:
             p[0] = Identifier(name=p[1])
-    else:
+    elif p.slice[1].type == "NUMBER":
+        p[0] = Number(value=p[1])
+    elif p.slice[1].type == "STRING":
+        p[0] = String(value=p[1])
+    else:  # LPAREN expression RPAREN
         p[0] = p[2]
 
 
@@ -706,6 +710,37 @@ def p_expression(p):
         p[0] = p[1]
     else:
         p[0] = BinOp(operator=p[2], left=p[1], right=p[3])
+
+
+def p_struct_instantiation_opt(p):
+    '''struct_instantiation_opt : LBRACE struct_field_inits_opt RBRACE
+                                | empty'''
+    if len(p) == 2:  # matched empty
+        p[0] = None
+    else:
+        p[0] = p[2]
+
+
+def p_struct_field_inits_opt(p):
+    '''struct_field_inits_opt : struct_field_inits
+                              | empty'''
+    p[0] = p[1] if p[1] is not None else []
+
+
+def p_struct_field_inits_multiple(p):
+    '''struct_field_inits : struct_field_inits COMMA struct_field_init'''
+    p[0] = p[1] + [p[3]]
+
+
+def p_struct_field_inits_single(p):
+    '''struct_field_inits : struct_field_init'''
+    p[0] = [p[1]]
+
+
+def p_struct_field_init(p):
+    '''struct_field_init : IDENTIFIER COLON expression'''
+    p[0] = (p[1], p[3])
+
 
 # -------------------- Arguments -------------------- #
 
