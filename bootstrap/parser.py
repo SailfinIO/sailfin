@@ -265,10 +265,16 @@ def p_method_declaration(p):
 
 
 def p_interface_declaration(p):
-    '''interface_declaration : INTERFACE IDENTIFIER COLON LBRACE interface_members RBRACE'''
+    '''interface_declaration : INTERFACE IDENTIFIER colon_opt LBRACE interface_members RBRACE'''
     name = p[2]
     methods = p[5]
     p[0] = InterfaceDeclaration(name=name, methods=methods)
+
+
+def p_colon_opt(p):
+    '''colon_opt : COLON
+                 | empty'''
+    p[0] = None
 
 
 def p_interface_members(p):

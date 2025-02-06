@@ -30,11 +30,9 @@ class ASTValidator:
                 raise ValidationError(f"Invalid method name: {node.name}")
             # Method parameters are defined as (param_name, param_type, default)
             for param in node.params:
-                # Unpack assuming a three-element tuple; this handles parameters like ('self', None, None)
                 if len(param) == 3:
                     param_name, param_type, _ = param
                 else:
-                    # Fallback if your design changes in the future
                     param_name, param_type = param[0], param[1]
                 if not param_name.isidentifier():
                     raise ValidationError(
@@ -47,7 +45,6 @@ class ASTValidator:
         elif isinstance(node, StructDeclaration):
             if not node.name.isidentifier():
                 raise ValidationError(f"Invalid struct name: {node.name}")
-            # Validate each member, which can be a field or a method
             for member in node.members:
                 ASTValidator.validate(member)
         elif isinstance(node, FieldDeclaration):
@@ -55,6 +52,29 @@ class ASTValidator:
                 raise ValidationError(f"Invalid field name: {node.name}")
             if not node.field_type.isidentifier():
                 raise ValidationError(f"Invalid field type: {node.field_type}")
+        elif isinstance(node, InterfaceDeclaration):
+            # New branch: validate interface declarations
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid interface name: {node.name}")
+            for method in node.methods:
+                ASTValidator.validate(method)
+        elif isinstance(node, InterfaceMethod):
+            # Validate interface methods
+            if not node.name.isidentifier():
+                raise ValidationError(
+                    f"Invalid interface method name: {node.name}")
+            for param in node.params:
+                # Unpack assuming a three-element tuple (e.g., ('self', None, None)).
+                if len(param) == 3:
+                    param_name, param_type, _ = param
+                else:
+                    param_name, param_type = param[0], param[1]
+                if not param_name.isidentifier():
+                    raise ValidationError(
+                        f"Invalid interface method parameter name: {param_name}")
+                if param_type and not param_type.isidentifier():
+                    raise ValidationError(
+                        f"Invalid interface method parameter type: {param_type}")
         elif isinstance(node, PrintStatement):
             ASTValidator.validate(node.expression)
         elif isinstance(node, Assignment):
@@ -116,7 +136,6 @@ class ASTValidator:
             for stmt in node.body:
                 ASTValidator.validate(stmt)
         elif isinstance(node, LambdaExpression):
-            # Validate each lambda parameter: expect a tuple (name, type)
             for param in node.params:
                 param_name, param_type = param
                 if not param_name.isidentifier():

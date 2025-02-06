@@ -40,19 +40,14 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         raise NotImplementedError(f"No visit_{type(node).__name__} method")
 
     def visit_Program(self, node: Program):
-        # Handle imports first if any
+        # Visit all statements first
         for stmt in node.statements:
-            if isinstance(stmt, ImportStatement):
-                self.visit(stmt)
-        # Add import statements
+            self.visit(stmt)
+        # Prepend all import statements (sorted for consistency) at the beginning of the code.
         if self.imports:
-            for imp in sorted(self.imports):
-                self.code.append(imp)
-            self.code.append('')  # Add a newline after imports
-        # Visit other statements
-        for stmt in node.statements:
-            if not isinstance(stmt, ImportStatement):
-                self.visit(stmt)
+            import_lines = sorted(self.imports)
+            # Insert a newline after the imports for separation.
+            self.code = import_lines + [''] + self.code
         return '\n'.join(self.code)
 
     def visit_ImportStatement(self, node: ImportStatement):
@@ -265,6 +260,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append('')  # Add a newline after method
 
     def visit_InterfaceDeclaration(self, node: InterfaceDeclaration):
+        # This line should add the import needed for interfaces.
         self.imports.add("from abc import ABC, abstractmethod")
         self.code.append(f"{self.indent()}class {node.name}(ABC):")
         self.indent_level += 1
@@ -273,13 +269,24 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         else:
             for method in node.methods:
                 self.code.append(f"{self.indent()}@abstractmethod")
-                params = ', '.join([param[0] for param in method.params])
-                return_type = f" -> {method.return_type}" if method.return_type else ""
-                self.code.append(f"{self.indent()}def {
-                                 method.name}(self, {params}){return_type}:")
+                if method.params and method.params[0][0] == "self":
+                    params_list = [param[0] for param in method.params[1:]]
+                else:
+                    params_list = [param[0] for param in method.params]
+                params = ', '.join(params_list)
+                if method.return_type and method.return_type != "void":
+                    return_type = f" -> {self.map_type(method.return_type)}"
+                else:
+                    return_type = ""
+                if params:
+                    self.code.append(f"{self.indent()}def {
+                                     method.name}(self, {params}){return_type}:")
+                else:
+                    self.code.append(f"{self.indent()}def {
+                                     method.name}(self){return_type}:")
                 self.code.append(f"{self.indent()}    pass")
         self.indent_level -= 1
-        self.code.append('')  # Add a newline after interface
+        self.code.append('')  # Newline after interface
 
     def visit_EnumDeclaration(self, node: EnumDeclaration):
         self.imports.add("import enum")
