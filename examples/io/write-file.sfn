@@ -2,7 +2,7 @@
 
 import { fs } from "sailfin/io";
 
-fn main() {
+fn main() -> void {
     fs.writeFile("output.txt", "Hello, Sailfin!");
     print.info("File written successfully.");
 }

@@ -16,13 +16,13 @@ devDependencies: {
     mock_lib: "^0.5.0",
 }
 
-build {
+build: {
     entry: "src/main.sfn",
     output: "dist/",
     optimize: true,
 }
 
-test {
+test: {
     directories: ["tests/", "examples/"],
     coverage: true,
 }
@@ -34,7 +34,7 @@ scripts: {
     clean: "sfn clean",
 }
 
-run {
+run: {
     script: "src/main.sfn",
     args: ["--production"],
 }

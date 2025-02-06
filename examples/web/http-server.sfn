@@ -1,11 +1,15 @@
 // examples/web/http-server.sfn
 
-import { serve } from "sailfin/http";
+import { serve } from "sailfin/net";
 
-serve(fn(req, res) {
+fn handleRequest(req: Request, res: Response) -> void {
     if req.path == "/" {
         res.send("Welcome to Sail!");
     } else {
         res.send("404 Not Found", 404);
     }
-}, { port: 8080 });
+}
+
+fn main() -> void {
+    serve(handleRequest, { port: 8080 });
+}

@@ -1,14 +1,14 @@
 // examples/functional/higher-order-functions.sfn
 
-fn apply(value -> number, fn transformer -> (number) -> number) -> number {
+fn apply(value: number, transformer: fn(number) -> number) -> number {
     return transformer(value);
 }
 
-fn double(x -> number) -> number {
+fn double(x: number) -> number {
     return x * 2;
 }
 
-fn main() {
-    let result = apply(5, double);
+fn main() -> void {
+    let result: number = apply(5, double);
     print.info("Result: {{result}}"); // Outputs: 10
 }

@@ -1,632 +1,358 @@
-# bootstrap/code_generator.py
-
-import enum
-import os
-import re
-import uuid
-from ast_nodes import (
-    ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, InterfaceDeclaration,
-    LambdaExpression, MatchStatement, MethodDeclaration, NumberPattern, Program,
-    FunctionDeclaration, StructInstantiation, TryFinally, TypeAliasDeclaration, UnaryOp, VariableDeclaration, ConstantDeclaration,
-    PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
-    FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
-    MemberAccess, Assignment, WildcardPattern, Await
-)
-from fs_class_def import fs_class_def
-from http_client_def import http_client_def
+from ast_nodes import *
+from utils import interpolate_string, generate_unique_name
+from abc import ABC, abstractmethod
 
 
-class CodeGenerator:
+class CodeGeneratorVisitor(ABC):
+    @abstractmethod
+    def visit(self, node):
+        pass
+
+
+class PythonCodeGenerator(CodeGeneratorVisitor):
     def __init__(self):
-        self.imports_set = set()
-        self.global_code = []
-        self.has_async = False  # Flag to indicate presence of async features
-        self.async_functions = set()  # Set of async function names
-        self.requires_http = False  # Flag to indicate if 'http' is used
-        self.async_stack = []  # Stack to track async context
-        self.interfaces = {}  # Dictionary to store interface declarations
-        self.built_in_included_modules = set()  # Set to store built-in modules
+        self.imports = set()
+        self.code = []
+        self.indent_level = 0
 
-    def map_type(self, type_name):
-        """
-        Maps your language's types to Python's types.
-        Extend this method as needed for additional type mappings.
-        """
-        type_mappings = {
-            'string': 'str',
-            'number': 'float',
-            'bool': 'bool',
-            'void': 'None',
-            # Add more mappings as needed
-        }
-        # Default to the same name if not mapped
-        return type_mappings.get(type_name, type_name)
+    def indent(self):
+        return '    ' * self.indent_level
 
-    def generate_code(self, ast, indent_level=0, top_level=True, global_vars=None):
-        if top_level:
-            # Reset imports_set and flags for each top-level generation
-            self.imports_set.clear()
-            self.global_code.clear()  # Ensure global_code is reset
-            self.has_async = False
-            self.async_functions.clear()
-            self.requires_http = False
-            self.async_stack = []
-            self.interfaces = {}  # Reset interfaces
+    def visit(self, node):
+        method_name = f'visit_{type(node).__name__}'
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(node)
 
-        if global_vars is None:
-            global_vars = set()
+    def generic_visit(self, node):
+        raise NotImplementedError(f"No visit_{type(node).__name__} method")
 
-        # Collect global variable declarations if top level
-        if top_level:
-            for stmt in ast.statements:
-                if isinstance(stmt, VariableDeclaration) or isinstance(stmt, ConstantDeclaration):
-                    global_vars.add(stmt.name)
+    def visit_Program(self, node: Program):
+        # Handle imports first if any
+        for stmt in node.statements:
+            if isinstance(stmt, ImportStatement):
+                self.visit(stmt)
+        # Add import statements
+        if self.imports:
+            for imp in sorted(self.imports):
+                self.code.append(imp)
+            self.code.append('')  # Add a newline after imports
+        # Visit other statements
+        for stmt in node.statements:
+            if not isinstance(stmt, ImportStatement):
+                self.visit(stmt)
+        return '\n'.join(self.code)
 
-        # **Move the main function modification BEFORE code generation loop**
-        if top_level:
-            main_func = next((stmt for stmt in ast.statements if isinstance(
-                stmt, FunctionDeclaration) and stmt.name == 'main'), None)
-            if main_func:
-                if main_func.is_async:
-                    self.has_async = True
-                    self.async_functions.add(main_func.name)
-                    # Preserve original body
-                    original_body = main_func.body.copy()
-                    # Modify main_func.body to include init and close
-                    main_func.body = [
-                        Await(
-                            expression=FunctionCall(
-                                func_name=Identifier('http.init'),
-                                arguments=[]
-                            )
-                        ),
-                        TryFinally(
-                            try_block=original_body,
-                            finally_block=[
-                                Await(
-                                    expression=FunctionCall(
-                                        func_name=Identifier('http.close'),
-                                        arguments=[]
-                                    )
-                                )
-                            ]
-                        )
-                    ]
+    def visit_ImportStatement(self, node: ImportStatement):
+        items = ', '.join(node.items)
+        source = node.source
+        # Handle relative imports if needed
+        if source.startswith('./') or source.startswith('../'):
+            source = source.replace('/', '.').rstrip('.sfn')
+        self.code.append(f"from {source} import {items}")
 
-        # First pass: Collect interface declarations
-        if top_level:
-            for stmt in ast.statements:
-                if isinstance(stmt, InterfaceDeclaration):
-                    self.interfaces[stmt.name] = stmt
+    def visit_PrintStatement(self, node: PrintStatement):
+        expr = self.visit(node.expression)
+        self.code.append(f"{self.indent()}print({expr})")
 
-        # Generate code for statements
-        code = ""
-        for stmt in ast.statements:
-            if isinstance(stmt, InterfaceDeclaration):
-                code += self.generate_statement(stmt,
-                                                indent_level, global_vars)
-                code += "\n"
-            elif isinstance(stmt, StructDeclaration):
-                code += self.generate_statement(stmt,
-                                                indent_level, global_vars)
-                code += "\n"
+    def visit_Number(self, node: Number):
+        return str(node.value)
+
+    def visit_String(self, node: String):
+        return interpolate_string(node.value)
+
+    def visit_Identifier(self, node: Identifier):
+        return node.name
+
+    def visit_BinOp(self, node: BinOp):
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        return f"({left} {node.operator} {right})"
+
+    def visit_UnaryOp(self, node: UnaryOp):
+        operand = self.visit(node.operand)
+        return f"({node.operator} {operand})"
+
+    def visit_FunctionCall(self, node: FunctionCall):
+        func_name = self.visit(node.func_name)
+        args = ', '.join([self.visit(arg) for arg in node.arguments])
+        return f"{func_name}({args})"
+
+    def visit_MemberAccess(self, node: MemberAccess):
+        obj = self.visit(node.object_)
+        return f"{obj}.{node.member}"
+
+    def visit_VariableDeclaration(self, node: VariableDeclaration):
+        var_type = node.var_type
+        name = node.name
+        value = self.visit(node.value)
+        comment = "  # Mutable" if node.mutable else ""
+        if var_type:
+            self.code.append(f"{self.indent()}{name}: {
+                             var_type} = {value}{comment}")
+        else:
+            self.code.append(f"{self.indent()}{name} = {value}{comment}")
+
+    def visit_ArrayLiteral(self, node: ArrayLiteral):
+        elements = ', '.join([self.visit(element)
+                             for element in node.elements])
+        return f"[{elements}]"
+
+    def visit_WhileLoop(self, node: WhileLoop):
+        condition = self.visit(node.condition)
+        self.code.append(f"{self.indent()}while {condition}:")
+        self.indent_level += 1
+        if not node.body:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for stmt in node.body:
+                self.visit(stmt)
+        self.indent_level -= 1
+
+    def visit_TestDeclaration(self, node: TestDeclaration):
+        self.code.append(f"{self.indent()}def test_{
+                         generate_unique_name('test')}(self):")
+        self.indent_level += 1
+        for stmt in node.body:
+            self.visit(stmt)
+        self.indent_level -= 1
+        self.code.append('')  # Add a newline after test
+
+    def visit_ForLoop(self, node: ForLoop):
+        iterable = self.visit(node.iterable)
+        self.code.append(f"{self.indent()}for {node.variable} in {iterable}:")
+        self.indent_level += 1
+        if not node.body:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for stmt in node.body:
+                self.visit(stmt)
+        self.indent_level -= 1
+
+    def visit_RangeExpression(self, node: RangeExpression):
+        start = self.visit(node.start)
+        end = self.visit(node.end)
+        return f"range({start}, {end})"
+
+    def visit_ConstantDeclaration(self, node: ConstantDeclaration):
+        name = node.name
+        var_type = node.var_type
+        value = self.visit(node.value)
+        self.code.append(f"{self.indent()}{name}: {
+                         var_type} = {value}  # Constant")
+
+    def visit_FunctionDeclaration(self, node: FunctionDeclaration):
+        decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
+        async_str = 'async ' if node.is_async else ''
+        params = ', '.join([param[0] for param in node.params])
+        # Only include a return type if it is not 'void'
+        if node.return_type and node.return_type != 'void':
+            return_type = f" -> {node.return_type}"
+        else:
+            return_type = ""
+        self.code.append(f"{self.indent()}{decorators}{async_str}def {
+                         node.name}({params}){return_type}:")
+        self.indent_level += 1
+        if not node.body:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for stmt in node.body:
+                self.visit(stmt)
+        self.indent_level -= 1
+        self.code.append('')  # newline after function
+
+    def visit_IfStatement(self, node: IfStatement):
+        condition = self.visit(node.condition)
+        self.code.append(f"{self.indent()}if {condition}:")
+        self.indent_level += 1
+        if not node.then_branch:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for stmt in node.then_branch:
+                self.visit(stmt)
+        self.indent_level -= 1
+        if node.else_branch:
+            self.code.append(f"{self.indent()}else:")
+            self.indent_level += 1
+            if not node.else_branch:
+                self.code.append(f"{self.indent()}pass")
             else:
-                code += self.generate_statement(stmt,
-                                                indent_level, global_vars)
-                code += "\n"
+                for stmt in node.else_branch:
+                    self.visit(stmt)
+            self.indent_level -= 1
 
-        # Only at the very end (top_level = True) do we prepend imports & global lambdas
-        if top_level:
-            # Handle imports
-            if self.has_async:
-                self.imports_set.add("import asyncio")
-            if self.requires_http:
-                self.imports_set.add("import aiohttp")
-            if self.interfaces:
-                self.imports_set.add("from abc import ABC, abstractmethod")
+    def visit_ReturnStatement(self, node: ReturnStatement):
+        if node.expression:
+            expr = self.visit(node.expression)
+            self.code.append(f"{self.indent()}return {expr}")
+        else:
+            self.code.append(f"{self.indent()}return")
 
-            # Prepend imports
-            if self.imports_set:
-                sorted_imports = sorted(self.imports_set)
-                print(f"Imports to prepend: {sorted_imports}")  # Debugging
-                imports_str = "\n".join(sorted_imports) + "\n\n"
-            else:
-                print("No imports to prepend.")
-                imports_str = ""
+    def visit_Assignment(self, node: Assignment):
+        target = self.visit(node.target)
+        value = self.visit(node.value)
+        self.code.append(f"{self.indent()}{target} = {value}")
 
-            # Inject 'HTTPClient' class definition
-            if self.requires_http:
-                http_def = http_client_def()
-                self.global_code.append(http_def)
-                print("Injected HTTPClient definitions.")  # Debugging
+    def visit_StructDeclaration(self, node: StructDeclaration):
+        base_classes = ', '.join(node.interfaces) if node.interfaces else ''
+        inheritance = f"({base_classes})" if base_classes else ''
+        self.code.append(f"{self.indent()}class {node.name}{inheritance}:")
+        self.indent_level += 1
+        if not node.members:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for member in node.members:
+                if isinstance(member, FieldDeclaration):
+                    mutable = member.mutable
+                    var_type = member.field_type
+                    name = member.name
+                    comment = "  # Mutable" if mutable else ""
+                    self.code.append(f"{self.indent()}{name}: {
+                                     var_type}{comment}")
+                elif isinstance(member, MethodDeclaration):
+                    self.visit(member)
+        self.indent_level -= 1
+        self.code.append('')  # Add a newline after class
 
-            # Combine imports and global code
-            global_code_str = "".join(
-                self.global_code) + "\n" if self.global_code else ""
-            code = imports_str + global_code_str + code
+    def visit_MethodDeclaration(self, node: MethodDeclaration):
+        decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
+        async_str = 'async ' if node.is_async else ''
+        params = ', '.join([param[0] for param in node.params])
+        return_type = f" -> {node.return_type}" if node.return_type else ""
+        self.code.append(f"{decorators}{self.indent()}{async_str}def {
+                         node.name}(self, {params}){return_type}:")
+        self.indent_level += 1
+        if not node.body:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for stmt in node.body:
+                self.visit(stmt)
+        self.indent_level -= 1
+        self.code.append('')  # Add a newline after method
 
-            # Adjust main execution based on whether 'main' is async
-            if main_func:
-                if main_func.is_async:
-                    code += '\nif __name__ == "__main__":\n    asyncio.run(main())\n'
+    def visit_InterfaceDeclaration(self, node: InterfaceDeclaration):
+        self.imports.add("from abc import ABC, abstractmethod")
+        self.code.append(f"{self.indent()}class {node.name}(ABC):")
+        self.indent_level += 1
+        if not node.methods:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for method in node.methods:
+                self.code.append(f"{self.indent()}@abstractmethod")
+                params = ', '.join([param[0] for param in method.params])
+                return_type = f" -> {method.return_type}" if method.return_type else ""
+                self.code.append(f"{self.indent()}def {
+                                 method.name}(self, {params}){return_type}:")
+                self.code.append(f"{self.indent()}    pass")
+        self.indent_level -= 1
+        self.code.append('')  # Add a newline after interface
+
+    def visit_EnumDeclaration(self, node: EnumDeclaration):
+        self.imports.add("import enum")
+        self.code.append(f"{self.indent()}class {node.name}(enum.Enum):")
+        self.indent_level += 1
+        if not node.variants:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            for variant in node.variants:
+                if variant.fields:
+                    fields = ', '.join(
+                        [field.name for field in variant.fields])
+                    self.code.append(f"{self.indent()}{
+                                     variant.name} = ({fields},)")
                 else:
-                    code += '\nif __name__ == "__main__":\n    main()\n'
+                    self.code.append(f"{self.indent()}{
+                                     variant.name} = enum.auto()")
+        self.indent_level -= 1
+        self.code.append('')  # Add a newline after enum
 
-        return code
+    def visit_MatchStatement(self, node: MatchStatement):
+        condition = self.visit(node.condition)
+        self.code.append(f"{self.indent()}match {condition}:")
+        self.indent_level += 1
+        for arm in node.arms:
+            pattern = self.visit(arm.pattern)
+            self.code.append(f"{self.indent()}case {pattern}:")
+            self.indent_level += 1
+            if not arm.body:
+                self.code.append(f"{self.indent()}pass")
+            else:
+                for stmt in arm.body:
+                    self.visit(stmt)
+            self.indent_level -= 1
+        self.indent_level -= 1
 
-    def generate_statement(self, stmt, indent_level, global_vars):
-        indent = "    " * indent_level
-        code = ""
-        if isinstance(stmt, PrintStatement):
-            expr = self.generate_expression(stmt.expression)
-            code += f"{indent}print({expr})\n"
-        elif isinstance(stmt, InterfaceDeclaration):
-            # Handle Interface Declaration
-            code += self.generate_interface(stmt, indent_level)
-            return code
-        elif isinstance(stmt, VariableDeclaration):
-            var = stmt.name
-            value = self.generate_expression(stmt.value)
-            if stmt.mutable:
-                code += f"{indent}{var} = {value}  # Mutable variable\n"
-            else:
-                code += f"{indent}{var} = {value}\n"
-        elif isinstance(stmt, ConstantDeclaration):
-            var = stmt.name
-            value = self.generate_expression(stmt.value)
-            code += f"{indent}{var} = {value}  # Constant\n"
-        elif isinstance(stmt, TryFinally):
-            code += f"{indent}try:\n"
-            if not stmt.try_block:
-                code += f"{indent}    pass\n"
-            else:
-                try_block_ast = Program(stmt.try_block)
-                code += self.generate_code(try_block_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-            code += f"{indent}finally:\n"
-            if not stmt.finally_block:
-                code += f"{indent}    pass\n"
-            else:
-                finally_block_ast = Program(stmt.finally_block)
-                code += self.generate_code(finally_block_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-        elif isinstance(stmt, FunctionDeclaration):
-            if stmt.is_async:
-                self.has_async = True
-                self.async_functions.add(stmt.name)
-                self.async_stack.append(True)
-            else:
-                self.async_stack.append(False)
-            decorators = ""
-            for decorator in stmt.decorators:
-                decorators += f"{indent}@{decorator}\n"
-            params = ", ".join([param[0] for param in stmt.params])
-            if stmt.is_async:
-                code += decorators
-                code += f"{indent}async def {stmt.name}({params}):\n"
-            else:
-                code += decorators
-                code += f"{indent}def {stmt.name}({params}):\n"
-            if not stmt.body:
-                code += f"{indent}    pass\n"
-            else:
-                # Detect if the function modifies any global variables
-                modified_globals = self.find_modified_globals(
-                    stmt.body, global_vars)
-                if modified_globals:
-                    # Insert global declarations
-                    for var in modified_globals:
-                        code += f"{indent}    global {var}\n"
-                # Recursively generate code for the function body with increased indentation
-                function_body_ast = Program(stmt.body)
-                code += self.generate_code(function_body_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-            self.async_stack.pop()
-        elif isinstance(stmt, MethodDeclaration):
-            if stmt.is_async:
-                self.has_async = True
-                self.async_functions.add(stmt.name)
-                self.async_stack.append(True)
-            else:
-                self.async_stack.append(False)
-            decorators = ""
-            for decorator in stmt.decorators:
-                decorators += f"{indent}@{decorator}\n"
-            method_params = ", ".join([param[0] for param in stmt.params])
-            # Ensure 'self' is included
-            if not method_params.startswith('self'):
-                method_params = "self, " + method_params
-            if stmt.is_async:
-                code += decorators
-                code += f"{indent}async def {stmt.name}({method_params}):\n"
-            else:
-                code += decorators
-                code += f"{indent}def {stmt.name}({method_params}):\n"
-            if not stmt.body:
-                code += f"{indent}    pass\n"
-            else:
-                method_body_ast = Program(stmt.body)
-                code += self.generate_code(
-                    method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
-            self.async_stack.pop()
-        elif isinstance(stmt, IfStatement):
-            condition = self.generate_expression(stmt.condition)
-            code += f"{indent}if {condition}:\n"
-            if not stmt.then_branch:
-                code += f"{indent}    pass\n"
-            else:
-                then_branch_ast = Program(stmt.then_branch)
-                code += self.generate_code(then_branch_ast, indent_level + 1,
-                                           global_vars=global_vars, top_level=False)
-            if stmt.else_branch:
-                code += f"{indent}else:\n"
-                else_branch_ast = Program(stmt.else_branch)
-                code += self.generate_code(else_branch_ast, indent_level + 1,
-                                           global_vars=global_vars, top_level=False)
-        elif isinstance(stmt, EnumDeclaration):
-            # Add import enum to imports_set
-            self.imports_set.add("import enum")
-            print("Added 'import enum' to imports_set")  # Debugging
-            code += f"{indent}class {stmt.name}(enum.Enum):\n"
-            if not stmt.variants:
-                code += f"{indent}    pass\n"
-            else:
-                for variant in stmt.variants:
-                    if variant.fields:
-                        # Handle variants with fields using tuple values
-                        field_count = len(variant.fields)
-                        fields_placeholder = ", ".join(['...'] * field_count)
-                        code += f"{indent}    {
-                            variant.name} = ({fields_placeholder})\n"
-                    else:
-                        code += f"{indent}    {variant.name} = enum.auto()\n"
-            code += "\n"
-        elif isinstance(stmt, ReturnStatement):
-            if stmt.expression:
-                expr = self.generate_expression(stmt.expression)
-                code += f"{indent}return {expr}\n"
-            else:
-                code += f"{indent}return\n"
-        elif isinstance(stmt, StructDeclaration):
-            # Handle Struct Declaration (possibly implementing interfaces)
-            code += self.generate_struct(stmt, indent_level, global_vars)
-            return code
-        elif isinstance(stmt, Assignment):
-            target = self.generate_expression(stmt.target)
-            value = self.generate_expression(stmt.value)
-            code += f"{indent}{target} = {value}\n"
-        elif isinstance(stmt, ExpressionStatement):
-            expr_code = self.generate_expression(stmt.expression)
-            code += f"{indent}{expr_code}\n"
-        elif isinstance(stmt, ImportStatement):
-            items = ", ".join(stmt.items)
-            source = stmt.source.strip('"')  # Strip quotes
+    def visit_NumberPattern(self, node: NumberPattern):
+        return str(node.value)
 
-            # Handle local relative imports
-            if source.startswith("../") or source.startswith("./"):
-                source_path = os.path.normpath(source)  # Normalize the path
-                module_parts = source_path.split(os.sep)
+    def visit_WildcardPattern(self, node: WildcardPattern):
+        return "_"
 
-                # If it ends with ".sfn", assume it’s a compiled Python module
-                if module_parts[-1].endswith(".sfn"):
-                    # Remove .sfn extension
-                    module_parts[-1] = module_parts[-1].replace(".sfn", "")
-
-                # Generate relative import
-                # Determine relative dots
-                relative_prefix = "." * module_parts.count("..")
-                cleaned_parts = [
-                    part for part in module_parts if part not in ["..", "."]]
-                module_path = ".".join(cleaned_parts)
-
-                # Python relative import
-                code += f"{indent}from {relative_prefix}{module_path} import {items}\n"
-
-            # Handle normal or built-in imports
-            else:
-                code += f"{indent}from {source.replace('/', '.')} import {
-                    items}\n"
-
-        elif isinstance(stmt, TypeAliasDeclaration):
-            code += f"{indent}{stmt.name} = {stmt.aliased_type}  # Type Alias\n"
-        elif isinstance(stmt, MatchStatement):
-            cond_expr = self.generate_expression(stmt.condition)
-            code += f"{indent}match {cond_expr}:\n"
-
-            for arm in stmt.arms:
-                pattern_code = self.generate_pattern_expression(arm.pattern)
-                code += f"{indent}    case {pattern_code}:\n"
-
-                # Generate code for the arm's body
-                case_body_ast = Program(arm.body)
-                case_body_code = self.generate_code(
-                    case_body_ast, indent_level + 2,
-                    global_vars=global_vars, top_level=False)
-                code += case_body_code
-        elif isinstance(stmt, Await):
-            # Direct Await statement, rare outside expressions
-            if not any(self.async_stack):
-                raise SyntaxError(
-                    f"'await' used outside of an async function.")
-            self.has_async = True
-            expr_code = self.generate_expression(stmt.expression)
-            code += f"{indent}await {expr_code}\n"
+    def visit_TryFinally(self, node: TryFinally):
+        self.code.append(f"{self.indent()}try:")
+        self.indent_level += 1
+        if not node.try_block:
+            self.code.append(f"{self.indent()}pass")
         else:
-            # Debugging aid
-            print(f"Unhandled statement type: {type(stmt).__name__}")
-            raise NotImplementedError(f"Code generation for {
-                                      type(stmt).__name__} not implemented.")
-        return code
-
-    def generate_expression(self, expr):
-        if isinstance(expr, BinOp):
-            left = self.generate_expression(expr.left)
-            right = self.generate_expression(expr.right)
-            return f"({left} {expr.operator} {right})"
-        elif isinstance(expr, Await):
-            if not any(self.async_stack):
-                raise SyntaxError("'await' used outside of an async function")
-            self.has_async = True
-            inner_expr = self.generate_expression(expr.expression)
-            return f"await {inner_expr}"
-        elif isinstance(expr, UnaryOp):
-            operand = self.generate_expression(expr.operand)
-            if expr.operator == 'not':
-                return f"(not {operand})"
-            else:
-                raise NotImplementedError(
-                    f"Unary operator '{expr.operator}' not implemented.")
-        elif isinstance(expr, StructInstantiation):
-            struct_name = self.generate_expression(expr.struct_name)
-            fields = ", ".join([f"{key}={self.generate_expression(
-                value)}" for key, value in expr.fields.items()])
-            return f"{struct_name}({fields})"
-        elif isinstance(expr, Number):
-            return str(expr.value)
-        elif isinstance(expr, String):
-            # Detect interpolation patterns like {{variable}}
-            pattern = re.compile(r'\{\{([^{}]+)\}\}')
-            matches = pattern.findall(expr.value)
-            if matches:
-                # Replace all occurrences of {{variable}} with {variable}
-                interpolated = pattern.sub(r'{\1}', expr.value)
-                # Prepend 'f' to make it an f-string
-                return f"f\"{interpolated}\""
-            else:
-                return f"\"{expr.value}\""
-        elif isinstance(expr, Identifier):
-            if expr.name == 'http':
-                self.requires_http = True
-            return expr.name
-        elif isinstance(expr, FunctionCall):
-            if isinstance(expr.func_name, MemberAccess):
-                if isinstance(expr.func_name.object, Identifier) and expr.func_name.object.name == 'http':
-                    self.requires_http = True
-            elif isinstance(expr.func_name, Identifier) and expr.func_name.name == 'http':
-                self.requires_http = True
-            # Handle other function calls as before
-            if isinstance(expr.func_name, MemberAccess):
-                obj_code = self.generate_expression(expr.func_name.object)
-                member = expr.func_name.member
-                if member == 'map':
-                    # Handle map: map(fn, obj)
-                    fn_code = self.generate_expression(expr.arguments[0])
-                    return f"list(map({fn_code}, {obj_code}))"
-                elif member == 'reduce':
-                    # Handle reduce: functools.reduce(fn, obj, initial)
-                    if len(expr.arguments) != 2:
-                        raise NotImplementedError(
-                            "reduce requires two arguments: function and initial")
-                    initial = self.generate_expression(expr.arguments[1])
-                    fn_code = self.generate_expression(expr.arguments[0])
-                    self.imports_set.add("import functools")
-                    return f"functools.reduce({fn_code}, {obj_code}, {initial})"
-                else:
-                    # Handle other member functions: obj.member(args)
-                    func_full = self.generate_expression(expr.func_name)
-                    args = ", ".join([self.generate_expression(arg)
-                                     for arg in expr.arguments])
-                    return f"{func_full}({args})"
-            else:
-                # Handle regular function calls
-                func_name = self.generate_expression(expr.func_name)
-                args = ", ".join([self.generate_expression(arg)
-                                 for arg in expr.arguments])
-                return f"{func_name}({args})"
-        elif isinstance(expr, MemberAccess):
-            obj = self.generate_expression(expr.object)
-            member = expr.member
-            return f"{obj}.{member}"
-        elif isinstance(expr, LambdaExpression):
-            params = ", ".join([param[0] for param in expr.params])
-            if len(expr.body) == 1 and isinstance(expr.body[0], ReturnStatement):
-                body_expr = self.generate_expression(expr.body[0].expression)
-                return f"lambda {params}: {body_expr}"
-            else:
-                # Generate a unique function name
-                func_name = f"_lambda_{uuid.uuid4().hex}"
-                # Generate the function definition
-                func_def = f"def {func_name}({params}):\n"
-                for stmt in expr.body:
-                    func_def += self.generate_statement(
-                        stmt, indent_level=1, global_vars=set())
-                # Add the function definition to the global code
-                self.global_code.append(func_def)
-                # Return the function name
-                return func_name
-        elif isinstance(expr, ArrayLiteral):
-            elements = ", ".join([self.generate_expression(el)
-                                 for el in expr.elements])
-            return f"[{elements}]"
-        elif isinstance(expr, str):
-            return expr
+            for stmt in node.try_block:
+                self.visit(stmt)
+        self.indent_level -= 1
+        self.code.append(f"{self.indent()}finally:")
+        self.indent_level += 1
+        if not node.finally_block:
+            self.code.append(f"{self.indent()}pass")
         else:
-            raise NotImplementedError(
-                f"Expression type {type(expr).__name__} not implemented.")
+            for stmt in node.finally_block:
+                self.visit(stmt)
+        self.indent_level -= 1
 
-    def generate_pattern_expression(self, pattern):
-        if isinstance(pattern, NumberPattern):
-            return str(pattern.value)
-        elif isinstance(pattern, WildcardPattern):
-            return "_"
+    def visit_TryCatchFinally(self, node: TryCatchFinally):
+        self.code.append(f"{self.indent()}try:")
+        self.indent_level += 1
+        if not node.try_block:
+            self.code.append(f"{self.indent()}pass")
         else:
-            raise NotImplementedError(
-                f"Pattern type {type(pattern).__name__} not implemented.")
-
-    def find_modified_globals(self, statements, global_vars):
-        """
-        Traverse the list of statements and identify any assignments
-        to variables that are in the global_vars set.
-        """
-        modified = set()
-        for stmt in statements:
-            if isinstance(stmt, Assignment):
-                target = self.get_assignment_target(stmt.target)
-                if target and target in global_vars:
-                    modified.add(target)
-            elif isinstance(stmt, FunctionDeclaration):
-                # Nested functions: handle separately if needed
-                pass
-            elif isinstance(stmt, IfStatement):
-                # Recursively check then and else branches
-                modified.update(self.find_modified_globals(
-                    stmt.then_branch, global_vars))
-                if stmt.else_branch:
-                    modified.update(self.find_modified_globals(
-                        stmt.else_branch, global_vars))
-            # Handle other statement types as needed
-        return modified
-
-    def get_assignment_target(self, target):
-        """
-        Extract the variable name from the assignment target.
-        """
-        if isinstance(target, Identifier):
-            return target.name
-        elif isinstance(target, MemberAccess):
-            # For simplicity, ignore member accesses (e.g., obj.attr)
-            return None
-        else:
-            return None
-
-    def generate_interface(self, interface_decl, indent_level):
-        """
-        Generates Python code for an interface using Abstract Base Classes.
-        """
-        indent = "    " * indent_level
-        code = ""
-        # Ensure the ABC module is imported
-        self.imports_set.add("from abc import ABC, abstractmethod")
-
-        # Start class definition
-        parents = interface_decl.parents.copy() if hasattr(
-            interface_decl, 'parents') else []
-        if parents:
-            parents_str = f"({', '.join(parents)}, ABC)"
-        else:
-            parents_str = "(ABC)"
-        code += f"{indent}class {interface_decl.name}{parents_str}:\n"
-
-        if not interface_decl.methods:
-            code += f"{indent}    pass\n"
-        else:
-            for method in interface_decl.methods:
-                code += f"{indent}    @abstractmethod\n"
-                params = ", ".join([param[0] for param in method.params])
-                if not params.startswith('self'):
-                    params = "self, " + params
-                return_type = self.map_type(method.return_type)
-                code += f"{indent}    def {method.name}({params}) -> {
-                    return_type}:\n"
-                code += f"{indent}        pass\n\n"
-
-        return code
-
-    def generate_struct(self, struct_decl, indent_level, global_vars):
-        """
-        Generates Python code for a struct, handling interface implementations.
-        """
-        indent = "    " * indent_level
-        code = ""
-
-        # Handle interface inheritance
-        base_classes = struct_decl.interfaces.copy() if hasattr(
-            struct_decl, 'interfaces') else []
-        if base_classes:
-            base_classes_str = f"({', '.join(base_classes)})"
-        else:
-            base_classes_str = ""
-
-        code += f"{indent}class {struct_decl.name}{base_classes_str}:\n"
-
-        if not struct_decl.members:
-            code += f"{indent}    pass\n"
-            return code
-
-        # Separate fields and methods
-        fields = [m for m in struct_decl.members if isinstance(
-            m, FieldDeclaration)]
-        methods = [m for m in struct_decl.members if isinstance(
-            m, MethodDeclaration)]
-
-        # Constructor (__init__)
-        if fields:
-            init_params = ['self']
-            init_body = ""
-            for field in fields:
-                init_params.append(field.name)
-                init_body += f"{indent}        self.{field.name} = {field.name}\n"
-            params_str = ", ".join(init_params)
-            code += f"{indent}    def __init__({params_str}):\n"
-            code += init_body
-        else:
-            code += f"{indent}    pass\n"
-
-        # Methods
-        for method in methods:
-            if method.is_async:
-                self.has_async = True
-                self.async_functions.add(method.name)
-                self.async_stack.append(True)
+            for stmt in node.try_block:
+                self.visit(stmt)
+        self.indent_level -= 1
+        for error_type, error_var, catch_block in node.catch_blocks:
+            self.code.append(f"{self.indent()}except {
+                             error_type} as {error_var}:")
+            self.indent_level += 1
+            if not catch_block:
+                self.code.append(f"{self.indent()}pass")
             else:
-                self.async_stack.append(False)
-
-            decorators = ""
-            for decorator in method.decorators:
-                decorators += f"{indent}    @{decorator}\n"
-
-            method_params = ", ".join([param[0] for param in method.params])
-            if not method_params.startswith('self'):
-                method_params = "self, " + method_params
-
-            return_type = self.map_type(method.return_type)
-
-            if method.is_async:
-                code += decorators
-                code += f"{indent}    async def {method.name}({method_params}) -> {
-                    return_type}:\n"
+                for stmt in catch_block:
+                    self.visit(stmt)
+            self.indent_level -= 1
+        if node.finally_block:
+            self.code.append(f"{self.indent()}finally:")
+            self.indent_level += 1
+            if not node.finally_block:
+                self.code.append(f"{self.indent()}pass")
             else:
-                code += decorators
-                code += f"{indent}    def {method.name}({method_params}) -> {
-                    return_type}:\n"
+                for stmt in node.finally_block:
+                    self.visit(stmt)
+            self.indent_level -= 1
 
-            if not method.body:
-                code += f"{indent}        pass\n"
-            else:
-                # Recursively generate code for the method body with increased indentation
-                method_body_ast = Program(method.body)
-                method_body_code = self.generate_code(
-                    method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
-                code += method_body_code
+    def visit_ThrowStatement(self, node: ThrowStatement):
+        expr = self.visit(node.expression)
+        # Ensure that thrown expressions are wrapped in Exception
+        self.code.append(f"{self.indent()}raise Exception({expr})")
 
-            self.async_stack.pop()
-
-        # Add __repr__ method for better debugging (optional)
-        if fields:
-            repr_fields = ", ".join(
-                [f"{field.name}={{self.{field.name}!r}}" for field in fields])
-            code += f"{indent}    def __repr__(self):\n"
-            code += f"{indent}        return f\"{
-                struct_decl.name}({repr_fields})\"\n"
-
-        return code
+    # -------------------- NEW: Lambda Expression -------------------- #
+    def visit_LambdaExpression(self, node: LambdaExpression):
+        # If the lambda's body consists of a single ReturnStatement, generate an inline lambda.
+        if len(node.body) == 1 and isinstance(node.body[0], ReturnStatement) and node.body[0].expression is not None:
+            expr = self.visit(node.body[0].expression)
+            params = ', '.join([param[0] for param in node.params])
+            return f"(lambda {params}: {expr})"
+        else:
+            # Otherwise, generate a nested function definition and return its name.
+            func_name = generate_unique_name("lambda_func")
+            params = ', '.join([param[0] for param in node.params])
+            self.code.append(f"{self.indent()}def {func_name}({params}):")
+            self.indent_level += 1
+            for stmt in node.body:
+                self.visit(stmt)
+            self.indent_level -= 1
+            return func_name

@@ -1,16 +1,16 @@
 // examples/web/rest-api.sfn
 
-import { serve } from "sailfin/http";
+import { serve, Request, Response } from "sailfin/http";
 
-fn handleRequest(req, res) {
+fn handleRequest(req: Request, res: Response) -> void {
     match req.method {
-        "GET" => res.send("You sent a GET request."),
+        "GET"  => res.send("You sent a GET request."),
         "POST" => res.send("You sent a POST request."),
-        _ => res.send("Unsupported method!", 405),
+        _      => res.send("Unsupported method!", 405),
     }
 }
 
-fn main() {
+fn main() -> void {
     serve(handleRequest, { port: 3000 });
     print.info("Server is running on http://localhost:3000");
 }

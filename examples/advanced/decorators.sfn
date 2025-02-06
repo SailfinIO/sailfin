@@ -1,6 +1,6 @@
 // examples/advanced/decorators.sfn
 
 @logExecution
-fn compute(x -> number) -> number {
+fn compute(x: number) -> number {
   return x * x;
 }

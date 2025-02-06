@@ -1,10 +1,12 @@
 // examples/concurrency/channels.sfn
 
-let channel -> channel[number] = channel();
+let channel: Channel<number> = Channel();
 
 routine {
     channel.send(42); // Send data into the channel
 }
 
-let result -> number = await channel.receive();
-print.info("Received: {{result}}"); // Outputs: Received: 42
+fn main() -> void {
+    let result: number = await channel.receive();
+    print.info("Received: {{result}}"); // Outputs: Received: 42
+}

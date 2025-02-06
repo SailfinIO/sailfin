@@ -1,216 +1,261 @@
 # bootstrap/ast_nodes.py
 
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Tuple, Union
+
+
+@dataclass
 class ASTNode:
     pass
 
 
+@dataclass
 class Expression(ASTNode):
     pass
 
 
+@dataclass
 class UnaryOp(Expression):
-    def __init__(self, operator, operand):
-        self.operator = operator
-        self.operand = operand
+    operator: str
+    operand: Expression
 
 
-class Program(ASTNode):
-    def __init__(self, statements):
-        self.statements = statements
-
-
-class PrintStatement(ASTNode):
-    def __init__(self, expression):
-        self.expression = expression
-
-
-class VariableDeclaration(ASTNode):
-    def __init__(self, name, var_type, value, mutable=False):
-        self.name = name
-        self.var_type = var_type  # Can be None if type is not specified
-        self.value = value
-        self.mutable = mutable
-
-
-class ConstantDeclaration(ASTNode):
-    def __init__(self, name, var_type, value):
-        self.name = name
-        self.var_type = var_type
-        self.value = value
-
-
-class FunctionDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
-        self.name = name
-        self.params = params  # List of tuples: (param_name, param_type)
-        self.return_type = return_type
-        self.body = body  # List of statements
-        self.decorators = decorators if decorators else []  # List of decorator names
-        self.is_async = is_async  # Indicates if the function is asynchronous
-
-
+@dataclass
 class BinOp(Expression):
-    def __init__(self, operator, left, right):
-        self.operator = operator
-        self.left = left
-        self.right = right
+    operator: str
+    left: Expression
+    right: Expression
 
 
+@dataclass
 class Number(Expression):
-    def __init__(self, value):
-        self.value = value
+    value: Union[int, float]
 
 
+@dataclass
 class String(Expression):
-    def __init__(self, value):
-        self.value = value
+    value: str
 
 
+@dataclass
 class Identifier(Expression):
-    def __init__(self, name):
-        self.name = name
+    name: str
 
 
-class IfStatement(ASTNode):
-    def __init__(self, condition, then_branch, else_branch=None):
-        self.condition = condition
-        self.then_branch = then_branch  # List of statements
-        self.else_branch = else_branch  # List of statements or None
-
-
-class ReturnStatement(ASTNode):
-    def __init__(self, expression=None):
-        self.expression = expression
-
-
-class StructDeclaration(ASTNode):
-    def __init__(self, name, members, interfaces=None):
-        self.name = name
-        self.members = members  # List of FieldDeclaration and MethodDeclaration
-        self.interfaces = interfaces if interfaces else []  # List of interface names
-
-
-class StructInstantiation(Expression):
-    def __init__(self, struct_name, fields):
-        self.struct_name = struct_name  # Identifier
-        self.fields = fields            # Dictionary of field names to expressions
-
-
-class FieldDeclaration(ASTNode):
-    def __init__(self, name, field_type, mutable=False):
-        self.name = name
-        self.field_type = field_type
-        self.mutable = mutable
-
-
+@dataclass
 class FunctionCall(Expression):
-    def __init__(self, func_name, arguments):
-        self.func_name = func_name
-        self.arguments = arguments  # List of expressions
+    func_name: Union[Identifier, 'MemberAccess']
+    arguments: List[Expression]
 
 
+@dataclass
 class MemberAccess(Expression):
-    def __init__(self, object_, member):
-        self.object = object_
-        self.member = member
+    object_: Expression
+    member: str
 
 
-class Assignment(ASTNode):
-    def __init__(self, target, value):
-        self.target = target  # Identifier or MemberAccess
-        self.value = value
+@dataclass
+class Program(ASTNode):
+    statements: List[ASTNode]
 
 
+@dataclass
+class PrintStatement(ASTNode):
+    expression: Expression
+
+
+@dataclass
+class VariableDeclaration(ASTNode):
+    name: str
+    var_type: Optional[str]
+    value: Expression
+    mutable: bool = False
+
+
+@dataclass
+class ConstantDeclaration(ASTNode):
+    name: str
+    var_type: str
+    value: Expression
+
+
+@dataclass
+class FunctionDeclaration(ASTNode):
+    name: str
+    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
+    return_type: Optional[str]
+    body: List[ASTNode]
+    decorators: List[str] = field(default_factory=list)
+    is_async: bool = False
+
+
+@dataclass
+class IfStatement(ASTNode):
+    condition: Expression
+    then_branch: List[ASTNode]
+    else_branch: Optional[List[ASTNode]] = None
+
+
+@dataclass
+class ReturnStatement(ASTNode):
+    expression: Optional[Expression] = None
+
+
+@dataclass
+class StructDeclaration(ASTNode):
+    name: str
+    members: List[Union['FieldDeclaration', 'MethodDeclaration']]
+    interfaces: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FieldDeclaration(ASTNode):
+    name: str
+    field_type: str
+    mutable: bool = False
+
+
+@dataclass
 class MethodDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
-        self.name = name
-        self.params = params  # List of tuples: (param_name, param_type)
-        self.return_type = return_type
-        self.body = body  # List of statements
-        self.decorators = decorators if decorators else []
-        self.is_async = is_async  # Indicates if the method is asynchronous
+    name: str
+    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
+    return_type: Optional[str]
+    body: List[ASTNode]
+    decorators: List[str] = field(default_factory=list)
+    is_async: bool = False
 
 
-class Await(Expression):
-    def __init__(self, expression):
-        self.expression = expression
+@dataclass
+class InterfaceDeclaration(ASTNode):
+    name: str
+    methods: List['InterfaceMethod']
 
 
+@dataclass
+class InterfaceMethod(ASTNode):
+    name: str
+    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
+    return_type: Optional[str]
+
+
+@dataclass
 class EnumDeclaration(ASTNode):
-    def __init__(self, name, variants):
-        self.name = name
-        self.variants = variants  # List of EnumVariant
+    name: str
+    variants: List['EnumVariant']
 
 
+@dataclass
 class EnumVariant(ASTNode):
-    def __init__(self, name, fields=None):
-        self.name = name
-        self.fields = fields if fields else []  # List of FieldDeclaration
+    name: str
+    fields: List[FieldDeclaration] = field(default_factory=list)
 
 
-class ExpressionStatement(ASTNode):
-    def __init__(self, expression):
-        self.expression = expression
-
-
-class LambdaExpression(Expression):
-    def __init__(self, params, body):
-        self.params = params
-        self.body = body
-
-
-class ImportStatement(ASTNode):
-    def __init__(self, items, source):
-        self.items = items  # List of identifiers
-        self.source = source  # String literal
-
-
-class TypeAliasDeclaration(ASTNode):
-    def __init__(self, name, aliased_type):
-        self.name = name
-        self.aliased_type = aliased_type
-
-
+@dataclass
 class MatchStatement(ASTNode):
-    def __init__(self, condition, arms):
-        self.condition = condition
-        self.arms = arms
+    condition: Expression
+    arms: List['MatchArm']
 
 
+@dataclass
 class MatchArm(ASTNode):
-    def __init__(self, pattern, body):
-        self.pattern = pattern
-        self.body = body
+    pattern: 'Pattern'
+    body: List[ASTNode]
 
 
-class NumberPattern(ASTNode):
-    def __init__(self, value):
-        self.value = value
-
-
-class WildcardPattern(ASTNode):
+@dataclass
+class Pattern(ASTNode):
     pass
 
 
-class ArrayLiteral(Expression):
-    def __init__(self, elements):
-        self.elements = elements  # List of expressions
+@dataclass
+class NumberPattern(Pattern):
+    value: Union[int, float]
 
 
+@dataclass
+class WildcardPattern(Pattern):
+    pass
+
+
+@dataclass
+class Assignment(ASTNode):
+    target: Union[Identifier, MemberAccess]
+    value: Expression
+
+
+@dataclass
+class ExpressionStatement(ASTNode):
+    expression: Expression
+
+
+@dataclass
+class ImportStatement(ASTNode):
+    items: List[str]
+    source: str
+
+
+@dataclass
+class TypeAliasDeclaration(ASTNode):
+    name: str
+    aliased_type: str
+
+
+@dataclass
+class LambdaExpression(Expression):
+    params: List[Tuple[str, str]]  # Each is (name, type)
+    return_type: Optional[str]
+    body: List[ASTNode]
+
+
+@dataclass
+class Await(Expression):
+    expression: Expression
+
+
+@dataclass
 class TryFinally(ASTNode):
-    def __init__(self, try_block, finally_block):
-        self.try_block = try_block  # List of statements
-        self.finally_block = finally_block  # List of statements
+    try_block: List[ASTNode]
+    finally_block: List[ASTNode]
 
 
-class InterfaceDeclaration(ASTNode):
-    def __init__(self, name, methods):
-        self.name = name
-        self.methods = methods  # List of InterfaceMethod
+@dataclass
+class TryCatchFinally(ASTNode):
+    try_block: List[ASTNode]
+    # List of (error_type, error_var, block)
+    catch_blocks: List[Tuple[str, str, List[ASTNode]]]
+    finally_block: Optional[List[ASTNode]] = None
 
 
-class InterfaceMethod(ASTNode):
-    def __init__(self, name, params, return_type):
-        self.name = name
-        self.params = params  # List of tuples: (param_name, param_type)
-        self.return_type = return_type
+@dataclass
+class ThrowStatement(ASTNode):
+    expression: Expression
+
+
+@dataclass
+class ArrayLiteral(Expression):
+    elements: List[Expression]
+
+
+@dataclass
+class WhileLoop(ASTNode):
+    condition: Expression
+    body: List[ASTNode]
+
+
+@dataclass
+class ForLoop(ASTNode):
+    variable: str
+    iterable: Expression
+    body: List[ASTNode]
+
+
+@dataclass
+class RangeExpression(Expression):
+    start: Expression
+    end: Expression
+
+
+@dataclass
+class TestDeclaration(ASTNode):
+    description: str
+    body: List[ASTNode]
