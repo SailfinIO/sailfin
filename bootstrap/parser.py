@@ -748,6 +748,10 @@ def p_struct_field_init(p):
     p[0] = (p[1], p[3])
 
 
+def p_struct_field_init_shorthand(p):
+    '''struct_field_init : IDENTIFIER'''
+    p[0] = (p[1], Identifier(name=p[1]))
+
 # -------------------- Arguments -------------------- #
 
 

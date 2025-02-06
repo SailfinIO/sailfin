@@ -230,26 +230,56 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append('')  # Add a newline after class
 
     def visit_MethodDeclaration(self, node: MethodDeclaration):
-        decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
-        async_str = 'async ' if node.is_async else ''
-        # If the first parameter is "self", don't duplicate it.
-        if node.params and node.params[0][0] == "self":
+        # Determine if this is a constructor method.
+        is_constructor = node.name == "new"
+
+        # Build decorators. Start with an empty list.
+        decorator_lines = []
+
+        # For a constructor, add @classmethod.
+        if is_constructor:
+            decorator_lines.append(f"{self.indent()}@classmethod")
+
+        # Also add any other decorators provided in the AST.
+        for dec in node.decorators:
+            decorator_lines.append(f"{self.indent()}@{dec}")
+
+        # Join the decorators into one string.
+        decorators = "\n".join(decorator_lines)
+        if decorators:
+            # Ensure there is a newline after the decorators.
+            decorators += "\n"
+
+        # For instance methods, the first parameter should be "self".
+        # For class methods, use "cls".
+        first_param = "cls" if is_constructor else "self"
+
+        # Process the parameters.
+        if node.params and node.params[0][0] in ("self", "cls"):
             params_list = [param[0] for param in node.params[1:]]
         else:
             params_list = [param[0] for param in node.params]
         params = ', '.join(params_list)
-        # Map the return type if provided and not 'void'
+
+        # Handle the return type.
         if node.return_type and node.return_type != 'void':
-            return_type = f" -> {self.map_type(node.return_type)}"
+            ret_type = self.map_type(node.return_type)
+            if is_constructor:
+                # Quote the return type for forward references.
+                ret_type = f"'{ret_type}'"
+            return_type = f" -> {ret_type}"
         else:
             return_type = ""
-        # If there are additional parameters, include a comma after 'self'
+
+        # Build the method signature.
         if params:
-            method_signature = f"def {node.name}(self, {params}){return_type}:"
+            method_signature = f"def {node.name}({first_param}, {params}){
+                return_type}:"
         else:
-            method_signature = f"def {node.name}(self){return_type}:"
-        self.code.append(f"{decorators}{self.indent()}{
-                         async_str}{method_signature}")
+            method_signature = f"def {node.name}({first_param}){return_type}:"
+
+        # Append the decorator lines and the method signature.
+        self.code.append(f"{decorators}{self.indent()}{method_signature}")
         self.indent_level += 1
         if not node.body:
             self.code.append(f"{self.indent()}pass")
@@ -257,7 +287,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             for stmt in node.body:
                 self.visit(stmt)
         self.indent_level -= 1
-        self.code.append('')  # Add a newline after method
+        self.code.append('')  # Add a newline after the method
 
     def visit_InterfaceDeclaration(self, node: InterfaceDeclaration):
         # This line should add the import needed for interfaces.
