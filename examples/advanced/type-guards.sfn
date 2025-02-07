@@ -1,6 +1,11 @@
 // examples/advanced/type-guards.sfn
 
-fn process(input: string | number) {
+struct User {
+    name: string;
+    age: number;
+}
+
+fn process(input: string | number) -> void {
     if input is string {
         print.info("It's a string: {{input}}");
     } else {
@@ -8,11 +13,14 @@ fn process(input: string | number) {
     }
 }
 
-process("Sail");
-process(42);
+fn main() -> void {
+    process("Sail");
+    process(42);
 
-match user {
-    User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
-    User { name, age } => print.info("Minor user: {{name}}"),
-    _ => print.info("Unknown entity"),
+    let user: User = User { name: "Bob", age: 20 };
+    match user {
+        User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
+        User { name, age } => print.info("Minor user: {{name}}"),
+        _ => print.info("Unknown entity"),
+    }
 }

@@ -1,8 +1,11 @@
 // examples/advanced/parametric-polymorphism.sfn
 
-fn identity<T>(value -> T) -> T {
+fn identity<T>(value: T) -> T {
     return value;
 }
 
-let num = identity(42);
-let text = identity("Sailfin");
+fn main() -> void {
+    let num: number = identity(42);
+    let text: string = identity("Sailfin");
+    print.info("Number: {{num}}, Text: {{text}}");
+}

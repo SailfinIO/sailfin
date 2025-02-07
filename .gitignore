@@ -123,4 +123,12 @@ logs/
 .env
 .env.*
 
+# bootstrap compiler output
 output.py
+
+# Node.js
+out
+dist
+node_modules
+.vscode-test/
+*.vsix

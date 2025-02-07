@@ -1,11 +1,13 @@
 // examples/web/async.sfn
 
-async fn fetchData(url -> string) -> string {
+import { http } from "sailfin/net";
+
+async fn fetchData(url: string) -> string {
     let response = await http.get(url);
     return response.body;
 }
 
 async fn main() -> void {
-    let data = await fetchData("https://example.com");
+    let data: string = await fetchData("https://example.com");
     print.info("Data: {{data}}");
 }

@@ -1,12 +1,12 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-let tasks -> channel[fn() -> void] = channel();
+let tasks: Channel<fn() -> void> = Channel();
 
 // Spawn a worker pool
 for _ in 1..5 {
     routine {
         while true {
-            let task = await tasks.receive();
+            let task: fn() -> void = await tasks.receive();
             task(); // Execute the task
         }
     }

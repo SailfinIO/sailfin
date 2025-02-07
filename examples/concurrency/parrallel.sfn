@@ -1,6 +1,16 @@
 // examples/concurrency/parrallel.sfn
 
-let results -> number[] = parallel [
+fn computeTask1() -> number {
+    // Dummy implementation
+    return 10;
+}
+
+fn computeTask2() -> number {
+    // Dummy implementation
+    return 20;
+}
+
+let results: number[] = parallel [
     fn() -> number { return computeTask1(); },
     fn() -> number { return computeTask2(); }
 ];

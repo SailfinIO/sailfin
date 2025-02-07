@@ -3,7 +3,7 @@
 try {
     // Risky operation
 } catch (SpecificError e) {
-    // Handle specific error
+    // Handle the specific error
 } finally {
     // Cleanup code
 }

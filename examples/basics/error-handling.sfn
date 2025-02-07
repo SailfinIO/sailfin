@@ -1,21 +1,21 @@
 // examples/basics/error-handling.sfn
 
 struct DivisionError {
-    message -> string;
+    message: string;
 }
 
-fn safeDivide(a -> number, b -> number) -> number | DivisionError {
+fn safeDivide(a: number, b: number) -> number | DivisionError {
     if b == 0 {
         return DivisionError { message: "Cannot divide by zero!" };
     }
     return a / b;
 }
 
-fn main() {
-    let result = safeDivide(10, 0);
+fn main() -> void {
+    let result: number | DivisionError = safeDivide(10, 0);
 
     match result {
-        DivisionError { message } -> print.info("Error: {{message}}"),
-        _ -> print.info("Result: {{result}}"),
+        DivisionError { message } => print.error("Error: {{message}}"),
+        _ => print.info("Result: {{result}}"),
     }
 }
