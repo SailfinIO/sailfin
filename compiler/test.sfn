@@ -1,0 +1,36 @@
+// A simple Parser structure
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+// Create a new parser given a token list
+fn newParser(tokens: Token[]) -> Parser {
+    return Parser { tokens: tokens, pos: 0 };
+}
+
+// Return the current token or an EOF token if finished.
+fn current(parser: Parser) -> Token {
+    if parser.pos < parser.tokens.length {
+        return parser.tokens[parser.pos];
+    }
+    // Create and return a special EOF token if needed.
+    return Token("EOF", "", -1);
+}
+
+// Advance the parser and return the consumed token.
+fn advance(parser: Parser) -> Token {
+    let tok = current(parser);
+    parser.pos = parser.pos + 1;
+    return tok;
+}
+
+// Ensure the current token has the expected type; if so, consume it.
+fn expect(parser: Parser, expectedType: string) -> Token {
+    let tok = current(parser);
+    if tok.type == expectedType {
+        return advance(parser);
+    } else {
+        error("Expected " + expectedType + " but found " + tok.type + " at line " + tok.lineno.toString());
+    }
+}

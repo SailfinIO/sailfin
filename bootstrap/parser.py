@@ -19,6 +19,9 @@ precedence = (
     ('right', 'UMINUS'),
     ('left', 'AMP'),
     ('left', 'PIPE'),
+    ('right', 'ASSIGN', 'PLUS_ASSIGN', 'MINUS_ASSIGN',
+     'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN'),
+
 )
 # -------------------- Program -------------------- #
 
@@ -62,8 +65,6 @@ def p_statement(p):
                  | if_statement
                  | return_statement
                  | expression_statement
-                 | assignment_identifier
-                 | assignment_member
                  | import_statement
                  | type_alias_declaration
                  | try_finally
@@ -72,6 +73,7 @@ def p_statement(p):
                  | for_loop
                  | test_declaration'''
     p[0] = p[1]
+
 
 # -------------------- Print Statement -------------------- #
 
@@ -526,40 +528,49 @@ def p_return_statement(p):
 # -------------------- Assignment Statements -------------------- #
 
 
-def p_assignment_identifier(p):
-    '''assignment_identifier : IDENTIFIER ASSIGN expression SEMICOLON
-                  | IDENTIFIER PLUS_ASSIGN expression SEMICOLON
-                  | IDENTIFIER MINUS_ASSIGN expression SEMICOLON
-                  | IDENTIFIER MULTIPLY_ASSIGN expression SEMICOLON
-                  | IDENTIFIER DIVIDE_ASSIGN expression SEMICOLON'''
-    target = Identifier(name=p[1])
-    operator = p[2]
-    value = p[3]
-    if operator == '=':
-        p[0] = Assignment(target=target, value=value)
+def p_lvalue(p):
+    '''lvalue : IDENTIFIER
+              | lvalue DOT IDENTIFIER'''
+    if len(p) == 2:
+        p[0] = Identifier(name=p[1])
     else:
-        op_map = {'+=': '+', '-=': '-', '*=': '*', '/=': '/'}
-        binary_op = BinOp(operator=op_map[operator], left=target, right=value)
-        p[0] = Assignment(target=target, value=binary_op)
+        p[0] = MemberAccess(object_=p[1], member=p[3])
 
 
-def p_assignment_member(p):
-    '''assignment_member : expression DOT IDENTIFIER ASSIGN expression SEMICOLON
-                  | expression DOT IDENTIFIER PLUS_ASSIGN expression SEMICOLON
-                  | expression DOT IDENTIFIER MINUS_ASSIGN expression SEMICOLON
-                  | expression DOT IDENTIFIER MULTIPLY_ASSIGN expression SEMICOLON
-                  | expression DOT IDENTIFIER DIVIDE_ASSIGN expression SEMICOLON'''
-    target = MemberAccess(object_=p[1], member=p[3])
-    operator = p[4]
-    value = p[5]
-    if operator == '=':
-        p[0] = Assignment(target=target, value=value)
+def p_assignment_expression(p):
+    '''assignment_expression : lvalue ASSIGN expression %prec ASSIGN
+                             | lvalue PLUS_ASSIGN expression %prec ASSIGN
+                             | lvalue MINUS_ASSIGN expression %prec ASSIGN
+                             | lvalue MULTIPLY_ASSIGN expression %prec ASSIGN
+                             | lvalue DIVIDE_ASSIGN expression %prec ASSIGN'''
+    if p[2] == '=':
+        p[0] = Assignment(target=p[1], value=p[3])
     else:
         op_map = {'+=': '+', '-=': '-', '*=': '*', '/=': '/'}
-        binary_op = BinOp(operator=op_map[operator], left=target, right=value)
-        p[0] = Assignment(target=target, value=binary_op)
+        p[0] = Assignment(target=p[1], value=BinOp(
+            operator=op_map[p[2]], left=p[1], right=p[3]))
+
 
 # -------------------- Expression Statements -------------------- #
+
+def p_nonassignment_expression(p):
+    '''nonassignment_expression : unary_expression
+                                | nonassignment_expression PLUS unary_expression
+                                | nonassignment_expression MINUS unary_expression
+                                | nonassignment_expression MULTIPLY unary_expression
+                                | nonassignment_expression DIVIDE unary_expression
+                                | nonassignment_expression LT unary_expression
+                                | nonassignment_expression GT unary_expression
+                                | nonassignment_expression LEQ unary_expression
+                                | nonassignment_expression GEQ unary_expression
+                                | nonassignment_expression EQ unary_expression
+                                | nonassignment_expression NEQ unary_expression
+                                | nonassignment_expression AND unary_expression
+                                | nonassignment_expression OR unary_expression'''
+    if len(p) == 2:
+        p[0] = p[1]
+    else:
+        p[0] = BinOp(operator=p[2], left=p[1], right=p[3])
 
 
 def p_expression_statement(p):
@@ -716,6 +727,20 @@ def p_statements_opt(p):
 
 # -------------------- Type Non-Terminal -------------------- #
 
+
+def stringify_type(t):
+    # If t is already a string, return it.
+    if isinstance(t, str):
+        return t
+    # If t is a UnionType, convert it into something like "left|right"
+    elif isinstance(t, UnionType):
+        return stringify_type(t.left) + "|" + stringify_type(t.right)
+    elif isinstance(t, IntersectionType):
+        return stringify_type(t.left) + "&" + stringify_type(t.right)
+    else:
+        # You can customize this based on your AST
+        return str(t)
+
 # A primary type is just an identifier or a parenthesized type.
 
 
@@ -725,7 +750,8 @@ def p_type_primary(p):
     if len(p) == 2:
         p[0] = p[1]
     else:
-        p[0] = p[2]
+        p[0] = stringify_type(p[2])
+
 
 # A type suffix is zero or more array postfixes.
 
@@ -830,23 +856,31 @@ def p_unary_expression(p):
 
 
 def p_expression(p):
-    '''expression : unary_expression
-                  | expression PLUS expression
-                  | expression MINUS expression
-                  | expression MULTIPLY expression
-                  | expression DIVIDE expression
-                  | expression LT expression
-                  | expression GT expression
-                  | expression LEQ expression
-                  | expression GEQ expression
-                  | expression EQ expression
-                  | expression NEQ expression
-                  | expression AND expression
-                  | expression OR expression'''
-    if len(p) == 2:
+    '''expression : nonassignment_expression assignment_opt'''
+    if p[2] is None:
         p[0] = p[1]
     else:
-        p[0] = BinOp(operator=p[2], left=p[1], right=p[3])
+        # p[2] is a tuple (op, right)
+        op, right = p[2]
+        if op == '=':
+            p[0] = Assignment(target=p[1], value=right)
+        else:
+            op_map = {'+=': '+', '-=': '-', '*=': '*', '/=': '/'}
+            p[0] = Assignment(target=p[1],
+                              value=BinOp(operator=op_map[op], left=p[1], right=right))
+
+
+def p_assignment_opt(p):
+    '''assignment_opt : ASSIGN expression
+                      | PLUS_ASSIGN expression
+                      | MINUS_ASSIGN expression
+                      | MULTIPLY_ASSIGN expression
+                      | DIVIDE_ASSIGN expression
+                      | empty'''
+    if len(p) == 2:
+        p[0] = None
+    else:
+        p[0] = (p[1], p[2])
 
 
 def p_struct_instantiation_opt(p):

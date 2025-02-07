@@ -1,0 +1,131 @@
+// interpreter.sfn
+
+// A simple environment for variable bindings.
+struct Environment {
+    // In a complete interpreter you would have a proper map/dictionary.
+    // Here we simulate it with two parallel arrays.
+    names: string[];
+    values: (number|string)[];
+}
+
+fn newEnvironment() -> Environment {
+    return Environment { names: [], values: [] };
+}
+
+fn envSet(env: Environment, name: string, value: number|string) {
+    // For simplicity, we just append a new binding.
+    env.names.append(name);
+    env.values.append(value);
+}
+
+fn envLookup(env: Environment, name: string) -> (number|string) {
+    let i: number = 0;
+    while (i < env.names.length) {
+        if (env.names[i] == name) {
+            return env.values[i];
+        }
+        i = i + 1;
+    }
+    error("Undefined variable: " + name);
+    return ""; // unreachable
+}
+
+
+// Global environment (for our simple interpreter).
+let globalEnv: Environment = newEnvironment();
+
+
+// The entry point for the interpreter.
+fn interpret(program: Program) {
+    for stmt in program.statements {
+        runStatement(stmt);
+    }
+}
+
+
+// Run a single statement.
+fn runStatement(stmt: Statement) {
+    // Use the node's tag method to decide its kind.
+    if (stmt.getStatementKind() == "VariableDeclaration") {
+        // Cast stmt to a VariableDeclaration.
+        let varDecl: VariableDeclaration = stmt;
+        // Evaluate the initializer expression.
+        let value = evaluate(varDecl.value);
+        // Bind the variable in the global environment.
+        envSet(globalEnv, varDecl.name, value);
+    } else if (stmt.getStatementKind() == "ExpressionStatement") {
+        let exprStmt: ExpressionStatement = stmt;
+        // Evaluate the expression (its result might be printed or used).
+        evaluate(exprStmt.expression);
+    } else if (stmt.getStatementKind() == "ReturnStatement") {
+        let retStmt: ReturnStatement = stmt;
+        // Evaluate the return expression.
+        let retValue = evaluate(retStmt.expression);
+        // For now, simply print the return value.
+        print.info("Return: " + retValue.toString());
+    } else if (stmt.getStatementKind() == "FunctionDeclaration") {
+        // Function declarations could be stored in the environment.
+        // (A complete interpreter would create a closure here.)
+        let funcDecl: FunctionDeclaration = stmt;
+        envSet(globalEnv, funcDecl.name, funcDecl);
+    } else {
+        error("Unknown statement kind: " + stmt.getStatementKind());
+    }
+}
+
+
+// Evaluate an expression and return a number or string.
+fn evaluate(expr: Expression) -> (number | string) {
+    if (expr.getExpressionKind() == "NumberExpr") {
+        let numExpr: NumberExpr = expr;
+        return numExpr.value;
+    } else if (expr.getExpressionKind() == "StringExpr") {
+        let strExpr: StringExpr = expr;
+        return strExpr.value;
+    } else if (expr.getExpressionKind() == "IdentifierExpr") {
+        let idExpr: IdentifierExpr = expr;
+        return envLookup(globalEnv, idExpr.name);
+    } else if (expr.getExpressionKind() == "BinaryExpr") {
+        let binExpr: BinaryExpr = expr;
+        let left = evaluate(binExpr.left);
+        let right = evaluate(binExpr.right);
+        if (binExpr.operator == "+") {
+            return left + right;
+        } else if (binExpr.operator == "-") {
+            return left - right;
+        } else if (binExpr.operator == "*") {
+            return left * right;
+        } else if (binExpr.operator == "/") {
+            return left / right;
+        } else {
+            error("Unknown operator: " + binExpr.operator);
+        }
+    } else if (expr.getExpressionKind() == "CallExpr") {
+        let callExpr: CallExpr = expr;
+        // For a minimal implementation, assume callee is an identifier.
+        let funcName = "";
+        if (callExpr.callee.getExpressionKind() == "IdentifierExpr") {
+            let idExpr: IdentifierExpr = callExpr.callee;
+            funcName = idExpr.name;
+        } else {
+            error("Function calls with non-identifier callees are not supported yet.");
+        }
+        // Look up the function declaration from the environment.
+        let funcDecl = envLookup(globalEnv, funcName);
+        // A complete implementation would evaluate arguments, bind them to parameters,
+        // create a new environment, and then interpret the function body.
+        print.info("Function call to " + funcName + " (not fully implemented)");
+        return "";
+    } else if (expr.getExpressionKind() == "MemberAccessExpr") {
+        let memberExpr: MemberAccessExpr = expr;
+        // Evaluate the object, then access the member.
+        let obj = evaluate(memberExpr.object);
+        // For now, we don't support member access in the interpreter.
+        error("Member access is not implemented yet.");
+    } else if (expr.getExpressionKind() == "NilExpr") {
+        return "";
+    } else {
+        error("Unknown expression kind: " + expr.getExpressionKind());
+    }
+    return ""; // fallback
+}

@@ -51,11 +51,18 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Visit all statements first
         for stmt in node.statements:
             self.visit(stmt)
-        # Prepend all import statements (sorted for consistency) at the beginning of the code.
-        if self.imports:
-            import_lines = sorted(self.imports)
-            # Insert a newline after the imports for separation.
-            self.code = import_lines + [''] + self.code
+
+        # Prepare the __future__ import
+        future_import = "from __future__ import annotations"
+
+        # Get other imports (if any) and sort them
+        # Remove the __future__ import if it is accidentally added in self.imports
+        other_imports = sorted(
+            imp for imp in self.imports if imp != future_import)
+
+        # Prepend the __future__ import and other import statements to the generated code
+        self.code = [future_import] + other_imports + [''] + self.code
+
         return '\n'.join(self.code)
 
     def visit_ImportStatement(self, node: ImportStatement):
@@ -227,6 +234,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append(f"{self.indent()}{target} = {value}")
 
     def visit_StructDeclaration(self, node: StructDeclaration):
+        # Ensure the dataclass decorator is available.
+        self.imports.add("from dataclasses import dataclass")
+        self.code.append(f"{self.indent()}@dataclass")
         base_classes = ', '.join(node.interfaces) if node.interfaces else ''
         inheritance = f"({base_classes})" if base_classes else ''
         self.code.append(f"{self.indent()}class {node.name}{inheritance}:")
@@ -241,9 +251,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     name = member.name
                     comment = "  # Mutable" if mutable else ""
                     py_type = self.map_type(var_type)
-                    self.code.append(f"{self.indent()}{name}: {
-                                     py_type}{comment}")
-
+                    self.code.append(
+                        f"{self.indent()}{name}: {py_type}{comment}")
                 elif isinstance(member, MethodDeclaration):
                     self.visit(member)
         self.indent_level -= 1

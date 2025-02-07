@@ -1,0 +1,95 @@
+// A simple Parser structure
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+// Create a new parser given a token list
+fn newParser(tokens: Token[]) -> Parser {
+    return Parser { tokens: tokens, pos: 0 };
+}
+
+// Return the current token or an EOF token if finished.
+fn current(parser: Parser) -> Token {
+    if parser.pos < parser.tokens.length {
+        return parser.tokens[parser.pos];
+    }
+    // Create and return a special EOF token if needed.
+    return Token("EOF", "", -1);
+}
+
+// Advance the parser and return the consumed token.
+fn advance(parser: Parser) -> Token {
+    let tok = current(parser);
+    parser.pos = parser.pos + 1;
+    return tok;
+}
+
+// Ensure the current token has the expected type; if so, consume it.
+fn expect(parser: Parser, expectedType: string) -> Token {
+    let tok = current(parser);
+    if tok.type == expectedType {
+        return advance{parser};
+    } else {
+        error("Expected " + expectedType + " but found " + tok.type + " at line " + tok.lineno.toString());
+    }
+}
+
+// --- Parsing Expressions ---
+// For our minimal version, we’ll support just numbers and identifiers.
+fn parseExpression(parser: Parser) -> Expression {
+    let tok = current(parser);
+    if tok.type == "NUMBER" {
+         advance(parser);
+         // Create a NumberExpr (assume token.value is convertible to number)
+         return NumberExpr(value: tok.value);
+    } else if tok.type == "IDENTIFIER" {
+         advance(parser);
+         return IdentifierExpr(name: tok.value);
+    } else {
+         error("Unexpected token in expression: " + tok.type);
+    }
+}
+
+// --- Parsing Statements ---
+// Let’s support variable declarations (e.g. "let x: number = 123;")
+// and expression statements.
+fn parseStatement(parser: Parser) -> Statement {
+    let tok = current(parser);
+    if tok.type == "LET" {
+         // Parse variable declaration.
+         advance(parser); // Consume 'let'
+         let identTok = expect(parser, "IDENTIFIER");
+         
+         // Optionally, check for a type annotation.
+         let varType: string = "";
+         if (current(parser).type == "COLON") {
+             advance(parser);  // Consume ':'
+             let typeTok = expect(parser, "IDENTIFIER");
+             varType = typeTok.value;
+         }
+         
+         // Expect an assignment operator
+         expect(parser, "ASSIGN");
+         let expr = parseExpression(parser);
+         // End the declaration with a semicolon.
+         expect(parser, "SEMICOLON");
+         
+         return VariableDeclaration(name: identTok.value, var_type: varType, value: expr);
+    } else {
+         // If not a variable declaration, assume an expression statement.
+         let expr = parseExpression(parser);
+         expect(parser, "SEMICOLON");
+         return ExpressionStatement(expression: expr);
+    }
+}
+
+// --- Parsing the Entire Program ---
+fn parseProgram(parser: Parser) -> Program {
+    let stmts: Statement[] = [];
+    while (current(parser).type != "EOF") {
+         let stmt = parseStatement(parser);
+         stmts.append(stmt);
+    }
+    return Program(statements: stmts);
+}

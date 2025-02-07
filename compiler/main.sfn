@@ -1,9 +1,27 @@
-import { fs } from "sailfin/io";
-import { tokenize } from "./lexer/lexer.sfn";
+// main.sfn
 
+// Import the modules that you have written.
+import "lexer.sfn" as Lexer;
+import "parser.sfn" as Parser;
+import "ast.sfn" as AST;
+import "interpreter.sfn" as Interpreter;
+
+// Main entry point.
 fn main() {
-    let source -> string = fs.readFile("./hello-world.sfn");
-    let tokens -> array<Token> = tokenize(source);
-
-    print.info("Tokens: {{tokens}}");
+    // Read source code (this could be from a file or hardcoded string).
+    let source: string = readFile("test.sfn");
+    
+    // 1. Lexing: produce a list of tokens.
+    let tokens: Token[] = Lexer.lex(source);
+    
+    // 2. Parsing: create a parser and generate the AST.
+    let parser: Parser = Parser.newParser(tokens);
+    let program: AST.Program = Parser.parseProgram(parser);
+    
+    // 3. Interpreting: run the AST.
+    Interpreter.interpret(program);
+    
+    // Alternatively, if you’re generating code:
+    // let targetCode: string = CodeGenerator.generate(program);
+    // writeFile("output.py", targetCode);
 }
