@@ -43,6 +43,24 @@ class Identifier(Expression):
 
 
 @dataclass
+class UnionType(Expression):
+    left: Expression
+    right: Expression
+
+
+@dataclass
+class IntersectionType(Expression):
+    left: Expression
+    right: Expression
+
+
+@dataclass
+class TypeCheck(Expression):
+    expr: Expression
+    type_name: str
+
+
+@dataclass
 class FunctionCall(Expression):
     func_name: Union[Identifier, 'MemberAccess']
     arguments: List[Expression]
@@ -153,6 +171,7 @@ class EnumDeclaration(ASTNode):
 @dataclass
 class EnumVariant(ASTNode):
     name: str
+    value: Optional[str] = None      # Added to hold assigned string values
     fields: List[FieldDeclaration] = field(default_factory=list)
 
 
@@ -165,7 +184,8 @@ class MatchStatement(ASTNode):
 @dataclass
 class MatchArm(ASTNode):
     pattern: 'Pattern'
-    body: List[ASTNode]
+    guard: Optional[Expression] = None
+    body: List[ASTNode] = field(default_factory=list)
 
 
 @dataclass
@@ -181,6 +201,13 @@ class NumberPattern(Pattern):
 @dataclass
 class WildcardPattern(Pattern):
     pass
+
+
+@dataclass
+class TaggedPattern(Pattern):
+    type_name: str
+    variant: str
+    fields: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -265,3 +292,9 @@ class RangeExpression(Expression):
 class TestDeclaration(ASTNode):
     description: str
     body: List[ASTNode]
+
+
+@dataclass
+class ArrayIndexing(Expression):
+    object_: Expression
+    index: Expression

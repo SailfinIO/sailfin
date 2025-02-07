@@ -124,6 +124,10 @@ class ASTValidator:
         elif isinstance(node, ArrayLiteral):
             for element in node.elements:
                 ASTValidator.validate(element)
+        elif isinstance(node, ArrayIndexing):
+            # New branch for array indexing expressions
+            ASTValidator.validate(node.object_)
+            ASTValidator.validate(node.index)
         elif isinstance(node, WhileLoop):
             ASTValidator.validate(node.condition)
             for stmt in node.body:

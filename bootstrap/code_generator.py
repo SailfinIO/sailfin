@@ -19,10 +19,18 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return '    ' * self.indent_level
 
     def map_type(self, t: str) -> str:
+        # Check if the type ends with array notation
+        if t.endswith("[]"):
+            # Ensure the necessary import is added
+            self.imports.add("from typing import List")
+            inner_type = t[:-2]
+            py_inner = self.map_type(inner_type)
+            return f"List[{py_inner}]"
+        # Map simple types
         type_mapping = {
-            "number": "int",   # or "float" depending on your design
+            "number": "int",
             "string": "str",
-            # add additional mappings as needed
+            # add other mappings as needed...
         }
         return type_mapping.get(t, t)
 
@@ -79,7 +87,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_BinOp(self, node: BinOp):
         left = self.visit(node.left)
         right = self.visit(node.right)
-        return f"({left} {node.operator} {right})"
+        operator = node.operator
+        # Map C-like logical operators to Python equivalents.
+        if operator == '&&':
+            operator = 'and'
+        elif operator == '||':
+            operator = 'or'
+        return f"({left} {operator} {right})"
 
     def visit_UnaryOp(self, node: UnaryOp):
         operand = self.visit(node.operand)
@@ -110,6 +124,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         elements = ', '.join([self.visit(element)
                              for element in node.elements])
         return f"[{elements}]"
+
+    def visit_ArrayIndexing(self, node: ArrayIndexing):
+        object_str = self.visit(node.object_)
+        index_str = self.visit(node.index)
+        return f"{object_str}[{index_str}]"
 
     def visit_WhileLoop(self, node: WhileLoop):
         condition = self.visit(node.condition)
@@ -158,9 +177,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
         async_str = 'async ' if node.is_async else ''
         params = ', '.join([param[0] for param in node.params])
-        # Only include a return type if it is not 'void'
+        # Use map_type to convert the return type
         if node.return_type and node.return_type != 'void':
-            return_type = f" -> {node.return_type}"
+            mapped_return = self.map_type(node.return_type)
+            return_type = f" -> {mapped_return}"
         else:
             return_type = ""
         self.code.append(f"{self.indent()}{decorators}{async_str}def {

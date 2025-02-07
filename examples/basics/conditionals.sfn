@@ -12,7 +12,7 @@ fn checkNumber(value: number) -> void {
     match value {
         42 =>    print.info("The answer to life, the universe, and everything!"),
         -1 =>    print.info("A special negative number!"),
-        _  =>    print.info("Just another number."),
+        _  =>    print.info("Just another number.")
     }
 }
 

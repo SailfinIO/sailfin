@@ -1,0 +1,74 @@
+// Define a token type.
+struct Token {
+    type: string;
+    value: string;
+    lineno: number;
+}
+
+// Reserved keywords and their token types.
+enum Reserved {
+    Fn = "FN",
+    Struct = "STRUCT",
+    Interface = "INTERFACE",
+    Let = "LET",
+    Mut = "MUT",
+    If = "IF",
+    Else = "ELSE",
+    Return = "RETURN",
+    Print = "PRINT",
+    Implements = "IMPLEMENTS",
+    // add additional keywords as needed…
+}
+
+// Helper function to lookup reserved words using if/else.
+fn lookupReserved(word: string) -> string {
+    if word == "fn" {
+        return Reserved.Fn;
+    } else if word == "struct" {
+        return Reserved.Struct;
+    } else if word == "interface" {
+        return Reserved.Interface;
+    } else if word == "let" {
+        return Reserved.Let;
+    } else if word == "mut" {
+        return Reserved.Mut;
+    } else if word == "if" {
+        return Reserved.If;
+    } else if word == "else" {
+        return Reserved.Else;
+    } else if word == "return" {
+        return Reserved.Return;
+    } else if word == "print" {
+        return Reserved.Print;
+    } else if word == "implements" {
+        return Reserved.Implements;
+    } else {
+        return "IDENTIFIER";
+    }
+}
+
+// The lexer function: takes source code and returns a list of tokens.
+fn lex(source: string) -> Token[] {
+    let tokens: Token[] = [];
+    let pos: number = 0;
+    let lineno: number = 1;
+
+        // Helper functions for character tests.
+    fn isDigit(c: string) -> bool {
+        return c >= "0" && c <= "9";
+    }
+
+    fn isLetter(c: string) -> bool {
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
+    }
+
+    fn isWhitespace(c: string) -> bool {
+        return c == " " || c == "\t" || c == "\r";
+    }
+
+    while pos < source.length {
+        let c: string = source[pos];
+    }
+
+    return tokens;
+}

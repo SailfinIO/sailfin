@@ -31,6 +31,7 @@ reserved = {
     'while': 'WHILE',
     'in': 'IN',
     'test': 'TEST',
+    'is': 'IS',
 }
 
 tokens = [
@@ -49,6 +50,10 @@ tokens = [
     'AND', 'OR', 'NOT',
     # Arrows
     'ARROW',
+    'FAT_ARROW',
+    # Union and Intersection operators
+    'PIPE',
+    'AMP'
 ] + list(reserved.values())
 
 # Regular expression rules for simple tokens
@@ -83,6 +88,9 @@ t_AND = r'&&'
 t_OR = r'\|\|'
 t_NOT = r'!'
 t_ARROW = r'->'
+t_FAT_ARROW = r'=>'
+t_PIPE = r'\|'
+t_AMP = r'&'
 
 # Regular expression rules with actions
 

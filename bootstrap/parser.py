@@ -11,13 +11,15 @@ precedence = (
     ('left', 'AND'),
     ('left', 'EQ', 'NEQ'),
     ('left', 'LT', 'GT', 'LEQ', 'GEQ'),
+    ('left', 'IS'),
     ('left', 'PLUS', 'MINUS'),
     ('left', 'MULTIPLY', 'DIVIDE'),
     ('left', 'DOT'),
     ('right', 'ARROW'),
     ('right', 'UMINUS'),
+    ('left', 'AMP'),
+    ('left', 'PIPE'),
 )
-
 # -------------------- Program -------------------- #
 
 
@@ -42,7 +44,7 @@ def p_statements_single(p):
 
 def p_empty(p):
     'empty :'
-    p[0] = []
+    p[0] = None
 
 # -------------------- Statement Rule -------------------- #
 
@@ -86,8 +88,6 @@ def p_throw_statement(p):
     p[0] = ThrowStatement(expression=p[2])
 
 # -------------------- Variable Declarations -------------------- #
-
-# Updated: type annotation now uses COLON instead of ARROW.
 
 
 def p_variable_declaration_let(p):
@@ -138,7 +138,7 @@ def p_type_alias_declaration(p):
 
 
 def p_opt_return_type(p):
-    '''opt_return_type : ARROW type
+    '''opt_return_type : ARROW type_expr
                        | empty'''
     if len(p) == 3:
         p[0] = p[2]
@@ -315,28 +315,38 @@ def p_enum_variants_opt(p):
 
 def p_enum_variants(p):
     '''enum_variants : enum_variants COMMA enum_variant
-                    | enum_variant'''
+                     | enum_variant'''
     if len(p) == 4:
         p[0] = p[1] + [p[3]]
     else:
         p[0] = [p[1]]
 
 
+# New production: enum variant with an assignment (for reserved enums)
+def p_enum_variant_assignment(p):
+    '''enum_variant : IDENTIFIER ASSIGN STRING'''
+    # For a variant like: Fn = "FN"
+    p[0] = EnumVariant(name=p[1], value=p[3])
+
+
+# Existing production: enum variant without an assignment
 def p_enum_variant(p):
     '''enum_variant : IDENTIFIER
-                   | IDENTIFIER LBRACE enum_fields RBRACE'''
+                    | IDENTIFIER LBRACE enum_fields RBRACE'''
     if len(p) == 2:
-        name = p[1]
-        fields = []
+        p[0] = EnumVariant(name=p[1])
     else:
-        name = p[1]
-        fields = p[3]
-    p[0] = EnumVariant(name=name, fields=fields)
+        p[0] = EnumVariant(name=p[1], fields=p[3])
+
+
+def p_enum_field_declaration(p):
+    '''enum_field_declaration : IDENTIFIER COLON type'''
+    p[0] = FieldDeclaration(name=p[1], field_type=p[3], mutable=False)
 
 
 def p_enum_fields(p):
-    '''enum_fields : enum_fields COMMA field_declaration
-                   | field_declaration'''
+    '''enum_fields : enum_fields COMMA enum_field_declaration
+                   | enum_field_declaration'''
     if len(p) == 4:
         p[0] = p[1] + [p[3]]
     else:
@@ -347,6 +357,7 @@ def p_optional_comma(p):
     '''optional_comma : COMMA
                       | empty'''
     pass
+
 
 # -------------------- Array Literals -------------------- #
 
@@ -389,40 +400,94 @@ def p_for_loop(p):
 
 def p_match_statement(p):
     '''match_statement : MATCH expression LBRACE match_arms RBRACE'''
-    condition = p[2]
-    arms = p[4]
-    p[0] = MatchStatement(condition=condition, arms=arms)
+    p[0] = MatchStatement(condition=p[2], arms=p[4])
 
 
 def p_match_arms(p):
-    '''match_arms : match_arms match_arm
-                  | match_arm'''
-    if len(p) == 3:
-        p[0] = p[1] + [p[2]]
+    '''match_arms : match_arm_list_opt'''
+    p[0] = p[1]
+
+
+def p_match_arm_list_opt(p):
+    '''match_arm_list_opt : match_arm_list
+                          | empty'''
+    p[0] = p[1] if p[1] is not None else []
+
+
+def p_match_arm_list(p):
+    '''match_arm_list : match_arm_list COMMA match_arm
+                      | match_arm'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
     else:
         p[0] = [p[1]]
 
 
-def p_match_arm(p):
-    '''match_arm : pattern ARROW block'''
-    pattern = p[1]
-    body = p[3]
-    p[0] = MatchArm(pattern=pattern, body=body)
-
-
-def p_pattern_number(p):
-    '''pattern : NUMBER
-               | MINUS NUMBER'''
-    if len(p) == 2:
-        value = p[1]
+def p_guard_opt(p):
+    '''guard_opt : IF expression
+                 | empty'''
+    if len(p) == 3:
+        p[0] = p[2]
     else:
-        value = -p[2]
-    p[0] = NumberPattern(value=value)
+        p[0] = None
 
 
-def p_pattern_wildcard(p):
-    '''pattern : UNDERSCORE'''
+def p_match_arm(p):
+    '''match_arm : match_pattern guard_opt match_arrow match_arm_body'''
+    p[0] = MatchArm(pattern=p[1], guard=p[2], body=p[4])
+
+
+def p_match_arrow(p):
+    '''match_arrow : FAT_ARROW'''
+    p[0] = p[1]
+
+
+def p_match_arm_body(p):
+    '''match_arm_body : block
+                      | expression'''
+    # If it’s a block, it’s already a list of statements.
+    # Otherwise, wrap a bare expression in an ExpressionStatement.
+    if isinstance(p[1], list):
+        p[0] = p[1]
+    else:
+        p[0] = [ExpressionStatement(expression=p[1])]
+
+
+# -------------------- Match Patterns -------------------- #
+# These productions are used exclusively in match arms.
+
+def p_match_pattern_number(p):
+    '''match_pattern : NUMBER'''
+    p[0] = NumberPattern(value=p[1])
+
+
+def p_match_pattern_negative(p):
+    '''match_pattern : MINUS NUMBER'''
+    p[0] = NumberPattern(value=-p[2])
+
+
+def p_match_pattern_struct(p):
+    '''match_pattern : IDENTIFIER LBRACE pattern_field_names RBRACE'''
+    p[0] = TaggedPattern(type_name=p[1], variant="", fields=p[3])
+
+
+def p_match_pattern_simple(p):
+    '''match_pattern : IDENTIFIER'''
+    p[0] = Identifier(name=p[1])
+
+
+def p_match_pattern_wildcard(p):
+    '''match_pattern : UNDERSCORE'''
     p[0] = WildcardPattern()
+
+
+def p_pattern_field_names(p):
+    '''pattern_field_names : pattern_field_names COMMA IDENTIFIER
+                           | IDENTIFIER'''
+    if len(p) == 2:
+        p[0] = [p[1]]
+    else:
+        p[0] = p[1] + [p[3]]
 
 # -------------------- If Statements -------------------- #
 
@@ -510,6 +575,11 @@ def p_expression_await(p):
 def p_expression_range(p):
     'expression : expression DOT DOT expression'
     p[0] = RangeExpression(start=p[1], end=p[4])
+
+
+def p_expression_typecheck(p):
+    'expression : expression IS type'
+    p[0] = TypeCheck(expr=p[1], type_name=p[3])
 
 # -------------------- Import Statements -------------------- #
 
@@ -632,15 +702,71 @@ def p_default_opt(p):
 
 
 def p_block(p):
-    '''block : LBRACE statements RBRACE'''
+    '''block : LBRACE statements_opt RBRACE'''
     p[0] = p[2]
+
+
+def p_statements_opt(p):
+    '''statements_opt : statements
+                      | empty'''
+    if p[1] is None:
+        p[0] = []
+    else:
+        p[0] = p[1]
 
 # -------------------- Type Non-Terminal -------------------- #
 
+# A primary type is just an identifier or a parenthesized type.
 
-def p_type_identifier(p):
-    'type : IDENTIFIER'
+
+def p_type_primary(p):
+    '''type_primary : IDENTIFIER
+                    | LPAREN type_expr RPAREN'''
+    if len(p) == 2:
+        p[0] = p[1]
+    else:
+        p[0] = p[2]
+
+# A type suffix is zero or more array postfixes.
+
+
+def p_type_suffix(p):
+    '''type_suffix : type_suffix LBRACKET RBRACKET
+                   | empty'''
+    if len(p) == 2:  # empty production
+        p[0] = ""
+    else:
+        p[0] = p[1] + "[]"
+
+# Now the complete type expression is a primary type with optional suffixes.
+
+
+def p_type_expr_postfix(p):
+    '''type_expr_postfix : type_primary type_suffix'''
+    p[0] = p[1] + p[2]
+
+# If you also want to support union and intersection, you can add another level.
+
+
+def p_type_expr(p):
+    '''type_expr : type_expr PIPE type_expr_postfix
+                 | type_expr AMP type_expr_postfix
+                 | type_expr_postfix'''
+    if len(p) == 2:
+        p[0] = p[1]
+    else:
+        # Here you can choose to represent union/intersection in your AST.
+        # For example:
+        if p[2] == '|':
+            p[0] = UnionType(left=p[1], right=p[3])
+        elif p[2] == '&':
+            p[0] = IntersectionType(left=p[1], right=p[3])
+
+
+def p_type(p):
+    'type : type_expr'
     p[0] = p[1]
+
 
 # -------------------- Test Declarations -------------------- #
 
@@ -671,6 +797,11 @@ def p_primary_expression(p):
         p[0] = String(value=p[1])
     else:  # LPAREN expression RPAREN
         p[0] = p[2]
+
+
+def p_postfix_expression_index(p):
+    '''postfix_expression : postfix_expression LBRACKET expression RBRACKET'''
+    p[0] = ArrayIndexing(object_=p[1], index=p[3])
 
 
 def p_postfix_expression(p):

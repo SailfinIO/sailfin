@@ -1,177 +1,312 @@
+// Define a token type.
 struct Token {
-    type -> string;
-    value -> string;
-    line -> number;
-    column -> number;
+    type: string;
+    value: string;
+    lineno: number;
 }
 
-fn is_whitespace(c -> string) -> bool {
-    return c == " " || c == "\t" || c == "\n";
+// Reserved keywords and their token types.
+enum Reserved {
+    Fn = "FN",
+    Struct = "STRUCT",
+    Interface = "INTERFACE",
+    Let = "LET",
+    Mut = "MUT",
+    If = "IF",
+    Else = "ELSE",
+    Return = "RETURN",
+    Print = "PRINT",
+    Implements = "IMPLEMENTS",
+    // add additional keywords as needed…
 }
 
-fn is_digit(c -> string) -> bool {
-    return "0" <= c && c <= "9";
-}
-
-fn is_letter(c -> string) -> bool {
-    return ("a" <= c && c <= "z") || ("A" <= c && c <= "Z") || c == "_";
-}
-
-fn is_operator(c -> string) -> bool {
-    return c == "+" || c == "-" || c == "*" || c == "/" || c == "=" ||
-           c == "<" || c == ">" || c == "!" || c == "&" || c == "|" ||
-           c == ":" || c == "." || c == "@" || c == ",";
-}
-
-let reserved -> map<string, string> = {
-    "fn": "FN",
-    "print": "PRINT",
-    "info": "INFO",
-    "let": "LET",
-    "mut": "MUT",
-    "return": "RETURN",
-    "if": "IF",
-    "else": "ELSE",
-    "match": "MATCH",
-    "const": "CONST",
-    "async": "ASYNC",
-    "await": "AWAIT",
-    "import": "IMPORT",
-    "from": "FROM",
-    "struct": "STRUCT",
-    "enum": "ENUM",
-    "interface": "INTERFACE",
-    "implements": "IMPLEMENTS"
-};
-
-fn tokenize(input -> string) -> array<Token> {
-    let tokens -> array<Token> = [];
-    let pos -> number = 0;
-    let line -> number = 1;
-    let col -> number = 1;
-
-    while pos < input.len() {
-        let c -> string = input[pos:pos + 1];
-
-        // Skip whitespace
-        if is_whitespace(c) {
-            if c == "\n" {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-            pos += 1;
-            continue;
-        }
-
-        // Identify numbers
-        if is_digit(c) {
-            let start -> number = pos;
-            while pos < input.len() && is_digit(input[pos:pos + 1]) {
-                pos += 1;
-                col += 1;
-            }
-            if pos < input.len() && input[pos:pos + 1] == "." {
-                pos += 1;
-                col += 1;
-                while pos < input.len() && is_digit(input[pos:pos + 1]) {
-                    pos += 1;
-                    col += 1;
-                }
-            }
-            let value -> string = input[start:pos];
-            tokens.push(Token { type: "NUMBER", value: value, line: line, column: col });
-            continue;
-        }
-
-        // Identify identifiers or reserved words
-        if is_letter(c) {
-            let start -> number = pos;
-            while pos < input.len() && (is_letter(input[pos:pos + 1]) || is_digit(input[pos:pos + 1])) {
-                pos += 1;
-                col += 1;
-            }
-            let value -> string = input[start:pos];
-            let token_type -> string = reserved.getOrDefault(value, "IDENTIFIER");
-            tokens.push(Token { type: token_type, value: value, line: line, column: col });
-            continue;
-        }
-
-        // Identify strings
-        if c == "\"" {
-            let start -> number = pos + 1;
-            pos += 1;
-            col += 1;
-            while pos < input.len() && input[pos:pos + 1] != "\"" {
-                pos += 1;
-                col += 1;
-            }
-            if pos < input.len() {
-                pos += 1; // Consume closing quote
-                col += 1;
-                let value -> string = input[start:pos - 1];
-                tokens.push(Token { type: "STRING", value: value, line: line, column: col });
-            } else {
-                print.error("Unterminated string at line {{line}}, column {{col}}");
-            }
-            continue;
-        }
-
-        // Identify operators and punctuation
-        if is_operator(c) {
-            let op -> string = c;
-            pos += 1;
-            col += 1;
-
-            // Handle compound operators
-            if pos < input.len() && (
-                (c == "=" && input[pos:pos + 1] == "=") ||
-                (c == "!" && input[pos:pos + 1] == "=") ||
-                (c == "&" && input[pos:pos + 1] == "&") ||
-                (c == "|" && input[pos:pos + 1] == "|")
-            ) {
-                op += input[pos:pos + 1];
-                pos += 1;
-                col += 1;
-            }
-
-            tokens.push(Token { type: op, value: op, line: line, column: col });
-            continue;
-        }
-
-        // Handle comments
-        if c == "/" && pos + 1 < input.len() {
-            if input[pos + 1:pos + 2] == "/" {
-                // Single-line comment
-                while pos < input.len() && input[pos:pos + 1] != "\n" {
-                    pos += 1;
-                    col += 1;
-                }
-                continue;
-            } else if input[pos + 1:pos + 2] == "*" {
-                // Multi-line comment
-                pos += 2;
-                col += 2;
-                while pos + 1 < input.len() && !(input[pos:pos + 1] == "*" && input[pos + 1:pos + 2] == "/") {
-                    if input[pos:pos + 1] == "\n" {
-                        line += 1;
-                        col = 1;
-                    } else {
-                        col += 1;
-                    }
-                    pos += 1;
-                }
-                pos += 2; // Consume closing */
-                col += 2;
-                continue;
-            }
-        }
-
-        print.error("Unknown character '{{c}}' at line {{line}}, column {{col}}");
-        pos += 1;
-        col += 1;
+// Helper function to lookup reserved words using if/else.
+fn lookupReserved(word: string) -> string {
+    if word == "fn" {
+        return Reserved.Fn;
+    } else if word == "struct" {
+        return Reserved.Struct;
+    } else if word == "interface" {
+        return Reserved.Interface;
+    } else if word == "let" {
+        return Reserved.Let;
+    } else if word == "mut" {
+        return Reserved.Mut;
+    } else if word == "if" {
+        return Reserved.If;
+    } else if word == "else" {
+        return Reserved.Else;
+    } else if word == "return" {
+        return Reserved.Return;
+    } else if word == "print" {
+        return Reserved.Print;
+    } else if word == "implements" {
+        return Reserved.Implements;
+    } else {
+        return "IDENTIFIER";
     }
+}
+
+// The lexer function: takes source code and returns a list of tokens.
+fn lex(source: string) -> Token[] {
+    let tokens: Token[] = [];
+    let pos: number = 0;
+    let lineno: number = 1;
+
+    // Helper functions for character tests.
+    fn isDigit(c: string) -> bool {
+        return c >= "0" && c <= "9";
+    }
+
+    fn isLetter(c: string) -> bool {
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
+    }
+
+    fn isWhitespace(c: string) -> bool {
+        return c == " " || c == "\t" || c == "\r";
+    }
+
+    // Main loop: scan until the end of source.
+    while pos < source.length {
+        let c: string = source[pos];
+
+        // Newline handling.
+        if c == "\n" {
+            lineno = lineno + 1;
+            pos = pos + 1;
+            continue;
+        }
+
+        // Skip whitespace.
+        if isWhitespace(c) {
+            pos = pos + 1;
+            continue;
+        }
+
+        // --- NUMBER LITERALS ---
+        if isDigit(c) {
+            let start: number = pos;
+            while pos < source.length && isDigit(source[pos]) {
+                pos = pos + 1;
+            }
+            // Optionally, handle a decimal point.
+            if pos < source.length && source[pos] == "." {
+                pos = pos + 1;
+                while pos < source.length && isDigit(source[pos]) {
+                    pos = pos + 1;
+                }
+            }
+            let numberText: string = source.substring(start, pos);
+            tokens.append(Token("NUMBER", numberText, lineno));
+            continue;
+        }
+
+        // --- IDENTIFIERS AND KEYWORDS ---
+        if isLetter(c) || c == "_" {
+            let start: number = pos;
+            while pos < source.length && (isLetter(source[pos]) || isDigit(source[pos]) || source[pos] == "_") {
+                pos = pos + 1;
+            }
+            let idText: string = source.substring(start, pos);
+            let tokenType: string = lookupReserved(idText);
+            tokens.append(Token(tokenType, idText, lineno));
+            continue;
+        }
+
+        // --- STRING LITERALS ---
+        if c == "\"" {
+            pos = pos + 1; // Skip the opening quote.
+            let start: number = pos;
+            while pos < source.length && source[pos] != "\"" {
+                // (Optionally, handle escape sequences here.)
+                pos = pos + 1;
+            }
+            if pos >= source.length {
+                error("Unterminated string literal at line " + lineno.toString());
+            }
+            let strText: string = source.substring(start, pos);
+            pos = pos + 1; // Skip the closing quote.
+            tokens.append(Token("STRING", strText, lineno));
+            continue;
+        }
+
+        // --- COMMENTS ---
+        // Single-line comment: //
+        if c == "/" && pos + 1 < source.length && source[pos + 1] == "/" {
+            pos = pos + 2; // Skip the "//"
+            while pos < source.length && source[pos] != "\n" {
+                pos = pos + 1;
+            }
+            continue;
+        }
+        // Multi-line comment: /* ... */
+        if c == "/" && pos + 1 < source.length && source[pos + 1] == "*" {
+            pos = pos + 2; // Skip "/*"
+            while pos + 1 < source.length && not (source[pos] == "*" && source[pos + 1] == "/") {
+                if source[pos] == "\n" {
+                    lineno = lineno + 1;
+                }
+                pos = pos + 1;
+            }
+            pos = pos + 2; // Skip closing "*/"
+            continue;
+        }
+
+        // --- OPERATORS AND DELIMITERS ---
+        // Check multi-character operators first.
+        if c == "+" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("PLUS_ASSIGN", "+=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("PLUS", "+", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == "-" {
+            // Check for "-=" operator.
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("MINUS_ASSIGN", "-=", lineno));
+                pos = pos + 2;
+                continue;
+            }
+            // Check for arrow operator "->".
+            if pos + 1 < source.length && source[pos + 1] == ">" {
+                tokens.append(Token("ARROW", "->", lineno));
+                pos = pos + 2;
+                continue;
+            }
+            tokens.append(Token("MINUS", "-", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "*" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("MULTIPLY_ASSIGN", "*=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("MULTIPLY", "*", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == "/" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("DIVIDE_ASSIGN", "/=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("DIVIDE", "/", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == "=" {
+            // Check for "==".
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("EQ", "==", lineno));
+                pos = pos + 2;
+            }
+            // Check for the "fat arrow" "=>".
+            else if pos + 1 < source.length && source[pos + 1] == ">" {
+                tokens.append(Token("FAT_ARROW", "=>", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("ASSIGN", "=", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == "!" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("NEQ", "!=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("NOT", "!", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == "<" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("LEQ", "<=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("LT", "<", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if c == ">" {
+            if pos + 1 < source.length && source[pos + 1] == "=" {
+                tokens.append(Token("GEQ", ">=", lineno));
+                pos = pos + 2;
+            } else {
+                tokens.append(Token("GT", ">", lineno));
+                pos = pos + 1;
+            }
+            continue;
+        }
+        // Delimiters.
+        if c == "(" {
+            tokens.append(Token("LPAREN", "(", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == ")" {
+            tokens.append(Token("RPAREN", ")", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "{" {
+            tokens.append(Token("LBRACE", "{", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "}" {
+            tokens.append(Token("RBRACE", "}", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "[" {
+            tokens.append(Token("LBRACKET", "[", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "]" {
+            tokens.append(Token("RBRACKET", "]", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == ";" {
+            tokens.append(Token("SEMICOLON", ";", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "," {
+            tokens.append(Token("COMMA", ",", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "." {
+            tokens.append(Token("DOT", ".", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == ":" {
+            tokens.append(Token("COLON", ":", lineno));
+            pos = pos + 1;
+            continue;
+        }
+        if c == "@" {
+            tokens.append(Token("AT", "@", lineno));
+            pos = pos + 1;
+            continue;
+        }
+
+        // If no rule matches, report an error.
+        error("Illegal character \"" + c + "\" at line " + lineno.toString());
+    } // end while
 
     return tokens;
 }
