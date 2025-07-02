@@ -1,6 +1,0 @@
-// Simple match test
-fn check() -> void {
-    match x {
-        42 => print.info("forty-two");
-    }
-}

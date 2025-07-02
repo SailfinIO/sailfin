@@ -481,7 +481,11 @@ def p_match_arm_body(p):
     if isinstance(p[1], list):
         p[0] = p[1]
     else:
-        p[0] = [p[1]]
+        # If it's a raw expression, wrap it in an ExpressionStatement
+        if hasattr(p[1], '__class__') and not isinstance(p[1], (ExpressionStatement, IfStatement, ReturnStatement, PrintStatement)):
+            p[0] = [ExpressionStatement(expression=p[1])]
+        else:
+            p[0] = [p[1]]
 
 
 # -------------------- Match Patterns -------------------- #

@@ -44,13 +44,21 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             return f"Union[{left}, {right}]"
         # Handle identifier AST nodes
         if isinstance(t, Identifier):
-            return t.name
+            # Apply type mapping to identifier names
+            type_mapping = {
+                "number": "int",
+                "string": "str",
+                "void": "None",
+                # add other mappings as needed...
+            }
+            return type_mapping.get(t.name, t.name)
         # Fallback: raw string type names
         if isinstance(t, str):
             # Map simple types
             type_mapping = {
                 "number": "int",
                 "string": "str",
+                "void": "None",
                 # add other mappings as needed...
             }
             return type_mapping.get(t, t)
@@ -136,6 +144,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
     def visit_MemberAccess(self, node: MemberAccess):
         obj = self.visit(node.object_)
+        # Special case: print.info() becomes print() in Python
+        if obj == "print" and node.member == "info":
+            return "print"
         return f"{obj}.{node.member}"
 
     def visit_VariableDeclaration(self, node: VariableDeclaration):
