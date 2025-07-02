@@ -1,6 +1,6 @@
 // examples/web/http-server.sfn
 
-import { serve } from "sailfin/net";
+import { serve, Request, Response } from "sailfin/net";
 
 fn handleRequest(req: Request, res: Response) -> void {
     if req.path == "/" {

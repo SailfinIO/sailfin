@@ -1,82 +1,102 @@
-# bootstrap/bootstrap.py
-
-import enum
-import sys
-from lexer import lexer
-from parser import parser
-from code_generator import PythonCodeGenerator
-from ast_nodes import ASTNode
-from validator import ASTValidator
+#!/usr/bin/env python3
 from errors import CompilerError
+from validator import ASTValidator
+from ast_nodes import ASTNode
+from code_generator import PythonCodeGenerator
+from parser import parser
+from lexer import lexer
+import sys
+import logging
+
+#  ─── Logger Setup ───────────────────────────────────────────────────────────
+logger = logging.getLogger("sailfin")
+logger.setLevel(logging.DEBUG)
+
+# Console handler
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+
+# Formatter: time, logger name, level, file:line, func
+fmt = logging.Formatter(
+    "%(asctime)s %(name)s %(levelname)-5s %(filename)s:%(lineno)d %(funcName)s() │ %(message)s",
+    datefmt="%H:%M:%S",
+)
+ch.setFormatter(fmt)
+logger.addHandler(ch)
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def inspect_tokens(source_code):
     lexer.input(source_code)
     for tok in lexer:
-        print(tok)
+        # compute column if you like
+        line_start = source_code.rfind("\n", 0, tok.lexpos) + 1
+        col = tok.lexpos - line_start + 1
+        logger.debug(
+            f"Token {tok.type!r} {tok.value!r} at line {tok.lineno}, col {col}")
 
 
 def print_ast(node, indent=0):
-    prefix = ' ' * indent
+    prefix = " " * indent
     if isinstance(node, ASTNode):
-        print(f"{prefix}{type(node).__name__}:")
+        logger.debug(f"{prefix}{type(node).__name__}:")
         for attr, value in node.__dict__.items():
-            print(f"{prefix}  {attr}:")
+            logger.debug(f"{prefix}  {attr}:")
             print_ast(value, indent + 4)
     elif isinstance(node, str):
-        print(f"{prefix}'{node}'")
+        logger.debug(f"{prefix}{node!r}")
     else:
-        print(f"{prefix}{repr(node)}")
+        logger.debug(f"{prefix}{value!r}")
 
 
 def compile_and_run(source_file):
     try:
-        with open(source_file, 'r') as f:
+        logger.info(f"Reading source file {source_file!r}")
+        with open(source_file, "r") as f:
             source_code = f.read()
-        print(repr(source_code))
 
-        # Inspect tokens
-        print("Token Inspection:")
+        logger.debug(f"Source ({len(source_code)} chars):\n{source_code!r}")
+
+        logger.info("Inspecting tokens…")
         inspect_tokens(source_code)
-        print("\n")
 
-        # Lexing and Parsing
-        ast = parser.parse(source_code, lexer=lexer)
+        logger.info("Parsing…")
+        ast = parser.parse(
+            source_code,
+            lexer=lexer,
+            tracking=True,
+            debug=True,
+        )
 
-        # Pretty-print the AST for debugging
-        print("AST Structure:")
+        logger.info("Dumping AST structure…")
         print_ast(ast)
-        print("\n")
 
-        # Validate AST
+        logger.info("Validating AST…")
         ASTValidator.validate(ast)
-        print("AST validation successful.")
+        logger.info("AST validation successful.")
 
-        # Code Generation
+        logger.info("Generating Python code…")
         generator = PythonCodeGenerator()
         target_code = generator.visit(ast)
+        logger.debug(f"Generated code:\n{target_code}")
 
-        print("Generated Python Code:")
-        print(target_code)  # Optional: Print the generated code for debugging
-
-        # Optionally, write the target code to a file
-        with open('output.py', 'w') as f:
+        logger.info("Writing output.py and executing…")
+        with open("output.py", "w") as f:
             f.write(target_code)
-
-        # Execute the generated Python code in a separate namespace
-        namespace = {'__name__': '__main__'}  # Mimic script execution
+        namespace = {"__name__": "__main__"}
         exec(target_code, namespace)
 
     except CompilerError as e:
-        print(e)
-    except Exception as e:
-        import traceback
-        print("Unexpected Error:")
-        traceback.print_exc()
+        logger.error("Compilation error: %s", e)
+        sys.exit(1)
+
+    except Exception:
+        logger.error("Unexpected exception:", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python bootstrap.py <source_file.sfn>")
-    else:
-        compile_and_run(sys.argv[1])
+        logger.error("Usage: python bootstrap.py <source_file.sfn>")
+        sys.exit(1)
+    compile_and_run(sys.argv[1])

@@ -1,6 +1,6 @@
 // examples/web/rest-api.sfn
 
-import { serve, Request, Response } from "sailfin/http";
+import { serve, Request, Response, websocket } from "sailfin/net";
 
 fn handleRequest(req: Request, res: Response) -> void {
     match req.method {

@@ -24,3 +24,10 @@ Make the binary executable:
 ```bash
 chmod +x /usr/local/bin/sfn
 ```
+
+## Running local
+
+```bash
+cd bootstrap
+poetry run python bootstrap.py ../examples/basics/hello-wo
+```

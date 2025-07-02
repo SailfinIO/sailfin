@@ -13,6 +13,6 @@ fn computeTask2() -> number {
 async fn main() -> void {
     let future1 = async { computeTask1() };
     let future2 = async { computeTask2() };
-    let results: number[] = await [future1, future2];
+    let results: number[] = await [future1, future2]; // array notation already conforms
     print.info("Results: {{results}}");
 }

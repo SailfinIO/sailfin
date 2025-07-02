@@ -4,7 +4,7 @@ interface Driveable {
     fn drive(self) -> string; // All Driveable types must implement this method
 }
 
-struct Car {
+struct Car implements Driveable {
     brand: string;
 
     fn new(brand: string) -> Car {
@@ -16,7 +16,7 @@ struct Car {
     }
 }
 
-struct Bike {
+struct Bike implements Driveable {
     brand: string;
 
     fn new(brand: string) -> Bike {

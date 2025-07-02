@@ -1,6 +1,6 @@
 // examples/web/websocket-chat.sfn
 
-import { websocket } from "sailfin/net";
+import { serve, Request, Response, websocket, http } from "sailfin/net";
 
 fn main() -> void {
     let server = websocket.serve({ port: 8080 });

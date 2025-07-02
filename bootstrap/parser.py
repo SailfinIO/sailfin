@@ -23,6 +23,30 @@ precedence = (
      'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN'),
 
 )
+
+
+def stringify_type(node):
+    """
+    Turn a type-AST node back into the simple string form
+    your validator expects (e.g. Identifier -> "Foo",
+    ArrayType -> "Foo[]", UnionType -> "A|B", etc.).
+    """
+    if isinstance(node, Identifier):
+        return node.name
+    if isinstance(node, ArrayType):
+        return f"{stringify_type(node.element_type)}[]"
+    if isinstance(node, OptionalType):
+        return f"{stringify_type(node.base)}?"
+    if isinstance(node, UnionType):
+        return f"{stringify_type(node.left)}|{stringify_type(node.right)}"
+    if isinstance(node, IntersectionType):
+        return f"{stringify_type(node.left)}&{stringify_type(node.right)}"
+    if isinstance(node, TypeApplication):
+        # just treat the base name (validator doesn’t check generics)
+        return stringify_type(node.base)
+    # fallback
+    return str(node)
+
 # -------------------- Program -------------------- #
 
 
@@ -215,6 +239,17 @@ def p_interface_list(p):
         p[0] = p[1] + [p[3]]
     else:
         p[0] = [p[1]]
+    # ... existing code ...
+# Generic type parameter lists
+
+
+def p_IDENTIFIER_list(p):
+    '''IDENTIFIER_list : IDENTIFIER_list COMMA IDENTIFIER
+                       | IDENTIFIER'''
+    if len(p) == 2:
+        p[0] = [p[1]]
+    else:
+        p[0] = p[1] + [p[3]]
 
 
 def p_struct_members(p):
@@ -401,18 +436,25 @@ def p_for_loop(p):
 
 
 def p_match_statement(p):
-    '''match_statement : MATCH expression LBRACE match_arms RBRACE'''
-    p[0] = MatchStatement(condition=p[2], arms=p[4])
+    '''match_statement : MATCH expression match_block optional_semicolon'''
+    p[0] = MatchStatement(condition=p[2], arms=p[3])
+
+
+def p_match_block(p):
+    '''match_block : LBRACE match_arms RBRACE'''
+    p[0] = p[2]
+
+
+def p_optional_semicolon(p):
+    '''optional_semicolon : SEMICOLON
+                         | empty'''
+    pass
 
 
 def p_match_arms(p):
-    '''match_arms : match_arm_list_opt'''
-    p[0] = p[1]
-
-
-def p_match_arm_list_opt(p):
-    '''match_arm_list_opt : match_arm_list
-                          | empty'''
+    '''match_arms : match_arm_list
+                   | match_arm_list COMMA
+                   | empty'''
     p[0] = p[1] if p[1] is not None else []
 
 
@@ -446,13 +488,12 @@ def p_match_arrow(p):
 
 def p_match_arm_body(p):
     '''match_arm_body : block
-                      | expression'''
-    # If it’s a block, it’s already a list of statements.
-    # Otherwise, wrap a bare expression in an ExpressionStatement.
+                      | statement'''
+    # block returns a List[ASTNode], statement returns a single ASTNode
     if isinstance(p[1], list):
         p[0] = p[1]
     else:
-        p[0] = [ExpressionStatement(expression=p[1])]
+        p[0] = [p[1]]
 
 
 # -------------------- Match Patterns -------------------- #
@@ -630,7 +671,7 @@ def p_lambda_parameters_single(p):
 
 def p_lambda_parameter(p):
     '''lambda_parameter : IDENTIFIER COLON type'''
-    p[0] = (p[1], p[3])
+    p[0] = (Identifier(name=p[1]), p[3])
 
 
 def p_opt_lambda_return(p):
@@ -693,15 +734,13 @@ def p_parameter(p):
     '''parameter : IDENTIFIER COLON type default_opt
                  | IDENTIFIER'''
     if len(p) == 2:
-        # This branch matches if the parameter is specified without a type.
         if p[1] == "self":
-            p[0] = (p[1], None, None)
+            p[0] = (Identifier(name=p[1]), None, None)
         else:
-            # You might want to raise an error or force a type annotation for non-self parameters.
             raise ParserError(
                 "Missing type annotation for parameter '{}'".format(p[1]), p.lineno(1))
     else:
-        p[0] = (p[1], p[3], p[4])
+        p[0] = (Identifier(name=p[1]), p[3], p[4])
 
 
 def p_default_opt(p):
@@ -728,48 +767,35 @@ def p_statements_opt(p):
 # -------------------- Type Non-Terminal -------------------- #
 
 
-def stringify_type(t):
-    # If t is already a string, return it.
-    if isinstance(t, str):
-        return t
-    # If t is a UnionType, convert it into something like "left|right"
-    elif isinstance(t, UnionType):
-        return stringify_type(t.left) + "|" + stringify_type(t.right)
-    elif isinstance(t, IntersectionType):
-        return stringify_type(t.left) + "&" + stringify_type(t.right)
-    else:
-        # You can customize this based on your AST
-        return str(t)
-
 # A primary type is just an identifier or a parenthesized type.
-
-
 def p_type_primary(p):
     '''type_primary : IDENTIFIER
                     | LPAREN type_expr RPAREN'''
     if len(p) == 2:
-        p[0] = p[1]
+        p[0] = Identifier(name=p[1])
     else:
-        p[0] = stringify_type(p[2])
+        p[0] = p[2]
 
-
-# A type suffix is zero or more array postfixes.
+# A type suffix handles array '[]' and optional '?' sugar.
 
 
 def p_type_suffix(p):
-    '''type_suffix : type_suffix LBRACKET RBRACKET
-                   | empty'''
-    if len(p) == 2:  # empty production
-        p[0] = ""
+    '''type_suffix : empty
+                   | type_suffix LBRACKET RBRACKET
+                   | type_suffix QUESTION'''
+    if len(p) == 2:
+        p[0] = p[1]
+    elif p[2] == '[':
+        p[0] = ArrayType(element_type=p[1])
     else:
-        p[0] = p[1] + "[]"
+        p[0] = OptionalType(base=p[1])
 
 # Now the complete type expression is a primary type with optional suffixes.
 
 
 def p_type_expr_postfix(p):
     '''type_expr_postfix : type_primary type_suffix'''
-    p[0] = p[1] + p[2]
+    p[0] = p[2] or p[1]
 
 # If you also want to support union and intersection, you can add another level.
 
@@ -934,15 +960,46 @@ def p_arguments(p):
 # -------------------- Error Handling -------------------- #
 
 
-def p_error(p):
-    if p:
-        error_message = f"Syntax error at token '{
-            p.type}' with value '{p.value}' at line {p.lineno}"
-        raise ParserError(error_message, p.lineno)
-    else:
-        raise ParserError("Syntax error at EOF")
+def find_column(text, lexpos):
+    last_cr = text.rfind('\n', 0, lexpos)
+    if last_cr < 0:
+        last_cr = -1
+    return lexpos - last_cr
 
+
+def p_error(p):
+    if not p:
+        # unexpected EOF
+        raise ParserError("Syntax error: unexpected end of file", 0)
+
+    # figure out what tokens WOULD have been valid here
+    expected = []
+    try:
+        # `parser` is the Yacc() instance we've built below
+        state = p.state
+        # parser.action is a dict: { state: { lookahead_token: action, ... } }
+        actions = parser.action.get(state, {})
+        expected = [tok for tok in actions.keys() if tok != 'error']
+    except Exception:
+        pass
+
+    data = p.lexer.lexdata
+    lineno = data[:p.lexpos].count('\n') + 1
+    col = find_column(data, p.lexpos)
+    msg = f"Syntax error at token {p.type!r} ({p.value!r}) at line {lineno}, column {col}"
+    if expected:
+        msg += f"\nExpected one of: {', '.join(expected)}"
+
+    # show the source line + caret
+    start = data.rfind('\n', 0, p.lexpos) + 1
+    end = data.find('\n', p.lexpos)
+    if end == -1:
+        end = len(data)
+    line = data[start:end]
+    pointer = ' ' * (col - 1) + '^'
+
+    raise ParserError(f"{msg}\n  {line}\n  {pointer}", lineno)
 # -------------------- Build the Parser -------------------- #
 
 
-parser = yacc.yacc(debug=False)
+parser = yacc.yacc(debug=False, write_tables=False)

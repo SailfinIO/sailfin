@@ -1,6 +1,6 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-let tasks: Channel<fn() -> void> = Channel();
+let tasks: Channel<fn() -> void> = Channel<fn() -> void>();
 
 // Spawn a worker pool
 for _ in 1..5 {

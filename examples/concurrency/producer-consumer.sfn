@@ -1,6 +1,6 @@
 // examples/concurrency/producer-consumer.sfn
 
-let buffer: Channel<number> = Channel(10); // Bounded buffer with capacity 10
+let buffer: Channel<number> = Channel<number>(10); // Bounded buffer with capacity 10
 
 // Producer routine
 routine {

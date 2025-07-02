@@ -85,7 +85,7 @@ class PrintStatement(ASTNode):
 @dataclass
 class VariableDeclaration(ASTNode):
     name: str
-    var_type: Optional[str]
+    var_type: Optional[ASTNode]
     value: Expression
     mutable: bool = False
 
@@ -93,16 +93,18 @@ class VariableDeclaration(ASTNode):
 @dataclass
 class ConstantDeclaration(ASTNode):
     name: str
-    var_type: str
+    var_type: ASTNode
     value: Expression
 
 
 @dataclass
 class FunctionDeclaration(ASTNode):
     name: str
-    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
-    return_type: Optional[str]
+    # Now each parameter name is an Identifier
+    params: List[Tuple[Identifier, Optional[ASTNode]]]
+    return_type: Optional[ASTNode]
     body: List[ASTNode]
+    type_params: List[str] = field(default_factory=list)
     decorators: List[str] = field(default_factory=list)
     is_async: bool = False
 
@@ -123,6 +125,7 @@ class ReturnStatement(ASTNode):
 class StructDeclaration(ASTNode):
     name: str
     members: List[Union['FieldDeclaration', 'MethodDeclaration']]
+    type_params: List[str] = field(default_factory=list)
     interfaces: List[str] = field(default_factory=list)
 
 
@@ -135,15 +138,16 @@ class StructInstantiation(Expression):
 @dataclass
 class FieldDeclaration(ASTNode):
     name: str
-    field_type: str
+    field_type: ASTNode
     mutable: bool = False
 
 
 @dataclass
 class MethodDeclaration(ASTNode):
     name: str
-    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
-    return_type: Optional[str]
+    # Now each parameter name is an Identifier
+    params: List[Tuple[Identifier, Optional[ASTNode]]]
+    return_type: Optional[ASTNode]
     body: List[ASTNode]
     decorators: List[str] = field(default_factory=list)
     is_async: bool = False
@@ -153,13 +157,15 @@ class MethodDeclaration(ASTNode):
 class InterfaceDeclaration(ASTNode):
     name: str
     methods: List['InterfaceMethod']
+    type_params: List[str] = field(default_factory=list)
 
 
 @dataclass
 class InterfaceMethod(ASTNode):
     name: str
-    params: List[Tuple[str, Optional[str]]]  # List of (param_name, param_type)
-    return_type: Optional[str]
+    # List of (param_name, param_type)
+    params: List[Tuple[str, Optional[ASTNode]]]
+    return_type: Optional[ASTNode]
 
 
 @dataclass
@@ -230,13 +236,13 @@ class ImportStatement(ASTNode):
 @dataclass
 class TypeAliasDeclaration(ASTNode):
     name: str
-    aliased_type: str
+    aliased_type: ASTNode
 
 
 @dataclass
 class LambdaExpression(Expression):
-    params: List[Tuple[str, str]]  # Each is (name, type)
-    return_type: Optional[str]
+    params: List[Tuple[str, ASTNode]]  # Each is (name, type)
+    return_type: Optional[ASTNode]
     body: List[ASTNode]
 
 
@@ -298,3 +304,25 @@ class TestDeclaration(ASTNode):
 class ArrayIndexing(Expression):
     object_: Expression
     index: Expression
+
+# First-class array and optional AST types
+
+
+@dataclass
+class ArrayType(ASTNode):
+    element_type: ASTNode
+
+
+@dataclass
+class OptionalType(ASTNode):
+    base: ASTNode
+
+
+@dataclass
+class TypeApplication(Expression):
+    base: Expression
+    type_args: List[ASTNode]
+    arguments: List[Expression]
+
+
+# Removed duplicate Identifier definition to avoid conflicts

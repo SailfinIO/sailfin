@@ -1,6 +1,6 @@
 // examples/web/fetch-data.sfn
 
-import { http } from "sailfin/net";
+import { serve, Request, Response, http } from "sailfin/net";
 
 async fn fetchData(url: string) -> string {
     let response = await http.get(url);
@@ -11,7 +11,7 @@ async fn fetchData(url: string) -> string {
     }
 }
 
-fn main() -> void {
+async fn main() -> void {
     let url: string = "https://jsonplaceholder.typicode.com/posts/1";
     let data: string = await fetchData(url);
     print.info("Fetched data: {{data}}");

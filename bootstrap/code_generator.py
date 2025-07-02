@@ -1,6 +1,7 @@
 from ast_nodes import *
 from utils import interpolate_string, generate_unique_name
 from abc import ABC, abstractmethod
+from typing import Union
 
 
 class CodeGeneratorVisitor(ABC):
@@ -18,21 +19,43 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def indent(self):
         return '    ' * self.indent_level
 
-    def map_type(self, t: str) -> str:
-        # Check if the type ends with array notation
-        if t.endswith("[]"):
-            # Ensure the necessary import is added
+    def map_type(self, t: Union[str, ASTNode]) -> str:
+        # Handle ArrayType nodes
+        if isinstance(t, ArrayType):
             self.imports.add("from typing import List")
-            inner_type = t[:-2]
-            py_inner = self.map_type(inner_type)
-            return f"List[{py_inner}]"
-        # Map simple types
-        type_mapping = {
-            "number": "int",
-            "string": "str",
-            # add other mappings as needed...
-        }
-        return type_mapping.get(t, t)
+            inner = self.map_type(t.element_type)
+            return f"List[{inner}]"
+        # Handle OptionalType nodes
+        if isinstance(t, OptionalType):
+            self.imports.add("from typing import Optional")
+            inner = self.map_type(t.base)
+            return f"Optional[{inner}]"
+        # Handle generic TypeApplication nodes
+        if isinstance(t, TypeApplication):
+            base_str = self.map_type(t.base) if isinstance(
+                t.base, (str, ASTNode)) else self.visit(t.base)
+            args_str = ', '.join([self.map_type(arg) for arg in t.type_args])
+            return f"{base_str}[{args_str}]"
+        # Handle UnionType nodes
+        if isinstance(t, UnionType):
+            self.imports.add("from typing import Union")
+            left = self.map_type(t.left)
+            right = self.map_type(t.right)
+            return f"Union[{left}, {right}]"
+        # Handle identifier AST nodes
+        if isinstance(t, Identifier):
+            return t.name
+        # Fallback: raw string type names
+        if isinstance(t, str):
+            # Map simple types
+            type_mapping = {
+                "number": "int",
+                "string": "str",
+                # add other mappings as needed...
+            }
+            return type_mapping.get(t, t)
+        # Unknown ASTNode type
+        return str(t)
 
     def visit(self, node):
         if isinstance(node, list):
@@ -65,6 +88,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         return '\n'.join(self.code)
 
+    def visit_Identifier(self, node: Identifier):
+        return node.name
+
     def visit_ImportStatement(self, node: ImportStatement):
         items = ', '.join(node.items)
         source = node.source
@@ -87,9 +113,6 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
     def visit_String(self, node: String):
         return interpolate_string(node.value)
-
-    def visit_Identifier(self, node: Identifier):
-        return node.name
 
     def visit_BinOp(self, node: BinOp):
         left = self.visit(node.left)
@@ -122,8 +145,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         comment = "  # Mutable" if node.mutable else ""
         if var_type:
             py_type = self.map_type(var_type)
-            self.code.append(f"{self.indent()}{name}: {
-                             py_type} = {value}{comment}")
+            # Emit variable declaration with type annotation
+            self.code.append(
+                f"{self.indent()}{name}: {py_type} = {value}{comment}")
         else:
             self.code.append(f"{self.indent()}{name} = {value}{comment}")
 
@@ -149,8 +173,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.indent_level -= 1
 
     def visit_TestDeclaration(self, node: TestDeclaration):
-        self.code.append(f"{self.indent()}def test_{
-                         generate_unique_name('test')}(self):")
+        # Define a unique test method
+        test_name = generate_unique_name('test')
+        self.code.append(f"{self.indent()}def test_{test_name}(self):")
         self.indent_level += 1
         for stmt in node.body:
             self.visit(stmt)
@@ -175,23 +200,28 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
     def visit_ConstantDeclaration(self, node: ConstantDeclaration):
         name = node.name
-        var_type = node.var_type
         value = self.visit(node.value)
-        self.code.append(f"{self.indent()}{name}: {
-                         var_type} = {value}  # Constant")
+        # Emit constant declaration with type annotation
+        if node.var_type:
+            py_type = self.map_type(node.var_type)
+            self.code.append(
+                f"{self.indent()}{name}: {py_type} = {value}  # Constant")
+        else:
+            self.code.append(f"{self.indent()}{name} = {value}  # Constant")
 
     def visit_FunctionDeclaration(self, node: FunctionDeclaration):
         decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
         async_str = 'async ' if node.is_async else ''
-        params = ', '.join([param[0] for param in node.params])
-        # Use map_type to convert the return type
-        if node.return_type and node.return_type != 'void':
+        params = ', '.join([self.visit(param[0]) for param in node.params])
+        # Generate return type annotation from ASTNode
+        if node.return_type:
             mapped_return = self.map_type(node.return_type)
             return_type = f" -> {mapped_return}"
         else:
             return_type = ""
-        self.code.append(f"{self.indent()}{decorators}{async_str}def {
-                         node.name}({params}){return_type}:")
+        # Emit function declaration with decorators and return type
+        self.code.append(
+            f"{self.indent()}{decorators}{async_str}def {node.name}({params}){return_type}:")
         self.indent_level += 1
         if not node.body:
             self.code.append(f"{self.indent()}pass")
@@ -290,8 +320,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             params_list = [param[0] for param in node.params]
         params = ', '.join(params_list)
 
-        # Handle the return type.
-        if node.return_type and node.return_type != 'void':
+        # Handle the return type from ASTNode
+        if node.return_type:
             ret_type = self.map_type(node.return_type)
             if is_constructor:
                 # Quote the return type for forward references.
@@ -302,8 +332,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         # Build the method signature.
         if params:
-            method_signature = f"def {node.name}({first_param}, {params}){
-                return_type}:"
+            method_signature = f"def {node.name}({first_param}, {params}){return_type}:"
         else:
             method_signature = f"def {node.name}({first_param}){return_type}:"
 
@@ -338,11 +367,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 else:
                     return_type = ""
                 if params:
-                    self.code.append(f"{self.indent()}def {
-                                     method.name}(self, {params}){return_type}:")
+                    # Emit abstract method signature with parameters
+                    self.code.append(
+                        f"{self.indent()}def {method.name}(self, {params}){return_type}:")
                 else:
-                    self.code.append(f"{self.indent()}def {
-                                     method.name}(self){return_type}:")
+                    # Emit abstract method signature without additional parameters
+                    self.code.append(
+                        f"{self.indent()}def {method.name}(self){return_type}:")
                 self.code.append(f"{self.indent()}    pass")
         self.indent_level -= 1
         self.code.append('')  # Newline after interface
@@ -358,11 +389,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 if variant.fields:
                     fields = ', '.join(
                         [field.name for field in variant.fields])
-                    self.code.append(f"{self.indent()}{
-                                     variant.name} = ({fields},)")
+                    self.code.append(
+                        f"{self.indent()}{variant.name} = ({fields},)")
                 else:
-                    self.code.append(f"{self.indent()}{
-                                     variant.name} = enum.auto()")
+                    self.code.append(
+                        f"{self.indent()}{variant.name} = enum.auto()")
         self.indent_level -= 1
         self.code.append('')  # Add a newline after enum
 
@@ -416,8 +447,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 self.visit(stmt)
         self.indent_level -= 1
         for error_type, error_var, catch_block in node.catch_blocks:
-            self.code.append(f"{self.indent()}except {
-                             error_type} as {error_var}:")
+            # Emit except clause for catch blocks
+            self.code.append(
+                f"{self.indent()}except {error_type} as {error_var}:")
             self.indent_level += 1
             if not catch_block:
                 self.code.append(f"{self.indent()}pass")
@@ -446,11 +478,19 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             [f"{name}={self.visit(expr)}" for name, expr in node.field_inits])
         return f"{node.struct_name}({fields})"
 
+    def visit_TypeApplication(self, node: TypeApplication):
+        # Generate generic constructor or call with type arguments
+        base = self.map_type(node.base) if isinstance(
+            node.base, ASTNode) else str(node.base)
+        args_types = ', '.join(self.map_type(arg) for arg in node.type_args)
+        args_vals = ', '.join(self.visit(arg) for arg in node.arguments)
+        return f"{base}[{args_types}]({args_vals})"
+
     def visit_LambdaExpression(self, node: LambdaExpression):
         # If the lambda's body consists of a single ReturnStatement, generate an inline lambda.
         if len(node.body) == 1 and isinstance(node.body[0], ReturnStatement) and node.body[0].expression is not None:
             expr = self.visit(node.body[0].expression)
-            params = ', '.join([param[0] for param in node.params])
+            params = ', '.join([self.visit(param[0]) for param in node.params])
             return f"(lambda {params}: {expr})"
         else:
             # Otherwise, generate a nested function definition and return its name.

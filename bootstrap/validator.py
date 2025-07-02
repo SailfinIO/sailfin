@@ -26,9 +26,10 @@ class ASTValidator:
             for param in node.params:
                 # Expecting parameters as a tuple: (param_name, param_type, default)
                 param_name, param_type, _ = param
-                if not param_name.isidentifier():
+                if not param_name.name.isidentifier():
                     raise ValidationError(
-                        f"Invalid parameter name: {param_name}")
+                        f"Invalid parameter name: {param_name.name}")
+
                 if param_type:
                     # Convert param_type to a string representation if needed.
                     param_type_str = param_type if isinstance(
@@ -48,9 +49,10 @@ class ASTValidator:
                     param_name, param_type, _ = param
                 else:
                     param_name, param_type = param[0], param[1]
-                if not param_name.isidentifier():
+                if not param_name.name.isidentifier():
                     raise ValidationError(
-                        f"Invalid method parameter name: {param_name}")
+                        f"Invalid method parameter name: {param_name.name}")
+
                 if param_type:
                     param_type_str = param_type if isinstance(
                         param_type, str) else stringify_type(param_type)
@@ -73,8 +75,10 @@ class ASTValidator:
                 raise ValidationError(f"Invalid field type: {node.field_type}")
         elif isinstance(node, InterfaceDeclaration):
             # New branch: validate interface declarations
-            if not node.name.isidentifier():
-                raise ValidationError(f"Invalid interface name: {node.name}")
+            if not param_name.name.isidentifier():
+                raise ValidationError(
+                    f"Invalid interface method parameter name: {param_name.name}")
+
             for method in node.methods:
                 ASTValidator.validate(method)
         elif isinstance(node, InterfaceMethod):
@@ -161,15 +165,21 @@ class ASTValidator:
         elif isinstance(node, LambdaExpression):
             for param in node.params:
                 param_name, param_type = param
-                if not param_name.isidentifier():
+                if not param_name.name.isidentifier():
                     raise ValidationError(
-                        f"Invalid lambda parameter name: {param_name}")
+                        f"Invalid lambda parameter name: {param_name.name}")
+
+                # If your param_type is still a string, this check may remain unchanged,
+                # or if it too becomes an Identifier, use param_type.name.
                 if param_type and not param_type.isidentifier():
                     raise ValidationError(
                         f"Invalid lambda parameter type: {param_type}")
             if node.return_type and not node.return_type.isidentifier():
                 raise ValidationError(
                     f"Invalid lambda return type: {node.return_type}")
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
+
             for stmt in node.body:
                 ASTValidator.validate(stmt)
         elif isinstance(node, ReturnStatement):

@@ -25,3 +25,9 @@ To run the tests, run the following command:
 ```bash
 poetry run pytest
 ```
+
+## To test individual Sailfin files
+
+```bash
+./bootstrap.py ../examples/basics/conditionals.sfn
+```

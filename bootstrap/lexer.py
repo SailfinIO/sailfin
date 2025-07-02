@@ -40,7 +40,7 @@ tokens = [
     'STRING',
     # Operators
     'PLUS', 'MINUS', 'MULTIPLY', 'DIVIDE', 'ASSIGN',
-    'PLUS_ASSIGN', 'MINUS_ASSIGN', 'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN',
+    'PLUS_ASSIGN', 'MINUS_ASSIGN', 'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN', 'QUESTION',
     # Delimiters
     'LPAREN', 'RPAREN', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET',
     'SEMICOLON', 'COMMA', 'DOT', 'COLON', 'AT', 'UNDERSCORE',
@@ -66,6 +66,7 @@ t_PLUS_ASSIGN = r'\+='
 t_MINUS_ASSIGN = r'-='
 t_MULTIPLY_ASSIGN = r'\*='
 t_DIVIDE_ASSIGN = r'/='
+t_QUESTION = r'\?'
 t_LPAREN = r'\('
 t_RPAREN = r'\)'
 t_LBRACE = r'\{'
@@ -145,8 +146,24 @@ def t_multiline_comment(t):
 
 
 def t_error(t):
-    error_message = f"Illegal character '{t.value[0]}' at line {t.lineno}"
-    raise LexerError(error_message, t.lineno)
+    # find the start of this line
+    data = t.lexer.lexdata
+    pos = t.lexpos
+    line_start = data.rfind("\n", 0, pos) + 1
+    line_end = data.find("\n", pos)
+    if line_end == -1:
+        line_end = len(data)
+    line_text = data[line_start:line_end]
+    col = pos - line_start + 1
+
+    msg = (
+        f"\nIllegal character {t.value[0]!r} "
+        f"at line {t.lineno}, column {col!r}\n\n"
+        f"  {line_text}\n"
+        f"  {' '*(col-1)}^"
+    )
+    # raise with a nice message that your bootstrap catches
+    raise LexerError(msg, t.lineno)
 
 
 # Build the lexer

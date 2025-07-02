@@ -1,6 +1,6 @@
 // examples/web/async.sfn
 
-import { http } from "sailfin/net";
+import { serve, Request, Response, http } from "sailfin/net";
 
 async fn fetchData(url: string) -> string {
     let response = await http.get(url);
