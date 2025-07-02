@@ -46,7 +46,7 @@ def print_ast(node, indent=0):
     elif isinstance(node, str):
         logger.debug(f"{prefix}{node!r}")
     else:
-        logger.debug(f"{prefix}{value!r}")
+        logger.debug(f"{prefix}{node!r}")
 
 
 def compile_and_run(source_file):

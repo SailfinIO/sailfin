@@ -194,5 +194,27 @@ class ASTValidator:
                     raise ValidationError(
                         f"Invalid field name in struct instantiation: {field_name}")
                 ASTValidator.validate(expr)
+        elif isinstance(node, MatchStatement):
+            ASTValidator.validate(node.condition)
+            for arm in node.arms:
+                ASTValidator.validate(arm)
+        elif isinstance(node, MatchArm):
+            ASTValidator.validate(node.pattern)
+            if node.guard:
+                ASTValidator.validate(node.guard)
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
+        elif isinstance(node, NumberPattern):
+            pass  # Numbers are always valid in patterns
+        elif isinstance(node, WildcardPattern):
+            pass  # Wildcard patterns are always valid
+        elif isinstance(node, TaggedPattern):
+            if not node.type_name.isidentifier():
+                raise ValidationError(
+                    f"Invalid tagged pattern type name: {node.type_name}")
+            for field in node.fields:
+                if not field.isidentifier():
+                    raise ValidationError(
+                        f"Invalid tagged pattern field: {field}")
         else:
             raise ValidationError(f"Unknown AST node: {type(node).__name__}")
