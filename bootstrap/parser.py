@@ -6,6 +6,7 @@ from errors import ParserError
 
 # Precedence rules to resolve ambiguity
 precedence = (
+    ('left', 'COMMA'),
     ('right', 'NOT'),
     ('left', 'OR'),
     ('left', 'AND'),
@@ -16,12 +17,14 @@ precedence = (
     ('left', 'MULTIPLY', 'DIVIDE'),
     ('left', 'DOT'),
     ('right', 'ARROW'),
+    ('right', 'FAT_ARROW'),
     ('right', 'UMINUS'),
     ('left', 'AMP'),
     ('left', 'PIPE'),
     ('right', 'ASSIGN', 'PLUS_ASSIGN', 'MINUS_ASSIGN',
      'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN'),
-
+    ('left', 'LBRACE'),
+    ('left', 'IDENTIFIER'),
 )
 
 
@@ -240,16 +243,6 @@ def p_interface_list(p):
     else:
         p[0] = [p[1]]
     # ... existing code ...
-# Generic type parameter lists
-
-
-def p_IDENTIFIER_list(p):
-    '''IDENTIFIER_list : IDENTIFIER_list COMMA IDENTIFIER
-                       | IDENTIFIER'''
-    if len(p) == 2:
-        p[0] = [p[1]]
-    else:
-        p[0] = p[1] + [p[3]]
 
 
 def p_struct_members(p):
@@ -436,19 +429,13 @@ def p_for_loop(p):
 
 
 def p_match_statement(p):
-    '''match_statement : MATCH expression match_block optional_semicolon'''
+    '''match_statement : MATCH expression match_block'''
     p[0] = MatchStatement(condition=p[2], arms=p[3])
 
 
 def p_match_block(p):
     '''match_block : LBRACE match_arms RBRACE'''
     p[0] = p[2]
-
-
-def p_optional_semicolon(p):
-    '''optional_semicolon : SEMICOLON
-                         | empty'''
-    pass
 
 
 def p_match_arms(p):
@@ -488,8 +475,9 @@ def p_match_arrow(p):
 
 def p_match_arm_body(p):
     '''match_arm_body : block
-                      | statement'''
-    # block returns a List[ASTNode], statement returns a single ASTNode
+                      | expression %prec FAT_ARROW
+                      | expression_statement'''
+    # block returns a List[ASTNode], others return single ASTNode
     if isinstance(p[1], list):
         p[0] = p[1]
     else:
@@ -568,31 +556,8 @@ def p_return_statement(p):
 
 # -------------------- Assignment Statements -------------------- #
 
-
-def p_lvalue(p):
-    '''lvalue : IDENTIFIER
-              | lvalue DOT IDENTIFIER'''
-    if len(p) == 2:
-        p[0] = Identifier(name=p[1])
-    else:
-        p[0] = MemberAccess(object_=p[1], member=p[3])
-
-
-def p_assignment_expression(p):
-    '''assignment_expression : lvalue ASSIGN expression %prec ASSIGN
-                             | lvalue PLUS_ASSIGN expression %prec ASSIGN
-                             | lvalue MINUS_ASSIGN expression %prec ASSIGN
-                             | lvalue MULTIPLY_ASSIGN expression %prec ASSIGN
-                             | lvalue DIVIDE_ASSIGN expression %prec ASSIGN'''
-    if p[2] == '=':
-        p[0] = Assignment(target=p[1], value=p[3])
-    else:
-        op_map = {'+=': '+', '-=': '-', '*=': '*', '/=': '/'}
-        p[0] = Assignment(target=p[1], value=BinOp(
-            operator=op_map[p[2]], left=p[1], right=p[3]))
-
-
 # -------------------- Expression Statements -------------------- #
+
 
 def p_nonassignment_expression(p):
     '''nonassignment_expression : unary_expression
@@ -833,22 +798,29 @@ def p_test_declaration(p):
 
 
 def p_primary_expression(p):
-    '''primary_expression : IDENTIFIER struct_instantiation_opt
+    '''primary_expression : IDENTIFIER
+                          | PRINT
+                          | INFO
                           | NUMBER
                           | STRING
                           | LPAREN expression RPAREN'''
     if p.slice[1].type == "IDENTIFIER":
-        # If the optional part is present, p[2] will be non-None.
-        if p[2] is not None:
-            p[0] = StructInstantiation(struct_name=p[1], field_inits=p[2])
-        else:
-            p[0] = Identifier(name=p[1])
+        p[0] = Identifier(name=p[1])
+    elif p.slice[1].type == "PRINT":
+        p[0] = Identifier(name=p[1])
+    elif p.slice[1].type == "INFO":
+        p[0] = Identifier(name=p[1])
     elif p.slice[1].type == "NUMBER":
         p[0] = Number(value=p[1])
     elif p.slice[1].type == "STRING":
         p[0] = String(value=p[1])
     else:  # LPAREN expression RPAREN
         p[0] = p[2]
+
+
+def p_postfix_expression_struct_instantiation(p):
+    '''postfix_expression : IDENTIFIER LBRACE struct_field_inits_opt RBRACE'''
+    p[0] = StructInstantiation(struct_name=p[1], field_inits=p[3])
 
 
 def p_postfix_expression_index(p):
@@ -859,7 +831,8 @@ def p_postfix_expression_index(p):
 def p_postfix_expression(p):
     '''postfix_expression : primary_expression
                           | postfix_expression LPAREN arguments RPAREN
-                          | postfix_expression DOT IDENTIFIER'''
+                          | postfix_expression DOT IDENTIFIER
+                          | postfix_expression DOT INFO'''
     if len(p) == 2:
         p[0] = p[1]
     elif p[2] == '(':
@@ -907,15 +880,6 @@ def p_assignment_opt(p):
         p[0] = None
     else:
         p[0] = (p[1], p[2])
-
-
-def p_struct_instantiation_opt(p):
-    '''struct_instantiation_opt : LBRACE struct_field_inits_opt RBRACE
-                                | empty'''
-    if len(p) == 2:  # matched empty
-        p[0] = None
-    else:
-        p[0] = p[2]
 
 
 def p_struct_field_inits_opt(p):

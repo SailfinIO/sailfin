@@ -78,7 +78,6 @@ t_COMMA = r','
 t_DOT = r'\.'
 t_COLON = r':'
 t_AT = r'@'
-t_UNDERSCORE = r'_'
 t_LT = r'<'
 t_GT = r'>'
 t_LEQ = r'<='
@@ -98,7 +97,11 @@ t_AMP = r'&'
 
 def t_IDENTIFIER(t):
     r'[A-Za-z_][A-Za-z0-9_]*'
-    t.type = reserved.get(t.value, 'IDENTIFIER')  # Check for reserved words
+    if t.value == '_':
+        t.type = 'UNDERSCORE'
+    else:
+        # Check for reserved words
+        t.type = reserved.get(t.value, 'IDENTIFIER')
     return t
 
 
