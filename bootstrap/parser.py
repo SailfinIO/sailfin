@@ -83,6 +83,7 @@ def p_empty(p):
 def p_statement(p):
     '''statement : print_statement
                  | throw_statement
+                 | assert_statement
                  | variable_declaration
                  | constant_declaration
                  | function_declaration
@@ -116,6 +117,13 @@ def p_print_statement(p):
 def p_throw_statement(p):
     '''throw_statement : THROW expression SEMICOLON'''
     p[0] = ThrowStatement(expression=p[2])
+
+# -------------------- Assert Statement -------------------- #
+
+
+def p_assert_statement(p):
+    '''assert_statement : ASSERT expression SEMICOLON'''
+    p[0] = AssertStatement(condition=p[2])
 
 # -------------------- Variable Declarations -------------------- #
 

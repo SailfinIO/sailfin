@@ -15,6 +15,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.imports = set()
         self.code = []
         self.indent_level = 0
+        self.test_functions = []  # Track test function names
 
     def indent(self):
         return '    ' * self.indent_level
@@ -88,10 +89,27 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             isinstance(stmt, FunctionDeclaration) and stmt.name == 'main'
             for stmt in node.statements
         )
-        if has_main:
+        
+        # Add test runner and main execution
+        if self.test_functions or has_main:
             self.code.append('')
             self.code.append('if __name__ == "__main__":')
-            self.code.append('    main()')
+            if self.test_functions:
+                self.code.append('    # Run tests')
+                for test_func in self.test_functions:
+                    self.code.append(f'    try:')
+                    self.code.append(f'        {test_func}()')
+                    self.code.append(f'        print("✓ Test passed: {test_func}")')
+                    self.code.append(f'    except AssertionError as e:')
+                    self.code.append(f'        print("✗ Test failed: {test_func}")')
+                    self.code.append(f'        print(f"  Assertion error: {{e}}")')
+                    self.code.append(f'    except Exception as e:')
+                    self.code.append(f'        print("✗ Test error: {test_func}")')
+                    self.code.append(f'        print(f"  Error: {{e}}")')
+            if has_main:
+                if self.test_functions:
+                    self.code.append('    # Run main')
+                self.code.append('    main()')
 
         # Prepare the __future__ import
         future_import = "from __future__ import annotations"
@@ -120,6 +138,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_PrintStatement(self, node: PrintStatement):
         expr = self.visit(node.expression)
         self.code.append(f"{self.indent()}print({expr})")
+
+    def visit_AssertStatement(self, node: AssertStatement):
+        condition = self.visit(node.condition)
+        self.code.append(f"{self.indent()}assert {condition}")
 
     def visit_ExpressionStatement(self, node: ExpressionStatement):
         # Handle ExpressionStatement nodes by visiting the inner expression.
@@ -194,9 +216,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.indent_level -= 1
 
     def visit_TestDeclaration(self, node: TestDeclaration):
-        # Define a unique test method
+        # Generate a standalone test function that can be run
         test_name = generate_unique_name('test')
-        self.code.append(f"{self.indent()}def test_{test_name}(self):")
+        test_func_name = f"test_{test_name}"
+        self.test_functions.append(test_func_name)
+        self.code.append(f"{self.indent()}def {test_func_name}():")
         self.indent_level += 1
         for stmt in node.body:
             self.visit(stmt)

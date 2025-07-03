@@ -109,6 +109,12 @@ class ASTValidator:
                             f"Invalid interface method parameter type: {param_type_str}")
         elif isinstance(node, PrintStatement):
             ASTValidator.validate(node.expression)
+        elif isinstance(node, AssertStatement):
+            ASTValidator.validate(node.condition)
+        elif isinstance(node, TestDeclaration):
+            # Validate test description is a string, body statements are valid
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
         elif isinstance(node, Assignment):
             ASTValidator.validate(node.target)
             ASTValidator.validate(node.value)

@@ -83,6 +83,11 @@ class PrintStatement(ASTNode):
 
 
 @dataclass
+class AssertStatement(ASTNode):
+    condition: Expression
+
+
+@dataclass
 class VariableDeclaration(ASTNode):
     name: str
     var_type: Optional[ASTNode]

@@ -31,6 +31,7 @@ reserved = {
     'while': 'WHILE',
     'in': 'IN',
     'test': 'TEST',
+    'assert': 'ASSERT',
     'is': 'IS',
     'new': 'NEW',
 }
