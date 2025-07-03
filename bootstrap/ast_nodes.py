@@ -136,6 +136,13 @@ class StructInstantiation(Expression):
 
 
 @dataclass
+class EnumVariantConstruction(Expression):
+    enum_name: Expression  # Usually an Identifier, but could be a MemberAccess
+    variant_name: str
+    field_inits: List[Tuple[str, Expression]]
+
+
+@dataclass
 class FieldDeclaration(ASTNode):
     name: str
     field_type: ASTNode

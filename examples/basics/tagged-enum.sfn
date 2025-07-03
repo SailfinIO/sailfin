@@ -7,8 +7,8 @@ enum Shape {
 
 fn area(shape: Shape) -> number {
     match shape {
-        Shape.Circle { radius } => return 3.14 * radius * radius,
-        Shape.Rectangle { width, height } => return width * height,
+        Shape.Circle { radius } => 3.14 * radius * radius,
+        Shape.Rectangle { width, height } => width * height,
     }
 }
 

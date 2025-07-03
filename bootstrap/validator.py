@@ -215,6 +215,27 @@ class ASTValidator:
                     raise ValidationError(
                         f"Invalid field name in struct instantiation: {field_name_str}")
                 ASTValidator.validate(expr)
+        elif isinstance(node, EnumVariantConstruction):
+            # Handle enum_name as either string or Identifier object
+            enum_name_str = node.enum_name.name if hasattr(
+                node.enum_name, 'name') else node.enum_name
+            if not enum_name_str.isidentifier():
+                raise ValidationError(
+                    f"Invalid enum name in variant construction: {enum_name_str}")
+            # Handle variant_name as either string or Identifier object
+            variant_name_str = node.variant_name.name if hasattr(
+                node.variant_name, 'name') else node.variant_name
+            if not variant_name_str.isidentifier():
+                raise ValidationError(
+                    f"Invalid variant name in enum construction: {variant_name_str}")
+            for field_name, expr in node.field_inits:
+                # Handle field_name as either string or Identifier object
+                field_name_str = field_name.name if hasattr(
+                    field_name, 'name') else field_name
+                if not field_name_str.isidentifier():
+                    raise ValidationError(
+                        f"Invalid field name in enum variant construction: {field_name_str}")
+                ASTValidator.validate(expr)
         elif isinstance(node, MatchStatement):
             ASTValidator.validate(node.condition)
             for arm in node.arms:

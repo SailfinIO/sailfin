@@ -477,7 +477,8 @@ def p_match_arrow(p):
 def p_match_arm_body(p):
     '''match_arm_body : block
                       | expression %prec FAT_ARROW
-                      | expression_statement'''
+                      | expression_statement
+                      | return_statement'''
     # block returns a List[ASTNode], others return single ASTNode
     if isinstance(p[1], list):
         p[0] = p[1]
@@ -505,6 +506,11 @@ def p_match_pattern_negative(p):
 def p_match_pattern_struct(p):
     '''match_pattern : IDENTIFIER LBRACE pattern_field_names RBRACE'''
     p[0] = TaggedPattern(type_name=p[1], variant="", fields=p[3])
+
+
+def p_match_pattern_tagged_enum(p):
+    '''match_pattern : IDENTIFIER DOT IDENTIFIER LBRACE pattern_field_names RBRACE'''
+    p[0] = TaggedPattern(type_name=p[1], variant=p[3], fields=p[5])
 
 
 def p_match_pattern_simple(p):
@@ -658,12 +664,25 @@ def p_try_finally(p):
 
 
 def p_try_catch_finally(p):
-    '''try_catch_finally : TRY block CATCH LPAREN IDENTIFIER RPAREN block FINALLY block
+    '''try_catch_finally : TRY block CATCH LPAREN IDENTIFIER IDENTIFIER RPAREN block FINALLY block
+                          | TRY block CATCH LPAREN IDENTIFIER IDENTIFIER RPAREN block
+                          | TRY block CATCH LPAREN IDENTIFIER RPAREN block FINALLY block
                           | TRY block CATCH LPAREN IDENTIFIER RPAREN block'''
-    if len(p) == 10:
+    if len(p) == 11:  # TRY block CATCH LPAREN IDENTIFIER IDENTIFIER RPAREN block FINALLY block
         try_block = p[2]
         error_type = p[5]
         error_var = p[6]
+        catch_block = p[8]
+        finally_block = p[10]
+        p[0] = TryCatchFinally(
+            try_block=try_block,
+            catch_blocks=[(error_type, error_var, catch_block)],
+            finally_block=finally_block
+        )
+    elif len(p) == 10:  # TRY block CATCH LPAREN IDENTIFIER RPAREN block FINALLY block
+        try_block = p[2]
+        error_type = None
+        error_var = p[5]
         catch_block = p[7]
         finally_block = p[9]
         p[0] = TryCatchFinally(
@@ -671,10 +690,20 @@ def p_try_catch_finally(p):
             catch_blocks=[(error_type, error_var, catch_block)],
             finally_block=finally_block
         )
-    else:
+    elif len(p) == 9:  # TRY block CATCH LPAREN IDENTIFIER IDENTIFIER RPAREN block
         try_block = p[2]
         error_type = p[5]
         error_var = p[6]
+        catch_block = p[8]
+        p[0] = TryCatchFinally(
+            try_block=try_block,
+            catch_blocks=[(error_type, error_var, catch_block)],
+            finally_block=None
+        )
+    else:  # len(p) == 8: TRY block CATCH LPAREN IDENTIFIER RPAREN block
+        try_block = p[2]
+        error_type = None
+        error_var = p[5]
         catch_block = p[7]
         p[0] = TryCatchFinally(
             try_block=try_block,
@@ -837,6 +866,9 @@ def p_primary_expression_paren(p):
     p[0] = p[2]
 
 
+# Enum variant construction handled in postfix_expression
+
+
 def p_postfix_expression_index(p):
     '''postfix_expression : postfix_expression LBRACKET expression RBRACKET'''
     p[0] = ArrayIndexing(object_=p[1], index=p[3])
@@ -845,13 +877,20 @@ def p_postfix_expression_index(p):
 def p_postfix_expression(p):
     '''postfix_expression : primary_expression
                           | postfix_expression LPAREN arguments RPAREN
-                          | postfix_expression DOT IDENTIFIER
+                          | postfix_expression DOT IDENTIFIER LBRACE struct_field_inits_opt RBRACE %prec LBRACE
+                          | postfix_expression DOT IDENTIFIER %prec DOT
                           | postfix_expression DOT INFO'''
     if len(p) == 2:
         p[0] = p[1]
     elif p[2] == '(':
         p[0] = FunctionCall(func_name=p[1], arguments=p[3])
-    else:
+    elif len(p) == 7:  # DOT IDENTIFIER LBRACE ... RBRACE (enum variant construction)
+        enum_name = p[1]
+        variant_name = p[3]
+        field_inits = p[5]
+        p[0] = EnumVariantConstruction(
+            enum_name=enum_name, variant_name=variant_name, field_inits=field_inits)
+    else:  # DOT IDENTIFIER or DOT INFO (member access)
         p[0] = MemberAccess(object_=p[1], member=p[3])
 
 

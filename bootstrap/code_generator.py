@@ -46,7 +46,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(t, Identifier):
             # Apply type mapping to identifier names
             type_mapping = {
-                "number": "int",
+                "number": "float",
                 "string": "str",
                 "void": "None",
                 # add other mappings as needed...
@@ -56,7 +56,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(t, str):
             # Map simple types
             type_mapping = {
-                "number": "int",
+                "number": "float",
                 "string": "str",
                 "void": "None",
                 # add other mappings as needed...
@@ -145,7 +145,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_MemberAccess(self, node: MemberAccess):
         obj = self.visit(node.object_)
         # Special case: print.info() and print.error() become print() in Python
-        if obj == "print" and node.member in ["info", "error"]:
+        if obj == "print" and node.member in ["info", "debug", "warn", "error"]:
             return "print"
         return f"{obj}.{node.member}"
 
@@ -399,21 +399,17 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append('')  # Newline after interface
 
     def visit_EnumDeclaration(self, node: EnumDeclaration):
-        self.imports.add("import enum")
-        self.code.append(f"{self.indent()}class {node.name}(enum.Enum):")
+        # Generate a class with class variables for each variant
+        # This allows enum variants to be referenced as Class.Variant
+        self.code.append(f"{self.indent()}class {node.name}:")
         self.indent_level += 1
         if not node.variants:
             self.code.append(f"{self.indent()}pass")
         else:
             for variant in node.variants:
-                if variant.fields:
-                    fields = ', '.join(
-                        [field.name for field in variant.fields])
-                    self.code.append(
-                        f"{self.indent()}{variant.name} = ({fields},)")
-                else:
-                    self.code.append(
-                        f"{self.indent()}{variant.name} = enum.auto()")
+                # Each variant is just a string constant for type identification
+                self.code.append(
+                    f"{self.indent()}{variant.name} = \"{variant.name}\"")
         self.indent_level -= 1
         self.code.append('')  # Add a newline after enum
 
@@ -428,8 +424,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             if not arm.body:
                 self.code.append(f"{self.indent()}pass")
             else:
-                for stmt in arm.body:
-                    self.visit(stmt)
+                # For match expressions, we need to return the result
+                # Check if the body is a single expression statement
+                if len(arm.body) == 1 and hasattr(arm.body[0], 'expression'):
+                    # Single expression - return it
+                    expr = self.visit(arm.body[0].expression)
+                    self.code.append(f"{self.indent()}return {expr}")
+                else:
+                    # Multiple statements
+                    for stmt in arm.body:
+                        self.visit(stmt)
             self.indent_level -= 1
         self.indent_level -= 1
 
@@ -440,16 +444,17 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return "_"
 
     def visit_TaggedPattern(self, node: TaggedPattern):
-        # For struct patterns like DivisionError { message }
-        # Generate Python match pattern like DivisionError(message=message)
+        # For enum variant patterns like Shape.Circle { radius }
+        # Generate Python match pattern that matches the dict structure
+        # e.g. {"type": "Circle", "radius": radius} where radius is bound to the variable
         if node.fields:
-            # Create pattern variables for destructuring
+            # Create pattern for destructuring dict fields
             field_patterns = ", ".join(
-                [f"{field}={field}" for field in node.fields])
-            return f"{node.type_name}({field_patterns})"
+                [f'"{field}": {field}' for field in node.fields])
+            return f'{{"type": "{node.variant}", {field_patterns}}}'
         else:
             # No fields to destructure, just match the type
-            return f"{node.type_name}()"
+            return f'{{"type": "{node.variant}"}}'
 
     def visit_TryFinally(self, node: TryFinally):
         self.code.append(f"{self.indent()}try:")
@@ -509,6 +514,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         fields = ', '.join(
             [f"{name}={self.visit(expr)}" for name, expr in node.field_inits])
         return f"{node.struct_name}({fields})"
+
+    def visit_EnumVariantConstruction(self, node: EnumVariantConstruction):
+        # Generate enum variant construction as a dictionary with type and fields
+        # Example: Shape.Circle { radius: 5 } -> {"type": "Circle", "radius": 5}
+        fields = ', '.join(
+            [f'"{name}": {self.visit(expr)}' for name, expr in node.field_inits])
+        return f'{{"type": "{node.variant_name}", {fields}}}'
 
     def visit_TypeApplication(self, node: TypeApplication):
         # Generate generic constructor or call with type arguments
