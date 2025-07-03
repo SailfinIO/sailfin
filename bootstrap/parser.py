@@ -25,6 +25,7 @@ precedence = (
      'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN'),
     ('left', 'LBRACE'),
     ('left', 'IDENTIFIER'),
+    ('left', 'MATCH'),
 )
 
 
@@ -429,7 +430,7 @@ def p_for_loop(p):
 
 
 def p_match_statement(p):
-    '''match_statement : MATCH expression match_block'''
+    '''match_statement : MATCH expression match_block %prec MATCH'''
     p[0] = MatchStatement(condition=p[2], arms=p[3])
 
 
@@ -801,30 +802,39 @@ def p_test_declaration(p):
 # -------------------- Primary and Postfix Expressions -------------------- #
 
 
-def p_primary_expression(p):
-    '''primary_expression : IDENTIFIER
-                          | PRINT
-                          | INFO
-                          | NUMBER
-                          | STRING
-                          | LPAREN expression RPAREN'''
-    if p.slice[1].type == "IDENTIFIER":
-        p[0] = Identifier(name=p[1])
-    elif p.slice[1].type == "PRINT":
-        p[0] = Identifier(name=p[1])
-    elif p.slice[1].type == "INFO":
-        p[0] = Identifier(name=p[1])
-    elif p.slice[1].type == "NUMBER":
-        p[0] = Number(value=p[1])
-    elif p.slice[1].type == "STRING":
-        p[0] = String(value=p[1])
-    else:  # LPAREN expression RPAREN
-        p[0] = p[2]
-
-
 def p_postfix_expression_struct_instantiation(p):
-    '''postfix_expression : IDENTIFIER LBRACE struct_field_inits_opt RBRACE'''
-    p[0] = StructInstantiation(struct_name=p[1], field_inits=p[3])
+    '''postfix_expression : NEW IDENTIFIER LBRACE struct_field_inits_opt RBRACE'''
+    p[0] = StructInstantiation(struct_name=p[2], field_inits=p[4])
+
+
+def p_primary_expression_print(p):
+    '''primary_expression : PRINT'''
+    p[0] = Identifier(name=p[1])
+
+
+def p_primary_expression_info(p):
+    '''primary_expression : INFO'''
+    p[0] = Identifier(name=p[1])
+
+
+def p_primary_expression_identifier(p):
+    '''primary_expression : IDENTIFIER'''
+    p[0] = Identifier(name=p[1])
+
+
+def p_primary_expression_number(p):
+    '''primary_expression : NUMBER'''
+    p[0] = Number(value=p[1])
+
+
+def p_primary_expression_string(p):
+    '''primary_expression : STRING'''
+    p[0] = String(value=p[1])
+
+
+def p_primary_expression_paren(p):
+    '''primary_expression : LPAREN expression RPAREN'''
+    p[0] = p[2]
 
 
 def p_postfix_expression_index(p):
@@ -843,6 +853,9 @@ def p_postfix_expression(p):
         p[0] = FunctionCall(func_name=p[1], arguments=p[3])
     else:
         p[0] = MemberAccess(object_=p[1], member=p[3])
+
+
+# Struct instantiation handled in primary_expression rules
 
 
 def p_unary_expression(p):

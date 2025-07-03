@@ -32,6 +32,7 @@ reserved = {
     'in': 'IN',
     'test': 'TEST',
     'is': 'IS',
+    'new': 'NEW',
 }
 
 tokens = [

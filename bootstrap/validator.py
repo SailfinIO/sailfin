@@ -6,7 +6,10 @@ import re
 
 class ASTValidator:
 
-    def is_valid_type(t: str) -> bool:
+    def is_valid_type(t) -> bool:
+        # Convert AST node to string if needed
+        if hasattr(t, '__class__') and not isinstance(t, str):
+            t = stringify_type(t)
         # This regex allows one or more type segments (identifiers with optional array notation)
         # separated by the union operator.
         pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)(?:\|[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$'
@@ -75,9 +78,8 @@ class ASTValidator:
                 raise ValidationError(f"Invalid field type: {node.field_type}")
         elif isinstance(node, InterfaceDeclaration):
             # New branch: validate interface declarations
-            if not param_name.name.isidentifier():
-                raise ValidationError(
-                    f"Invalid interface method parameter name: {param_name.name}")
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid interface name: {node.name}")
 
             for method in node.methods:
                 ASTValidator.validate(method)
@@ -92,12 +94,19 @@ class ASTValidator:
                     param_name, param_type, _ = param
                 else:
                     param_name, param_type = param[0], param[1]
-                if not param_name.isidentifier():
+                # Handle param_name as either string or Identifier object
+                param_name_str = param_name.name if hasattr(
+                    param_name, 'name') else param_name
+                if not param_name_str.isidentifier():
                     raise ValidationError(
-                        f"Invalid interface method parameter name: {param_name}")
-                if param_type and not param_type.isidentifier():
-                    raise ValidationError(
-                        f"Invalid interface method parameter type: {param_type}")
+                        f"Invalid interface method parameter name: {param_name_str}")
+                # Handle param_type as either string or Identifier object
+                if param_type:
+                    param_type_str = param_type.name if hasattr(
+                        param_type, 'name') else param_type
+                    if not param_type_str.isidentifier():
+                        raise ValidationError(
+                            f"Invalid interface method parameter type: {param_type_str}")
         elif isinstance(node, PrintStatement):
             ASTValidator.validate(node.expression)
         elif isinstance(node, Assignment):
@@ -169,14 +178,20 @@ class ASTValidator:
                     raise ValidationError(
                         f"Invalid lambda parameter name: {param_name.name}")
 
-                # If your param_type is still a string, this check may remain unchanged,
-                # or if it too becomes an Identifier, use param_type.name.
-                if param_type and not param_type.isidentifier():
+                # Handle param_type as either string or Identifier object
+                if param_type:
+                    param_type_str = param_type.name if hasattr(
+                        param_type, 'name') else param_type
+                    if not param_type_str.isidentifier():
+                        raise ValidationError(
+                            f"Invalid lambda parameter type: {param_type_str}")
+            # Handle return_type as either string or Identifier object
+            if node.return_type:
+                return_type_str = node.return_type.name if hasattr(
+                    node.return_type, 'name') else node.return_type
+                if not return_type_str.isidentifier():
                     raise ValidationError(
-                        f"Invalid lambda parameter type: {param_type}")
-            if node.return_type and not node.return_type.isidentifier():
-                raise ValidationError(
-                    f"Invalid lambda return type: {node.return_type}")
+                        f"Invalid lambda return type: {return_type_str}")
             for stmt in node.body:
                 ASTValidator.validate(stmt)
 
@@ -186,13 +201,19 @@ class ASTValidator:
             if node.expression is not None:
                 ASTValidator.validate(node.expression)
         elif isinstance(node, StructInstantiation):
-            if not node.struct_name.isidentifier():
+            # Handle struct_name as either string or Identifier object
+            struct_name_str = node.struct_name.name if hasattr(
+                node.struct_name, 'name') else node.struct_name
+            if not struct_name_str.isidentifier():
                 raise ValidationError(
-                    f"Invalid struct instantiation name: {node.struct_name}")
+                    f"Invalid struct instantiation name: {struct_name_str}")
             for field_name, expr in node.field_inits:
-                if not field_name.isidentifier():
+                # Handle field_name as either string or Identifier object
+                field_name_str = field_name.name if hasattr(
+                    field_name, 'name') else field_name
+                if not field_name_str.isidentifier():
                     raise ValidationError(
-                        f"Invalid field name in struct instantiation: {field_name}")
+                        f"Invalid field name in struct instantiation: {field_name_str}")
                 ASTValidator.validate(expr)
         elif isinstance(node, MatchStatement):
             ASTValidator.validate(node.condition)
@@ -209,12 +230,17 @@ class ASTValidator:
         elif isinstance(node, WildcardPattern):
             pass  # Wildcard patterns are always valid
         elif isinstance(node, TaggedPattern):
-            if not node.type_name.isidentifier():
+            # Handle type_name as either string or Identifier object
+            type_name_str = node.type_name.name if hasattr(
+                node.type_name, 'name') else node.type_name
+            if not type_name_str.isidentifier():
                 raise ValidationError(
-                    f"Invalid tagged pattern type name: {node.type_name}")
+                    f"Invalid tagged pattern type name: {type_name_str}")
             for field in node.fields:
-                if not field.isidentifier():
+                # Handle field as either string or Identifier object
+                field_str = field.name if hasattr(field, 'name') else field
+                if not field_str.isidentifier():
                     raise ValidationError(
-                        f"Invalid tagged pattern field: {field}")
+                        f"Invalid tagged pattern field: {field_str}")
         else:
             raise ValidationError(f"Unknown AST node: {type(node).__name__}")

@@ -10,6 +10,6 @@ struct User {
 }
 
 fn main() -> void {
-    let user: User = User { id: 1, name: "Alice" };
+    let user: User = new User { id: 1, name: "Alice" };
     print.info(user.greet()); // Outputs: Hello, Alice!
 }

@@ -325,10 +325,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         first_param = "cls" if is_constructor else "self"
 
         # Process the parameters.
-        if node.params and node.params[0][0] in ("self", "cls"):
-            params_list = [param[0] for param in node.params[1:]]
+        if node.params and (node.params[0][0] == "self" or (hasattr(node.params[0][0], 'name') and node.params[0][0].name == "self") or
+                            node.params[0][0] == "cls" or (hasattr(node.params[0][0], 'name') and node.params[0][0].name == "cls")):
+            params_list = [param[0].name if hasattr(
+                param[0], 'name') else param[0] for param in node.params[1:]]
         else:
-            params_list = [param[0] for param in node.params]
+            params_list = [param[0].name if hasattr(
+                param[0], 'name') else param[0] for param in node.params]
         params = ', '.join(params_list)
 
         # Handle the return type from ASTNode
@@ -368,15 +371,21 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         else:
             for method in node.methods:
                 self.code.append(f"{self.indent()}@abstractmethod")
-                if method.params and method.params[0][0] == "self":
-                    params_list = [param[0] for param in method.params[1:]]
-                else:
-                    params_list = [param[0] for param in method.params]
+                # Extract parameter names, skipping the first parameter if it's "self"
+                params_list = []
+                for param in method.params:
+                    param_name = param[0].name if hasattr(
+                        param[0], 'name') else param[0]
+                    # Skip "self" parameter since we add it automatically in the method signature
+                    if param_name != "self":
+                        params_list.append(param_name)
+
                 params = ', '.join(params_list)
                 if method.return_type and method.return_type != "void":
                     return_type = f" -> {self.map_type(method.return_type)}"
                 else:
                     return_type = ""
+
                 if params:
                     # Emit abstract method signature with parameters
                     self.code.append(
@@ -429,6 +438,18 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
     def visit_WildcardPattern(self, node: WildcardPattern):
         return "_"
+
+    def visit_TaggedPattern(self, node: TaggedPattern):
+        # For struct patterns like DivisionError { message }
+        # Generate Python match pattern like DivisionError(message=message)
+        if node.fields:
+            # Create pattern variables for destructuring
+            field_patterns = ", ".join(
+                [f"{field}={field}" for field in node.fields])
+            return f"{node.type_name}({field_patterns})"
+        else:
+            # No fields to destructure, just match the type
+            return f"{node.type_name}()"
 
     def visit_TryFinally(self, node: TryFinally):
         self.code.append(f"{self.indent()}try:")

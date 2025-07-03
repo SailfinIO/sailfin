@@ -1,0 +1,7 @@
+struct Test {
+    x: number;
+}
+
+fn main() -> void {
+    let t = new Test { x: 42 };
+}
