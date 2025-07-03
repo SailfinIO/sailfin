@@ -83,6 +83,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         for stmt in node.statements:
             self.visit(stmt)
 
+        # Check if there's a main function and add a call to it
+        has_main = any(
+            isinstance(stmt, FunctionDeclaration) and stmt.name == 'main'
+            for stmt in node.statements
+        )
+        if has_main:
+            self.code.append('')
+            self.code.append('if __name__ == "__main__":')
+            self.code.append('    main()')
+
         # Prepare the __future__ import
         future_import = "from __future__ import annotations"
 
