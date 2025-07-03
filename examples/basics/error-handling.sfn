@@ -6,7 +6,7 @@ struct DivisionError {
 
 fn safeDivide(a: number, b: number) -> number | DivisionError {
     if b == 0 {
-        return DivisionError { message: "Cannot divide by zero!" };
+        return new DivisionError { message: "Cannot divide by zero!" };
     }
     return a / b;
 }

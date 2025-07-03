@@ -14,6 +14,6 @@ struct User implements Greeter {
 }
 
 fn main() -> void {
-    let greeter: Greeter = User { id: 1, name: "Alice" };
+    let greeter: Greeter = new User { id: 1, name: "Alice" };
     print.info(greeter.greet()); // Outputs: Hello, Alice!
 }

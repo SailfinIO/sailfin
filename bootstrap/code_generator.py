@@ -144,8 +144,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
     def visit_MemberAccess(self, node: MemberAccess):
         obj = self.visit(node.object_)
-        # Special case: print.info() becomes print() in Python
-        if obj == "print" and node.member == "info":
+        # Special case: print.info() and print.error() become print() in Python
+        if obj == "print" and node.member in ["info", "error"]:
             return "print"
         return f"{obj}.{node.member}"
 
