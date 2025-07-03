@@ -89,7 +89,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             isinstance(stmt, FunctionDeclaration) and stmt.name == 'main'
             for stmt in node.statements
         )
-        
+
         # Add test runner and main execution
         if self.test_functions or has_main:
             self.code.append('')
@@ -99,12 +99,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 for test_func in self.test_functions:
                     self.code.append(f'    try:')
                     self.code.append(f'        {test_func}()')
-                    self.code.append(f'        print("✓ Test passed: {test_func}")')
+                    self.code.append(
+                        f'        print("✓ Test passed: {test_func}")')
                     self.code.append(f'    except AssertionError as e:')
-                    self.code.append(f'        print("✗ Test failed: {test_func}")')
-                    self.code.append(f'        print(f"  Assertion error: {{e}}")')
+                    self.code.append(
+                        f'        print("✗ Test failed: {test_func}")')
+                    self.code.append(
+                        f'        print(f"  Assertion error: {{e}}")')
                     self.code.append(f'    except Exception as e:')
-                    self.code.append(f'        print("✗ Test error: {test_func}")')
+                    self.code.append(
+                        f'        print("✗ Test error: {test_func}")')
                     self.code.append(f'        print(f"  Error: {{e}}")')
             if has_main:
                 if self.test_functions:
