@@ -494,7 +494,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 for stmt in catch_block:
                     self.visit(stmt)
             self.indent_level -= 1
-        if node.finally_block:
+        if node.finally_block is not None:
             self.code.append(f"{self.indent()}finally:")
             self.indent_level += 1
             if not node.finally_block:

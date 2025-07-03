@@ -246,6 +246,26 @@ class ASTValidator:
                 ASTValidator.validate(node.guard)
             for stmt in node.body:
                 ASTValidator.validate(stmt)
+        elif isinstance(node, TryFinally):
+            for stmt in node.try_block:
+                ASTValidator.validate(stmt)
+            for stmt in node.finally_block:
+                ASTValidator.validate(stmt)
+        elif isinstance(node, TryCatchFinally):
+            for stmt in node.try_block:
+                ASTValidator.validate(stmt)
+            for error_type, error_var, catch_block in node.catch_blocks:
+                if not error_type.isidentifier():
+                    raise ValidationError(
+                        f"Invalid error type name: {error_type}")
+                if not error_var.isidentifier():
+                    raise ValidationError(
+                        f"Invalid error variable name: {error_var}")
+                for stmt in catch_block:
+                    ASTValidator.validate(stmt)
+            if node.finally_block:
+                for stmt in node.finally_block:
+                    ASTValidator.validate(stmt)
         elif isinstance(node, NumberPattern):
             pass  # Numbers are always valid in patterns
         elif isinstance(node, WildcardPattern):

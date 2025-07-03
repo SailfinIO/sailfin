@@ -1,5 +1,0 @@
-fn main() -> void {
-    if true {
-        print.info("hello");
-    }
-}

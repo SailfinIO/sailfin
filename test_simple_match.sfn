@@ -1,5 +1,0 @@
-fn main() -> void {
-    match x {
-        DivisionError { message } => print.info("Error"),
-    }
-}
