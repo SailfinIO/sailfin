@@ -1,0 +1,43 @@
+// examples/basics/nested-structures.sfn
+
+struct Address {
+    street: string;
+    city: string;
+    zipCode: string;
+
+    fn getFullAddress(self) -> string {
+        return "{{self.street}}, {{self.city}} {{self.zipCode}}";
+    }
+}
+
+struct Person {
+    name: string;
+    age: number;
+    address: Address;
+
+    fn introduce(self) -> string {
+        return "Hi, I'm {{self.name}}, {{self.age}} years old";
+    }
+}
+
+fn main() -> void {
+    // Create nested structures
+    let homeAddress: Address = new Address {
+        street: "123 Main St",
+        city: "Springfield", 
+        zipCode: "12345"
+    };
+
+    let person: Person = new Person {
+        name: "Alice Johnson",
+        age: 30,
+        address: homeAddress
+    };
+
+    // Access nested data
+    print.info(person.introduce());
+    print.info("Lives in: {{person.address.city}}");
+    print.info("Full address: {{person.address.getFullAddress()}}");
+
+    print.info("Nested structures example completed.");
+}

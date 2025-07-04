@@ -1,0 +1,16 @@
+// examples/basics/type-conversion.sfn
+// Note: Type conversion functions are not yet implemented in the bootstrap compiler
+// This example shows the intended syntax when type conversion is available
+
+fn main() -> void {
+    print.info("Type conversion is not yet implemented in the bootstrap compiler.");
+    print.info("This file shows the intended syntax:");
+    print.info("");
+    print.info("  let numStr: string = \"42\";");
+    print.info("  let num: number = parseInt(numStr);");
+    print.info("  print.info(\"Converted: {{num}}\");");
+    print.info("");
+    print.info("  let value: number = 123;");
+    print.info("  let valueStr: string = toString(value);");
+    print.info("  print.info(\"As string: {{valueStr}}\");");
+}

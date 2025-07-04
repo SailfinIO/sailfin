@@ -1,0 +1,26 @@
+// examples/basics/optionals.sfn
+// Note: Generic enums like Option<T> are not yet implemented in the bootstrap compiler
+// This example shows the intended syntax when optionals are available
+
+fn main() -> void {
+    print.info("Optional types are not yet implemented in the bootstrap compiler.");
+    print.info("This file shows the intended syntax:");
+    print.info("");
+    print.info("  enum Option<T> {");
+    print.info("      Some(T),");
+    print.info("      None,");
+    print.info("  }");
+    print.info("");
+    print.info("  fn findUser(id: number) -> Option<string> {");
+    print.info("      if id == 1 {");
+    print.info("          return Option.Some(\"Alice\");");
+    print.info("      } else {");
+    print.info("          return Option.None;");
+    print.info("      }");
+    print.info("  }");
+    print.info("");
+    print.info("  match user {");
+    print.info("      Option.Some(name) => print.info(\"Found: {{name}}\"),");
+    print.info("      Option.None => print.info(\"Not found\"),");
+    print.info("  }");
+}

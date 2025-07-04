@@ -1,0 +1,33 @@
+// examples/basics/constants.sfn
+
+// Global constants
+const PI: number = 3.14159;
+const MAX_USERS: number = 1000;
+const APP_NAME: string = "Sailfin App";
+const DEBUG_FLAG: number = 0; // Using number instead of bool to avoid codegen issue
+
+fn calculateCircleArea(radius: number) -> number {
+    return PI * radius * radius;
+}
+
+fn main() -> void {
+    // Using constants
+    print.info("Application: {{APP_NAME}}");
+    print.info("Maximum users allowed: {{MAX_USERS}}");
+    print.info("Debug flag: {{DEBUG_FLAG}}");
+
+    // Constants in calculations
+    let radius: number = 5;
+    let area: number = calculateCircleArea(radius);
+    print.info("Circle area (radius {{radius}}): {{area}}");
+
+    // Local constants within functions
+    const LOCAL_MULTIPLIER: number = 2;
+    let doubled: number = radius * LOCAL_MULTIPLIER;
+    print.info("Doubled radius: {{doubled}}");
+
+    // Constants are immutable - this would cause a compile error:
+    // PI = 3.14; // Error: cannot assign to constant
+
+    print.info("Constants example completed.");
+}

@@ -1,0 +1,28 @@
+// examples/basics/strings.sfn
+
+fn main() -> void {
+    // String literals
+    let greeting: string = "Hello";
+    let name: string = "Sailfin";
+    
+    // String interpolation (the main string feature currently supported)
+    let world: string = "World";
+    print.info("Hello, {{world}}!");
+    print.info("Welcome to {{name}}!");
+
+    // String variables
+    let message: string = "Programming is fun";
+    print.info("Message: {{message}}");
+    
+    // Multiple string variables
+    let firstName: string = "Alice";
+    let lastName: string = "Johnson";
+    print.info("Full name: {{firstName}} {{lastName}}");
+
+    // String in calculations (showing interpolation)
+    let version: string = "1.0";
+    let appName: string = "Sailfin";
+    print.info("Running {{appName}} version {{version}}");
+
+    print.info("String interpolation examples completed.");
+}

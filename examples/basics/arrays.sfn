@@ -1,0 +1,18 @@
+// examples/basics/arrays.sfn
+
+fn main() -> void {
+    // Creating arrays with correct syntax: type[]
+    let numbers: number[] = [1, 2, 3, 4, 5];
+    let names: string[] = ["Alice", "Bob", "Charlie"];
+    let empty: number[] = [];
+
+    // Array access
+    print.info("First number: {{numbers[0]}}");
+    print.info("Second name: {{names[1]}}");
+    print.info("Third number: {{numbers[2]}}");
+
+    // Show array contents
+    print.info("Numbers array: [1, 2, 3, 4, 5]");
+    print.info("Names array: [Alice, Bob, Charlie]");
+    print.info("Empty array created successfully");
+}

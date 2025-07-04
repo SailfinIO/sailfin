@@ -1,0 +1,15 @@
+// examples/basics/for-loops.sfn
+// Note: For loops are not yet implemented in the bootstrap compiler
+// This example shows the intended syntax when for loops are available
+
+fn main() -> void {
+    print.info("For loops are not yet implemented in the bootstrap compiler.");
+    print.info("This file shows the intended syntax:");
+    print.info("  for i in 0..5 {");
+    print.info("      print.info(\"Number: {i}\");");
+    print.info("  }");
+    print.info("");
+    print.info("  for item in array {");
+    print.info("      print.info(\"Item: {{item}}\");");
+    print.info("  }");
+}

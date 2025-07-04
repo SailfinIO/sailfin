@@ -150,6 +150,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return '\n'.join(self.code)
 
     def visit_Identifier(self, node: Identifier):
+        # Handle boolean literals
+        if node.name == 'true':
+            return 'True'
+        elif node.name == 'false':
+            return 'False'
         return node.name
 
     def visit_ImportStatement(self, node: ImportStatement):
