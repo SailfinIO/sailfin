@@ -101,7 +101,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         raise NotImplementedError(f"No visit_{type(node).__name__} method")
 
     def visit_Program(self, node: Program):
-        # Visit all statements first
+        # Visit all statements
         for stmt in node.statements:
             self.visit(stmt)
 
@@ -304,8 +304,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             self.code.append(f"{self.indent()}{name} = {value}  # Constant")
 
     def visit_FunctionDeclaration(self, node: FunctionDeclaration):
-        decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
         async_str = 'async ' if node.is_async else ''
+
+        # Handle decorators - emit each on its own line before the function
+        for decorator in node.decorators:
+            self.code.append(f"{self.indent()}@{decorator}")
 
         # Handle parameters with default values
         param_strings = []
@@ -324,9 +327,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             return_type = f" -> {mapped_return}"
         else:
             return_type = ""
-        # Emit function declaration with decorators and return type
+        # Emit function declaration with return type
         self.code.append(
-            f"{self.indent()}{decorators}{async_str}def {node.name}({params}){return_type}:")
+            f"{self.indent()}{async_str}def {node.name}({params}){return_type}:")
         self.indent_level += 1
 
         # Track that we're now inside a function

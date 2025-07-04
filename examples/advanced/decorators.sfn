@@ -1,6 +1,39 @@
 // examples/advanced/decorators.sfn
 
+// Decorator syntax demonstration
+// Shows how decorator syntax is parsed and generates proper Python decorators
+
+// Define a simple decorator function
+fn logExecution(func: any) -> any {
+    // This would return a wrapper function in a full implementation
+    // For now, we demonstrate the syntax
+    return func;
+}
+
+// Define another decorator
+fn debugInfo(func: any) -> any {
+    return func;
+}
+
+// Apply decorators using @decorator syntax
 @logExecution
+@debugInfo
 fn compute(x: number) -> number {
-  return x * x;
+    return x * x;
+}
+
+// A simple decorator without parameters
+@logExecution
+fn greet(name: string) -> string {
+    return "Hello, " + name + "!";
+}
+
+fn main() -> void {
+    let result: number = compute(5);
+    print.info("Result: {{result}}");
+    
+    let greeting: string = greet("World");
+    print.info("Greeting: {{greeting}}");
+    
+    print.info("Decorator syntax is parsed and generated correctly");
 }
