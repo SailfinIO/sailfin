@@ -1,0 +1,5 @@
+// Simple function test
+
+fn test() -> void {
+    return;
+}

@@ -188,25 +188,36 @@ def p_opt_return_type(p):
 
 
 def p_function_declaration(p):
-    '''function_declaration : decorators_opt FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
-    p[0] = FunctionDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type=p[7] if p[7] is not None else 'void',
-        body=p[8],
-        decorators=p[1] if p[1] else [],
-        is_async=False
-    )
+    '''function_declaration : decorators_opt FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block
+                            | ASYNC FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
+    if len(p) == 9 and p[1] != 'async':  # decorators_opt FN ...
+        p[0] = FunctionDeclaration(
+            name=p[3],
+            params=p[5],
+            return_type=p[7] if p[7] is not None else 'void',
+            body=p[8],
+            decorators=p[1] if p[1] else [],
+            is_async=False
+        )
+    elif len(p) == 9 and p[1] == 'async':  # ASYNC FN ...
+        p[0] = FunctionDeclaration(
+            name=p[3],
+            params=p[5],
+            return_type=p[7] if p[7] is not None else 'void',
+            body=p[8],
+            decorators=[],
+            is_async=True
+        )
 
 
-def p_function_declaration_async(p):
-    '''function_declaration : decorators_opt ASYNC FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
+def p_function_declaration_async_with_decorators(p):
+    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
     p[0] = FunctionDeclaration(
         name=p[4],
         params=p[6],
         return_type=p[8] if p[8] is not None else 'void',
         body=p[9],
-        decorators=p[1] if p[1] else [],
+        decorators=p[1],
         is_async=True
     )
 
@@ -880,6 +891,18 @@ def p_primary_expression_string(p):
 def p_primary_expression_paren(p):
     '''primary_expression : LPAREN expression RPAREN'''
     p[0] = p[2]
+
+
+def p_primary_expression_async_block_statements(p):
+    '''primary_expression : ASYNC LBRACE statements_opt RBRACE'''
+    p[0] = AsyncBlock(body=p[3] if p[3] else [])
+
+
+def p_primary_expression_async_block_expression(p):
+    '''primary_expression : ASYNC LBRACE expression RBRACE'''
+    # Convert the expression to an expression statement
+    expr_stmt = ExpressionStatement(expression=p[3])
+    p[0] = AsyncBlock(body=[expr_stmt])
 
 
 # Enum variant construction handled in postfix_expression

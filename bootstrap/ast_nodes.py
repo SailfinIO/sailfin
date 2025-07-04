@@ -264,6 +264,11 @@ class Await(Expression):
 
 
 @dataclass
+class AsyncBlock(Expression):
+    body: List[ASTNode]
+
+
+@dataclass
 class TryFinally(ASTNode):
     try_block: List[ASTNode]
     finally_block: List[ASTNode]

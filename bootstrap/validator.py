@@ -166,6 +166,13 @@ class ASTValidator:
             # New branch for array indexing expressions
             ASTValidator.validate(node.object_)
             ASTValidator.validate(node.index)
+        elif isinstance(node, AsyncBlock):
+            # Validate async block expressions
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
+        elif isinstance(node, Await):
+            # Validate await expressions
+            ASTValidator.validate(node.expression)
         elif isinstance(node, WhileLoop):
             ASTValidator.validate(node.condition)
             for stmt in node.body:

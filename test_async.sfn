@@ -1,0 +1,5 @@
+// Simple async function test
+
+async fn myFunction() -> void {
+    return;
+}
