@@ -259,6 +259,25 @@ class FileSystem:
         except Exception as e:
             raise IOError(f"Error writing JSON file {path}: {e}")
 
+    @staticmethod
+    def deleteFile(path: str) -> None:
+        """
+        Delete a file.
+
+        Args:
+            path: Path to the file to delete
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist
+            IOError: If there's an error deleting the file
+        """
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {path}")
+        except Exception as e:
+            raise IOError(f"Error deleting file {path}: {e}")
+
 
 # Global file system instance
 fs = FileSystem()

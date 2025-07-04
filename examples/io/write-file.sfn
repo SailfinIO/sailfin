@@ -3,6 +3,19 @@
 import { fs } from "sailfin/io";
 
 fn main() -> void {
-    fs.writeFile("output.txt", "Hello, Sailfin!");
-    print.info("File written successfully.");
+    // Use a temporary file name to avoid conflicts
+    let testFile: string = "temp_test_write.txt";
+    let content: string = "Hello, Sailfin!\nThis file was created by the write-file example.\nSuccessfully written!";
+    
+    // Write content to the file
+    fs.writeFile(testFile, content);
+    print.info("File written successfully to {{testFile}}");
+    
+    // Verify by reading the file back
+    let readContent: string = fs.readFile(testFile);
+    print.info("Verification - Read back: {{readContent}}");
+    
+    // Clean up: remove the temporary file
+    fs.deleteFile(testFile);
+    print.info("Cleanup completed.");
 }

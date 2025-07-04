@@ -3,6 +3,18 @@
 import { fs } from "sailfin/io";
 
 fn main() -> void {
-    let content: string = fs.readFile("example.txt");
+    // Create a temporary test file for demonstration
+    let testFile: string = "temp_test_read.txt";
+    let testContent: string = "Hello from Sailfin!\nThis is a test file for reading.\nLine 3 of content.";
+    
+    // Write test content to the file
+    fs.writeFile(testFile, testContent);
+    
+    // Read the file content back
+    let content: string = fs.readFile(testFile);
     print.info("File content: {{content}}");
+    
+    // Clean up: remove the temporary file
+    fs.deleteFile(testFile);
+    print.info("Cleanup completed.");
 }

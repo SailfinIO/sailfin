@@ -1,4 +1,3 @@
-
 def fs_class_def():
     return """\
 class fs:
@@ -78,4 +77,20 @@ class fs:
         except Exception as e:
             print(f"Error reading binary file '{{filename}}': {{e}}")
             return b""
+
+    @staticmethod
+    def deleteFile(filename):
+        \"\"\"
+        Deletes the specified file.
+
+        :param filename: Name of the file to delete.
+        \"\"\"
+        import os
+        try:
+            os.remove(filename)
+            print(f"File '{{filename}}' deleted successfully.")
+        except FileNotFoundError:
+            print(f"File '{{filename}}' not found, cannot delete.")
+        except Exception as e:
+            print(f"Error deleting file '{{filename}}': {{e}}")
 """
