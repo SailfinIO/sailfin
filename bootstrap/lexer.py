@@ -47,7 +47,7 @@ tokens = [
     'PLUS_ASSIGN', 'MINUS_ASSIGN', 'MULTIPLY_ASSIGN', 'DIVIDE_ASSIGN', 'QUESTION',
     # Delimiters
     'LPAREN', 'RPAREN', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET',
-    'SEMICOLON', 'COMMA', 'DOT', 'COLON', 'AT', 'UNDERSCORE',
+    'SEMICOLON', 'COMMA', 'DOT', 'DOTDOT', 'COLON', 'AT', 'UNDERSCORE',
     # Comparison Operators
     'LT', 'GT', 'LEQ', 'GEQ', 'EQ', 'NEQ',
     # Logical Operators
@@ -79,6 +79,7 @@ t_LBRACKET = r'\['
 t_RBRACKET = r'\]'
 t_SEMICOLON = r';'
 t_COMMA = r','
+t_DOTDOT = r'\.\.'
 t_DOT = r'\.'
 t_COLON = r':'
 t_AT = r'@'

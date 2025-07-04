@@ -16,6 +16,7 @@ precedence = (
     ('left', 'EQ', 'NEQ'),
     ('left', 'LT', 'GT', 'LEQ', 'GEQ'),
     ('left', 'IS'),
+    ('left', 'DOTDOT'),
     ('left', 'PLUS', 'MINUS'),
     ('left', 'MULTIPLY', 'DIVIDE'),
     ('left', 'DOT'),
@@ -522,8 +523,12 @@ def p_while_loop(p):
 
 
 def p_for_loop(p):
-    'for_loop : FOR IDENTIFIER IN expression block'
-    p[0] = ForLoop(variable=p[2], iterable=p[4], body=p[5])
+    '''for_loop : FOR IDENTIFIER IN expression block
+                | FOR UNDERSCORE IN expression block'''
+    if p[2] == '_':
+        p[0] = ForLoop(variable='_', iterable=p[4], body=p[5])
+    else:
+        p[0] = ForLoop(variable=p[2], iterable=p[4], body=p[5])
 
 # -------------------- Match Statements -------------------- #
 
@@ -700,8 +705,8 @@ def p_expression_await(p):
 
 
 def p_expression_range(p):
-    'expression : expression DOT DOT expression'
-    p[0] = RangeExpression(start=p[1], end=p[4])
+    'expression : expression DOTDOT expression'
+    p[0] = RangeExpression(start=p[1], end=p[3])
 
 
 def p_expression_typecheck(p):
@@ -870,16 +875,29 @@ def p_statements_opt(p):
 # -------------------- Type Non-Terminal -------------------- #
 
 
-# A primary type is just an identifier or a parenthesized type.
+# A primary type is just an identifier, a generic type, or a parenthesized type.
 def p_type_primary(p):
     '''type_primary : IDENTIFIER
+                    | IDENTIFIER LT type_args GT
                     | LPAREN type_expr RPAREN'''
     if len(p) == 2:
         p[0] = Identifier(name=p[1])
+    elif len(p) == 5:  # Generic type: IDENTIFIER < type_args >
+        p[0] = TypeApplication(base=Identifier(
+            name=p[1]), type_args=p[3], arguments=[])
     else:
-        p[0] = p[2]
+        p[0] = p[3]
 
 # A type suffix handles array '[]' and optional '?' sugar.
+
+
+def p_type_args(p):
+    '''type_args : type_expr
+                 | type_args COMMA type_expr'''
+    if len(p) == 2:
+        p[0] = [p[1]]
+    else:
+        p[0] = p[1] + [p[3]]
 
 
 def p_type_suffix(p):

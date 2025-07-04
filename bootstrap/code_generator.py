@@ -334,6 +334,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         func_name = self.visit(node.func_name)
         args = ', '.join([self.visit(arg) for arg in node.arguments])
 
+        # Special case: Channel() constructor becomes asyncio.Queue()
+        if isinstance(node.func_name, Identifier) and node.func_name.name == "Channel":
+            self.imports.add("import asyncio")
+            return "asyncio.Queue()"
+
         # Special case: array.filter(lambda) becomes list(filter(lambda, array))
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "filter":
             obj = self.visit(node.func_name.object_)
@@ -360,6 +365,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "concat":
             obj = self.visit(node.func_name.object_)
             return f"({obj} + {args})"
+
+        # Special case: channel.send(value) becomes channel.put_nowait(value)
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "send":
+            obj = self.visit(node.func_name.object_)
+            return f"{obj}.put_nowait({args})"
+
+        # Special case: channel.receive() becomes channel.get()
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "receive":
+            obj = self.visit(node.func_name.object_)
+            return f"{obj}.get()"
 
         return f"{func_name}({args})"
 

@@ -384,5 +384,9 @@ class ASTValidator:
                             f"Invalid parameter type: {param_type_str}")
             for stmt in node.body:
                 self.validate(stmt)
+        elif isinstance(node, RangeExpression):
+            # Validate the start and end expressions of the range
+            self.validate(node.start)
+            self.validate(node.end)
         else:
             raise ValidationError(f"Unknown AST node: {type(node).__name__}")
