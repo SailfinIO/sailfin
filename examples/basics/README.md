@@ -2,6 +2,147 @@
 
 This directory contains comprehensive examples of Sailfin's basic language features. All examples in this directory compile and run successfully with the bootstrap compiler.
 
+## 📖 Language Overview
+
+**Sailfin** is a modern, statically-typed programming language with a focus on:
+
+- **Type Safety**: Explicit type annotations and compile-time type checking
+- **Memory Safety**: No null pointers, ownership semantics
+- **Performance**: Compiled to efficient target languages (currently Python via bootstrap)
+- **Expressiveness**: Pattern matching, algebraic data types, interfaces
+
+## 🔑 Reserved Keywords
+
+The Sailfin language uses the following reserved keywords:
+
+### Core Language Keywords
+
+- `fn` - Function declaration
+- `lambda` - Anonymous function expression
+- `let` - Immutable variable declaration
+- `mut` - Mutable variable declaration
+- `return` - Return statement
+
+### Type and Structure Keywords
+
+- `struct` - Structure definition
+- `enum` - Enumeration definition
+- `interface` - Interface definition
+- `implements` - Interface implementation
+- `new` - Object instantiation
+
+### Control Flow Keywords
+
+- `if`, `else` - Conditional statements
+- `match` - Pattern matching
+- `while` - While loops
+- `for`, `in` - For loops (syntax defined, not fully implemented)
+
+### Error Handling Keywords
+
+- `try`, `catch`, `finally` - Exception handling
+- `throw` - Throw exception
+
+### Async/Concurrency Keywords
+
+- `async` - Asynchronous function
+- `await` - Await async operation
+
+### Module System Keywords
+
+- `import`, `from` - Module imports
+
+### Testing Keywords
+
+- `test` - Test block declaration
+- `assert` - Assertion statement
+
+### Utility Keywords
+
+- `print` - Built-in print namespace
+- `info` - Print info method
+- `is` - Type checking/comparison
+
+## 🔣 Operators and Symbols
+
+### Arithmetic Operators
+
+- `+` - Addition
+- `-` - Subtraction
+- `*` - Multiplication
+- `/` - Division
+
+### Assignment Operators
+
+- `=` - Assignment
+- `+=` - Plus assignment
+- `-=` - Minus assignment
+- `*=` - Multiply assignment
+- `/=` - Divide assignment
+
+### Comparison Operators
+
+- `==` - Equality
+- `!=` - Inequality
+- `<` - Less than
+- `>` - Greater than
+- `<=` - Less than or equal
+- `>=` - Greater than or equal
+
+### Logical Operators
+
+- `&&` - Logical AND
+- `||` - Logical OR
+- `!` - Logical NOT
+
+### Special Operators
+
+- `->` - Function return type annotation
+- `=>` - Fat arrow (pattern matching, lambdas)
+- `|` - Union type operator / pipe
+- `&` - Intersection operator / ampersand
+- `?` - Optional/nullable type operator
+- `_` - Wildcard pattern
+
+### Delimiters
+
+- `()` - Parentheses (function calls, grouping)
+- `{}` - Braces (blocks, struct literals)
+- `[]` - Brackets (arrays, indexing)
+- `;` - Semicolon (statement terminator)
+- `,` - Comma (separator)
+- `.` - Dot (member access)
+- `:` - Colon (type annotations)
+- `@` - At symbol (decorators/attributes)
+
+## 📝 Basic Type System
+
+### Primitive Types
+
+- `number` - Numeric values (integers and floats)
+- `string` - Text strings with interpolation support
+- `bool` - Boolean values (`true`/`false`)
+- `void` - No return value
+
+### Collection Types
+
+- `Type[]` - Arrays (e.g., `number[]`, `string[]`)
+
+### Custom Types
+
+- User-defined `struct` types
+- User-defined `enum` types
+- `interface` types for polymorphism
+
+### Type Annotations
+
+All variables require explicit type annotations:
+
+```sailfin
+let name: string = "Sailfin";
+mut count: number = 42;
+```
+
 ## ✅ Fully Working Examples
 
 The following examples demonstrate **real, working language features**:
@@ -10,7 +151,6 @@ The following examples demonstrate **real, working language features**:
 
 - **`hello-world.sfn`** - Basic program structure and print statements
 - **`variables.sfn`** - Variable declarations with type annotations
-- **`constants.sfn`** - Immutable variable declarations
 - **`functions.sfn`** - Function definitions, parameters, and return types
 - **`function-expression.sfn`** - Function expressions and closures
 
@@ -138,6 +278,10 @@ These examples provide a solid foundation for understanding Sailfin's current ca
 - `../functional/` - Functional programming patterns
 - `../types/` - Advanced type system features
 
+---
+
+## 📋 Language Examples and Syntax Guide
+
 ### Function Definition
 
 Functions are defined with the `fn` keyword:
@@ -166,9 +310,10 @@ fn main() -> void {
 
 **Key Features:**
 
-- `fn main()` is the entry point
+- `fn main()` is the entry point function
 - `-> void` indicates the function returns nothing
 - `print.info()` is the built-in logging function for informational output
+- Comments use `//` for single-line comments
 
 ---
 
@@ -196,11 +341,12 @@ fn main() -> void {
 
 **Key Features:**
 
-- `let` creates immutable variables
+- `let` creates immutable variables (default)
 - `mut` creates mutable variables
 - Type annotations are explicit: `variable: type`
 - String interpolation with `{{variable}}`
 - Global variables can be accessed from functions
+- Compound assignment operators (`+=`, `-=`, `*=`, `/=`) supported
 
 ---
 
@@ -225,6 +371,226 @@ fn main() -> void {
     print.info(add(3, 5));        // Outputs: 8
     print.info(greet());          // Outputs: Hello, Sail!
     print.info(greet("Alice"));   // Outputs: Hello, Alice!
+}
+```
+
+**Key Features:**
+
+- Functions are declared with `fn` keyword
+- Parameters have explicit type annotations
+- Return type is specified after `->`
+- Default parameter values are supported (`name: string = "Sail"`)
+- Functions must explicitly `return` values (except for `void` functions)
+- Function calls use standard parentheses syntax
+
+---
+
+## Function Expressions (Lambdas)
+
+**File: [`function-expression.sfn`](./function-expression.sfn)**
+
+Sailfin supports anonymous functions using lambda expressions.
+
+```sailfin
+// examples/basics/function-expression.sfn
+
+fn main() -> void {
+    let add = lambda(x: number, y: number) -> number { return x + y; };
+    print.info("Result: {{add(5, 3)}}");
+}
+```
+
+**Key Features:**
+
+- `lambda` keyword for anonymous functions
+- Lambda expressions can be assigned to variables
+- Full type annotations for parameters and return types
+- Lambdas support closures and first-class function behavior
+
+---
+
+## Arrays
+
+**File: [`arrays.sfn`](./arrays.sfn)**
+
+Sailfin provides typed arrays with bracket syntax for indexing.
+
+```sailfin
+// examples/basics/arrays.sfn
+
+fn main() -> void {
+    // Creating arrays with correct syntax: type[]
+    let numbers: number[] = [1, 2, 3, 4, 5];
+    let names: string[] = ["Alice", "Bob", "Charlie"];
+    let empty: number[] = [];
+
+    // Array access - demonstrating real array indexing
+    print.info("First number: {{numbers[0]}}");
+    print.info("Second name: {{names[1]}}");
+    print.info("Third number: {{numbers[2]}}");
+    print.info("Last number: {{numbers[4]}}");
+    print.info("Last name: {{names[2]}}");
+
+    // Array element access and assignment
+    let firstElement: number = numbers[0];
+    let middleName: string = names[1];
+
+    print.info("Stored first element: {{firstElement}}");
+    print.info("Stored middle name: {{middleName}}");
+}
+```
+
+**Key Features:**
+
+- Array types use `Type[]` syntax (e.g., `number[]`, `string[]`)
+- Array literals use square brackets `[1, 2, 3]`
+- Zero-indexed access with bracket notation `arr[0]`
+- Empty arrays can be declared: `let empty: number[] = []`
+- Array elements can be stored in variables
+
+---
+
+## Strings
+
+**File: [`strings.sfn`](./strings.sfn)**
+
+Sailfin provides string literals with interpolation support.
+
+```sailfin
+// examples/basics/strings.sfn
+
+fn main() -> void {
+    // String literals
+    let greeting: string = "Hello";
+    let name: string = "Sailfin";
+
+    // String interpolation (the main string feature currently supported)
+    let world: string = "World";
+    print.info("Hello, {{world}}!");
+    print.info("Welcome to {{name}}!");
+
+    // Multiple string variables in interpolation
+    let firstName: string = "Alice";
+    let lastName: string = "Johnson";
+    print.info("Full name: {{firstName}} {{lastName}}");
+
+    // String variables in calculations/interpolation
+    let version: string = "1.0";
+    let appName: string = "Sailfin";
+    print.info("Running {{appName}} version {{version}}");
+}
+```
+
+**Key Features:**
+
+- String literals use double quotes `"text"`
+- String interpolation with `{{variable}}` syntax
+- Multiple variables can be interpolated in a single string
+- Strings support Unicode and special characters
+
+---
+
+## Booleans
+
+**File: [`booleans.sfn`](./booleans.sfn)**
+
+Boolean type with `true`/`false` literals and comparison operations.
+
+```sailfin
+// examples/basics/booleans.sfn
+
+fn main() -> void {
+    // Boolean literals (true/false are identifiers in current implementation)
+    let isActive: bool = true;
+    let isComplete: bool = false;
+
+    // Comparison operators
+    let x: number = 10;
+    let y: number = 5;
+
+    print.info("Comparing {{x}} and {{y}}:");
+    print.info("x > y: (calculated as {{x}} > {{y}})");
+    print.info("x < y: (calculated as {{x}} < {{y}})");
+    print.info("x == y: (calculated as {{x}} == {{y}})");
+
+    // Boolean variables in conditionals
+    if isActive {
+        print.info("System is active");
+    }
+
+    if isComplete {
+        print.info("Task is complete");
+    }
+}
+```
+
+**Key Features:**
+
+- Boolean type is `bool`
+- Boolean literals: `true` and `false`
+- Comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- Booleans work directly in `if` conditions
+- Logical operators: `&&` (AND), `||` (OR), `!` (NOT)
+
+---
+
+## Conditionals
+
+**File: [`conditionals.sfn`](./conditionals.sfn)**
+
+Sailfin provides both `if-else` statements and pattern matching with `match`.
+
+```sailfin
+// examples/basics/conditionals.sfn
+
+fn checkNumber(value: number) -> void {
+    if value > 0 {
+        print.info("{{value}} is positive");
+    } else if value < 0 {
+        print.info("{{value}} is negative");
+    } else {
+        print.info("{{value}} is zero");
+    }
+
+    match value {
+        42 =>    print.info("The answer to life, the universe, and everything!"),
+        -1 =>    print.info("A special negative number!"),
+        _  =>    print.info("Just another number.")
+    }
+}
+
+fn main() -> void {
+    checkNumber(42);
+    checkNumber(-5);
+    checkNumber(0);
+}
+```
+
+**Key Features:**
+
+- Standard `if-else if-else` chains
+- No parentheses required around conditions
+- Pattern matching with `match` expressions
+- Fat arrow `=>` for match arms
+- Wildcard pattern `_` for catch-all cases
+- Multiple conditions can be chained
+
+---
+
+## Loops
+
+**File: [`loops.sfn`](./loops.sfn)**
+
+Sailfin currently supports `while` loops for iteration.
+
+```sailfin
+// examples/basics/loops.sfn
+
+fn testWhile() -> void {
+    let i: number = 0;
+    while i < 10 {
+        i = i + 1;
+    }
 }
 ```
 
