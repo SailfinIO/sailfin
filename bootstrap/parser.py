@@ -134,12 +134,14 @@ def p_assert_statement(p):
 
 def p_routine_statement_named(p):
     '''routine_statement : ROUTINE STRING LBRACE statements_opt RBRACE'''
-    p[0] = ExpressionStatement(expression=Routine(name=p[2], body=p[4] if p[4] else []))
+    p[0] = ExpressionStatement(expression=Routine(
+        name=p[2], body=p[4] if p[4] else []))
 
 
 def p_routine_statement_unnamed(p):
     '''routine_statement : ROUTINE LBRACE statements_opt RBRACE'''
-    p[0] = ExpressionStatement(expression=Routine(name=None, body=p[3] if p[3] else []))
+    p[0] = ExpressionStatement(expression=Routine(
+        name=None, body=p[3] if p[3] else []))
 
 # -------------------- Variable Declarations -------------------- #
 

@@ -106,7 +106,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_Program(self, node: Program):
         # First pass: detect which functions contain routines
         self._detect_functions_with_routines(node)
-        
+
         # Visit all statements
         for stmt in node.statements:
             self.visit(stmt)
@@ -155,8 +155,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 self.imports.add("import asyncio")
                 self.code.append('    # Run top-level routines')
                 self.code.append('    async def run_routines():')
-                routine_calls = [f'{routine}()' for routine in self.top_level_routines]
-                self.code.append(f'        await asyncio.gather({", ".join(routine_calls)})')
+                routine_calls = [
+                    f'{routine}()' for routine in self.top_level_routines]
+                self.code.append(
+                    f'        await asyncio.gather({", ".join(routine_calls)})')
                 self.code.append('    asyncio.run(run_routines())')
 
         # Prepare the __future__ import
@@ -178,12 +180,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             def __init__(self, generator):
                 self.generator = generator
                 self.current_function = None
-                
+
             def visit(self, node):
                 method_name = f'visit_{node.__class__.__name__}'
                 method = getattr(self, method_name, self.generic_visit)
                 return method(node)
-                
+
             def generic_visit(self, node):
                 for field, value in node.__dict__.items():
                     if isinstance(value, list):
@@ -192,21 +194,22 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                                 self.visit(item)
                     elif hasattr(value, '__dict__'):
                         self.visit(value)
-                        
+
             def visit_FunctionDeclaration(self, node):
                 old_function = self.current_function
                 self.current_function = node.name
                 for stmt in node.body:
                     self.visit(stmt)
                 self.current_function = old_function
-                
+
             def visit_Routine(self, node):
                 if self.current_function:
-                    self.generator.functions_with_routines.add(self.current_function)
+                    self.generator.functions_with_routines.add(
+                        self.current_function)
                 # Continue visiting the routine body
                 for stmt in node.body:
                     self.visit(stmt)
-        
+
         detector = RoutineDetector(self)
         detector.visit(node)
 
@@ -324,7 +327,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 key_str = self.visit(key)
             value_str = self.visit(value)
             pairs.append(f"{key_str}: {value_str}")
-        
+
         pairs_str = ', '.join(pairs)
         return f"{{{pairs_str}}}"
 
@@ -387,7 +390,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Store the current function name for tracking routines
         old_function_name = self.current_function_name
         self.current_function_name = node.name
-        
+
         # Check if this function should be async (either explicitly marked or contains routines)
         should_be_async = node.is_async or node.name in self.functions_with_routines
         async_str = 'async ' if should_be_async else ''
@@ -864,7 +867,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # If we're inside a function, mark it as containing routines
         if self.current_function_name:
             self.functions_with_routines.add(self.current_function_name)
-            
+
         # Generate an async function and create a task for concurrent execution
         self.imports.add("import asyncio")
         func_name = generate_unique_name("routine")
@@ -880,7 +883,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if not node.body:
             self.code.append(f"{self.indent()}pass")
         else:
-            # Process all statements 
+            # Process all statements
             for stmt in node.body:
                 self.visit(stmt)
 

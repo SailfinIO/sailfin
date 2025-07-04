@@ -15,7 +15,7 @@ def run_example(path_to_bootstrap: str, example_file: str) -> Tuple[bool, str, s
     """Runs bootstrap.py on a single example file and returns success status with output."""
     env = os.environ.copy()
     env['SAILFIN_TEST_MODE'] = '1'  # Enable test mode for server examples
-    
+
     proc = subprocess.run(
         [sys.executable, path_to_bootstrap, example_file],
         capture_output=True,
