@@ -443,6 +443,34 @@ def p_array_elements_single(p):
     p[0] = [p[1]]
 
 
+# -------------------- Dictionary Literals -------------------- #
+
+
+def p_expression_dictionary_literal(p):
+    'expression : LBRACE dictionary_pairs RBRACE'
+    p[0] = DictionaryLiteral(pairs=p[2])
+
+
+def p_expression_dictionary_literal_empty(p):
+    'expression : LBRACE RBRACE'
+    p[0] = DictionaryLiteral(pairs=[])
+
+
+def p_dictionary_pairs_multiple(p):
+    'dictionary_pairs : dictionary_pairs COMMA dictionary_pair'
+    p[0] = p[1] + [p[3]]
+
+
+def p_dictionary_pairs_single(p):
+    'dictionary_pairs : dictionary_pair'
+    p[0] = [p[1]]
+
+
+def p_dictionary_pair(p):
+    'dictionary_pair : expression COLON expression'
+    p[0] = (p[1], p[3])
+
+
 def p_array_elements_empty(p):
     'array_elements : empty'
     p[0] = []

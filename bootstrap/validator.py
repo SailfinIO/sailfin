@@ -162,6 +162,10 @@ class ASTValidator:
         elif isinstance(node, ArrayLiteral):
             for element in node.elements:
                 ASTValidator.validate(element)
+        elif isinstance(node, DictionaryLiteral):
+            for key, value in node.pairs:
+                ASTValidator.validate(key)
+                ASTValidator.validate(value)
         elif isinstance(node, ArrayIndexing):
             # New branch for array indexing expressions
             ASTValidator.validate(node.object_)

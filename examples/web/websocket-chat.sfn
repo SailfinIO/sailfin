@@ -8,7 +8,7 @@ fn main() -> void {
 
     routine {
         for client in server.clients() {
-            client.onMessage(fn(msg: string) {
+            client.onMessage(lambda(msg: string) -> void {
                 print.info("Received: {{msg}}");
                 client.send("Echo: {{msg}}");
             });

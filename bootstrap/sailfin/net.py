@@ -4,8 +4,52 @@ Sailfin net module - HTTP and networking utilities.
 import asyncio
 import aiohttp
 import json
-from typing import Dict, Any, Optional, Union
+import os
+from typing import Dict, Any, Optional, Union, List, Callable
 from dataclasses import dataclass
+
+
+class WebSocketClient:
+    """Mock WebSocket client."""
+    
+    def __init__(self):
+        self._message_handler = None
+    
+    def onMessage(self, handler: Callable[[str], None]):
+        """Set message handler."""
+        self._message_handler = handler
+        # Simulate receiving a message for demo
+        if handler:
+            handler("Hello from WebSocket client!")
+    
+    def send(self, message: str):
+        """Send message to client."""
+        print(f"WebSocket: Sending message: {message}")
+
+
+class WebSocketServer:
+    """Mock WebSocket server."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.port = config.get("port", 8080)
+        self._clients = [WebSocketClient()]  # Mock client for demo
+    
+    def clients(self) -> List[WebSocketClient]:
+        """Get list of connected clients."""
+        return self._clients
+
+
+class WebSocketModule:
+    """WebSocket module with serve function."""
+    
+    @staticmethod
+    def serve(config: Dict[str, Any]) -> WebSocketServer:
+        """Create and return a WebSocket server."""
+        return WebSocketServer(config)
+
+
+# Create websocket module instance
+websocket = WebSocketModule()
 
 
 @dataclass

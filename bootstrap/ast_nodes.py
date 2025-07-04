@@ -299,6 +299,11 @@ class ArrayLiteral(Expression):
 
 
 @dataclass
+class DictionaryLiteral(Expression):
+    pairs: List[Tuple[Expression, Expression]]  # List of (key, value) pairs
+
+
+@dataclass
 class WhileLoop(ASTNode):
     condition: Expression
     body: List[ASTNode]

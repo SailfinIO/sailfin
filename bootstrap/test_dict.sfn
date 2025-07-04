@@ -1,0 +1,15 @@
+// Test dictionary literals
+
+fn main() -> void {
+    let config = { port: 8080, host: "localhost" };
+    print.info("Created config dictionary");
+    
+    let empty_dict = {};
+    print.info("Created empty dictionary");
+    
+    let nested = { 
+        server: { port: 8080 }, 
+        debug: true 
+    };
+    print.info("Created nested dictionary");
+}

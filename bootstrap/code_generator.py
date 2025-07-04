@@ -19,6 +19,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.global_variables = set()  # Track global variable names
         self.in_function = False  # Track if we're inside a function
         self.top_level_routines = []  # Track top-level routine function names
+        self.functions_with_routines = set()  # Track functions that contain routines
+        self.current_function_name = None  # Track the current function being processed
 
     def indent(self):
         return '    ' * self.indent_level
@@ -102,6 +104,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         raise NotImplementedError(f"No visit_{type(node).__name__} method")
 
     def visit_Program(self, node: Program):
+        # First pass: detect which functions contain routines
+        self._detect_functions_with_routines(node)
+        
         # Visit all statements
         for stmt in node.statements:
             self.visit(stmt)
@@ -139,7 +144,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             if has_main:
                 if self.test_functions:
                     self.code.append('    # Run main')
-                if main_function.is_async:
+                # Check if main function should be async (explicitly marked or contains routines)
+                if main_function.is_async or 'main' in self.functions_with_routines:
                     self.imports.add("import asyncio")
                     self.code.append('    asyncio.run(main())')
                 else:
@@ -165,6 +171,44 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code = [future_import] + other_imports + [''] + self.code
 
         return '\n'.join(self.code)
+
+    def _detect_functions_with_routines(self, node):
+        """Pre-process the AST to detect which functions contain routines"""
+        class RoutineDetector:
+            def __init__(self, generator):
+                self.generator = generator
+                self.current_function = None
+                
+            def visit(self, node):
+                method_name = f'visit_{node.__class__.__name__}'
+                method = getattr(self, method_name, self.generic_visit)
+                return method(node)
+                
+            def generic_visit(self, node):
+                for field, value in node.__dict__.items():
+                    if isinstance(value, list):
+                        for item in value:
+                            if hasattr(item, '__dict__'):
+                                self.visit(item)
+                    elif hasattr(value, '__dict__'):
+                        self.visit(value)
+                        
+            def visit_FunctionDeclaration(self, node):
+                old_function = self.current_function
+                self.current_function = node.name
+                for stmt in node.body:
+                    self.visit(stmt)
+                self.current_function = old_function
+                
+            def visit_Routine(self, node):
+                if self.current_function:
+                    self.generator.functions_with_routines.add(self.current_function)
+                # Continue visiting the routine body
+                for stmt in node.body:
+                    self.visit(stmt)
+        
+        detector = RoutineDetector(self)
+        detector.visit(node)
 
     def visit_Identifier(self, node: Identifier):
         # Handle boolean literals
@@ -270,6 +314,20 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                              for element in node.elements])
         return f"[{elements}]"
 
+    def visit_DictionaryLiteral(self, node: DictionaryLiteral):
+        pairs = []
+        for key, value in node.pairs:
+            # If the key is an identifier, convert it to a string literal
+            if isinstance(key, Identifier):
+                key_str = f'"{key.name}"'
+            else:
+                key_str = self.visit(key)
+            value_str = self.visit(value)
+            pairs.append(f"{key_str}: {value_str}")
+        
+        pairs_str = ', '.join(pairs)
+        return f"{{{pairs_str}}}"
+
     def visit_ArrayIndexing(self, node: ArrayIndexing):
         object_str = self.visit(node.object_)
         index_str = self.visit(node.index)
@@ -326,7 +384,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             self.code.append(f"{self.indent()}{name} = {value}  # Constant")
 
     def visit_FunctionDeclaration(self, node: FunctionDeclaration):
-        async_str = 'async ' if node.is_async else ''
+        # Store the current function name for tracking routines
+        old_function_name = self.current_function_name
+        self.current_function_name = node.name
+        
+        # Check if this function should be async (either explicitly marked or contains routines)
+        should_be_async = node.is_async or node.name in self.functions_with_routines
+        async_str = 'async ' if should_be_async else ''
 
         # Handle decorators - emit each on its own line before the function
         for decorator in node.decorators:
@@ -372,6 +436,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         # Restore function context
         self.in_function = old_in_function
+        self.current_function_name = old_function_name
         self.indent_level -= 1
         self.code.append('')  # newline after function
 
@@ -796,6 +861,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return f"{func_name}()"
 
     def visit_Routine(self, node: Routine):
+        # If we're inside a function, mark it as containing routines
+        if self.current_function_name:
+            self.functions_with_routines.add(self.current_function_name)
+            
         # Generate an async function and create a task for concurrent execution
         self.imports.add("import asyncio")
         func_name = generate_unique_name("routine")
@@ -825,7 +894,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             self.top_level_routines.append(func_name)
             return func_name  # Return function name for potential use
         else:
-            return f"asyncio.create_task({func_name}())"
+            # If we're inside a function that's now marked as containing routines,
+            # we can use await instead of create_task since the function will be async
+            if self.current_function_name in self.functions_with_routines:
+                return f"await {func_name}()"
+            else:
+                return f"asyncio.create_task({func_name}())"
 
     def visit_Await(self, node: Await):
         # Special case: await [future1, future2] should become await asyncio.gather(future1, future2)
