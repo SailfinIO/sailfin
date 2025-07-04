@@ -17,9 +17,10 @@ class ASTValidator:
         if t in self.current_type_params:
             return True
 
-        # This regex allows one or more type segments (identifiers with optional array notation)
+        # This regex allows one or more type segments (identifiers with optional array notation and optional '?' suffix)
         # separated by union (|) or intersection (&) operators.
-        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)(?:[|&][A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$'
+        # Now supports: TypeName, TypeName[], TypeName?, TypeName[]?, A|B, A&B, etc.
+        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*\??)(?:[|&][A-Za-z_][A-Za-z0-9_]*(?:\[\])*\??)*$'
         return re.fullmatch(pattern, t) is not None
 
     def validate(self, node: ASTNode):
