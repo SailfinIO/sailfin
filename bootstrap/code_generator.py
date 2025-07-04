@@ -339,6 +339,23 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             obj = self.visit(node.func_name.object_)
             return f"list(filter({args}, {obj}))"
 
+        # Special case: array.map(lambda) becomes list(map(lambda, array))
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "map":
+            obj = self.visit(node.func_name.object_)
+            return f"list(map({args}, {obj}))"
+
+        # Special case: array.reduce(initial, lambda) becomes functools.reduce(lambda, array, initial)
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "reduce":
+            self.imports.add("import functools")
+            obj = self.visit(node.func_name.object_)
+            arg_list = [self.visit(arg) for arg in node.arguments]
+            if len(arg_list) == 2:
+                initial, reducer = arg_list
+                return f"functools.reduce({reducer}, {obj}, {initial})"
+            else:
+                # If no initial value provided, use default reduce behavior
+                return f"functools.reduce({args}, {obj})"
+
         # Special case: array.concat(other) becomes array + other (but as an expression)
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "concat":
             obj = self.visit(node.func_name.object_)
