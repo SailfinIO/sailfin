@@ -7,6 +7,7 @@ import os
 import sys
 import glob
 import subprocess
+import argparse
 from typing import List, Dict, Tuple
 
 
@@ -20,7 +21,7 @@ def run_example(path_to_bootstrap: str, example_file: str) -> Tuple[bool, str, s
     return proc.returncode == 0, proc.stdout, proc.stderr
 
 
-def test_directory(bootstrap_script: str, examples_dir: str) -> Dict[str, any]:
+def test_directory(bootstrap_script: str, examples_dir: str, quiet: bool = False) -> Dict[str, any]:
     """Test all examples in a directory and return results."""
     # Find all .sfn files recursively
     pattern = os.path.join(examples_dir, "**", "*.sfn")
@@ -45,14 +46,16 @@ def test_directory(bootstrap_script: str, examples_dir: str) -> Dict[str, any]:
 
         if success:
             passed.append(filename)
-            print(f"✓ {filename}")
+            if not quiet:
+                print(f"✓ {filename}")
         else:
             failed.append({
                 'file': filename,
                 'stdout': stdout,
                 'stderr': stderr
             })
-            print(f"✗ {filename}")
+            if not quiet:
+                print(f"✗ {filename}")
 
     return {
         'directory': os.path.basename(examples_dir),
@@ -65,24 +68,49 @@ def test_directory(bootstrap_script: str, examples_dir: str) -> Dict[str, any]:
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Test Sailfin examples')
+    parser.add_argument('--dir', '-d',
+                        help='Test only specific directory (e.g., "basics", "advanced")')
+    parser.add_argument('--ci', action='store_true',
+                        help='CI mode: exit 0 only if all working directories pass (ignore unimplemented features)')
+    parser.add_argument('--strict', action='store_true',
+                        help='Strict mode: exit 0 only if ALL examples pass')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                        help='Quiet mode: only show summary')
+
+    args = parser.parse_args()
+
     # Locate bootstrap script and examples directory
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
     examples_root = os.path.join(repo_root, "examples")
 
-    # Find all example subdirectories
-    example_dirs = []
-    for item in os.listdir(examples_root):
-        full_path = os.path.join(examples_root, item)
-        if os.path.isdir(full_path) and item != '__pycache__':
-            example_dirs.append(full_path)
+    # Find example directories to test
+    if args.dir:
+        # Test specific directory
+        target_dir = os.path.join(examples_root, args.dir)
+        if not os.path.isdir(target_dir):
+            print(f"❌ Directory not found: {target_dir}")
+            sys.exit(1)
+        example_dirs = [target_dir]
+    else:
+        # Find all example subdirectories
+        example_dirs = []
+        for item in os.listdir(examples_root):
+            full_path = os.path.join(examples_root, item)
+            if os.path.isdir(full_path) and item != '__pycache__':
+                example_dirs.append(full_path)
 
     if not example_dirs:
         print("No example directories found.")
         sys.exit(1)
 
-    print("🚀 Testing Sailfin Examples")
-    print("=" * 50)
+    if not args.quiet:
+        if args.dir:
+            print(f"🚀 Testing Sailfin Examples: {args.dir}")
+        else:
+            print("🚀 Testing Sailfin Examples")
+        print("=" * 50)
 
     all_results = []
     total_files = 0
@@ -91,20 +119,22 @@ def main():
 
     for examples_dir in sorted(example_dirs):
         dir_name = os.path.basename(examples_dir)
-        print(f"\n📁 Testing {dir_name}/")
-        print("-" * 30)
+        if not args.quiet:
+            print(f"\n📁 Testing {dir_name}/")
+            print("-" * 30)
 
-        results = test_directory(bootstrap_script, examples_dir)
+        results = test_directory(bootstrap_script, examples_dir, args.quiet)
         all_results.append(results)
 
         total_files += results['total']
         total_passed += results['passed']
         total_failed += results['failed']
 
-        if results['total'] == 0:
-            print(f"   No .sfn files found")
-        else:
-            print(f"   {results['passed']}/{results['total']} passed")
+        if not args.quiet:
+            if results['total'] == 0:
+                print(f"   No .sfn files found")
+            else:
+                print(f"   {results['passed']}/{results['total']} passed")
 
     print("\n" + "=" * 50)
     print("📊 SUMMARY")
