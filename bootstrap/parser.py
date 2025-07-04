@@ -480,6 +480,14 @@ def p_array_elements_single(p):
     p[0] = [p[1]]
 
 
+# -------------------- Parallel Expressions -------------------- #
+
+
+def p_expression_parallel(p):
+    'expression : PARALLEL LBRACKET array_elements RBRACKET'
+    p[0] = ParallelExpression(tasks=p[3])
+
+
 # -------------------- Dictionary Literals -------------------- #
 
 
@@ -1052,6 +1060,13 @@ def p_primary_expression_routine_named_block_expression(p):
 def p_postfix_expression_index(p):
     '''postfix_expression : postfix_expression LBRACKET expression RBRACKET'''
     p[0] = ArrayIndexing(object_=p[1], index=p[3])
+
+
+def p_primary_expression_generic_call(p):
+    '''primary_expression : IDENTIFIER LT type_args GT LPAREN arguments RPAREN'''
+    # Handle generic constructor calls like Channel<number>(10)
+    type_name = TypeApplication(base=Identifier(name=p[1]), type_args=p[3], arguments=[])
+    p[0] = FunctionCall(func_name=type_name, arguments=p[6])
 
 
 def p_postfix_expression(p):

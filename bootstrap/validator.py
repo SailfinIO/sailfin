@@ -211,6 +211,9 @@ class ASTValidator:
         elif isinstance(node, ArrayLiteral):
             for element in node.elements:
                 self.validate(element)
+        elif isinstance(node, ParallelExpression):
+            for task in node.tasks:
+                self.validate(task)
         elif isinstance(node, DictionaryLiteral):
             for key, value in node.pairs:
                 self.validate(key)

@@ -11,8 +11,8 @@ fn computeTask2() -> number {
 }
 
 let results: number[] = parallel [
-    fn() -> number { return computeTask1(); },
-    fn() -> number { return computeTask2(); }
+    lambda () -> number { return computeTask1(); },
+    lambda () -> number { return computeTask2(); }
 ];
 
 print.info("Results: {{results}}");

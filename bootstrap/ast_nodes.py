@@ -307,6 +307,11 @@ class ArrayLiteral(Expression):
 
 
 @dataclass
+class ParallelExpression(Expression):
+    tasks: List[Expression]
+
+
+@dataclass
 class DictionaryLiteral(Expression):
     pairs: List[Tuple[Expression, Expression]]  # List of (key, value) pairs
 

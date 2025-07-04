@@ -150,7 +150,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 # Check if main function should be async (explicitly marked or contains routines)
                 if main_function.is_async or 'main' in self.functions_with_routines:
                     self.imports.add("import asyncio")
-                    self.code.append('    asyncio.run(main())')
+                    if has_routines:
+                        # If we have both main and routines, run them concurrently
+                        self.code.append('    # Run main and top-level routines concurrently')
+                        self.code.append('    async def run_all():')
+                        routine_calls = [f'{routine}()' for routine in self.top_level_routines]
+                        all_calls = routine_calls + ['main()']
+                        self.code.append(f'        await asyncio.gather({", ".join(all_calls)})')
+                        self.code.append('    asyncio.run(run_all())')
+                    else:
+                        self.code.append('    asyncio.run(main())')
                 else:
                     self.code.append('    main()')
             elif has_routines:
@@ -339,6 +348,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             self.imports.add("import asyncio")
             return "asyncio.Queue()"
 
+        # Special case: Channel<T>(...) constructor becomes asyncio.Queue(...)
+        if isinstance(node.func_name, TypeApplication) and isinstance(node.func_name.base, Identifier) and node.func_name.base.name == "Channel":
+            self.imports.add("import asyncio")
+            return f"asyncio.Queue({args})"
+
         # Special case: array.filter(lambda) becomes list(filter(lambda, array))
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "filter":
             obj = self.visit(node.func_name.object_)
@@ -367,9 +381,18 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             return f"({obj} + {args})"
 
         # Special case: channel.send(value) becomes channel.put_nowait(value)
+        # But NOT for WebSocket clients or other objects
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "send":
             obj = self.visit(node.func_name.object_)
-            return f"{obj}.put_nowait({args})"
+            # Only apply this transformation to variables that clearly look like channels
+            if isinstance(node.func_name.object_, Identifier):
+                var_name = node.func_name.object_.name.lower()
+                # Only transform if the variable name suggests it's a channel
+                # or if we know it was created via Channel() constructor
+                if ("channel" in var_name or var_name in ["ch", "c", "chan", "tasks", "queue", "q"]):
+                    return f"{obj}.put_nowait({args})"
+            # For all other cases (like WebSocket clients), keep the original .send()
+            return f"{obj}.send({args})"
 
         # Special case: channel.receive() becomes channel.get()
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "receive":
@@ -410,6 +433,36 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         elements = ', '.join([self.visit(element)
                              for element in node.elements])
         return f"[{elements}]"
+
+    def visit_ParallelExpression(self, node: ParallelExpression):
+        # Ensure asyncio is imported
+        self.imports.add("import asyncio")
+        
+        # Generate async wrapper function
+        wrapper_name = generate_unique_name("parallel_wrapper")
+        
+        # Generate function calls for each task
+        task_calls = []
+        for task in node.tasks:
+            if isinstance(task, FunctionExpression):
+                # Generate async lambda for parallel execution
+                task_name = self.visit_async_function_expression(task)
+                task_calls.append(f"{task_name}()")
+            else:
+                # For other expressions, just call them
+                task_calls.append(self.visit(task))
+        
+        # Use asyncio.gather to run tasks in parallel
+        tasks_str = ', '.join(task_calls)
+        
+        # Generate async wrapper function
+        self.code.append(f"{self.indent()}async def {wrapper_name}():")
+        self.indent_level += 1
+        self.code.append(f"{self.indent()}return await asyncio.gather({tasks_str})")
+        self.indent_level -= 1
+        
+        # Return call to asyncio.run with the wrapper
+        return f"asyncio.run({wrapper_name}())"
 
     def visit_DictionaryLiteral(self, node: DictionaryLiteral):
         pairs = []
@@ -887,7 +940,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return f'{{"type": "{node.variant_name}", {fields}}}'
 
     def visit_TypeApplication(self, node: TypeApplication):
-        # Generate generic constructor or call with type arguments
+        # Generate generic type annotation with type arguments
         base = self.map_type(node.base) if isinstance(
             node.base, ASTNode) else str(node.base)
         args_types = ', '.join(self.map_type(arg) for arg in node.type_args)
@@ -968,6 +1021,65 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             # Return the function name as the expression value
             return func_name
 
+    def visit_async_function_expression(self, node: FunctionExpression):
+        """Generate async function expressions for parallel execution"""
+        # Handle parameters
+        param_strings = []
+        for param in node.params:
+            # Parameters can be 2-tuples (name, type) or 3-tuples (name, type, default)
+            if len(param) == 2:
+                name, param_type = param
+            else:
+                name, param_type, _ = param  # Ignore default for function expressions
+            param_str = self.visit(name)
+            param_strings.append(param_str)
+        params = ', '.join(param_strings)
+
+        # For simple single-expression functions, use async lambda
+        if (len(node.body) == 1 and
+                isinstance(node.body[0], (ExpressionStatement, ReturnStatement))):
+            # Extract the expression
+            if isinstance(node.body[0], ExpressionStatement):
+                expr = self.visit(node.body[0].expression)
+            else:  # ReturnStatement
+                expr = self.visit(
+                    node.body[0].expression) if node.body[0].expression else "None"
+
+            # Use async lambda for parallel execution
+            # Since Python doesn't have async lambdas, we create an async function
+            func_name = generate_unique_name("async_task")
+            if params:
+                self.code.append(f"{self.indent()}async def {func_name}({params}):")
+            else:
+                self.code.append(f"{self.indent()}async def {func_name}():")
+            self.indent_level += 1
+            self.code.append(f"{self.indent()}return {expr}")
+            self.indent_level -= 1
+            return func_name
+        else:
+            # For complex functions, generate an inline async function definition
+            func_name = generate_unique_name("async_task")
+
+            # Generate return type annotation if present
+            if node.return_type:
+                mapped_return = self.map_type(node.return_type)
+                return_type = f" -> {mapped_return}"
+            else:
+                return_type = ""
+
+            # Generate the async function definition
+            self.code.append(
+                f"{self.indent()}async def {func_name}({params}){return_type}:")
+            self.indent_level += 1
+
+            # Generate function body
+            for stmt in node.body:
+                self.visit(stmt)
+
+            self.indent_level -= 1
+
+            return func_name
+
     def visit_AsyncBlock(self, node: AsyncBlock):
         # Generate an async function and return a coroutine
         self.imports.add("import asyncio")
@@ -1035,7 +1147,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # If we're inside a function, create and return a task for concurrent execution
         if not old_in_function:
             self.top_level_routines.append(func_name)
-            return func_name  # Return function name for potential use
+            return ""  # Return empty string to avoid generating immediate code
         else:
             # If we're inside a function that's now marked as containing routines,
             # we can use await instead of create_task since the function will be async

@@ -36,6 +36,7 @@ reserved = {
     'is': 'IS',
     'new': 'NEW',
     'routine': 'ROUTINE',
+    'parallel': 'PARALLEL',
 }
 
 tokens = [
