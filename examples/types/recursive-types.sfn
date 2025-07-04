@@ -14,10 +14,10 @@ fn traverse(node: TreeNode?) -> void {
 }
 
 fn main() -> void {
-    let root: TreeNode = TreeNode {
+    let root: TreeNode = new TreeNode {
         value: 10,
-        left: TreeNode { value: 5, left: null, right: null },
-        right: TreeNode { value: 15, left: null, right: null },
+        left: new TreeNode { value: 5, left: null, right: null },
+        right: new TreeNode { value: 15, left: null, right: null }
     };
 
     traverse(root);
