@@ -265,7 +265,8 @@ def p_struct_declaration(p):
     type_params = p[3]
     interfaces = p[4]
     members = p[6]
-    p[0] = StructDeclaration(name=name, members=members, type_params=type_params, interfaces=interfaces)
+    p[0] = StructDeclaration(name=name, members=members,
+                             type_params=type_params, interfaces=interfaces)
 
 
 def p_type_params_opt(p):

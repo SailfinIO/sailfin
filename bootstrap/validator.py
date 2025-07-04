@@ -12,11 +12,11 @@ class ASTValidator:
         # Convert AST node to string if needed
         if hasattr(t, '__class__') and not isinstance(t, str):
             t = stringify_type(t)
-        
+
         # Check if t is a type parameter
         if t in self.current_type_params:
             return True
-            
+
         # This regex allows one or more type segments (identifiers with optional array notation)
         # separated by the union operator.
         pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)(?:\|[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$'
@@ -74,19 +74,20 @@ class ASTValidator:
         elif isinstance(node, StructDeclaration):
             if not node.name.isidentifier():
                 raise ValidationError(f"Invalid struct name: {node.name}")
-            
+
             # Validate type parameters
             for type_param in node.type_params:
                 if not type_param.isidentifier():
-                    raise ValidationError(f"Invalid type parameter: {type_param}")
-            
+                    raise ValidationError(
+                        f"Invalid type parameter: {type_param}")
+
             # Set current type parameters context
             prev_type_params = self.current_type_params.copy()
             self.current_type_params.update(node.type_params)
-            
+
             for member in node.members:
                 self.validate(member)
-                
+
             # Restore previous type parameters context
             self.current_type_params = prev_type_params
         # In the validator for FieldDeclaration:

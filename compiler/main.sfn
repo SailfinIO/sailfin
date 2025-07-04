@@ -1,10 +1,10 @@
 // main.sfn
 
 // Import the modules that you have written.
-import "lexer.sfn" as Lexer;
-import "parser.sfn" as Parser;
-import "ast.sfn" as AST;
-import "interpreter.sfn" as Interpreter;
+import { Lexer } from "lexer.sfn";
+import { Parser } from "parser.sfn";
+import { Program } from "ast.sfn";
+import { Interpreter } from "interpreter.sfn";
 
 // Main entry point.
 fn main() {
@@ -16,7 +16,7 @@ fn main() {
     
     // 2. Parsing: create a parser and generate the AST.
     let parser: Parser = Parser.newParser(tokens);
-    let program: AST.Program = Parser.parseProgram(parser);
+    let program: Program = Parser.parseProgram(parser);
     
     // 3. Interpreting: run the AST.
     Interpreter.interpret(program);

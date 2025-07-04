@@ -174,7 +174,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         type_var_declarations = []
         if self.type_vars:
             for type_var in sorted(self.type_vars):
-                type_var_declarations.append(f"{type_var} = TypeVar('{type_var}')")
+                type_var_declarations.append(
+                    f"{type_var} = TypeVar('{type_var}')")
 
         # Prepare the imports and type variable declarations
         imports_and_type_vars = [future_import] + other_imports
@@ -493,25 +494,25 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_StructDeclaration(self, node: StructDeclaration):
         # Ensure the dataclass decorator is available.
         self.imports.add("from dataclasses import dataclass")
-        
+
         # Add TypeVar imports for generic types and track type variables
         if node.type_params:
             self.imports.add("from typing import TypeVar, Generic")
             for type_param in node.type_params:
                 self.type_vars.add(type_param)
-        
+
         self.code.append(f"{self.indent()}@dataclass")
-        
+
         # Build inheritance clause
         base_classes = []
         if node.type_params:
             base_classes.append("Generic[" + ", ".join(node.type_params) + "]")
         if node.interfaces:
             base_classes.extend(node.interfaces)
-        
+
         inheritance = f"({', '.join(base_classes)})" if base_classes else ''
         self.code.append(f"{self.indent()}class {node.name}{inheritance}:")
-        
+
         self.indent_level += 1
         if not node.members:
             self.code.append(f"{self.indent()}pass")

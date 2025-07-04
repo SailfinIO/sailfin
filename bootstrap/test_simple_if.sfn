@@ -1,0 +1,5 @@
+fn check() -> void {
+    if true {
+        print("ok");
+    }
+}
