@@ -20,7 +20,7 @@ fn main() -> void {
     print.info("  }");
     print.info("");
     print.info("  match user {");
-    print.info("      Option.Some(name) => print.info(\"Found: {{name}}\"),");
+    print.info("      Option.Some(name) => print.info(\"Found: {name}\"),");
     print.info("      Option.None => print.info(\"Not found\"),");
     print.info("  }");
 }

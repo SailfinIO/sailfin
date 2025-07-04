@@ -1,15 +1,17 @@
 // examples/basics/for-loops.sfn
-// Note: For loops are not yet implemented in the bootstrap compiler
-// This example shows the intended syntax when for loops are available
+// Demonstrating iteration patterns using while loops
+// (for loops are not yet implemented in the bootstrap compiler)
 
 fn main() -> void {
-    print.info("For loops are not yet implemented in the bootstrap compiler.");
-    print.info("This file shows the intended syntax:");
-    print.info("  for i in 0..5 {");
-    print.info("      print.info(\"Number: {i}\");");
-    print.info("  }");
+    print.info("Demonstrating iteration patterns:");
+    
+    // Simulate a for loop using while loop
+    let i: number = 0;
+    while i < 5 {
+        print.info("Number: {{i}}");
+        i = i + 1;
+    }
+    
     print.info("");
-    print.info("  for item in array {");
-    print.info("      print.info(\"Item: {{item}}\");");
-    print.info("  }");
+    print.info("Iteration complete!");
 }

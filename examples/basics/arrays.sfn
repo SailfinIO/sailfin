@@ -6,13 +6,20 @@ fn main() -> void {
     let names: string[] = ["Alice", "Bob", "Charlie"];
     let empty: number[] = [];
 
-    // Array access
+    // Array access - demonstrating real array indexing
     print.info("First number: {{numbers[0]}}");
     print.info("Second name: {{names[1]}}");
     print.info("Third number: {{numbers[2]}}");
-
-    // Show array contents
-    print.info("Numbers array: [1, 2, 3, 4, 5]");
-    print.info("Names array: [Alice, Bob, Charlie]");
-    print.info("Empty array created successfully");
+    print.info("Last number: {{numbers[4]}}");
+    print.info("Last name: {{names[2]}}");
+    
+    // Array element manipulation examples
+    let firstElement: number = numbers[0];
+    let middleName: string = names[1];
+    
+    print.info("Stored first element: {{firstElement}}");
+    print.info("Stored middle name: {{middleName}}");
+    
+    // Show that empty array works
+    print.info("Empty array has been created");
 }

@@ -8,9 +8,9 @@ fn main() -> void {
     print.info("");
     print.info("  let numStr: string = \"42\";");
     print.info("  let num: number = parseInt(numStr);");
-    print.info("  print.info(\"Converted: {{num}}\");");
+    print.info("  print.info(\"Converted: {num}\");");
     print.info("");
     print.info("  let value: number = 123;");
     print.info("  let valueStr: string = toString(value);");
-    print.info("  print.info(\"As string: {{valueStr}}\");");
+    print.info("  print.info(\"As string: {valueStr}\");");
 }
