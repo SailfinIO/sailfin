@@ -60,6 +60,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(t, TypeApplication):
             base_str = self.map_type(t.base) if isinstance(
                 t.base, (str, ASTNode)) else self.visit(t.base)
+
+            # Special case: Channel<T> becomes asyncio.Queue
+            if (isinstance(t.base, Identifier) and t.base.name == "Channel") or base_str == "Channel":
+                self.imports.add("import asyncio")
+                return "asyncio.Queue"
+
             args_str = ', '.join([self.map_type(arg) for arg in t.type_args])
             return f"{base_str}[{args_str}]"
         # Handle UnionType nodes
@@ -152,11 +158,14 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     self.imports.add("import asyncio")
                     if has_routines:
                         # If we have both main and routines, run them concurrently
-                        self.code.append('    # Run main and top-level routines concurrently')
+                        self.code.append(
+                            '    # Run main and top-level routines concurrently')
                         self.code.append('    async def run_all():')
-                        routine_calls = [f'{routine}()' for routine in self.top_level_routines]
+                        routine_calls = [
+                            f'{routine}()' for routine in self.top_level_routines]
                         all_calls = routine_calls + ['main()']
-                        self.code.append(f'        await asyncio.gather({", ".join(all_calls)})')
+                        self.code.append(
+                            f'        await asyncio.gather({", ".join(all_calls)})')
                         self.code.append('    asyncio.run(run_all())')
                     else:
                         self.code.append('    asyncio.run(main())')
@@ -325,6 +334,29 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return interpolate_string(node.value)
 
     def visit_BinOp(self, node: BinOp):
+        # Special case: fix misparsed generic constructor calls
+        # Pattern: Channel<number>(10) gets parsed as ((Channel < number) > 10)
+        if (node.operator == '>' and
+            isinstance(node.left, BinOp) and node.left.operator == '<' and
+            isinstance(node.left.left, Identifier) and
+            isinstance(node.left.right, Identifier) and
+                isinstance(node.right, Number)):
+
+            # This is likely a misparsed generic constructor call
+            # Convert ((Channel < number) > 10) to Channel<number>(10)
+            type_name = node.left.left.name  # "Channel"
+            type_arg = node.left.right.name  # "number"
+            first_arg = node.right.value      # 10
+
+            # Special case for Channel<T>(args) -> asyncio.Queue(args)
+            if type_name == "Channel":
+                self.imports.add("import asyncio")
+                return f"asyncio.Queue({first_arg})"
+
+            # For other generic types, we'd handle them here
+            # For now, just return a generic constructor call
+            return f"{type_name}({first_arg})"
+
         left = self.visit(node.left)
         right = self.visit(node.right)
         operator = node.operator
@@ -340,6 +372,30 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         return f"({node.operator} {operand})"
 
     def visit_FunctionCall(self, node: FunctionCall):
+        # Special case: fix misparsed generic constructor calls
+        # Pattern: Channel<number>(10) gets parsed as ((Channel < number) > 10)
+        # We detect this pattern and fix it
+        if (isinstance(node.func_name, BinOp) and node.func_name.operator == '>' and
+            isinstance(node.func_name.left, BinOp) and node.func_name.left.operator == '<' and
+            isinstance(node.func_name.left.left, Identifier) and
+            isinstance(node.func_name.left.right, Identifier) and
+                isinstance(node.func_name.right, Number)):
+
+            # This is likely a misparsed generic constructor call
+            # Convert ((Channel < number) > 10) to Channel<number>(10)
+            type_name = node.func_name.left.left.name  # "Channel"
+            type_arg = node.func_name.left.right.name  # "number"
+            first_arg = node.func_name.right.value      # 10
+
+            # Special case for Channel<T>(args) -> asyncio.Queue(args)
+            if type_name == "Channel":
+                self.imports.add("import asyncio")
+                return f"asyncio.Queue({first_arg})"
+
+            # For other generic types, we'd handle them here
+            # For now, just return a generic constructor call
+            return f"{type_name}({first_arg})"
+
         func_name = self.visit(node.func_name)
         args = ', '.join([self.visit(arg) for arg in node.arguments])
 
@@ -389,7 +445,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 var_name = node.func_name.object_.name.lower()
                 # Only transform if the variable name suggests it's a channel
                 # or if we know it was created via Channel() constructor
-                if ("channel" in var_name or var_name in ["ch", "c", "chan", "tasks", "queue", "q"]):
+                if ("channel" in var_name or "buffer" in var_name or var_name in ["ch", "c", "chan", "tasks", "queue", "q"]):
                     return f"{obj}.put_nowait({args})"
             # For all other cases (like WebSocket clients), keep the original .send()
             return f"{obj}.send({args})"
@@ -398,6 +454,15 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "receive":
             obj = self.visit(node.func_name.object_)
             return f"{obj}.get()"
+
+        # Special case: sleep(ms) becomes await asyncio.sleep(ms/1000)
+        if isinstance(node.func_name, Identifier) and node.func_name.name == "sleep":
+            self.imports.add("import asyncio")
+            if args:
+                # Convert milliseconds to seconds
+                return f"await asyncio.sleep({args} / 1000)"
+            else:
+                return "await asyncio.sleep(0)"
 
         return f"{func_name}({args})"
 
@@ -437,10 +502,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_ParallelExpression(self, node: ParallelExpression):
         # Ensure asyncio is imported
         self.imports.add("import asyncio")
-        
+
         # Generate async wrapper function
         wrapper_name = generate_unique_name("parallel_wrapper")
-        
+
         # Generate function calls for each task
         task_calls = []
         for task in node.tasks:
@@ -451,16 +516,17 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             else:
                 # For other expressions, just call them
                 task_calls.append(self.visit(task))
-        
+
         # Use asyncio.gather to run tasks in parallel
         tasks_str = ', '.join(task_calls)
-        
+
         # Generate async wrapper function
         self.code.append(f"{self.indent()}async def {wrapper_name}():")
         self.indent_level += 1
-        self.code.append(f"{self.indent()}return await asyncio.gather({tasks_str})")
+        self.code.append(
+            f"{self.indent()}return await asyncio.gather({tasks_str})")
         self.indent_level -= 1
-        
+
         # Return call to asyncio.run with the wrapper
         return f"asyncio.run({wrapper_name}())"
 
@@ -1049,7 +1115,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             # Since Python doesn't have async lambdas, we create an async function
             func_name = generate_unique_name("async_task")
             if params:
-                self.code.append(f"{self.indent()}async def {func_name}({params}):")
+                self.code.append(
+                    f"{self.indent()}async def {func_name}({params}):")
             else:
                 self.code.append(f"{self.indent()}async def {func_name}():")
             self.indent_level += 1

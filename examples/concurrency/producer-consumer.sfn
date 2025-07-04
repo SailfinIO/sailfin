@@ -4,7 +4,7 @@ let buffer: Channel<number> = Channel<number>(10); // Bounded buffer with capaci
 
 // Producer routine
 routine {
-    for i in 1..20 {
+    for i in 1..7 {
         print.info("Producing {{i}}");
         buffer.send(i);
         sleep(500);
@@ -13,7 +13,7 @@ routine {
 
 // Consumer routine
 routine {
-    while true {
+    for _ in 1..7 {
         let item: number = await buffer.receive();
         print.info("Consumed {{item}}");
         sleep(1000);
