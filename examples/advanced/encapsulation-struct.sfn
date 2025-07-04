@@ -6,15 +6,17 @@ struct BankAccount {
     // Constructor with validation
     fn new(initialBalance: number) -> BankAccount {
         if initialBalance < 0 {
-            throw Error("Initial balance cannot be negative.");
+            print.info("Error: Initial balance cannot be negative.");
+            return new BankAccount { balance: 0 };
         }
-        return BankAccount { balance: initialBalance };
+        return new BankAccount { balance: initialBalance };
     }
 
     // Deposit money into the account
     fn deposit(self, amount: number) -> void {
         if amount <= 0 {
-            throw Error("Deposit amount must be positive.");
+            print.info("Error: Deposit amount must be positive.");
+            return;
         }
         self.balance += amount;
     }
@@ -22,10 +24,12 @@ struct BankAccount {
     // Withdraw money from the account
     fn withdraw(self, amount: number) -> void {
         if amount <= 0 {
-            throw Error("Withdrawal amount must be positive.");
+            print.info("Error: Withdrawal amount must be positive.");
+            return;
         }
         if amount > self.balance {
-            throw Error("Insufficient funds.");
+            print.info("Error: Insufficient funds.");
+            return;
         }
         self.balance -= amount;
     }

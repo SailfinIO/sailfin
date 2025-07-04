@@ -8,7 +8,7 @@ struct Car implements Driveable {
     brand: string;
 
     fn new(brand: string) -> Car {
-        return Car { brand };
+        return new Car { brand };
     }
 
     fn drive(self) -> string {
@@ -20,7 +20,7 @@ struct Bike implements Driveable {
     brand: string;
 
     fn new(brand: string) -> Bike {
-        return Bike { brand };
+        return new Bike { brand };
     }
 
     fn drive(self) -> string {

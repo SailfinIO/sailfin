@@ -5,22 +5,24 @@ struct User {
     age: number;
 }
 
-fn process(input: string | number) -> void {
-    if input is string {
-        print.info("It's a string: {{input}}");
-    } else {
-        print.info("It's a number: {{input}}");
-    }
+fn processString(input: string) -> void {
+    print.info("It's a string: {{input}}");
+}
+
+fn processNumber(input: number) -> void {
+    print.info("It's a number: {{input}}");
 }
 
 fn main() -> void {
-    process("Sail");
-    process(42);
+    processString("Sail");
+    processNumber(42);
 
-    let user: User = User { name: "Bob", age: 20 };
-    match user {
-        User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
-        User { name, age } => print.info("Minor user: {{name}}"),
-        _ => print.info("Unknown entity"),
+    let user: User = new User { name: "Bob", age: 20 };
+    
+    // Pattern matching on struct fields
+    if user.age >= 18 {
+        print.info("Adult user: {{user.name}}");
+    } else {
+        print.info("Minor user: {{user.name}}");
     }
 }

@@ -1,23 +1,26 @@
 // examples/advanced/matrix-multiplication.sfn
 
-fn multiply(a: number[][], b: number[][]) -> number[][] {
-    let rowsA: number = a.length;
-    let colsA: number = a[0].length;
-    let colsB: number = b[0].length;
-
-    // Using a range expression (0..rowsA) with functional constructs
-    return (0..rowsA).map(fn(row: number) -> number[] {
-        return (0..colsB).map(fn(col: number) -> number {
-            return (0..colsA).reduce(0, fn(acc: number, k: number) -> number {
-                return acc + a[row][k] * b[k][col];
-            });
-        });
-    });
+// Simple 2x2 matrix multiplication example
+fn multiply2x2(a1: number, a2: number, a3: number, a4: number,
+               b1: number, b2: number, b3: number, b4: number) -> void {
+    // Matrix A = [[a1, a2], [a3, a4]]
+    // Matrix B = [[b1, b2], [b3, b4]]
+    
+    // Result[0][0] = a1*b1 + a2*b3
+    let r00: number = a1 * b1 + a2 * b3;
+    // Result[0][1] = a1*b2 + a2*b4
+    let r01: number = a1 * b2 + a2 * b4;
+    // Result[1][0] = a3*b1 + a4*b3
+    let r10: number = a3 * b1 + a4 * b3;
+    // Result[1][1] = a3*b2 + a4*b4
+    let r11: number = a3 * b2 + a4 * b4;
+    
+    print.info("Matrix multiplication result:");
+    print.info("[[{{r00}}, {{r01}}], [{{r10}}, {{r11}}]]");
 }
 
 fn main() -> void {
-    let a: number[][] = [[1, 2], [3, 4]];
-    let b: number[][] = [[5, 6], [7, 8]];
-    let result: number[][] = multiply(a, b);
-    print.info("Result: {{result}}");
+    // A = [[1, 2], [3, 4]]
+    // B = [[5, 6], [7, 8]]
+    multiply2x2(1, 2, 3, 4, 5, 6, 7, 8);
 }
