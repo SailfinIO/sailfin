@@ -296,7 +296,7 @@ class ASTValidator:
                     param_name, param_type = param
                 else:
                     param_name, param_type, _ = param
-                    
+
                 if not param_name.name.isidentifier():
                     raise ValidationError(
                         f"Invalid parameter name: {param_name.name}")
