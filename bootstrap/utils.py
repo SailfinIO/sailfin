@@ -26,7 +26,7 @@ def interpolate_string(s):
                     # Generate safe access that works for both dicts and objects
                     return "{" + f"({obj}['{member}'] if isinstance({obj}, dict) else {obj}.{member})" + "}"
             return "{" + expr + "}"
-        
+
         interpolated = pattern.sub(replace_member_access, s)
         return f"f\"{interpolated}\""
     else:
