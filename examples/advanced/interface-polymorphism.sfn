@@ -7,8 +7,8 @@ interface Driveable {
 struct Car implements Driveable {
     brand: string;
 
-    fn new(brand: string) -> Car {
-        return new Car { brand };
+    fn create(brand: string) -> Car {
+        return new Car { brand: brand };
     }
 
     fn drive(self) -> string {
@@ -19,8 +19,8 @@ struct Car implements Driveable {
 struct Bike implements Driveable {
     brand: string;
 
-    fn new(brand: string) -> Bike {
-        return new Bike { brand };
+    fn create(brand: string) -> Bike {
+        return new Bike { brand: brand };
     }
 
     fn drive(self) -> string {
@@ -29,9 +29,9 @@ struct Bike implements Driveable {
 }
 
 fn main() -> void {
-    let vehicle1: Driveable = Car.new("Tesla");
-    let vehicle2: Driveable = Bike.new("Yamaha");
+    let car: Car = new Car { brand: "Tesla" };
+    let bike: Bike = new Bike { brand: "Yamaha" };
 
-    print.info(vehicle1.drive()); // Outputs: Driving a Tesla car.
-    print.info(vehicle2.drive()); // Outputs: Riding a Yamaha bike.
+    print.info(car.drive()); // Outputs: Driving a Tesla car.
+    print.info(bike.drive()); // Outputs: Riding a Yamaha bike.
 }
