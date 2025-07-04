@@ -111,7 +111,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             if isinstance(stmt, FunctionDeclaration) and stmt.name == 'main':
                 main_function = stmt
                 break
-        
+
         has_main = main_function is not None
 
         # Add test runner and main execution
@@ -167,9 +167,14 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_ImportStatement(self, node: ImportStatement):
         items = ', '.join(node.items)
         source = node.source
-        # Handle relative imports if needed
-        if source.startswith('./') or source.startswith('../'):
+
+        # Handle built-in sailfin modules
+        if source.startswith('sailfin/'):
+            source = source.replace('/', '.')
+        # Handle relative imports
+        elif source.startswith('./') or source.startswith('../'):
             source = source.replace('/', '.').rstrip('.sfn')
+
         self.code.append(f"from {source} import {items}")
 
     def visit_PrintStatement(self, node: PrintStatement):
@@ -749,22 +754,22 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Generate an async function and return a coroutine
         self.imports.add("import asyncio")
         func_name = generate_unique_name("async_block")
-        
+
         # Generate async function definition
         self.code.append(f"{self.indent()}async def {func_name}():")
         self.indent_level += 1
-        
+
         # Track that we're now inside a function
         old_in_function = self.in_function
         self.in_function = True
-        
+
         if not node.body:
             self.code.append(f"{self.indent()}pass")
         else:
             # Process all statements except the last one
             for stmt in node.body[:-1]:
                 self.visit(stmt)
-            
+
             # For the last statement, if it's an expression statement, return its value
             last_stmt = node.body[-1]
             if isinstance(last_stmt, ExpressionStatement):
@@ -772,11 +777,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 self.code.append(f"{self.indent()}return {expr_result}")
             else:
                 self.visit(last_stmt)
-        
+
         # Restore function context
         self.in_function = old_in_function
         self.indent_level -= 1
-        
+
         # Return the coroutine call
         return f"{func_name}()"
 
@@ -784,8 +789,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Special case: await [future1, future2] should become await asyncio.gather(future1, future2)
         if isinstance(node.expression, ArrayLiteral):
             self.imports.add("import asyncio")
-            elements = ', '.join([self.visit(element) for element in node.expression.elements])
+            elements = ', '.join([self.visit(element)
+                                 for element in node.expression.elements])
             return f"await asyncio.gather({elements})"
-        
+
         expr = self.visit(node.expression)
         return f"await {expr}"

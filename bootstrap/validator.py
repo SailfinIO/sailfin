@@ -184,6 +184,16 @@ class ASTValidator:
             ASTValidator.validate(node.iterable)
             for stmt in node.body:
                 ASTValidator.validate(stmt)
+        elif isinstance(node, ImportStatement):
+            # Validate import statements
+            if not isinstance(node.source, str) or not node.source:
+                raise ValidationError(
+                    "Import source must be a non-empty string")
+            if not isinstance(node.items, list) or not node.items:
+                raise ValidationError("Import items must be a non-empty list")
+            for item in node.items:
+                if not isinstance(item, str) or not item.isidentifier():
+                    raise ValidationError(f"Invalid import item: {item}")
         elif isinstance(node, LambdaExpression):
             for param in node.params:
                 param_name, param_type = param

@@ -827,6 +827,7 @@ def p_type_expr_postfix(p):
         # Apply the type suffix to the primary type
         p[0] = _apply_type_suffix(p[1], p[2])
 
+
 def _apply_type_suffix(base_type, suffix):
     """Apply a type suffix to a base type, handling nested suffixes."""
     if isinstance(suffix, ArrayType):

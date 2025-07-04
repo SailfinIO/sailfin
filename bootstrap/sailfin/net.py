@@ -1,0 +1,132 @@
+"""
+Sailfin net module - HTTP and networking utilities.
+"""
+import asyncio
+import aiohttp
+import json
+from typing import Dict, Any, Optional, Union
+from dataclasses import dataclass
+
+
+@dataclass
+class Request:
+    """HTTP Request object."""
+    method: str
+    url: str
+    headers: Dict[str, str]
+    body: Optional[str] = None
+
+
+@dataclass
+class Response:
+    """HTTP Response object."""
+    status: int
+    headers: Dict[str, str]
+    body: str
+
+    @property
+    def json(self) -> Any:
+        """Parse response body as JSON."""
+        return json.loads(self.body)
+
+
+class HttpClient:
+    """HTTP client for making requests."""
+
+    def __init__(self):
+        self._session = None
+
+    async def _get_session(self):
+        """Get or create aiohttp session."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def get(self, url: str, headers: Dict[str, str] = None) -> Response:
+        """Make HTTP GET request."""
+        session = await self._get_session()
+        async with session.get(url, headers=headers or {}) as resp:
+            body = await resp.text()
+            return Response(
+                status=resp.status,
+                headers=dict(resp.headers),
+                body=body
+            )
+
+    async def post(self, url: str, data: Union[str, Dict[str, Any]] = None,
+                   headers: Dict[str, str] = None) -> Response:
+        """Make HTTP POST request."""
+        session = await self._get_session()
+
+        if isinstance(data, dict):
+            data = json.dumps(data)
+            headers = headers or {}
+            headers['Content-Type'] = 'application/json'
+
+        async with session.post(url, data=data, headers=headers or {}) as resp:
+            body = await resp.text()
+            return Response(
+                status=resp.status,
+                headers=dict(resp.headers),
+                body=body
+            )
+
+    async def close(self):
+        """Close the HTTP session."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+
+# Global HTTP client instance
+http = HttpClient()
+
+
+async def serve(handler, host: str = "localhost", port: int = 8000):
+    """
+    Simple HTTP server.
+
+    Args:
+        handler: Async function that takes (request: Request) -> Response
+        host: Host to bind to
+        port: Port to bind to
+    """
+    from aiohttp import web
+
+    async def aiohttp_handler(request):
+        # Convert aiohttp request to Sailfin Request
+        body = await request.text() if request.body_exists else None
+        sailfin_request = Request(
+            method=request.method,
+            url=str(request.url),
+            headers=dict(request.headers),
+            body=body
+        )
+
+        # Call the user handler
+        response = await handler(sailfin_request)
+
+        # Convert Sailfin Response to aiohttp response
+        return web.Response(
+            text=response.body,
+            status=response.status,
+            headers=response.headers
+        )
+
+    app = web.Application()
+    app.router.add_route('*', '/{path:.*}', aiohttp_handler)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    print(f"Server starting on http://{host}:{port}")
+    await site.start()
+
+    # Keep the server running
+    try:
+        await asyncio.Future()  # Run forever
+    except KeyboardInterrupt:
+        print("Server shutting down...")
+    finally:
+        await runner.cleanup()
+        await http.close()
