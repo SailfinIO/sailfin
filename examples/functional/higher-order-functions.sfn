@@ -1,6 +1,8 @@
 // examples/functional/higher-order-functions.sfn
 
-fn apply(value: number, transformer: fn(number) -> number) -> number {
+// Higher-order function that applies a transformer to a value
+// We use any type for the transformer parameter to accept functions/lambdas
+fn apply(value: number, transformer: any) -> number {
     return transformer(value);
 }
 
@@ -9,6 +11,16 @@ fn double(x: number) -> number {
 }
 
 fn main() -> void {
-    let result: number = apply(5, double);
-    print.info("Result: {{result}}"); // Outputs: 10
+    // Using a regular function
+    let result1: number = apply(5, double);
+    print.info("Result with function: {{result1}}"); // Outputs: 10
+    
+    // Using a lambda expression
+    let result2: number = apply(5, lambda(x: number) -> number { return x * 3; });
+    print.info("Result with lambda: {{result2}}"); // Outputs: 15
+    
+    // Another lambda example - square function
+    let square = lambda(x: number) -> number { return x * x; };
+    let result3: number = apply(4, square);
+    print.info("Result with square: {{result3}}"); // Outputs: 16
 }

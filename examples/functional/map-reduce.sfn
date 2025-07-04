@@ -3,8 +3,9 @@
 fn main() -> void {
     let numbers: number[] = [1, 2, 3, 4, 5];
 
-    let squares: number[] = numbers.map(fn(x: number) -> number { return x * x; });
-    let sum: number = squares.reduce(0, fn(acc: number, x: number) -> number { return acc + x; });
+    // Using lambda expressions for higher-order array methods
+    let squares: number[] = numbers.map(lambda(x: number) -> number { return x * x; });
+    let sum: number = squares.reduce(0, lambda(acc: number, x: number) -> number { return acc + x; });
 
     print.info("Sum of squares: {{sum}}"); // Outputs: 55
 }
