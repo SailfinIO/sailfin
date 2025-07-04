@@ -821,7 +821,28 @@ def p_type_suffix(p):
 
 def p_type_expr_postfix(p):
     '''type_expr_postfix : type_primary type_suffix'''
-    p[0] = p[2] or p[1]
+    if p[2] is None:
+        p[0] = p[1]
+    else:
+        # Apply the type suffix to the primary type
+        p[0] = _apply_type_suffix(p[1], p[2])
+
+def _apply_type_suffix(base_type, suffix):
+    """Apply a type suffix to a base type, handling nested suffixes."""
+    if isinstance(suffix, ArrayType):
+        if suffix.element_type is None:
+            # This is a simple array suffix, apply it to the base
+            return ArrayType(element_type=base_type)
+        else:
+            # This is a nested suffix, apply it recursively
+            return ArrayType(element_type=_apply_type_suffix(base_type, suffix.element_type))
+    elif isinstance(suffix, OptionalType):
+        if suffix.base is None:
+            return OptionalType(base=base_type)
+        else:
+            return OptionalType(base=_apply_type_suffix(base_type, suffix.base))
+    else:
+        return suffix
 
 # If you also want to support union and intersection, you can add another level.
 
