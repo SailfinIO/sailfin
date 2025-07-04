@@ -21,6 +21,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.top_level_routines = []  # Track top-level routine function names
         self.functions_with_routines = set()  # Track functions that contain routines
         self.current_function_name = None  # Track the current function being processed
+        self.type_vars = set()  # Track TypeVar declarations needed for generics
 
     def indent(self):
         return '    ' * self.indent_level
@@ -169,8 +170,20 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         other_imports = sorted(
             imp for imp in self.imports if imp != future_import)
 
-        # Prepend the __future__ import and other import statements to the generated code
-        self.code = [future_import] + other_imports + [''] + self.code
+        # Generate TypeVar declarations for generic types
+        type_var_declarations = []
+        if self.type_vars:
+            for type_var in sorted(self.type_vars):
+                type_var_declarations.append(f"{type_var} = TypeVar('{type_var}')")
+
+        # Prepare the imports and type variable declarations
+        imports_and_type_vars = [future_import] + other_imports
+        if type_var_declarations:
+            imports_and_type_vars.extend([''] + type_var_declarations)
+        imports_and_type_vars.append('')
+
+        # Prepend the __future__ import, other imports, and type variables to the generated code
+        self.code = imports_and_type_vars + self.code
 
         return '\n'.join(self.code)
 
@@ -219,6 +232,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             return 'True'
         elif node.name == 'false':
             return 'False'
+        elif node.name == 'null':
+            return 'None'
         return node.name
 
     def visit_ImportStatement(self, node: ImportStatement):
@@ -478,10 +493,25 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_StructDeclaration(self, node: StructDeclaration):
         # Ensure the dataclass decorator is available.
         self.imports.add("from dataclasses import dataclass")
+        
+        # Add TypeVar imports for generic types and track type variables
+        if node.type_params:
+            self.imports.add("from typing import TypeVar, Generic")
+            for type_param in node.type_params:
+                self.type_vars.add(type_param)
+        
         self.code.append(f"{self.indent()}@dataclass")
-        base_classes = ', '.join(node.interfaces) if node.interfaces else ''
-        inheritance = f"({base_classes})" if base_classes else ''
+        
+        # Build inheritance clause
+        base_classes = []
+        if node.type_params:
+            base_classes.append("Generic[" + ", ".join(node.type_params) + "]")
+        if node.interfaces:
+            base_classes.extend(node.interfaces)
+        
+        inheritance = f"({', '.join(base_classes)})" if base_classes else ''
         self.code.append(f"{self.indent()}class {node.name}{inheritance}:")
+        
         self.indent_level += 1
         if not node.members:
             self.code.append(f"{self.indent()}pass")
@@ -551,6 +581,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         for param in params_to_process:
             name, param_type, default_value = param
             param_str = self.visit(name)
+            if param_type is not None:
+                type_str = self.map_type(param_type)
+                param_str += f": {type_str}"
             if default_value is not None:
                 default_str = self.visit(default_value)
                 param_str += f"={default_str}"

@@ -1,0 +1,10 @@
+struct List<T> {
+    items: T[];
+
+    fn get(self, index: number) -> T? {
+        if index < 0 || index >= 5 {
+            return null;
+        }
+        return self.items[index];
+    }
+}

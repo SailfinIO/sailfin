@@ -1,0 +1,8 @@
+// test simple if statement
+fn main() -> void {
+    let index: number = 5;
+    let length: number = 10;
+    if index >= length {
+        return;
+    }
+}

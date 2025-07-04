@@ -1,0 +1,8 @@
+// Simple generic struct test
+struct List<T> {
+    items: T[];
+
+    fn add(self, item: T) -> void {
+        self.items.append(item);
+    }
+}

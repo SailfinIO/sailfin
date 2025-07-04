@@ -72,7 +72,8 @@ def compile_and_run(source_file):
         print_ast(ast)
 
         logger.info("Validating AST…")
-        ASTValidator.validate(ast)
+        validator = ASTValidator()
+        validator.validate(ast)
         logger.info("AST validation successful.")
 
         logger.info("Generating Python code…")

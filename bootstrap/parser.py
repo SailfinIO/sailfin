@@ -10,9 +10,9 @@ from errors import ParserError
 # Precedence rules to resolve ambiguity
 precedence = (
     ('left', 'COMMA'),
-    ('right', 'NOT'),
     ('left', 'OR'),
     ('left', 'AND'),
+    ('right', 'NOT'),
     ('left', 'EQ', 'NEQ'),
     ('left', 'LT', 'GT', 'LEQ', 'GEQ'),
     ('left', 'IS'),
@@ -260,11 +260,27 @@ def p_decorator(p):
 
 
 def p_struct_declaration(p):
-    '''struct_declaration : STRUCT IDENTIFIER implements_opt LBRACE struct_members RBRACE'''
+    '''struct_declaration : STRUCT IDENTIFIER type_params_opt implements_opt LBRACE struct_members RBRACE'''
     name = p[2]
-    interfaces = p[3]
-    members = p[5]
-    p[0] = StructDeclaration(name=name, members=members, interfaces=interfaces)
+    type_params = p[3]
+    interfaces = p[4]
+    members = p[6]
+    p[0] = StructDeclaration(name=name, members=members, type_params=type_params, interfaces=interfaces)
+
+
+def p_type_params_opt(p):
+    '''type_params_opt : LT type_param_list GT
+                       | empty'''
+    p[0] = p[2] if len(p) > 2 else []
+
+
+def p_type_param_list(p):
+    '''type_param_list : type_param_list COMMA IDENTIFIER
+                       | IDENTIFIER'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
 
 
 def p_implements_opt(p):
