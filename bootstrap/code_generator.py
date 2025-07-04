@@ -16,9 +16,30 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code = []
         self.indent_level = 0
         self.test_functions = []  # Track test function names
+        self.global_variables = set()  # Track global variable names
+        self.in_function = False  # Track if we're inside a function
 
     def indent(self):
         return '    ' * self.indent_level
+        
+    def _find_global_assignments(self, statements):
+        """Find which global variables are assigned to in the given statements."""
+        global_assignments = set()
+        
+        def check_node(node):
+            if isinstance(node, Assignment):
+                if isinstance(node.target, Identifier) and node.target.name in self.global_variables:
+                    global_assignments.add(node.target.name)
+            elif isinstance(node, ExpressionStatement):
+                check_node(node.expression)
+            elif hasattr(node, 'body') and node.body:
+                for stmt in node.body:
+                    check_node(stmt)
+                    
+        for stmt in statements:
+            check_node(stmt)
+            
+        return global_assignments
 
     def map_type(self, t: Union[str, ASTNode]) -> str:
         # Handle ArrayType nodes
@@ -190,6 +211,11 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         name = node.name
         value = self.visit(node.value)
         comment = "  # Mutable" if node.mutable else ""
+        
+        # Track global variables (variables declared at module level)
+        if not self.in_function:
+            self.global_variables.add(name)
+            
         if var_type:
             py_type = self.map_type(var_type)
             # Emit variable declaration with type annotation
@@ -261,7 +287,18 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_FunctionDeclaration(self, node: FunctionDeclaration):
         decorators = ''.join([f"@{dec}\n" for dec in node.decorators])
         async_str = 'async ' if node.is_async else ''
-        params = ', '.join([self.visit(param[0]) for param in node.params])
+        
+        # Handle parameters with default values
+        param_strings = []
+        for param in node.params:
+            name, param_type, default_value = param
+            param_str = self.visit(name)
+            if default_value is not None:
+                default_str = self.visit(default_value)
+                param_str += f"={default_str}"
+            param_strings.append(param_str)
+        params = ', '.join(param_strings)
+        
         # Generate return type annotation from ASTNode
         if node.return_type:
             mapped_return = self.map_type(node.return_type)
@@ -272,11 +309,25 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append(
             f"{self.indent()}{decorators}{async_str}def {node.name}({params}){return_type}:")
         self.indent_level += 1
+        
+        # Track that we're now inside a function
+        old_in_function = self.in_function
+        self.in_function = True
+        
+        # Find global variables that are modified in this function
+        global_vars_modified = self._find_global_assignments(node.body)
+        if global_vars_modified:
+            global_decl = ', '.join(sorted(global_vars_modified))
+            self.code.append(f"{self.indent()}global {global_decl}")
+        
         if not node.body:
             self.code.append(f"{self.indent()}pass")
         else:
             for stmt in node.body:
                 self.visit(stmt)
+        
+        # Restore function context
+        self.in_function = old_in_function
         self.indent_level -= 1
         self.code.append('')  # newline after function
 
@@ -340,12 +391,21 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_MethodDeclaration(self, node: MethodDeclaration):
         # Determine if this is a constructor method.
         is_constructor = node.name == "new"
+        
+        # Check if this is a static method (no 'self' parameter)
+        has_self_param = (node.params and 
+                         hasattr(node.params[0][0], 'name') and 
+                         node.params[0][0].name == "self")
+        is_static = not has_self_param and not is_constructor
 
         # Build decorators. Start with an empty list.
         decorator_lines = []
 
         # For a constructor, add @classmethod.
         if is_constructor:
+            decorator_lines.append(f"{self.indent()}@classmethod")
+        elif is_static:
+            # For static methods (methods without self), add @classmethod
             decorator_lines.append(f"{self.indent()}@classmethod")
 
         # Also add any other decorators provided in the AST.
@@ -358,19 +418,33 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             # Ensure there is a newline after the decorators.
             decorators += "\n"
 
+        # Handle parameters with default values, similar to FunctionDeclaration
+        param_strings = []
+        
         # For instance methods, the first parameter should be "self".
         # For class methods, use "cls".
-        first_param = "cls" if is_constructor else "self"
-
-        # Process the parameters.
-        if node.params and (node.params[0][0] == "self" or (hasattr(node.params[0][0], 'name') and node.params[0][0].name == "self") or
-                            node.params[0][0] == "cls" or (hasattr(node.params[0][0], 'name') and node.params[0][0].name == "cls")):
-            params_list = [param[0].name if hasattr(
-                param[0], 'name') else param[0] for param in node.params[1:]]
+        if is_constructor or is_static:
+            first_param = "cls"
+            # Process all parameters since there's no 'self' to skip
+            params_to_process = node.params
         else:
-            params_list = [param[0].name if hasattr(
-                param[0], 'name') else param[0] for param in node.params]
-        params = ', '.join(params_list)
+            first_param = "self"
+            # Skip the first parameter if it's 'self'
+            if has_self_param:
+                params_to_process = node.params[1:]
+            else:
+                params_to_process = node.params
+        
+        # Process parameters with default values
+        for param in params_to_process:
+            name, param_type, default_value = param
+            param_str = self.visit(name)
+            if default_value is not None:
+                default_str = self.visit(default_value)
+                param_str += f"={default_str}"
+            param_strings.append(param_str)
+        
+        params = ', '.join(param_strings)
 
         # Handle the return type from ASTNode
         if node.return_type:

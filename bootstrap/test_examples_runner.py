@@ -30,7 +30,7 @@ def main():
     # Locate bootstrap script and examples directory
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
-    examples_dir = os.path.join(repo_root, "examples")
+    examples_dir = os.path.join(repo_root, "examples/basics")
 
     # Find all .sfn files recursively
     pattern = os.path.join(examples_dir, "**", "*.sfn")
