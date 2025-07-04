@@ -18,8 +18,8 @@ class ASTValidator:
             return True
 
         # This regex allows one or more type segments (identifiers with optional array notation)
-        # separated by the union operator.
-        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)(?:\|[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$'
+        # separated by union (|) or intersection (&) operators.
+        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*)(?:[|&][A-Za-z_][A-Za-z0-9_]*(?:\[\])*)*$'
         return re.fullmatch(pattern, t) is not None
 
     def validate(self, node: ASTNode):
@@ -101,8 +101,8 @@ class ASTValidator:
             if not node.name.isidentifier():
                 raise ValidationError(f"Invalid interface name: {node.name}")
 
-            for method in node.methods:
-                self.validate(method)
+            for member in node.members:
+                self.validate(member)
         elif isinstance(node, InterfaceMethod):
             # Validate interface methods
             if not node.name.isidentifier():
@@ -127,6 +127,24 @@ class ASTValidator:
                     if not param_type_str.isidentifier():
                         raise ValidationError(
                             f"Invalid interface method parameter type: {param_type_str}")
+        elif isinstance(node, InterfaceProperty):
+            # Validate interface properties
+            if not node.name.isidentifier():
+                raise ValidationError(
+                    f"Invalid interface property name: {node.name}")
+            if node.property_type:
+                # Convert property_type to string representation if needed
+                property_type_str = node.property_type if isinstance(
+                    node.property_type, str) else stringify_type(node.property_type)
+                if not self.is_valid_type(property_type_str):
+                    raise ValidationError(
+                        f"Invalid interface property type: {property_type_str}")
+        elif isinstance(node, TypeCheck):
+            # Validate type check expressions (e.g., value is string)
+            self.validate(node.expr)
+            if not self.is_valid_type(node.type_name):
+                raise ValidationError(
+                    f"Invalid type name in type check: {node.type_name}")
         elif isinstance(node, PrintStatement):
             self.validate(node.expression)
         elif isinstance(node, AssertStatement):
@@ -149,6 +167,16 @@ class ASTValidator:
         elif isinstance(node, EnumDeclaration):
             for variant in node.variants:
                 self.validate(variant)
+        elif isinstance(node, TypeAliasDeclaration):
+            # Validate type alias declarations
+            if not node.name.isidentifier():
+                raise ValidationError(f"Invalid type alias name: {node.name}")
+            # Validate the aliased type by converting to string representation
+            aliased_type_str = node.aliased_type if isinstance(
+                node.aliased_type, str) else stringify_type(node.aliased_type)
+            if not self.is_valid_type(aliased_type_str):
+                raise ValidationError(
+                    f"Invalid aliased type: {aliased_type_str}")
         elif isinstance(node, EnumVariant):
             for field in node.fields:
                 self.validate(field)

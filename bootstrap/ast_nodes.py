@@ -170,7 +170,7 @@ class MethodDeclaration(ASTNode):
 @dataclass
 class InterfaceDeclaration(ASTNode):
     name: str
-    methods: List['InterfaceMethod']
+    members: List[Union['InterfaceMethod', 'InterfaceProperty']]
     type_params: List[str] = field(default_factory=list)
 
 
@@ -180,6 +180,12 @@ class InterfaceMethod(ASTNode):
     # List of (param_name, param_type)
     params: List[Tuple[str, Optional[ASTNode]]]
     return_type: Optional[ASTNode]
+
+
+@dataclass
+class InterfaceProperty(ASTNode):
+    name: str
+    property_type: Optional[ASTNode]
 
 
 @dataclass

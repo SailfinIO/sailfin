@@ -74,6 +74,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             type_mapping = {
                 "number": "float",
                 "string": "str",
+                "boolean": "bool",
                 "void": "None",
                 # add other mappings as needed...
             }
@@ -84,6 +85,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             type_mapping = {
                 "number": "float",
                 "string": "str",
+                "boolean": "bool",
                 "void": "None",
                 # add other mappings as needed...
             }
@@ -236,6 +238,50 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         elif node.name == 'null':
             return 'None'
         return node.name
+
+    def visit_TypeCheck(self, node: TypeCheck):
+        expr = self.visit(node.expr)
+        type_name = self.visit(node.type_name)
+
+        # Map Sailfin types to Python types for isinstance checks
+        type_map = {
+            'string': 'str',
+            'number': '(int, float)',
+            'boolean': 'bool',
+            'void': 'type(None)'
+        }
+
+        python_type = type_map.get(type_name, type_name)
+        return f"isinstance({expr}, {python_type})"
+
+    def visit_UnionType(self, node: UnionType):
+        # Union types in Python can use Union from typing
+        left = self.map_type(node.left)
+        right = self.map_type(node.right)
+        self.imports.add("from typing import Union")
+        return f"Union[{left}, {right}]"
+
+    def visit_TypeAliasDeclaration(self, node: TypeAliasDeclaration):
+        # In Python, type aliases are just simple assignments
+        if isinstance(node.aliased_type, IntersectionType):
+            # Handle intersection types specially for type aliases
+            left = self.map_type(node.aliased_type.left)
+            right = self.map_type(node.aliased_type.right)
+            self.imports.add("from typing import Any")
+            self.code.append(
+                f"{self.indent()}{node.name} = Any  # Intersection of {left} & {right}")
+        else:
+            aliased_type = self.map_type(node.aliased_type)
+            self.code.append(f"{self.indent()}{node.name} = {aliased_type}")
+
+    def visit_IntersectionType(self, node: IntersectionType):
+        # For intersection types, we can't generate perfect Python equivalent
+        # But we can return a comment or a Union annotation
+        left = self.map_type(node.left)
+        right = self.map_type(node.right)
+        # Python doesn't have true intersection types, so we approximate with a comment
+        self.imports.add("from typing import Any")
+        return f"Any  # Intersection of {left} & {right}"
 
     def visit_ImportStatement(self, node: ImportStatement):
         items = ', '.join(node.items)
@@ -642,35 +688,45 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.imports.add("from abc import ABC, abstractmethod")
         self.code.append(f"{self.indent()}class {node.name}(ABC):")
         self.indent_level += 1
-        if not node.methods:
+        if not node.members:
             self.code.append(f"{self.indent()}pass")
         else:
-            for method in node.methods:
-                self.code.append(f"{self.indent()}@abstractmethod")
-                # Extract parameter names, skipping the first parameter if it's "self"
-                params_list = []
-                for param in method.params:
-                    param_name = param[0].name if hasattr(
-                        param[0], 'name') else param[0]
-                    # Skip "self" parameter since we add it automatically in the method signature
-                    if param_name != "self":
-                        params_list.append(param_name)
+            for member in node.members:
+                if hasattr(member, 'params'):  # It's an InterfaceMethod
+                    self.code.append(f"{self.indent()}@abstractmethod")
+                    # Extract parameter names, skipping the first parameter if it's "self"
+                    params_list = []
+                    for param in member.params:
+                        param_name = param[0] if isinstance(
+                            param[0], str) else param[0].name
+                        # Skip "self" parameter since we add it automatically in the method signature
+                        if param_name != "self":
+                            param_type = f": {self.map_type(param[1])}" if param[1] else ""
+                            params_list.append(f"{param_name}{param_type}")
 
-                params = ', '.join(params_list)
-                if method.return_type and method.return_type != "void":
-                    return_type = f" -> {self.map_type(method.return_type)}"
-                else:
-                    return_type = ""
+                    params = ', '.join(params_list)
+                    if member.return_type and member.return_type != "void":
+                        return_type = f" -> {self.map_type(member.return_type)}"
+                    else:
+                        return_type = ""
 
-                if params:
-                    # Emit abstract method signature with parameters
+                    if params:
+                        # Emit abstract method signature with parameters
+                        self.code.append(
+                            f"{self.indent()}def {member.name}(self, {params}){return_type}:")
+                    else:
+                        # Emit abstract method signature without additional parameters
+                        self.code.append(
+                            f"{self.indent()}def {member.name}(self){return_type}:")
+                    self.code.append(f"{self.indent()}    pass")
+                else:  # It's an InterfaceProperty
+                    # For properties, we generate abstract property getters/setters
+                    property_type = f" -> {self.map_type(member.property_type)}" if member.property_type else ""
+                    self.code.append(f"{self.indent()}@property")
+                    self.code.append(f"{self.indent()}@abstractmethod")
                     self.code.append(
-                        f"{self.indent()}def {method.name}(self, {params}){return_type}:")
-                else:
-                    # Emit abstract method signature without additional parameters
-                    self.code.append(
-                        f"{self.indent()}def {method.name}(self){return_type}:")
-                self.code.append(f"{self.indent()}    pass")
+                        f"{self.indent()}def {member.name}(self){property_type}:")
+                    self.code.append(f"{self.indent()}    pass")
         self.indent_level -= 1
         self.code.append('')  # Newline after interface
 

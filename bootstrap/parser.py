@@ -356,8 +356,8 @@ def p_method_declaration(p):
 def p_interface_declaration(p):
     '''interface_declaration : INTERFACE IDENTIFIER colon_opt LBRACE interface_members RBRACE'''
     name = p[2]
-    methods = p[5]
-    p[0] = InterfaceDeclaration(name=name, methods=methods)
+    members = p[5]
+    p[0] = InterfaceDeclaration(name=name, members=members)
 
 
 def p_colon_opt(p):
@@ -367,12 +367,18 @@ def p_colon_opt(p):
 
 
 def p_interface_members(p):
-    '''interface_members : interface_members interface_method
-                         | interface_method'''
+    '''interface_members : interface_members interface_member
+                         | interface_member'''
     if len(p) == 3:
         p[0] = p[1] + [p[2]]
     else:
         p[0] = [p[1]]
+
+
+def p_interface_member(p):
+    '''interface_member : interface_method
+                        | interface_property'''
+    p[0] = p[1]
 
 
 def p_interface_method(p):
@@ -385,6 +391,13 @@ def p_interface_method(p):
     else:
         return_type = 'void'
     p[0] = InterfaceMethod(name=name, params=params, return_type=return_type)
+
+
+def p_interface_property(p):
+    '''interface_property : IDENTIFIER COLON type SEMICOLON'''
+    name = p[1]
+    property_type = p[3]
+    p[0] = InterfaceProperty(name=name, property_type=property_type)
 
 # -------------------- Enum Declarations -------------------- #
 
