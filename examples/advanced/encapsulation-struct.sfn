@@ -4,8 +4,8 @@ struct BankAccount {
     mut balance: number; // Mutable field
 
     // Constructor with validation
-    fn new(initialBalance: number) -> BankAccount {
-        if initialBalance < 0 {
+    fn create(initialBalance: number) -> BankAccount {
+        if (initialBalance < 0) {
             print.info("Error: Initial balance cannot be negative.");
             return new BankAccount { balance: 0 };
         }
@@ -14,7 +14,7 @@ struct BankAccount {
 
     // Deposit money into the account
     fn deposit(self, amount: number) -> void {
-        if amount <= 0 {
+        if (amount <= 0) {
             print.info("Error: Deposit amount must be positive.");
             return;
         }
@@ -23,11 +23,11 @@ struct BankAccount {
 
     // Withdraw money from the account
     fn withdraw(self, amount: number) -> void {
-        if amount <= 0 {
+        if (amount <= 0) {
             print.info("Error: Withdrawal amount must be positive.");
             return;
         }
-        if amount > self.balance {
+        if (amount > self.balance) {
             print.info("Error: Insufficient funds.");
             return;
         }
@@ -42,7 +42,7 @@ struct BankAccount {
 
 fn main() -> void {
     // Create a new bank account using the constructor
-    let account: BankAccount = BankAccount.new(100);
+    let account: BankAccount = BankAccount.create(100);
 
     // Deposit money
     account.deposit(50);
@@ -53,9 +53,5 @@ fn main() -> void {
     print.info("Balance after withdrawal: {{account.getBalance()}}"); // Should print: 120
 
     // Try an invalid operation
-    try {
-        account.withdraw(200); // This will throw an error
-    } catch (err) {
-        print.info("Error: {{err.message}}"); // Should print: Insufficient funds.
-    }
+    account.withdraw(200); // This will attempt to withdraw more than the balance
 }
