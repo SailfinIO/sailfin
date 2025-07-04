@@ -30,7 +30,7 @@ def main():
     # Locate bootstrap script and examples directory
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
-    examples_dir = os.path.join(repo_root, "examples/basics")
+    examples_dir = os.path.join(repo_root, "examples/advanced")
 
     # Find all .sfn files recursively
     pattern = os.path.join(examples_dir, "**", "*.sfn")
@@ -49,8 +49,27 @@ def main():
     if failures:
         # Summary of failures
         print(f"{len(failures)} example(s) failed to compile/test.")
-        sys.exit(1)
-    else:
+        # Output the list of failed examples
+        for failed in failures:
+            print(f"  - {failed}")
+        print("Please fix the errors and try again.")
+        # Exit with a non-zero status to indicate failure
+        print("Exiting with status 1.")
+        # This will cause CI to fail if this script is run in a CI environment
+        # or if the exit code is checked by the caller.
+        if sys.version_info >= (3, 8):
+            sys.exit(1)
+        else:
+            # For older Python versions, use os._exit to avoid issues with sys.exit
+            os._exit(1)  # Exit immediately without cleanup
+    elif not failures:
+        print("All examples compiled and ran successfully.")
+        # Exit with a zero status to indicate success
+        if sys.version_info >= (3, 8):
+            sys.exit(0)
+        else:
+            os._exit(0)
+    elif not failures:
         print("All examples compiled and ran successfully.")
 
 
