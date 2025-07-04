@@ -1,4 +1,0 @@
-fn main() -> void {
-    let add = lambda(x: number, y: number) -> number { return x + y; };
-    print.info("Result: {{add(5, 3)}}");
-}

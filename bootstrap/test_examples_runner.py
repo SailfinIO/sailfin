@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Test harness: iterates over all .sfn example files and invokes the bootstrap compiler to ensure syntactic correctness.
+Test harness: tests all .sfn example files in the basics directory to ensure 
+the bootstrap compiler handles core syntax correctly.
+
+For testing all directories, use test_all_examples.py instead.
 """
 import os
 import sys
@@ -30,7 +33,7 @@ def main():
     # Locate bootstrap script and examples directory
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
-    examples_dir = os.path.join(repo_root, "examples/advanced")
+    examples_dir = os.path.join(repo_root, "examples/basics")
 
     # Find all .sfn files recursively
     pattern = os.path.join(examples_dir, "**", "*.sfn")
@@ -53,24 +56,10 @@ def main():
         for failed in failures:
             print(f"  - {failed}")
         print("Please fix the errors and try again.")
-        # Exit with a non-zero status to indicate failure
-        print("Exiting with status 1.")
-        # This will cause CI to fail if this script is run in a CI environment
-        # or if the exit code is checked by the caller.
-        if sys.version_info >= (3, 8):
-            sys.exit(1)
-        else:
-            # For older Python versions, use os._exit to avoid issues with sys.exit
-            os._exit(1)  # Exit immediately without cleanup
-    elif not failures:
+        sys.exit(1)
+    else:
         print("All examples compiled and ran successfully.")
-        # Exit with a zero status to indicate success
-        if sys.version_info >= (3, 8):
-            sys.exit(0)
-        else:
-            os._exit(0)
-    elif not failures:
-        print("All examples compiled and ran successfully.")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

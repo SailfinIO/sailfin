@@ -197,17 +197,17 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
     def visit_FunctionCall(self, node: FunctionCall):
         func_name = self.visit(node.func_name)
         args = ', '.join([self.visit(arg) for arg in node.arguments])
-        
+
         # Special case: array.filter(lambda) becomes list(filter(lambda, array))
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "filter":
             obj = self.visit(node.func_name.object_)
             return f"list(filter({args}, {obj}))"
-        
+
         # Special case: array.concat(other) becomes array + other (but as an expression)
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "concat":
             obj = self.visit(node.func_name.object_)
             return f"({obj} + {args})"
-        
+
         return f"{func_name}({args})"
 
     def visit_MemberAccess(self, node: MemberAccess):
