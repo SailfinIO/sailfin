@@ -411,6 +411,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         should_be_async = node.is_async or node.name in self.functions_with_routines
         async_str = 'async ' if should_be_async else ''
 
+        # Handle generic type parameters - generate TypeVar declarations
+        if node.type_params:
+            self.imports.add("from typing import TypeVar")
+            for type_param in node.type_params:
+                self.code.append(
+                    f"{self.indent()}{type_param} = TypeVar('{type_param}')")
+
         # Handle decorators - emit each on its own line before the function
         for decorator in node.decorators:
             self.code.append(f"{self.indent()}@{decorator}")
@@ -420,6 +427,13 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         for param in node.params:
             name, param_type, default_value = param
             param_str = self.visit(name)
+            if param_type and param_type != "void":
+                # Check if this is a generic type parameter
+                if isinstance(param_type, Identifier) and param_type.name in node.type_params:
+                    type_annotation = param_type.name
+                else:
+                    type_annotation = self.map_type(param_type)
+                param_str += f": {type_annotation}"
             if default_value is not None:
                 default_str = self.visit(default_value)
                 param_str += f"={default_str}"
@@ -428,8 +442,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         # Generate return type annotation from ASTNode
         if node.return_type:
-            mapped_return = self.map_type(node.return_type)
-            return_type = f" -> {mapped_return}"
+            # Check if this is a generic type parameter
+            if isinstance(node.return_type, Identifier) and node.return_type.name in node.type_params:
+                return_type = f" -> {node.return_type.name}"
+            else:
+                mapped_return = self.map_type(node.return_type)
+                return_type = f" -> {mapped_return}"
         else:
             return_type = ""
         # Emit function declaration with return type

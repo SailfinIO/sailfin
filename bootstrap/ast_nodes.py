@@ -155,12 +155,14 @@ class FieldDeclaration(ASTNode):
 
 
 @dataclass
+@dataclass
 class MethodDeclaration(ASTNode):
     name: str
     # Now each parameter name is an Identifier
     params: List[Tuple[Identifier, Optional[ASTNode]]]
     return_type: Optional[ASTNode]
     body: List[ASTNode]
+    type_params: List[str] = field(default_factory=list)
     decorators: List[str] = field(default_factory=list)
     is_async: bool = False
 

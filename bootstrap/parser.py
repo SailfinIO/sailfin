@@ -203,35 +203,38 @@ def p_opt_return_type(p):
 
 
 def p_function_declaration(p):
-    '''function_declaration : decorators_opt FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block
-                            | ASYNC FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
-    if len(p) == 9 and p[1] != 'async':  # decorators_opt FN ...
+    '''function_declaration : decorators_opt FN IDENTIFIER type_params_opt LPAREN parameters RPAREN opt_return_type block
+                            | ASYNC FN IDENTIFIER type_params_opt LPAREN parameters RPAREN opt_return_type block'''
+    if len(p) == 10 and p[1] != 'async':  # decorators_opt FN ...
         p[0] = FunctionDeclaration(
             name=p[3],
-            params=p[5],
-            return_type=p[7] if p[7] is not None else 'void',
-            body=p[8],
+            type_params=p[4],
+            params=p[6],
+            return_type=p[8] if p[8] is not None else 'void',
+            body=p[9],
             decorators=p[1] if p[1] else [],
             is_async=False
         )
-    elif len(p) == 9 and p[1] == 'async':  # ASYNC FN ...
+    elif len(p) == 10 and p[1] == 'async':  # ASYNC FN ...
         p[0] = FunctionDeclaration(
             name=p[3],
-            params=p[5],
-            return_type=p[7] if p[7] is not None else 'void',
-            body=p[8],
+            type_params=p[4],
+            params=p[6],
+            return_type=p[8] if p[8] is not None else 'void',
+            body=p[9],
             decorators=[],
             is_async=True
         )
 
 
 def p_function_declaration_async_with_decorators(p):
-    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
+    '''function_declaration : decorators ASYNC FN IDENTIFIER type_params_opt LPAREN parameters RPAREN opt_return_type block'''
     p[0] = FunctionDeclaration(
         name=p[4],
-        params=p[6],
-        return_type=p[8] if p[8] is not None else 'void',
-        body=p[9],
+        type_params=p[5],
+        params=p[7],
+        return_type=p[9] if p[9] is not None else 'void',
+        body=p[10],
         decorators=p[1],
         is_async=True
     )
@@ -332,14 +335,15 @@ def p_field_declaration(p):
 
 
 def p_method_declaration(p):
-    '''method_declaration : decorators_opt FN IDENTIFIER LPAREN parameters RPAREN opt_return_type block'''
+    '''method_declaration : decorators_opt FN IDENTIFIER type_params_opt LPAREN parameters RPAREN opt_return_type block'''
     decorators = p[1]
     is_async = False  # Extend to support async methods if needed
-    return_type = p[7] if p[7] is not None else 'void'
-    body = p[8]
+    return_type = p[8] if p[8] is not None else 'void'
+    body = p[9]
     p[0] = MethodDeclaration(
         name=p[3],
-        params=p[5],
+        type_params=p[4],
+        params=p[6],
         return_type=return_type,
         body=body,
         decorators=decorators,
