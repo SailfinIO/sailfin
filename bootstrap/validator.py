@@ -170,6 +170,10 @@ class ASTValidator:
             # Validate async block expressions
             for stmt in node.body:
                 ASTValidator.validate(stmt)
+        elif isinstance(node, Routine):
+            # Validate routine expressions
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
         elif isinstance(node, Await):
             # Validate await expressions
             ASTValidator.validate(node.expression)

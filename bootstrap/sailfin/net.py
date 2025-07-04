@@ -21,8 +21,12 @@ class Request:
 class Response:
     """HTTP Response object."""
     status: int
-    headers: Dict[str, str]
     body: str
+    headers: Optional[Dict[str, str]] = None
+
+    def __post_init__(self):
+        if self.headers is None:
+            self.headers = {}
 
     @property
     def json(self) -> Any:
@@ -91,6 +95,7 @@ async def serve(handler, host: str = "localhost", port: int = 8000):
         host: Host to bind to
         port: Port to bind to
     """
+    import os
     from aiohttp import web
 
     async def aiohttp_handler(request):
@@ -124,7 +129,13 @@ async def serve(handler, host: str = "localhost", port: int = 8000):
 
     # Keep the server running
     try:
-        await asyncio.Future()  # Run forever
+        # Check if we're in test mode
+        if os.environ.get('SAILFIN_TEST_MODE'):
+            print("Test mode detected, server will exit after 2 seconds...")
+            await asyncio.sleep(2)
+            print("Server shutting down (test mode)...")
+        else:
+            await asyncio.Future()  # Run forever
     except KeyboardInterrupt:
         print("Server shutting down...")
     finally:

@@ -35,6 +35,7 @@ reserved = {
     'assert': 'ASSERT',
     'is': 'IS',
     'new': 'NEW',
+    'routine': 'ROUTINE',
 }
 
 tokens = [

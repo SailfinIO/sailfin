@@ -2,14 +2,14 @@
 
 import { serve, Request, Response } from "sailfin/net";
 
-fn handleRequest(req: Request, res: Response) -> void {
-    if req.path == "/" {
-        res.send("Welcome to Sail!");
+async fn handleRequest(req: Request) -> Response {
+    if req.url.endsWith("/") {
+        return new Response { status: 200, body: "Welcome to Sail!" };
     } else {
-        res.send("404 Not Found", 404);
+        return new Response { status: 404, body: "404 Not Found" };
     }
 }
 
-fn main() -> void {
-    serve(handleRequest, { port: 8080 });
+async fn main() -> void {
+    await serve(handleRequest, "localhost", 8080);
 }

@@ -18,6 +18,7 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.test_functions = []  # Track test function names
         self.global_variables = set()  # Track global variable names
         self.in_function = False  # Track if we're inside a function
+        self.top_level_routines = []  # Track top-level routine function names
 
     def indent(self):
         return '    ' * self.indent_level
@@ -113,9 +114,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 break
 
         has_main = main_function is not None
+        has_routines = len(self.top_level_routines) > 0
 
-        # Add test runner and main execution
-        if self.test_functions or has_main:
+        # Add test runner, main execution, and routine execution
+        if self.test_functions or has_main or has_routines:
             self.code.append('')
             self.code.append('if __name__ == "__main__":')
             if self.test_functions:
@@ -142,6 +144,14 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     self.code.append('    asyncio.run(main())')
                 else:
                     self.code.append('    main()')
+            elif has_routines:
+                # Run top-level routines if no main function
+                self.imports.add("import asyncio")
+                self.code.append('    # Run top-level routines')
+                self.code.append('    async def run_routines():')
+                routine_calls = [f'{routine}()' for routine in self.top_level_routines]
+                self.code.append(f'        await asyncio.gather({", ".join(routine_calls)})')
+                self.code.append('    asyncio.run(run_routines())')
 
         # Prepare the __future__ import
         future_import = "from __future__ import annotations"
@@ -784,6 +794,38 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         # Return the coroutine call
         return f"{func_name}()"
+
+    def visit_Routine(self, node: Routine):
+        # Generate an async function and create a task for concurrent execution
+        self.imports.add("import asyncio")
+        func_name = generate_unique_name("routine")
+
+        # Generate async function definition
+        self.code.append(f"{self.indent()}async def {func_name}():")
+        self.indent_level += 1
+
+        # Track that we're now inside a function
+        old_in_function = self.in_function
+        self.in_function = True
+
+        if not node.body:
+            self.code.append(f"{self.indent()}pass")
+        else:
+            # Process all statements 
+            for stmt in node.body:
+                self.visit(stmt)
+
+        # Restore function context
+        self.in_function = old_in_function
+        self.indent_level -= 1
+
+        # If we're at the top level, collect the routine to run later
+        # If we're inside a function, create and return a task for concurrent execution
+        if not old_in_function:
+            self.top_level_routines.append(func_name)
+            return func_name  # Return function name for potential use
+        else:
+            return f"asyncio.create_task({func_name}())"
 
     def visit_Await(self, node: Await):
         # Special case: await [future1, future2] should become await asyncio.gather(future1, future2)

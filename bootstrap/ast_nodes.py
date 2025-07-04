@@ -269,6 +269,12 @@ class AsyncBlock(Expression):
 
 
 @dataclass
+class Routine(Expression):
+    name: Optional[str]  # Optional name for the routine
+    body: List[ASTNode]
+
+
+@dataclass
 class TryFinally(ASTNode):
     try_block: List[ASTNode]
     finally_block: List[ASTNode]

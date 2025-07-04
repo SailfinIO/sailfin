@@ -103,7 +103,8 @@ def p_statement(p):
                  | try_catch_finally
                  | while_loop
                  | for_loop
-                 | test_declaration'''
+                 | test_declaration
+                 | routine_statement'''
     p[0] = p[1]
 
 
@@ -127,6 +128,18 @@ def p_throw_statement(p):
 def p_assert_statement(p):
     '''assert_statement : ASSERT expression SEMICOLON'''
     p[0] = AssertStatement(condition=p[2])
+
+# -------------------- Routine Statement -------------------- #
+
+
+def p_routine_statement_named(p):
+    '''routine_statement : ROUTINE STRING LBRACE statements_opt RBRACE'''
+    p[0] = ExpressionStatement(expression=Routine(name=p[2], body=p[4] if p[4] else []))
+
+
+def p_routine_statement_unnamed(p):
+    '''routine_statement : ROUTINE LBRACE statements_opt RBRACE'''
+    p[0] = ExpressionStatement(expression=Routine(name=None, body=p[3] if p[3] else []))
 
 # -------------------- Variable Declarations -------------------- #
 
@@ -925,6 +938,30 @@ def p_primary_expression_async_block_expression(p):
     # Convert the expression to an expression statement
     expr_stmt = ExpressionStatement(expression=p[3])
     p[0] = AsyncBlock(body=[expr_stmt])
+
+
+def p_primary_expression_routine_block_statements(p):
+    '''primary_expression : ROUTINE LBRACE statements_opt RBRACE'''
+    p[0] = Routine(name=None, body=p[3] if p[3] else [])
+
+
+def p_primary_expression_routine_block_expression(p):
+    '''primary_expression : ROUTINE LBRACE expression RBRACE'''
+    # Convert the expression to an expression statement
+    expr_stmt = ExpressionStatement(expression=p[3])
+    p[0] = Routine(name=None, body=[expr_stmt])
+
+
+def p_primary_expression_routine_named_block_statements(p):
+    '''primary_expression : ROUTINE STRING LBRACE statements_opt RBRACE'''
+    p[0] = Routine(name=p[2], body=p[4] if p[4] else [])
+
+
+def p_primary_expression_routine_named_block_expression(p):
+    '''primary_expression : ROUTINE STRING LBRACE expression RBRACE'''
+    # Convert the expression to an expression statement
+    expr_stmt = ExpressionStatement(expression=p[4])
+    p[0] = Routine(name=p[2], body=[expr_stmt])
 
 
 # Enum variant construction handled in postfix_expression

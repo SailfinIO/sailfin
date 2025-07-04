@@ -13,10 +13,14 @@ from typing import List, Dict, Tuple
 
 def run_example(path_to_bootstrap: str, example_file: str) -> Tuple[bool, str, str]:
     """Runs bootstrap.py on a single example file and returns success status with output."""
+    env = os.environ.copy()
+    env['SAILFIN_TEST_MODE'] = '1'  # Enable test mode for server examples
+    
     proc = subprocess.run(
         [sys.executable, path_to_bootstrap, example_file],
         capture_output=True,
-        text=True
+        text=True,
+        env=env
     )
     return proc.returncode == 0, proc.stdout, proc.stderr
 
