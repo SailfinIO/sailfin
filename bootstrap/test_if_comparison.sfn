@@ -1,6 +1,0 @@
-fn check() -> void {
-    let index = 5;
-    if index < 0 {
-        print("negative");
-    }
-}

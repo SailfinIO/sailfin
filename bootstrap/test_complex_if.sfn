@@ -1,8 +1,0 @@
-// test complex boolean in if statement
-fn main() -> void {
-    let index: number = 5;
-    let items: number[] = [1, 2, 3];
-    if index < 0 || index >= items.length {
-        return;
-    }
-}

@@ -455,14 +455,29 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             obj = self.visit(node.func_name.object_)
             return f"{obj}.get()"
 
-        # Special case: sleep(ms) becomes await asyncio.sleep(ms/1000)
+        # Special case: sleep(ms) becomes await asyncio.sleep(ms/1000) or time.sleep(ms/1000)
         if isinstance(node.func_name, Identifier) and node.func_name.name == "sleep":
-            self.imports.add("import asyncio")
-            if args:
-                # Convert milliseconds to seconds
-                return f"await asyncio.sleep({args} / 1000)"
+            # Check if we're in an async function
+            is_in_async_function = (hasattr(self, 'async_functions') and
+                                    self.current_function_name and
+                                    self.current_function_name in self.async_functions)
+
+            if is_in_async_function:
+                # Use async sleep in async functions
+                self.imports.add("import asyncio")
+                if args:
+                    # Convert milliseconds to seconds
+                    return f"await asyncio.sleep({args} / 1000)"
+                else:
+                    return "await asyncio.sleep(0)"
             else:
-                return "await asyncio.sleep(0)"
+                # Use regular sleep in sync functions
+                self.imports.add("import time")
+                if args:
+                    # Convert milliseconds to seconds
+                    return f"time.sleep({args} / 1000)"
+                else:
+                    return "time.sleep(0)"
 
         return f"{func_name}({args})"
 
@@ -607,6 +622,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Check if this function should be async (either explicitly marked or contains routines)
         should_be_async = node.is_async or node.name in self.functions_with_routines
         async_str = 'async ' if should_be_async else ''
+
+        # Track which functions are async for sleep() handling
+        if should_be_async:
+            if not hasattr(self, 'async_functions'):
+                self.async_functions = set()
+            self.async_functions.add(node.name)
 
         # Handle generic type parameters - generate TypeVar declarations
         if node.type_params:
