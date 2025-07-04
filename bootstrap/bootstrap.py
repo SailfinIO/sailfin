@@ -7,22 +7,33 @@ from parser import parser
 from lexer import lexer
 import sys
 import logging
+import argparse
+import os
 
 #  ─── Logger Setup ───────────────────────────────────────────────────────────
 logger = logging.getLogger("sailfin")
-logger.setLevel(logging.DEBUG)
 
-# Console handler
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
 
-# Formatter: time, logger name, level, file:line, func
-fmt = logging.Formatter(
-    "%(asctime)s %(name)s %(levelname)-5s %(filename)s:%(lineno)d %(funcName)s() │ %(message)s",
-    datefmt="%H:%M:%S",
-)
-ch.setFormatter(fmt)
-logger.addHandler(ch)
+def setup_logging(verbose=False):
+    """Setup logging based on verbosity level"""
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        fmt = logging.Formatter(
+            "%(asctime)s %(name)s %(levelname)-5s %(filename)s:%(lineno)d %(funcName)s() │ %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        ch.setFormatter(fmt)
+        logger.addHandler(ch)
+    else:
+        # Production mode - only errors to stderr
+        logger.setLevel(logging.ERROR)
+        ch = logging.StreamHandler(sys.stderr)
+        ch.setLevel(logging.ERROR)
+        fmt = logging.Formatter("sfn: %(levelname)s: %(message)s")
+        ch.setFormatter(fmt)
+        logger.addHandler(ch)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -49,55 +60,139 @@ def print_ast(node, indent=0):
         logger.debug(f"{prefix}{node!r}")
 
 
-def compile_and_run(source_file):
+def compile_and_run(source_file, output_file=None, verbose=False, run_output=True):
+    """
+    Compile a Sailfin source file to Python and optionally run it.
+
+    Args:
+        source_file: Path to the .sfn source file
+        output_file: Optional output file path (default: output.py)
+        verbose: Enable verbose logging
+        run_output: Whether to execute the compiled code
+    """
     try:
-        logger.info(f"Reading source file {source_file!r}")
+        if verbose:
+            logger.info(f"Reading source file {source_file!r}")
+
+        if not os.path.exists(source_file):
+            logger.error(f"Source file not found: {source_file}")
+            sys.exit(1)
+
         with open(source_file, "r") as f:
             source_code = f.read()
 
-        logger.debug(f"Source ({len(source_code)} chars):\n{source_code!r}")
+        if verbose:
+            logger.debug(
+                f"Source ({len(source_code)} chars):\n{source_code!r}")
+            logger.info("Inspecting tokens…")
+            inspect_tokens(source_code)
 
-        logger.info("Inspecting tokens…")
-        inspect_tokens(source_code)
+        if verbose:
+            logger.info("Parsing…")
 
-        logger.info("Parsing…")
+        # Parse without debug output in production mode
         ast = parser.parse(
             source_code,
             lexer=lexer,
             tracking=True,
-            debug=True,
+            debug=verbose,  # Only show parser debug in verbose mode
         )
 
-        logger.info("Dumping AST structure…")
-        print_ast(ast)
+        if verbose:
+            logger.info("Dumping AST structure…")
+            print_ast(ast)
 
-        logger.info("Validating AST…")
+        if verbose:
+            logger.info("Validating AST…")
         validator = ASTValidator()
         validator.validate(ast)
-        logger.info("AST validation successful.")
+        if verbose:
+            logger.info("AST validation successful.")
 
-        logger.info("Generating Python code…")
+        if verbose:
+            logger.info("Generating Python code…")
         generator = PythonCodeGenerator()
         target_code = generator.visit(ast)
-        logger.debug(f"Generated code:\n{target_code}")
+        if verbose:
+            logger.debug(f"Generated code:\n{target_code}")
 
-        logger.info("Writing output.py and executing…")
-        with open("output.py", "w") as f:
+        # Determine output file
+        if output_file is None:
+            output_file = "output.py"
+
+        if verbose:
+            logger.info(f"Writing {output_file}")
+        with open(output_file, "w") as f:
             f.write(target_code)
-        namespace = {"__name__": "__main__"}
-        exec(target_code, namespace)
+
+        if run_output:
+            if verbose:
+                logger.info("Executing compiled code…")
+            namespace = {"__name__": "__main__"}
+            exec(target_code, namespace)
+        elif verbose:
+            logger.info(
+                f"Compilation successful. Output written to {output_file}")
 
     except CompilerError as e:
-        logger.error("Compilation error: %s", e)
+        logger.error(f"Compilation failed: {e}")
         sys.exit(1)
 
-    except Exception:
-        logger.error("Unexpected exception:", exc_info=True)
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
         sys.exit(1)
+
+    except Exception as e:
+        if verbose:
+            logger.error("Unexpected exception:", exc_info=True)
+        else:
+            logger.error(f"Internal compiler error: {e}")
+        sys.exit(1)
+
+
+def main():
+    parser_args = argparse.ArgumentParser(
+        description="Sailfin compiler - compile .sfn files to Python",
+        prog="sfn"
+    )
+    parser_args.add_argument(
+        "source_file",
+        help="Sailfin source file to compile (.sfn)"
+    )
+    parser_args.add_argument(
+        "-o", "--output",
+        help="Output file path (default: output.py)",
+        default=None
+    )
+    parser_args.add_argument(
+        "-c", "--compile-only",
+        help="Compile only, don't execute the output",
+        action="store_true"
+    )
+    parser_args.add_argument(
+        "-v", "--verbose",
+        help="Enable verbose output for debugging",
+        action="store_true"
+    )
+
+    args = parser_args.parse_args()
+
+    # Setup logging based on verbosity
+    setup_logging(args.verbose)
+
+    # Validate source file extension
+    if not args.source_file.endswith('.sfn'):
+        logger.error("Source file must have .sfn extension")
+        sys.exit(1)
+
+    # Compile and optionally run
+    compile_and_run(
+        source_file=args.source_file,
+        output_file=args.output,
+        verbose=args.verbose,
+        run_output=not args.compile_only
+    )
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        logger.error("Usage: python bootstrap.py <source_file.sfn>")
-        sys.exit(1)
-    compile_and_run(sys.argv[1])
+    main()
