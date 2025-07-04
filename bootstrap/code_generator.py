@@ -658,3 +658,58 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 self.visit(stmt)
             self.indent_level -= 1
             return func_name
+
+    def visit_FunctionExpression(self, node: FunctionExpression):
+        # Handle parameters
+        param_strings = []
+        for param in node.params:
+            # Parameters can be 2-tuples (name, type) or 3-tuples (name, type, default)
+            if len(param) == 2:
+                name, param_type = param
+            else:
+                name, param_type, _ = param  # Ignore default for function expressions
+            param_str = self.visit(name)
+            param_strings.append(param_str)
+        params = ', '.join(param_strings)
+        
+        # For simple single-expression functions, use lambda
+        if (len(node.body) == 1 and 
+            isinstance(node.body[0], (ExpressionStatement, ReturnStatement))):
+            # Extract the expression
+            if isinstance(node.body[0], ExpressionStatement):
+                expr = self.visit(node.body[0].expression)
+            else:  # ReturnStatement
+                expr = self.visit(node.body[0].expression) if node.body[0].expression else "None"
+            
+            return f"lambda {params}: {expr}"
+        else:
+            # For complex functions, generate an inline function definition
+            func_name = generate_unique_name("inline_func")
+            
+            # Generate return type annotation if present
+            if node.return_type:
+                mapped_return = self.map_type(node.return_type)
+                return_type = f" -> {mapped_return}"
+            else:
+                return_type = ""
+                
+            # Generate the function definition
+            self.code.append(f"{self.indent()}def {func_name}({params}){return_type}:")
+            self.indent_level += 1
+            
+            # Track that we're now inside a function
+            old_in_function = self.in_function
+            self.in_function = True
+            
+            if not node.body:
+                self.code.append(f"{self.indent()}pass")
+            else:
+                for stmt in node.body:
+                    self.visit(stmt)
+            
+            # Restore function context
+            self.in_function = old_in_function
+            self.indent_level -= 1
+            
+            # Return the function name as the expression value
+            return func_name

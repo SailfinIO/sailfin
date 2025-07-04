@@ -1,0 +1,3 @@
+fn hello() -> void {
+    print.info("Hello");
+}

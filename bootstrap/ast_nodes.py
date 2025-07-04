@@ -317,6 +317,14 @@ class ArrayIndexing(Expression):
     object_: Expression
     index: Expression
 
+
+@dataclass
+class FunctionExpression(Expression):
+    params: List[Tuple[Identifier, Optional[ASTNode]]]
+    return_type: Optional[ASTNode]
+    body: List[ASTNode]
+
+
 # First-class array and optional AST types
 
 

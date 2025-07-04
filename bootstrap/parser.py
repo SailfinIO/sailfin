@@ -4,6 +4,9 @@ from lexer import tokens
 from ast_nodes import *
 from errors import ParserError
 
+# Force parser regeneration by adding version comment
+# Version: function_expression_support_v8_lambda
+
 # Precedence rules to resolve ambiguity
 precedence = (
     ('left', 'COMMA'),
@@ -643,6 +646,11 @@ def p_expression_lambda(p):
     p[0] = LambdaExpression(params=p[4], return_type=p[6], body=p[7])
 
 
+def p_expression_function(p):
+    '''expression : LAMBDA LPAREN parameters RPAREN opt_return_type LBRACE statements_opt RBRACE'''
+    p[0] = FunctionExpression(params=p[3], return_type=p[5], body=p[7])
+
+
 def p_lambda_parameters_multiple(p):
     '''lambda_parameters : lambda_parameters COMMA lambda_parameter'''
     p[0] = p[1] + [p[3]]
@@ -975,8 +983,8 @@ def p_struct_field_init_shorthand(p):
 
 
 def p_arguments(p):
-    '''arguments : arguments COMMA expression
-                 | expression
+    '''arguments : arguments COMMA argument_expression
+                 | argument_expression
                  | empty'''
     if len(p) == 4:
         p[0] = p[1] + [p[3]]
@@ -984,6 +992,11 @@ def p_arguments(p):
         p[0] = [p[1]]
     else:
         p[0] = []
+
+
+def p_argument_expression(p):
+    '''argument_expression : expression'''
+    p[0] = p[1]
 
 # -------------------- Error Handling -------------------- #
 

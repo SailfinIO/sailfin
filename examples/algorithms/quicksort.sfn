@@ -4,9 +4,9 @@ fn quicksort(arr: number[]) -> number[] {
     if arr.length <= 1 { return arr; }
 
     let pivot: number = arr[0];
-    let less: number[] = arr.filter(fn(x: number) -> boolean { return x < pivot; });
-    let equal: number[] = arr.filter(fn(x: number) -> boolean { return x == pivot; });
-    let greater: number[] = arr.filter(fn(x: number) -> boolean { return x > pivot; });
+    let less: number[] = arr.filter(lambda(x: number) -> boolean { return x < pivot; });
+    let equal: number[] = arr.filter(lambda(x: number) -> boolean { return x == pivot; });
+    let greater: number[] = arr.filter(lambda(x: number) -> boolean { return x > pivot; });
 
     return quicksort(less).concat(equal).concat(quicksort(greater));
 }

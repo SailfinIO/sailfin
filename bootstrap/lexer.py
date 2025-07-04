@@ -6,6 +6,7 @@ from errors import LexerError
 # List of token names, including reserved keywords
 reserved = {
     'fn': 'FN',
+    'lambda': 'LAMBDA',
     'print': 'PRINT',
     'info': 'INFO',
     'let': 'LET',

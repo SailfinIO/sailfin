@@ -289,5 +289,26 @@ class ASTValidator:
                 if not field_str.isidentifier():
                     raise ValidationError(
                         f"Invalid tagged pattern field: {field_str}")
+        elif isinstance(node, FunctionExpression):
+            for param in node.params:
+                # FunctionExpression parameters can be 2-tuples (param_name, param_type) or 3-tuples (param_name, param_type, default)
+                if len(param) == 2:
+                    param_name, param_type = param
+                else:
+                    param_name, param_type, _ = param
+                    
+                if not param_name.name.isidentifier():
+                    raise ValidationError(
+                        f"Invalid parameter name: {param_name.name}")
+
+                if param_type:
+                    # Convert param_type to a string representation if needed.
+                    param_type_str = param_type if isinstance(
+                        param_type, str) else stringify_type(param_type)
+                    if not ASTValidator.is_valid_type(param_type_str):
+                        raise ValidationError(
+                            f"Invalid parameter type: {param_type_str}")
+            for stmt in node.body:
+                ASTValidator.validate(stmt)
         else:
             raise ValidationError(f"Unknown AST node: {type(node).__name__}")
