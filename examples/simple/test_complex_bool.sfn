@@ -1,0 +1,10 @@
+// Test complex boolean condition like in generic-structures.sfn
+struct Test {
+    items: number[];
+    
+    fn check(self, index: number) -> void {
+        if (index < 0 || index >= self.items.length) {
+            return;
+        }
+    }
+}
