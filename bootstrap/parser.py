@@ -988,16 +988,6 @@ def p_postfix_expression_struct_instantiation(p):
     p[0] = StructInstantiation(struct_name=p[2], field_inits=p[4])
 
 
-def p_postfix_expression_struct_literal(p):
-    '''postfix_expression : postfix_expression LBRACE struct_field_inits_opt RBRACE'''
-    # Handle case where postfix_expression is an Identifier (struct name)
-    if isinstance(p[1], Identifier):
-        p[0] = StructInstantiation(struct_name=p[1].name, field_inits=p[3])
-    else:
-        # This should be an error, but for now just pass through
-        p[0] = p[1]
-
-
 def p_primary_expression_print(p):
     '''primary_expression : PRINT'''
     p[0] = Identifier(name=p[1])
@@ -1072,6 +1062,14 @@ def p_postfix_expression_index(p):
     p[0] = ArrayIndexing(object_=p[1], index=p[3])
 
 
+def p_primary_expression_generic_call(p):
+    '''primary_expression : IDENTIFIER LT type_args GT LPAREN arguments RPAREN'''
+    # Handle generic constructor calls like Channel<number>(10)
+    type_name = TypeApplication(base=Identifier(
+        name=p[1]), type_args=p[3], arguments=[])
+    p[0] = FunctionCall(func_name=type_name, arguments=p[6])
+
+
 def p_postfix_expression(p):
     '''postfix_expression : primary_expression
                           | postfix_expression LPAREN arguments RPAREN
@@ -1090,14 +1088,6 @@ def p_postfix_expression(p):
             enum_name=enum_name, variant_name=variant_name, field_inits=field_inits)
     else:  # DOT IDENTIFIER or DOT INFO (member access)
         p[0] = MemberAccess(object_=p[1], member=p[3])
-
-
-def p_primary_expression_generic_call(p):
-    '''primary_expression : IDENTIFIER LT type_args GT LPAREN arguments RPAREN'''
-    # Handle generic constructor calls like Channel<number>(10)
-    type_name = TypeApplication(base=Identifier(
-        name=p[1]), type_args=p[3], arguments=[])
-    p[0] = FunctionCall(func_name=type_name, arguments=p[6])
 
 
 # Struct instantiation handled in primary_expression rules

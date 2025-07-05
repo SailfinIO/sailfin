@@ -6,8 +6,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BOOTSTRAP_DIR="$SCRIPT_DIR/../../../bootstrap"
-CASES_DIR="$SCRIPT_DIR/../cases"
+BOOTSTRAP_DIR="$SCRIPT_DIR/../../bootstrap"
+CASES_DIR="$SCRIPT_DIR/cases"
 
 echo "🧪 Sailfin Real Functionality Tests"
 echo "==================================="

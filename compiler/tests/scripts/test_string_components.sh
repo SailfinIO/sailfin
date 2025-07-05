@@ -41,7 +41,3 @@ cat compiler/tests/cases/while_loop_test.sfn
 echo
 
 echo "=== While Loop Tests Complete ==="
-"
-echo
-
-echo "=== String Tests Complete ==="
