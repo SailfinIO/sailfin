@@ -1,1 +1,0 @@
-Hello, Self-Hosted Sailfin!
