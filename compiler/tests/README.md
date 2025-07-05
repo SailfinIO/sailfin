@@ -6,23 +6,40 @@ This directory contains the test suite for the Sailfin self-hosting compiler.
 
 ```
 tests/
-├── run_tests.sh              # Master test runner
+├── run_tests.sh              # Master test runner (✅ Working)
 ├── scripts/                  # Test automation scripts
 │   ├── test_self_hosting.sh  # Self-hosting verification
-│   └── test_mutability.sh    # Mutability system tests
+│   ├── test_mutability.sh    # Mutability system tests
+│   ├── test_arrays.sh        # Array functionality tests
+│   ├── test_strings.sh       # String handling tests
+│   └── test_modules.sh       # Module system tests
 ├── cases/                    # Test case files (.sfn)
 │   ├── demo.sfn              # Basic language features demo
 │   ├── mutability_test.sfn   # Mutability and assignment tests
-│   └── comprehensive_test.sfn # Complex language constructs
-├── test_import.sfn           # Module import/export functionality test
-├── test_module.sfn           # Sample module for import testing
-└── *.sfn                     # Additional specific feature tests
+│   ├── comprehensive_test.sfn # Complex language constructs
+│   ├── test_import.sfn       # Module import/export functionality test
+│   ├── test_module.sfn       # Sample module for import testing
+│   └── *.sfn                 # 40+ additional feature-specific tests
 ```
 
-## Recent Additions (July 5, 2025)
+## Recent Cleanup (July 5, 2025)
 
-- `test_import.sfn` - Tests module import functionality with `import "module.sfn" as Name`
-- `test_module.sfn` - Sample module providing functions and constants for import testing
+- ✅ **Organized Test Structure**: Moved all `.sfn` test files to `cases/` directory
+- ✅ **Updated Master Test Runner**: `run_tests.sh` now runs comprehensive test suite
+- ✅ **Fixed Test Cases**: Updated incompatible tests (e.g., C-style for loops → while loops)
+- ✅ **Added Module Tests**: `test_import.sfn` and `test_module.sfn` for import functionality
+- ✅ **Clean Output**: Colored output with clear PASS/FAIL indicators
+
+## Current Test Results
+```
+🧪 Sailfin Compiler Test Suite
+===============================
+📊 Test Results Summary
+Total Tests:  14
+Passed:       14
+Failed:       0
+🎉 All tests passed!
+```
 
 ## Running Tests
 

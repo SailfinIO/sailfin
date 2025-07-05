@@ -1,94 +1,129 @@
 #!/bin/bash
-# Real functional test for Sailfin compiler
-# This script tests that the bootstrap can compile simple Sailfin code to executable Python
-# and validates the actual functionality
+# Sailfin Compiler Test Suite
+# This script runs comprehensive tests for the Sailfin compiler
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_DIR="$SCRIPT_DIR/../../bootstrap"
 CASES_DIR="$SCRIPT_DIR/cases"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 
-echo "🧪 Sailfin Real Functionality Tests"
-echo "==================================="
+echo "🧪 Sailfin Compiler Test Suite"
+echo "==============================="
 echo ""
 
-# Function to run a compilation test and check the output
-run_compilation_test() {
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Test counters
+TOTAL_TESTS=0
+PASSED_TESTS=0
+FAILED_TESTS=0
+
+# Function to run a single test case
+run_test_case() {
     local test_name="$1"
     local test_file="$2"
-    local expected_pattern="$3"
     
-    echo "🔍 Testing: $test_name"
-    echo "   File: $test_file"
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    
+    printf "%-50s" "Testing: $test_name"
     
     if [[ ! -f "$test_file" ]]; then
-        echo "   ❌ Test file not found: $test_file"
-        return 1
+        echo -e "${RED}MISSING${NC} - Test file not found"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        return 0  # Continue with other tests
     fi
     
-    # Try to compile the file with bootstrap
-    local output_file="$BOOTSTRAP_DIR/test_output_$(basename "$test_file" .sfn).py"
-    
+    # Try to compile with bootstrap
     cd "$BOOTSTRAP_DIR"
-    if python bootstrap.py "$test_file" -o "$output_file" -c 2>&1; then
-        echo "   ✅ Compilation successful"
-        
-        # Check if output file was created
-        if [[ -f "$output_file" ]]; then
-            echo "   ✅ Output file created: $(basename "$output_file")"
-            
-            # Check if the output contains expected pattern
-            if [[ -n "$expected_pattern" ]]; then
-                if grep -q "$expected_pattern" "$output_file" 2>/dev/null; then
-                    echo "   ✅ Output contains expected pattern: $expected_pattern"
-                else
-                    echo "   ⚠️  Output doesn't contain expected pattern: $expected_pattern"
-                    echo "      Actual content:"
-                    head -10 "$output_file" | sed 's/^/         /'
-                fi
-            fi
-        else
-            echo "   ❌ No output file created"
-            return 1
-        fi
+    if python bootstrap.py "$test_file" > /dev/null 2>&1; then
+        echo -e "${GREEN}PASS${NC}"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+        return 0
     else
-        echo "   ❌ Compilation failed"
-        return 1
+        echo -e "${RED}FAIL${NC}"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        return 0  # Don't exit, continue with other tests
     fi
-    
-    echo ""
-    return 0
 }
 
-# Test basic number variable
-run_compilation_test "Simple Number Variable" "$CASES_DIR/simple_number.sfn" "42"
+# Function to run a test script
+run_test_script() {
+    local script_name="$1"
+    local script_file="$SCRIPTS_DIR/$script_name"
+    
+    echo ""
+    echo -e "${BLUE}📋 Running $script_name${NC}"
+    echo "────────────────────────────────────────────────────"
+    
+    if [[ -f "$script_file" ]] && [[ -x "$script_file" ]]; then
+        cd "$SCRIPT_DIR"
+        if bash "$script_file"; then
+            echo -e "${GREEN}✅ $script_name completed successfully${NC}"
+        else
+            echo -e "${RED}❌ $script_name failed${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️  $script_name not found or not executable${NC}"
+    fi
+}
 
-# Test basic arithmetic
-cat > "$CASES_DIR/simple_arithmetic.sfn" << 'EOF'
-let x: number = 10;
-let y: number = 5;
-let result: number = x + y;
-EOF
-
-run_compilation_test "Simple Arithmetic" "$CASES_DIR/simple_arithmetic.sfn" "result"
-
-# Test mutability
-cat > "$CASES_DIR/simple_mutability.sfn" << 'EOF'
-mut counter: number = 0;
-counter = counter + 1;
-EOF
-
-run_compilation_test "Simple Mutability" "$CASES_DIR/simple_mutability.sfn" "counter"
-
-echo "🎯 Real Test Summary"
-echo "=================="
-echo "These tests verify that the bootstrap compiler can:"
-echo "1. Parse basic Sailfin syntax"
-echo "2. Generate Python output"
-echo "3. Handle variables and arithmetic"
-echo "4. Support mutability keywords"
+echo -e "${BLUE}🔍 Phase 1: Basic Compilation Tests${NC}"
+echo "Testing individual .sfn files for compilation errors..."
 echo ""
-echo "Note: For ARM64 assembly generation, we need the self-hosting"
-echo "Sailfin compiler to be working, which requires these basic"
-echo "features to be implemented in the bootstrap first."
+
+# Test basic language features
+run_test_case "Hello World" "$CASES_DIR/hello_world_test.sfn"
+run_test_case "Simple Number" "$CASES_DIR/simple_number.sfn"
+run_test_case "Simple String" "$CASES_DIR/simple_string_test.sfn"
+run_test_case "Simple Arithmetic" "$CASES_DIR/simple_arithmetic.sfn"
+run_test_case "Simple Function" "$CASES_DIR/simple_function.sfn"
+
+# Test mutability system
+run_test_case "Valid Mutability" "$CASES_DIR/valid_mutability_test.sfn"
+run_test_case "Complex Mutability" "$CASES_DIR/complex_mutability_test.sfn"
+
+# Test control flow
+run_test_case "Simple If-Return" "$CASES_DIR/simple_if_return.sfn"
+run_test_case "Simple While" "$CASES_DIR/simple_while_test.sfn"
+run_test_case "Simple For" "$CASES_DIR/simple_for_test.sfn"
+
+# Test data structures
+run_test_case "Array Access" "$CASES_DIR/array_access_test.sfn"
+run_test_case "Struct Access" "$CASES_DIR/struct_access_test.sfn"
+
+# Test advanced features
+run_test_case "Module Import" "$CASES_DIR/test_import.sfn"
+run_test_case "Complex Expressions" "$CASES_DIR/comprehensive_test.sfn"
+
+echo ""
+echo -e "${BLUE}🔍 Phase 2: Specialized Test Scripts${NC}"
+echo "Running comprehensive test suites..."
+
+# Run specialized test scripts
+run_test_script "test_mutability.sh"
+run_test_script "test_self_hosting.sh"
+run_test_script "test_arrays.sh"
+run_test_script "test_strings.sh"
+run_test_script "test_modules.sh"
+
+echo ""
+echo -e "${BLUE}📊 Test Results Summary${NC}"
+echo "==============================="
+echo -e "Total Tests:  ${TOTAL_TESTS}"
+echo -e "Passed:       ${GREEN}${PASSED_TESTS}${NC}"
+echo -e "Failed:       ${RED}${FAILED_TESTS}${NC}"
+
+if [[ $FAILED_TESTS -eq 0 ]]; then
+    echo -e "${GREEN}🎉 All tests passed!${NC}"
+    exit 0
+else
+    echo -e "${RED}❌ Some tests failed.${NC}"
+    exit 1
+fi

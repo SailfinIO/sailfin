@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/bin/bash
 # Sailfin Self-Hosting Build Script
 # This script demonstrates the complete self-hosting pipeline
@@ -310,10 +311,31 @@ main() {
     create_artifacts
     echo ""
 
+=======
+p 3: Test real compiler
+    test_real_compiler
+    echo ""
+    
+    # Step 4: Build self-hosting
+    build_self_hosting
+    echo ""
+    
+    # Step 5: Test self-hosting
+    test_self_hosting
+    echo ""
+    
+    # Step 6: Create artifacts
+    create_artifacts
+    echo ""
+    
+>>>>>>> b07d353 (fix: cleanup)
     # Step 7: Summary
     print_summary
 }
 
 # Invoke main with all arguments
 main "$@"
+<<<<<<< HEAD
   
+=======
+>>>>>>> b07d353 (fix: cleanup)
