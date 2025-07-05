@@ -1,3 +1,0 @@
-Hello from example.txt!
-This is a test file for Sailfin I/O operations.
-Line 3 of the file.

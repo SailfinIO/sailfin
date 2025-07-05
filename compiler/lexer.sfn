@@ -70,15 +70,15 @@ fn lex(source: string) -> Token[] {
 
     // Helper functions for character tests.
     fn isDigit(c: string) -> bool {
-        return c >= "0" && c <= "9";
+        return (c >= "0") && (c <= "9");
     }
 
     fn isLetter(c: string) -> bool {
-        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
+        return ((c >= "a") && (c <= "z")) || ((c >= "A") && (c <= "Z"));
     }
 
     fn isWhitespace(c: string) -> bool {
-        return c == " " || c == "\t" || c == "\r";
+        return (c == " ") || (c == "\t") || (c == "\r");
     }
 
     // Main loop: scan until the end of source.
@@ -136,8 +136,8 @@ fn lex(source: string) -> Token[] {
                 // (Optionally, handle escape sequences here.)
                 pos = pos + 1;
             }        if (pos >= source.length) {
-            error("Unterminated string literal at line " + lineno.toString());
-            }
+            error("Unterminated string literal at line {{lineno}}");
+        }
             let strText: string = source.substring(start, pos);
             pos = pos + 1; // Skip the closing quote.
             tokens.append(Token("STRING", strText, lineno));
@@ -319,7 +319,7 @@ fn lex(source: string) -> Token[] {
         }
 
         // If no rule matches, report an error.
-        error("Illegal character \"" + c + "\" at line " + lineno.toString());
+        error("Illegal character \"{{c}}\" at line {{lineno}}");
     } // end while
 
     return tokens;

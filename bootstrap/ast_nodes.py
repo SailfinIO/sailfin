@@ -254,6 +254,12 @@ class ImportStatement(ASTNode):
 
 
 @dataclass
+class ImportModuleStatement(ASTNode):
+    source: str
+    alias: str
+
+
+@dataclass
 class TypeAliasDeclaration(ASTNode):
     name: str
     aliased_type: ASTNode

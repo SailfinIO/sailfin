@@ -34,6 +34,7 @@ reserved = {
     'test': 'TEST',
     'assert': 'ASSERT',
     'is': 'IS',
+    'as': 'AS',
     'new': 'NEW',
     'routine': 'ROUTINE',
     'parallel': 'PARALLEL',

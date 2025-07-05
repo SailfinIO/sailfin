@@ -725,10 +725,16 @@ def p_expression_typecheck(p):
 
 
 def p_import_statement(p):
-    '''import_statement : IMPORT LBRACE import_items RBRACE FROM STRING SEMICOLON'''
-    items = p[3]
-    source = p[6]
-    p[0] = ImportStatement(items=items, source=source)
+    '''import_statement : IMPORT LBRACE import_items RBRACE FROM STRING SEMICOLON
+                       | IMPORT STRING AS IDENTIFIER SEMICOLON'''
+    if len(p) == 8:  # import { items } from "source";
+        items = p[3]
+        source = p[6]
+        p[0] = ImportStatement(items=items, source=source)
+    else:  # import "source" as Alias;
+        source = p[2]
+        alias = p[4]
+        p[0] = ImportModuleStatement(source=source, alias=alias)
 
 
 def p_import_items(p):

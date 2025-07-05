@@ -5,6 +5,7 @@ from ast_nodes import ASTNode
 from code_generator import PythonCodeGenerator
 from parser import parser
 from lexer import lexer
+from module_loader import get_module_loader
 import sys
 import logging
 import argparse
@@ -109,9 +110,16 @@ def compile_and_run(source_file, output_file=None, verbose=False, run_output=Tru
         if verbose:
             logger.info("AST validation successful.")
 
+        # Set up module loader for the source file's directory
+        source_dir = os.path.dirname(os.path.abspath(source_file))
+        module_loader = get_module_loader(source_dir)
+
         if verbose:
             logger.info("Generating Python code…")
         generator = PythonCodeGenerator()
+        generator.module_loader = module_loader  # Inject module loader
+        # Set current file for relative imports
+        generator.current_file = source_file
         target_code = generator.visit(ast)
         if verbose:
             logger.debug(f"Generated code:\n{target_code}")

@@ -10,11 +10,19 @@ tests/
 ├── scripts/                  # Test automation scripts
 │   ├── test_self_hosting.sh  # Self-hosting verification
 │   └── test_mutability.sh    # Mutability system tests
-└── cases/                    # Test case files (.sfn)
-    ├── demo.sfn              # Basic language features demo
-    ├── mutability_test.sfn   # Mutability and assignment tests
-    └── comprehensive_test.sfn # Complex language constructs
+├── cases/                    # Test case files (.sfn)
+│   ├── demo.sfn              # Basic language features demo
+│   ├── mutability_test.sfn   # Mutability and assignment tests
+│   └── comprehensive_test.sfn # Complex language constructs
+├── test_import.sfn           # Module import/export functionality test
+├── test_module.sfn           # Sample module for import testing
+└── *.sfn                     # Additional specific feature tests
 ```
+
+## Recent Additions (July 5, 2025)
+
+- `test_import.sfn` - Tests module import functionality with `import "module.sfn" as Name`
+- `test_module.sfn` - Sample module providing functions and constants for import testing
 
 ## Running Tests
 

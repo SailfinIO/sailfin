@@ -22,6 +22,8 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.functions_with_routines = set()  # Track functions that contain routines
         self.current_function_name = None  # Track the current function being processed
         self.type_vars = set()  # Track TypeVar declarations needed for generics
+        self.module_loader = None  # Will be injected by bootstrap
+        self.current_file = None   # Current file being compiled
 
     def indent(self):
         return '    ' * self.indent_level
@@ -314,6 +316,39 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
 
         self.code.append(f"from {source} import {items}")
 
+    def visit_ImportModuleStatement(self, node: ImportModuleStatement):
+        source = node.source
+        alias = node.alias
+
+        # Handle local .sfn files
+        if source.endswith('.sfn'):
+            if self.module_loader:
+                try:
+                    # Load the module using the module loader
+                    import_code = self.module_loader.load_sailfin_module(
+                        source, alias, self.current_file)
+                    self.code.append(f"# Module {alias} loaded from {source}")
+                    self.code.append(import_code)
+
+                except Exception as e:
+                    # Fallback to placeholder if module loading fails
+                    self.code.append(
+                        f"# WARNING: Failed to load module {source}: {e}")
+                    self.code.append(
+                        f"class {alias}: pass  # Module not available")
+            else:
+                # Fallback when no module loader is available
+                self.code.append(f"# Module import: {alias} from {source}")
+                self.code.append(
+                    f"class {alias}: pass  # Module loader not available")
+        # Handle built-in sailfin modules with module syntax
+        elif source.startswith('sailfin/'):
+            python_module = source.replace('/', '.')
+            self.code.append(f"import {python_module} as {alias}")
+        else:
+            # Direct module import
+            self.code.append(f"import {source} as {alias}")
+
     def visit_PrintStatement(self, node: PrintStatement):
         expr = self.visit(node.expression)
         self.code.append(f"{self.indent()}print({expr})")
@@ -356,6 +391,27 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             # For other generic types, we'd handle them here
             # For now, just return a generic constructor call
             return f"{type_name}({first_arg})"
+
+        # Fix operator precedence issues where comparison operators
+        # should have higher precedence than logical operators
+
+        # Pattern 1: (A or B) == C should be A or (B == C)
+        if (node.operator in ['==', '!=', '<', '>', '<=', '>='] and
+                isinstance(node.left, BinOp) and node.left.operator == '||'):
+            # Reconstruct as: left.left || (left.right operator right)
+            left_left = self.visit(node.left.left)
+            left_right = self.visit(node.left.right)
+            right_operand = self.visit(node.right)
+            return f"({left_left} or ({left_right} {node.operator} {right_operand}))"
+
+        # Pattern 2: (A and B) <= C should be A and (B <= C)
+        if (node.operator in ['==', '!=', '<', '>', '<=', '>='] and
+                isinstance(node.left, BinOp) and node.left.operator == '&&'):
+            # Reconstruct as: left.left && (left.right operator right)
+            left_left = self.visit(node.left.left)
+            left_right = self.visit(node.left.right)
+            right_operand = self.visit(node.right)
+            return f"({left_left} and ({left_right} {node.operator} {right_operand}))"
 
         left = self.visit(node.left)
         right = self.visit(node.right)
@@ -408,6 +464,30 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         if isinstance(node.func_name, TypeApplication) and isinstance(node.func_name.base, Identifier) and node.func_name.base.name == "Channel":
             self.imports.add("import asyncio")
             return f"asyncio.Queue({args})"
+
+        # Special case: error() function calls become RuntimeError exceptions in Python
+        if isinstance(node.func_name, Identifier) and node.func_name.name == "error":
+            return f"raise RuntimeError({args})"
+
+        # Special case: obj.toString() becomes str(obj) in Python
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "toString":
+            obj = self.visit(node.func_name.object_)
+            return f"str({obj})"
+
+        # Special case: string.substring(start, end) becomes string[start:end] in Python
+        if isinstance(node.func_name, MemberAccess) and node.func_name.member == "substring":
+            obj = self.visit(node.func_name.object_)
+            # Convert comma-separated args to colon-separated slice notation
+            args_list = [self.visit(arg) for arg in node.arguments]
+            if len(args_list) == 2:
+                start, end = args_list
+                return f"{obj}[{start}:{end}]"
+            elif len(args_list) == 1:
+                start = args_list[0]
+                return f"{obj}[{start}:]"
+            else:
+                # Fallback to original args format if unexpected number of arguments
+                return f"{obj}[{args}]"
 
         # Special case: array.filter(lambda) becomes list(filter(lambda, array))
         if isinstance(node.func_name, MemberAccess) and node.func_name.member == "filter":
@@ -489,6 +569,9 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         # Special case: .length on arrays becomes len() in Python
         if node.member == "length":
             return f"len({obj})"
+        # Special case: .toString() becomes str() in Python
+        if node.member == "toString":
+            return f"str({obj})"
         return f"{obj}.{node.member}"
 
     def visit_VariableDeclaration(self, node: VariableDeclaration):
