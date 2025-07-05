@@ -370,6 +370,11 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         let whileStmt: WhileStatement = stmt as WhileStatement;
         genWhileStatement(ctx, whileStmt);
         
+    } else if kind == "ForStatement" {
+        // Cast to ForStatement and generate for loop code
+        let forStmt: ForStatement = stmt as ForStatement;
+        genForStatement(ctx, forStmt);
+        
     } else {
         error("Unsupported statement type: " + kind);
     }
@@ -478,6 +483,41 @@ fn genWhileStatement(ctx: CodeGenContext, whileStmt: WhileStatement) {
         genStatement(ctx, whileStmt.body[i]);
         i = i + 1;
     }
+    
+    // Jump back to loop start
+    emit(ctx, "b", [loopLabel]);
+    
+    // End label
+    emit(ctx, endLabel + ":", []);
+}
+
+// Generate code for for loop
+fn genForStatement(ctx: CodeGenContext, forStmt: ForStatement) {
+    let loopLabel: string = genLabel(ctx);
+    let updateLabel: string = genLabel(ctx);
+    let endLabel: string = genLabel(ctx);
+    
+    // Generate initialization
+    genStatement(ctx, forStmt.init);
+    
+    // Loop start label
+    emit(ctx, loopLabel + ":", []);
+    
+    // Generate condition and branch
+    genExpression(ctx, forStmt.condition);
+    emit(ctx, "cmp", ["w8", "#0"]);
+    emit(ctx, "b.eq", [endLabel]);  // Branch to end if condition is false
+    
+    // Generate loop body
+    let i: number = 0;
+    while (i < forStmt.body.length) {
+        genStatement(ctx, forStmt.body[i]);
+        i = i + 1;
+    }
+    
+    // Update label and statement
+    emit(ctx, updateLabel + ":", []);
+    genStatement(ctx, forStmt.update);
     
     // Jump back to loop start
     emit(ctx, "b", [loopLabel]);

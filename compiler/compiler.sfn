@@ -1,0 +1,37 @@
+// compiler.sfn - Main self-hosting compiler with module imports
+
+// Import compiler components
+import "lexer.sfn" as Lexer;
+import "parser.sfn" as Parser;  
+import "ast.sfn" as AST;
+import "codegen.sfn" as CodeGen;
+
+// Main compiler entry point
+fn compile(source: string) -> string {
+    // 1. Lexical Analysis
+    let tokens: Token[] = Lexer.lex(source);
+    
+    // 2. Syntax Analysis
+    let parser: Parser.Parser = Parser.newParser(tokens);
+    let program: AST.Program = Parser.parseProgram(parser);
+    
+    // 3. Code Generation
+    let assembly: string = CodeGen.generateCode(program);
+    
+    return assembly;
+}
+
+// Test the compiler
+fn main() -> void {
+    let testCode: string = "let x: number = 42; print(x);";
+    
+    print("Sailfin Self-Hosting Compiler");
+    print("=============================");
+    print("Source: " + testCode);
+    print("");
+    
+    let result: string = compile(testCode);
+    
+    print("Generated Assembly:");
+    print(result);
+}

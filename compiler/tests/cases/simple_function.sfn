@@ -1,0 +1,4 @@
+// Simple function test
+fn getNumber() -> number {
+    return 42;
+}

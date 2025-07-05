@@ -193,6 +193,22 @@ struct IndexExpr implements Expression {
     }
 }
 
+// Struct field initialization
+struct FieldInit {
+    name: string;
+    value: Expression;
+}
+
+// Struct literal expression Person { name: "John", age: 30 }
+struct StructLiteral implements Expression {
+    typeName: string;
+    fields: FieldInit[];
+    
+    fn getExpressionKind(self) -> string {
+        return "StructLiteral";
+    }
+}
+
 // An identifier expression.
 struct IdentifierExpr implements Expression {
     name: string;
@@ -271,5 +287,34 @@ struct ForStatement implements Statement {
     
     fn getStatementKind(self) -> string {
         return "ForStatement";
+    }
+}
+
+// Import statement (import "module" as alias)
+struct ImportStatement implements Statement {
+    modulePath: string;   // Path to module file
+    alias: string;        // Optional alias for imported module
+    
+    fn getStatementKind(self) -> string {
+        return "ImportStatement";
+    }
+}
+
+// Export statement (export fn functionName)
+struct ExportStatement implements Statement {
+    declaration: Statement;  // What to export (function, struct, etc.)
+    
+    fn getStatementKind(self) -> string {
+        return "ExportStatement";
+    }
+}
+
+// Module declaration (module name { ... })
+struct ModuleDeclaration implements Statement {
+    name: string;
+    body: Statement[];
+    
+    fn getStatementKind(self) -> string {
+        return "ModuleDeclaration";
     }
 }

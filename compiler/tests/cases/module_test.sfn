@@ -1,0 +1,8 @@
+// Test case for module system
+
+import "utils.sfn" as Utils;
+
+fn main() -> void {
+    let message: string = "Hello from module system!";
+    Utils.printBanner(message);
+}

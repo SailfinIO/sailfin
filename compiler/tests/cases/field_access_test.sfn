@@ -1,0 +1,7 @@
+// Test field access on array elements
+struct Token {
+    value: string;
+}
+
+let tokens: Token[] = [Token { value: "test" }];
+let result: string = tokens[0].value;

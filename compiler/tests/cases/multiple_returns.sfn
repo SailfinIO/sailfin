@@ -1,0 +1,7 @@
+// Test multiple returns in function
+fn getCurrent(pos: number, length: number) -> string {
+    if (pos < length) {
+        return "valid";
+    }
+    return "eof";
+}

@@ -19,6 +19,9 @@ enum Reserved {
     Return = "RETURN",
     Print = "PRINT",
     Implements = "IMPLEMENTS",
+    Import = "IMPORT",
+    Export = "EXPORT",
+    Module = "MODULE",
     // add additional keywords as needed…
 }
 
@@ -48,6 +51,12 @@ fn lookupReserved(word: string) -> string {
         return Reserved.Print;
     } else if word == "implements" {
         return Reserved.Implements;
+    } else if word == "import" {
+        return Reserved.Import;
+    } else if word == "export" {
+        return Reserved.Export;
+    } else if word == "module" {
+        return Reserved.Module;
     } else {
         return "IDENTIFIER";
     }

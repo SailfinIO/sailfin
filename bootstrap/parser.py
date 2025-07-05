@@ -988,6 +988,16 @@ def p_postfix_expression_struct_instantiation(p):
     p[0] = StructInstantiation(struct_name=p[2], field_inits=p[4])
 
 
+def p_postfix_expression_struct_literal(p):
+    '''postfix_expression : postfix_expression LBRACE struct_field_inits_opt RBRACE'''
+    # Handle case where postfix_expression is an Identifier (struct name)
+    if isinstance(p[1], Identifier):
+        p[0] = StructInstantiation(struct_name=p[1].name, field_inits=p[3])
+    else:
+        # This should be an error, but for now just pass through
+        p[0] = p[1]
+
+
 def p_primary_expression_print(p):
     '''primary_expression : PRINT'''
     p[0] = Identifier(name=p[1])

@@ -1,0 +1,4 @@
+// Test simple return in function body
+fn simpleReturn() -> string {
+    return "test";
+}

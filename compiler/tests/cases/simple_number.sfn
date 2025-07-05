@@ -1,0 +1,2 @@
+// Very simple test - just a number variable
+let x: number = 42;

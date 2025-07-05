@@ -1,0 +1,15 @@
+// Test case for for loops
+
+fn main() -> void {
+    // Simple counting for loop
+    for (let i: number = 0; i < 5; i = i + 1) {
+        print("For loop iteration: " + i.toString());
+    }
+    
+    // For loop with different step
+    for (let j: number = 10; j > 0; j = j - 2) {
+        print("Countdown: " + j.toString());
+    }
+    
+    print("For loops completed!");
+}

@@ -1,0 +1,6 @@
+// Test standalone struct literal
+struct Token {
+    value: string;
+}
+
+let token: Token = Token { value: "test" };

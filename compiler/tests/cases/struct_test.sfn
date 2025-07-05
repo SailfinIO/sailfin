@@ -1,0 +1,17 @@
+// Test case for struct declarations
+
+struct Person {
+    name: string;
+    age: number;
+    active: number;
+}
+
+struct Point {
+    x: number;
+    y: number;
+}
+
+fn main() -> void {
+    // TODO: Add struct literal and member access when implemented
+    print("Struct declarations compiled successfully!");
+}

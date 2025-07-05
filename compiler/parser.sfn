@@ -208,6 +208,35 @@ fn parseStatement(parser: Parser) -> Statement {
              expect(parser, "SEMICOLON");
              return ExpressionStatement { expression: expr };
          }
+    } else if tok.type == "STRUCT" {
+         // Parse struct declaration
+         advance(parser);  // Consume 'struct'
+         let nameTok: Token = expect(parser, "IDENTIFIER");
+         
+         // TODO: Parse optional implements clause
+         
+         expect(parser, "LBRACE");
+         let fields: FieldDeclaration[] = [];
+         
+         // Parse struct fields
+         while current(parser).type != "RBRACE" {
+             let fieldName: Token = expect(parser, "IDENTIFIER");
+             expect(parser, "COLON");
+             let fieldType: Token = expect(parser, "IDENTIFIER");
+             expect(parser, "SEMICOLON");
+             
+             fields.append(FieldDeclaration {
+                 name: fieldName.value,
+                 fieldType: fieldType.value
+             });
+         }
+         
+         expect(parser, "RBRACE");
+         
+         return StructDeclaration {
+             name: nameTok.value,
+             fields: fields
+         };
     } else if tok.type == "FN" {
          // Parse function declaration
          advance(parser);  // Consume 'fn'
@@ -300,6 +329,38 @@ fn parseStatement(parser: Parser) -> Statement {
              condition: condition, 
              body: body 
          };
+    } else if tok.type == "FOR" {
+         // Parse for loop
+         advance(parser);  // Consume 'for'
+         expect(parser, "LPAREN");
+         
+         // Parse initialization
+         let init: Statement = parseStatement(parser);
+         
+         // Parse condition
+         let condition: Expression = parseExpression(parser);
+         expect(parser, "SEMICOLON");
+         
+         // Parse update
+         let update: Statement = parseStatement(parser);
+         expect(parser, "RPAREN");
+         
+         // Parse body
+         expect(parser, "LBRACE");
+         let body: Statement[] = [];
+         
+         while current(parser).type != "RBRACE" {
+             body.append(parseStatement(parser));
+         }
+         
+         expect(parser, "RBRACE");
+         
+         return ForStatement { 
+             init: init,
+             condition: condition, 
+             update: update,
+             body: body 
+         };
     } else if tok.type == "RETURN" {
          // Parse return statement
          advance(parser);  // Consume 'return'
@@ -311,6 +372,29 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "SEMICOLON");
          return ReturnStatement { expression: expr };
+    } else if tok.type == "IMPORT" {
+         // Parse import statement
+         advance(parser);  // Consume 'import'
+         let modulePathTok: Token = expect(parser, "STRING");
+         let modulePath: string = modulePathTok.value;
+         
+         let alias: string = "";
+         if current(parser).type == "IDENTIFIER" && current(parser).value == "as" {
+             advance(parser);  // Consume 'as'
+             let aliasTok: Token = expect(parser, "IDENTIFIER");
+             alias = aliasTok.value;
+         }
+         
+         expect(parser, "SEMICOLON");
+         return ImportStatement { 
+             modulePath: modulePath, 
+             alias: alias 
+         };
+    } else if tok.type == "EXPORT" {
+         // Parse export statement  
+         advance(parser);  // Consume 'export'
+         let declaration: Statement = parseStatement(parser);
+         return ExportStatement { declaration: declaration };
     } else {
          // Default to expression statement
          let expr = parseExpression(parser);

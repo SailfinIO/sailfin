@@ -1,0 +1,18 @@
+// Test case closer to actual parser code
+struct Token {
+    tokenType: string;
+    value: string;
+}
+
+struct Parser {
+    pos: number;
+    tokens: Token[];
+}
+
+fn peek(parser: Parser) -> Token {
+    if parser.pos + 1 < parser.tokens.length {
+        return parser.tokens[parser.pos + 1];
+    } else {
+        return Token { tokenType: "EOF", value: "" };
+    }
+}
