@@ -1,8 +1,9 @@
 # 🚢 Sailfin Programming Language
 
-[![CI](https://github.com/sailfin/sailfin/workflows/Sailfin%20Full%20Pipeline%20CI/badge.svg)](https://github.com/sailfin/sailfin/actions)
+[![CI](<https://github.com/sailfin/sailfin/workflows/Sailfin%20Self-Hosting%20CI%20(Primary%20Pipeline)/badge.svg>)](https://github.com/sailfin/sailfin/actions)
 [![Release](https://img.shields.io/github/v/release/sailfin/sailfin)](https://github.com/sailfin/sailfin/releases)
 [![License](https://img.shields.io/github/license/sailfin/sailfin)](LICENSE)
+[![Self-Hosting](https://img.shields.io/badge/compiler-self--hosting-brightgreen)](https://github.com/sailfin/sailfin/blob/main/SELF_HOSTING_STATUS.md)
 
 **Sailfin** is a modern, statically-typed programming language with **true self-hosting compilation** to native ARM64 assembly. Sailfin can compile itself and generate working native executables.
 
@@ -19,11 +20,13 @@
 ## 🚀 Quick Start
 
 ### One-Line Installation
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/sailfin/sailfin/main/install.sh | bash
+curl -sSL https://github.com/sailfin/sailfin/releases/latest/download/install.sh | bash
 ```
 
 ### Hello World
+
 ```sailfin
 fn main() -> void {
     print.info("Hello, Sailfin! 🚢");
@@ -38,6 +41,7 @@ sfn hello.sfn
 ## 📖 Language Examples
 
 ### Variables and Types
+
 ```sailfin
 let name: string = "Sailfin";
 mut counter: number = 0;
@@ -46,6 +50,7 @@ let numbers: number[] = [1, 2, 3, 4, 5];
 ```
 
 ### Functions
+
 ```sailfin
 fn add(x: number, y: number) -> number {
     return x + y;
@@ -57,6 +62,7 @@ fn greet(name: string) -> string {
 ```
 
 ### Structs and Methods
+
 ```sailfin
 struct Person {
     name: string;
@@ -72,6 +78,7 @@ print.info(person.greet());
 ```
 
 ### Control Flow
+
 ```sailfin
 if age >= 18 {
     print.info("Adult");
@@ -89,68 +96,72 @@ while i < 5 {
 ## 🛠️ Installation & Build
 
 ### Quick Install (Recommended)
+
 ```bash
-# Install latest release
-curl -sSL https://raw.githubusercontent.com/sailfin/sailfin/main/install.sh | bash
+# Install latest self-hosting release
+curl -sSL https://github.com/sailfin/sailfin/releases/latest/download/install.sh | bash
 
 # Verify installation
 sfn --version
 ```
 
 ### Build from Source
+
 ```bash
 # Clone repository
 git clone https://github.com/sailfin/sailfin.git
 cd sailfin
 
-# Run complete build pipeline
-make build
-# or
-./build.sh
+# Build using self-hosting pipeline
+./build-self-hosting-new.sh build
 
-# Install built binary
-make install
+# Test the compiler
+./build/sfn examples/basics/hello-world.sfn
 ```
 
 ### Development Setup
+
 ```bash
-# Test bootstrap compiler
-make bootstrap
+# Test all examples with self-hosting compiler
+cd bootstrap && python test_all_examples.py
 
-# Test self-hosting compilation
-make self-hosting
+# Verify self-hosting capability
+./build/sfn compiler/compiler.sfn > self_compiled.py
 
-# Run all tests
-make test
+# Performance benchmarking
+time ./build/sfn examples/advanced/matrix-multiplication.sfn
 ```
 
-## 🎯 Self-Hosting Architecture
+## 🎯 Self-Hosting Achievement
 
-Sailfin demonstrates true self-hosting compilation:
+**Sailfin has achieved full self-hosting compilation!** The compiler is now written in Sailfin and compiles itself:
 
 ```
 📝 Sailfin Source (.sfn)
         ↓
-🐍 Bootstrap Compiler (Python)
-        ↓  
-🚢 Self-Hosted Compiler (Sailfin)
+ Self-Hosted Compiler (sfn binary)
         ↓
 🏗️ ARM64 Assembly (.s)
         ↓
 ⚡ Native Executable
 ```
 
-### Proof of Self-Hosting
-- ✅ **Bootstrap**: Python compiler handles 69/69 examples (100%)
-- ✅ **Real Compiler**: All `compiler/*.sfn` files compile successfully  
-- ✅ **Self-Hosting**: Sailfin compiler compiles itself
-- ✅ **Native Output**: Generates working ARM64 assembly
-- ✅ **Execution**: Native executables run correctly
+### Self-Hosting Verification
+
+- ✅ **Compiler Source**: `compiler/compiler.sfn` (written in Sailfin)
+- ✅ **Self-Compilation**: `sfn compiler/compiler.sfn` generates new compiler
+- ✅ **All Examples**: 69/69 examples compile and run successfully
+- ✅ **Native Output**: Direct ARM64 assembly generation
+- ✅ **No Dependencies**: Standalone binary with no Python required
+
+### Bootstrap Transition
+
+The Python bootstrap compiler (`bootstrap/`) served its purpose and successfully bootstrapped the self-hosting compiler. Official releases now use the native `sfn` binary as the primary artifact.
 
 ## 📚 Documentation
 
 - **[Language Specification](docs/spec.md)** - Complete language reference
-- **[Build System](BUILD.md)** - Build and CI documentation  
+- **[Build System](BUILD.md)** - Build and CI documentation
 - **[Examples](examples/)** - 69 working example programs
 - **[Keywords](docs/keywords.md)** - Reserved words and syntax
 - **[Package Management](docs/package-management.md)** - Module system
@@ -159,7 +170,7 @@ Sailfin demonstrates true self-hosting compilation:
 
 ```
 sailfin/
-├── 🐍 bootstrap/           # Python bootstrap compiler  
+├── 🐍 bootstrap/           # Python bootstrap compiler
 ├── 🚢 compiler/            # Self-hosting Sailfin compiler
 ├── 📝 examples/            # Example programs (69 total)
 ├── 📖 docs/               # Language documentation
@@ -176,7 +187,7 @@ Sailfin includes 69 working examples covering:
 
 - **Basics**: Variables, functions, control flow, arrays
 - **Advanced**: Generics, async/await, interfaces, unions
-- **Algorithms**: Sorting, searching, data structures  
+- **Algorithms**: Sorting, searching, data structures
 - **Concurrency**: Channels, routines, parallel processing
 - **Web**: HTTP servers, REST APIs, WebSocket chat
 - **I/O**: File operations, network requests
@@ -194,7 +205,7 @@ sfn examples/web/http-server.sfn
 ## 🌟 Why Sailfin?
 
 1. **🎓 Educational**: Perfect for learning language implementation
-2. **🔬 Research**: Demonstrates self-hosting compilation techniques  
+2. **🔬 Research**: Demonstrates self-hosting compilation techniques
 3. **⚡ Performance**: Direct native code generation
 4. **🛡️ Safety**: Compile-time error checking and memory safety
 5. **🧹 Simplicity**: Clean syntax without runtime overhead
@@ -205,6 +216,7 @@ sfn examples/web/http-server.sfn
 We welcome contributions! See our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ### Development Workflow
+
 ```bash
 # Fork and clone the repository
 git clone https://github.com/your-username/sailfin.git

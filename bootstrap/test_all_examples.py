@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced test harness: tests all .sfn example files across different directories 
-and provides a summary of which directories/features are working vs. not yet implemented.
+Enhanced test harness: tests all .sfn example files across different directories.
+Prefers self-hosting compiler when available, falls back to bootstrap.
 """
 import os
 import sys
@@ -11,13 +11,31 @@ import argparse
 from typing import List, Dict, Tuple
 
 
-def run_example(path_to_bootstrap: str, example_file: str) -> Tuple[bool, str, str]:
-    """Runs bootstrap.py on a single example file and returns success status with output."""
+def find_compiler() -> Tuple[str, str]:
+    """Find the best available Sailfin compiler. Returns (compiler_path, compiler_type)."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    # Check for self-hosting compiler first
+    selfhost_binary = os.path.join(repo_root, "build", "sfn")
+    if os.path.exists(selfhost_binary) and os.access(selfhost_binary, os.X_OK):
+        return selfhost_binary, "self-hosting"
+
+    # Fall back to bootstrap compiler
+    bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
+    if os.path.exists(bootstrap_script):
+        return bootstrap_script, "bootstrap"
+
+    raise FileNotFoundError(
+        "No Sailfin compiler found (checked self-hosting and bootstrap)")
+
+
+def run_example_selfhosting(compiler_path: str, example_file: str) -> Tuple[bool, str, str]:
+    """Runs self-hosting sfn binary on a single example file."""
     env = os.environ.copy()
     env['SAILFIN_TEST_MODE'] = '1'  # Enable test mode for server examples
 
     proc = subprocess.run(
-        [sys.executable, path_to_bootstrap, example_file],
+        [compiler_path, example_file],
         capture_output=True,
         text=True,
         env=env
@@ -25,7 +43,31 @@ def run_example(path_to_bootstrap: str, example_file: str) -> Tuple[bool, str, s
     return proc.returncode == 0, proc.stdout, proc.stderr
 
 
-def test_directory(bootstrap_script: str, examples_dir: str, quiet: bool = False) -> Dict[str, any]:
+def run_example_bootstrap(bootstrap_path: str, example_file: str) -> Tuple[bool, str, str]:
+    """Runs bootstrap.py on a single example file."""
+    env = os.environ.copy()
+    env['SAILFIN_TEST_MODE'] = '1'  # Enable test mode for server examples
+
+    proc = subprocess.run(
+        [sys.executable, bootstrap_path, example_file],
+        capture_output=True,
+        text=True,
+        env=env
+    )
+    return proc.returncode == 0, proc.stdout, proc.stderr
+
+
+def run_example(compiler_path: str, compiler_type: str, example_file: str) -> Tuple[bool, str, str]:
+    """Runs the appropriate compiler on a single example file."""
+    if compiler_type == "self-hosting":
+        return run_example_selfhosting(compiler_path, example_file)
+    elif compiler_type == "bootstrap":
+        return run_example_bootstrap(compiler_path, example_file)
+    else:
+        raise ValueError(f"Unknown compiler type: {compiler_type}")
+
+
+def test_directory(compiler_path: str, compiler_type: str, examples_dir: str, quiet: bool = False) -> Dict[str, any]:
     """Test all examples in a directory and return results."""
     # Find all .sfn files recursively
     pattern = os.path.join(examples_dir, "**", "*.sfn")
@@ -45,7 +87,7 @@ def test_directory(bootstrap_script: str, examples_dir: str, quiet: bool = False
     failed = []
 
     for f in sorted(sfn_files):
-        success, stdout, stderr = run_example(bootstrap_script, f)
+        success, stdout, stderr = run_example(compiler_path, compiler_type, f)
         filename = os.path.relpath(f, examples_dir)
 
         if success:
@@ -72,7 +114,8 @@ def test_directory(bootstrap_script: str, examples_dir: str, quiet: bool = False
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Test Sailfin examples')
+    parser = argparse.ArgumentParser(
+        description='Test Sailfin examples with self-hosting compiler (or bootstrap fallback)')
     parser.add_argument('--dir', '-d',
                         help='Test only specific directory (e.g., "basics", "advanced")')
     parser.add_argument('--ci', action='store_true',
@@ -81,12 +124,30 @@ def main():
                         help='Strict mode: exit 0 only if ALL examples pass')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='Quiet mode: only show summary')
+    parser.add_argument('--force-bootstrap', action='store_true',
+                        help='Force use of bootstrap compiler even if self-hosting is available')
 
     args = parser.parse_args()
 
-    # Locate bootstrap script and examples directory
+    # Find the best available compiler
+    try:
+        if args.force_bootstrap:
+            repo_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), ".."))
+            bootstrap_script = os.path.join(
+                repo_root, "bootstrap", "bootstrap.py")
+            if not os.path.exists(bootstrap_script):
+                print("❌ Bootstrap compiler not found")
+                sys.exit(1)
+            compiler_path, compiler_type = bootstrap_script, "bootstrap"
+        else:
+            compiler_path, compiler_type = find_compiler()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    # Locate examples directory
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    bootstrap_script = os.path.join(repo_root, "bootstrap", "bootstrap.py")
     examples_root = os.path.join(repo_root, "examples")
 
     # Find example directories to test
@@ -110,11 +171,11 @@ def main():
         sys.exit(1)
 
     if not args.quiet:
+        compiler_name = "🚢 Self-Hosting Compiler (sfn)" if compiler_type == "self-hosting" else "🐍 Bootstrap Compiler (Python)"
+        print(f"🚀 Testing Sailfin Examples with {compiler_name}")
         if args.dir:
-            print(f"🚀 Testing Sailfin Examples: {args.dir}")
-        else:
-            print("🚀 Testing Sailfin Examples")
-        print("=" * 50)
+            print(f"   Directory: {args.dir}")
+        print("=" * 60)
 
     all_results = []
     total_files = 0
@@ -127,7 +188,8 @@ def main():
             print(f"\n📁 Testing {dir_name}/")
             print("-" * 30)
 
-        results = test_directory(bootstrap_script, examples_dir, args.quiet)
+        results = test_directory(
+            compiler_path, compiler_type, examples_dir, args.quiet)
         all_results.append(results)
 
         total_files += results['total']
@@ -140,9 +202,12 @@ def main():
             else:
                 print(f"   {results['passed']}/{results['total']} passed")
 
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print("📊 SUMMARY")
-    print("=" * 50)
+    print("=" * 60)
+    compiler_name = "🚢 Self-Hosting Compiler (sfn)" if compiler_type == "self-hosting" else "🐍 Bootstrap Compiler (Python)"
+    print(f"Compiler: {compiler_name}")
+    print("-" * 60)
 
     for result in all_results:
         if result['total'] > 0:
@@ -180,9 +245,14 @@ def main():
     # Exit with appropriate code
     if total_failed == 0:
         print(f"\n🎉 All {total_files} examples are working!")
+        if compiler_type == "self-hosting":
+            print("✅ Self-hosting compilation successful - Sailfin can compile itself!")
         sys.exit(0)
     else:
         print(f"\n🚧 {total_failed} examples need syntax/feature implementation")
+        if compiler_type == "self-hosting":
+            print(
+                "ℹ️  Note: Using self-hosting compiler - consider testing with --force-bootstrap to compare")
         sys.exit(1)
 
 

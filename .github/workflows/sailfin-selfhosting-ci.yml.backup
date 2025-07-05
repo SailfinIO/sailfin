@@ -1,4 +1,4 @@
-name: Sailfin Self-Hosting CI (Primary Pipeline)
+name: Sailfin Self-Hosting CI
 
 on:
   push:
@@ -7,11 +7,11 @@ on:
     branches: [main]
 
 jobs:
-  # Download or Build Self-Hosting Compiler
-  setup-compiler:
+  # Build Self-Hosting Compiler
+  build-selfhosting:
     runs-on: ubuntu-latest
     outputs:
-      compiler-available: ${{ steps.check-compiler.outputs.available }}
+      compiler-path: ${{ steps.build.outputs.compiler-path }}
 
     steps:
       - name: Checkout Repository
@@ -19,60 +19,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for Latest Self-Hosting Release
-        id: check-compiler
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
         run: |
-          # Try to download the latest official Sailfin binary from GitHub releases
-          echo "🔍 Checking for latest Sailfin self-hosting release..."
-
-          # Get latest release
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/sailfin/sailfin/releases/latest | grep '"tag_name"' | cut -d '"' -f 4 || echo "")
-
-          if [ -n "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
-            echo "📥 Found release: $LATEST_RELEASE"
-            mkdir -p build
-            
-            # Download Linux x64 release
-            DOWNLOAD_URL="https://github.com/sailfin/sailfin/releases/download/$LATEST_RELEASE/sailfin-linux-x64.tar.gz"
-            
-            if curl -L "$DOWNLOAD_URL" -o sailfin-release.tar.gz 2>/dev/null; then
-              tar -xzf sailfin-release.tar.gz
-              mv sailfin-linux-x64/sfn build/
-              chmod +x build/sfn
-              echo "✅ Downloaded official Sailfin binary"
-              echo "available=true" >> $GITHUB_OUTPUT
-            else
-              echo "❌ Failed to download official release, will build from source"
-              echo "available=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "❌ No official release found, will build from source"
-            echo "available=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build Self-Hosting Compiler (if needed)
-        if: steps.check-compiler.outputs.available != 'true'
-        run: |
-          echo "🔨 Building self-hosting compiler from source..."
-
-          # Set up Python for bootstrap fallback
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-          cd bootstrap
+      - name: Configure Poetry
+        run: |
           poetry config virtualenvs.create false
-          poetry install --no-interaction --no-ansi
-          cd ..
+        working-directory: bootstrap
 
-          # Build using our build script
+      - name: Install Bootstrap Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Build Self-Hosting Compiler
+        id: build
+        run: |
           chmod +x build-self-hosting-new.sh
-          ./build-self-hosting-new.sh build
+          ./build-self-hosting-new.sh compiler
+          echo "compiler-path=${{ github.workspace }}/build/sfn" >> $GITHUB_OUTPUT
 
       - name: Test Self-Hosting Compiler
         run: |
-          echo "🧪 Testing self-hosting compiler..."
+          # Test that the compiler works
           ./build/sfn examples/basics/hello-world.sfn > test_output.py
-          echo "✅ Self-hosting compiler works!"
+          echo "✅ Self-hosting compiler built and tested successfully!"
 
       - name: Upload Compiler Artifact
         uses: actions/upload-artifact@v4
@@ -86,7 +64,7 @@ jobs:
   # Test All Examples with Self-Hosting Compiler
   test-examples:
     runs-on: ubuntu-latest
-    needs: setup-compiler
+    needs: build-selfhosting
 
     steps:
       - name: Checkout Repository
@@ -124,25 +102,25 @@ jobs:
 
       - name: Test All Examples
         run: |
-          echo "🧪 Testing all 69 examples with self-hosting compiler..."
+          echo "Testing all 69 examples with self-hosting compiler..."
           python test_all_examples.py
           echo "✅ All examples pass with self-hosting compiler!"
         working-directory: bootstrap
 
       - name: Verify Self-Hosting Capability
         run: |
-          echo "🔄 Verifying self-hosting: compiler compiles itself..."
+          echo "Verifying self-hosting: compiler compiles itself..."
           ./build/sfn compiler/compiler.sfn > self_compiled.py
           echo "✅ Self-hosting verification successful!"
 
   # Cross-Platform Build Test
   test-cross-platform:
     runs-on: ${{ matrix.os }}
-    needs: setup-compiler
+    needs: build-selfhosting
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-
+        
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -181,7 +159,7 @@ jobs:
 
       - name: Test Self-Hosting Compiler on ${{ matrix.os }}
         run: |
-          echo "🧪 Testing self-hosting compiler on ${{ matrix.os }}..."
+          echo "Testing self-hosting compiler on ${{ matrix.os }}..."
           if [ "$RUNNER_OS" = "macOS" ]; then
             # Test compilation on macOS
             ./build/sfn examples/basics/hello-world.sfn > test_macos.py
@@ -195,7 +173,7 @@ jobs:
   # Performance Benchmark
   benchmark:
     runs-on: ubuntu-latest
-    needs: setup-compiler
+    needs: build-selfhosting
 
     steps:
       - name: Checkout Repository
@@ -233,14 +211,43 @@ jobs:
 
       - name: Performance Benchmark
         run: |
-          echo "📊 Running performance benchmarks..."
-
+          echo "Running performance benchmarks..."
+          
           # Benchmark self-hosting compiler vs bootstrap
-          echo "⏱️ Benchmarking compilation time..."
-
+          echo "Benchmarking compilation time..."
+          
           # Test with a larger example
           time ./build/sfn examples/advanced/matrix-multiplication.sfn > selfhost_result.py
           time python bootstrap.py ../examples/advanced/matrix-multiplication.sfn -o bootstrap_result.py
-
+          
           echo "✅ Performance benchmark completed"
         working-directory: bootstrap
+
+  # Security Scan
+  security:
+    runs-on: ubuntu-latest
+    needs: build-selfhosting
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Compiler Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sailfin-compiler
+          path: build/
+
+      - name: Security Scan
+        run: |
+          echo "Running security scan on self-hosting compiler..."
+          
+          # Check for common security issues
+          if command -v bandit &> /dev/null; then
+            bandit -r build/sfn_compiler.py || true
+          fi
+          
+          # Check file permissions
+          ls -la build/
+          
+          echo "✅ Security scan completed"

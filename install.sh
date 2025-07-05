@@ -1,6 +1,6 @@
 #!/bin/bash
-# Sailfin Programming Language Installer
-# curl -sSL https://raw.githubusercontent.com/sailfin/sailfin/main/install.sh | bash
+# Sailfin Self-Hosting Compiler Installer
+# curl -sSL https://github.com/sailfin/sailfin/releases/latest/download/install.sh | bash
 
 set -e
 
@@ -17,17 +17,53 @@ BINARY_NAME="sfn"
 INSTALL_DIR="$HOME/.local/bin"
 VERSION="${SAILFIN_VERSION:-latest}"
 
+echo -e "${BLUE}"
+cat << "EOF"
+  _________      .__.__   _____.__        
+ /   _____/____  |__|  |_/ ____\__| ____  
+ \_____  \\__  \ |  |  |\   __\|  |/    \ 
+ /        \/ __ \|  |  |_|  |  |  |   |  \
+/_______  (____  /__|____/__|  |__|___|  /
+        \/     \/                      \/
+
+🚢 Sailfin Self-Hosting Compiler Installer
+=========================================
+EOF
+echo -e "${NC}"
+
 # Platform detection
 detect_platform() {
     local os
     local arch
     
     case "$OSTYPE" in
-        linux*)   os="Linux" ;;
-        darwin*)  os="macOS" ;;
-        cygwin*)  os="Windows" ;;
-        msys*)    os="Windows" ;;
-        win32*)   os="Windows" ;;
+        linux*)   os="linux" ;;
+        darwin*)  os="macos" ;;
+        cygwin*)  os="windows" ;;
+        msys*)    os="windows" ;;
+        win32*)   os="windows" ;;
+        *)        os="unknown" ;;
+    esac
+    
+    case "$(uname -m)" in
+        x86_64)   arch="x64" ;;
+        aarch64)  arch="arm64" ;;
+        arm64)    arch="arm64" ;;
+        *)        arch="x64" ;;
+    esac
+    
+    if [ "$os" = "unknown" ]; then
+        echo -e "${RED}❌ Unsupported operating system: $OSTYPE${NC}"
+        exit 1
+    fi
+    
+    if [ "$os" = "windows" ]; then
+        echo -e "${RED}❌ Windows support coming soon! Please use WSL for now.${NC}"
+        exit 1
+    fi
+    
+    echo "${os}-${arch}"
+}
         *)        os="unknown" ;;
     esac
     
