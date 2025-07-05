@@ -1,16 +1,16 @@
 # Sailfin Makefile
-# Convenience wrapper around build.sh
+# Primary build system for Sailfin programming language
 
-.PHONY: all build test clean bootstrap self-hosting artifacts install help
+.PHONY: all build test clean examples compiler install help
 
 # Default target
 all: build
 
-# Main build pipeline
+# Main build pipeline - builds Sailfin compiler from source
 build:
 	@./build.sh build
 
-# Run tests only
+# Run compiler and example tests
 test:
 	@./build.sh test
 
@@ -18,17 +18,13 @@ test:
 clean:
 	@./build.sh clean
 
-# Test bootstrap compiler
-bootstrap:
-	@./build.sh bootstrap
+# Test all examples only
+examples:
+	@./build.sh examples
 
-# Test self-hosting compilation
-self-hosting:
-	@./build.sh self-hosting
-
-# Create release artifacts
-artifacts:
-	@./build.sh artifacts
+# Build compiler only (no tests)
+compiler:
+	@./build.sh compiler
 
 # Install Sailfin (requires curl)
 install:
@@ -41,13 +37,12 @@ help:
 	@echo "==================="
 	@echo ""
 	@echo "Available targets:"
-	@echo "  all          Run complete build pipeline (default)"
+	@echo "  all          Build Sailfin compiler from source (default)"
 	@echo "  build        Same as 'all'"
-	@echo "  test         Run tests only"
+	@echo "  test         Run compiler and example tests"
 	@echo "  clean        Clean build directory"
-	@echo "  bootstrap    Test bootstrap compiler only"
-	@echo "  self-hosting Test self-hosting compilation only"
-	@echo "  artifacts    Create release artifacts"
+	@echo "  examples     Test all examples only"
+	@echo "  compiler     Build compiler only (no tests)"
 	@echo "  install      Install Sailfin system-wide"
 	@echo "  help         Show this help message"
 	@echo ""

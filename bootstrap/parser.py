@@ -889,18 +889,27 @@ def p_statements_opt(p):
 # -------------------- Type Non-Terminal -------------------- #
 
 
-# A primary type is just an identifier, a generic type, or a parenthesized type.
+# A primary type is just an identifier, a qualified type, a generic type, or a parenthesized type.
 def p_type_primary(p):
-    '''type_primary : IDENTIFIER
-                    | IDENTIFIER LT type_args GT
+    '''type_primary : type_qualified
+                    | type_qualified LT type_args GT
                     | LPAREN type_expr RPAREN'''
     if len(p) == 2:
-        p[0] = Identifier(name=p[1])
-    elif len(p) == 5:  # Generic type: IDENTIFIER < type_args >
-        p[0] = TypeApplication(base=Identifier(
-            name=p[1]), type_args=p[3], arguments=[])
+        p[0] = p[1]
+    elif len(p) == 5:  # Generic type: type_qualified < type_args >
+        p[0] = TypeApplication(base=p[1], type_args=p[3], arguments=[])
     else:
         p[0] = p[3]
+
+
+def p_type_qualified(p):
+    '''type_qualified : IDENTIFIER
+                      | type_qualified DOT IDENTIFIER'''
+    if len(p) == 2:
+        p[0] = Identifier(name=p[1])
+    else:
+        # Qualified type name like Module.Type
+        p[0] = MemberAccess(object_=p[1], member=p[3])
 
 # A type suffix handles array '[]' and optional '?' sugar.
 

@@ -112,7 +112,7 @@ fn lex(source: string) -> Token[] {
                 }
             }
             let numberText: string = source.substring(start, pos);
-            tokens.append(Token("NUMBER", numberText, lineno));
+            tokens.append(new Token { type: "NUMBER", value: numberText, lineno: lineno });
             continue;
         }
 
@@ -124,7 +124,7 @@ fn lex(source: string) -> Token[] {
             }
             let idText: string = source.substring(start, pos);
             let tokenType: string = lookupReserved(idText);
-            tokens.append(Token(tokenType, idText, lineno));
+            tokens.append(new Token { type: tokenType, value: idText, lineno: lineno });
             continue;
         }
 
@@ -140,7 +140,7 @@ fn lex(source: string) -> Token[] {
         }
             let strText: string = source.substring(start, pos);
             pos = pos + 1; // Skip the closing quote.
-            tokens.append(Token("STRING", strText, lineno));
+            tokens.append(new Token { type: "STRING", value: strText, lineno: lineno });
             continue;
         }
 
@@ -170,10 +170,10 @@ fn lex(source: string) -> Token[] {
         // Check multi-character operators first.
         if c == "+" {
             if pos + 1 < source.length && source[pos + 1] == "=" {
-                tokens.append(Token("PLUS_ASSIGN", "+=", lineno));
+                tokens.append(new Token { type: "PLUS_ASSIGN", value: "+=", lineno: lineno });
                 pos = pos + 2;
             } else {
-                tokens.append(Token("PLUS", "+", lineno));
+                tokens.append(new Token { type: "PLUS", value: "+", lineno: lineno });
                 pos = pos + 1;
             }
             continue;
@@ -181,17 +181,17 @@ fn lex(source: string) -> Token[] {
         if c == "-" {
             // Check for "-=" operator.
             if pos + 1 < source.length && source[pos + 1] == "=" {
-                tokens.append(Token("MINUS_ASSIGN", "-=", lineno));
+                tokens.append(new Token { type: "MINUS_ASSIGN", value: "-=", lineno: lineno });
                 pos = pos + 2;
                 continue;
             }
             // Check for arrow operator "->".
             if pos + 1 < source.length && source[pos + 1] == ">" {
-                tokens.append(Token("ARROW", "->", lineno));
+                tokens.append(new Token { type: "ARROW", value: "->", lineno: lineno });
                 pos = pos + 2;
                 continue;
             }
-            tokens.append(Token("MINUS", "-", lineno));
+            tokens.append(new Token { type: "MINUS", value: "-", lineno: lineno });
             pos = pos + 1;
             continue;
         }

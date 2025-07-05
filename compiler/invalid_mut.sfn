@@ -1,2 +1,0 @@
-let x: number = 42;
-x = 100;

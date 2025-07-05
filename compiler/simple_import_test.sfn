@@ -1,0 +1,9 @@
+// Even simpler test without Token types
+
+import "lexer.sfn" as Lexer;
+
+fn main() -> void {
+    print("Testing basic import...");
+    let source: string = "hello";
+    print("Source: " + source);
+}

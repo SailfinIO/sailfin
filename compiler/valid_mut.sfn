@@ -1,4 +1,0 @@
-let x: number = 42;
-mut y: number = 10;
-y = y + x;
-y = y * 2;
