@@ -88,13 +88,14 @@ jobs:
           python bootstrap.py ../compiler/lexer.sfn -o lexer_test.py
           python bootstrap.py ../compiler/parser.sfn -o parser_test.py
           python bootstrap.py ../compiler/ast.sfn -o ast_test.py
+          python bootstrap.py ../compiler/full_compiler.sfn -o full_compiler_test.py
           echo "✅ All real compiler files compile successfully!"
         working-directory: bootstrap
 
-      - name: Test Self-Hosting Pipeline (Simplified)
+      - name: Test Self-Hosting Pipeline (Real Compiler)
         run: |
-          echo "Testing self-hosting pipeline with simplified compiler..."
-          python bootstrap.py ../compiler/simplified_compiler.sfn -o sailfin_compiler.py -c
+          echo "Testing self-hosting pipeline with full compiler..."
+          python bootstrap.py ../compiler/full_compiler.sfn -o sailfin_compiler.py -c
           python sailfin_compiler.py > program.s
           file program.s
           echo "✅ Self-hosting pipeline generates ARM64 assembly!"

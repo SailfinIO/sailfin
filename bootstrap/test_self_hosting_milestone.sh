@@ -112,10 +112,10 @@ build_self_hosting() {
     cd "$BOOTSTRAP_DIR"
     
     # Use simplified compiler for self-hosting demo
-    local compiler_source="$COMPILER_DIR/simplified_compiler.sfn"
+    local compiler_source="$COMPILER_DIR/full_compiler.sfn"
     
     if [ ! -f "$compiler_source" ]; then
-        log_error "Simplified compiler not found: $compiler_source"
+        log_error "Full compiler not found: $compiler_source"
         exit 1
     fi
     

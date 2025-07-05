@@ -184,12 +184,14 @@ fn expect(parser: Parser, expectedType: string) -> Token {
 
 // Peek at the next token without consuming it
 fn peek(parser: Parser) -> Token {
-    if parser.pos + 1 < parser.tokens.length {
-        return parser.tokens[parser.pos + 1];
-    } else {
-        // Return EOF token if at end
-        return new Token { type: "EOF", value: "", lineno: 0 };
+    let nextPos: number = parser.pos + 1;
+    let tokensLength: number = parser.tokens.length;
+    if nextPos >= tokensLength {
+        let eofToken: Token = new Token { type: "EOF", value: "", lineno: 0 };
+        return eofToken;
     }
+    let nextToken: Token = parser.tokens[nextPos];
+    return nextToken;
 }
 
 // --- Parsing Expressions ---
@@ -214,7 +216,7 @@ fn parseBinaryExpression(parser: Parser, minPrecedence: number) -> Expression {
         let operator: string = tok.value;
         let right: Expression = parseBinaryExpression(parser, precedence + 1);
         
-        left = BinaryExpr { left: left, operator: operator, right: right };
+        left = new BinaryExpr { left: left, operator: operator, right: right };
     }
     
     return left;
@@ -226,10 +228,10 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
     
     if tok.type == "NUMBER" {
         advance(parser);
-        return NumberExpr { value: tok.value.toNumber() };
+        return new NumberExpr { value: tok.value.toNumber() };
     } else if tok.type == "STRING" {
         advance(parser);
-        return StringExpr { value: tok.value };
+        return new StringExpr { value: tok.value };
     } else if tok.type == "LBRACKET" {
         // Parse array literal [1, 2, 3]
         advance(parser);  // Consume '['
@@ -245,11 +247,11 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
         }
         
         expect(parser, "RBRACKET");
-        return ArrayExpr { elements: elements };
+        return new ArrayExpr { elements: elements };
     } else if tok.type == "IDENTIFIER" {
         advance(parser);
         let name: string = tok.value;
-        let expr: Expression = IdentifierExpr { name: name };
+        let expr: Expression = new IdentifierExpr { name: name };
         
         // Handle postfix operations (function calls and array indexing)
         while (true) {
@@ -268,13 +270,13 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
                 }
                 
                 expect(parser, "RPAREN");
-                expr = CallExpr { callee: expr, arguments: args };
+                expr = new CallExpr { callee: expr, arguments: args };
             } else if current(parser).type == "LBRACKET" {
                 // Array indexing
                 advance(parser);  // Consume '['
                 let index: Expression = parseExpression(parser);
                 expect(parser, "RBRACKET");
-                expr = IndexExpr { array: expr, index: index };
+                expr = new IndexExpr { array: expr, index: index };
             } else {
                 break;  // No more postfix operations
             }
@@ -329,7 +331,7 @@ fn parseStatement(parser: Parser) -> Statement {
          // End the declaration with a semicolon.
          expect(parser, "SEMICOLON");
          
-         return VariableDeclaration { 
+         return new VariableDeclaration { 
              name: identTok.value, 
              var_type: varType, 
              value: expr,
@@ -345,7 +347,7 @@ fn parseStatement(parser: Parser) -> Statement {
              let expr: Expression = parseExpression(parser);
              expect(parser, "SEMICOLON");
              
-             return AssignmentStatement {
+             return new AssignmentStatement {
                  target: identTok.value,
                  value: expr
              };
@@ -353,7 +355,7 @@ fn parseStatement(parser: Parser) -> Statement {
              // Expression statement
              let expr = parseExpression(parser);
              expect(parser, "SEMICOLON");
-             return ExpressionStatement { expression: expr };
+             return new ExpressionStatement { expression: expr };
          }
     } else if tok.type == "STRUCT" {
          // Parse struct declaration
@@ -372,7 +374,7 @@ fn parseStatement(parser: Parser) -> Statement {
              let fieldType: Token = expect(parser, "IDENTIFIER");
              expect(parser, "SEMICOLON");
              
-             fields.append(FieldDeclaration {
+             fields.append(new FieldDeclaration {
                  name: fieldName.value,
                  fieldType: fieldType.value
              });
@@ -380,7 +382,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return StructDeclaration {
+         return new StructDeclaration {
              name: nameTok.value,
              fields: fields
          };
@@ -421,7 +423,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return FunctionDeclaration { 
+         return new FunctionDeclaration { 
              name: nameTok.value, 
              parameters: params, 
              returnType: returnType, 
@@ -453,7 +455,7 @@ fn parseStatement(parser: Parser) -> Statement {
              expect(parser, "RBRACE");
          }
          
-         return IfStatement { 
+         return new IfStatement { 
              condition: condition, 
              thenBody: thenBody, 
              elseBody: elseBody 
@@ -472,7 +474,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return WhileStatement { 
+         return new WhileStatement { 
              condition: condition, 
              body: body 
          };
@@ -502,7 +504,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return ForStatement { 
+         return new ForStatement { 
              init: init,
              condition: condition, 
              update: update,
@@ -511,14 +513,14 @@ fn parseStatement(parser: Parser) -> Statement {
     } else if tok.type == "RETURN" {
          // Parse return statement
          advance(parser);  // Consume 'return'
-         let expr: Expression = NilExpr {};
+         let expr: Expression = new NilExpr {};
          
          if current(parser).type != "SEMICOLON" {
              expr = parseExpression(parser);
          }
          
          expect(parser, "SEMICOLON");
-         return ReturnStatement { expression: expr };
+         return new ReturnStatement { expression: expr };
     } else if tok.type == "IMPORT" {
          // Parse import statement
          advance(parser);  // Consume 'import'
@@ -533,7 +535,7 @@ fn parseStatement(parser: Parser) -> Statement {
          }
          
          expect(parser, "SEMICOLON");
-         return ImportStatement { 
+         return new ImportStatement { 
              modulePath: modulePath, 
              alias: alias 
          };
@@ -541,12 +543,12 @@ fn parseStatement(parser: Parser) -> Statement {
          // Parse export statement  
          advance(parser);  // Consume 'export'
          let declaration: Statement = parseStatement(parser);
-         return ExportStatement { declaration: declaration };
+         return new ExportStatement { declaration: declaration };
     } else {
          // Default to expression statement
          let expr = parseExpression(parser);
          expect(parser, "SEMICOLON");
-         return ExpressionStatement { expression: expr };
+         return new ExpressionStatement { expression: expr };
     }
 }
 
@@ -556,7 +558,7 @@ fn parseParameter(parser: Parser) -> Parameter {
     expect(parser, "COLON");
     let typeTok: Token = expect(parser, "IDENTIFIER");
     
-    return Parameter { name: nameTok.value, paramType: typeTok.value };
+    return new Parameter { name: nameTok.value, paramType: typeTok.value };
 }
 
 // --- Parsing the Entire Program ---
@@ -566,5 +568,5 @@ fn parseProgram(parser: Parser) -> Program {
          let stmt = parseStatement(parser);
          stmts.append(stmt);
     }
-    return Program { statements: stmts };
+    return new Program { statements: stmts };
 }

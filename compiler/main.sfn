@@ -1,66 +1,74 @@
-// main.sfn - Self-hosting Sailfin Compiler
+// main.sfn - Self-hosting Sailfin Compiler Entry Point
 
-// For now, we'll use a hardcoded test program instead of file I/O
-// until we implement proper file operations
+// Import all necessary modules
+import "lexer.sfn" as Lexer;
+import "parser.sfn" as Parser;
+import "ast.sfn" as AST;
 
 // Main entry point - compile a test program with function declarations
-fn main() {
+fn main() -> void {
     // Test source code - function declaration with parameters and calls
     let source: string = "fn add(x: number, y: number) -> number { return x + y; } fn main() -> void { let result: number = add(10, 20); }";
     
-    print("Sailfin Self-Hosting Compiler - ARM64 with Functions");
-    print("====================================================");
-    print("Source: " + source);
+    print.info("Sailfin Self-Hosting Compiler - ARM64 with Functions");
+    print.info("====================================================");
+    print.info("Source: " + source);
     
     // 1. Lexing: produce a list of tokens
-    print("\n1. Lexical Analysis...");
-    let tokens: Token[] = lex(source);
-    print("Generated " + tokens.length.toString() + " tokens");
+    print.info("");
+    print.info("1. Lexical Analysis...");
+    let tokens: Token[] = Lexer.lex(source);
+    print.info("Generated " + tokens.length.toString() + " tokens");
     
     // 2. Parsing: create a parser and generate the AST  
-    print("\n2. Parsing...");
-    let parser: Parser = newParser(tokens);
-    let program: Program = parseProgram(parser);
-    print("AST generated successfully");
+    print.info("");
+    print.info("2. Parsing...");
+    let parser: Parser = Parser.newParser(tokens);
+    let program: Program = Parser.parseProgram(parser);
+    print.info("AST generated successfully");
     
     // 3. Code Generation: generate ARM64 assembly code
-    print("\n3. Code Generation (ARM64 Assembly)...");
-    let asmCode: string = generateCode(program);
-    print("Generated assembly code:");
-    print("========================");
-    print(asmCode);
-    print("========================");
+    print.info("");
+    print.info("3. Code Generation (ARM64 Assembly)...");
+    let asmCode: string = AST.generateCode(program);
+    print.info("Generated assembly code:");
+    print.info("========================");
+    print.info(asmCode);
+    print.info("========================");
     
-    print("\nLanguage features demonstrated:");
-    print("✓ Function declarations (fn name(params) -> returnType)");
-    print("✓ Function parameters with type annotations");
-    print("✓ Return types including void");
-    print("✓ Function calls with argument passing");
-    print("✓ Local variable scoping within functions");
-    print("✓ Return statements");
-    print("✓ Immutable variables (let x: type = value)");
-    print("✓ Mutable variables (mut y: type = value)");
-    print("✓ Variable assignments (y = new_value)");
-    print("✓ Arithmetic expressions with operator precedence");
-    print("✓ Conditional statements (if/else)");
-    print("✓ Compile-time mutability checking");
+    print.info("");
+    print.info("Language features demonstrated:");
+    print.info("✓ Function declarations (fn name(params) -> returnType)");
+    print.info("✓ Function parameters with type annotations");
+    print.info("✓ Return types including void");
+    print.info("✓ Function calls with argument passing");
+    print.info("✓ Local variable scoping within functions");
+    print.info("✓ Return statements");
+    print.info("✓ Immutable variables (let x: type = value)");
+    print.info("✓ Mutable variables (mut y: type = value)");
+    print.info("✓ Variable assignments (y = new_value)");
+    print.info("✓ Arithmetic expressions with operator precedence");
+    print.info("✓ Conditional statements (if/else)");
+    print.info("✓ Compile-time mutability checking");
     
-    print("\nNext steps:");
-    print("1. Save this assembly to a .s file");
-    print("2. Run: clang -c output.s -o output.o");
-    print("3. Run: clang -o output output.o");
-    print("4. Run: ./output");
-    print("\nSelf-hosting compilation with functions complete!");
+    print.info("");
+    print.info("Next steps:");
+    print.info("1. Save this assembly to a .s file");
+    print.info("2. Run: clang -c output.s -o output.o");
+    print.info("3. Run: clang -o output output.o");
+    print.info("4. Run: ./output");
+    print.info("");
+    print.info("Self-hosting compilation with functions complete!");
 }
 
 // Simple test function to verify the compiler works
-fn testCompiler() {
+fn testCompiler() -> void {
     let testSource: string = "let answer: number = 42;";
-    let tokens: Token[] = lex(testSource);
+    let tokens: Token[] = Lexer.lex(testSource);
     
     if tokens.length > 0 {
-        print("✓ Lexer working");
+        print.info("✓ Lexer working");
     } else {
-        print("✗ Lexer failed");
+        print.info("✗ Lexer failed");
     }
 }
