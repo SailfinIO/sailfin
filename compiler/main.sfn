@@ -1,27 +1,52 @@
-// main.sfn
+// main.sfn - Self-hosting Sailfin Compiler
 
-// Import the modules that you have written.
-import { Lexer } from "lexer.sfn";
-import { Parser } from "parser.sfn";
-import { Program } from "ast.sfn";
-import { Interpreter } from "interpreter.sfn";
+// For now, we'll use a hardcoded test program instead of file I/O
+// until we implement proper file operations
 
-// Main entry point.
+// Main entry point - compile a simple test program
 fn main() {
-    // Read source code (this could be from a file or hardcoded string).
-    let source: string = readFile("test.sfn");
+    // Test source code - a simple variable declaration and arithmetic
+    let source: string = "let x: number = 42; let y: number = x + 8;";
     
-    // 1. Lexing: produce a list of tokens.
-    let tokens: Token[] = Lexer.lex(source);
+    print("Sailfin Self-Hosting Compiler - ARM64 Machine Code Generation");
+    print("================================================================");
+    print("Source: " + source);
     
-    // 2. Parsing: create a parser and generate the AST.
-    let parser: Parser = Parser.newParser(tokens);
-    let program: Program = Parser.parseProgram(parser);
+    // 1. Lexing: produce a list of tokens
+    print("\n1. Lexical Analysis...");
+    let tokens: Token[] = lex(source);
+    print("Generated " + tokens.length.toString() + " tokens");
     
-    // 3. Interpreting: run the AST.
-    Interpreter.interpret(program);
+    // 2. Parsing: create a parser and generate the AST  
+    print("\n2. Parsing...");
+    let parser: Parser = newParser(tokens);
+    let program: Program = parseProgram(parser);
+    print("AST generated successfully");
     
-    // Alternatively, if you’re generating code:
-    // let targetCode: string = CodeGenerator.generate(program);
-    // writeFile("output.py", targetCode);
+    // 3. Code Generation: generate ARM64 assembly code
+    print("\n3. Code Generation (ARM64 Assembly)...");
+    let asmCode: string = generateCode(program);
+    print("Generated assembly code:");
+    print("========================");
+    print(asmCode);
+    print("========================");
+    
+    print("\nNext steps:");
+    print("1. Save this assembly to a .s file");
+    print("2. Run: clang -c output.s -o output.o");
+    print("3. Run: clang -o output output.o");
+    print("4. Run: ./output");
+    print("\nSelf-hosting compilation to machine code complete!");
+}
+
+// Simple test function to verify the compiler works
+fn testCompiler() {
+    let testSource: string = "let answer: number = 42;";
+    let tokens: Token[] = lex(testSource);
+    
+    if tokens.length > 0 {
+        print("✓ Lexer working");
+    } else {
+        print("✗ Lexer failed");
+    }
 }

@@ -1,0 +1,246 @@
+// codegen.sfn - Machine Code Generator for Sailfin
+// Generates ARM64 assembly code for Apple Silicon
+
+// Assembly instruction representation
+struct AsmInstruction {
+    opcode: string;
+    operands: string[];
+}
+
+// Variable tracking for stack allocation
+struct Variable {
+    name: string;
+    offset: number;  // Negative offset from %rbp
+    varType: string;
+}
+
+// Code generation context
+struct CodeGenContext {
+    instructions: AsmInstruction[];
+    labelCounter: number;
+    stackOffset: number;
+    variables: Variable[];  // Variable tracking
+}
+
+// Create a new code generation context
+fn newCodeGenContext() -> CodeGenContext {
+    return CodeGenContext {
+        instructions: [],
+        labelCounter: 0,
+        stackOffset: 0,
+        variables: []
+    };
+}
+
+// Add a variable to the context and return its stack offset
+fn addVariable(ctx: CodeGenContext, name: string, varType: string) -> number {
+    ctx.stackOffset = ctx.stackOffset - 4;  // Allocate 4 bytes (32-bit) for ARM64
+    let var: Variable = Variable {
+        name: name,
+        offset: ctx.stackOffset,
+        varType: varType
+    };
+    ctx.variables.append(var);
+    return ctx.stackOffset;
+}
+
+// Find a variable's stack offset
+fn findVariable(ctx: CodeGenContext, name: string) -> number {
+    let i: number = 0;
+    while (i < ctx.variables.length) {
+        if ctx.variables[i].name == name {
+            return ctx.variables[i].offset;
+        }
+        i = i + 1;
+    }
+    error("Variable not found: " + name);
+    return 0;  // Never reached
+}
+// Generate a unique label
+fn genLabel(ctx: CodeGenContext) -> string {
+    let label: string = ".L" + ctx.labelCounter.toString();
+    ctx.labelCounter = ctx.labelCounter + 1;
+    return label;
+}
+
+// Emit an assembly instruction
+fn emit(ctx: CodeGenContext, opcode: string, operands: string[]) {
+    let instr: AsmInstruction = AsmInstruction {
+        opcode: opcode,
+        operands: operands
+    };
+    ctx.instructions.append(instr);
+}
+
+// Generate assembly prologue
+fn genPrologue(ctx: CodeGenContext) {
+    emit(ctx, ".section", ["__TEXT,__text,regular,pure_instructions"]);
+    emit(ctx, ".globl", ["_main"]);
+    emit(ctx, ".p2align", ["2"]);
+    emit(ctx, "_main:", []);
+    emit(ctx, "sub", ["sp", "sp", "#32"]);           // Allocate stack space
+    emit(ctx, "stp", ["x29", "x30", "[sp, #16]"]);  // Save frame pointer and link register
+    emit(ctx, "add", ["x29", "sp", "#16"]);          // Set up frame pointer
+}
+
+// Generate assembly epilogue
+fn genEpilogue(ctx: CodeGenContext) {
+    // Restore registers and return
+    emit(ctx, "mov", ["w0", "#0"]);                  // Return value 0
+    emit(ctx, "ldp", ["x29", "x30", "[sp, #16]"]);  // Restore frame pointer and link register
+    emit(ctx, "add", ["sp", "sp", "#32"]);           // Deallocate stack space
+    emit(ctx, "ret", []);                            // Return
+}
+
+// Generate code for a number expression
+fn genNumberExpr(ctx: CodeGenContext, value: number) {
+    emit(ctx, "mov", ["w8", "#" + value.toString()]);  // Load immediate into w8
+}
+
+// Generate code for variable access
+fn genVariableExpr(ctx: CodeGenContext, name: string) {
+    let offset: number = findVariable(ctx, name);
+    emit(ctx, "ldr", ["w8", "[x29, #" + offset.toString() + "]"]);  // Load from stack
+}
+
+// Generate code for binary expression
+fn genBinaryExpr(ctx: CodeGenContext, left: Expression, operator: string, right: Expression) {
+    // Generate code for left operand (result in w8)
+    genExpression(ctx, left);
+    emit(ctx, "str", ["w8", "[sp, #-16]!"]);  // Save left operand on stack
+    
+    // Generate code for right operand (result in w8)
+    genExpression(ctx, right);
+    emit(ctx, "mov", ["w9", "w8"]);           // Move right operand to w9
+    emit(ctx, "ldr", ["w8", "[sp], #16"]);    // Restore left operand to w8
+    
+    // Perform the operation
+    if operator == "+" {
+        emit(ctx, "add", ["w8", "w8", "w9"]);
+    } else if operator == "-" {
+        emit(ctx, "sub", ["w8", "w8", "w9"]);
+    } else if operator == "*" {
+        emit(ctx, "mul", ["w8", "w8", "w9"]);
+    } else if operator == "/" {
+        emit(ctx, "sdiv", ["w8", "w8", "w9"]);  // Signed division
+    } else {
+        error("Unsupported binary operator: " + operator);
+    }
+}
+
+// Generate code for assignment
+fn genAssignment(ctx: CodeGenContext, varName: string, valueExpr: Expression) {
+    // Generate code for the value expression (result in w8)
+    genExpression(ctx, valueExpr);
+    
+    // Store the result in the variable location
+    let offset: number = findVariable(ctx, varName);
+    emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
+}
+
+// Generate code for an expression
+fn genExpression(ctx: CodeGenContext, expr: Expression) {
+    let kind: string = expr.getExpressionKind();
+    
+    if kind == "NumberExpr" {
+        // Cast to NumberExpr and extract value
+        let numExpr: NumberExpr = expr as NumberExpr;
+        genNumberExpr(ctx, numExpr.value);
+    } else if kind == "IdentifierExpr" {
+        // Cast to IdentifierExpr and extract name
+        let idExpr: IdentifierExpr = expr as IdentifierExpr;
+        genVariableExpr(ctx, idExpr.name);
+    } else if kind == "BinaryExpr" {
+        // Cast to BinaryExpr and generate binary operation
+        let binExpr: BinaryExpr = expr as BinaryExpr;
+        genBinaryExpr(ctx, binExpr.left, binExpr.operator, binExpr.right);
+    } else if kind == "StringExpr" {
+        // For now, just load a placeholder value for strings
+        emit(ctx, "mov", ["w8", "#0"]);  // Placeholder for string literals
+    } else {
+        error("Unsupported expression type: " + kind);
+    }
+}
+
+// Generate code for a statement
+fn genStatement(ctx: CodeGenContext, stmt: Statement) {
+    let kind: string = stmt.getStatementKind();
+    
+    if kind == "VariableDeclaration" {
+        // Cast to VariableDeclaration and handle variable allocation
+        let varDecl: VariableDeclaration = stmt as VariableDeclaration;
+        
+        // Add variable to context (allocates stack space)
+        addVariable(ctx, varDecl.name, varDecl.var_type);
+        
+        // Generate code for the initial value and store it
+        genExpression(ctx, varDecl.value);
+        let offset: number = findVariable(ctx, varDecl.name);
+        emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
+        
+    } else if kind == "ExpressionStatement" {
+        // Cast to ExpressionStatement and generate code for the expression
+        let exprStmt: ExpressionStatement = stmt as ExpressionStatement;
+        genExpression(ctx, exprStmt.expression);
+        
+    } else if kind == "ReturnStatement" {
+        // Cast to ReturnStatement and generate return code
+        let retStmt: ReturnStatement = stmt as ReturnStatement;
+        if retStmt.expression.getExpressionKind() != "NilExpr" {
+            genExpression(ctx, retStmt.expression);
+        }
+        // Jump to function epilogue (simplified for now)
+        emit(ctx, "jmp", [".function_end"]);
+        
+    } else {
+        error("Unsupported statement type: " + kind);
+    }
+}
+
+// Generate code for a program
+fn genProgram(ctx: CodeGenContext, program: Program) {
+    genPrologue(ctx);
+    
+    // Generate code for each statement
+    let i: number = 0;
+    while (i < program.statements.length) {
+        genStatement(ctx, program.statements[i]);
+        i = i + 1;
+    }
+    
+    // Add function end label for returns
+    emit(ctx, ".function_end:", []);
+    genEpilogue(ctx);
+}
+
+// Convert instructions to assembly text
+fn instructionsToAsm(instructions: AsmInstruction[]) -> string {
+    let result: string = "";
+    let i: number = 0;
+    
+    while (i < instructions.length) {
+        let instr: AsmInstruction = instructions[i];
+        
+        // Format the instruction
+        if instr.operands.length == 0 {
+            result = result + instr.opcode + "\n";
+        } else if instr.operands.length == 1 {
+            result = result + instr.opcode + " " + instr.operands[0] + "\n";
+        } else if instr.operands.length == 2 {
+            result = result + instr.opcode + " " + instr.operands[0] + ", " + instr.operands[1] + "\n";
+        } else {
+            error("Too many operands for instruction: " + instr.opcode);
+        }
+        
+        i = i + 1;
+    }
+    
+    return result;
+}
+
+// Main code generation function
+fn generateCode(program: Program) -> string {
+    let ctx: CodeGenContext = newCodeGenContext();
+    genProgram(ctx, program);
+    return instructionsToAsm(ctx.instructions);
+}

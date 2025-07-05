@@ -6,12 +6,12 @@ struct Parser {
 
 // Create a new parser given a token list
 fn newParser(tokens: Token[]) -> Parser {
-    return Parser { tokens: tokens, pos: 0 };
+    return new Parser { tokens: tokens, pos: 0 };
 }
 
 // Return the current token or an EOF token if finished.
 fn current(parser: Parser) -> Token {
-    if parser.pos < parser.tokens.length {
+    if (parser.pos < parser.tokens.length) {
         return parser.tokens[parser.pos];
     }
     // Create and return a special EOF token if needed.
@@ -29,7 +29,7 @@ fn advance(parser: Parser) -> Token {
 fn expect(parser: Parser, expectedType: string) -> Token {
     let tok = current(parser);
     if tok.type == expectedType {
-        return advance{parser};
+        return advance(parser);
     } else {
         error("Expected " + expectedType + " but found " + tok.type + " at line " + tok.lineno.toString());
     }
@@ -41,11 +41,11 @@ fn parseExpression(parser: Parser) -> Expression {
     let tok = current(parser);
     if tok.type == "NUMBER" {
          advance(parser);
-         // Create a NumberExpr (assume token.value is convertible to number)
-         return NumberExpr(value: tok.value);
+         // Create a NumberExpr
+         return NumberExpr { value: tok.value.toNumber() };
     } else if tok.type == "IDENTIFIER" {
          advance(parser);
-         return IdentifierExpr(name: tok.value);
+         return IdentifierExpr { name: tok.value };
     } else {
          error("Unexpected token in expression: " + tok.type);
     }
