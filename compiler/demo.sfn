@@ -1,0 +1,27 @@
+// demo.sfn - Demonstration of Sailfin self-hosting compiler features
+
+// Variable declarations with type annotations
+let x: number = 42;
+let y: number = 13;
+
+// Complex arithmetic expressions
+let sum: number = x + y;
+let product: number = x * y;
+let ratio: number = x / y;
+
+// Comparison operations
+let isGreater: number = x > y;
+let isEqual: number = sum == 55;
+
+// Conditional statements with nested logic
+if (x > 40) {
+    let doubled: number = x * 2;
+    if (doubled > 80) {
+        let final: number = doubled + y;
+    }
+} else {
+    let halved: number = x / 2;
+}
+
+// Complex expression with operator precedence
+let complex: number = (x + y) * 2 > (x * y) / 3;

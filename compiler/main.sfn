@@ -3,10 +3,10 @@
 // For now, we'll use a hardcoded test program instead of file I/O
 // until we implement proper file operations
 
-// Main entry point - compile a simple test program
+// Main entry point - compile a test program with more features
 fn main() {
-    // Test source code - a simple variable declaration and arithmetic
-    let source: string = "let x: number = 42; let y: number = x + 8;";
+    // Test source code - variables, arithmetic, and conditionals
+    let source: string = "let x: number = 42; let y: number = x + 8; if (y > 45) { let z: number = y * 2; }";
     
     print("Sailfin Self-Hosting Compiler - ARM64 Machine Code Generation");
     print("================================================================");
@@ -30,6 +30,13 @@ fn main() {
     print("========================");
     print(asmCode);
     print("========================");
+    
+    print("\nLanguage features demonstrated:");
+    print("✓ Variable declarations with type annotations");
+    print("✓ Arithmetic expressions with operator precedence");
+    print("✓ Conditional statements (if/else)");
+    print("✓ Nested scoping and block statements");
+    print("✓ Comparison operators");
     
     print("\nNext steps:");
     print("1. Save this assembly to a .s file");

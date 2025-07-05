@@ -123,6 +123,24 @@ fn genBinaryExpr(ctx: CodeGenContext, left: Expression, operator: string, right:
         emit(ctx, "mul", ["w8", "w8", "w9"]);
     } else if operator == "/" {
         emit(ctx, "sdiv", ["w8", "w8", "w9"]);  // Signed division
+    } else if operator == "==" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "eq"]);  // Set w8 to 1 if equal, 0 otherwise
+    } else if operator == "!=" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "ne"]);  // Set w8 to 1 if not equal, 0 otherwise
+    } else if operator == "<" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "lt"]);  // Set w8 to 1 if less than, 0 otherwise
+    } else if operator == ">" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "gt"]);  // Set w8 to 1 if greater than, 0 otherwise
+    } else if operator == "<=" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "le"]);  // Set w8 to 1 if less/equal, 0 otherwise
+    } else if operator == ">=" {
+        emit(ctx, "cmp", ["w8", "w9"]);
+        emit(ctx, "cset", ["w8", "ge"]);  // Set w8 to 1 if greater/equal, 0 otherwise
     } else {
         error("Unsupported binary operator: " + operator);
     }
@@ -136,6 +154,25 @@ fn genAssignment(ctx: CodeGenContext, varName: string, valueExpr: Expression) {
     // Store the result in the variable location
     let offset: number = findVariable(ctx, varName);
     emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
+}
+
+// Generate code for function call
+fn genCallExpr(ctx: CodeGenContext, callee: Expression, arguments: Expression[]) {
+    // For now, support only simple built-in functions like print
+    if callee.getExpressionKind() == "IdentifierExpr" {
+        let idExpr: IdentifierExpr = callee as IdentifierExpr;
+        
+        if idExpr.name == "print" && arguments.length == 1 {
+            // Simple print implementation - for now just evaluate the argument
+            genExpression(ctx, arguments[0]);
+            // TODO: Add actual print syscall implementation
+            emit(ctx, "// Print call - argument in w8", []);
+        } else {
+            error("Unsupported function call: " + idExpr.name);
+        }
+    } else {
+        error("Unsupported function call expression");
+    }
 }
 
 // Generate code for an expression
@@ -154,9 +191,16 @@ fn genExpression(ctx: CodeGenContext, expr: Expression) {
         // Cast to BinaryExpr and generate binary operation
         let binExpr: BinaryExpr = expr as BinaryExpr;
         genBinaryExpr(ctx, binExpr.left, binExpr.operator, binExpr.right);
+    } else if kind == "CallExpr" {
+        // Cast to CallExpr and generate function call
+        let callExpr: CallExpr = expr as CallExpr;
+        genCallExpr(ctx, callExpr.callee, callExpr.arguments);
     } else if kind == "StringExpr" {
         // For now, just load a placeholder value for strings
         emit(ctx, "mov", ["w8", "#0"]);  // Placeholder for string literals
+    } else if kind == "NilExpr" {
+        // Load zero for nil expressions
+        emit(ctx, "mov", ["w8", "#0"]);
     } else {
         error("Unsupported expression type: " + kind);
     }
@@ -188,13 +232,52 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         let retStmt: ReturnStatement = stmt as ReturnStatement;
         if retStmt.expression.getExpressionKind() != "NilExpr" {
             genExpression(ctx, retStmt.expression);
+            emit(ctx, "mov", ["w0", "w8"]);  // Move result to return register
+        } else {
+            emit(ctx, "mov", ["w0", "#0"]);  // Return 0 if no expression
         }
-        // Jump to function epilogue (simplified for now)
-        emit(ctx, "jmp", [".function_end"]);
+        // Jump to function epilogue
+        emit(ctx, "b", [".function_end"]);
+        
+    } else if kind == "IfStatement" {
+        // Cast to IfStatement and generate conditional code
+        let ifStmt: IfStatement = stmt as IfStatement;
+        genIfStatement(ctx, ifStmt);
         
     } else {
         error("Unsupported statement type: " + kind);
     }
+}
+
+// Generate code for if statement
+fn genIfStatement(ctx: CodeGenContext, ifStmt: IfStatement) {
+    let elseLabel: string = genLabel(ctx);
+    let endLabel: string = genLabel(ctx);
+    
+    // Generate condition and branch
+    genExpression(ctx, ifStmt.condition);
+    emit(ctx, "cmp", ["w8", "#0"]);
+    emit(ctx, "b.eq", [elseLabel]);  // Branch to else if condition is false
+    
+    // Generate then body
+    let i: number = 0;
+    while (i < ifStmt.thenBody.length) {
+        genStatement(ctx, ifStmt.thenBody[i]);
+        i = i + 1;
+    }
+    
+    emit(ctx, "b", [endLabel]);  // Jump to end
+    
+    // Generate else label and body
+    emit(ctx, elseLabel + ":", []);
+    i = 0;
+    while (i < ifStmt.elseBody.length) {
+        genStatement(ctx, ifStmt.elseBody[i]);
+        i = i + 1;
+    }
+    
+    // End label
+    emit(ctx, endLabel + ":", []);
 }
 
 // Generate code for a program

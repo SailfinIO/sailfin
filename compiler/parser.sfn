@@ -38,16 +38,84 @@ fn expect(parser: Parser, expectedType: string) -> Token {
 // --- Parsing Expressions ---
 // For our minimal version, we’ll support just numbers and identifiers.
 fn parseExpression(parser: Parser) -> Expression {
+    return parseBinaryExpression(parser, 0);
+}
+
+// Parse binary expressions with operator precedence
+fn parseBinaryExpression(parser: Parser, minPrecedence: number) -> Expression {
+    let left: Expression = parsePrimaryExpression(parser);
+    
+    while (true) {
+        let tok: Token = current(parser);
+        let precedence: number = getOperatorPrecedence(tok.type);
+        
+        if precedence < minPrecedence {
+            break;
+        }
+        
+        advance(parser);  // Consume operator
+        let operator: string = tok.value;
+        let right: Expression = parseBinaryExpression(parser, precedence + 1);
+        
+        left = BinaryExpr { left: left, operator: operator, right: right };
+    }
+    
+    return left;
+}
+
+// Parse primary expressions (numbers, identifiers, function calls, etc.)
+fn parsePrimaryExpression(parser: Parser) -> Expression {
     let tok = current(parser);
+    
     if tok.type == "NUMBER" {
-         advance(parser);
-         // Create a NumberExpr
-         return NumberExpr { value: tok.value.toNumber() };
+        advance(parser);
+        return NumberExpr { value: tok.value.toNumber() };
+    } else if tok.type == "STRING" {
+        advance(parser);
+        return StringExpr { value: tok.value };
     } else if tok.type == "IDENTIFIER" {
-         advance(parser);
-         return IdentifierExpr { name: tok.value };
+        advance(parser);
+        let name: string = tok.value;
+        
+        // Check for function call
+        if current(parser).type == "LPAREN" {
+            advance(parser);  // Consume '('
+            let args: Expression[] = [];
+            
+            // Parse arguments
+            if current(parser).type != "RPAREN" {
+                args.append(parseExpression(parser));
+                while current(parser).type == "COMMA" {
+                    advance(parser);  // Consume ','
+                    args.append(parseExpression(parser));
+                }
+            }
+            
+            expect(parser, "RPAREN");
+            return CallExpr { callee: IdentifierExpr { name: name }, arguments: args };
+        } else {
+            return IdentifierExpr { name: name };
+        }
+    } else if tok.type == "LPAREN" {
+        advance(parser);  // Consume '('
+        let expr: Expression = parseExpression(parser);
+        expect(parser, "RPAREN");
+        return expr;
     } else {
-         error("Unexpected token in expression: " + tok.type);
+        error("Unexpected token in expression: " + tok.type);
+    }
+}
+
+// Get operator precedence (higher number = higher precedence)
+fn getOperatorPrecedence(tokenType: string) -> number {
+    if tokenType == "MULTIPLY" || tokenType == "DIVIDE" {
+        return 20;
+    } else if tokenType == "PLUS" || tokenType == "MINUS" {
+        return 10;
+    } else if tokenType == "EQ" || tokenType == "NEQ" || tokenType == "LT" || tokenType == "GT" || tokenType == "LEQ" || tokenType == "GEQ" {
+        return 5;
+    } else {
+        return 0;  // Not a binary operator
     }
 }
 
@@ -75,12 +143,54 @@ fn parseStatement(parser: Parser) -> Statement {
          // End the declaration with a semicolon.
          expect(parser, "SEMICOLON");
          
-         return VariableDeclaration(name: identTok.value, var_type: varType, value: expr);
+         return VariableDeclaration { name: identTok.value, var_type: varType, value: expr };
+    } else if tok.type == "IF" {
+         // Parse if statement
+         advance(parser);  // Consume 'if'
+         let condition: Expression = parseExpression(parser);
+         
+         expect(parser, "LBRACE");
+         let thenBody: Statement[] = [];
+         
+         while current(parser).type != "RBRACE" {
+             thenBody.append(parseStatement(parser));
+         }
+         
+         expect(parser, "RBRACE");
+         
+         let elseBody: Statement[] = [];
+         if current(parser).type == "ELSE" {
+             advance(parser);  // Consume 'else'
+             expect(parser, "LBRACE");
+             
+             while current(parser).type != "RBRACE" {
+                 elseBody.append(parseStatement(parser));
+             }
+             
+             expect(parser, "RBRACE");
+         }
+         
+         return IfStatement { 
+             condition: condition, 
+             thenBody: thenBody, 
+             elseBody: elseBody 
+         };
+    } else if tok.type == "RETURN" {
+         // Parse return statement
+         advance(parser);  // Consume 'return'
+         let expr: Expression = NilExpr {};
+         
+         if current(parser).type != "SEMICOLON" {
+             expr = parseExpression(parser);
+         }
+         
+         expect(parser, "SEMICOLON");
+         return ReturnStatement { expression: expr };
     } else {
          // If not a variable declaration, assume an expression statement.
          let expr = parseExpression(parser);
          expect(parser, "SEMICOLON");
-         return ExpressionStatement(expression: expr);
+         return ExpressionStatement { expression: expr };
     }
 }
 
@@ -91,5 +201,5 @@ fn parseProgram(parser: Parser) -> Program {
          let stmt = parseStatement(parser);
          stmts.append(stmt);
     }
-    return Program(statements: stmts);
+    return Program { statements: stmts };
 }

@@ -1,0 +1,36 @@
+// comprehensive_test.sfn - Test program demonstrating Sailfin features
+
+// Basic variable declarations
+let x: number = 42;
+let y: number = 10;
+
+// Arithmetic operations
+let sum: number = x + y;
+let product: number = x * y;
+let difference: number = x - y;
+let quotient: number = x / y;
+
+// Conditional logic
+if (sum > 50) {
+    let message: string = "Sum is greater than 50";
+    let doubled: number = sum * 2;
+}
+
+// Comparison operations
+let isEqual: number = x == y;
+let isNotEqual: number = x != y;
+let isGreater: number = x > y;
+let isLess: number = x < y;
+
+// Nested conditionals
+if (x > 30) {
+    if (y < 20) {
+        let nested: number = x + y;
+    } else {
+        let alternative: number = x - y;
+    }
+}
+
+// Complex expressions
+let complex: number = (x + y) * (x - y);
+let comparison: number = (x * 2) > (y + 30);

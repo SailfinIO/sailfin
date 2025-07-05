@@ -210,3 +210,14 @@ struct NilExpr implements Expression {
         return "NilExpr";
     }
 }
+
+// An if statement with optional else clause
+struct IfStatement implements Statement {
+    condition: Expression;
+    thenBody: Statement[];
+    elseBody: Statement[];  // Empty if no else clause
+    
+    fn getStatementKind(self) -> string {
+        return "IfStatement";
+    }
+}
