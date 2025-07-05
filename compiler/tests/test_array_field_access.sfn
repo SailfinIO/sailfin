@@ -1,0 +1,8 @@
+struct Container {
+    items: number[];
+    pos: number;
+}
+
+fn getItem(container: Container) -> number {
+    return container.items[container.pos + 1];
+}

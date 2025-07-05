@@ -1,0 +1,20 @@
+// Minimal parser test - just the problematic functions
+struct Token {
+    type: string;
+    value: string;
+    lineno: number;
+}
+
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+fn current(parser: Parser) -> Token {
+    let pos: number = parser.pos;
+    let length: number = parser.tokens.length;
+    if pos < length {
+        return parser.tokens[pos];
+    }
+    return new Token { type: "EOF", value: "", lineno: -1 };
+}

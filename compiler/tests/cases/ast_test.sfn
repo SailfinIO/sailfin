@@ -1,0 +1,19 @@
+// Just test the AST definitions
+interface Statement {
+    fn getStatementKind(self) -> string;
+}
+
+interface Expression {
+    fn getExpressionKind(self) -> string;
+}
+
+// Basic expression types
+struct NumberExpr implements Expression {
+    value: number;
+    fn getExpressionKind(self) -> string { return "NumberExpr"; }
+}
+
+struct StringExpr implements Expression {
+    value: string;
+    fn getExpressionKind(self) -> string { return "StringExpr"; }
+}

@@ -1,0 +1,38 @@
+// Test just the first part of parser.sfn
+// Token definition (from lexer.sfn)
+struct Token {
+    type: string;
+    value: string;
+    lineno: number;
+}
+
+// AST interfaces and structures (simplified from ast.sfn)
+interface Statement {
+    fn getStatementKind(self) -> string;
+}
+
+interface Expression {
+    fn getExpressionKind(self) -> string;
+}
+
+// A simple Parser structure
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+// Create a new parser given a token list
+fn newParser(tokens: Token[]) -> Parser {
+    return new Parser { tokens: tokens, pos: 0 };
+}
+
+// Return the current token or an EOF token if finished.
+fn current(parser: Parser) -> Token {
+    let pos: number = parser.pos;
+    let length: number = parser.tokens.length;
+    if pos < length {
+        return parser.tokens[pos];
+    }
+    // Create and return a special EOF token if needed.
+    return new Token { type: "EOF", value: "", lineno: -1 };
+}

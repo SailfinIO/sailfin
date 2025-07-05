@@ -1,3 +1,148 @@
+// Token definition (from lexer.sfn)
+struct Token {
+    type: string;
+    value: string;
+    lineno: number;
+}
+
+// AST interfaces and structures (simplified from ast.sfn)
+interface Statement {
+    fn getStatementKind(self) -> string;
+}
+
+interface Expression {
+    fn getExpressionKind(self) -> string;
+}
+
+// Basic expression types
+struct NumberExpr implements Expression {
+    value: number;
+    fn getExpressionKind(self) -> string { return "NumberExpr"; }
+}
+
+struct StringExpr implements Expression {
+    value: string;
+    fn getExpressionKind(self) -> string { return "StringExpr"; }
+}
+
+struct IdentifierExpr implements Expression {
+    name: string;
+    fn getExpressionKind(self) -> string { return "IdentifierExpr"; }
+}
+
+struct BinaryExpr implements Expression {
+    left: Expression;
+    operator: string;
+    right: Expression;
+    fn getExpressionKind(self) -> string { return "BinaryExpr"; }
+}
+
+struct ArrayExpr implements Expression {
+    elements: Expression[];
+    fn getExpressionKind(self) -> string { return "ArrayExpr"; }
+}
+
+struct IndexExpr implements Expression {
+    array: Expression;
+    index: Expression;
+    fn getExpressionKind(self) -> string { return "IndexExpr"; }
+}
+
+struct CallExpr implements Expression {
+    callee: Expression;
+    arguments: Expression[];
+    fn getExpressionKind(self) -> string { return "CallExpr"; }
+}
+
+struct NilExpr implements Expression {
+    fn getExpressionKind(self) -> string { return "NilExpr"; }
+}
+
+// Basic statement types
+struct Program {
+    statements: Statement[];
+}
+
+struct VariableDeclaration implements Statement {
+    name: string;
+    var_type: string;
+    value: Expression;
+    isMutable: bool;
+    fn getStatementKind(self) -> string { return "VariableDeclaration"; }
+}
+
+struct ExpressionStatement implements Statement {
+    expression: Expression;
+    fn getStatementKind(self) -> string { return "ExpressionStatement"; }
+}
+
+struct ReturnStatement implements Statement {
+    expression: Expression;
+    fn getStatementKind(self) -> string { return "ReturnStatement"; }
+}
+
+struct AssignmentStatement implements Statement {
+    target: string;
+    value: Expression;
+    fn getStatementKind(self) -> string { return "AssignmentStatement"; }
+}
+
+struct IfStatement implements Statement {
+    condition: Expression;
+    thenBody: Statement[];
+    elseBody: Statement[];
+    fn getStatementKind(self) -> string { return "IfStatement"; }
+}
+
+struct WhileStatement implements Statement {
+    condition: Expression;
+    body: Statement[];
+    fn getStatementKind(self) -> string { return "WhileStatement"; }
+}
+
+struct ForStatement implements Statement {
+    init: Statement;
+    condition: Expression;
+    update: Statement;
+    body: Statement[];
+    fn getStatementKind(self) -> string { return "ForStatement"; }
+}
+
+struct FunctionDeclaration implements Statement {
+    name: string;
+    parameters: Parameter[];
+    returnType: string;
+    body: Statement[];
+    fn getStatementKind(self) -> string { return "FunctionDeclaration"; }
+}
+
+struct Parameter {
+    name: string;
+    paramType: string;
+}
+
+struct StructDeclaration implements Statement {
+    name: string;
+    fields: FieldDeclaration[];
+    fn getStatementKind(self) -> string { return "StructDeclaration"; }
+}
+
+struct FieldDeclaration {
+    name: string;
+    fieldType: string;
+}
+
+struct ImportStatement implements Statement {
+    modulePath: string;
+    alias: string;
+    fn getStatementKind(self) -> string { return "ImportStatement"; }
+}
+
+struct ExportStatement implements Statement {
+    declaration: Statement;
+    fn getStatementKind(self) -> string { return "ExportStatement"; }
+}
+
 // A simple Parser structure
 struct Parser {
     tokens: Token[];
@@ -11,11 +156,13 @@ fn newParser(tokens: Token[]) -> Parser {
 
 // Return the current token or an EOF token if finished.
 fn current(parser: Parser) -> Token {
-    if (parser.pos < parser.tokens.length) {
-        return parser.tokens[parser.pos];
+    let pos: number = parser.pos;
+    let length: number = parser.tokens.length;
+    if pos < length {
+        return parser.tokens[pos];
     }
     // Create and return a special EOF token if needed.
-    return Token("EOF", "", -1);
+    return new Token { type: "EOF", value: "", lineno: -1 };
 }
 
 // Advance the parser and return the consumed token.
@@ -41,7 +188,7 @@ fn peek(parser: Parser) -> Token {
         return parser.tokens[parser.pos + 1];
     } else {
         // Return EOF token if at end
-        return Token { type: "EOF", value: "", lineno: 0 };
+        return new Token { type: "EOF", value: "", lineno: 0 };
     }
 }
 

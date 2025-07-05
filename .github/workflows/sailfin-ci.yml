@@ -1,0 +1,221 @@
+name: Sailfin Full Pipeline CI
+
+on:
+  push:
+    branches: [main, alpha, beta, rc]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Test Bootstrap Compiler
+  test-bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Run Bootstrap Tests
+        run: |
+          python test_all_examples.py
+        working-directory: bootstrap
+
+      - name: Test Bootstrap Compiler Build
+        run: |
+          python bootstrap.py ../examples/basics/hello-world.sfn -o test_output.py
+          ls -la test_output.py
+        working-directory: bootstrap
+
+  # Test Self-Hosting Compiler
+  test-self-hosting:
+    runs-on: ubuntu-latest
+    needs: test-bootstrap
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Install ARM64 Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Test Real Compiler Compilation
+        run: |
+          echo "Testing all compiler/*.sfn files compile..."
+          python bootstrap.py ../compiler/lexer.sfn -o lexer_test.py
+          python bootstrap.py ../compiler/parser.sfn -o parser_test.py
+          python bootstrap.py ../compiler/ast.sfn -o ast_test.py
+          echo "✅ All real compiler files compile successfully!"
+        working-directory: bootstrap
+
+      - name: Test Self-Hosting Pipeline (Simplified)
+        run: |
+          echo "Testing self-hosting pipeline with simplified compiler..."
+          python bootstrap.py ../compiler/simplified_compiler.sfn -o sailfin_compiler.py -c
+          python sailfin_compiler.py > program.s
+          file program.s
+          echo "✅ Self-hosting pipeline generates ARM64 assembly!"
+        working-directory: bootstrap
+
+      - name: Upload Self-Hosting Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-hosting-artifacts
+          path: |
+            bootstrap/sailfin_compiler.py
+            bootstrap/program.s
+
+  # Build and Release
+  build-and-release:
+    runs-on: ubuntu-latest
+    needs: [test-bootstrap, test-self-hosting]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/alpha' || github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/rc'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pypoetry
+            bootstrap/dist
+          key: ${{ runner.os }}-poetry-${{ hashFiles('bootstrap/pyproject.toml', 'bootstrap/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Build Executable with PyInstaller
+        run: |
+          pyinstaller --onefile --name sfn bootstrap.py
+        working-directory: bootstrap
+
+      - name: Test Built Executable
+        run: |
+          ./dist/sfn ../examples/basics/hello-world.sfn
+        working-directory: bootstrap
+
+      - name: Verify Build Output
+        run: ls -lah bootstrap/dist
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-compiler-${{ github.sha }}
+          path: bootstrap/dist/sfn
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          poetry run semantic-release publish
+        working-directory: bootstrap
+
+  # Multi-platform builds
+  build-multi-platform:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    needs: [test-bootstrap, test-self-hosting]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Build Platform-Specific Executable
+        run: |
+          pyinstaller --onefile --name sfn-${{ runner.os }} bootstrap.py
+        working-directory: bootstrap
+
+      - name: Upload Platform Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-${{ runner.os }}-${{ github.sha }}
+          path: bootstrap/dist/sfn-${{ runner.os }}*

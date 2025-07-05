@@ -1,0 +1,8 @@
+// Test struct field access
+struct MyStruct {
+    field: number;
+}
+
+fn testAccess(s: MyStruct) -> number {
+    return s.field;
+}

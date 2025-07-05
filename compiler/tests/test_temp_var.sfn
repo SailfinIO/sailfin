@@ -1,0 +1,9 @@
+struct Container {
+    items: string[];
+    pos: number;
+}
+
+fn test1(container: Container) -> string {
+    let index: number = container.pos + 1;
+    return container.items[index];
+}
