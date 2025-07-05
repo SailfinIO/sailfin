@@ -1,0 +1,12 @@
+// Test case for string literals and print functionality
+
+fn main() -> void {
+    // Test string literals
+    let message: string = "Hello, Sailfin!";
+    
+    // Test print function with string
+    print("Hello, World!");
+    
+    // Test print function with variable
+    print(message);
+}

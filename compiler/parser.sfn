@@ -35,6 +35,16 @@ fn expect(parser: Parser, expectedType: string) -> Token {
     }
 }
 
+// Peek at the next token without consuming it
+fn peek(parser: Parser) -> Token {
+    if parser.pos + 1 < parser.tokens.length {
+        return parser.tokens[parser.pos + 1];
+    } else {
+        // Return EOF token if at end
+        return Token { type: "EOF", value: "", lineno: 0 };
+    }
+}
+
 // --- Parsing Expressions ---
 // For our minimal version, we’ll support just numbers and identifiers.
 fn parseExpression(parser: Parser) -> Expression {
@@ -73,29 +83,57 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
     } else if tok.type == "STRING" {
         advance(parser);
         return StringExpr { value: tok.value };
+    } else if tok.type == "LBRACKET" {
+        // Parse array literal [1, 2, 3]
+        advance(parser);  // Consume '['
+        let elements: Expression[] = [];
+        
+        // Parse array elements
+        if current(parser).type != "RBRACKET" {
+            elements.append(parseExpression(parser));
+            while current(parser).type == "COMMA" {
+                advance(parser);  // Consume ','
+                elements.append(parseExpression(parser));
+            }
+        }
+        
+        expect(parser, "RBRACKET");
+        return ArrayExpr { elements: elements };
     } else if tok.type == "IDENTIFIER" {
         advance(parser);
         let name: string = tok.value;
+        let expr: Expression = IdentifierExpr { name: name };
         
-        // Check for function call
-        if current(parser).type == "LPAREN" {
-            advance(parser);  // Consume '('
-            let args: Expression[] = [];
-            
-            // Parse arguments
-            if current(parser).type != "RPAREN" {
-                args.append(parseExpression(parser));
-                while current(parser).type == "COMMA" {
-                    advance(parser);  // Consume ','
+        // Handle postfix operations (function calls and array indexing)
+        while (true) {
+            if current(parser).type == "LPAREN" {
+                // Function call
+                advance(parser);  // Consume '('
+                let args: Expression[] = [];
+                
+                // Parse arguments
+                if current(parser).type != "RPAREN" {
                     args.append(parseExpression(parser));
+                    while current(parser).type == "COMMA" {
+                        advance(parser);  // Consume ','
+                        args.append(parseExpression(parser));
+                    }
                 }
+                
+                expect(parser, "RPAREN");
+                expr = CallExpr { callee: expr, arguments: args };
+            } else if current(parser).type == "LBRACKET" {
+                // Array indexing
+                advance(parser);  // Consume '['
+                let index: Expression = parseExpression(parser);
+                expect(parser, "RBRACKET");
+                expr = IndexExpr { array: expr, index: index };
+            } else {
+                break;  // No more postfix operations
             }
-            
-            expect(parser, "RPAREN");
-            return CallExpr { callee: IdentifierExpr { name: name }, arguments: args };
-        } else {
-            return IdentifierExpr { name: name };
         }
+        
+        return expr;
     } else if tok.type == "LPAREN" {
         advance(parser);  // Consume '('
         let expr: Expression = parseExpression(parser);
@@ -124,9 +162,10 @@ fn getOperatorPrecedence(tokenType: string) -> number {
 // and expression statements.
 fn parseStatement(parser: Parser) -> Statement {
     let tok = current(parser);
-    if tok.type == "LET" {
+    if tok.type == "LET" || tok.type == "MUT" {
          // Parse variable declaration.
-         advance(parser); // Consume 'let'
+         let isMutable: bool = tok.type == "MUT";
+         advance(parser); // Consume 'let' or 'mut'
          let identTok = expect(parser, "IDENTIFIER");
          
          // Optionally, check for a type annotation.
@@ -143,7 +182,75 @@ fn parseStatement(parser: Parser) -> Statement {
          // End the declaration with a semicolon.
          expect(parser, "SEMICOLON");
          
-         return VariableDeclaration { name: identTok.value, var_type: varType, value: expr };
+         return VariableDeclaration { 
+             name: identTok.value, 
+             var_type: varType, 
+             value: expr,
+             isMutable: isMutable
+         };
+    } else if tok.type == "IDENTIFIER" {
+         // Check if this is an assignment (x = value) or expression statement
+         let nextTok: Token = peek(parser);
+         if nextTok.type == "ASSIGN" {
+             // Parse assignment statement
+             let identTok: Token = advance(parser);  // Consume identifier
+             expect(parser, "ASSIGN");
+             let expr: Expression = parseExpression(parser);
+             expect(parser, "SEMICOLON");
+             
+             return AssignmentStatement {
+                 target: identTok.value,
+                 value: expr
+             };
+         } else {
+             // Expression statement
+             let expr = parseExpression(parser);
+             expect(parser, "SEMICOLON");
+             return ExpressionStatement { expression: expr };
+         }
+    } else if tok.type == "FN" {
+         // Parse function declaration
+         advance(parser);  // Consume 'fn'
+         let nameTok: Token = expect(parser, "IDENTIFIER");
+         
+         expect(parser, "LPAREN");
+         let params: Parameter[] = [];
+         
+         // Parse parameters
+         if current(parser).type != "RPAREN" {
+             params.append(parseParameter(parser));
+             while current(parser).type == "COMMA" {
+                 advance(parser);  // Consume ','
+                 params.append(parseParameter(parser));
+             }
+         }
+         
+         expect(parser, "RPAREN");
+         
+         // Parse return type
+         let returnType: string = "";
+         if current(parser).type == "ARROW" {
+             advance(parser);  // Consume '->'
+             let typeTok: Token = expect(parser, "IDENTIFIER");
+             returnType = typeTok.value;
+         }
+         
+         // Parse function body
+         expect(parser, "LBRACE");
+         let body: Statement[] = [];
+         
+         while current(parser).type != "RBRACE" {
+             body.append(parseStatement(parser));
+         }
+         
+         expect(parser, "RBRACE");
+         
+         return FunctionDeclaration { 
+             name: nameTok.value, 
+             parameters: params, 
+             returnType: returnType, 
+             body: body 
+         };
     } else if tok.type == "IF" {
          // Parse if statement
          advance(parser);  // Consume 'if'
@@ -175,6 +282,24 @@ fn parseStatement(parser: Parser) -> Statement {
              thenBody: thenBody, 
              elseBody: elseBody 
          };
+    } else if tok.type == "WHILE" {
+         // Parse while loop
+         advance(parser);  // Consume 'while'
+         let condition: Expression = parseExpression(parser);
+         
+         expect(parser, "LBRACE");
+         let body: Statement[] = [];
+         
+         while current(parser).type != "RBRACE" {
+             body.append(parseStatement(parser));
+         }
+         
+         expect(parser, "RBRACE");
+         
+         return WhileStatement { 
+             condition: condition, 
+             body: body 
+         };
     } else if tok.type == "RETURN" {
          // Parse return statement
          advance(parser);  // Consume 'return'
@@ -187,11 +312,20 @@ fn parseStatement(parser: Parser) -> Statement {
          expect(parser, "SEMICOLON");
          return ReturnStatement { expression: expr };
     } else {
-         // If not a variable declaration, assume an expression statement.
+         // Default to expression statement
          let expr = parseExpression(parser);
          expect(parser, "SEMICOLON");
          return ExpressionStatement { expression: expr };
     }
+}
+
+// Parse function parameter
+fn parseParameter(parser: Parser) -> Parameter {
+    let nameTok: Token = expect(parser, "IDENTIFIER");
+    expect(parser, "COLON");
+    let typeTok: Token = expect(parser, "IDENTIFIER");
+    
+    return Parameter { name: nameTok.value, paramType: typeTok.value };
 }
 
 // --- Parsing the Entire Program ---

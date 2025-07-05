@@ -1,0 +1,16 @@
+// Test case for array literals and indexing
+
+fn main() -> void {
+    // Test array literals
+    let numbers: number[] = [1, 2, 3, 4, 5];
+    
+    // Test array indexing
+    let first: number = numbers[0];
+    let third: number = numbers[2];
+    
+    print("First element: " + first.toString());
+    print("Third element: " + third.toString());
+    
+    // Test empty array
+    let empty: number[] = [];
+}

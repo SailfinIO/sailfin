@@ -1,0 +1,41 @@
+// demo.sfn - Demonstration of Sailfin self-hosting compiler features
+
+// Immutable variable declarations with type annotations
+let x: number = 42;
+let y: number = 13;
+
+// Mutable variable declarations
+mut counter: number = 0;
+mut accumulator: number = 1;
+
+// Complex arithmetic expressions
+let sum: number = x + y;
+let product: number = x * y;
+let ratio: number = x / y;
+
+// Mutable variable assignments
+counter = counter + 1;
+accumulator = accumulator * 2;
+
+// Comparison operations
+let isGreater: number = x > y;
+let isEqual: number = sum == 55;
+
+// Conditional statements with nested logic and mutations
+if (x > 40) {
+    let doubled: number = x * 2;
+    counter = counter + 10;  // Mutate counter
+    if (doubled > 80) {
+        let final: number = doubled + y;
+        accumulator = accumulator + final;  // Mutate accumulator
+    }
+} else {
+    let halved: number = x / 2;
+    counter = 0;  // Reset counter
+}
+
+// Complex expression with operator precedence and mutations
+let complex: number = (x + y) * 2 > (x * y) / 3;
+if (complex == 1) {
+    accumulator = accumulator * counter;
+}

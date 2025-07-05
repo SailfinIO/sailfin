@@ -12,6 +12,13 @@ struct Variable {
     name: string;
     offset: number;  // Negative offset from %rbp
     varType: string;
+    isMutable: bool; // Whether the variable can be modified
+}
+
+// String literal tracking
+struct StringLiteral {
+    label: string;
+    value: string;
 }
 
 // Code generation context
@@ -20,6 +27,8 @@ struct CodeGenContext {
     labelCounter: number;
     stackOffset: number;
     variables: Variable[];  // Variable tracking
+    stringLiterals: StringLiteral[];  // String literals
+    stringCounter: number;  // Counter for string label generation
 }
 
 // Create a new code generation context
@@ -28,20 +37,35 @@ fn newCodeGenContext() -> CodeGenContext {
         instructions: [],
         labelCounter: 0,
         stackOffset: 0,
-        variables: []
+        variables: [],
+        stringLiterals: [],
+        stringCounter: 0
     };
 }
 
 // Add a variable to the context and return its stack offset
-fn addVariable(ctx: CodeGenContext, name: string, varType: string) -> number {
+fn addVariable(ctx: CodeGenContext, name: string, varType: string, isMutable: bool) -> number {
     ctx.stackOffset = ctx.stackOffset - 4;  // Allocate 4 bytes (32-bit) for ARM64
     let var: Variable = Variable {
         name: name,
         offset: ctx.stackOffset,
-        varType: varType
+        varType: varType,
+        isMutable: isMutable
     };
     ctx.variables.append(var);
     return ctx.stackOffset;
+}
+
+// Add a string literal and return its label
+fn addStringLiteral(ctx: CodeGenContext, value: string) -> string {
+    let label: string = "_str" + ctx.stringCounter.toString();
+    ctx.stringCounter = ctx.stringCounter + 1;
+    let strLit: StringLiteral = StringLiteral {
+        label: label,
+        value: value
+    };
+    ctx.stringLiterals.append(strLit);
+    return label;
 }
 
 // Find a variable's stack offset
@@ -56,6 +80,20 @@ fn findVariable(ctx: CodeGenContext, name: string) -> number {
     error("Variable not found: " + name);
     return 0;  // Never reached
 }
+
+// Check if a variable is mutable
+fn isVariableMutable(ctx: CodeGenContext, name: string) -> bool {
+    let i: number = 0;
+    while (i < ctx.variables.length) {
+        if ctx.variables[i].name == name {
+            return ctx.variables[i].isMutable;
+        }
+        i = i + 1;
+    }
+    error("Variable not found: " + name);
+    return false;  // Never reached
+}
+
 // Generate a unique label
 fn genLabel(ctx: CodeGenContext) -> string {
     let label: string = ".L" + ctx.labelCounter.toString();
@@ -90,6 +128,20 @@ fn genEpilogue(ctx: CodeGenContext) {
     emit(ctx, "ldp", ["x29", "x30", "[sp, #16]"]);  // Restore frame pointer and link register
     emit(ctx, "add", ["sp", "sp", "#32"]);           // Deallocate stack space
     emit(ctx, "ret", []);                            // Return
+}
+
+// Generate string literal data section
+fn genStringLiterals(ctx: CodeGenContext) {
+    if ctx.stringLiterals.length > 0 {
+        emit(ctx, ".section", ["__TEXT,__cstring,cstring_literals"]);
+        let i: number = 0;
+        while (i < ctx.stringLiterals.length) {
+            let strLit: StringLiteral = ctx.stringLiterals[i];
+            emit(ctx, strLit.label + ":", []);
+            emit(ctx, ".asciz", ["\"" + strLit.value + "\""]);
+            i = i + 1;
+        }
+    }
 }
 
 // Generate code for a number expression
@@ -162,13 +214,44 @@ fn genCallExpr(ctx: CodeGenContext, callee: Expression, arguments: Expression[])
     if callee.getExpressionKind() == "IdentifierExpr" {
         let idExpr: IdentifierExpr = callee as IdentifierExpr;
         
-        if idExpr.name == "print" && arguments.length == 1 {
-            // Simple print implementation - for now just evaluate the argument
-            genExpression(ctx, arguments[0]);
-            // TODO: Add actual print syscall implementation
-            emit(ctx, "// Print call - argument in w8", []);
+        if idExpr.name == "print" {
+            // Built-in print function
+            if arguments.length == 1 {
+                genExpression(ctx, arguments[0]);
+                // Print syscall implementation for macOS
+                emit(ctx, "// Print syscall - argument in x8", []);
+                emit(ctx, "mov", ["x0", "#1"]);      // STDOUT_FILENO
+                emit(ctx, "mov", ["x1", "x8"]);      // Buffer (string address)
+                emit(ctx, "mov", ["x2", "#13"]);     // Length (simplified for now)
+                emit(ctx, "mov", ["x16", "#4"]);     // SYS_write  
+                emit(ctx, "svc", ["#0x80"]);         // System call
+            } else {
+                error("print() expects exactly 1 argument");
+            }
         } else {
-            error("Unsupported function call: " + idExpr.name);
+            // User-defined function call
+            
+            // TODO: Evaluate arguments and pass in registers (x0, x1, etc.)
+            let i: number = 0;
+            while (i < arguments.length && i < 4) {  // ARM64 can pass up to 8 args in registers
+                genExpression(ctx, arguments[i]);
+                if i == 0 {
+                    emit(ctx, "mov", ["x0", "x8"]);  // First argument in x0
+                } else if i == 1 {
+                    emit(ctx, "mov", ["x1", "x8"]);  // Second argument in x1
+                } else if i == 2 {
+                    emit(ctx, "mov", ["x2", "x8"]);  // Third argument in x2
+                } else if i == 3 {
+                    emit(ctx, "mov", ["x3", "x8"]);  // Fourth argument in x3
+                }
+                i = i + 1;
+            }
+            
+            // Call the function
+            emit(ctx, "bl", ["_" + idExpr.name]);  // Branch and link
+            
+            // Result is in w0/x0
+            emit(ctx, "mov", ["w8", "w0"]);  // Move result to our working register
         }
     } else {
         error("Unsupported function call expression");
@@ -196,8 +279,19 @@ fn genExpression(ctx: CodeGenContext, expr: Expression) {
         let callExpr: CallExpr = expr as CallExpr;
         genCallExpr(ctx, callExpr.callee, callExpr.arguments);
     } else if kind == "StringExpr" {
-        // For now, just load a placeholder value for strings
-        emit(ctx, "mov", ["w8", "#0"]);  // Placeholder for string literals
+        // Cast to StringExpr and generate string literal load
+        let strExpr: StringExpr = expr as StringExpr;
+        let label: string = addStringLiteral(ctx, strExpr.value);
+        emit(ctx, "adrp", ["x8", label + "@PAGE"]);
+        emit(ctx, "add", ["x8", "x8", label + "@PAGEOFF"]);
+    } else if kind == "ArrayExpr" {
+        // Cast to ArrayExpr and generate array literal
+        let arrayExpr: ArrayExpr = expr as ArrayExpr;
+        genArrayExpr(ctx, arrayExpr);
+    } else if kind == "IndexExpr" {
+        // Cast to IndexExpr and generate array indexing
+        let indexExpr: IndexExpr = expr as IndexExpr;
+        genIndexExpr(ctx, indexExpr);
     } else if kind == "NilExpr" {
         // Load zero for nil expressions
         emit(ctx, "mov", ["w8", "#0"]);
@@ -215,12 +309,34 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         let varDecl: VariableDeclaration = stmt as VariableDeclaration;
         
         // Add variable to context (allocates stack space)
-        addVariable(ctx, varDecl.name, varDecl.var_type);
+        addVariable(ctx, varDecl.name, varDecl.var_type, varDecl.isMutable);
         
         // Generate code for the initial value and store it
         genExpression(ctx, varDecl.value);
         let offset: number = findVariable(ctx, varDecl.name);
         emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
+        
+        // Add comment indicating mutability
+        if varDecl.isMutable {
+            emit(ctx, "// Mutable variable: " + varDecl.name, []);
+        } else {
+            emit(ctx, "// Immutable variable: " + varDecl.name, []);
+        }
+        
+    } else if kind == "AssignmentStatement" {
+        // Cast to AssignmentStatement and handle variable assignment
+        let assignStmt: AssignmentStatement = stmt as AssignmentStatement;
+        
+        // Check if variable is mutable
+        if not isVariableMutable(ctx, assignStmt.target) {
+            error("Cannot assign to immutable variable: " + assignStmt.target);
+        }
+        
+        // Generate code for the value and store it
+        genExpression(ctx, assignStmt.value);
+        let offset: number = findVariable(ctx, assignStmt.target);
+        emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
+        emit(ctx, "// Assignment to mutable variable: " + assignStmt.target, []);
         
     } else if kind == "ExpressionStatement" {
         // Cast to ExpressionStatement and generate code for the expression
@@ -239,13 +355,76 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         // Jump to function epilogue
         emit(ctx, "b", [".function_end"]);
         
+    } else if kind == "FunctionDeclaration" {
+        // Cast to FunctionDeclaration and generate function code
+        let funcDecl: FunctionDeclaration = stmt as FunctionDeclaration;
+        genFunctionDeclaration(ctx, funcDecl);
+        
     } else if kind == "IfStatement" {
         // Cast to IfStatement and generate conditional code
         let ifStmt: IfStatement = stmt as IfStatement;
         genIfStatement(ctx, ifStmt);
         
+    } else if kind == "WhileStatement" {
+        // Cast to WhileStatement and generate loop code
+        let whileStmt: WhileStatement = stmt as WhileStatement;
+        genWhileStatement(ctx, whileStmt);
+        
     } else {
         error("Unsupported statement type: " + kind);
+    }
+}
+
+// Generate code for function declaration
+fn genFunctionDeclaration(ctx: CodeGenContext, funcDecl: FunctionDeclaration) {
+    // Generate function label
+    emit(ctx, ".globl", ["_" + funcDecl.name]);
+    emit(ctx, "_" + funcDecl.name + ":", []);
+    
+    // Function prologue
+    emit(ctx, "sub", ["sp", "sp", "#32"]);
+    emit(ctx, "stp", ["x29", "x30", "[sp, #16]"]);
+    emit(ctx, "add", ["x29", "sp", "#16"]);
+    
+    // Save current variable context and create new scope
+    let savedOffset: number = ctx.stackOffset;
+    let savedVarCount: number = ctx.variables.length;
+    
+    // Add parameters to variable context
+    let i: number = 0;
+    while (i < funcDecl.parameters.length) {
+        let param: Parameter = funcDecl.parameters[i];
+        addVariable(ctx, param.name, param.paramType, false);  // Parameters are immutable by default
+        
+        // TODO: Load parameters from registers (x0, x1, etc.) to stack
+        // For now, just allocate space
+        let offset: number = findVariable(ctx, param.name);
+        emit(ctx, "// Parameter " + param.name + " at offset " + offset.toString(), []);
+        
+        i = i + 1;
+    }
+    
+    // Generate function body
+    i = 0;
+    while (i < funcDecl.body.length) {
+        genStatement(ctx, funcDecl.body[i]);
+        i = i + 1;
+    }
+    
+    // Function epilogue (if no explicit return)
+    emit(ctx, "_" + funcDecl.name + "_end:", []);
+    if funcDecl.returnType == "void" || funcDecl.returnType == "" {
+        emit(ctx, "mov", ["w0", "#0"]);  // Return 0 for void functions
+    }
+    emit(ctx, "ldp", ["x29", "x30", "[sp, #16]"]);
+    emit(ctx, "add", ["sp", "sp", "#32"]);
+    emit(ctx, "ret", []);
+    
+    // Restore variable context
+    ctx.stackOffset = savedOffset;
+    // Remove function-local variables
+    while (ctx.variables.length > savedVarCount) {
+        ctx.variables.removeLast();
     }
 }
 
@@ -280,20 +459,123 @@ fn genIfStatement(ctx: CodeGenContext, ifStmt: IfStatement) {
     emit(ctx, endLabel + ":", []);
 }
 
-// Generate code for a program
-fn genProgram(ctx: CodeGenContext, program: Program) {
-    genPrologue(ctx);
+// Generate code for while loop
+fn genWhileStatement(ctx: CodeGenContext, whileStmt: WhileStatement) {
+    let loopLabel: string = genLabel(ctx);
+    let endLabel: string = genLabel(ctx);
     
-    // Generate code for each statement
+    // Loop start label
+    emit(ctx, loopLabel + ":", []);
+    
+    // Generate condition and branch
+    genExpression(ctx, whileStmt.condition);
+    emit(ctx, "cmp", ["w8", "#0"]);
+    emit(ctx, "b.eq", [endLabel]);  // Branch to end if condition is false
+    
+    // Generate loop body
     let i: number = 0;
-    while (i < program.statements.length) {
-        genStatement(ctx, program.statements[i]);
+    while (i < whileStmt.body.length) {
+        genStatement(ctx, whileStmt.body[i]);
         i = i + 1;
     }
     
-    // Add function end label for returns
-    emit(ctx, ".function_end:", []);
-    genEpilogue(ctx);
+    // Jump back to loop start
+    emit(ctx, "b", [loopLabel]);
+    
+    // End label
+    emit(ctx, endLabel + ":", []);
+}
+
+// Generate code for array literal
+fn genArrayExpr(ctx: CodeGenContext, arrayExpr: ArrayExpr) {
+    // For now, implement simple stack-based array storage
+    // TODO: This is a simplified implementation - real arrays need heap allocation
+    
+    if arrayExpr.elements.length == 0 {
+        // Empty array - return null pointer
+        emit(ctx, "mov", ["x8", "#0"]);
+        return;
+    }
+    
+    // Allocate space on stack for array elements
+    let arraySize: number = arrayExpr.elements.length * 4;  // 4 bytes per element
+    ctx.stackOffset = ctx.stackOffset - arraySize;
+    let arrayOffset: number = ctx.stackOffset;
+    
+    // Store array base address in x8
+    emit(ctx, "add", ["x8", "x29", "#" + arrayOffset.toString()]);
+    
+    // Generate and store each element
+    let i: number = 0;
+    while (i < arrayExpr.elements.length) {
+        genExpression(ctx, arrayExpr.elements[i]);  // Result in w8
+        let elementOffset: number = arrayOffset + (i * 4);
+        emit(ctx, "str", ["w8", "[x29, #" + elementOffset.toString() + "]"]);
+        i = i + 1;
+    }
+    
+    // Restore array base address to x8
+    emit(ctx, "add", ["x8", "x29", "#" + arrayOffset.toString()]);
+}
+
+// Generate code for array indexing
+fn genIndexExpr(ctx: CodeGenContext, indexExpr: IndexExpr) {
+    // Generate array base address (result in x8)
+    genExpression(ctx, indexExpr.array);
+    emit(ctx, "mov", ["x9", "x8"]);  // Save array base in x9
+    
+    // Generate index value (result in w8)
+    genExpression(ctx, indexExpr.index);
+    
+    // Calculate element address: base + (index * 4)
+    emit(ctx, "lsl", ["x8", "x8", "#2"]);   // Multiply index by 4 (element size)
+    emit(ctx, "add", ["x8", "x9", "x8"]);   // Add to base address
+    
+    // Load value from calculated address
+    emit(ctx, "ldr", ["w8", "[x8]"]);
+}
+
+// Generate code for a program
+fn genProgram(ctx: CodeGenContext, program: Program) {
+    // Check if we have a main function or if this is a script
+    let hasMainFunction: bool = false;
+    let i: number = 0;
+    while (i < program.statements.length) {
+        let stmt: Statement = program.statements[i];
+        if stmt.getStatementKind() == "FunctionDeclaration" {
+            let funcDecl: FunctionDeclaration = stmt as FunctionDeclaration;
+            if funcDecl.name == "main" {
+                hasMainFunction = true;
+            }
+        }
+        i = i + 1;
+    }
+    
+    if not hasMainFunction {
+        // Generate a main wrapper for script-style code
+        genPrologue(ctx);
+        
+        // Generate code for each statement
+        i = 0;
+        while (i < program.statements.length) {
+            genStatement(ctx, program.statements[i]);
+            i = i + 1;
+        }
+        
+        // Add function end label for returns
+        emit(ctx, ".function_end:", []);
+        genEpilogue(ctx);
+    } else {
+        // Generate all functions
+        i = 0;
+        while (i < program.statements.length) {
+            genStatement(ctx, program.statements[i]);
+            i = i + 1;
+        }
+    }
+    
+    // Generate string literals at the end
+    genStringLiterals(ctx);
 }
 
 // Convert instructions to assembly text

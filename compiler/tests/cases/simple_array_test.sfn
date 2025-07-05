@@ -1,0 +1,4 @@
+// Simple array test
+
+let arr: number[] = [10, 20, 30];
+let value: number = arr[1];

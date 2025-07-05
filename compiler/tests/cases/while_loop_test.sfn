@@ -1,0 +1,13 @@
+// Test case for while loops
+
+fn main() -> void {
+    // Simple counter loop
+    mut i: number = 0;
+    
+    while (i < 5) {
+        print("Iteration: " + i.toString());
+        i = i + 1;
+    }
+    
+    print("Loop completed!");
+}

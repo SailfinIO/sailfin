@@ -1,0 +1,6 @@
+// hello_world_test.sfn - Simple hello world with function
+
+fn main() -> void {
+    // For now, use a placeholder since we don't have full print support yet
+    let greeting: number = 42;  // Placeholder for "Hello, Sailfin!"
+}

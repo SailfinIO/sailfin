@@ -1,0 +1,2 @@
+// Simple string test without type annotations
+print("Hello, World!");

@@ -3,13 +3,13 @@
 // For now, we'll use a hardcoded test program instead of file I/O
 // until we implement proper file operations
 
-// Main entry point - compile a test program with more features
+// Main entry point - compile a test program with function declarations
 fn main() {
-    // Test source code - variables, arithmetic, and conditionals
-    let source: string = "let x: number = 42; let y: number = x + 8; if (y > 45) { let z: number = y * 2; }";
+    // Test source code - function declaration with parameters and calls
+    let source: string = "fn add(x: number, y: number) -> number { return x + y; } fn main() -> void { let result: number = add(10, 20); }";
     
-    print("Sailfin Self-Hosting Compiler - ARM64 Machine Code Generation");
-    print("================================================================");
+    print("Sailfin Self-Hosting Compiler - ARM64 with Functions");
+    print("====================================================");
     print("Source: " + source);
     
     // 1. Lexing: produce a list of tokens
@@ -32,18 +32,25 @@ fn main() {
     print("========================");
     
     print("\nLanguage features demonstrated:");
-    print("✓ Variable declarations with type annotations");
+    print("✓ Function declarations (fn name(params) -> returnType)");
+    print("✓ Function parameters with type annotations");
+    print("✓ Return types including void");
+    print("✓ Function calls with argument passing");
+    print("✓ Local variable scoping within functions");
+    print("✓ Return statements");
+    print("✓ Immutable variables (let x: type = value)");
+    print("✓ Mutable variables (mut y: type = value)");
+    print("✓ Variable assignments (y = new_value)");
     print("✓ Arithmetic expressions with operator precedence");
     print("✓ Conditional statements (if/else)");
-    print("✓ Nested scoping and block statements");
-    print("✓ Comparison operators");
+    print("✓ Compile-time mutability checking");
     
     print("\nNext steps:");
     print("1. Save this assembly to a .s file");
     print("2. Run: clang -c output.s -o output.o");
     print("3. Run: clang -o output output.o");
     print("4. Run: ./output");
-    print("\nSelf-hosting compilation to machine code complete!");
+    print("\nSelf-hosting compilation with functions complete!");
 }
 
 // Simple test function to verify the compiler works

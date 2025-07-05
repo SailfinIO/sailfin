@@ -14,6 +14,8 @@ enum Reserved {
     Mut = "MUT",
     If = "IF",
     Else = "ELSE",
+    While = "WHILE",
+    For = "FOR",
     Return = "RETURN",
     Print = "PRINT",
     Implements = "IMPLEMENTS",
@@ -36,6 +38,10 @@ fn lookupReserved(word: string) -> string {
         return Reserved.If;
     } else if word == "else" {
         return Reserved.Else;
+    } else if word == "while" {
+        return Reserved.While;
+    } else if word == "for" {
+        return Reserved.For;
     } else if word == "return" {
         return Reserved.Return;
     } else if word == "print" {
