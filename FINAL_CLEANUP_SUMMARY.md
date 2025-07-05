@@ -3,8 +3,9 @@
 ## Files Cleaned Up ✅
 
 ### Python Test Files Removed from Bootstrap Directory:
+
 - `test_array_index_test.py`
-- `test_field_access2.py` 
+- `test_field_access2.py`
 - `test_simple_function.py`
 - `test_output_simple_arithmetic.py`
 - `test_simple_arithmetic.py`
@@ -28,20 +29,25 @@
 - `test_simple_struct2.py`
 
 ### Stray .sfn Files Removed:
-- `bootstrap/test_member_access.sfn` 
+
+- `bootstrap/test_member_access.sfn`
 
 ### Compiler Directory Cleanup:
+
 - Moved test files (`complex_mut.sfn`, `valid_mut.sfn`, `invalid_mut.sfn`, `simple_test.sfn`) to proper location
 
 ### Cache Cleanup:
+
 - Removed all `__pycache__` directories (except in venv)
 
 ## Files Kept (Legitimate):
+
 - `bootstrap/test_all_examples.py` - Comprehensive example test runner (legitimate)
 - `output.py` - Compiled output from compiler (legitimate)
 - `build/` directory contents - Build artifacts (legitimate)
 
 ## Final State:
+
 ```
 📊 Directory File Counts:
 - Bootstrap .py files: 17 (cleaned, minimal)
@@ -50,6 +56,7 @@
 ```
 
 ## Verification:
+
 ```
 🧪 Sailfin Compiler Test Suite
 ===============================
@@ -66,6 +73,7 @@ Failed:       0
 ```
 
 ## Repository Now Clean ✅
+
 - No stray test files in wrong directories
 - All tests properly organized in `/compiler/tests/` structure
 - Test scripts work correctly
