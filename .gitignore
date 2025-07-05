@@ -126,6 +126,10 @@ logs/
 # bootstrap compiler output
 output.py
 
+# Test files
+test_*.py
+test_*.sfn
+
 # Node.js
 out
 dist

@@ -64,18 +64,6 @@ detect_platform() {
     
     echo "${os}-${arch}"
 }
-*)        os="unknown" ;;
-esac
-
-case "$(uname -m)" in
-x86_64)  arch="x64" ;;
-arm64)   arch="arm64" ;;
-aarch64) arch="arm64" ;;
-*)       arch="unknown" ;;
-esac
-
-echo "$os"
-}
 
 # Logging functions
 log_info() {
