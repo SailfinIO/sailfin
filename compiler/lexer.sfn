@@ -67,7 +67,7 @@ fn lex(source: string) -> Token[] {
     }
 
     // Main loop: scan until the end of source.
-    while pos < source.length {
+    while (pos < source.length) {
         let c: string = source[pos];
 
         // Newline handling.
@@ -120,9 +120,8 @@ fn lex(source: string) -> Token[] {
             while pos < source.length && source[pos] != "\"" {
                 // (Optionally, handle escape sequences here.)
                 pos = pos + 1;
-            }
-            if pos >= source.length {
-                error("Unterminated string literal at line " + lineno.toString());
+            }        if (pos >= source.length) {
+            error("Unterminated string literal at line " + lineno.toString());
             }
             let strText: string = source.substring(start, pos);
             pos = pos + 1; // Skip the closing quote.
