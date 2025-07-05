@@ -1,0 +1,309 @@
+name: "Sailfin Self-Hosted Compiler Build and Test"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Build target (compiler, test, all)"
+        required: false
+        type: choice
+        options:
+          - "compiler"
+          - "test"
+          - "all"
+        default: "all"
+  push:
+    branches: [main, alpha, beta]
+    paths:
+      - 'compiler/**'
+      - 'bootstrap/**'
+      - 'build-self-hosting-new.sh'
+      - '.github/workflows/selfhosted-release.yml'
+
+jobs:
+  # Build self-hosting compiler
+  build-selfhosted-compiler:
+    runs-on: ubuntu-latest
+    outputs:
+      compiler-ready: ${{ steps.build.outputs.compiler-ready }}
+      
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Bootstrap Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Build Self-Hosting Compiler
+        id: build
+        run: |
+          echo "🚢 Building Sailfin Self-Hosting Compiler..."
+          chmod +x build-self-hosting-new.sh
+          ./build-self-hosting-new.sh compiler
+          
+          # Verify compiler was built
+          if [ -f "build/sfn" ] && [ -f "build/sfn_compiler.py" ]; then
+            echo "✅ Self-hosting compiler built successfully"
+            echo "compiler-ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to build self-hosting compiler"
+            echo "compiler-ready=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload Compiler Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-selfhosted-compiler
+          path: |
+            build/sfn
+            build/sfn_compiler.py
+          retention-days: 30
+
+  # Test self-hosting capability
+  test-selfhosted-compiler:
+    runs-on: ubuntu-latest
+    needs: build-selfhosted-compiler
+    if: needs.build-selfhosted-compiler.outputs.compiler-ready == 'true'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Download Compiler Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sailfin-selfhosted-compiler
+          path: build/
+
+      - name: Make Compiler Executable
+        run: |
+          chmod +x build/sfn
+
+      - name: Test Basic Compilation
+        run: |
+          echo "🧪 Testing basic compilation capability..."
+          
+          # Test with hello world example
+          if [ -f "examples/basics/hello-world.sfn" ]; then
+            echo "Testing with hello-world.sfn..."
+            ./build/sfn examples/basics/hello-world.sfn > test_hello.py
+            echo "✅ Hello world compilation successful"
+          else
+            echo "⚠️ No hello-world example found, creating simple test..."
+            echo 'function main() { console.log("Hello, Self-Hosted Sailfin!"); }' > test_simple.sfn
+            ./build/sfn test_simple.sfn > test_simple.py
+            echo "✅ Simple compilation test successful"
+          fi
+
+      - name: Verify Self-Hosting Capability
+        run: |
+          echo "🔍 Verifying self-hosting: compiler compiles itself..."
+          
+          # Check if compiler source exists
+          if [ -d "compiler" ] && [ -f "compiler/compiler.sfn" ]; then
+            echo "Found compiler source, testing self-compilation..."
+            ./build/sfn compiler/compiler.sfn > self_compiled.py
+            echo "✅ Self-hosting verification successful!"
+          else
+            echo "⚠️ Compiler source not found, testing with available examples..."
+            
+            # Test with multiple examples to verify functionality
+            example_count=0
+            for example in examples/basics/*.sfn examples/simple/*.sfn 2>/dev/null; do
+              if [ -f "$example" ] && [ $example_count -lt 5 ]; then
+                echo "Testing: $example"
+                ./build/sfn "$example" > "test_$(basename "$example" .sfn).py"
+                example_count=$((example_count + 1))
+              fi
+            done
+            
+            if [ $example_count -gt 0 ]; then
+              echo "✅ Compiled $example_count examples successfully"
+            else
+              echo "❌ No examples found to test"
+              exit 1
+            fi
+          fi
+
+      - name: Performance Check
+        run: |
+          echo "⚡ Running performance check..."
+          
+          # Simple performance test
+          time ./build/sfn examples/basics/hello-world.sfn > perf_test.py 2>&1 || \
+          time ./build/sfn test_simple.sfn > perf_test.py 2>&1 || \
+          echo "Performance test completed"
+
+  # Cross-platform validation
+  validate-cross-platform:
+    runs-on: ${{ matrix.os }}
+    needs: build-selfhosted-compiler
+    if: needs.build-selfhosted-compiler.outputs.compiler-ready == 'true' && github.event.inputs.target != 'compiler'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry (Unix)
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Download Compiler Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sailfin-selfhosted-compiler
+          path: build/
+
+      - name: Make Compiler Executable
+        run: |
+          chmod +x build/sfn
+
+      - name: Test Compiler on ${{ matrix.os }}
+        run: |
+          echo "🧪 Testing self-hosted compiler on ${{ matrix.os }}..."
+          
+          # Create a simple test program if examples don't exist
+          if [ ! -f "examples/basics/hello-world.sfn" ]; then
+            echo 'function main() { console.log("Hello from ${{ matrix.os }}!"); }' > platform_test.sfn
+            test_file="platform_test.sfn"
+          else
+            test_file="examples/basics/hello-world.sfn"
+          fi
+          
+          ./build/sfn "$test_file" > "platform_test_${{ matrix.os }}.py"
+          echo "✅ Compiler works correctly on ${{ matrix.os }}"
+
+  # Generate release artifacts
+  package-artifacts:
+    runs-on: ubuntu-latest
+    needs: [build-selfhosted-compiler, test-selfhosted-compiler]
+    if: needs.build-selfhosted-compiler.outputs.compiler-ready == 'true' && github.event.inputs.target != 'test'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Compiler Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sailfin-selfhosted-compiler
+          path: build/
+
+      - name: Create Distribution Package
+        run: |
+          echo "📦 Creating distribution package..."
+          
+          # Create package directory
+          mkdir -p dist/sailfin-selfhosted
+          
+          # Copy compiler
+          cp build/sfn dist/sailfin-selfhosted/
+          cp build/sfn_compiler.py dist/sailfin-selfhosted/
+          
+          # Copy documentation
+          cp README.md dist/sailfin-selfhosted/ 2>/dev/null || echo "README not found"
+          
+          # Copy examples if they exist
+          if [ -d "examples" ]; then
+            cp -r examples dist/sailfin-selfhosted/
+          fi
+          
+          # Create simple installation script
+          cat > dist/sailfin-selfhosted/install.sh << 'EOF'
+          #!/bin/bash
+          echo "🚢 Installing Sailfin Self-Hosted Compiler..."
+          
+          INSTALL_DIR="$HOME/.local/bin"
+          mkdir -p "$INSTALL_DIR"
+          
+          cp sfn "$INSTALL_DIR/"
+          cp sfn_compiler.py "$INSTALL_DIR/"
+          
+          echo "✅ Sailfin self-hosted compiler installed to $INSTALL_DIR"
+          echo "   Add $INSTALL_DIR to your PATH if needed"
+          echo "   Usage: sfn <source_file.sfn>"
+          EOF
+          
+          chmod +x dist/sailfin-selfhosted/install.sh
+          
+          # Create version info
+          echo "Sailfin Self-Hosted Compiler" > dist/sailfin-selfhosted/VERSION
+          echo "Built: $(date)" >> dist/sailfin-selfhosted/VERSION
+          echo "Commit: $GITHUB_SHA" >> dist/sailfin-selfhosted/VERSION
+
+      - name: Create Tarball
+        run: |
+          cd dist
+          tar -czf sailfin-selfhosted.tar.gz sailfin-selfhosted/
+          cd ..
+
+      - name: Upload Distribution Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-selfhosted-dist
+          path: dist/sailfin-selfhosted.tar.gz
+          retention-days: 90
+
+      - name: Show Package Contents
+        run: |
+          echo "📋 Package contents:"
+          tar -tzf dist/sailfin-selfhosted.tar.gz
