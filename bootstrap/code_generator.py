@@ -184,13 +184,16 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     f'        await asyncio.gather({", ".join(routine_calls)})')
                 self.code.append('    asyncio.run(run_routines())')
 
-        # Prepare the __future__ import
-        future_import = "from __future__ import annotations"
+        # Skip __future__ import for embedded modules to avoid execution context issues
+        if getattr(self, 'is_embedded_module', False):
+            future_import = None
+        else:
+            # For now, also skip __future__ import for main programs to avoid execution context issues
+            # TODO: Re-enable when execution context is fixed
+            future_import = None
 
         # Get other imports (if any) and sort them
-        # Remove the __future__ import if it is accidentally added in self.imports
-        other_imports = sorted(
-            imp for imp in self.imports if imp != future_import)
+        other_imports = sorted(self.imports)
 
         # Generate TypeVar declarations for generic types
         type_var_declarations = []
@@ -200,7 +203,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                     f"{type_var} = TypeVar('{type_var}')")
 
         # Prepare the imports and type variable declarations
-        imports_and_type_vars = [future_import] + other_imports
+        imports_and_type_vars = []
+        if future_import:
+            imports_and_type_vars.append(future_import)
+        imports_and_type_vars.extend(other_imports)
         if type_var_declarations:
             imports_and_type_vars.extend([''] + type_var_declarations)
         imports_and_type_vars.append('')

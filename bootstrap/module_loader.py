@@ -107,28 +107,37 @@ class ModuleLoader:
             module_generator = PythonCodeGenerator()
             module_generator.module_loader = self
             module_generator.current_file = str(module_path)
+            module_generator.is_embedded_module = True  # Flag to avoid __future__ import
 
             # Generate Python code
             python_code = module_generator.visit(ast)
 
-            # Create a temporary Python file
+            # Create a temporary Python file for caching (optional)
             module_name = f"sailfin_module_{alias}_{abs(hash(module_key)) % 1000000}"
             temp_file = self._create_temp_module(module_name, python_code)
 
             # Store in loaded modules cache
             self.loaded_modules[module_key] = (module_name, temp_file)
 
-            # Return code that executes the module and creates an alias namespace
+            # Return code that embeds the module code directly (no temp file dependency)
+            # Use a safer approach with base64 encoding to avoid any quoting issues
+            import base64
+            encoded_code = base64.b64encode(
+                python_code.encode('utf-8')).decode('ascii')
+
             return f"""
 # Import module {alias} from {source}
 _module_globals_before_{alias} = set(globals().keys())
-exec(compile(open(r'{temp_file}').read(), r'{temp_file}', 'exec'), globals())
+import base64
+_module_code_{alias} = base64.b64decode('{encoded_code}').decode('utf-8')
+exec(compile(_module_code_{alias}, '<module_{alias}>', 'exec'), globals())
 _module_globals_after_{alias} = set(globals().keys())
 _module_exports_{alias} = {{k: globals()[k] for k in _module_globals_after_{alias} - _module_globals_before_{alias} if not k.startswith('_')}}
 class {alias}:
     pass
 for _k, _v in _module_exports_{alias}.items():
     setattr({alias}, _k, _v)
+del _module_code_{alias}  # Clean up the embedded code
 """.strip()
 
         finally:

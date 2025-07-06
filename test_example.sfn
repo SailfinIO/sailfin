@@ -1,0 +1,1 @@
+fn main() -> void { print.info("Hello from example!"); }
