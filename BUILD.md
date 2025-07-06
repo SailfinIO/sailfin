@@ -82,7 +82,7 @@ SAILFIN_VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/sailfin/sailf
   - `lexer.sfn` → Python lexer
   - `parser.sfn` → Python parser
   - `ast.sfn` → Python AST
-  - `full_compiler.sfn` → Complete compiler
+  - `compiler.sfn` → Complete compiler
 - Generates self-hosted compiler
 
 ### 3. Native Code Generation
@@ -235,5 +235,3 @@ What was accomplished:
 ✅ Self-hosted compiler generates working ARM64 assembly
 ✅ Complete pipeline: Sailfin → Bootstrap → Self-Hosted → Native Code
 ```
-
-This confirms Sailfin is fully self-hosting! 🚀
