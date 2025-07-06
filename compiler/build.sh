@@ -111,7 +111,6 @@ build_self_hosting() {
     
     cd "$BOOTSTRAP_DIR"
     
-    # Use simplified compiler for self-hosting demo
     local compiler_source="$COMPILER_DIR/compiler.sfn"
     
     if [ ! -f "$compiler_source" ]; then
