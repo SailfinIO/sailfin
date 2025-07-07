@@ -1,0 +1,23 @@
+// examples/advanced/web-server-with-concurrency-simple.sfn
+// Simplified version that works with current language features
+
+import { serve, Request, Response } from "sailfin/net";
+
+async fn computeHeavyTask() -> number {
+    // Simulate heavy processing (without sleep function)
+    return 42;
+}
+
+async fn handleRequest(req: Request) -> Response {
+    if req.url.endsWith("/compute") {
+        let result: number = await computeHeavyTask();
+        return new Response { status: 200, body: "Computed result: 42" };
+    } else {
+        return new Response { status: 200, body: "Welcome to Sail!" };
+    }
+}
+
+async fn main() -> void {
+    print.info("Server is running on http://localhost:8080");
+    await serve(handleRequest, "localhost", 8080);
+}

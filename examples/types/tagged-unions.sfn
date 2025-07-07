@@ -1,20 +1,20 @@
 // examples/types/tagged-unions.sfn
 
 enum Shape {
-    Circle { radius -> number },
-    Square { side -> number },
-    Rectangle { width -> number, height -> number },
+    Circle { radius: number },
+    Square { side: number },
+    Rectangle { width: number, height: number },
 }
 
-fn area(shape -> Shape) -> number {
+fn area(shape: Shape) -> number {
     match shape {
-        Shape.Circle { radius } => return 3.14 * radius * radius,
-        Shape.Square { side } => return side * side,
-        Shape.Rectangle { width, height } => return width * height,
+        Shape.Circle { radius } => 3.14 * radius * radius,
+        Shape.Square { side }   => side * side,
+        Shape.Rectangle { width, height } => width * height,
     }
 }
 
-fn main() {
-    let circle = Shape.Circle { radius: 5 };
+fn main() -> void {
+    let circle: Shape = Shape.Circle { radius: 5 };
     print.info("Circle area: {{area(circle)}}");
 }

@@ -1,0 +1,57 @@
+// examples/basics/method-chaining.sfn
+
+struct StringBuilder {
+    content: string;
+
+    fn create() -> StringBuilder {
+        return new StringBuilder { content: "" };
+    }
+
+    fn append(self, text: string) -> StringBuilder {
+        return new StringBuilder { content: "{{self.content}}{{text}}" };
+    }
+
+    fn toString(self) -> string {
+        return self.content;
+    }
+}
+
+struct Calculator {
+    value: number;
+
+    fn create(initial: number) -> Calculator {
+        return new Calculator { value: initial };
+    }
+
+    fn add(self, amount: number) -> Calculator {
+        return new Calculator { value: self.value + amount };
+    }
+
+    fn multiply(self, factor: number) -> Calculator {
+        return new Calculator { value: self.value * factor };
+    }
+
+    fn getValue(self) -> number {
+        return self.value;
+    }
+}
+
+fn main() -> void {
+    // Method chaining with StringBuilder (simplified)
+    let builder: StringBuilder = StringBuilder.create();
+    let builder2: StringBuilder = builder.append("Hello, ");
+    let builder3: StringBuilder = builder2.append("Sailfin!");
+    let message: string = builder3.toString();
+    
+    print.info("Built message: {{message}}");
+
+    // Method chaining with Calculator
+    let calc: Calculator = Calculator.create(10);
+    let calc2: Calculator = calc.add(5);        // 15
+    let calc3: Calculator = calc2.multiply(2);  // 30
+    let result: number = calc3.getValue();
+
+    print.info("Calculation result: {{result}}");
+
+    print.info("Method chaining example completed.");
+}

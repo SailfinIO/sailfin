@@ -1,6 +1,6 @@
 // examples/advanced/unions.sfn
 
-fn print.infoValue(value: string | number) {
+fn printInfoValue(value: string | number) -> void {
     if value is string {
         print.info("It's a string: {{value}}");
     } else {
@@ -8,16 +8,18 @@ fn print.infoValue(value: string | number) {
     }
 }
 
-// Intersection
+// Intersection example
 interface Admin {
-    isAdmin -> boolean;
+    isAdmin: boolean;
 }
 
 interface User {
-    name -> string;
+    name: string;
 }
 
 type AdminUser = Admin & User;
 
-let admin -> AdminUser = { name: "Alice", isAdmin: true };
-print.info("Admin: {{admin.name}}");
+fn main() -> void {
+    let admin: AdminUser = { name: "Alice", isAdmin: true };
+    print.info("Admin: {{admin.name}}");
+}

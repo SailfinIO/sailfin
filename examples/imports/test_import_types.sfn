@@ -1,0 +1,10 @@
+// Test importing types and functions together
+import "geometry.sfn" as Geo;
+
+fn main() -> void {
+    let p1: Geo.Point = Geo.createPoint(0, 0);
+    let p2: Geo.Point = Geo.createPoint(3, 4);
+    
+    let dist: number = Geo.distance(p1, p2);
+    print("Distance squared: " + dist.toString());
+}

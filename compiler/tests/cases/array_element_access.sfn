@@ -1,0 +1,13 @@
+// Test field access on array element (like parser.tokens[parser.pos])
+struct Token {
+    value: string;
+}
+
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+fn getCurrentToken(parser: Parser) -> Token {
+    return parser.tokens[parser.pos];
+}

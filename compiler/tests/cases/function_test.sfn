@@ -1,0 +1,41 @@
+// function_test.sfn - Test function declarations and calls
+
+// Simple function with no parameters
+fn greet() -> void {
+    // TODO: When we have string support, print a greeting
+    let message: number = 42;
+}
+
+// Function with parameters and return value
+fn add(x: number, y: number) -> number {
+    let result: number = x + y;
+    return result;
+}
+
+// Function with local variables and conditionals
+fn max(a: number, b: number) -> number {
+    if (a > b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+// Function with mutations
+fn increment(value: number) -> number {
+    mut result: number = value;
+    result = result + 1;
+    return result;
+}
+
+// Main function demonstrating function calls
+fn main() -> void {
+    greet();
+    
+    let sum: number = add(10, 20);
+    let maximum: number = max(sum, 25);
+    let incremented: number = increment(maximum);
+    
+    // Test nested function calls
+    let final: number = add(increment(5), max(10, 15));
+}

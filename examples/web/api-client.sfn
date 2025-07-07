@@ -1,0 +1,34 @@
+// examples/web/api-client.sfn
+// Example showing HTTP client usage with async/await
+
+import { http } from "sailfin/net";
+
+async fn fetchUserData() -> string {
+    let response = await http.get("https://jsonplaceholder.typicode.com/users/1");
+    
+    if response.status == 200 {
+        return response.body;
+    } else {
+        return "Error: Failed to fetch user data";
+    }
+}
+
+async fn fetchMultipleUsers() -> string[] {
+    let user1 = await http.get("https://jsonplaceholder.typicode.com/users/1");
+    let user2 = await http.get("https://jsonplaceholder.typicode.com/users/2");
+    let user3 = await http.get("https://jsonplaceholder.typicode.com/users/3");
+    
+    return [user1.body, user2.body, user3.body];
+}
+
+async fn main() -> void {
+    print.info("Fetching single user data...");
+    
+    let userData: string = await fetchUserData();
+    print.info("User data received:");
+    print.info(userData);
+    
+    print.info("Fetching multiple users...");
+    let userResults: string[] = await fetchMultipleUsers();
+    print.info("Multiple users fetched successfully");
+}

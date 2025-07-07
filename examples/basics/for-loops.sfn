@@ -1,0 +1,17 @@
+// examples/basics/for-loops.sfn
+// Demonstrating iteration patterns using while loops
+// (for loops are not yet implemented in the bootstrap compiler)
+
+fn main() -> void {
+    print.info("Demonstrating iteration patterns:");
+    
+    // Simulate a for loop using while loop
+    let i: number = 0;
+    while i < 5 {
+        print.info("Number: {{i}}");
+        i = i + 1;
+    }
+    
+    print.info("");
+    print.info("Iteration complete!");
+}

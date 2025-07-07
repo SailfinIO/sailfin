@@ -1,0 +1,17 @@
+struct Token {
+    type: string;
+    value: string;
+}
+
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+fn peek(parser: Parser) -> Token {
+    if parser.pos + 1 < parser.tokens.length {
+        return parser.tokens[parser.pos + 1];
+    } else {
+        return new Token { type: "EOF", value: "" };
+    }
+}

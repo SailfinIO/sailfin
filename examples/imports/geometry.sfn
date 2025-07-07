@@ -1,0 +1,16 @@
+// Define some data structures to export
+struct Point {
+    x: number;
+    y: number;
+}
+
+fn createPoint(x: number, y: number) -> Point {
+    return new Point { x: x, y: y };
+}
+
+fn distance(p1: Point, p2: Point) -> number {
+    let dx: number = p1.x - p2.x;
+    let dy: number = p1.y - p2.y;
+    // Simplified distance calculation (without sqrt)
+    return dx * dx + dy * dy;
+}

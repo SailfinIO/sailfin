@@ -1,13 +1,15 @@
 // examples/basics/basic-enum.sfn
 
 enum Color {
- Red,
- Green,
- Blue,
+    Red,
+    Green,
+    Blue,
 }
 
-let favorite -> Color = Color.Red;
+fn main() -> void {
+    let favorite: Color = Color.Red;
 
-if (favorite == Color.Red) {
-  print.info("Your favorite color is red!");
+    if (favorite == Color.Red) {
+        print.info("Your favorite color is red!");
+    }
 }

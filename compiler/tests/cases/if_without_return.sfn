@@ -1,0 +1,7 @@
+// Test if statement without returns
+fn testIf(x: number) -> number {
+    if (x > 0) {
+        let y: number = 1;
+    }
+    return 42;
+}

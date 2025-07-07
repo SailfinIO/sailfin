@@ -1,14 +1,14 @@
 // examples/web/websocket-chat.sfn
 
-import { websocket } from "sail/net";
+import { serve, Request, Response, websocket, http } from "sailfin/net";
 
-fn main() {
+fn main() -> void {
     let server = websocket.serve({ port: 8080 });
     print.info("WebSocket server is running on ws://localhost:8080");
 
     routine {
         for client in server.clients() {
-            client.onMessage(fn(msg) {
+            client.onMessage(lambda(msg: string) -> void {
                 print.info("Received: {{msg}}");
                 client.send("Echo: {{msg}}");
             });

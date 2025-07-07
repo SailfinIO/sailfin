@@ -1,17 +1,24 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-let tasks -> channel[fn() -> void] = channel();
+let tasks = Channel();
 
-// Spawn a worker pool
-for _ in 1..5 {
-    routine {
-        while true {
-            let task = await tasks.receive();
-            task(); // Execute the task
-        }
-    }
+// Add tasks to the queue first
+tasks.send(lambda() -> void { print.info("Task 1 executed!"); });
+tasks.send(lambda() -> void { print.info("Task 2 executed!"); });
+tasks.send(lambda() -> void { print.info("Task 3 executed!"); });
+
+// Spawn a limited worker pool that will process tasks and exit
+routine {
+    let task1 = await tasks.receive();
+    task1();
 }
 
-// Add tasks to the queue
-tasks.send(fn() { print.info("Task 1 executed!"); });
-tasks.send(fn() { print.info("Task 2 executed!"); });
+routine {
+    let task2 = await tasks.receive();
+    task2();
+}
+
+routine {
+    let task3 = await tasks.receive();
+    task3();
+}

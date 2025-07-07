@@ -1,0 +1,8 @@
+// Simple version of peek function
+fn peek() -> string {
+    if true {
+        return "test";
+    } else {
+        return "eof";
+    }
+}

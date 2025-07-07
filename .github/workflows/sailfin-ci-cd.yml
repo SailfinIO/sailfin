@@ -1,0 +1,284 @@
+name: Sailfin Self-Hosting CI/CD
+
+on:
+  push:
+    branches: [main, alpha, beta, rc]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+env:
+  PROJECT_NAME: sailfin
+
+jobs:
+  # Build matrix for different platforms
+  build-compiler:
+    name: Build Self-Hosting Compiler
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux-x86_64
+            python: "3.9"
+          - os: macos-latest
+            platform: Darwin-arm64
+            python: "3.9"
+          - os: macos-13
+            platform: Darwin-x86_64
+            python: "3.9"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Python Dependencies
+        run: |
+          cd bootstrap
+          if [ -f pyproject.toml ]; then
+            python -m pip install --upgrade pip
+            python -m pip install -e .
+          fi
+
+      - name: Build Self-Hosting Compiler
+        run: |
+          chmod +x build.sh
+          ./build.sh compiler
+
+      - name: Test Self-Hosting Compiler
+        run: |
+          ./build.sh test
+
+      - name: Create Release Package
+        run: |
+          ./build.sh release
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.PROJECT_NAME }}-${{ matrix.platform }}
+          path: dist/sailfin-${{ matrix.platform }}.tar.gz
+          retention-days: 30
+
+  # Test examples across platforms
+  test-examples:
+    name: Test Examples
+    runs-on: ubuntu-latest
+    needs: build-compiler
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Download Linux Build
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ env.PROJECT_NAME }}-Linux-x86_64
+          path: dist/
+
+      - name: Install Compiler
+        run: |
+          cd dist
+          tar -xzf sailfin-Linux-x86_64.tar.gz
+          mkdir -p ~/.local/bin
+          cp sfn ~/.local/bin/
+          cp sfn_compiler.py ~/.local/bin/
+          chmod +x ~/.local/bin/sfn
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Test All Examples
+        run: |
+          cd bootstrap
+          python test_all_examples.py
+
+  # Create release for tags
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-compiler, test-examples]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Prepare Release Assets
+        run: |
+          mkdir -p release-assets
+          find artifacts/ -name "*.tar.gz" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          # Create release notes
+          cat > release-notes.md << EOF
+          # Sailfin $VERSION Release
+
+          ## 🚢 Self-Hosting Compiler
+
+          This release includes the self-hosting Sailfin compiler built from the latest source code.
+
+          ## 📦 Installation
+
+          ### Quick Install (Recommended)
+          \`\`\`bash
+          curl -sSL https://github.com/sailfin/sailfin/releases/download/$VERSION/install.sh | bash
+          \`\`\`
+
+          ### Manual Installation
+          1. Download the appropriate archive for your platform
+          2. Extract the archive
+          3. Copy \`sfn\` to a directory in your PATH
+
+          ## 🔧 Supported Platforms
+
+          - Linux x86_64
+          - macOS Apple Silicon (ARM64)
+          - macOS Intel (x86_64)
+
+          ## 🚀 Quick Start
+
+          \`\`\`bash
+          echo 'fn main() -> void { print.info("Hello, Sailfin!"); }' > hello.sfn
+          sfn hello.sfn
+          \`\`\`
+
+          ## 📖 Documentation
+
+          - [Language Specification](https://github.com/sailfin/sailfin/tree/main/docs)
+          - [Examples](https://github.com/sailfin/sailfin/tree/main/examples)
+          - [Build Instructions](https://github.com/sailfin/sailfin/blob/main/BUILD.md)
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: Sailfin ${{ steps.release-notes.outputs.VERSION }}
+          body_path: release-notes.md
+          files: |
+            release-assets/*
+            install.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Pre-release for development branches
+  create-prerelease:
+    name: Create Pre-Release
+    runs-on: ubuntu-latest
+    needs: [build-compiler, test-examples]
+    if: github.event_name == 'push' && contains(fromJson('["alpha", "beta", "rc"]'), github.ref_name)
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Prepare Pre-Release Assets
+        run: |
+          mkdir -p release-assets
+          find artifacts/ -name "*.tar.gz" -exec cp {} release-assets/ \;
+
+          # Create a timestamp-based version
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BRANCH_NAME=${{ github.ref_name }}
+          VERSION="$BRANCH_NAME-$TIMESTAMP"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        id: version
+
+      - name: Create Pre-Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Sailfin ${{ steps.version.outputs.VERSION }} (Pre-Release)
+          body: |
+            # Sailfin ${{ steps.version.outputs.VERSION }} Pre-Release
+
+            This is an automated pre-release build from the `${{ github.ref_name }}` branch.
+
+            ⚠️ **This is a development build and may be unstable.**
+
+            ## Installation
+            ```bash
+            # Download and install specific version
+            SAILFIN_VERSION=${{ steps.version.outputs.VERSION }} curl -sSL https://github.com/sailfin/sailfin/releases/download/${{ steps.version.outputs.VERSION }}/install.sh | bash
+            ```
+
+            Built from commit: ${{ github.sha }}
+          files: |
+            release-assets/*
+            install.sh
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Cleanup old pre-releases
+  cleanup-prereleases:
+    name: Cleanup Old Pre-Releases
+    runs-on: ubuntu-latest
+    needs: create-prerelease
+    if: github.event_name == 'push' && contains(fromJson('["alpha", "beta", "rc"]'), github.ref_name)
+
+    steps:
+      - name: Delete Old Pre-Releases
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            // Filter pre-releases for current branch
+            const branchName = '${{ github.ref_name }}';
+            const branchReleases = releases
+              .filter(release => release.prerelease && release.tag_name.startsWith(branchName))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            // Keep only the 3 most recent pre-releases per branch
+            const releasesToDelete = branchReleases.slice(3);
+
+            for (const release of releasesToDelete) {
+              console.log(`Deleting old pre-release: ${release.tag_name}`);
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+              });
+              
+              // Also delete the tag
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${release.tag_name}`,
+                });
+              } catch (error) {
+                console.log(`Tag ${release.tag_name} may already be deleted`);
+              }
+            }

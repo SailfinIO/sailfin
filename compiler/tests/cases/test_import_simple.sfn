@@ -1,0 +1,8 @@
+// Test import with simple usage
+import "../../lexer.sfn" as Lexer;
+
+fn main() -> void {
+    print.info("Testing import...");
+    // Try to access something from Lexer module without arrays first
+    print.info("Import test complete");
+}

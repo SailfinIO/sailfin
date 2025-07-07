@@ -1,21 +1,35 @@
 // examples/advanced/multithreaded-task.sfn
+// Demonstrates syntax for future multithreading features
+// Currently using synchronous execution for demonstration
 
-fn computeTask(id -> number) -> string {
-    print.info("Task {{id}} started on thread {{thread.id()}}");
-    sleep(1000); // Simulate a 1-second task
+fn computeTask(id: number) -> string {
+    print.info("Task {{id}} started");
+    // Future: sleep(1000); // Simulate a 1-second task
+    print.info("Task {{id}} processing...");
     return "Result from Task {{id}}";
 }
 
-fn main() {
-    // Launch multiple tasks using routines
-    let results = parallel [
-        fn() -> string { return computeTask(1); },
-        fn() -> string { return computeTask(2); },
-        fn() -> string { return computeTask(3); }
+fn main() -> void {
+    // Future syntax for parallel execution:
+    // let results: string[] = parallel [
+    //     fn() -> string { return computeTask(1); },
+    //     fn() -> string { return computeTask(2); },
+    //     fn() -> string { return computeTask(3); }
+    // ];
+
+    // Current implementation using sequential execution
+    let results: string[] = [
+        computeTask(1),
+        computeTask(2),
+        computeTask(3)
     ];
 
     print.info("All tasks completed:");
-    for result in results {
-        print.info(result);
+    
+    // Use while loop since for-in loops aren't implemented yet
+    let i: number = 0;
+    while i < 3 {
+        print.info(results[i]);
+        i = i + 1;
     }
 }

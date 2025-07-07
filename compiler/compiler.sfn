@@ -1,0 +1,30 @@
+// Self-hosting Sailfin compiler
+// Using modular imports
+
+import "ast.sfn" as AST;
+import "lexer.sfn" as Lexer;
+import "parser.sfn" as Parser;
+import "codegen.sfn" as CodeGen;
+
+// Compile Sailfin source code to assembly
+fn compile(source: string) -> string {
+    // Tokenize
+    let tokens: Lexer.Token[] = Lexer.lex(source);
+    
+    // Parse
+    let parser: Parser.Parser = Parser.newParser(tokens);
+    let program: AST.Program = Parser.parseProgram(parser);
+    
+    // Generate code
+    let ctx: CodeGen.CodeGenContext = CodeGen.newCodeGenContext();
+    CodeGen.genProgram(ctx, program);
+    
+    return CodeGen.getGeneratedCode(ctx);
+}
+
+// Test the compiler - simplified for build pipeline
+fn main() -> void {
+    let testCode: string = "let x: number = 42;";
+    let result: string = compile(testCode);
+    print(result);
+}

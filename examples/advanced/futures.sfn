@@ -1,8 +1,18 @@
 // examples/advanced/futures.sfn
 
-fn main() {
+fn computeTask1() -> number {
+    // Dummy task implementation
+    return 1;
+}
+
+fn computeTask2() -> number {
+    // Dummy task implementation
+    return 2;
+}
+
+async fn main() -> void {
     let future1 = async { computeTask1() };
     let future2 = async { computeTask2() };
-    let results = await [future1, future2];
+    let results: number[] = await [future1, future2]; // array notation already conforms
     print.info("Results: {{results}}");
 }

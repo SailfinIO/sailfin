@@ -1,0 +1,7 @@
+// Even simpler test
+fn simpleFunction(x: number) -> number {
+    if x > 0 {
+        return x;
+    }
+    return 0;
+}

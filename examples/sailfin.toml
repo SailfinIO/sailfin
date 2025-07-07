@@ -1,0 +1,44 @@
+# sailfin.toml
+
+# — Project metadata
+[project]
+name        = "my_project"
+version     = "1.0.0"
+description = "A Sailfin project for demonstrating project.sfn structure."
+authors     = ["Michael Curtis <michael@sailfin.io>"]
+
+# — Runtime dependencies
+[dependencies]
+sailfin     = "^2.0.0"
+utils       = "^1.2.3"
+
+# — Dev-only dependencies (tests, mocks, codegens, etc)
+[dev-dependencies]
+sail_test   = "^1.0.0"
+mock_lib    = "^0.5.0"
+
+# — Build configuration
+[build]
+# Entrypoint for compilation
+entry     = "src/main.sfn"
+# Where to emit `.sfnc` or native executables
+output    = "dist/"
+# Toggle optimizations (e.g. O2, minify AST)
+optimize  = true
+
+# — Testing configuration
+[test]
+directories = ["tests/", "examples/"]
+coverage    = true
+
+# — Handy script aliases (invoked with `sailfin run-script <name>`)
+[scripts]
+build   = "sailfin build"
+test    = "sailfin test"
+start   = "sailfin run"
+clean   = "sailfin clean"
+
+# — Runtime “run” configuration (args, env, etc)
+[run]
+script = "src/main.sfn"
+args   = ["--production"]

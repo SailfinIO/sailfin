@@ -1,0 +1,18 @@
+// Minimal reproduction of parser.sfn issue
+struct Token {
+    type: string;
+    value: string;
+    lineno: number;
+}
+
+struct Parser {
+    tokens: Token[];
+    pos: number;
+}
+
+fn current(parser: Parser) -> Token {
+    if parser.pos < parser.tokens.length {
+        return parser.tokens[parser.pos];
+    }
+    return new Token { type: "EOF", value: "", lineno: -1 };
+}

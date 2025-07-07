@@ -1,0 +1,15 @@
+// codegen.sfn - Simplified Code Generator for Sailfin
+// This is a basic version that avoids type casting and complex features
+
+import "ast.sfn" as AST;
+
+// Simple code generation - generates a fixed assembly output
+fn generateCode(program: AST.Program) -> string {
+    let assembly: string = ".section __TEXT,__text,regular,pure_instructions\n";
+    assembly = assembly + ".globl _main\n";
+    assembly = assembly + ".p2align 2\n";
+    assembly = assembly + "_main:\n";
+    assembly = assembly + "    mov w0, #42\n";
+    assembly = assembly + "    ret\n";
+    return assembly;
+}

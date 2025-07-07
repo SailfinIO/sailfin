@@ -1,0 +1,18 @@
+// examples/web/websocket-chat-simple.sfn
+// Simplified version that works with current language features
+
+import { serve, Request, Response } from "sailfin/net";
+
+async fn handleWebSocketRequest(req: Request) -> Response {
+    if req.url.endsWith("/ws") {
+        return new Response { status: 200, body: "WebSocket endpoint (not fully implemented yet)" };
+    } else {
+        return new Response { status: 200, body: "WebSocket chat server is running" };
+    }
+}
+
+async fn main() -> void {
+    print.info("WebSocket chat server starting on http://localhost:8080");
+    print.info("Visit http://localhost:8080 for info, /ws for WebSocket endpoint");
+    await serve(handleWebSocketRequest, "localhost", 8080);
+}

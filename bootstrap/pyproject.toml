@@ -1,6 +1,6 @@
 [project]
 name = "bootstrap"
-version = "0.0.1"
+version = "0.0.1-alpha.4"
 description = "Bootstrap compiler for the Sailfin Language"
 authors = [
     { name = "Michael Curtis", email = "michael@sailfin.io" }
@@ -10,54 +10,62 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "ply (>=3.11,<4.0)",
-    "llvmlite (>=0.44.0,<0.45.0)",
     "aiohttp (>=3.11.11,<4.0.0)",
-    "pyinstaller (>=6.11.1,<7.0.0)"
+    "pyinstaller (>=6.11.1,<7.0.0)",
+    "async-timeout (>=5.0.1,<6.0.0)"
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=2.0.0,<3.0.0", "poetry-dynamic-versioning"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
 python-semantic-release = "^9.17.0"
+poetry-dynamic-versioning = "^1.7.1"
 
 [tool.semantic_release]
 version_source = "tag"
 upload_to_pypi = false
+commit_parser = "semantic_release.commit_parser:AngularCommitParser"
 
-# Define branch configuration properly in TOML
-[[tool.semantic_release.branches]]
-name = "main"
+[tool.semantic_release.branches.main]
+match = "(main|master)"
 prerelease = false
 
-[[tool.semantic_release.branches]]
-name = "beta"
+[tool.semantic_release.branches.rc]
+match = "rc"
 prerelease = true
+prerelease_token = "rc"
 
-plugins = [
-    [
-        "semantic_release.commit_parser",
-        { type_enforced = true, body_required = false, merge_message_pattern = "^Merge pull request #\\d+ from .+$" }
-    ],
-    "semantic_release.release",
-    "semantic_release.changelog",
-    "semantic_release.github",
-    [
-        "semantic_release.git",
-        { message = "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}", assets = ["bootstrap/dist/sfn"] }
-    ]
-]
+[tool.semantic_release.branches.alpha]
+match = "alpha"
+prerelease = true
+prerelease_token = "alpha"
+
+[tool.semantic_release.branches.beta]
+match = "beta"
+prerelease = true
+prerelease_token = "beta"
+
+[tool.semantic_release.commit_parser_options]
+type_enforced = true
+body_required = false
+merge_message_pattern = "^Merge pull request #\\d+ from .+$"
 
 [tool.semantic_release.changelog]
-directory = "bootstrap"
+directory = "CHANGELOG.md"
 filename = "CHANGELOG.md"
 include_v_prefix = true
-version_variable = "__version__"
 
 [tool.semantic_release.git]
 tag_template = "v{version}"
 commit_author = "semantic-release-bot <bot@example.com>"
 
 [tool.semantic_release.github]
+assets = [
+    { path = "bootstrap/dist/sfn", label = "sfn" }
+]
 release_method = "github"
+
+[tool.poetry-dynamic-versioning]
+enable = true

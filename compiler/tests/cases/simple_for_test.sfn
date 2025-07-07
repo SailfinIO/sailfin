@@ -1,0 +1,7 @@
+// Simple for loop test using while loop (for loops not yet implemented)
+
+mut i: number = 0;
+while i < 3 {
+    let doubled: number = i * 2;
+    i = i + 1;
+}

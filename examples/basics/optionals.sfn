@@ -1,0 +1,63 @@
+// examples/basics/optionals.sfn
+
+// Simple optional-like pattern using enums with different approaches
+// Since empty struct fields aren't supported, we'll use basic enums
+
+enum Status {
+    Found,
+    NotFound,
+}
+
+struct UserResult {
+    status: Status;
+    name: string;  // We'll use empty string for NotFound case
+}
+
+fn findUser(id: number) -> UserResult {
+    if (id == 1) {
+        return new UserResult { status: Status.Found, name: "Alice" };
+    } else if (id == 2) {
+        return new UserResult { status: Status.Found, name: "Bob" };
+    } else {
+        return new UserResult { status: Status.NotFound, name: "" };
+    }
+}
+
+fn handleUserResult(result: UserResult) -> void {
+    if (result.status == Status.Found) {
+        print.info("Found user: {{result.name}}");
+    } else {
+        print.info("User not found");
+    }
+}
+
+fn main() -> void {
+    print.info("=== Optional-like Pattern Demo ===");
+    
+    // Test finding existing users
+    let user1: UserResult = findUser(1);
+    let user2: UserResult = findUser(2);
+    let user3: UserResult = findUser(99);
+    
+    // Handle the results using helper function
+    print.info("Looking for user 1:");
+    handleUserResult(user1);
+    
+    print.info("Looking for user 2:");
+    handleUserResult(user2);
+    
+    print.info("Looking for user 99:");
+    handleUserResult(user3);
+    
+    // Direct checking example
+    print.info("Direct status checking:");
+    if (user1.status == Status.Found) {
+        print.info("User 1 exists with name: {{user1.name}}");
+    }
+    
+    if (user3.status == Status.NotFound) {
+        print.info("User 99 was not found as expected");
+    }
+    
+    print.info("Optional pattern demo completed!");
+}

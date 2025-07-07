@@ -1,0 +1,11 @@
+let constant: number = 100;
+mut counter: number = 0;
+mut total: number = 0;
+
+counter = counter + 1;
+total = total + constant;
+
+if (counter > 0) {
+    total = total * 2;
+    counter = 0;
+}

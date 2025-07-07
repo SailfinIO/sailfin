@@ -1,0 +1,18 @@
+// examples/concurrency/parrallel.sfn
+
+fn computeTask1() -> number {
+    // Dummy implementation
+    return 10;
+}
+
+fn computeTask2() -> number {
+    // Dummy implementation
+    return 20;
+}
+
+let results: number[] = parallel [
+    lambda () -> number { return computeTask1(); },
+    lambda () -> number { return computeTask2(); }
+];
+
+print.info("Results: {{results}}");

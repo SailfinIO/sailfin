@@ -1,0 +1,12 @@
+// Test importing a local module
+import "test_module.sfn" as TestMod;
+
+fn main() -> void {
+    let result: number = TestMod.add(5, 3);
+    print("Result: " + result.toString());
+    
+    let greeting: string = TestMod.greet("World");
+    print(greeting);
+    
+    print("Module version: " + TestMod.MODULE_VERSION);
+}

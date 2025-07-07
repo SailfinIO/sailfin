@@ -1,11 +1,11 @@
 // examples/advanced/web-server-with-concurrency.sfn
 
-import { serve } from "sail/http";
+import { serve, Request, Response, websocket } from "sailfin/net";
 
-fn handleRequest(req, res) {
+fn handleRequest(req: Request, res: Response) -> void {
     if req.path == "/compute" {
         routine {
-            let result = computeHeavyTask();
+            let result: number = computeHeavyTask();
             res.send("Computed result: {{result}}");
         }
     } else {
@@ -14,12 +14,11 @@ fn handleRequest(req, res) {
 }
 
 fn computeHeavyTask() -> number {
-    // Simulate a heavy task
-    sleep(2000); // Simulate processing
+    sleep(2000); // Simulate heavy processing
     return 42;
 }
 
-fn main() {
+fn main() -> void {
     serve(handleRequest, { port: 8080 });
     print.info("Server is running on http://localhost:8080");
 }

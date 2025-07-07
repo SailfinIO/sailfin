@@ -1,11 +1,15 @@
 // examples/web/http-server.sfn
 
-import { serve } from "sail/http";
+import { serve, Request, Response } from "sailfin/net";
 
-serve(fn(req, res) {
-    if req.path == "/" {
-        res.send("Welcome to Sail!");
+async fn handleRequest(req: Request) -> Response {
+    if req.url.endsWith("/") {
+        return new Response { status: 200, body: "Welcome to Sail!" };
     } else {
-        res.send("404 Not Found", 404);
+        return new Response { status: 404, body: "404 Not Found" };
     }
-}, { port: 8080 });
+}
+
+async fn main() -> void {
+    await serve(handleRequest, "localhost", 8080);
+}

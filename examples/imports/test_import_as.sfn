@@ -1,0 +1,10 @@
+// Test importing and using functions from another module
+import "math_utils.sfn" as MathUtils;
+
+fn main() -> void {
+    let result: number = MathUtils.add(5, 3);
+    print("5 + 3 = " + result.toString());
+    
+    let greeting: string = MathUtils.greet("Sailfin");
+    print(greeting);
+}

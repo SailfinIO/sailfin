@@ -1,0 +1,31 @@
+// examples/basics/booleans.sfn
+
+fn main() -> void {
+    // Boolean literals (true/false are identifiers in current implementation)
+    let isActive: bool = true;
+    let isComplete: bool = false;
+
+    // Comparison operators
+    let x: number = 10;
+    let y: number = 5;
+    
+    print.info("Comparing {{x}} and {{y}}:");
+    print.info("x > y: (calculated as {{x}} > {{y}})");
+    print.info("x < y: (calculated as {{x}} < {{y}})");
+    print.info("x == y: (calculated as {{x}} == {{y}})");
+
+    // Simple conditional logic
+    let age: number = 25;
+    let canVote: bool = true; // In real implementation: age >= 18
+    
+    if canVote {
+        print.info("You are allowed to vote!");
+    }
+
+    // Boolean variables in conditionals
+    if isActive {
+        print.info("System is active");
+    }
+    
+    print.info("Boolean examples completed.");
+}

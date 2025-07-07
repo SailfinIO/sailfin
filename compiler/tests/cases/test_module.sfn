@@ -1,0 +1,14 @@
+// Simple test module for import functionality
+let MODULE_VERSION: string = "1.0.0";
+
+fn add(x: number, y: number) -> number {
+    return x + y;
+}
+
+fn greet(name: string) -> string {
+    return "Hello, " + name + "!";
+}
+
+fn multiply(a: number, b: number) -> number {
+    return a * b;
+}

@@ -1,0 +1,11 @@
+// utils.sfn - Utility module for testing
+
+export fn printBanner(message: string) -> void {
+    print("===================");
+    print(message);
+    print("===================");
+}
+
+export fn add(x: number, y: number) -> number {
+    return x + y;
+}

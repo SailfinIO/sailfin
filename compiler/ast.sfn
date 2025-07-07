@@ -1,0 +1,320 @@
+// ast.sfn
+
+// ---------------------------------------------------------------------
+// Marker Interfaces
+// ---------------------------------------------------------------------
+
+// Every statement must provide its kind.
+interface Statement {
+    fn getStatementKind(self) -> string;
+}
+
+// Every expression must provide its kind.
+interface Expression {
+    fn getExpressionKind(self) -> string;
+}
+
+
+// ---------------------------------------------------------------------
+// Program Node
+// ---------------------------------------------------------------------
+
+struct Program {
+    statements: Statement[];
+}
+
+
+// ---------------------------------------------------------------------
+// Statement Nodes
+// ---------------------------------------------------------------------
+
+// An expression statement (a bare expression used as a statement).
+struct ExpressionStatement implements Statement {
+    expression: Expression;
+    
+    fn getStatementKind(self) -> string {
+        return "ExpressionStatement";
+    }
+}
+// A variable declaration (for example: "let x: number = 123;" or "mut y: string = hello;").
+struct VariableDeclaration implements Statement {
+    name: string;
+    var_type: string; // Leave empty if no type is provided.
+    value: Expression;
+    isMutable: bool;  // true for 'mut', false for 'let'
+    
+    fn getStatementKind(self) -> string {
+        return "VariableDeclaration";
+    }
+}
+
+// An assignment statement (for example: "x = 42;").
+struct AssignmentStatement implements Statement {
+    target: string;  // Variable name being assigned to
+    value: Expression;
+    
+    fn getStatementKind(self) -> string {
+        return "AssignmentStatement";
+    }
+}
+
+// A return statement.
+struct ReturnStatement implements Statement {
+    expression: Expression;  // Use NilExpr if no expression is provided.
+    
+    fn getStatementKind(self) -> string {
+        return "ReturnStatement";
+    }
+}
+
+// A parameter for a function.
+struct Parameter {
+    name: string;
+    paramType: string;
+}
+
+// A function declaration.
+struct FunctionDeclaration implements Statement {
+    name: string;
+    parameters: Parameter[];
+    returnType: string;
+    body: Statement[];
+    
+    fn getStatementKind(self) -> string {
+        return "FunctionDeclaration";
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Interface Declaration
+// ---------------------------------------------------------------------
+
+// A method signature within an interface.
+struct InterfaceMethod {
+    name: string;
+    parameters: Parameter[];
+    returnType: string;
+}
+
+// An interface declaration (for example, "interface Greeter { fn greet(self) -> string; }").
+struct InterfaceDeclaration implements Statement {
+    name: string;
+    methods: InterfaceMethod[];
+    
+    fn getStatementKind(self) -> string {
+        return "InterfaceDeclaration";
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Struct Declaration
+// ---------------------------------------------------------------------
+
+// A field declaration in a struct.
+struct FieldDeclaration {
+    name: string;
+    fieldType: string;
+}
+
+// A struct declaration with fields, methods, and a list of implemented interfaces.
+struct StructDeclaration implements Statement {
+    name: string;
+    fields: FieldDeclaration[];
+    methods: FunctionDeclaration[];
+    interfaces: string[];  // Names of interfaces implemented by this struct.
+    
+    fn getStatementKind(self) -> string {
+        return "StructDeclaration";
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Enum Declaration
+// ---------------------------------------------------------------------
+
+// An enum variant. If no value is provided, use an empty string.
+struct EnumVariant {
+    name: string;
+    value: string;
+}
+
+// An enum declaration that supports variants with or without an assigned value.
+struct EnumDeclaration implements Statement {
+    name: string;
+    variants: EnumVariant[];
+    
+    fn getStatementKind(self) -> string {
+        return "EnumDeclaration";
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Expression Nodes
+// ---------------------------------------------------------------------
+
+// A numeric literal expression.
+struct NumberExpr implements Expression {
+    value: number;
+    
+    fn getExpressionKind(self) -> string {
+        return "NumberExpr";
+    }
+}
+
+// A string literal expression.
+struct StringExpr implements Expression {
+    value: string;
+    
+    fn getExpressionKind(self) -> string {
+        return "StringExpr";
+    }
+}
+
+// Array expression [1, 2, 3]
+struct ArrayExpr implements Expression {
+    elements: Expression[];
+    
+    fn getExpressionKind(self) -> string {
+        return "ArrayExpr";
+    }
+}
+
+// Array index expression arr[index]
+struct IndexExpr implements Expression {
+    array: Expression;
+    index: Expression;
+    
+    fn getExpressionKind(self) -> string {
+        return "IndexExpr";
+    }
+}
+
+// Struct field initialization
+struct FieldInit {
+    name: string;
+    value: Expression;
+}
+
+// Struct literal expression Person { name: "John", age: 30 }
+struct StructLiteral implements Expression {
+    typeName: string;
+    fields: FieldInit[];
+    
+    fn getExpressionKind(self) -> string {
+        return "StructLiteral";
+    }
+}
+
+// An identifier expression.
+struct IdentifierExpr implements Expression {
+    name: string;
+    
+    fn getExpressionKind(self) -> string {
+        return "IdentifierExpr";
+    }
+}
+
+// A binary expression (for example: 1 + 2).
+struct BinaryExpr implements Expression {
+    left: Expression;
+    operator: string;
+    right: Expression;
+    
+    fn getExpressionKind(self) -> string {
+        return "BinaryExpr";
+    }
+}
+
+// A function call expression (for example: f(1, 2)).
+struct CallExpr implements Expression {
+    callee: Expression;
+    arguments: Expression[];
+    
+    fn getExpressionKind(self) -> string {
+        return "CallExpr";
+    }
+}
+
+// A member access expression (for example: object.member).
+struct MemberAccessExpr implements Expression {
+    object: Expression;
+    member: string;
+    
+    fn getExpressionKind(self) -> string {
+        return "MemberAccessExpr";
+    }
+}
+
+// A nil expression to represent the absence of a value.
+// Use this for example when a return statement has no expression.
+struct NilExpr implements Expression {
+    fn getExpressionKind(self) -> string {
+        return "NilExpr";
+    }
+}
+
+// An if statement with optional else clause
+struct IfStatement implements Statement {
+    condition: Expression;
+    thenBody: Statement[];
+    elseBody: Statement[];  // Empty if no else clause
+    
+    fn getStatementKind(self) -> string {
+        return "IfStatement";
+    }
+}
+
+// While loop statement (while condition { body })
+struct WhileStatement implements Statement {
+    condition: Expression;
+    body: Statement[];
+    
+    fn getStatementKind(self) -> string {
+        return "WhileStatement";
+    }
+}
+
+// For loop statement (for init; condition; update { body })
+struct ForStatement implements Statement {
+    init: Statement;      // Initialization statement (e.g., let i = 0)
+    condition: Expression; // Loop condition (e.g., i < 10)
+    update: Statement;    // Update statement (e.g., i = i + 1)
+    body: Statement[];    // Loop body
+    
+    fn getStatementKind(self) -> string {
+        return "ForStatement";
+    }
+}
+
+// Import statement (import "module" as alias)
+struct ImportStatement implements Statement {
+    modulePath: string;   // Path to module file
+    alias: string;        // Optional alias for imported module
+    
+    fn getStatementKind(self) -> string {
+        return "ImportStatement";
+    }
+}
+
+// Export statement (export fn functionName)
+struct ExportStatement implements Statement {
+    declaration: Statement;  // What to export (function, struct, etc.)
+    
+    fn getStatementKind(self) -> string {
+        return "ExportStatement";
+    }
+}
+
+// Module declaration (module name { ... })
+struct ModuleDeclaration implements Statement {
+    name: string;
+    body: Statement[];
+    
+    fn getStatementKind(self) -> string {
+        return "ModuleDeclaration";
+    }
+}

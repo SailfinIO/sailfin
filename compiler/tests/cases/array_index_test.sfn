@@ -1,0 +1,4 @@
+// Test array indexing
+let arr: number[] = [1, 2, 3];
+let x: number = arr[0];
+let y: number = arr[1 + 1];

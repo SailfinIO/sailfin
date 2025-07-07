@@ -1,0 +1,8 @@
+struct Container {
+    items: string[];
+}
+
+fn checkContainer(container: Container) -> string {
+    if container.items.length <= 1 { return container.items[0]; }
+    return "default";
+}

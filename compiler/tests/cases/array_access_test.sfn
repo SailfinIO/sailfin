@@ -1,0 +1,8 @@
+// Test array access
+struct Container {
+    items: number[];
+}
+
+fn getItem(c: Container, index: number) -> number {
+    return c.items[index];
+}

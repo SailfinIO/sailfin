@@ -1,47 +1,37 @@
 // examples/advanced/interface-polymorphism.sfn
 
-// Define an interface for vehicles that can be driven
 interface Driveable {
-    fn drive(self) -> string; // All "Driveable" types must implement this method
+    fn drive(self) -> string; // All Driveable types must implement this method
 }
 
-// Define a struct for cars
-struct Car {
-    brand -> string;
+struct Car implements Driveable {
+    brand: string;
 
-    // Constructor for Car
-    fn new(brand -> string) -> Car {
-        return Car { brand };
+    fn create(brand: string) -> Car {
+        return new Car { brand: brand };
     }
 
-    // Implement the "drive" method for Car
     fn drive(self) -> string {
         return "Driving a {{self.brand}} car.";
     }
 }
 
-// Define a struct for bikes
-struct Bike {
-    brand -> string;
+struct Bike implements Driveable {
+    brand: string;
 
-    // Constructor for Bike
-    fn new(brand -> string) -> Bike {
-        return Bike { brand };
+    fn create(brand: string) -> Bike {
+        return new Bike { brand: brand };
     }
 
-    // Implement the "drive" method for Bike
     fn drive(self) -> string {
         return "Riding a {{self.brand}} bike.";
     }
 }
 
-// Main function to demonstrate polymorphism
-fn main() {
-    // Create a car and a bike, both as "Driveable" types
-    let vehicle1: Driveable = Car.new("Tesla");
-    let vehicle2: Driveable = Bike.new("Yamaha");
+fn main() -> void {
+    let car: Car = new Car { brand: "Tesla" };
+    let bike: Bike = new Bike { brand: "Yamaha" };
 
-    // Call the "drive" method on both vehicles
-    print.info(vehicle1.drive()); // Outputs: Driving a Tesla car.
-    print.info(vehicle2.drive()); // Outputs: Riding a Yamaha bike.
+    print.info(car.drive()); // Outputs: Driving a Tesla car.
+    print.info(bike.drive()); // Outputs: Riding a Yamaha bike.
 }

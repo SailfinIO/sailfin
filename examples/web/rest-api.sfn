@@ -1,16 +1,18 @@
 // examples/web/rest-api.sfn
 
-import { serve } from "sail/http";
+import { serve, Request, Response } from "sailfin/net";
 
-fn handleRequest(req, res) {
-    match req.method {
-        "GET" => res.send("You sent a GET request."),
-        "POST" => res.send("You sent a POST request."),
-        _ => res.send("Unsupported method!", 405),
+async fn handleRequest(req: Request) -> Response {
+    if req.method == "GET" {
+        return new Response { status: 200, body: "You sent a GET request." };
+    } else if req.method == "POST" {
+        return new Response { status: 200, body: "You sent a POST request." };
+    } else {
+        return new Response { status: 405, body: "Unsupported method!" };
     }
 }
 
-fn main() {
-    serve(handleRequest, { port: 3000 });
+async fn main() -> void {
     print.info("Server is running on http://localhost:3000");
+    await serve(handleRequest, "localhost", 3000);
 }

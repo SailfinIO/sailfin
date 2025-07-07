@@ -1,0 +1,10 @@
+// Simple test for member access in if conditions
+struct Test {
+    items: number[];
+    
+    fn check(self) -> void {
+        if self.items.length > 0 {
+            return;
+        }
+    }
+}

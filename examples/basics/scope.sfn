@@ -1,0 +1,43 @@
+// examples/basics/scope.sfn
+
+// Global variable
+let globalVar: string = "I'm global";
+
+fn testScope() -> void {
+    let outerVar: string = "I'm in the function";
+    
+    print.info("Global: {{globalVar}}");
+    print.info("Outer: {{outerVar}}");
+
+    // Block scope demonstration (if blocks create scope)
+    if true {
+        let blockVar: string = "I'm in the block";
+        print.info("Block - Global: {{globalVar}}");
+        print.info("Block - Outer: {{outerVar}}");
+        print.info("Block - Block: {{blockVar}}");
+    }
+    
+    // Back to function scope - blockVar is not accessible here
+    print.info("After block - Outer: {{outerVar}}");
+    // print.info(blockVar); // This would cause a compile error
+}
+
+fn testParameterScope(param: string) -> void {
+    // Parameters are scoped to the function
+    print.info("Parameter: {{param}}");
+}
+
+fn testVariables() -> void {
+    let immutable: number = 10;
+    // Note: mut keyword not yet implemented in bootstrap compiler
+    let mutable: number = 20;
+    
+    print.info("Immutable value: {{immutable}}");
+    print.info("Mutable value: {{mutable}}");
+}
+
+fn main() -> void {
+    testScope();
+    testParameterScope("Hello from main");
+    testVariables();
+}

@@ -1,0 +1,50 @@
+// mutability_test.sfn - Test immutable and mutable variables
+
+// Immutable variables (cannot be changed after declaration)
+let constant: number = 100;
+let name: string = "Sailfin";
+
+// Mutable variables (can be changed after declaration)
+mut score: number = 0;
+mut lives: number = 3;
+mut active: number = 1;
+
+// Initial calculations
+let bonus: number = constant / 10;
+score = score + bonus;
+
+// Game logic simulation
+if (lives > 0) {
+    score = score + 50;
+    lives = lives - 1;
+    
+    if (score > 100) {
+        lives = lives + 1;  // Bonus life
+        active = 1;
+    }
+} else {
+    active = 0;  // Game over
+}
+
+// Final score calculation
+if (active == 1) {
+    score = score * 2;  // Double points for being active
+}
+
+// Advanced mutation patterns
+mut temp: number = 0;
+temp = score + lives;
+temp = temp * constant;
+
+// Complex conditionals with mutations
+if (temp > 1000) {
+    mut multiplier: number = 2;
+    if (lives > 2) {
+        multiplier = multiplier + 1;
+    }
+    score = score * multiplier;
+}
+
+// Demonstrate compile-time error prevention
+// The following would cause an error if uncommented:
+// constant = 200;  // Error: cannot assign to immutable variable
