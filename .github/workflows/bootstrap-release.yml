@@ -1,0 +1,70 @@
+name: Compiler Build and Publish
+
+on:
+  push:
+    branches:
+      - main
+      - rc
+      - alpha
+      - beta
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for semantic-release to access full git history
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create false
+        working-directory: bootstrap
+
+      - name: Cache PyInstaller and Poetry Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pypoetry
+            bootstrap/dist
+          key: ${{ runner.os }}-poetry-${{ hashFiles('bootstrap/pyproject.toml', 'bootstrap/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install Dependencies
+        run: |
+          poetry install --no-interaction --no-ansi
+        working-directory: bootstrap
+
+      - name: Build Executable with PyInstaller
+        run: |
+          pyinstaller --onefile --name sfn bootstrap.py
+        working-directory: bootstrap
+
+      - name: Verify Build Output
+        run: ls -lah bootstrap/dist
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sfn
+          path: bootstrap/dist/sfn
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          poetry run semantic-release publish
+        working-directory: bootstrap

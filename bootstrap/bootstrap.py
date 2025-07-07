@@ -5,7 +5,7 @@ from ast_nodes import ASTNode
 from code_generator import PythonCodeGenerator
 from parser import parser
 from lexer import lexer
-from module_loader import get_module_loader
+from module_loader import get_module_loader, reset_module_loader
 import sys
 import logging
 import argparse
@@ -72,6 +72,9 @@ def compile_and_run(source_file, output_file=None, verbose=False, run_output=Tru
         run_output: Whether to execute the compiled code
     """
     try:
+        # Reset module loader to clear any cached modules from previous runs
+        reset_module_loader()
+
         if verbose:
             logger.info(f"Reading source file {source_file!r}")
 

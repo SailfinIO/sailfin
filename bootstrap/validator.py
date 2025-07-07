@@ -17,10 +17,10 @@ class ASTValidator:
         if t in self.current_type_params:
             return True
 
-        # This regex allows one or more type segments (identifiers with optional array notation and optional '?' suffix)
+        # This regex allows one or more type segments (identifiers with optional module prefix, array notation and optional '?' suffix)
         # separated by union (|) or intersection (&) operators.
-        # Now supports: TypeName, TypeName[], TypeName?, TypeName[]?, A|B, A&B, etc.
-        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])*\??)(?:[|&][A-Za-z_][A-Za-z0-9_]*(?:\[\])*\??)*$'
+        # Now supports: TypeName, Module.TypeName, TypeName[], Module.TypeName[], TypeName?, A|B, A&B, etc.
+        pattern = r'^(?:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\[\])*\??)(?:[|&][A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\[\])*\??)*$'
         return re.fullmatch(pattern, t) is not None
 
     def validate(self, node: ASTNode):
@@ -291,9 +291,18 @@ class ASTValidator:
             if node.expression is not None:
                 self.validate(node.expression)
         elif isinstance(node, StructInstantiation):
-            # Handle struct_name as either string or Identifier object
-            struct_name_str = node.struct_name.name if hasattr(
-                node.struct_name, 'name') else node.struct_name
+            # Handle struct_name as string, Identifier, or MemberAccess
+            if hasattr(node.struct_name, 'name'):
+                # Identifier object
+                struct_name_str = node.struct_name.name
+            elif hasattr(node.struct_name, 'member'):
+                # MemberAccess object (e.g., AST.BinaryExpr)
+                # For validation purposes, we just check the member name
+                struct_name_str = node.struct_name.member
+            else:
+                # String
+                struct_name_str = node.struct_name
+
             if not struct_name_str.isidentifier():
                 raise ValidationError(
                     f"Invalid struct instantiation name: {struct_name_str}")

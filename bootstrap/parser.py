@@ -41,6 +41,8 @@ def stringify_type(node):
     """
     if isinstance(node, Identifier):
         return node.name
+    if isinstance(node, MemberAccess):
+        return f"{stringify_type(node.object_)}.{node.member}"
     if isinstance(node, ArrayType):
         return f"{stringify_type(node.element_type)}[]"
     if isinstance(node, OptionalType):
@@ -999,8 +1001,17 @@ def p_test_declaration(p):
 
 
 def p_postfix_expression_struct_instantiation(p):
-    '''postfix_expression : NEW IDENTIFIER LBRACE struct_field_inits_opt RBRACE'''
-    p[0] = StructInstantiation(struct_name=p[2], field_inits=p[4])
+    '''postfix_expression : NEW IDENTIFIER LBRACE struct_field_inits_opt RBRACE
+                          | NEW IDENTIFIER DOT IDENTIFIER LBRACE struct_field_inits_opt RBRACE'''
+    if len(p) == 6:
+        # NEW IDENTIFIER LBRACE ... RBRACE (simple struct)
+        p[0] = StructInstantiation(
+            struct_name=Identifier(name=p[2]), field_inits=p[4])
+    else:
+        # NEW IDENTIFIER DOT IDENTIFIER LBRACE ... RBRACE (module-prefixed struct)
+        module_name = Identifier(name=p[2])
+        struct_name = MemberAccess(object_=module_name, member=p[4])
+        p[0] = StructInstantiation(struct_name=struct_name, field_inits=p[6])
 
 
 def p_primary_expression_print(p):

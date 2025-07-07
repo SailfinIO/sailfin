@@ -1,3 +1,6 @@
+// Import AST nodes from ast.sfn
+import "ast.sfn" as AST;
+
 // Token definition (from lexer.sfn)
 struct Token {
     type: string;
@@ -5,143 +8,7 @@ struct Token {
     lineno: number;
 }
 
-// AST interfaces and structures (simplified from ast.sfn)
-interface Statement {
-    fn getStatementKind(self) -> string;
-}
-
-interface Expression {
-    fn getExpressionKind(self) -> string;
-}
-
-// Basic expression types
-struct NumberExpr implements Expression {
-    value: number;
-    fn getExpressionKind(self) -> string { return "NumberExpr"; }
-}
-
-struct StringExpr implements Expression {
-    value: string;
-    fn getExpressionKind(self) -> string { return "StringExpr"; }
-}
-
-struct IdentifierExpr implements Expression {
-    name: string;
-    fn getExpressionKind(self) -> string { return "IdentifierExpr"; }
-}
-
-struct BinaryExpr implements Expression {
-    left: Expression;
-    operator: string;
-    right: Expression;
-    fn getExpressionKind(self) -> string { return "BinaryExpr"; }
-}
-
-struct ArrayExpr implements Expression {
-    elements: Expression[];
-    fn getExpressionKind(self) -> string { return "ArrayExpr"; }
-}
-
-struct IndexExpr implements Expression {
-    array: Expression;
-    index: Expression;
-    fn getExpressionKind(self) -> string { return "IndexExpr"; }
-}
-
-struct CallExpr implements Expression {
-    callee: Expression;
-    arguments: Expression[];
-    fn getExpressionKind(self) -> string { return "CallExpr"; }
-}
-
-struct NilExpr implements Expression {
-    fn getExpressionKind(self) -> string { return "NilExpr"; }
-}
-
-// Basic statement types
-struct Program {
-    statements: Statement[];
-}
-
-struct VariableDeclaration implements Statement {
-    name: string;
-    var_type: string;
-    value: Expression;
-    isMutable: bool;
-    fn getStatementKind(self) -> string { return "VariableDeclaration"; }
-}
-
-struct ExpressionStatement implements Statement {
-    expression: Expression;
-    fn getStatementKind(self) -> string { return "ExpressionStatement"; }
-}
-
-struct ReturnStatement implements Statement {
-    expression: Expression;
-    fn getStatementKind(self) -> string { return "ReturnStatement"; }
-}
-
-struct AssignmentStatement implements Statement {
-    target: string;
-    value: Expression;
-    fn getStatementKind(self) -> string { return "AssignmentStatement"; }
-}
-
-struct IfStatement implements Statement {
-    condition: Expression;
-    thenBody: Statement[];
-    elseBody: Statement[];
-    fn getStatementKind(self) -> string { return "IfStatement"; }
-}
-
-struct WhileStatement implements Statement {
-    condition: Expression;
-    body: Statement[];
-    fn getStatementKind(self) -> string { return "WhileStatement"; }
-}
-
-struct ForStatement implements Statement {
-    init: Statement;
-    condition: Expression;
-    update: Statement;
-    body: Statement[];
-    fn getStatementKind(self) -> string { return "ForStatement"; }
-}
-
-struct FunctionDeclaration implements Statement {
-    name: string;
-    parameters: Parameter[];
-    returnType: string;
-    body: Statement[];
-    fn getStatementKind(self) -> string { return "FunctionDeclaration"; }
-}
-
-struct Parameter {
-    name: string;
-    paramType: string;
-}
-
-struct StructDeclaration implements Statement {
-    name: string;
-    fields: FieldDeclaration[];
-    fn getStatementKind(self) -> string { return "StructDeclaration"; }
-}
-
-struct FieldDeclaration {
-    name: string;
-    fieldType: string;
-}
-
-struct ImportStatement implements Statement {
-    modulePath: string;
-    alias: string;
-    fn getStatementKind(self) -> string { return "ImportStatement"; }
-}
-
-struct ExportStatement implements Statement {
-    declaration: Statement;
-    fn getStatementKind(self) -> string { return "ExportStatement"; }
-}
+// All AST nodes are now imported from ast.sfn
 
 // A simple Parser structure
 struct Parser {
@@ -196,13 +63,13 @@ fn peek(parser: Parser) -> Token {
 
 // --- Parsing Expressions ---
 // For our minimal version, we’ll support just numbers and identifiers.
-fn parseExpression(parser: Parser) -> Expression {
+fn parseExpression(parser: Parser) -> AST.Expression {
     return parseBinaryExpression(parser, 0);
 }
 
 // Parse binary expressions with operator precedence
-fn parseBinaryExpression(parser: Parser, minPrecedence: number) -> Expression {
-    let left: Expression = parsePrimaryExpression(parser);
+fn parseBinaryExpression(parser: Parser, minPrecedence: number) -> AST.Expression {
+    let left: AST.Expression = parsePrimaryExpression(parser);
     
     while (true) {
         let tok: Token = current(parser);
@@ -214,28 +81,28 @@ fn parseBinaryExpression(parser: Parser, minPrecedence: number) -> Expression {
         
         advance(parser);  // Consume operator
         let operator: string = tok.value;
-        let right: Expression = parseBinaryExpression(parser, precedence + 1);
+        let right: AST.Expression = parseBinaryExpression(parser, precedence + 1);
         
-        left = new BinaryExpr { left: left, operator: operator, right: right };
+        left = new AST.BinaryExpr { left: left, operator: operator, right: right };
     }
     
     return left;
 }
 
 // Parse primary expressions (numbers, identifiers, function calls, etc.)
-fn parsePrimaryExpression(parser: Parser) -> Expression {
+fn parsePrimaryExpression(parser: Parser) -> AST.Expression {
     let tok = current(parser);
     
     if tok.type == "NUMBER" {
         advance(parser);
-        return new NumberExpr { value: tok.value.toNumber() };
+        return new AST.NumberExpr { value: tok.value.toNumber() };
     } else if tok.type == "STRING" {
         advance(parser);
-        return new StringExpr { value: tok.value };
+        return new AST.StringExpr { value: tok.value };
     } else if tok.type == "LBRACKET" {
         // Parse array literal [1, 2, 3]
         advance(parser);  // Consume '['
-        let elements: Expression[] = [];
+        let elements: AST.Expression[] = [];
         
         // Parse array elements
         if current(parser).type != "RBRACKET" {
@@ -247,18 +114,18 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
         }
         
         expect(parser, "RBRACKET");
-        return new ArrayExpr { elements: elements };
+        return new AST.ArrayExpr { elements: elements };
     } else if tok.type == "IDENTIFIER" {
         advance(parser);
         let name: string = tok.value;
-        let expr: Expression = new IdentifierExpr { name: name };
+        let expr: AST.Expression = new AST.IdentifierExpr { name: name };
         
         // Handle postfix operations (function calls and array indexing)
         while (true) {
             if current(parser).type == "LPAREN" {
                 // Function call
                 advance(parser);  // Consume '('
-                let args: Expression[] = [];
+                let args: AST.Expression[] = [];
                 
                 // Parse arguments
                 if current(parser).type != "RPAREN" {
@@ -270,13 +137,13 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
                 }
                 
                 expect(parser, "RPAREN");
-                expr = new CallExpr { callee: expr, arguments: args };
+                expr = new AST.CallExpr { callee: expr, arguments: args };
             } else if current(parser).type == "LBRACKET" {
                 // Array indexing
                 advance(parser);  // Consume '['
-                let index: Expression = parseExpression(parser);
+                let index: AST.Expression = parseExpression(parser);
                 expect(parser, "RBRACKET");
-                expr = new IndexExpr { array: expr, index: index };
+                expr = new AST.IndexExpr { array: expr, index: index };
             } else {
                 break;  // No more postfix operations
             }
@@ -285,7 +152,7 @@ fn parsePrimaryExpression(parser: Parser) -> Expression {
         return expr;
     } else if tok.type == "LPAREN" {
         advance(parser);  // Consume '('
-        let expr: Expression = parseExpression(parser);
+        let expr: AST.Expression = parseExpression(parser);
         expect(parser, "RPAREN");
         return expr;
     } else {
@@ -309,7 +176,7 @@ fn getOperatorPrecedence(tokenType: string) -> number {
 // --- Parsing Statements ---
 // Let’s support variable declarations (e.g. "let x: number = 123;")
 // and expression statements.
-fn parseStatement(parser: Parser) -> Statement {
+fn parseStatement(parser: Parser) -> AST.Statement {
     let tok = current(parser);
     if tok.type == "LET" || tok.type == "MUT" {
          // Parse variable declaration.
@@ -331,7 +198,7 @@ fn parseStatement(parser: Parser) -> Statement {
          // End the declaration with a semicolon.
          expect(parser, "SEMICOLON");
          
-         return new VariableDeclaration { 
+         return new AST.VariableDeclaration { 
              name: identTok.value, 
              var_type: varType, 
              value: expr,
@@ -344,10 +211,10 @@ fn parseStatement(parser: Parser) -> Statement {
              // Parse assignment statement
              let identTok: Token = advance(parser);  // Consume identifier
              expect(parser, "ASSIGN");
-             let expr: Expression = parseExpression(parser);
+             let expr: AST.Expression = parseExpression(parser);
              expect(parser, "SEMICOLON");
              
-             return new AssignmentStatement {
+             return new AST.AssignmentStatement {
                  target: identTok.value,
                  value: expr
              };
@@ -355,7 +222,7 @@ fn parseStatement(parser: Parser) -> Statement {
              // Expression statement
              let expr = parseExpression(parser);
              expect(parser, "SEMICOLON");
-             return new ExpressionStatement { expression: expr };
+             return new AST.ExpressionStatement { expression: expr };
          }
     } else if tok.type == "STRUCT" {
          // Parse struct declaration
@@ -365,7 +232,7 @@ fn parseStatement(parser: Parser) -> Statement {
          // TODO: Parse optional implements clause
          
          expect(parser, "LBRACE");
-         let fields: FieldDeclaration[] = [];
+         let fields: AST.FieldDeclaration[] = [];
          
          // Parse struct fields
          while current(parser).type != "RBRACE" {
@@ -374,7 +241,7 @@ fn parseStatement(parser: Parser) -> Statement {
              let fieldType: Token = expect(parser, "IDENTIFIER");
              expect(parser, "SEMICOLON");
              
-             fields.append(new FieldDeclaration {
+             fields.append(new AST.FieldDeclaration {
                  name: fieldName.value,
                  fieldType: fieldType.value
              });
@@ -382,7 +249,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return new StructDeclaration {
+         return new AST.StructDeclaration {
              name: nameTok.value,
              fields: fields
          };
@@ -392,7 +259,7 @@ fn parseStatement(parser: Parser) -> Statement {
          let nameTok: Token = expect(parser, "IDENTIFIER");
          
          expect(parser, "LPAREN");
-         let params: Parameter[] = [];
+         let params: AST.Parameter[] = [];
          
          // Parse parameters
          if current(parser).type != "RPAREN" {
@@ -415,7 +282,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          // Parse function body
          expect(parser, "LBRACE");
-         let body: Statement[] = [];
+         let body: AST.Statement[] = [];
          
          while current(parser).type != "RBRACE" {
              body.append(parseStatement(parser));
@@ -423,7 +290,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return new FunctionDeclaration { 
+         return new AST.FunctionDeclaration { 
              name: nameTok.value, 
              parameters: params, 
              returnType: returnType, 
@@ -432,10 +299,10 @@ fn parseStatement(parser: Parser) -> Statement {
     } else if tok.type == "IF" {
          // Parse if statement
          advance(parser);  // Consume 'if'
-         let condition: Expression = parseExpression(parser);
+         let condition: AST.Expression = parseExpression(parser);
          
          expect(parser, "LBRACE");
-         let thenBody: Statement[] = [];
+         let thenBody: AST.Statement[] = [];
          
          while current(parser).type != "RBRACE" {
              thenBody.append(parseStatement(parser));
@@ -443,7 +310,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         let elseBody: Statement[] = [];
+         let elseBody: AST.Statement[] = [];
          if current(parser).type == "ELSE" {
              advance(parser);  // Consume 'else'
              expect(parser, "LBRACE");
@@ -455,7 +322,7 @@ fn parseStatement(parser: Parser) -> Statement {
              expect(parser, "RBRACE");
          }
          
-         return new IfStatement { 
+         return new AST.IfStatement { 
              condition: condition, 
              thenBody: thenBody, 
              elseBody: elseBody 
@@ -463,10 +330,10 @@ fn parseStatement(parser: Parser) -> Statement {
     } else if tok.type == "WHILE" {
          // Parse while loop
          advance(parser);  // Consume 'while'
-         let condition: Expression = parseExpression(parser);
+         let condition: AST.Expression = parseExpression(parser);
          
          expect(parser, "LBRACE");
-         let body: Statement[] = [];
+         let body: AST.Statement[] = [];
          
          while current(parser).type != "RBRACE" {
              body.append(parseStatement(parser));
@@ -474,7 +341,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return new WhileStatement { 
+         return new AST.WhileStatement { 
              condition: condition, 
              body: body 
          };
@@ -484,19 +351,19 @@ fn parseStatement(parser: Parser) -> Statement {
          expect(parser, "LPAREN");
          
          // Parse initialization
-         let init: Statement = parseStatement(parser);
+         let init: AST.Statement = parseStatement(parser);
          
          // Parse condition
-         let condition: Expression = parseExpression(parser);
+         let condition: AST.Expression = parseExpression(parser);
          expect(parser, "SEMICOLON");
          
          // Parse update
-         let update: Statement = parseStatement(parser);
+         let update: AST.Statement = parseStatement(parser);
          expect(parser, "RPAREN");
          
          // Parse body
          expect(parser, "LBRACE");
-         let body: Statement[] = [];
+         let body: AST.Statement[] = [];
          
          while current(parser).type != "RBRACE" {
              body.append(parseStatement(parser));
@@ -504,7 +371,7 @@ fn parseStatement(parser: Parser) -> Statement {
          
          expect(parser, "RBRACE");
          
-         return new ForStatement { 
+         return new AST.ForStatement { 
              init: init,
              condition: condition, 
              update: update,
@@ -513,14 +380,14 @@ fn parseStatement(parser: Parser) -> Statement {
     } else if tok.type == "RETURN" {
          // Parse return statement
          advance(parser);  // Consume 'return'
-         let expr: Expression = new NilExpr {};
+         let expr: AST.Expression = new AST.NilExpr {};
          
          if current(parser).type != "SEMICOLON" {
              expr = parseExpression(parser);
          }
          
          expect(parser, "SEMICOLON");
-         return new ReturnStatement { expression: expr };
+         return new AST.ReturnStatement { expression: expr };
     } else if tok.type == "IMPORT" {
          // Parse import statement
          advance(parser);  // Consume 'import'
@@ -535,38 +402,38 @@ fn parseStatement(parser: Parser) -> Statement {
          }
          
          expect(parser, "SEMICOLON");
-         return new ImportStatement { 
+         return new AST.ImportStatement { 
              modulePath: modulePath, 
              alias: alias 
          };
     } else if tok.type == "EXPORT" {
          // Parse export statement  
          advance(parser);  // Consume 'export'
-         let declaration: Statement = parseStatement(parser);
-         return new ExportStatement { declaration: declaration };
+         let declaration: AST.Statement = parseStatement(parser);
+         return new AST.ExportStatement { declaration: declaration };
     } else {
          // Default to expression statement
          let expr = parseExpression(parser);
          expect(parser, "SEMICOLON");
-         return new ExpressionStatement { expression: expr };
+         return new AST.ExpressionStatement { expression: expr };
     }
 }
 
 // Parse function parameter
-fn parseParameter(parser: Parser) -> Parameter {
+fn parseParameter(parser: Parser) -> AST.Parameter {
     let nameTok: Token = expect(parser, "IDENTIFIER");
     expect(parser, "COLON");
     let typeTok: Token = expect(parser, "IDENTIFIER");
     
-    return new Parameter { name: nameTok.value, paramType: typeTok.value };
+    return new AST.Parameter { name: nameTok.value, paramType: typeTok.value };
 }
 
 // --- Parsing the Entire Program ---
-fn parseProgram(parser: Parser) -> Program {
-    let stmts: Statement[] = [];
+fn parseProgram(parser: Parser) -> AST.Program {
+    let stmts: AST.Statement[] = [];
     while (current(parser).type != "EOF") {
          let stmt = parseStatement(parser);
          stmts.append(stmt);
     }
-    return new Program { statements: stmts };
+    return new AST.Program { statements: stmts };
 }

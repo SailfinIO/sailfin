@@ -75,8 +75,28 @@ class ModuleLoader:
 
         # Check if already compiled
         if module_key in self.loaded_modules:
-            module_name, temp_file = self.loaded_modules[module_key]
-            return f"exec(compile(open(r'{temp_file}').read(), r'{temp_file}', 'exec'), globals()); {alias} = type('Module', (), globals().copy())()"
+            cached_data = self.loaded_modules[module_key]
+            if len(cached_data) == 3:
+                # New format with encoded code
+                module_name, temp_file, encoded_code = cached_data
+                return f"""
+# Import module {alias} from {source}
+_module_globals_before_{alias} = set(globals().keys())
+import base64
+_module_code_{alias} = base64.b64decode('{encoded_code}').decode('utf-8')
+exec(compile(_module_code_{alias}, '<module_{alias}>', 'exec'), globals())
+_module_globals_after_{alias} = set(globals().keys())
+_module_exports_{alias} = {{k: globals()[k] for k in _module_globals_after_{alias} - _module_globals_before_{alias} if not k.startswith('_')}}
+class {alias}:
+    pass
+for _k, _v in _module_exports_{alias}.items():
+    setattr({alias}, _k, _v)
+del _module_code_{alias}  # Clean up the embedded code
+""".strip()
+            else:
+                # Old format without encoded code - need to recompile
+                # Remove from cache and fall through to recompilation
+                del self.loaded_modules[module_key]
 
         # Check for circular imports
         if module_key in self.loading_modules:
@@ -112,18 +132,18 @@ class ModuleLoader:
             # Generate Python code
             python_code = module_generator.visit(ast)
 
+            # Use a safer approach with base64 encoding to avoid any quoting issues
+            import base64
+            encoded_code = base64.b64encode(
+                python_code.encode('utf-8')).decode('ascii')
+
             # Create a temporary Python file for caching (optional)
             module_name = f"sailfin_module_{alias}_{abs(hash(module_key)) % 1000000}"
             temp_file = self._create_temp_module(module_name, python_code)
 
             # Store in loaded modules cache
-            self.loaded_modules[module_key] = (module_name, temp_file)
-
-            # Return code that embeds the module code directly (no temp file dependency)
-            # Use a safer approach with base64 encoding to avoid any quoting issues
-            import base64
-            encoded_code = base64.b64encode(
-                python_code.encode('utf-8')).decode('ascii')
+            self.loaded_modules[module_key] = (
+                module_name, temp_file, encoded_code)
 
             return f"""
 # Import module {alias} from {source}
@@ -196,6 +216,14 @@ def get_module_loader(base_path: str = ".") -> ModuleLoader:
     if _module_loader is None:
         _module_loader = ModuleLoader(base_path)
     return _module_loader
+
+
+def reset_module_loader():
+    """Reset the global module loader to clear all caches."""
+    global _module_loader
+    if _module_loader:
+        _module_loader.cleanup()
+    _module_loader = None
 
 
 def load_module(source: str, alias: str, current_file: Optional[str] = None) -> object:

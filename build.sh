@@ -237,7 +237,7 @@ test_examples() {
     
     while IFS= read -r -d '' example_file; do
         ((example_count++))
-        local relative_path="${example_file#$EXAMPLES_DIR/}"
+        local relative_path="${example_file#"$EXAMPLES_DIR"/}"
         log_info "Testing example: $relative_path"
         
         if ./sfn "$example_file" &> /dev/null; then

@@ -87,6 +87,10 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
                 # add other mappings as needed...
             }
             return type_mapping.get(t.name, t.name)
+        # Handle MemberAccess nodes (e.g., AST.Expression)
+        if isinstance(t, MemberAccess):
+            obj = self.map_type(t.object_)
+            return f"{obj}.{t.member}"
         # Fallback: raw string type names
         if isinstance(t, str):
             # Map simple types
@@ -1103,10 +1107,31 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
         self.code.append(f"{self.indent()}raise Exception({expr})")
 
     def visit_StructInstantiation(self, node: StructInstantiation):
+        # Handle module-prefixed struct names like AST.BinaryExpr
+        if isinstance(node.struct_name, MemberAccess):
+            struct_name = f"{self.visit(node.struct_name.object_)}.{node.struct_name.member}"
+        else:
+            struct_name = self.visit(node.struct_name)
+
+        # Map bootstrap AST types to target AST types when generating Sailfin code
+        type_mapping = {
+            "MemberAccess": "MemberAccessExpr",
+            # Add other mappings as needed
+        }
+
+        # Apply mapping if this is a direct AST type reference
+        if struct_name in type_mapping:
+            struct_name = type_mapping[struct_name]
+        # Also handle module-prefixed types like AST.MemberAccess -> AST.MemberAccessExpr
+        elif "." in struct_name:
+            module, type_name = struct_name.rsplit(".", 1)
+            if type_name in type_mapping:
+                struct_name = f"{module}.{type_mapping[type_name]}"
+
         # For example, generate a call to a constructor function
         fields = ', '.join(
             [f"{name}={self.visit(expr)}" for name, expr in node.field_inits])
-        return f"{node.struct_name}({fields})"
+        return f"{struct_name}({fields})"
 
     def visit_EnumVariantConstruction(self, node: EnumVariantConstruction):
         # Generate enum variant construction as a dictionary with type and fields

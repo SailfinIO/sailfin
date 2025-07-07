@@ -67,6 +67,12 @@ struct ReturnStatement implements Statement {
     }
 }
 
+// A parameter for a function.
+struct Parameter {
+    name: string;
+    paramType: string;
+}
+
 // A function declaration.
 struct FunctionDeclaration implements Statement {
     name: string;
@@ -79,16 +85,17 @@ struct FunctionDeclaration implements Statement {
     }
 }
 
-// A parameter for a function.
-struct Parameter {
-    name: string;
-    paramType: string;
-}
-
 
 // ---------------------------------------------------------------------
 // Interface Declaration
 // ---------------------------------------------------------------------
+
+// A method signature within an interface.
+struct InterfaceMethod {
+    name: string;
+    parameters: Parameter[];
+    returnType: string;
+}
 
 // An interface declaration (for example, "interface Greeter { fn greet(self) -> string; }").
 struct InterfaceDeclaration implements Statement {
@@ -100,17 +107,16 @@ struct InterfaceDeclaration implements Statement {
     }
 }
 
-// A method signature within an interface.
-struct InterfaceMethod {
-    name: string;
-    parameters: Parameter[];
-    returnType: string;
-}
-
 
 // ---------------------------------------------------------------------
 // Struct Declaration
 // ---------------------------------------------------------------------
+
+// A field declaration in a struct.
+struct FieldDeclaration {
+    name: string;
+    fieldType: string;
+}
 
 // A struct declaration with fields, methods, and a list of implemented interfaces.
 struct StructDeclaration implements Statement {
@@ -124,16 +130,16 @@ struct StructDeclaration implements Statement {
     }
 }
 
-// A field declaration in a struct.
-struct FieldDeclaration {
-    name: string;
-    fieldType: string;
-}
-
 
 // ---------------------------------------------------------------------
 // Enum Declaration
 // ---------------------------------------------------------------------
+
+// An enum variant. If no value is provided, use an empty string.
+struct EnumVariant {
+    name: string;
+    value: string;
+}
 
 // An enum declaration that supports variants with or without an assigned value.
 struct EnumDeclaration implements Statement {
@@ -143,12 +149,6 @@ struct EnumDeclaration implements Statement {
     fn getStatementKind(self) -> string {
         return "EnumDeclaration";
     }
-}
-
-// An enum variant. If no value is provided, use an empty string.
-struct EnumVariant {
-    name: string;
-    value: string;
 }
 
 
