@@ -322,7 +322,12 @@ class PythonCodeGenerator(CodeGeneratorVisitor):
             source = source.replace('/', '.')
         # Handle relative imports
         elif source.startswith('./') or source.startswith('../'):
-            source = source.replace('/', '.').rstrip('.sfn')
+            source = source.replace('/', '.')
+            if source.endswith('.sfn'):
+                source = source[:-4]  # Remove .sfn extension
+        # Handle local .sfn files - remove extension to look for compiled Python module
+        elif source.endswith('.sfn'):
+            source = source[:-4]  # Remove .sfn extension
 
         self.code.append(f"from {source} import {items}")
 

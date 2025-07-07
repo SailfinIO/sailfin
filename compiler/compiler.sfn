@@ -1,90 +1,30 @@
-// Self-hosting Sailfin compiler - working version
-// Uses simplified but correct syntax that works with the bootstrap
+// Self-hosting Sailfin compiler
+// Using modular imports
 
-// Token and basic structures
-struct Token {
-    type: string;
-    value: string;
-    lineno: number;
-}
+import "ast.sfn" as AST;
+import "lexer.sfn" as Lexer;
+import "parser.sfn" as Parser;
+import "codegen.sfn" as CodeGen;
 
-struct Parser {
-    tokens: Token[];
-    pos: number;
-}
-
-// Create a new parser
-fn newParser(tokens: Token[]) -> Parser {
-    return new Parser { tokens: tokens, pos: 0 };
-}
-
-// Get current token
-fn current(parser: Parser) -> Token {
-    let length: number = parser.tokens.length;
-    if parser.pos < length {
-        return parser.tokens[parser.pos];
-    }
-    return new Token { type: "EOF", value: "", lineno: -1 };
-}
-
-// Advance parser position
-fn advance(parser: Parser) -> Token {
-    let tok: Token = current(parser);
-    parser.pos = parser.pos + 1;
-    return tok;
-}
-
-// Simple lexer - basic tokenization
-fn lex(source: string) -> Token[] {
-    let tokens: Token[] = [];
-    
-    // For now, just create a simple token for demo
-    tokens.append(new Token { type: "LET", value: "let", lineno: 1 });
-    tokens.append(new Token { type: "IDENTIFIER", value: "x", lineno: 1 });
-    tokens.append(new Token { type: "COLON", value: ":", lineno: 1 });
-    tokens.append(new Token { type: "IDENTIFIER", value: "number", lineno: 1 });
-    tokens.append(new Token { type: "ASSIGN", value: "=", lineno: 1 });
-    tokens.append(new Token { type: "NUMBER", value: "42", lineno: 1 });
-    tokens.append(new Token { type: "SEMICOLON", value: ";", lineno: 1 });
-    
-    return tokens;
-}
-
-// Simple parser - basic AST
-fn parseProgram(parser: Parser) -> string {
-    let result: string = "Parsed program with " + parser.tokens.length.toString() + " tokens";
-    return result;
-}
-
-// Simple code generator
-fn generateCode(program: string) -> string {
-    let assembly: string = ".section __TEXT,__text,regular,pure_instructions\n";
-    assembly = assembly + ".globl _main\n";
-    assembly = assembly + ".p2align 2\n";
-    assembly = assembly + "_main:\n";
-    assembly = assembly + "    mov w0, #42\n";
-    assembly = assembly + "    ret\n";
-    return assembly;
-}
-
-// Main compiler entry point
+// Compile Sailfin source code to assembly
 fn compile(source: string) -> string {
-    // 1. Lexical Analysis
-    let tokens: Token[] = lex(source);
+    // Tokenize
+    let tokens: Lexer.Token[] = Lexer.lex(source);
     
-    // 2. Syntax Analysis
-    let parser: Parser = newParser(tokens);
-    let program: string = parseProgram(parser);
+    // Parse
+    let parser: Parser.Parser = Parser.newParser(tokens);
+    let program: AST.Program = Parser.parseProgram(parser);
     
-    // 3. Code Generation
-    let assembly: string = generateCode(program);
+    // Generate code
+    let ctx: CodeGen.CodeGenContext = CodeGen.newCodeGenContext();
+    CodeGen.genProgram(ctx, program);
     
-    return assembly;
+    return CodeGen.getGeneratedCode(ctx);
 }
 
 // Test the compiler - simplified for build pipeline
 fn main() -> void {
-    let testCode: string = "let x: number = 42; print(x);";
+    let testCode: string = "let x: number = 42;";
     let result: string = compile(testCode);
     print(result);
 }

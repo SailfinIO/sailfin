@@ -140,6 +140,12 @@ def compile_and_run(source_file, output_file=None, verbose=False, run_output=Tru
             if verbose:
                 logger.info("Executing compiled code…")
             namespace = {"__name__": "__main__"}
+
+            # Add the source file's directory to sys.path so imports can be resolved
+            source_dir = os.path.dirname(os.path.abspath(source_file))
+            if source_dir not in sys.path:
+                sys.path.insert(0, source_dir)
+
             exec(target_code, namespace)
         elif verbose:
             logger.info(

@@ -1,0 +1,8 @@
+// Simple module that exports a function
+fn greet(name: string) -> string {
+    return "Hello, " + name + "!";
+}
+
+fn add(a: number, b: number) -> number {
+    return a + b;
+}

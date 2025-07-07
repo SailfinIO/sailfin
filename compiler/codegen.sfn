@@ -33,7 +33,7 @@ struct CodeGenContext {
 
 // Create a new code generation context
 fn newCodeGenContext() -> CodeGenContext {
-    return CodeGenContext {
+    return new CodeGenContext {
         instructions: [],
         labelCounter: 0,
         stackOffset: 0,
@@ -46,7 +46,7 @@ fn newCodeGenContext() -> CodeGenContext {
 // Add a variable to the context and return its stack offset
 fn addVariable(ctx: CodeGenContext, name: string, varType: string, isMutable: bool) -> number {
     ctx.stackOffset = ctx.stackOffset - 4;  // Allocate 4 bytes (32-bit) for ARM64
-    let var: Variable = Variable {
+    let var: Variable = new Variable {
         name: name,
         offset: ctx.stackOffset,
         varType: varType,
@@ -60,7 +60,7 @@ fn addVariable(ctx: CodeGenContext, name: string, varType: string, isMutable: bo
 fn addStringLiteral(ctx: CodeGenContext, value: string) -> string {
     let label: string = "_str" + ctx.stringCounter.toString();
     ctx.stringCounter = ctx.stringCounter + 1;
-    let strLit: StringLiteral = StringLiteral {
+    let strLit: StringLiteral = new StringLiteral {
         label: label,
         value: value
     };
@@ -103,7 +103,7 @@ fn genLabel(ctx: CodeGenContext) -> string {
 
 // Emit an assembly instruction
 fn emit(ctx: CodeGenContext, opcode: string, operands: string[]) {
-    let instr: AsmInstruction = AsmInstruction {
+    let instr: AsmInstruction = new AsmInstruction {
         opcode: opcode,
         operands: operands
     };
@@ -212,7 +212,7 @@ fn genAssignment(ctx: CodeGenContext, varName: string, valueExpr: Expression) {
 fn genCallExpr(ctx: CodeGenContext, callee: Expression, arguments: Expression[]) {
     // For now, support only simple built-in functions like print
     if callee.getExpressionKind() == "IdentifierExpr" {
-        let idExpr: IdentifierExpr = callee as IdentifierExpr;
+        let idExpr: IdentifierExpr = callee;
         
         if idExpr.name == "print" {
             // Built-in print function
@@ -264,33 +264,33 @@ fn genExpression(ctx: CodeGenContext, expr: Expression) {
     
     if kind == "NumberExpr" {
         // Cast to NumberExpr and extract value
-        let numExpr: NumberExpr = expr as NumberExpr;
+        let numExpr: NumberExpr = expr;
         genNumberExpr(ctx, numExpr.value);
     } else if kind == "IdentifierExpr" {
         // Cast to IdentifierExpr and extract name
-        let idExpr: IdentifierExpr = expr as IdentifierExpr;
+        let idExpr: IdentifierExpr = expr;
         genVariableExpr(ctx, idExpr.name);
     } else if kind == "BinaryExpr" {
         // Cast to BinaryExpr and generate binary operation
-        let binExpr: BinaryExpr = expr as BinaryExpr;
+        let binExpr: BinaryExpr = expr;
         genBinaryExpr(ctx, binExpr.left, binExpr.operator, binExpr.right);
     } else if kind == "CallExpr" {
         // Cast to CallExpr and generate function call
-        let callExpr: CallExpr = expr as CallExpr;
+        let callExpr: CallExpr = expr;
         genCallExpr(ctx, callExpr.callee, callExpr.arguments);
     } else if kind == "StringExpr" {
         // Cast to StringExpr and generate string literal load
-        let strExpr: StringExpr = expr as StringExpr;
+        let strExpr: StringExpr = expr;
         let label: string = addStringLiteral(ctx, strExpr.value);
         emit(ctx, "adrp", ["x8", label + "@PAGE"]);
         emit(ctx, "add", ["x8", "x8", label + "@PAGEOFF"]);
     } else if kind == "ArrayExpr" {
         // Cast to ArrayExpr and generate array literal
-        let arrayExpr: ArrayExpr = expr as ArrayExpr;
+        let arrayExpr: ArrayExpr = expr;
         genArrayExpr(ctx, arrayExpr);
     } else if kind == "IndexExpr" {
         // Cast to IndexExpr and generate array indexing
-        let indexExpr: IndexExpr = expr as IndexExpr;
+        let indexExpr: IndexExpr = expr;
         genIndexExpr(ctx, indexExpr);
     } else if kind == "NilExpr" {
         // Load zero for nil expressions
@@ -306,7 +306,7 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
     
     if kind == "VariableDeclaration" {
         // Cast to VariableDeclaration and handle variable allocation
-        let varDecl: VariableDeclaration = stmt as VariableDeclaration;
+        let varDecl: VariableDeclaration = stmt;
         
         // Add variable to context (allocates stack space)
         addVariable(ctx, varDecl.name, varDecl.var_type, varDecl.isMutable);
@@ -317,18 +317,20 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         emit(ctx, "str", ["w8", "[x29, #" + offset.toString() + "]"]);
         
         // Add comment indicating mutability
-        if varDecl.isMutable {
-            emit(ctx, "// Mutable variable: " + varDecl.name, []);
+        if (varDecl.isMutable) {
+            let mutComment: string = "// Mutable variable: " + varDecl.name;
+            emit(ctx, mutComment, []);
         } else {
-            emit(ctx, "// Immutable variable: " + varDecl.name, []);
+            let immutComment: string = "// Immutable variable: " + varDecl.name;
+            emit(ctx, immutComment, []);
         }
         
     } else if kind == "AssignmentStatement" {
         // Cast to AssignmentStatement and handle variable assignment
-        let assignStmt: AssignmentStatement = stmt as AssignmentStatement;
+        let assignStmt: AssignmentStatement = stmt;
         
         // Check if variable is mutable
-        if not isVariableMutable(ctx, assignStmt.target) {
+        if !isVariableMutable(ctx, assignStmt.target) {
             error("Cannot assign to immutable variable: " + assignStmt.target);
         }
         
@@ -340,12 +342,12 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         
     } else if kind == "ExpressionStatement" {
         // Cast to ExpressionStatement and generate code for the expression
-        let exprStmt: ExpressionStatement = stmt as ExpressionStatement;
+        let exprStmt: ExpressionStatement = stmt;
         genExpression(ctx, exprStmt.expression);
         
     } else if kind == "ReturnStatement" {
         // Cast to ReturnStatement and generate return code
-        let retStmt: ReturnStatement = stmt as ReturnStatement;
+        let retStmt: ReturnStatement = stmt;
         if retStmt.expression.getExpressionKind() != "NilExpr" {
             genExpression(ctx, retStmt.expression);
             emit(ctx, "mov", ["w0", "w8"]);  // Move result to return register
@@ -357,22 +359,22 @@ fn genStatement(ctx: CodeGenContext, stmt: Statement) {
         
     } else if kind == "FunctionDeclaration" {
         // Cast to FunctionDeclaration and generate function code
-        let funcDecl: FunctionDeclaration = stmt as FunctionDeclaration;
+        let funcDecl: FunctionDeclaration = stmt;
         genFunctionDeclaration(ctx, funcDecl);
         
     } else if kind == "IfStatement" {
         // Cast to IfStatement and generate conditional code
-        let ifStmt: IfStatement = stmt as IfStatement;
+        let ifStmt: IfStatement = stmt;
         genIfStatement(ctx, ifStmt);
         
     } else if kind == "WhileStatement" {
         // Cast to WhileStatement and generate loop code
-        let whileStmt: WhileStatement = stmt as WhileStatement;
+        let whileStmt: WhileStatement = stmt;
         genWhileStatement(ctx, whileStmt);
         
     } else if kind == "ForStatement" {
         // Cast to ForStatement and generate for loop code
-        let forStmt: ForStatement = stmt as ForStatement;
+        let forStmt: ForStatement = stmt;
         genForStatement(ctx, forStmt);
         
     } else {
@@ -583,7 +585,7 @@ fn genProgram(ctx: CodeGenContext, program: Program) {
     while (i < program.statements.length) {
         let stmt: Statement = program.statements[i];
         if stmt.getStatementKind() == "FunctionDeclaration" {
-            let funcDecl: FunctionDeclaration = stmt as FunctionDeclaration;
+            let funcDecl: FunctionDeclaration = stmt;
             if funcDecl.name == "main" {
                 hasMainFunction = true;
             }
@@ -591,7 +593,7 @@ fn genProgram(ctx: CodeGenContext, program: Program) {
         i = i + 1;
     }
     
-    if not hasMainFunction {
+    if !hasMainFunction {
         // Generate a main wrapper for script-style code
         genPrologue(ctx);
         

@@ -94,10 +94,10 @@ compile_self_hosting() {
     sfn --help > /dev/null 2>&1 && log_success "sfn binary is working"
     
     # Use sfn to compile the self-hosting compiler to Python
-    log_info "Compiling main.sfn to Python with sfn (from compiler directory)..."
-    if sfn main.sfn -o "../build/main_compiler.py" -c 2>&1 | tee "../build/compile.log"; then
-        log_success "Successfully compiled main.sfn to Python"
-        
+    log_info "Compiling compiler.sfn to Python with sfn (from compiler directory)..."
+    if sfn compiler.sfn -o "../build/compiler.py" -c 2>&1 | tee "../build/compile.log"; then
+        log_success "Successfully compiled compiler.sfn to Python"
+
         # Change back to build directory to create wrapper scripts
         cd "$BUILD_DIR"
         
