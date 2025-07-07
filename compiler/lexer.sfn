@@ -135,9 +135,10 @@ fn lex(source: string) -> Token[] {
             while pos < source.length && source[pos] != "\"" {
                 // (Optionally, handle escape sequences here.)
                 pos = pos + 1;
-            }        if (pos >= source.length) {
-            error("Unterminated string literal at line {{lineno}}");
-        }
+            }
+            if (pos >= source.length) {
+                error("Unterminated string literal at line {{lineno}}");
+            }
             let strText: string = source.substring(start, pos);
             pos = pos + 1; // Skip the closing quote.
             tokens.append(new Token { type: "STRING", value: strText, lineno: lineno });
@@ -146,7 +147,7 @@ fn lex(source: string) -> Token[] {
 
         // --- COMMENTS ---
         // Single-line comment: //
-        if c == "/" && pos + 1 < source.length && source[pos + 1] == "/" {
+        if c == "/" && (pos + 1) < source.length && source[pos + 1] == "/" {
             pos = pos + 2; // Skip the "//"
             while pos < source.length && source[pos] != "\n" {
                 pos = pos + 1;

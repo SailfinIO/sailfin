@@ -82,19 +82,9 @@ fn compile(source: string) -> string {
     return assembly;
 }
 
-// Test the compiler
+// Test the compiler - simplified for build pipeline
 fn main() -> void {
     let testCode: string = "let x: number = 42; print(x);";
-    
-    print("Sailfin Self-Hosting Compiler v2");
-    print("=================================");
-    print("Source: " + testCode);
-    print("");
-    
     let result: string = compile(testCode);
-    
-    print("Generated Assembly:");
     print(result);
-    print("");
-    print("Self-hosting compiler is working!");
 }
