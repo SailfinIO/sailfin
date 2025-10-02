@@ -1,758 +1,871 @@
-# bootstrap/parser.py
+"""Recursive-descent parser for the Sailfin bootstrap compiler.
 
-import sys
-import ply.yacc as yacc
-from lexer import tokens
+The previous parser relied on PLY's yacc module but had diverged from the
+current AST definitions and language design.  This module implements a
+purpose-built parser that produces the richer dataclasses defined in
+``bootstrap.ast_nodes`` and focuses on the subset of the grammar required by
+the bootstrap compiler and examples.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, Iterator, List, Optional, Sequence
+
 from ast_nodes import (
-    ArrayLiteral, Await, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement, LambdaExpression, MatchArm, MatchStatement, MethodDeclaration, NumberPattern, Program, FunctionDeclaration, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
-    PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
-    FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
-    MemberAccess, Assignment, WildcardPattern
+    ArrayLiteral,
+    Assignment,
+    AwaitExpression,
+    BinaryExpression,
+    Block,
+    BooleanLiteral,
+    CallExpression,
+    CatchClause,
+    ConstantDeclaration,
+    ConstructorPattern,
+    Decorator,
+    EnumDeclaration,
+    EnumVariant,
+    Expression,
+    ExpressionStatement,
+    LambdaExpression,
+    FieldDeclaration,
+    FunctionDeclaration,
+    FunctionSignature,
+    Identifier,
+    IdentifierPattern,
+    IfStatement,
+    ImportDeclaration,
+    InterfaceDeclaration,
+    LiteralPattern,
+    MatchCase,
+    MatchStatement,
+    MemberExpression,
+    IndexExpression,
+    MethodDeclaration,
+    NullLiteral,
+    NumberLiteral,
+    ObjectField,
+    OptionalType,
+    ParallelExpression,
+    Parameter,
+    Pattern,
+    PatternField,
+    Program,
+    QualifiedName,
+    RoutineDeclaration,
+    ForStatement,
+    LoopStatement,
+    RangeExpression,
+    SimpleType,
+    Statement,
+    StringLiteral,
+    StructDeclaration,
+    StructLiteral,
+    UnaryExpression,
+    ReturnStatement,
+    ThrowStatement,
+    TryStatement,
+    TypeAnnotation,
+    TypeAliasDeclaration,
+    TypeParameter,
+    FunctionType,
+    UnionType,
+    VariableDeclaration,
+    WildcardPattern,
 )
 
-# Precedence rules
-precedence = (
-    ('left', 'OR'),
-    ('left', 'AND'),
-    ('left', 'EQ', 'NEQ'),
-    ('left', 'LT', 'GT', 'LEQ', 'GEQ'),
-    ('left', 'PLUS', 'MINUS'),
-    ('left', 'MULTIPLY', 'DIVIDE'),
-    ('left', 'DOT'),
-    ('left', 'LPAREN', 'RPAREN'),  # Added for function calls
-    ('right', 'UMINUS'),
-)
 
-
-def p_program(p):
-    '''program : statements'''
-    p[0] = Program(p[1])
-
-
-def p_statements_multiple(p):
-    '''statements : statements statement'''
-    p[0] = p[1] + [p[2]]
-
-
-def p_statements_single(p):
-    '''statements : statement'''
-    p[0] = [p[1]]
-
-
-def p_statement_declaration(p):
-    '''statement : variable_declaration
-                 | constant_declaration
-                 | function_declaration
-                 | struct_declaration
-                 | enum_declaration
-                 | print_statement
-                 | if_statement
-                 | return_statement
-                 | assignment
-                 | expression_statement
-                 | match_statement 
-                 | import_statement'''
-    p[0] = p[1]
-
-
-def p_match_statement(p):
-    '''match_statement : MATCH expression LBRACE match_arms RBRACE'''
-    p[0] = MatchStatement(condition=p[2], arms=p[4])
-
-
-def p_match_arms(p):
-    '''
-    match_arms :
-               | match_arm_list maybe_comma
-    '''
-    # Two possibilities:
-    # 1) Empty match arms (no arms at all).
-    # 2) One or more arms, followed by an optional trailing comma.
-    if len(p) == 1:
-        # Empty production => []
-        p[0] = []
-    else:
-        # match_arm_list maybe_comma => the actual list of arms
-        p[0] = p[1]
-
-
-def p_match_arm_list_single(p):
-    '''match_arm_list : match_arm'''
-    p[0] = [p[1]]
-
-
-def p_match_arm_list_multiple(p):
-    '''match_arm_list : match_arm_list COMMA match_arm'''
-    p[0] = p[1] + [p[3]]
-
-
-def p_maybe_comma(p):
-    '''maybe_comma : COMMA
-                   | empty
-    '''
-    # Optional trailing comma. We do nothing with it, just allow it syntactically.
-    pass
-
-
-def p_match_arm(p):
-    '''match_arm : pattern ARROW inline_statement'''
-    p[0] = MatchArm(pattern=p[1], body=[p[3]])
-
-
-def p_inline_statement_print(p):
-    '''inline_statement : PRINT DOT INFO LPAREN expression RPAREN'''
-    p[0] = PrintStatement(expression=p[5])
-
-
-def p_inline_statement_assignment(p):
-    '''inline_statement : assignment_expression'''
-    # But note: assignment_expression is returning an Assignment AST node,
-    # which is a statement-level node in your AST.
-    p[0] = p[1]
-
-
-def p_inline_statement_expression(p):
-    '''inline_statement : expression'''
-    p[0] = ExpressionStatement(expression=p[1])
-
-
-def p_pattern_negative_number(p):
-    '''pattern : MINUS NUMBER'''
-    p[0] = NumberPattern(-p[2])
-
-
-def p_pattern_number(p):
-    '''pattern : NUMBER'''
-    p[0] = NumberPattern(value=p[1])
-
-
-def p_pattern_wildcard(p):
-    '''pattern : UNDERSCORE'''
-    p[0] = WildcardPattern()
-
-
-def p_assignment_expression(p):
-    '''assignment_expression : lvalue ASSIGN expression
-                              | lvalue PLUS_ASSIGN expression
-                              | lvalue MINUS_ASSIGN expression
-                              | lvalue MULTIPLY_ASSIGN expression
-                              | lvalue DIVIDE_ASSIGN expression'''
-    if p[2] == '=':
-        p[0] = Assignment(target=p[1], value=p[3])
-    elif p[2] == '+=':
-        p[0] = Assignment(target=p[1], value=BinOp(
-            operator='+', left=p[1], right=p[3]))
-    elif p[2] == '-=':
-        p[0] = Assignment(target=p[1], value=BinOp(
-            operator='-', left=p[1], right=p[3]))
-    elif p[2] == '*=':
-        p[0] = Assignment(target=p[1], value=BinOp(
-            operator='*', left=p[1], right=p[3]))
-    elif p[2] == '/=':
-        p[0] = Assignment(target=p[1], value=BinOp(
-            operator='/', left=p[1], right=p[3]))
-    else:
-        raise NotImplementedError(f"Assignment operator {
-                                  p[2]} not implemented")
-
-
-# Type Alias Declaration
-
-
-def p_type_alias_declaration(p):
-    '''type_alias_declaration : TYPE IDENTIFIER ASSIGN type SEMICOLON'''
-    p[0] = TypeAliasDeclaration(name=p[2], aliased_type=p[4])
-
-# Struct Declaration
-
-
-def p_struct_declaration(p):
-    '''struct_declaration : STRUCT IDENTIFIER LBRACE struct_members RBRACE'''
-    p[0] = StructDeclaration(name=p[2], members=p[4])
-
-
-def p_struct_members_multiple(p):
-    '''struct_members : struct_members struct_member'''
-    p[0] = p[1] + [p[2]]
-
-
-def p_struct_members_single(p):
-    '''struct_members : struct_member'''
-    p[0] = [p[1]]
-
-
-def p_struct_member(p):
-    '''struct_member : mut_field_declaration
-                     | field_declaration
-                     | method_declaration'''
-    p[0] = p[1]
-
-# Method Declaration (within Struct)
-
-
-def p_method_declaration_with_decorators(p):
-    '''method_declaration : decorators FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = MethodDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type=p[8],
-        body=p[10],
-        decorators=p[1]
-    )
-
-
-def p_method_declaration_without_decorators(p):
-    '''method_declaration : FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = MethodDeclaration(
-        name=p[2],
-        params=p[4],
-        return_type=p[7],
-        body=p[9]
-    )
-
-# Field Declarations
-
-
-def p_mut_field_declaration(p):
-    '''mut_field_declaration : MUT LET IDENTIFIER ARROW type SEMICOLON'''
-    p[0] = FieldDeclaration(name=p[3], field_type=p[5], mutable=True)
-
-
-def p_field_declaration(p):
-    '''field_declaration : LET IDENTIFIER ARROW type SEMICOLON'''
-    p[0] = FieldDeclaration(name=p[2], field_type=p[4], mutable=False)
-
-# Enum Declaration
-
-
-def p_enum_declaration(p):
-    '''enum_declaration : ENUM IDENTIFIER LBRACE enum_variants_opt RBRACE'''
-    p[0] = EnumDeclaration(name=p[2], variants=p[4])
-
-# `enum_variants_opt` can be either a list of variants or empty.
-
-
-def p_enum_variants_opt(p):
-    '''enum_variants_opt : enum_variants
-                         | empty'''
-    # If it's empty, return an empty list so we don't break code that expects a list.
-    p[0] = p[1] if p[1] is not None else []
-
-# `enum_variants` requires at least one variant (with possible trailing comma).
-
-
-def p_enum_variants(p):
-    '''enum_variants : enum_variant_list maybe_trailing_comma'''
-    # This rule ensures we collect the actual variants
-    # in `enum_variant_list` and ignore the optional trailing comma.
-    p[0] = p[1]
-
-# One or more variants, separated by commas, but no trailing comma here.
-
-
-def p_enum_variant_list_single(p):
-    '''enum_variant_list : enum_variant'''
-    p[0] = [p[1]]
-
-
-def p_enum_variant_list_multiple(p):
-    '''enum_variant_list : enum_variant_list COMMA enum_variant'''
-    p[0] = p[1] + [p[3]]
-
-# An optional trailing comma is either a `,` or empty.
-
-
-def p_maybe_trailing_comma(p):
-    '''maybe_trailing_comma : COMMA
-                            | empty
-    '''
-    pass
-
-
-def p_enum_variant_with_fields(p):
-    '''enum_variant : IDENTIFIER LBRACE struct_members RBRACE'''
-    p[0] = EnumVariant(name=p[1], fields=p[3])
-
-
-def p_enum_variant_without_fields(p):
-    '''enum_variant : IDENTIFIER'''
-    p[0] = EnumVariant(name=p[1])
-
-
-# Decorators
-
-
-def p_decorators_multiple(p):
-    '''decorators : decorators decorator'''
-    p[0] = p[1] + [p[2]]
-
-
-def p_decorators_single(p):
-    '''decorators : decorator'''
-    p[0] = [p[1]]
-
-
-def p_decorator(p):
-    '''decorator : AT IDENTIFIER'''
-    p[0] = p[2]
-
-# Constant Declaration
-
-
-def p_constant_declaration(p):
-    '''constant_declaration : CONST LET IDENTIFIER ARROW type ASSIGN expression SEMICOLON'''
-    p[0] = ConstantDeclaration(name=p[3], var_type=p[5], value=p[7])
-
-# Variable Declaration
-
-
-def p_variable_declaration_let_with_type(p):
-    'variable_declaration : LET mut_opt IDENTIFIER ARROW type ASSIGN expression SEMICOLON'
-    mutable = p[2]
-    name = p[3]
-    var_type = p[5]
-    value = p[7]
-    print(f"VariableDeclaration (let with type): name={name}, var_type={
-          var_type}, value={value}, mutable={mutable}")  # Debugging
-    p[0] = VariableDeclaration(name, var_type, value, mutable)
-
-
-def p_variable_declaration_let_without_type(p):
-    'variable_declaration : LET mut_opt IDENTIFIER ASSIGN expression SEMICOLON'
-    mutable = p[2]
-    name = p[3]
-    var_type = None
-    value = p[5]
-    print(f"VariableDeclaration (let without type): name={name}, var_type={
-          var_type}, value={value}, mutable={mutable}")  # Debugging
-    p[0] = VariableDeclaration(name, var_type, value, mutable)
-
-
-def p_variable_declaration_mut_with_type(p):
-    'variable_declaration : MUT IDENTIFIER ARROW type ASSIGN expression SEMICOLON'
-    mutable = True
-    name = p[2]
-    var_type = p[4]
-    value = p[6]
-    print(f"VariableDeclaration (mut with type): name={name}, var_type={
-          var_type}, value={value}, mutable={mutable}")  # Debugging
-    p[0] = VariableDeclaration(name, var_type, value, mutable)
-
-
-def p_variable_declaration_mut_without_type(p):
-    'variable_declaration : MUT IDENTIFIER ASSIGN expression SEMICOLON'
-    mutable = True
-    name = p[2]
-    var_type = None
-    value = p[4]
-    print(f"VariableDeclaration (mut without type): name={name}, var_type={
-          var_type}, value={value}, mutable={mutable}")  # Debugging
-    p[0] = VariableDeclaration(name, var_type, value, mutable)
-
-
-def p_mut_opt_mut(p):
-    '''mut_opt : MUT'''
-    p[0] = True
-
-
-def p_mut_opt_empty(p):
-    '''mut_opt : '''
-    p[0] = False
-
-
-# Function Declaration
-
-
-def p_function_declaration_async_with_decorators(p):
-    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[4],
-        params=p[6],
-        return_type=p[9],
-        body=p[11],
-        decorators=p[1],
-        is_async=True
-    )
-
-
-def p_function_declaration_async_with_decorators_no_return(p):
-    '''function_declaration : decorators ASYNC FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[4],
-        params=p[6],
-        return_type='void',  # Default return type
-        body=p[8],
-        decorators=p[1],
-        is_async=True
-    )
-
-
-def p_function_declaration_async_without_decorators(p):
-    '''function_declaration : ASYNC FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type=p[8],
-        body=p[10],
-        decorators=[],
-        is_async=True
-    )
-
-
-def p_function_declaration_async_without_decorators_no_return(p):
-    '''function_declaration : ASYNC FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type='void',
-        body=p[7],
-        decorators=[],
-        is_async=True
-    )
-
-# EXISTING: Function Declaration without 'async'
-
-
-def p_function_declaration_with_decorators(p):
-    '''function_declaration : decorators FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type=p[8],
-        body=p[10],
-        decorators=p[1],
-        is_async=False
-    )
-
-
-def p_function_declaration_with_decorators_no_return(p):
-    '''function_declaration : decorators FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[3],
-        params=p[5],
-        return_type='void',
-        body=p[8],
-        decorators=p[1],
-        is_async=False
-    )
-
-
-def p_function_declaration_without_decorators(p):
-    '''function_declaration : FN IDENTIFIER LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[2],
-        params=p[4],
-        return_type=p[7],
-        body=p[9],
-        decorators=[],
-        is_async=False
-    )
-
-
-def p_function_declaration_without_decorators_no_return(p):
-    '''function_declaration : FN IDENTIFIER LPAREN parameters RPAREN LBRACE statements RBRACE'''
-    p[0] = FunctionDeclaration(
-        name=p[2],
-        params=p[4],
-        return_type='void',
-        body=p[7],
-        decorators=[],
-        is_async=False
-    )
-
-
-def p_expression_await(p):
-    '''expression : AWAIT expression'''
-    p[0] = Await(expression=p[2])
-
-
-# Print Statement
-
-
-def p_print_statement(p):
-    '''print_statement : PRINT DOT INFO LPAREN expression RPAREN SEMICOLON'''
-    p[0] = PrintStatement(expression=p[5])
-
-
-# Import Statement
-
-def p_import_statement(p):
-    '''import_statement : IMPORT LBRACE import_items RBRACE FROM STRING SEMICOLON'''
-    p[0] = ImportStatement(items=p[3], source=p[5])
-
-
-def p_import_items_multiple(p):
-    '''import_items : import_items COMMA IDENTIFIER'''
-    p[0] = p[1] + [p[3]]
-
-
-def p_import_items_single(p):
-    '''import_items : IDENTIFIER'''
-    p[0] = [p[1]]
-
-
-def p_import_items_empty(p):
-    '''import_items : '''
-    p[0] = []
-
-# If Statement
-
-
-def p_block(p):
-    """block : LBRACE statements RBRACE"""
-    p[0] = p[2]
-
-
-def p_if_statement_no_parens(p):
-    """if_statement : IF expression block else_clause"""
-    p[0] = IfStatement(condition=p[2],
-                       then_branch=p[3],
-                       else_branch=p[4])
-
-
-def p_if_statement_with_parens(p):
-    """if_statement : IF LPAREN expression RPAREN block else_clause"""
-    p[0] = IfStatement(condition=p[3],
-                       then_branch=p[5],
-                       else_branch=p[6])
-
-
-def p_else_clause_if(p):
-    """else_clause : ELSE if_statement"""
-    # “else if …” is effectively just “ELSE <nested if>”
-    # We'll store it in a single-element list so it reuses your AST shape
-    # (IfStatement wants else_branch as a list or None).
-    p[0] = [p[2]]
-
-
-def p_else_clause_block(p):
-    """else_clause : ELSE block"""
-    # This is a normal “else { … }”
-    # We'll store the statements of the block directly.
-    p[0] = p[2]
-
-
-def p_else_clause_empty(p):
-    """else_clause :"""
-    # No else at all
-    p[0] = []
-
-
-# Return Statement
-
-
-def p_return_statement(p):
-    '''return_statement : RETURN expression SEMICOLON
-                        | RETURN SEMICOLON'''
-    if len(p) == 4:
-        p[0] = ReturnStatement(expression=p[2])
-    else:
-        p[0] = ReturnStatement()
-
-# Assignment
-
-
-def p_assignment(p):
-    '''assignment : assignment_expression SEMICOLON'''
-    p[0] = p[1]
-
-
-def p_lvalue_identifier(p):
-    '''lvalue : IDENTIFIER'''
-    p[0] = Identifier(name=p[1])
-
-
-def p_lvalue_member_access(p):
-    '''lvalue : expression DOT IDENTIFIER'''
-    p[0] = MemberAccess(object_=p[1], member=p[3])
-
-# Expression Statement
-
-
-def p_expression_lambda(p):
-    '''expression : FN LPAREN parameters RPAREN ARROW type LBRACE statements RBRACE'''
-    print("Parsing lambda with return type")
-    p[0] = LambdaExpression(params=p[3], body=p[8])
-
-
-def p_expression_lambda_no_return(p):
-    '''expression : FN LPAREN parameters RPAREN LBRACE statements RBRACE'''
-    print("Parsing lambda without return type")
-    p[0] = LambdaExpression(params=p[3], body=p[6])
-
-
-def p_expression_statement(p):
-    '''expression_statement : expression SEMICOLON'''
-    p[0] = ExpressionStatement(expression=p[1])
-
-# Parameters
-
-
-def p_parameters_multiple(p):
-    '''parameters : parameters COMMA parameter
-                  | parameters COMMA'''
-    if len(p) == 4:
-        p[0] = p[1] + [p[3]]
-    else:
-        p[0] = p[1]
-
-
-def p_parameters_single(p):
-    '''parameters : parameter'''
-    p[0] = [p[1]]
-
-
-def p_parameters_empty(p):
-    '''parameters : '''
-    p[0] = []
-
-
-def p_parameter_with_type(p):
-    'parameter : IDENTIFIER ARROW type'
-    p[0] = (p[1], p[3])
-
-# Allow parameters without type annotations
-
-
-def p_parameter_without_type(p):
-    'parameter : IDENTIFIER'
-    p[0] = (p[1], None)
-
-# Type Definitions
-
-
-def p_type(p):
-    '''type : IDENTIFIER
-            | type LT type_list GT'''
-    if len(p) == 2:
-        p[0] = p[1]
-    else:
-        p[0] = f"{p[1]}<{', '.join(p[3])}>"
-
-
-def p_type_list_multiple(p):
-    '''type_list : type_list COMMA type'''
-    p[0] = p[1] + [p[3]]
-
-
-def p_type_list_single(p):
-    '''type_list : type'''
-    p[0] = [p[1]]
-
-# Expressions
-
-
-def p_expression_array_literal(p):
-    '''expression : LBRACKET elements RBRACKET'''
-    p[0] = ArrayLiteral(elements=p[2])
-
-
-def p_elements_multiple(p):
-    '''elements : elements COMMA expression
-                | elements COMMA'''
-    if len(p) == 4:
-        p[0] = p[1] + [p[3]]
-    else:
-        p[0] = p[1]
-
-
-def p_elements_single(p):
-    '''elements : expression'''
-    p[0] = [p[1]]
-
-
-def p_elements_empty(p):
-    '''elements : '''
-    p[0] = []
-
-
-def p_expression_binop(p):
-    '''expression : expression PLUS expression
-                  | expression MINUS expression
-                  | expression MULTIPLY expression
-                  | expression DIVIDE expression
-                  | expression LT expression
-                  | expression GT expression
-                  | expression LEQ expression
-                  | expression GEQ expression
-                  | expression EQ expression
-                  | expression NEQ expression
-                  | expression AND expression
-                  | expression OR expression'''
-    p[0] = BinOp(operator=p[2], left=p[1], right=p[3])
-
-
-def p_expression_uminus(p):
-    '''expression : MINUS expression %prec UMINUS'''
-    p[0] = BinOp(operator='-', left=Number(0), right=p[2])
-
-
-def p_expression_group(p):
-    '''expression : LPAREN expression RPAREN'''
-    p[0] = p[2]
-
-
-def p_expression_number(p):
-    '''expression : NUMBER'''
-    p[0] = Number(value=p[1])
-
-
-def p_expression_string(p):
-    '''expression : STRING'''
-    p[0] = String(value=p[1])
-
-
-def p_expression_identifier(p):
-    '''expression : IDENTIFIER'''
-    p[0] = Identifier(name=p[1])
-
-
-def p_expression_function_call(p):
-    '''expression : IDENTIFIER LPAREN arguments RPAREN
-                  | expression LPAREN arguments RPAREN'''
-    # If p[1] is a plain string (from the IDENTIFIER token),
-    # wrap it in an Identifier node:
-    if isinstance(p[1], str):
-        p[1] = Identifier(p[1])
-
-    # Now p[1] is always an AST node
-    p[0] = FunctionCall(func_name=p[1], arguments=p[3])
-
-
-def p_expression_member_access(p):
-    '''expression : expression DOT IDENTIFIER'''
-    p[0] = MemberAccess(object_=p[1], member=p[3])
-
-
-def p_arguments_multiple(p):
-    '''arguments : arguments COMMA expression'''
-    p[0] = p[1] + [p[3]]
-
-
-def p_arguments_single(p):
-    '''arguments : expression'''
-    p[0] = [p[1]]
-
-
-def p_arguments_empty(p):
-    '''arguments : '''
-    p[0] = []
-
-
-def p_empty(p):
-    '''empty :'''
-    pass
-
-
-def p_error(p):
-    if p:
-        print(f"Syntax error at token '{p.type}' with value '{
-              p.value}' at line {p.lineno}")
-        # Optionally, raise an exception or implement recovery strategies
-    else:
-        print("Syntax error at EOF")
-    sys.exit(1)  # Exit to prevent further errors
-
-
-# Build the parser
-parser = yacc.yacc()
+class ParseError(SyntaxError):
+    """Raised when the parser encounters an unexpected token."""
+
+
+@dataclass(frozen=True)
+class Token:
+    type: str
+    value: object
+    lineno: int
+    column: int
+
+
+def _compute_column(lexpos: int, text: str) -> int:
+    line_start = text.rfind("\n", 0, lexpos) + 1
+    return lexpos - line_start + 1
+
+
+def _tokenize(source: str, lexer) -> List[Token]:
+    lexer.input(source)
+    tokens: List[Token] = []
+    tok = lexer.token()
+    while tok is not None:
+        column = _compute_column(getattr(tok, "lexpos", 0), source)
+        tokens.append(Token(tok.type, tok.value, tok.lineno, column))
+        tok = lexer.token()
+    tokens.append(Token("EOF", "<eof>", tokens[-1].lineno if tokens else 1, 0))
+    return tokens
+
+
+class _TokenStream:
+    def __init__(self, tokens: Sequence[Token]):
+        self._tokens = tokens
+        self._index = 0
+
+    @property
+    def current(self) -> Token:
+        return self._tokens[self._index]
+
+    @property
+    def previous(self) -> Token:
+        return self._tokens[self._index - 1]
+
+    def peek(self, offset: int = 0) -> Token:
+        new_index = self._index + offset
+        if new_index < 0:
+            new_index = 0
+        if new_index >= len(self._tokens):
+            return self._tokens[-1]
+        return self._tokens[new_index]
+
+    def advance(self) -> Token:
+        token = self.current
+        if token.type != "EOF":
+            self._index += 1
+        return token
+
+    def match(self, *token_types: str) -> Optional[Token]:
+        if self.current.type in token_types:
+            token = self.current
+            self.advance()
+            return token
+        return None
+
+    def expect(self, token_type: str, message: Optional[str] = None) -> Token:
+        token = self.match(token_type)
+        if token is None:
+            current = self.current
+            expected = message or f"Expected {token_type}, found {current.type}"
+            raise ParseError(f"{expected} at line {current.lineno}, column {current.column}")
+        return token
+
+    def check(self, token_type: str) -> bool:
+        return self.current.type == token_type
+
+    def at_end(self) -> bool:
+        return self.current.type == "EOF"
+
+
+class _SailParser:
+    def __init__(self, stream: _TokenStream):
+        self.tokens = stream
+
+    # ------------------------------------------------------------------
+    # Entry point
+    # ------------------------------------------------------------------
+
+    def parse_program(self) -> Program:
+        statements: List[Statement] = []
+        while not self.tokens.at_end():
+            if self.tokens.match("SEMICOLON"):
+                continue
+            statements.append(self._parse_top_level())
+        return Program(statements)
+
+    # ------------------------------------------------------------------
+    # Top level constructs
+    # ------------------------------------------------------------------
+
+    def _parse_top_level(self) -> Statement:
+        if self.tokens.check("IMPORT"):
+            return self._parse_import()
+        if self.tokens.check("STRUCT"):
+            return self._parse_struct()
+        if self.tokens.check("ENUM"):
+            return self._parse_enum()
+        if self.tokens.check("INTERFACE"):
+            return self._parse_interface()
+        if self.tokens.check("TYPE"):
+            return self._parse_type_alias()
+        if self.tokens.check("CONST"):
+            return self._parse_const_declaration()
+        if self.tokens.check("LET"):
+            return self._parse_variable_declaration()
+        return self._parse_function(decorators=self._parse_decorators())
+
+    # ------------------------------------------------------------------
+    # Imports & type aliases
+    # ------------------------------------------------------------------
+
+    def _parse_import(self) -> ImportDeclaration:
+        self.tokens.expect("IMPORT")
+        self.tokens.expect("LBRACE")
+        items: List[str] = []
+        if not self.tokens.check("RBRACE"):
+            while True:
+                ident = self.tokens.expect("IDENTIFIER")
+                items.append(str(ident.value))
+                if not self.tokens.match("COMMA"):
+                    break
+                if self.tokens.check("RBRACE"):
+                    break
+        self.tokens.expect("RBRACE")
+        self.tokens.expect("FROM")
+        source = self.tokens.expect("STRING").value
+        self.tokens.expect("SEMICOLON")
+        return ImportDeclaration(items=items, source=source)
+
+    def _parse_type_alias(self) -> TypeAliasDeclaration:
+        self.tokens.expect("TYPE")
+        name = self.tokens.expect("IDENTIFIER").value
+        type_params = self._parse_type_parameters()
+        self.tokens.expect("ASSIGN")
+        aliased = self._parse_type()
+        self.tokens.expect("SEMICOLON")
+        return TypeAliasDeclaration(name=name, type_parameters=type_params, aliased_type=aliased)
+
+    # ------------------------------------------------------------------
+    # Structs and enums
+    # ------------------------------------------------------------------
+
+    def _parse_struct(self) -> StructDeclaration:
+        self.tokens.expect("STRUCT")
+        name = self.tokens.expect("IDENTIFIER").value
+        type_params = self._parse_type_parameters()
+        implements: List[SimpleType] = []
+        if self.tokens.match("IMPLEMENTS"):
+            implements = self._parse_implements_list()
+        self.tokens.expect("LBRACE")
+        members: List = []
+        while not self.tokens.match("RBRACE"):
+            if self._current_starts_decorator() or self.tokens.check("ASYNC") or self.tokens.check("FN"):
+                decorators = self._parse_decorators()
+                member = self._parse_function(decorators=decorators, is_method=True)
+            else:
+                member = self._parse_struct_field()
+            members.append(member)
+        return StructDeclaration(name=name, members=members, type_parameters=type_params, implements=implements)
+
+    def _parse_implements_list(self) -> List[SimpleType]:
+        items: List[SimpleType] = []
+        while True:
+            items.append(self._parse_nominal_type())
+            if not self.tokens.match("COMMA"):
+                break
+        return items
+
+    def _parse_struct_field(self) -> FieldDeclaration:
+        mutable = bool(self.tokens.match("MUT"))
+        self.tokens.match("LET")  # Allow optional `let` for readability
+        name_tok = self.tokens.expect("IDENTIFIER")
+        self.tokens.expect("ARROW")
+        field_type = self._parse_type()
+        self.tokens.expect("SEMICOLON")
+        return FieldDeclaration(name=name_tok.value, type_annotation=field_type, mutable=mutable)
+
+    def _parse_enum(self) -> EnumDeclaration:
+        self.tokens.expect("ENUM")
+        name = self.tokens.expect("IDENTIFIER").value
+        self.tokens.expect("LBRACE")
+        variants: List[EnumVariant] = []
+        while not self.tokens.match("RBRACE"):
+            variant_name = self.tokens.expect("IDENTIFIER").value
+            fields: List[FieldDeclaration] = []
+            if self.tokens.match("LBRACE"):
+                while not self.tokens.match("RBRACE"):
+                    mutable = bool(self.tokens.match("MUT"))
+                    field_name = self.tokens.expect("IDENTIFIER").value
+                    self.tokens.expect("ARROW")
+                    field_type = self._parse_type()
+                    self.tokens.expect("SEMICOLON")
+                    fields.append(FieldDeclaration(field_name, field_type, mutable))
+            variants.append(EnumVariant(name=variant_name, fields=fields))
+            self.tokens.match("COMMA")
+        return EnumDeclaration(name=name, variants=variants)
+
+    def _parse_interface(self) -> InterfaceDeclaration:
+        self.tokens.expect("INTERFACE")
+        name = self.tokens.expect("IDENTIFIER").value
+        type_params = self._parse_type_parameters()
+        self.tokens.expect("LBRACE")
+        members: List[FunctionSignature] = []
+        while not self.tokens.match("RBRACE"):
+            members.append(self._parse_function_signature())
+        return InterfaceDeclaration(name=name, members=members, type_parameters=type_params)
+
+    # ------------------------------------------------------------------
+    # Functions & methods
+    # ------------------------------------------------------------------
+
+    def _parse_decorators(self) -> List[Decorator]:
+        decorators: List[Decorator] = []
+        while self._current_starts_decorator():
+            self.tokens.expect("AT")
+            name = self._parse_qualified_name()
+            arguments: List[Expression] = []
+            if self.tokens.match("LPAREN"):
+                if not self.tokens.check("RPAREN"):
+                    while True:
+                        arguments.append(self._parse_expression())
+                        if not self.tokens.match("COMMA"):
+                            break
+                self.tokens.expect("RPAREN")
+            decorators.append(Decorator(name=name, arguments=arguments))
+        return decorators
+
+    def _current_starts_decorator(self) -> bool:
+        return self.tokens.check("AT")
+
+    def _parse_type_parameters(self) -> List[TypeParameter]:
+        if not self.tokens.match("LT"):
+            return []
+        params: List[TypeParameter] = []
+        while True:
+            name = self.tokens.expect("IDENTIFIER").value
+            bound = None
+            if self.tokens.match("COLON"):
+                bound = self._parse_type()
+            params.append(TypeParameter(name=name, bound=bound))
+            if not self.tokens.match("COMMA"):
+                break
+        self.tokens.expect("GT")
+        return params
+
+    def _parse_function(self, *, decorators: Optional[List[Decorator]] = None, is_method: bool = False) -> Statement:
+        decorators = decorators or []
+        is_async = bool(self.tokens.match("ASYNC"))
+        self.tokens.expect("FN")
+        name = self.tokens.expect("IDENTIFIER").value
+        type_parameters = self._parse_type_parameters()
+        parameters = self._parse_parameter_list()
+        return_type: Optional[TypeAnnotation] = None
+        if self.tokens.match("ARROW"):
+            return_type = self._parse_type()
+        body = self._parse_block()
+        if is_method:
+            return MethodDeclaration(
+                name=name,
+                parameters=parameters,
+                body=body,
+                return_type=return_type,
+                decorators=decorators,
+                type_parameters=type_parameters,
+                is_async=is_async,
+            )
+        return FunctionDeclaration(
+            name=name,
+            parameters=parameters,
+            body=body,
+            return_type=return_type,
+            decorators=decorators,
+            type_parameters=type_parameters,
+            is_async=is_async,
+        )
+
+    def _parse_parameter_list(self) -> List[Parameter]:
+        self.tokens.expect("LPAREN")
+        params: List[Parameter] = []
+        if not self.tokens.check("RPAREN"):
+            while True:
+                params.append(self._parse_parameter())
+                if not self.tokens.match("COMMA"):
+                    break
+        self.tokens.expect("RPAREN")
+        return params
+
+    def _parse_parameter(self) -> Parameter:
+        mutable = bool(self.tokens.match("MUT"))
+        name_tok = self.tokens.expect("IDENTIFIER")
+        type_annotation: Optional[TypeAnnotation] = None
+        default: Optional[Expression] = None
+        if self.tokens.match("ARROW"):
+            type_annotation = self._parse_type()
+        if self.tokens.match("ASSIGN"):
+            default = self._parse_expression()
+        return Parameter(name=name_tok.value, type_annotation=type_annotation, default=default, mutable=mutable)
+
+    def _parse_function_signature(self) -> FunctionSignature:
+        self.tokens.expect("FN")
+        name = self.tokens.expect("IDENTIFIER").value
+        parameters = self._parse_parameter_list()
+        return_type: Optional[TypeAnnotation] = None
+        if self.tokens.match("ARROW"):
+            return_type = self._parse_type()
+        self.tokens.expect("SEMICOLON")
+        return FunctionSignature(name=name, parameters=parameters, return_type=return_type)
+
+    def _parse_lambda_expression(self) -> LambdaExpression:
+        self.tokens.expect("FN")
+        parameters = self._parse_parameter_list()
+        return_type: Optional[TypeAnnotation] = None
+        if self.tokens.match("ARROW"):
+            return_type = self._parse_type()
+        body = self._parse_block()
+        return LambdaExpression(parameters=parameters, body=body, return_type=return_type)
+
+    # ------------------------------------------------------------------
+    # Statements
+    # ------------------------------------------------------------------
+
+    def _parse_block(self) -> Block:
+        self.tokens.expect("LBRACE")
+        statements: List[Statement] = []
+        while not self.tokens.match("RBRACE"):
+            if self.tokens.match("SEMICOLON"):
+                continue
+            statements.append(self._parse_statement())
+        return Block(statements)
+
+    def _parse_statement(self) -> Statement:
+        if self.tokens.check("LET"):
+            return self._parse_variable_declaration()
+        if self.tokens.check("CONST"):
+            return self._parse_const_declaration()
+        if self.tokens.check("RETURN"):
+            return self._parse_return()
+        if self.tokens.check("IF"):
+            return self._parse_if()
+        if self.tokens.check("MATCH"):
+            return self._parse_match_statement()
+        if self.tokens.check("FOR"):
+            return self._parse_for()
+        if self.tokens.check("LOOP"):
+            return self._parse_loop()
+        if self.tokens.check("ROUTINE"):
+            return self._parse_routine()
+        if self.tokens.check("TRY"):
+            return self._parse_try()
+        if self.tokens.check("THROW"):
+            return self._parse_throw()
+        if self.tokens.check("LBRACE"):
+            return self._parse_block()
+        # Fallback: expression or assignment
+        expr = self._parse_expression()
+        operator_token = self.tokens.match("ASSIGN", "PLUS_ASSIGN", "MINUS_ASSIGN", "MULTIPLY_ASSIGN", "DIVIDE_ASSIGN")
+        if operator_token:
+            value = self._parse_expression()
+            self.tokens.expect("SEMICOLON")
+            operator = operator_token.value or operator_token.type.lower()
+            return Assignment(target=expr, value=value, operator=operator)
+        self.tokens.expect("SEMICOLON")
+        return ExpressionStatement(expr)
+
+    def _parse_variable_declaration(self) -> VariableDeclaration:
+        self.tokens.expect("LET")
+        mutable = bool(self.tokens.match("MUT"))
+        name = self.tokens.expect("IDENTIFIER").value
+        type_annotation = None
+        if self.tokens.match("ARROW"):
+            type_annotation = self._parse_type()
+        initializer = None
+        if self.tokens.match("ASSIGN"):
+            initializer = self._parse_expression()
+        self.tokens.expect("SEMICOLON")
+        return VariableDeclaration(name=name, initializer=initializer, type_annotation=type_annotation, mutable=mutable)
+
+    def _parse_const_declaration(self) -> ConstantDeclaration:
+        self.tokens.expect("CONST")
+        name = self.tokens.expect("IDENTIFIER").value
+        type_annotation = None
+        if self.tokens.match("ARROW"):
+            type_annotation = self._parse_type()
+        self.tokens.expect("ASSIGN")
+        initializer = self._parse_expression()
+        self.tokens.expect("SEMICOLON")
+        return ConstantDeclaration(name=name, initializer=initializer, type_annotation=type_annotation)
+
+    def _parse_return(self) -> Statement:
+        self.tokens.expect("RETURN")
+        if self.tokens.match("SEMICOLON"):
+            return ReturnStatement(value=None)
+        value = self._parse_expression()
+        self.tokens.expect("SEMICOLON")
+        return ReturnStatement(value=value)
+
+    def _parse_if(self) -> IfStatement:
+        self.tokens.expect("IF")
+        condition = self._parse_optional_parenthesised_expression()
+        then_block = self._parse_block()
+        else_branch = None
+        if self.tokens.match("ELSE"):
+            if self.tokens.check("IF"):
+                else_branch = self._parse_if()
+            else:
+                else_branch = self._parse_block()
+        return IfStatement(condition=condition, then_block=then_block, else_branch=else_branch)
+
+    def _parse_match_statement(self) -> MatchStatement:
+        self.tokens.expect("MATCH")
+        value = self._parse_expression()
+        self.tokens.expect("LBRACE")
+        cases: List[MatchCase] = []
+        while not self.tokens.match("RBRACE"):
+            case = self._parse_match_case()
+            cases.append(case)
+            self.tokens.match("COMMA")
+        return MatchStatement(value=value, cases=cases)
+
+    def _parse_match_case(self) -> MatchCase:
+        pattern = self._parse_pattern()
+        guard = None
+        if self.tokens.match("IF"):
+            guard = self._parse_expression()
+        self.tokens.expect("ARROW")
+        if self.tokens.check("LBRACE"):
+            body = self._parse_block()
+        else:
+            expr = self._parse_expression()
+            self.tokens.match("SEMICOLON")
+            body = Block([ExpressionStatement(expr)])
+        return MatchCase(pattern=pattern, body=body, guard=guard)
+
+    def _parse_for(self) -> ForStatement:
+        self.tokens.expect("FOR")
+        pattern = self._parse_pattern()
+        self.tokens.expect("IN")
+        iterable_expr = self._parse_expression()
+        if self.tokens.match("RANGE"):
+            end = self._parse_expression()
+            iterable_expr = RangeExpression(start=iterable_expr, end=end)
+        body = self._parse_block()
+        return ForStatement(pattern=pattern, iterable=iterable_expr, body=body)
+
+    def _parse_loop(self) -> LoopStatement:
+        self.tokens.expect("LOOP")
+        body = self._parse_block()
+        return LoopStatement(body=body)
+
+    def _parse_routine(self) -> RoutineDeclaration:
+        self.tokens.expect("ROUTINE")
+        name: Optional[str] = None
+        if self.tokens.match("STRING"):
+            name = self.tokens.previous.value
+        elif self.tokens.check("IDENTIFIER") and self.tokens.peek(1).type != "LBRACE":
+            name = self.tokens.advance().value
+        body = self._parse_block()
+        return RoutineDeclaration(body=body, name=name)
+
+    def _parse_try(self) -> TryStatement:
+        self.tokens.expect("TRY")
+        try_block = self._parse_block()
+        catch_clause: Optional[CatchClause] = None
+        finally_block: Optional[Block] = None
+        if self.tokens.match("CATCH"):
+            identifier = None
+            pattern = None
+            if self.tokens.match("LPAREN"):
+                identifier = self.tokens.expect("IDENTIFIER").value
+                self.tokens.expect("RPAREN")
+            catch_body = self._parse_block()
+            catch_clause = CatchClause(identifier=identifier, pattern=pattern, body=catch_body)
+        if self.tokens.match("FINALLY"):
+            finally_block = self._parse_block()
+        return TryStatement(try_block=try_block, catch=catch_clause, finally_block=finally_block)
+
+    def _parse_throw(self) -> ThrowStatement:
+        self.tokens.expect("THROW")
+        expr = self._parse_expression()
+        self.tokens.expect("SEMICOLON")
+        return ThrowStatement(expression=expr)
+
+    # ------------------------------------------------------------------
+    # Patterns
+    # ------------------------------------------------------------------
+
+    def _parse_pattern(self) -> Pattern:
+        if self.tokens.match("UNDERSCORE"):
+            return WildcardPattern()
+        if self.tokens.match("MINUS"):
+            number_token = self.tokens.expect("NUMBER")
+            value = number_token.value
+            if isinstance(value, (int, float)):
+                value = -value
+            return LiteralPattern(NumberLiteral(value=value))
+        if self.tokens.check("NUMBER"):
+            value = self.tokens.advance().value
+            return LiteralPattern(NumberLiteral(value=value))
+        if self.tokens.check("STRING"):
+            value = self.tokens.advance().value
+            return LiteralPattern(StringLiteral(value=value))
+        if self.tokens.check("IDENTIFIER"):
+            ident = self.tokens.advance().value
+            if self.tokens.match("LBRACE"):
+                fields: List[PatternField] = []
+                while not self.tokens.match("RBRACE"):
+                    field_name = self.tokens.expect("IDENTIFIER").value
+                    field_pattern = None
+                    if self.tokens.match("COLON"):
+                        field_pattern = self._parse_pattern()
+                    fields.append(PatternField(name=field_name, pattern=field_pattern))
+                    self.tokens.match("COMMA")
+                return ConstructorPattern(type_name=QualifiedName([ident]), fields=fields)
+            return IdentifierPattern(name=ident)
+        token = self.tokens.current
+        raise ParseError(f"Unexpected token {token.type} in pattern at line {token.lineno}, column {token.column}")
+
+    # ------------------------------------------------------------------
+    # Types
+    # ------------------------------------------------------------------
+
+    def _parse_type(self) -> TypeAnnotation:
+        base_name = self._parse_qualified_name()
+        type_arguments: List[TypeAnnotation] = []
+        if self.tokens.match("LT"):
+            while True:
+                type_arguments.append(self._parse_type())
+                if not self.tokens.match("COMMA"):
+                    break
+            self.tokens.expect("GT")
+        annotation: TypeAnnotation = SimpleType(name=base_name, type_arguments=type_arguments)
+        if self.tokens.match("QUESTION_MARK"):
+            annotation = OptionalType(base=annotation)
+        while self.tokens.match("PIPE"):
+            right = self._parse_type()
+            if isinstance(annotation, UnionType):
+                annotation.options.append(right)
+            else:
+                annotation = UnionType(options=[annotation, right])
+        return annotation
+
+    def _parse_nominal_type(self) -> SimpleType:
+        name = self._parse_qualified_name()
+        type_arguments: List[TypeAnnotation] = []
+        if self.tokens.match("LT"):
+            while True:
+                type_arguments.append(self._parse_type())
+                if not self.tokens.match("COMMA"):
+                    break
+            self.tokens.expect("GT")
+        return SimpleType(name=name, type_arguments=type_arguments)
+
+    def _parse_qualified_name(self) -> QualifiedName:
+        parts = [self.tokens.expect("IDENTIFIER").value]
+        while self.tokens.match("DOT"):
+            parts.append(self.tokens.expect("IDENTIFIER").value)
+        return QualifiedName(parts)
+
+    # ------------------------------------------------------------------
+    # Expressions
+    # ------------------------------------------------------------------
+
+    def _parse_optional_parenthesised_expression(self) -> Expression:
+        if self.tokens.match("LPAREN"):
+            expr = self._parse_expression()
+            self.tokens.expect("RPAREN")
+            return expr
+        return self._parse_expression()
+
+    def _parse_expression(self) -> Expression:
+        if self.tokens.check("FN"):
+            return self._parse_lambda_expression()
+        return self._parse_logical_or()
+
+    def _parse_logical_or(self) -> Expression:
+        expr = self._parse_logical_and()
+        while self.tokens.match("OR"):
+            right = self._parse_logical_and()
+            expr = BinaryExpression(operator="||", left=expr, right=right)
+        return expr
+
+    def _parse_logical_and(self) -> Expression:
+        expr = self._parse_equality()
+        while self.tokens.match("AND"):
+            right = self._parse_equality()
+            expr = BinaryExpression(operator="&&", left=expr, right=right)
+        return expr
+
+    def _parse_equality(self) -> Expression:
+        expr = self._parse_comparison()
+        while True:
+            if self.tokens.match("EQ"):
+                right = self._parse_comparison()
+                expr = BinaryExpression(operator="==", left=expr, right=right)
+            elif self.tokens.match("NEQ"):
+                right = self._parse_comparison()
+                expr = BinaryExpression(operator="!=", left=expr, right=right)
+            else:
+                break
+        return expr
+
+    def _parse_comparison(self) -> Expression:
+        expr = self._parse_term()
+        while True:
+            if self.tokens.match("LT"):
+                right = self._parse_term()
+                expr = BinaryExpression(operator="<", left=expr, right=right)
+            elif self.tokens.match("LEQ"):
+                right = self._parse_term()
+                expr = BinaryExpression(operator="<=", left=expr, right=right)
+            elif self.tokens.match("GT"):
+                right = self._parse_term()
+                expr = BinaryExpression(operator=">", left=expr, right=right)
+            elif self.tokens.match("GEQ"):
+                right = self._parse_term()
+                expr = BinaryExpression(operator=">=", left=expr, right=right)
+            else:
+                break
+        return expr
+
+    def _parse_term(self) -> Expression:
+        expr = self._parse_factor()
+        while True:
+            if self.tokens.match("PLUS"):
+                right = self._parse_factor()
+                expr = BinaryExpression(operator="+", left=expr, right=right)
+            elif self.tokens.match("MINUS"):
+                right = self._parse_factor()
+                expr = BinaryExpression(operator="-", left=expr, right=right)
+            else:
+                break
+        return expr
+
+    def _parse_factor(self) -> Expression:
+        expr = self._parse_unary()
+        while True:
+            if self.tokens.match("MULTIPLY"):
+                right = self._parse_unary()
+                expr = BinaryExpression(operator="*", left=expr, right=right)
+            elif self.tokens.match("DIVIDE"):
+                right = self._parse_unary()
+                expr = BinaryExpression(operator="/", left=expr, right=right)
+            else:
+                break
+        return expr
+
+    def _parse_unary(self) -> Expression:
+        if self.tokens.match("MINUS"):
+            operand = self._parse_unary()
+            return UnaryExpression(operator="-", operand=operand)
+        if self.tokens.match("PLUS"):
+            return self._parse_unary()
+        if self.tokens.match("NOT"):
+            operand = self._parse_unary()
+            return UnaryExpression(operator="!", operand=operand)
+        if self.tokens.match("AWAIT"):
+            expression = self._parse_unary()
+            return AwaitExpression(expression=expression)
+        return self._parse_call()
+
+    def _parse_call(self) -> Expression:
+        expr = self._parse_primary()
+        while True:
+            if self.tokens.match("LPAREN"):
+                arguments: List[Expression] = []
+                if not self.tokens.check("RPAREN"):
+                    while True:
+                        arguments.append(self._parse_expression())
+                        if not self.tokens.match("COMMA"):
+                            break
+                self.tokens.expect("RPAREN")
+                expr = CallExpression(callee=expr, arguments=arguments)
+            elif self.tokens.match("DOT"):
+                member_token = self.tokens.match("IDENTIFIER", "INFO", "PRINT")
+                if member_token is None:
+                    current = self.tokens.current
+                    raise ParseError(
+                        f"Expected identifier after '.', found {current.type} at line {current.lineno}, column {current.column}"
+                    )
+                member = member_token.value
+                expr = MemberExpression(object=expr, member=member)
+            elif isinstance(expr, Identifier) and expr.name == "parallel" and self.tokens.check("LBRACKET"):
+                thunks = self._parse_parallel_thunks()
+                expr = ParallelExpression(thunks=thunks)
+            elif self.tokens.match("LBRACKET"):
+                index = self._parse_expression()
+                self.tokens.expect("RBRACKET")
+                expr = IndexExpression(sequence=expr, index=index)
+            elif isinstance(expr, Identifier) and self.tokens.check("LBRACE") and self._looks_like_struct_literal():
+                self.tokens.advance()  # Consume '{'
+                fields = self._parse_struct_literal_fields()
+                expr = StructLiteral(type_name=QualifiedName([expr.name]), fields=fields)
+            else:
+                break
+        return expr
+
+    def _looks_like_struct_literal(self) -> bool:
+        first = self.tokens.peek(1)
+        if first.type == "RBRACE":
+            return True
+        if first.type != "IDENTIFIER":
+            return False
+        second = self.tokens.peek(2)
+        return second.type == "COLON"
+
+    def _parse_parallel_thunks(self) -> List[Expression]:
+        self.tokens.expect("LBRACKET")
+        thunks: List[Expression] = []
+        if not self.tokens.check("RBRACKET"):
+            while True:
+                thunks.append(self._parse_expression())
+                if not self.tokens.match("COMMA"):
+                    break
+        self.tokens.expect("RBRACKET")
+        return thunks
+
+    def _parse_struct_literal_fields(self) -> List[ObjectField]:
+        fields: List[ObjectField] = []
+        while not self.tokens.match("RBRACE"):
+            name = self.tokens.expect("IDENTIFIER").value
+            self.tokens.expect("COLON")
+            value = self._parse_expression()
+            fields.append(ObjectField(name=name, value=value))
+            self.tokens.match("COMMA")
+        return fields
+
+    def _parse_primary(self) -> Expression:
+        if self.tokens.match("NUMBER"):
+            return NumberLiteral(value=self.tokens.previous.value)
+        if self.tokens.match("STRING"):
+            return StringLiteral(value=self.tokens.previous.value)
+        if self.tokens.match("TRUE"):
+            return BooleanLiteral(value=True)
+        if self.tokens.match("FALSE"):
+            return BooleanLiteral(value=False)
+        if self.tokens.match("NULL"):
+            return NullLiteral()
+        if self.tokens.match("PRINT"):
+            return Identifier(name="print")
+        if self.tokens.match("INFO"):
+            return Identifier(name="info")
+        if self.tokens.match("IDENTIFIER"):
+            name = self.tokens.previous.value
+            return Identifier(name=name)
+        if self.tokens.match("LPAREN"):
+            expr = self._parse_expression()
+            self.tokens.expect("RPAREN")
+            return expr
+        if self.tokens.match("LBRACKET"):
+            elements: List[Expression] = []
+            if not self.tokens.check("RBRACKET"):
+                while True:
+                    elements.append(self._parse_expression())
+                    if not self.tokens.match("COMMA"):
+                        break
+            self.tokens.expect("RBRACKET")
+            return ArrayLiteral(elements=elements)
+        token = self.tokens.current
+        raise ParseError(f"Unexpected token {token.type} at line {token.lineno}, column {token.column}")
+
+
+class Parser:
+    """Public parser facade mimicking the legacy PLY API."""
+
+    def parse(self, source: str, lexer=None) -> Program:
+        from lexer import lexer as default_lexer  # Local import to avoid cycles
+
+        if lexer is None:
+            active_lexer = default_lexer.clone()
+        elif hasattr(lexer, "clone"):
+            active_lexer = lexer.clone()
+        else:
+            active_lexer = lexer
+        tokens = _tokenize(source, active_lexer)
+        stream = _TokenStream(tokens)
+        parser_impl = _SailParser(stream)
+        program = parser_impl.parse_program()
+        stream.expect("EOF")
+        return program
+
+
+parser = Parser()
+
+
+__all__ = ["parser", "Parser", "ParseError"]

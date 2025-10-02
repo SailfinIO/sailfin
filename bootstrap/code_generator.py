@@ -494,7 +494,11 @@ class CodeGenerator:
         if isinstance(expr, NumberLiteral):
             return repr(expr.value)
         if isinstance(expr, StringLiteral):
-            return repr(expr.value)
+            value = expr.value
+            if "{{" in value and "}}" in value:
+                literal = repr(value)
+                return f"runtime.format_string({literal}, locals(), globals())"
+            return repr(value)
         if isinstance(expr, BooleanLiteral):
             return "True" if expr.value else "False"
         if isinstance(expr, NullLiteral):

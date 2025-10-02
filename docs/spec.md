@@ -1,147 +1,255 @@
-Sail Language Specification
+# Sailfin Language Specification
 
-Version: 0.0.1
-Date: January 2025
+Version: 0.1.0 (bootstrap preview)
+Date: October 2025
 
-Sail is a modern, developer-friendly programming language designed to combine the type-safe, expressive syntax of TypeScript with the powerful concurrency features of Go. Sail aims to empower developers to write performant, scalable, and readable code for modern applications.
+Sailfin is a statically-typed, expression-oriented programming language that
+combines familiar TypeScript-style types with Go-inspired concurrency
+primitives. This document focuses on the subset of the language implemented by
+the Python bootstrap compiler and should be considered the authoritative source
+for the current behaviour.
 
-Table of Contents
+## 1. Lexical Structure
 
-Core Principles
-Basic Syntax
-Types
-Concurrency Model
-Memory Model
-Standard Library Overview
-Compile Targets
-Future Roadmap
-Core Principles
+* **Identifiers** begin with a letter and may contain ASCII letters, digits, or
+  `_`. Identifiers are case-sensitive.
+* **Keywords** are listed in `docs/keywords.md` and cannot be used as
+  identifiers. Notable keywords include `fn`, `async`, `await`, `let`, `mut`,
+  `struct`, `enum`, `match`, `routine`, `try`, `catch`, and `throw`.
+* **Literals**:
+  * Numeric literals support integers (`42`) and decimals (`3.14`).
+  * String literals are wrapped in double quotes and support escape sequences.
+    The bootstrap compiler also recognises `{{ expression }}` for string
+    interpolation (see §7).
+  * Boolean literals are `true` and `false`.
+  * The keyword `null` denotes the absence of a value.
+* **Comments** use `//` for single-line comments and `/* … */` for multi-line
+  comments.
 
-Readable and Expressive Syntax: Inspired by TypeScript for developer familiarity.
-First-Class Concurrency: Lightweight threads (routines), channels for communication, and parallel execution.
-Type Safety: Statically typed with support for generics, union types, and interfaces.
-Performance: Compiles to efficient machine code or WebAssembly for fast execution.
-Interoperability: Easy integration with existing JavaScript and TypeScript ecosystems.
-Memory Safety: Prevent data races and unsafe memory access with immutable-by-default variables and ownership models.
-Basic Syntax
+## 2. Modules and Imports
 
-Hello, Sail!
-function main() {
-console.log("Hello, Sail!");
+Source files are compiled independently. A program consists of zero or more
+imports followed by declarations. Imports use ES-module style syntax:
+
+```sail
+import { Channel, channel } from "sail/async";
+```
+
+The bootstrap compiler records imports but does not yet resolve them; runtime
+support is provided by the Python backend.
+
+## 3. Declarations
+
+### 3.1 Variables and Constants
+
+Variables default to immutability and are introduced with `let`. Add `mut`
+after `let` to allow reassignment.
+
+```sail
+let name -> string = "Sailfin";
+let mut counter -> number = 0;
+```
+
+Type annotations are optional; the compiler currently performs limited type
+inference for unannotated declarations. Constants use `const` and must provide
+an initializer.
+
+### 3.2 Functions
+
+Functions use the `fn` keyword. Parameters accept optional type annotations and
+default values. Use the arrow syntax to annotate return types.
+
+```sail
+fn add(x -> number, y -> number) -> number {
+    return x + y;
 }
-Variables
-Sail supports immutable variables by default. Use mut to make variables mutable.
 
-let name: string = "Sail"; // Immutable
-mut age: number = 25; // Mutable
-Functions
-Sail functions are strongly typed and support default parameters and generics.
+fn greet(name -> string = "World") -> string {
+    return "Hello, {{name}}!";
+}
+```
 
-function greet(name: string = "World"): string {
-return `Hello, ${name}!`;
+Functions are synchronous by default. Prefix with `async` to enable `await`
+within the body. Decorators (`@identifier`) are parsed but currently ignored by
+code generation.
+
+### 3.3 Structs and Methods
+
+Structs group fields and methods. Fields are immutable unless declared with
+`mut`. Methods are defined with `fn` inside the struct body and may reference a
+`self` parameter explicitly. A struct may declare that it implements one or
+more interfaces using an `implements` clause:
+
+```sail
+interface Greeter {
+    fn greet(self) -> string;
 }
 
-console.log(greet()); // "Hello, World!"
-Conditionals and Loops
-if (x > 0) {
-console.log("Positive");
+struct User implements Greeter {
+    id -> number;
+    mut name -> string;
+
+    fn greet(self) -> string {
+        return "Hello, {{self.name}}!";
+    }
+}
+```sail
+let user -> User = User { id: 1, name: "Ada" };
+print.info(user.greet());
+```
+
+Struct literals use `Type { field: expression }` syntax. Method calls follow
+`instance.method(arguments)` semantics.
+
+### 3.4 Enums
+
+Enums mirror algebraic data types. Each variant may define an optional payload:
+
+```sail
+enum Response {
+    Ok,
+    Error { message -> string },
+}
+```
+
+Enum syntax is parsed by the bootstrap compiler; the Python backend lowers
+variants to helper objects in `runtime_support`.
+
+### 3.5 Type Aliases
+
+Type aliases provide named shortcuts:
+
+```sail
+type Result<T> = Response | T;
+```
+
+Generics are parsed but not yet enforced type-checking wise. The bootstrap
+compiler treats type annotations as metadata for the code generator.
+
+## 4. Statements and Control Flow
+
+### 4.1 Assignment and Expressions
+
+The standard arithmetic (`+`, `-`, `*`, `/`) and logical (`&&`, `||`, `!`)
+operators are supported. Compound assignment (`+=`, `-=`, `*=`, `/=`) is
+available for identifiers and member expressions.
+
+### 4.2 Conditionals
+
+`if` statements accept optional parentheses around the condition. The `else`
+branch may nest another `if` to produce `else if` chains.
+
+```sail
+if score >= 90 {
+    print.info("Excellent");
+} else if score >= 70 {
+    print.info("Pass");
 } else {
-console.log("Negative or zero");
+    print.info("Retry");
 }
+```
 
-for (let i = 0; i < 10; i++) {
-console.log(i);
+### 4.3 Pattern Matching
+
+`match` evaluates an expression against ordered cases. Patterns support
+numerical literals, string literals, `_` wildcards, and constructor matching for
+enums. Inline case bodies omit braces and may optionally end with a semicolon.
+
+```sail
+match value {
+    42 -> print.info("The answer"),
+    _  -> print.info("Something else"),
 }
-Types
+```
 
-Primitive Types
-number: Represents integers and floats.
-string: UTF-8 encoded strings.
-boolean: True or false values.
-void: Represents no value (used in function returns).
-null and undefined: Used for nullable types.
-Composite Types
-Arrays: Fixed or dynamic arrays.
-let numbers: number[] = [1, 2, 3];
-Tuples: Fixed-size collections of mixed types.
-let pair: [string, number] = ["age", 25];
-Enums:
-enum Color {
-Red,
-Green,
-Blue,
+### 4.4 Error Handling
+
+Sail provides `try`/`catch`/`finally` blocks alongside `throw` statements. The
+bootstrap runtime raises Python exceptions internally.
+
+```sail
+try {
+    account.withdraw(200);
+} catch (err) {
+    print.info("Error: {{err}}");
 }
-let color: Color = Color.Red;
-Structs: Custom data structures.
-struct Point {
-x: number;
-y: number;
+```
+
+## 5. Concurrency
+
+The concurrency model focuses on lightweight routines and channel-based
+communication. `async fn` enables coroutines and `await` suspends execution
+until the awaited routine completes. `routine { ... }` launches an asynchronous
+task using the helper `runtime.spawn`.
+
+```sail
+async fn main() {
+    let messages -> Channel<number> = channel();
+
+    routine {
+        messages.send(42);
+    }
+
+    let result -> number = await messages.receive();
+    print.info("Received: {{result}}");
 }
-let p: Point = { x: 0, y: 0 };
-Generics
-function identity<T>(value: T): T {
-return value;
-}
-Union and Intersection Types
-type StringOrNumber = string | number;
-type AdminUser = User & { isAdmin: boolean };
-Concurrency Model
+```
 
-Routines
-Routines are lightweight threads that can be spawned using the spawn keyword.
+Parallel execution of pure computations is exposed via `runtime.parallel`
+through function calls; native `parallel` expressions are reserved for future
+work.
 
-spawn {
-console.log("Running in a separate thread");
-}
-Channels
-Channels enable thread-safe communication between routines.
+## 6. Types
 
-const channel = new Channel<number>();
+Sail features a nominal type system with the following primitives:
 
-spawn {
-channel.send(42);
-}
+| Type      | Description                                    |
+|-----------|------------------------------------------------|
+| `number`  | 64-bit floating point numbers                   |
+| `string`  | UTF-8 encoded strings                          |
+| `boolean` | Truth values                                   |
+| `void`    | No return value (implicit when omitted)         |
+| `null`    | Explicit absence of a value                     |
 
-console.log(await channel.receive()); // Outputs: 42
-Parallel Execution
-For tasks that can run independently, use parallel.
+Composite types include structs, enums, arrays (`Type[]`), union types (`A | B`),
+and optionals (`Type?`). Function types (`fn(Type, ...) -> Return`) are parsed
+but not yet emitted by the bootstrap backend.
 
-const results = parallel([
-() => task1(),
-() => task2(),
-]);
+## 7. String Interpolation
 
-console.log(results); // Outputs results of task1 and task2
-Memory Model
+String literals support inline expressions using `{{ expression }}`. The Python
+backend evaluates the expression at runtime using the current local and global
+scope:
 
-Immutability by Default
-Variables are immutable unless explicitly declared mutable.
+```sail
+let name -> string = "Sail";
+print.info("Hello, {{name}}!");
+```
 
-Ownership and Borrowing
-Sail ensures memory safety by controlling ownership:
+If interpolation fails, the original placeholder is preserved to aid debugging.
 
-Ownership can be transferred between threads.
-Shared resources are managed through Mutex or Channel.
-Standard Library Overview
+## 8. Runtime Semantics
 
-Sail's standard library focuses on modern application development, with modules for:
+The bootstrap compiler translates Sail programs into Python 3 code backed by
+`bootstrap/runtime_support.py`. Key helpers:
 
-Concurrency: Routines, channels, and parallel execution.
-Networking: HTTP clients and servers.
-File I/O: Read and write files efficiently.
-Collections: Arrays, maps, and sets.
-Math: Utilities for numerical computation.
-Compile Targets
+* `runtime.console.info` – console printing used by the `print.info` idiom.
+* `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
+  helpers.
+* `runtime.format_string` – implements string interpolation.
 
-Sail compiles to:
+Generated Python exposes a `main` entry point when a `fn main` declaration is
+present.
 
-LLVM IR for generating efficient machine code.
-WebAssembly for browser and server environments.
-JavaScript for seamless interoperability.
-Future Roadmap
+## 9. Future Directions
 
-Self-Hosting Compiler: Rewrite the compiler in Sail itself.
-Advanced Tooling: Include a package manager, formatter, and linter.
-WebAssembly Ecosystem: Strengthen WASM support for browser-based applications.
-Distributed Computing: Add built-in support for distributed routines and data.
-This specification provides a solid foundation for developing the Sail language. Let me know if you'd like to dive into any specific section or start implementing the compiler!
+Upcoming milestones include:
+
+1. Full type-checking and inference beyond the bootstrap subset.
+2. More exhaustive pattern matching (guards and destructuring patterns).
+3. Native modules, package management, and standard library build-out.
+4. A self-hosted compiler once the bootstrap stabilises.
+
+This specification will evolve alongside the bootstrap implementation. Refer to
+`enbf.md` and the unit tests under `bootstrap/tests/` for executable examples of
+the language.

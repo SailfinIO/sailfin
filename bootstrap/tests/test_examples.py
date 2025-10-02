@@ -29,7 +29,13 @@ EXAMPLE_FILES = [
     EXAMPLE_ROOT / "basics" / "variables.sfn",
     EXAMPLE_ROOT / "basics" / "functions.sfn",
     EXAMPLE_ROOT / "basics" / "conditionals.sfn",
+    EXAMPLE_ROOT / "basics" / "hello-world.sfn",
+    EXAMPLE_ROOT / "basics" / "basic-enum.sfn",
+    EXAMPLE_ROOT / "basics" / "error-handling.sfn",
+    EXAMPLE_ROOT / "basics" / "try-catch-finally.sfn",
     EXAMPLE_ROOT / "basics" / "structs.sfn",
+    EXAMPLE_ROOT / "basics" / "interfaces.sfn",
+    EXAMPLE_ROOT / "basics" / "struct-composition.sfn",
     EXAMPLE_ROOT / "concurrency" / "channels.sfn",
     EXAMPLE_ROOT / "advanced" / "encapsulation-struct.sfn",
 ]
@@ -37,9 +43,6 @@ EXAMPLE_FILES = [
 
 @pytest.mark.parametrize("source_path", EXAMPLE_FILES)
 def test_compile_and_execute_example(source_path: pathlib.Path) -> None:
-    if source_path.name == "conditionals.sfn":
-        pytest.xfail("match statements are not fully supported yet")
-
     source = source_path.read_text(encoding="utf-8")
     lexer = base_lexer.clone()
     ast = parser.parse(source, lexer=lexer)

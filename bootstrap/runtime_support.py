@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+import re
 import time
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +74,31 @@ def parallel(tasks: Iterable[Callable[[], Any]]) -> List[Any]:
 
 def sleep(milliseconds: int) -> None:
     time.sleep(milliseconds / 1000)
+
+
+# ---------------------------------------------------------------------------
+# String interpolation helper
+# ---------------------------------------------------------------------------
+
+_INTERPOLATION_PATTERN = re.compile(r"{{\s*(.+?)\s*}}")
+
+
+def format_string(template: str, local_scope: Dict[str, Any], global_scope: Dict[str, Any]) -> str:
+    """Perform lightweight ``{{ expression }}`` interpolation.
+
+    The helper evaluates expressions against the supplied local/global scope
+    dictionaries.  Errors fall back to the original placeholder to avoid
+    masking issues in user programs.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        expression = match.group(1)
+        try:
+            return str(eval(expression, global_scope, local_scope))  # noqa: S307 - controlled scope
+        except Exception:
+            return "{" + expression + "}"
+
+    return _INTERPOLATION_PATTERN.sub(_replace, template)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +189,7 @@ __all__ = [
     "EnumType",
     "channel",
     "console",
+    "format_string",
     "match_exhaustive_failed",
     "parallel",
     "sleep",

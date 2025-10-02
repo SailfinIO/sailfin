@@ -15,6 +15,9 @@ reserved = {
     'match': 'MATCH',
     'const': 'CONST',
     'routine': 'ROUTINE',
+    'for': 'FOR',
+    'in': 'IN',
+    'loop': 'LOOP',
     'async': 'ASYNC',
     'await': 'AWAIT',
     'import': 'IMPORT',
@@ -24,6 +27,10 @@ reserved = {
     'enum': 'ENUM',
     'interface': 'INTERFACE',
     'implements': 'IMPLEMENTS',
+    'try': 'TRY',
+    'catch': 'CATCH',
+    'finally': 'FINALLY',
+    'throw': 'THROW',
     'true': 'TRUE',
     'false': 'FALSE',
     'null': 'NULL',
@@ -66,6 +73,8 @@ tokens = [
     'COLON',
     'AMPERSAND',
     'QUESTION_MARK',
+    'NOT',
+    'RANGE',
     'UNDERSCORE',
 ] + list(reserved.values())
 
@@ -100,6 +109,8 @@ t_COLON = r':'
 t_PIPE = r'\|'
 t_AMPERSAND = r'&'
 t_QUESTION_MARK = r'\?'
+t_NOT = r'!'
+t_RANGE = r'\.\.'
 t_AT = r'@'
 t_UNDERSCORE = r'_'
 

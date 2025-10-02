@@ -1,15 +1,13 @@
-# bootstrap/ast_nodes.py
-
-"""Abstract syntax tree node definitions for the Sailfin bootstrap compiler."""
+"""Abstract syntax tree definitions for the Sailfin bootstrap compiler."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 
 # ---------------------------------------------------------------------------
-# Base node hierarchies
+# Base hierarchy
 # ---------------------------------------------------------------------------
 
 
@@ -18,23 +16,23 @@ class ASTNode:
 
 
 class Statement(ASTNode):
-    """Marker for statement nodes."""
+    """Marker base class for statements."""
 
 
 class Expression(ASTNode):
-    """Marker for expression nodes."""
+    """Marker base class for expressions."""
 
 
 class Pattern(ASTNode):
-    """Marker for pattern nodes used in match arms and destructuring."""
+    """Marker base class for pattern nodes."""
 
 
 class TypeAnnotation(ASTNode):
-    """Marker for type annotation nodes."""
+    """Marker base class for type annotations."""
 
 
 # ---------------------------------------------------------------------------
-# Utility nodes
+# Utility structures
 # ---------------------------------------------------------------------------
 
 
@@ -42,7 +40,7 @@ class TypeAnnotation(ASTNode):
 class QualifiedName(ASTNode):
     parts: List[str]
 
-    def __str__(self) -> str:  # pragma: no cover - human readable aid
+    def __str__(self) -> str:  # pragma: no cover - helper for debugging
         return ".".join(self.parts)
 
 
@@ -59,7 +57,7 @@ class TypeParameter(ASTNode):
 
 
 # ---------------------------------------------------------------------------
-# Types
+# Type annotations
 # ---------------------------------------------------------------------------
 
 
@@ -67,16 +65,6 @@ class TypeParameter(ASTNode):
 class SimpleType(TypeAnnotation):
     name: QualifiedName
     type_arguments: List[TypeAnnotation] = field(default_factory=list)
-
-
-@dataclass
-class UnionType(TypeAnnotation):
-    options: List[TypeAnnotation]
-
-
-@dataclass
-class IntersectionType(TypeAnnotation):
-    components: List[TypeAnnotation]
 
 
 @dataclass
@@ -95,13 +83,41 @@ class OptionalType(TypeAnnotation):
 
 
 @dataclass
+class UnionType(TypeAnnotation):
+    options: List[TypeAnnotation]
+
+
+@dataclass
+class IntersectionType(TypeAnnotation):
+    components: List[TypeAnnotation]
+
+
+@dataclass
 class FunctionType(TypeAnnotation):
     parameters: List[TypeAnnotation]
     return_type: TypeAnnotation
 
 
 # ---------------------------------------------------------------------------
-# Top-level and declarations
+# Parameters and blocks
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Parameter(ASTNode):
+    name: str
+    type_annotation: Optional[TypeAnnotation] = None
+    default: Optional[Expression] = None
+    mutable: bool = False
+
+
+@dataclass
+class Block(ASTNode):
+    statements: List[Statement] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Top level declarations
 # ---------------------------------------------------------------------------
 
 
@@ -124,17 +140,24 @@ class TypeAliasDeclaration(Statement):
 
 
 @dataclass
-class Parameter(ASTNode):
+class InterfaceDeclaration(Statement):
     name: str
-    type_annotation: Optional[TypeAnnotation]
-    default: Optional[Expression] = None
+    members: List['FunctionSignature']
+    type_parameters: List[TypeParameter] = field(default_factory=list)
+
+
+@dataclass
+class FunctionSignature(ASTNode):
+    name: str
+    parameters: List[Parameter]
+    return_type: Optional[TypeAnnotation]
 
 
 @dataclass
 class FunctionDeclaration(Statement):
     name: str
     parameters: List[Parameter]
-    body: 'Block'
+    body: Block
     return_type: Optional[TypeAnnotation] = None
     decorators: List[Decorator] = field(default_factory=list)
     type_parameters: List[TypeParameter] = field(default_factory=list)
@@ -152,7 +175,7 @@ class FieldDeclaration(ASTNode):
 class MethodDeclaration(ASTNode):
     name: str
     parameters: List[Parameter]
-    body: 'Block'
+    body: Block
     return_type: Optional[TypeAnnotation] = None
     decorators: List[Decorator] = field(default_factory=list)
     type_parameters: List[TypeParameter] = field(default_factory=list)
@@ -171,20 +194,6 @@ class StructDeclaration(Statement):
 
 
 @dataclass
-class FunctionSignature(ASTNode):
-    name: str
-    parameters: List[Parameter]
-    return_type: Optional[TypeAnnotation]
-
-
-@dataclass
-class InterfaceDeclaration(Statement):
-    name: str
-    members: List[FunctionSignature]
-    type_parameters: List[TypeParameter] = field(default_factory=list)
-
-
-@dataclass
 class EnumVariant(ASTNode):
     name: str
     fields: List[FieldDeclaration] = field(default_factory=list)
@@ -200,17 +209,12 @@ class EnumDeclaration(Statement):
 @dataclass
 class TestDeclaration(Statement):
     name: str
-    body: 'Block'
+    body: Block
 
 
 # ---------------------------------------------------------------------------
 # Statements
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class Block(ASTNode):
-    statements: List[Statement] = field(default_factory=list)
 
 
 @dataclass
@@ -248,8 +252,8 @@ class IfStatement(Statement):
 @dataclass
 class MatchCase(ASTNode):
     pattern: Pattern
-    guard: Optional[Expression]
     body: Union[Block, Expression]
+    guard: Optional[Expression] = None
 
 
 @dataclass
@@ -298,7 +302,7 @@ class AssertStatement(Statement):
 
 @dataclass
 class CatchClause(ASTNode):
-    identifier: str
+    identifier: Optional[str]
     pattern: Optional[Pattern]
     body: Block
 
@@ -312,15 +316,15 @@ class TryStatement(Statement):
 
 @dataclass
 class RoutineDeclaration(Statement):
-    name: Optional[str]
     body: Block
+    name: Optional[str] = None
 
 
 @dataclass
 class Assignment(Statement, Expression):
     target: Expression
     value: Expression
-    operator: str = '='  # '=', '+=', '-=', '*=', '/=', '%='
+    operator: str = '='
 
 
 # ---------------------------------------------------------------------------
@@ -476,5 +480,88 @@ class PatternField(ASTNode):
 @dataclass
 class ConstructorPattern(Pattern):
     type_name: QualifiedName
-    fields: List[PatternField]
+    fields: List[PatternField] = field(default_factory=list)
+
+
+__all__ = [
+    # Base markers
+    "ASTNode",
+    "Statement",
+    "Expression",
+    "Pattern",
+    "TypeAnnotation",
+    # Utilities & types
+    "QualifiedName",
+    "Decorator",
+    "TypeParameter",
+    "SimpleType",
+    "ArrayType",
+    "TupleType",
+    "OptionalType",
+    "UnionType",
+    "IntersectionType",
+    "FunctionType",
+    "Parameter",
+    "Block",
+    # Declarations
+    "Program",
+    "ImportDeclaration",
+    "TypeAliasDeclaration",
+    "InterfaceDeclaration",
+    "FunctionSignature",
+    "FunctionDeclaration",
+    "FieldDeclaration",
+    "MethodDeclaration",
+    "StructDeclaration",
+    "EnumVariant",
+    "EnumDeclaration",
+    "TestDeclaration",
+    # Statements
+    "VariableDeclaration",
+    "ConstantDeclaration",
+    "ExpressionStatement",
+    "ReturnStatement",
+    "IfStatement",
+    "MatchCase",
+    "MatchStatement",
+    "ForStatement",
+    "WhileStatement",
+    "LoopStatement",
+    "BreakStatement",
+    "ContinueStatement",
+    "ThrowStatement",
+    "AssertStatement",
+    "CatchClause",
+    "TryStatement",
+    "RoutineDeclaration",
+    "Assignment",
+    # Expressions
+    "Identifier",
+    "NumberLiteral",
+    "StringLiteral",
+    "BooleanLiteral",
+    "NullLiteral",
+    "ArrayLiteral",
+    "ObjectField",
+    "ObjectLiteral",
+    "StructLiteral",
+    "MemberExpression",
+    "IndexExpression",
+    "CallExpression",
+    "LambdaExpression",
+    "AwaitExpression",
+    "AsyncBlockExpression",
+    "ParallelExpression",
+    "RangeExpression",
+    "UnaryExpression",
+    "BinaryExpression",
+    "TypeCheckExpression",
+    "MatchExpression",
+    # Patterns
+    "WildcardPattern",
+    "IdentifierPattern",
+    "LiteralPattern",
+    "PatternField",
+    "ConstructorPattern",
+]
 

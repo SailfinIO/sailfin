@@ -1,56 +1,49 @@
-# Reserved Keywords in Sail
+# Reserved Keywords in Sailfin (Bootstrap Compiler)
 
-The following keywords are reserved in the Sail language and cannot be used as identifiers (e.g., variable names, function names, etc.):
+The bootstrap compiler recognises the following tokens as reserved keywords.
+They may not be repurposed as identifiers. The set is expected to expand as
+the language matures.
 
-### Control Flow
+### Control Flow and Error Handling
 
 - `if`
 - `else`
 - `match`
-- `for`
-- `while`
-- `break`
-- `continue`
 - `return`
-- `throw`
 - `try`
 - `catch`
+- `finally`
+- `throw`
 
-### Functions and Methods
+### Functions, Types, and Declarations
 
 - `fn`
-- `self`
-- `static`
-- `print` # Built-in for output to the console
-
-### Types and Data
-
+- `async`
+- `await`
 - `let`
 - `mut`
+- `const`
 - `struct`
 - `enum`
 - `interface`
+- `implements`
 - `type`
-- `channel`
+- `import`
+- `from`
 
-### Concurrency
+### Concurrency and Utilities
 
 - `routine`
-- `parallel`
-- `await`
+- `print`
+- `info`
 
-### Special Values
+### Literals
 
-- `null`
 - `true`
 - `false`
+- `null`
 
-### Modifiers
-
-- `import`
-- `export`
-
-### Notes
-
-1. Keywords like `print.info` are reserved because they are built-in functions in the Sail standard library and cannot be overridden or redefined.
-2. The list is case-sensitive. For example, `print.info` is not the same as `print.info`.
+> **Note:** `print` and `info` are reserved so that the idiomatic
+> `print.info(...)` helper can be recognised uniformly. The compiler currently
+> treats them like ordinary identifiers when emitting Python code, so shadowing
+> them is discouraged but technically possible.
