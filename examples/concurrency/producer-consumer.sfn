@@ -1,21 +1,24 @@
 // examples/concurrency/producer-consumer.sfn
 
-let buffer -> channel[number] = channel(10); // A bounded buffer
+import { Channel, channel } from "sail/async";
+import { sleep } from "sail/time";
 
-// Producer
-routine {
-    for i in 1..20 {
-        print.info("Producing {{i}}");
-        buffer.send(i);
-        sleep(500);
+fn main() {
+    let buffer -> Channel<number> = channel(10); // bounded buffer
+
+    routine {
+        for i in 1..20 {
+            print.info("Producing {{i}}");
+            buffer.send(i);
+            sleep(500);
+        }
     }
-}
 
-// Consumer
-routine {
-    while true {
-        let item = await buffer.receive();
-        print.info("Consumed {{item}}");
-        sleep(1000);
+    routine {
+        loop {
+            let item = await buffer.receive();
+            print.info("Consumed {{item}}");
+            sleep(1000);
+        }
     }
 }

@@ -1,9 +1,11 @@
 // examples/concurrency/routines.sfn
 
-routine "routine1" {
-    print.info("This is routine 1");
-}
+fn main() {
+    routine "named" {
+        print.info("This is routine 1");
+    }
 
-routine {
-    print.info("This is an unnamed routine");
+    routine {
+        print.info("This is an unnamed routine");
+    }
 }

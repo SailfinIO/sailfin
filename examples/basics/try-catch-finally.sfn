@@ -1,9 +1,11 @@
-// examples/basics/finally.sfn
+// examples/basics/try-catch-finally.sfn
 
-try {
-    // Risky operation
-} catch (SpecificError e) {
-    // Handle specific error
-} finally {
-    // Cleanup code
+fn main() {
+    try {
+        performRiskyOperation();
+    } catch (err) {
+        print.error("Something went wrong: {{err}}");
+    } finally {
+        print.info("Shutting down cleanly.");
+    }
 }

@@ -1,190 +1,480 @@
 # bootstrap/ast_nodes.py
 
+"""Abstract syntax tree node definitions for the Sailfin bootstrap compiler."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Union
+
+
+# ---------------------------------------------------------------------------
+# Base node hierarchies
+# ---------------------------------------------------------------------------
+
+
 class ASTNode:
-    pass
+    """Base class for all AST nodes."""
+
+
+class Statement(ASTNode):
+    """Marker for statement nodes."""
 
 
 class Expression(ASTNode):
-    pass
+    """Marker for expression nodes."""
 
 
+class Pattern(ASTNode):
+    """Marker for pattern nodes used in match arms and destructuring."""
+
+
+class TypeAnnotation(ASTNode):
+    """Marker for type annotation nodes."""
+
+
+# ---------------------------------------------------------------------------
+# Utility nodes
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class QualifiedName(ASTNode):
+    parts: List[str]
+
+    def __str__(self) -> str:  # pragma: no cover - human readable aid
+        return ".".join(self.parts)
+
+
+@dataclass
+class Decorator(ASTNode):
+    name: QualifiedName
+    arguments: List[Expression] = field(default_factory=list)
+
+
+@dataclass
+class TypeParameter(ASTNode):
+    name: str
+    bound: Optional[TypeAnnotation] = None
+
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SimpleType(TypeAnnotation):
+    name: QualifiedName
+    type_arguments: List[TypeAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class UnionType(TypeAnnotation):
+    options: List[TypeAnnotation]
+
+
+@dataclass
+class IntersectionType(TypeAnnotation):
+    components: List[TypeAnnotation]
+
+
+@dataclass
+class ArrayType(TypeAnnotation):
+    element_type: TypeAnnotation
+
+
+@dataclass
+class TupleType(TypeAnnotation):
+    elements: List[TypeAnnotation]
+
+
+@dataclass
+class OptionalType(TypeAnnotation):
+    base: TypeAnnotation
+
+
+@dataclass
+class FunctionType(TypeAnnotation):
+    parameters: List[TypeAnnotation]
+    return_type: TypeAnnotation
+
+
+# ---------------------------------------------------------------------------
+# Top-level and declarations
+# ---------------------------------------------------------------------------
+
+
+@dataclass
 class Program(ASTNode):
-    def __init__(self, statements):
-        self.statements = statements
+    statements: List[Statement] = field(default_factory=list)
 
 
-class PrintStatement(ASTNode):
-    def __init__(self, expression):
-        self.expression = expression
+@dataclass
+class ImportDeclaration(Statement):
+    items: List[str]
+    source: str
 
 
-class VariableDeclaration(ASTNode):
-    def __init__(self, name, var_type, value, mutable=False):
-        self.name = name
-        self.var_type = var_type  # Can be None if type is not specified
-        self.value = value
-        self.mutable = mutable
+@dataclass
+class TypeAliasDeclaration(Statement):
+    name: str
+    type_parameters: List[TypeParameter]
+    aliased_type: TypeAnnotation
 
 
-class ConstantDeclaration(ASTNode):
-    def __init__(self, name, var_type, value):
-        self.name = name
-        self.var_type = var_type
-        self.value = value
+@dataclass
+class Parameter(ASTNode):
+    name: str
+    type_annotation: Optional[TypeAnnotation]
+    default: Optional[Expression] = None
 
 
-class FunctionDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
-        self.name = name
-        self.params = params  # List of tuples: (param_name, param_type)
-        self.return_type = return_type
-        self.body = body  # List of statements
-        self.decorators = decorators if decorators else []  # List of decorator names
-        self.is_async = is_async  # Indicates if the function is asynchronous
+@dataclass
+class FunctionDeclaration(Statement):
+    name: str
+    parameters: List[Parameter]
+    body: 'Block'
+    return_type: Optional[TypeAnnotation] = None
+    decorators: List[Decorator] = field(default_factory=list)
+    type_parameters: List[TypeParameter] = field(default_factory=list)
+    is_async: bool = False
 
 
-class BinOp(Expression):
-    def __init__(self, operator, left, right):
-        self.operator = operator
-        self.left = left
-        self.right = right
-
-
-class Number(Expression):
-    def __init__(self, value):
-        self.value = value
-
-
-class String(Expression):
-    def __init__(self, value):
-        self.value = value
-
-
-class Identifier(Expression):
-    def __init__(self, name):
-        self.name = name
-
-
-class IfStatement(ASTNode):
-    def __init__(self, condition, then_branch, else_branch=None):
-        self.condition = condition
-        self.then_branch = then_branch  # List of statements
-        self.else_branch = else_branch  # List of statements or None
-
-
-class ReturnStatement(ASTNode):
-    def __init__(self, expression=None):
-        self.expression = expression
-
-
-class StructDeclaration(ASTNode):
-    def __init__(self, name, members):
-        self.name = name
-        self.members = members  # List of FieldDeclaration
-
-
+@dataclass
 class FieldDeclaration(ASTNode):
-    def __init__(self, name, field_type, mutable=False):
-        self.name = name
-        self.field_type = field_type
-        self.mutable = mutable
+    name: str
+    type_annotation: TypeAnnotation
+    mutable: bool = False
 
 
-class FunctionCall(Expression):
-    def __init__(self, func_name, arguments):
-        self.func_name = func_name
-        self.arguments = arguments  # List of expressions
-
-
-class MemberAccess(Expression):
-    def __init__(self, object_, member):
-        self.object = object_
-        self.member = member
-
-
-class Assignment(ASTNode):
-    def __init__(self, target, value):
-        self.target = target  # Identifier or MemberAccess
-        self.value = value
-
-
+@dataclass
 class MethodDeclaration(ASTNode):
-    def __init__(self, name, params, return_type, body, decorators=None, is_async=False):
-        self.name = name
-        self.params = params  # List of tuples: (param_name, param_type)
-        self.return_type = return_type
-        self.body = body  # List of statements
-        self.decorators = decorators if decorators else []
-        self.is_async = is_async  # Indicates if the method is asynchronous
+    name: str
+    parameters: List[Parameter]
+    body: 'Block'
+    return_type: Optional[TypeAnnotation] = None
+    decorators: List[Decorator] = field(default_factory=list)
+    type_parameters: List[TypeParameter] = field(default_factory=list)
+    is_async: bool = False
 
 
-class Await(Expression):
-    def __init__(self, expression):
-        self.expression = expression
+StructMember = Union[FieldDeclaration, MethodDeclaration]
 
 
-class EnumDeclaration(ASTNode):
-    def __init__(self, name, variants):
-        self.name = name
-        self.variants = variants  # List of EnumVariant
+@dataclass
+class StructDeclaration(Statement):
+    name: str
+    members: List[StructMember]
+    type_parameters: List[TypeParameter] = field(default_factory=list)
+    implements: List[SimpleType] = field(default_factory=list)
 
 
+@dataclass
+class FunctionSignature(ASTNode):
+    name: str
+    parameters: List[Parameter]
+    return_type: Optional[TypeAnnotation]
+
+
+@dataclass
+class InterfaceDeclaration(Statement):
+    name: str
+    members: List[FunctionSignature]
+    type_parameters: List[TypeParameter] = field(default_factory=list)
+
+
+@dataclass
 class EnumVariant(ASTNode):
-    def __init__(self, name, fields=None):
-        self.name = name
-        self.fields = fields if fields else []  # List of FieldDeclaration
+    name: str
+    fields: List[FieldDeclaration] = field(default_factory=list)
 
 
-class ExpressionStatement(ASTNode):
-    def __init__(self, expression):
-        self.expression = expression
+@dataclass
+class EnumDeclaration(Statement):
+    name: str
+    variants: List[EnumVariant]
+    type_parameters: List[TypeParameter] = field(default_factory=list)
 
 
-class LambdaExpression(Expression):
-    def __init__(self, params, body):
-        self.params = params
-        self.body = body
+@dataclass
+class TestDeclaration(Statement):
+    name: str
+    body: 'Block'
 
 
-class ImportStatement(ASTNode):
-    def __init__(self, items, source):
-        self.items = items  # List of identifiers
-        self.source = source  # String literal
+# ---------------------------------------------------------------------------
+# Statements
+# ---------------------------------------------------------------------------
 
 
-class TypeAliasDeclaration(ASTNode):
-    def __init__(self, name, aliased_type):
-        self.name = name
-        self.aliased_type = aliased_type
+@dataclass
+class Block(ASTNode):
+    statements: List[Statement] = field(default_factory=list)
 
 
-class MatchStatement(ASTNode):
-    def __init__(self, condition, arms):
-        self.condition = condition
-        self.arms = arms
+@dataclass
+class VariableDeclaration(Statement):
+    name: str
+    initializer: Optional[Expression]
+    type_annotation: Optional[TypeAnnotation] = None
+    mutable: bool = False
 
 
-class MatchArm(ASTNode):
-    def __init__(self, pattern, body):
-        self.pattern = pattern
-        self.body = body
+@dataclass
+class ConstantDeclaration(Statement):
+    name: str
+    initializer: Expression
+    type_annotation: Optional[TypeAnnotation] = None
 
 
-class NumberPattern(ASTNode):
-    def __init__(self, value):
-        self.value = value
+@dataclass
+class ExpressionStatement(Statement):
+    expression: Expression
 
 
-class WildcardPattern(ASTNode):
+@dataclass
+class ReturnStatement(Statement):
+    value: Optional[Expression] = None
+
+
+@dataclass
+class IfStatement(Statement):
+    condition: Expression
+    then_block: Block
+    else_branch: Optional[Union['IfStatement', Block]] = None
+
+
+@dataclass
+class MatchCase(ASTNode):
+    pattern: Pattern
+    guard: Optional[Expression]
+    body: Union[Block, Expression]
+
+
+@dataclass
+class MatchStatement(Statement):
+    value: Expression
+    cases: List[MatchCase]
+
+
+@dataclass
+class ForStatement(Statement):
+    pattern: Pattern
+    iterable: Expression
+    body: Block
+
+
+@dataclass
+class WhileStatement(Statement):
+    condition: Expression
+    body: Block
+
+
+@dataclass
+class LoopStatement(Statement):
+    body: Block
+
+
+@dataclass
+class BreakStatement(Statement):
     pass
 
 
+@dataclass
+class ContinueStatement(Statement):
+    pass
+
+
+@dataclass
+class ThrowStatement(Statement):
+    expression: Expression
+
+
+@dataclass
+class AssertStatement(Statement):
+    expression: Expression
+
+
+@dataclass
+class CatchClause(ASTNode):
+    identifier: str
+    pattern: Optional[Pattern]
+    body: Block
+
+
+@dataclass
+class TryStatement(Statement):
+    try_block: Block
+    catch: Optional[CatchClause] = None
+    finally_block: Optional[Block] = None
+
+
+@dataclass
+class RoutineDeclaration(Statement):
+    name: Optional[str]
+    body: Block
+
+
+@dataclass
+class Assignment(Statement, Expression):
+    target: Expression
+    value: Expression
+    operator: str = '='  # '=', '+=', '-=', '*=', '/=', '%='
+
+
+# ---------------------------------------------------------------------------
+# Expressions
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Identifier(Expression):
+    name: str
+    type_arguments: List[TypeAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class NumberLiteral(Expression):
+    value: Union[int, float]
+
+
+@dataclass
+class StringLiteral(Expression):
+    value: str
+
+
+@dataclass
+class BooleanLiteral(Expression):
+    value: bool
+
+
+@dataclass
+class NullLiteral(Expression):
+    pass
+
+
+@dataclass
 class ArrayLiteral(Expression):
-    def __init__(self, elements):
-        self.elements = elements  # List of expressions
+    elements: List[Expression]
 
 
-class TryFinally(ASTNode):
-    def __init__(self, try_block, finally_block):
-        self.try_block = try_block  # List of statements
-        self.finally_block = finally_block  # List of statements
+@dataclass
+class ObjectField(ASTNode):
+    name: str
+    value: Expression
+
+
+@dataclass
+class ObjectLiteral(Expression):
+    fields: List[ObjectField]
+
+
+@dataclass
+class StructLiteral(Expression):
+    type_name: QualifiedName
+    fields: List[ObjectField]
+
+
+@dataclass
+class MemberExpression(Expression):
+    object: Expression
+    member: str
+
+
+@dataclass
+class IndexExpression(Expression):
+    sequence: Expression
+    index: Expression
+
+
+@dataclass
+class CallExpression(Expression):
+    callee: Expression
+    arguments: List[Expression]
+
+
+@dataclass
+class LambdaExpression(Expression):
+    parameters: List[Parameter]
+    body: Block
+    return_type: Optional[TypeAnnotation] = None
+
+
+@dataclass
+class AwaitExpression(Expression):
+    expression: Expression
+
+
+@dataclass
+class AsyncBlockExpression(Expression):
+    block: Block
+
+
+@dataclass
+class ParallelExpression(Expression):
+    thunks: List[Expression]
+
+
+@dataclass
+class RangeExpression(Expression):
+    start: Expression
+    end: Expression
+
+
+@dataclass
+class UnaryExpression(Expression):
+    operator: str
+    operand: Expression
+
+
+@dataclass
+class BinaryExpression(Expression):
+    operator: str
+    left: Expression
+    right: Expression
+
+
+@dataclass
+class TypeCheckExpression(Expression):
+    value: Expression
+    type_annotation: TypeAnnotation
+
+
+@dataclass
+class MatchExpression(Expression):
+    value: Expression
+    cases: List[MatchCase]
+
+
+# ---------------------------------------------------------------------------
+# Patterns
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class WildcardPattern(Pattern):
+    pass
+
+
+@dataclass
+class IdentifierPattern(Pattern):
+    name: str
+
+
+@dataclass
+class LiteralPattern(Pattern):
+    value: Expression
+
+
+@dataclass
+class PatternField(ASTNode):
+    name: str
+    pattern: Optional[Pattern] = None
+
+
+@dataclass
+class ConstructorPattern(Pattern):
+    type_name: QualifiedName
+    fields: List[PatternField]
+

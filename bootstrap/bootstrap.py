@@ -76,7 +76,12 @@ def compile_and_run(source_file):
 
     # Code Generation
     generator = CodeGenerator()
-    target_code = generator.generate_code(ast)
+    try:
+        target_code = generator.generate_code(ast)
+    except NotImplementedError as error:
+        print("\nCode generation is not available yet:")
+        print(f"  {error}")
+        return
 
     print("\nGenerated Python Code:")
     print(target_code)  # Optional: Print the generated code for debugging
@@ -89,7 +94,7 @@ def compile_and_run(source_file):
     namespace = {'__name__': '__main__'}  # Mimic script execution
     try:
         exec(target_code, namespace)
-    except Exception as e:
+    except Exception:
         import traceback
         print("Runtime Error:")
         traceback.print_exc()

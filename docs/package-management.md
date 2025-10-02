@@ -1,42 +1,31 @@
-# Sail Package Management
+# Sailfin Package Management
 
-Sail includes a built-in package manager called **`sail`**. This tool allows developers to:
-
-- Install, update, and remove dependencies.
-- Initialize new projects with a `sail.json` configuration file.
-- Publish packages to a central registry.
-- Resolve and cache dependencies for fast builds.
+Sailfin ships with a built-in package manager called **`sail`**. The tool manages dependencies, publishes libraries, and orchestrates project workflows in a way that mirrors familiar JavaScript tooling while remaining fully self-hosted.
 
 ## Getting Started
 
-### Installing a Package
-
-To install a package, use the `sail install` command:
+### Installing Packages
 
 ```bash
 sail install sail/http
 ```
 
-This command fetches the http package from the Sail package registry and adds it to the dependencies section of your sail.json file.
-
-Example: Installing Multiple Dependencies
+The command fetches the `sail/http` package from the Sailfin registry and records it in your `sail.json` manifest. Multiple packages can be installed at once:
 
 ```bash
 sail install sail/http sail/io sail/net
 ```
 
-## The `sail.json` File
+### The `sail.json` Manifest
 
-The `sail.json` file is the configuration file for your Sail project. It contains information about your project, such as the name, version, and dependencies.
-
-Example `sail.json` File:
+Every project contains a `sail.json` descriptor:
 
 ```json
 {
-  "name": "my-sail-project",
+  "name": "my-sailfin-project",
   "version": "1.0.0",
-  "description": "A simple Sail project",
-  "main": "src/main.sail",
+  "description": "A simple Sailfin project",
+  "main": "src/main.sfn",
   "dependencies": {
     "sail/http": "^1.0.0",
     "sail/io": "^0.5.0"
@@ -44,111 +33,70 @@ Example `sail.json` File:
 }
 ```
 
+Paths in `sail.json` use the `.sfn` extension for Sailfin source files.
+
 ## Common Commands
 
-### Initialize a New Project
-
-To create a new Sail project, use the `sail init` command:
-
-```bash
-sail init
-```
-
-This command initializes a new project with a `sail.json` file and a `src` directory.
-
-### Add a Dependency
-
-To add a new dependency to your project, use the `sail install` command:
-
-```bash
-sail install sail/http
-```
-
-This command fetches the http package from the Sail package registry and adds it to your dependencies.
-
-### Update Dependencies
-
-To update all dependencies to their latest versions, use the `sail update` command:
-
-```bash
-sail update
-```
-
-This command fetches the latest versions of all dependencies and updates the `sail.json` file.
-
-### Remove a Dependency
-
-To remove a dependency from your project, use the `sail remove` command:
-
-```bash
-sail remove sail/http
-```
-
-This command removes the http package from your dependencies.
-
-### Publish a Package
-
-To publish a package to the Sail package registry, use the `sail publish` command:
-
-```bash
-sail publish
-```
-
-This command publishes your package to the registry, making it available for other developers to install.
+| Command | Description |
+| ------- | ----------- |
+| `sail init` | Scaffold a new project with `sail.json` and a `src/` directory. |
+| `sail install <pkg>` | Add a dependency and write it to the manifest. |
+| `sail update` | Resolve the latest compatible versions for all dependencies. |
+| `sail remove <pkg>` | Remove a dependency and tidy the manifest. |
+| `sail run` | Build and execute the current project. |
+| `sail test` | Run test declarations across the codebase. |
+| `sail publish` | Publish the current package to the registry. |
 
 ## Example Workflow
 
-1. Initialize a new project:
+1. Initialise the project:
 
-```bash
-sail init
-```
+   ```bash
+   sail init
+   ```
 
-2. Add dependencies to your project:
+2. Install dependencies:
 
-```bash
-sail install sail/http
-```
+   ```bash
+   sail install sail/http
+   ```
 
-3. Write your code in the `src` directory.
+3. Write code using the Sailfin syntax:
 
-```bash
-import { serve } from "sail/http";
+   ```sailfin
+   import { serve } from "sail/http";
 
-fn main() {
-    serve(fn(req, res) {
-        res.send("Hello, Sail!");
-    }, { port: 8080 });
-}
-```
+   fn main() {
+       serve(fn(req, res) {
+           res.send("Hello, Sailfin!");
+       }, { port: 8080 });
+   }
+   ```
 
-4. Build and run your project:
+4. Run the application:
 
-```bash
-sail run
-```
+   ```bash
+   sail run
+   ```
 
-5. Publish your package to the registry:
+5. Publish when ready:
 
-```bash
-sail publish
-```
+   ```bash
+   sail publish
+   ```
 
-## Registy Information
+## Registry Information
 
-Sail packages are hosted on a central registry: https://sailpkg.org.
-The registry supports:
-
-- Package search and discovery.
-- Versioning and dependency resolution.
-- Secure package publishing and distribution.
+Sailfin packages are hosted on the central registry at <https://sailpkg.org>. The registry provides discovery, semantic version resolution, secure publishing, and provenance metadata for reproducible builds.
 
 ## Local Cache
 
-Sail maintains a local cache of packages to speed up builds and reduce network requests.
+The package manager maintains a local cache to accelerate installs:
 
-- The cache is located at `~/.sail/cache` on Unix systems and `%USERPROFILE%/.sail/cache` on Windows.
-- To clear the cache:
+- Unix-like systems: `~/.sail/cache`
+- Windows: `%USERPROFILE%/.sail/cache`
+
+Clear the cache when necessary:
 
 ```bash
 sail cache clear

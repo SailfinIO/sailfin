@@ -1,4 +1,6 @@
 // examples/advanced/lambda-closure.sfn
 
-let add = fn(x -> number, y -> number) -> number { return x + y; };
-print.info(add(3, 4)); // Outputs: 7
+fn main() {
+    let add = fn(x -> number, y -> number) -> number { return x + y; };
+    print.info(add(3, 4));
+}

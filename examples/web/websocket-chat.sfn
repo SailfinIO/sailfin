@@ -8,9 +8,9 @@ fn main() {
 
     routine {
         for client in server.clients() {
-            client.onMessage(fn(msg) {
-                print.info("Received: {{msg}}");
-                client.send("Echo: {{msg}}");
+            client.onMessage(fn(message) {
+                print.info("Received: {{message}}");
+                client.send("Echo: {{message}}");
             });
         }
     }

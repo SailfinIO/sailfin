@@ -4,5 +4,8 @@ fn identity<T>(value -> T) -> T {
     return value;
 }
 
-let num = identity(42);
-let text = identity("Sailfin");
+fn main() {
+    let num = identity(42);
+    let text = identity("Sailfin");
+    print.info("Values: {{num}}, {{text}}");
+}

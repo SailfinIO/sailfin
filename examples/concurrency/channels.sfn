@@ -1,10 +1,14 @@
 // examples/concurrency/channels.sfn
 
-let channel -> channel[number] = channel();
+import { Channel, channel } from "sail/async";
 
-routine {
-    channel.send(42); // Send data into the channel
+async fn main() {
+    let messages -> Channel<number> = channel();
+
+    routine {
+        messages.send(42);
+    }
+
+    let result -> number = await messages.receive();
+    print.info("Received: {{result}}");
 }
-
-let result -> number = await channel.receive();
-print.info("Received: {{result}}"); // Outputs: Received: 42

@@ -8,7 +8,7 @@ struct Car {
     brand -> string;
 
     fn new(brand -> string) -> Car {
-        return Car { brand };
+        return Car { brand: brand };
     }
 
     fn drive(self) -> string {
@@ -20,7 +20,7 @@ struct Bike {
     brand -> string;
 
     fn new(brand -> string) -> Bike {
-        return Bike { brand };
+        return Bike { brand: brand };
     }
 
     fn drive(self) -> string {
@@ -29,9 +29,9 @@ struct Bike {
 }
 
 fn main() {
-    let vehicle1: Driveable = Car.new("Tesla");
-    let vehicle2: Driveable = Bike.new("Yamaha");
+    let vehicle1 -> Driveable = Car.new("Tesla");
+    let vehicle2 -> Driveable = Bike.new("Yamaha");
 
-    print.info(vehicle1.drive()); // Outputs: Driving a Tesla car.
-    print.info(vehicle2.drive()); // Outputs: Riding a Yamaha bike.
+    print.info(vehicle1.drive());
+    print.info(vehicle2.drive());
 }

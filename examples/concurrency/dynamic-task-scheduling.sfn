@@ -1,17 +1,19 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-let tasks -> channel[fn() -> void] = channel();
+import { Channel, channel } from "sail/async";
 
-// Spawn a worker pool
-for _ in 1..5 {
-    routine {
-        while true {
-            let task = await tasks.receive();
-            task(); // Execute the task
+fn main() {
+    let tasks -> Channel<fn() -> void> = channel();
+
+    for _ in 1..5 {
+        routine {
+            loop {
+                let task = await tasks.receive();
+                task();
+            }
         }
     }
-}
 
-// Add tasks to the queue
-tasks.send(fn() { print.info("Task 1 executed!"); });
-tasks.send(fn() { print.info("Task 2 executed!"); });
+    tasks.send(fn() { print.info("Task 1 executed!"); });
+    tasks.send(fn() { print.info("Task 2 executed!"); });
+}

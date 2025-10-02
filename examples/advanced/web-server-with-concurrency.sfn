@@ -1,6 +1,7 @@
 // examples/advanced/web-server-with-concurrency.sfn
 
 import { serve } from "sail/http";
+import { sleep } from "sail/time";
 
 fn handleRequest(req, res) {
     if req.path == "/compute" {
@@ -9,13 +10,12 @@ fn handleRequest(req, res) {
             res.send("Computed result: {{result}}");
         }
     } else {
-        res.send("Welcome to Sail!", 200);
+        res.send("Welcome to Sailfin!", 200);
     }
 }
 
 fn computeHeavyTask() -> number {
-    // Simulate a heavy task
-    sleep(2000); // Simulate processing
+    sleep(2000);
     return 42;
 }
 

@@ -38,7 +38,7 @@ struct BankAccount {
 
 fn main() {
     // Create a new bank account
-    let account = BankAccount.new(100);
+    let mut account -> BankAccount = BankAccount.new(100);
 
     // Deposit money
     account.deposit(50);

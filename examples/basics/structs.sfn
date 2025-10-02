@@ -9,5 +9,7 @@ struct User {
     }
 }
 
-let user -> User = User { id: 1, name: "Alice" };
-print.info(user.greet()); // Outputs: Hello, Alice!
+fn main() {
+    let user -> User = User { id: 1, name: "Alice" };
+    print.info(user.greet());
+}

@@ -3,6 +3,10 @@
 struct List<T> {
     items -> T[];
 
+    fn new() -> List<T> {
+        return List<T> { items: [] };
+    }
+
     fn add(self, item -> T) -> void {
         self.items.append(item);
     }
@@ -13,4 +17,11 @@ struct List<T> {
         }
         return self.items[index];
     }
+}
+
+fn main() {
+    let numbers -> List<number> = List.new();
+    numbers.add(1);
+    numbers.add(2);
+    print.info("{{numbers.get(0)}}");
 }

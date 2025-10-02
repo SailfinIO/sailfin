@@ -1,487 +1,650 @@
-# bootstrap/code_generator.py
+"""Python code generation for the Sailfin bootstrap compiler.
 
-import enum
-import re
-import uuid
+This emitter walks the high-level Sailfin AST and produces Python 3
+source that targets the helpers defined in `runtime_support.py`. The
+implementation is intentionally conservative: the goal is to unlock
+experimentation with the new grammar rather than to deliver a
+feature-complete backend. Wherever behaviour is still undefined, the
+emitter raises `NotImplementedError` to make the remaining work explicit.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
 from ast_nodes import (
-    ArrayLiteral, EnumDeclaration, EnumVariant, ExpressionStatement, ImportStatement,
-    LambdaExpression, MatchStatement, MethodDeclaration, NumberPattern, Program,
-    FunctionDeclaration, TryFinally, TypeAliasDeclaration, VariableDeclaration, ConstantDeclaration,
-    PrintStatement, IfStatement, ReturnStatement, StructDeclaration,
-    FieldDeclaration, BinOp, Number, String, Identifier, FunctionCall,
-    MemberAccess, Assignment, WildcardPattern, Await
+    ArrayLiteral,
+    AssertStatement,
+    Assignment,
+    AsyncBlockExpression,
+    AwaitExpression,
+    BinaryExpression,
+    Block,
+    BooleanLiteral,
+    BreakStatement,
+    CallExpression,
+    CatchClause,
+    ConstantDeclaration,
+    ConstructorPattern,
+    ContinueStatement,
+    Decorator,
+    EnumDeclaration,
+    EnumVariant,
+    Expression,
+    ExpressionStatement,
+    FieldDeclaration,
+    ForStatement,
+    FunctionDeclaration,
+    Identifier,
+    IdentifierPattern,
+    IfStatement,
+    ImportDeclaration,
+    IndexExpression,
+    InterfaceDeclaration,
+    LambdaExpression,
+    LiteralPattern,
+    LoopStatement,
+    MatchCase,
+    MatchExpression,
+    MatchStatement,
+    MemberExpression,
+    MethodDeclaration,
+    NullLiteral,
+    NumberLiteral,
+    ObjectField,
+    ObjectLiteral,
+    OptionalType,
+    ParallelExpression,
+    Parameter,
+    Pattern,
+    PatternField,
+    Program,
+    QualifiedName,
+    RangeExpression,
+    ReturnStatement,
+    RoutineDeclaration,
+    SimpleType,
+    StringLiteral,
+    StructDeclaration,
+    StructLiteral,
+    ThrowStatement,
+    TryStatement,
+    TupleType,
+    TypeAliasDeclaration,
+    TypeCheckExpression,
+    TypeParameter,
+    UnionType,
+    VariableDeclaration,
+    WhileStatement,
+    WildcardPattern,
+    UnaryExpression,
 )
-from http_client_def import http_client_def
+from ast_nodes import ArrayType
+
+
+@dataclass
+class _PatternCompileResult:
+    condition: str
+    bindings: List[str]
 
 
 class CodeGenerator:
-    def __init__(self):
-        self.imports_set = set()
-        self.global_code = []
-        self.has_async = False  # Flag to indicate presence of async features
-        self.async_functions = set()  # Set of async function names
-        self.requires_http = False  # Flag to indicate if 'http' is used
-        self.async_stack = []  # Stack to track async context
+    def __init__(self) -> None:
+        self._lines: List[str] = []
+        self._indent: int = 0
+        self._temp_counter: int = 0
+        self._async_stack: List[bool] = [False]
+        self._imports: List[str] = [
+            "import asyncio",
+            "from bootstrap import runtime_support as runtime",
+        ]
+        self._preamble: List[str] = []
+        self._functions: List[str] = []
+        self._async_functions: set[str] = set()
+        self._global_mutables: set[str] = set()
 
-    def generate_code(self, ast, indent_level=0, top_level=True, global_vars=None):
-        if top_level:
-            # Reset imports_set and flags for each top-level generation
-            self.imports_set.clear()
-            self.has_async = False
-            self.async_functions.clear()
-            self.requires_http = False  # Reset the flag
-            self.async_stack = []
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        if global_vars is None:
-            global_vars = set()
+    def generate_code(self, program: Program) -> str:
+        self._lines.clear()
+        self._temp_counter = 0
+        self._preamble = [
+            "print = runtime.console",
+            "sleep = runtime.sleep",
+            "channel = runtime.channel",
+            "parallel = runtime.parallel",
+            "spawn = runtime.spawn",
+        ]
 
-        # Collect global variable declarations if top level
-        if top_level:
-            for stmt in ast.statements:
-                if isinstance(stmt, VariableDeclaration) or isinstance(stmt, ConstantDeclaration):
-                    global_vars.add(stmt.name)
+        for stmt in program.statements:
+            self._emit_statement(stmt)
 
-        # **Move the main function modification BEFORE code generation loop**
-        if top_level:
-            main_func = next((stmt for stmt in ast.statements if isinstance(
-                stmt, FunctionDeclaration) and stmt.name == 'main'), None)
-            if main_func:
-                if main_func.is_async:
-                    self.has_async = True
-                    self.async_functions.add(main_func.name)
-                    # Preserve original body
-                    original_body = main_func.body.copy()
-                    # Modify main_func.body to include init and close
-                    main_func.body = [
-                        Await(
-                            expression=FunctionCall(
-                                func_name=Identifier('http.init'),
-                                arguments=[]
-                            )
-                        ),
-                        TryFinally(
-                            try_block=original_body,
-                            finally_block=[
-                                Await(
-                                    expression=FunctionCall(
-                                        func_name=Identifier('http.close'),
-                                        arguments=[]
-                                    )
-                                )
-                            ]
-                        )
-                    ]
+        code_lines: List[str] = []
+        code_lines.extend(self._imports)
+        code_lines.append("")
+        code_lines.extend(self._preamble)
+        code_lines.append("")
+        code_lines.extend(self._lines)
 
-        # Generate code for statements
-        code = ""
-        for stmt in ast.statements:
-            code += self.generate_statement(stmt, indent_level, global_vars)
+        if 'main' in self._functions:
+            code_lines.append("")
+            code_lines.append("if __name__ == '__main__':")
+            if 'main' in self._async_functions:
+                code_lines.append("    asyncio.run(main())")
+            else:
+                code_lines.append("    main()")
+        return "\n".join(code_lines).rstrip() + "\n"
 
-        # Only at the very end (top_level = True) do we prepend imports & global lambdas
-        if top_level:
-            # Handle imports
-            if self.has_async:
-                self.imports_set.add("import asyncio")
-            if self.requires_http:
-                self.imports_set.add("import aiohttp")
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-            # Prepend imports
-            if self.imports_set:
-                sorted_imports = sorted(self.imports_set)
-                print(f"Imports to prepend: {sorted_imports}")  # Debugging
-                imports_str = "\n".join(sorted_imports) + "\n\n"
-            else:
-                print("No imports to prepend.")
-                imports_str = ""
+    def _emit(self, text: str) -> None:
+        indent = "    " * self._indent
+        self._lines.append(f"{indent}{text}")
 
-            # Inject 'HTTPClient' class definition
-            if self.requires_http:
-                http_def = http_client_def()
-                self.global_code.append(http_def)
-                print("Injected HTTPClient definitions.")  # Debugging
+    def _new_temp(self, prefix: str) -> str:
+        self._temp_counter += 1
+        return f"__{prefix}_{self._temp_counter}"
 
-            # Combine imports and global code
-            global_code_str = "".join(
-                self.global_code) + "\n" if self.global_code else ""
-            code = imports_str + global_code_str + code
+    def _push_async(self, is_async: bool) -> None:
+        self._async_stack.append(is_async)
 
-            # Adjust main execution based on whether 'main' is async
-            if main_func:
-                if main_func.is_async:
-                    code += '\nif __name__ == "__main__":\n    asyncio.run(main())\n'
-                else:
-                    code += '\nif __name__ == "__main__":\n    main()\n'
+    def _pop_async(self) -> None:
+        self._async_stack.pop()
 
-        return code
+    @property
+    def _in_async(self) -> bool:
+        return bool(self._async_stack and self._async_stack[-1])
 
-    def generate_statement(self, stmt, indent_level, global_vars):
-        indent = "    " * indent_level
-        code = ""
-        if isinstance(stmt, PrintStatement):
-            expr = self.generate_expression(stmt.expression)
-            code += f"{indent}print({expr})\n"
-        elif isinstance(stmt, VariableDeclaration):
-            var = stmt.name
-            value = self.generate_expression(stmt.value)
-            if stmt.mutable:
-                code += f"{indent}{var} = {value}  # Mutable variable\n"
-            else:
-                code += f"{indent}{var} = {value}\n"
-        elif isinstance(stmt, ConstantDeclaration):
-            var = stmt.name
-            value = self.generate_expression(stmt.value)
-            code += f"{indent}{var} = {value}  # Constant\n"
-        elif isinstance(stmt, TryFinally):
-            code += f"{indent}try:\n"
-            if not stmt.try_block:
-                code += f"{indent}    pass\n"
-            else:
-                try_block_ast = Program(stmt.try_block)
-                code += self.generate_code(try_block_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-            code += f"{indent}finally:\n"
-            if not stmt.finally_block:
-                code += f"{indent}    pass\n"
-            else:
-                finally_block_ast = Program(stmt.finally_block)
-                code += self.generate_code(finally_block_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-        elif isinstance(stmt, FunctionDeclaration):
-            if stmt.is_async:
-                self.has_async = True
-                self.async_functions.add(stmt.name)
-                self.async_stack.append(True)
-            else:
-                self.async_stack.append(False)
-            decorators = ""
-            for decorator in stmt.decorators:
-                decorators += f"{indent}@{decorator}\n"
-            params = ", ".join([param[0] for param in stmt.params])
-            if stmt.is_async:
-                code += decorators
-                code += f"{indent}async def {stmt.name}({params}):\n"
-            else:
-                code += decorators
-                code += f"{indent}def {stmt.name}({params}):\n"
-            if not stmt.body:
-                code += f"{indent}    pass\n"
-            else:
-                # Detect if the function modifies any global variables
-                modified_globals = self.find_modified_globals(
-                    stmt.body, global_vars)
-                if modified_globals:
-                    # Insert global declarations
-                    for var in modified_globals:
-                        code += f"{indent}    global {var}\n"
-                # Recursively generate code for the function body with increased indentation
-                function_body_ast = Program(stmt.body)
-                code += self.generate_code(function_body_ast, indent_level + 1,
-                                           top_level=False, global_vars=global_vars)
-            self.async_stack.pop()
-        elif isinstance(stmt, MethodDeclaration):
-            if stmt.is_async:
-                self.has_async = True
-                self.async_functions.add(stmt.name)
-                self.async_stack.append(True)
-            else:
-                self.async_stack.append(False)
-            decorators = ""
-            for decorator in stmt.decorators:
-                decorators += f"{indent}@{decorator}\n"
-            method_params = ", ".join([param[0] for param in stmt.params])
-            # Ensure 'self' is included
-            if not method_params.startswith('self'):
-                method_params = "self, " + method_params
-            if stmt.is_async:
-                code += decorators
-                code += f"{indent}async def {stmt.name}({method_params}):\n"
-            else:
-                code += decorators
-                code += f"{indent}def {stmt.name}({method_params}):\n"
-            if not stmt.body:
-                code += f"{indent}    pass\n"
-            else:
-                method_body_ast = Program(stmt.body)
-                code += self.generate_code(
-                    method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
-            self.async_stack.pop()
-        elif isinstance(stmt, IfStatement):
-            condition = self.generate_expression(stmt.condition)
-            code += f"{indent}if {condition}:\n"
-            if not stmt.then_branch:
-                code += f"{indent}    pass\n"
-            else:
-                then_branch_ast = Program(stmt.then_branch)
-                code += self.generate_code(then_branch_ast, indent_level + 1,
-                                           global_vars=global_vars, top_level=False)
-            if stmt.else_branch:
-                code += f"{indent}else:\n"
-                else_branch_ast = Program(stmt.else_branch)
-                code += self.generate_code(else_branch_ast, indent_level + 1,
-                                           global_vars=global_vars, top_level=False)
-        elif isinstance(stmt, EnumDeclaration):
-            # Add import enum to imports_set
-            self.imports_set.add("import enum")
-            print("Added 'import enum' to imports_set")  # Debugging
-            code += f"{indent}class {stmt.name}(enum.Enum):\n"
-            if not stmt.variants:
-                code += f"{indent}    pass\n"
-            else:
-                for variant in stmt.variants:
-                    if variant.fields:
-                        # Handle variants with fields using tuple values
-                        field_count = len(variant.fields)
-                        fields_placeholder = ", ".join(['...'] * field_count)
-                        code += f"{indent}    {
-                            variant.name} = ({fields_placeholder})\n"
-                    else:
-                        code += f"{indent}    {variant.name} = enum.auto()\n"
-            code += "\n"
-        elif isinstance(stmt, ReturnStatement):
-            if stmt.expression:
-                expr = self.generate_expression(stmt.expression)
-                code += f"{indent}return {expr}\n"
-            else:
-                code += f"{indent}return\n"
-        elif isinstance(stmt, StructDeclaration):
-            code += f"{indent}class {stmt.name}:\n"
-            if not stmt.members:
-                code += f"{indent}    pass\n"
-            else:
-                # Separate fields and methods
-                fields = [m for m in stmt.members if isinstance(
-                    m, FieldDeclaration)]
-                methods = [m for m in stmt.members if isinstance(
-                    m, MethodDeclaration)]
+    # ------------------------------------------------------------------
+    # Statements
+    # ------------------------------------------------------------------
 
-                # Constructor
-                init_params = ['self']
-                init_body = ""
-                for field in fields:
-                    init_params.append(field.name)
-                    init_body += f"{indent}        self.{field.name} = {field.name}\n"
-                params_str = ", ".join(init_params)
-                code += f"{indent}    def __init__({params_str}):\n"
-                if not init_body:
-                    code += f"{indent}        pass\n"
-                else:
-                    code += init_body
-
-                # Methods
-                for method in methods:
-                    if method.is_async:
-                        self.has_async = True
-                        self.async_functions.add(method.name)
-                        self.async_stack.append(True)
-                    else:
-                        self.async_stack.append(False)
-                    method_decorators = ""
-                    for decorator in method.decorators:
-                        method_decorators += f"{indent}    @{decorator}\n"
-                    method_params = ", ".join(
-                        [param[0] for param in method.params])
-                    # Ensure 'self' is included
-                    if not method_params.startswith('self'):
-                        method_params = "self, " + method_params
-                    if method.is_async:
-                        code += method_decorators
-                        code += f"{indent}    async def {
-                            method.name}({method_params}):\n"
-                    else:
-                        code += method_decorators
-                        code += f"{indent}    def {
-                            method.name}({method_params}):\n"
-                    if not method.body:
-                        code += f"{indent}        pass\n"
-                    else:
-                        method_body_ast = Program(method.body)
-                        code += self.generate_code(
-                            method_body_ast, indent_level + 2, global_vars=global_vars, top_level=False)
-                    self.async_stack.pop()
-                # Add __repr__ method for better debugging
-                code += f"{indent}    def __repr__(self):\n"
-                repr_fields = ", ".join(
-                    [f"{field.name}={{self.{field.name}!r}}" for field in fields])
-                code += f"{indent}        return f\"{
-                    stmt.name}({repr_fields})\"\n"
-        elif isinstance(stmt, Assignment):
-            target = self.generate_expression(stmt.target)
-            value = self.generate_expression(stmt.value)
-            code += f"{indent}{target} = {value}\n"
-        elif isinstance(stmt, ExpressionStatement):
-            expr_code = self.generate_expression(stmt.expression)
-            code += f"{indent}{expr_code}\n"
-        elif isinstance(stmt, ImportStatement):
+    def _emit_statement(self, stmt) -> None:  # type: ignore[override]
+        if isinstance(stmt, ImportDeclaration):
             items = ", ".join(stmt.items)
-            source = stmt.source
-            if source == "aiohttp":
-                # Special handling for aiohttp if needed
-                self.imports_set.add("import aiohttp")
-                code += f"{indent}import aiohttp\n"
-            else:
-                code += f"{indent}from {source} import {items}\n"
+            self._emit(f"# TODO import {items} from {stmt.source}")
         elif isinstance(stmt, TypeAliasDeclaration):
-            code += f"{indent}{stmt.name} = {stmt.aliased_type}  # Type Alias\n"
+            self._emit(f"# type alias {stmt.name}")
+        elif isinstance(stmt, InterfaceDeclaration):
+            self._emit(f"# interface {stmt.name}")
+        elif isinstance(stmt, StructDeclaration):
+            self._emit_struct(stmt)
+        elif isinstance(stmt, EnumDeclaration):
+            self._emit_enum(stmt)
+        elif isinstance(stmt, FunctionDeclaration):
+            self._emit_function(stmt)
+        elif isinstance(stmt, VariableDeclaration):
+            if self._indent == 0 and stmt.mutable:
+                self._global_mutables.add(stmt.name)
+            self._emit_variable(stmt)
+        elif isinstance(stmt, ConstantDeclaration):
+            self._emit_constant(stmt)
+        elif isinstance(stmt, ReturnStatement):
+            self._emit_return(stmt)
+        elif isinstance(stmt, ExpressionStatement):
+            expr_code = self._emit_expression(stmt.expression)
+            self._emit(expr_code)
+        elif isinstance(stmt, Assignment):
+            target = self._emit_expression(stmt.target)
+            value = self._emit_expression(stmt.value)
+            operator = stmt.operator or '='
+            if operator == '=':
+                self._emit(f"{target} = {value}")
+            else:
+                op = operator[0]
+                self._emit(f"{target} {operator} {value}")
+        elif isinstance(stmt, IfStatement):
+            self._emit_if(stmt)
+        elif isinstance(stmt, WhileStatement):
+            condition = self._emit_expression(stmt.condition)
+            self._emit(f"while {condition}:")
+            self._indent += 1
+            self._emit_block(stmt.body)
+            self._indent -= 1
+        elif isinstance(stmt, LoopStatement):
+            self._emit("while True:")
+            self._indent += 1
+            self._emit_block(stmt.body)
+            self._indent -= 1
+        elif isinstance(stmt, ForStatement):
+            iterable = self._emit_expression(stmt.iterable)
+            pattern_code = self._emit_pattern_assignment(stmt.pattern, "__item")
+            self._emit(f"for __item in {iterable}:")
+            self._indent += 1
+            for line in pattern_code:
+                self._emit(line)
+            self._emit_block(stmt.body)
+            self._indent -= 1
+        elif isinstance(stmt, BreakStatement):
+            self._emit("break")
+        elif isinstance(stmt, ContinueStatement):
+            self._emit("continue")
+        elif isinstance(stmt, ThrowStatement):
+            expr = self._emit_expression(stmt.expression)
+            self._emit(f"raise Exception({expr})")
+        elif isinstance(stmt, AssertStatement):
+            expr = self._emit_expression(stmt.expression)
+            self._emit(f"assert {expr}")
+        elif isinstance(stmt, TryStatement):
+            self._emit_try(stmt)
+        elif isinstance(stmt, RoutineDeclaration):
+            self._emit_routine(stmt)
         elif isinstance(stmt, MatchStatement):
-            cond_expr = self.generate_expression(stmt.condition)
-            code += f"{indent}match {cond_expr}:\n"
+            self._emit_match_statement(stmt)
+        elif isinstance(stmt, MatchExpression):
+            temp = self._emit_match_expression(stmt)
+            self._emit(temp)
+        elif isinstance(stmt, ParallelExpression):
+            expr = self._emit_expression(stmt)
+            self._emit(expr)
+        else:  # pragma: no cover - future extensions
+            raise NotImplementedError(f"Unhandled statement: {type(stmt).__name__}")
 
-            for arm in stmt.arms:
-                pattern_code = self.generate_pattern_expression(arm.pattern)
-                code += f"{indent}    case {pattern_code}:\n"
+    def _emit_block(self, block: Block) -> None:
+        if not block.statements:
+            self._emit("pass")
+            return
+        for inner in block.statements:
+            self._emit_statement(inner)
 
-                # Generate code for the arm's body
-                case_body_ast = Program(arm.body)
-                code += self.generate_code(case_body_ast, indent_level + 2,
-                                           global_vars=global_vars, top_level=False)
-        elif isinstance(stmt, Await):
-            # Direct Await statement, rare outside expressions
-            if not any(self.async_stack):
-                raise SyntaxError(
-                    f"'await' used outside of an async function.")
-            self.has_async = True
-            expr_code = self.generate_expression(stmt.expression)
-            code += f"{indent}await {expr_code}\n"
+    def _emit_struct(self, decl: StructDeclaration) -> None:
+        self._emit(f"class {decl.name}:")
+        self._indent += 1
+        fields = [m for m in decl.members if isinstance(m, FieldDeclaration)]
+        methods = [m for m in decl.members if isinstance(m, MethodDeclaration)]
+        if not fields and not methods:
+            self._emit("pass")
         else:
-            # Debugging aid
-            print(f"Unhandled statement type: {type(stmt).__name__}")
-            raise NotImplementedError(f"Code generation for {
-                                      type(stmt).__name__} not implemented.")
-        return code
-
-    def generate_expression(self, expr):
-        if isinstance(expr, BinOp):
-            left = self.generate_expression(expr.left)
-            right = self.generate_expression(expr.right)
-            return f"({left} {expr.operator} {right})"
-        elif isinstance(expr, Await):
-            if not any(self.async_stack):
-                raise SyntaxError("'await' used outside of an async function")
-            self.has_async = True
-            inner_expr = self.generate_expression(expr.expression)
-            return f"await {inner_expr}"
-        elif isinstance(expr, Number):
-            return str(expr.value)
-        elif isinstance(expr, String):
-            # Detect interpolation patterns like {{variable}}
-            pattern = re.compile(r'\{\{(\w+)\}\}')
-            matches = pattern.findall(expr.value)
-            if matches:
-                # Replace all occurrences of {{variable}} with {variable}
-                interpolated = pattern.sub(r'{\1}', expr.value)
-                # Prepend 'f' to make it an f-string
-                return f"f\"{interpolated}\""
+            params = ["self"] + [field.name for field in fields]
+            self._emit(f"def __init__({', '.join(params)}):")
+            self._indent += 1
+            if not fields:
+                self._emit("pass")
             else:
-                return f"\"{expr.value}\""
-        elif isinstance(expr, Identifier):
-            if expr.name == 'http':
-                self.requires_http = True
+                for field in fields:
+                    self._emit(f"self.{field.name} = {field.name}")
+            self._indent -= 1
+            for method in methods:
+                self._emit_method(method)
+        self._indent -= 1
+        self._emit("")
+
+    def _emit_enum(self, decl: EnumDeclaration) -> None:
+        enum_var = decl.name
+        self._emit(f"{enum_var} = runtime.EnumType('{enum_var}')")
+        for variant in decl.variants:
+            field_names = [field.name for field in variant.fields]
+            args = ", ".join(f"'{name}'" for name in field_names)
+            self._emit(
+                f"{enum_var}.{variant.name} = {enum_var}.variant('{variant.name}', [{args}])"
+            )
+        self._emit("")
+
+    def _emit_method(self, method: MethodDeclaration) -> None:
+        param_entries = []
+        has_self = any(param.name == 'self' for param in method.parameters)
+        decorator_strings = [self._emit_decorator(decorator) for decorator in method.decorators]
+        if not has_self:
+            decorator_strings.append("@staticmethod")
+
+        for param in method.parameters:
+            if has_self and param.name == 'self':
+                continue
+            entry = param.name
+            if param.default is not None:
+                entry += f"={self._emit_expression(param.default)}"
+            param_entries.append(entry)
+        signature_parts = ['self'] + param_entries if has_self else param_entries
+        signature = ", ".join(signature_parts)
+        header = "async def" if method.is_async else "def"
+        for deco in decorator_strings:
+            self._emit(deco)
+        self._emit(f"{header} {method.name}({signature}):")
+        self._indent += 1
+        self._push_async(method.is_async)
+        self._emit_block(method.body)
+        self._pop_async()
+        self._indent -= 1
+
+    def _emit_function(self, func: FunctionDeclaration) -> None:
+        params = ", ".join(param.name for param in func.parameters)
+        header = "async def" if func.is_async else "def"
+        for decorator in func.decorators:
+            deco = self._emit_decorator(decorator)
+            self._emit(deco)
+        param_entries = []
+        for param in func.parameters:
+            entry = param.name
+            if param.default is not None:
+                entry += f"={self._emit_expression(param.default)}"
+            param_entries.append(entry)
+        params = ", ".join(param_entries)
+        self._emit(f"{header} {func.name}({params}):")
+        self._indent += 1
+        self._push_async(func.is_async)
+        if self._global_mutables:
+            for name in sorted(self._global_mutables):
+                self._emit(f"global {name}")
+        if not func.body.statements:
+            self._emit("pass")
+        else:
+            self._emit_block(func.body)
+        self._pop_async()
+        self._indent -= 1
+        self._emit("")
+        self._functions.append(func.name)
+        if func.is_async:
+            self._async_functions.add(func.name)
+
+    def _emit_variable(self, decl: VariableDeclaration) -> None:
+        name = decl.name
+        if decl.initializer is not None:
+            value = self._emit_expression(decl.initializer)
+        else:
+            value = "None"
+        self._emit(f"{name} = {value}")
+
+    def _emit_constant(self, decl: ConstantDeclaration) -> None:
+        value = self._emit_expression(decl.initializer)
+        self._emit(f"{decl.name} = {value}")
+
+    def _emit_return(self, stmt: ReturnStatement) -> None:
+        if stmt.value is None:
+            self._emit("return")
+        else:
+            expr = self._emit_expression(stmt.value)
+            self._emit(f"return {expr}")
+
+    def _emit_if(self, stmt: IfStatement) -> None:
+        condition = self._emit_expression(stmt.condition)
+        self._emit(f"if {condition}:")
+        self._indent += 1
+        self._emit_block(stmt.then_block)
+        self._indent -= 1
+        if stmt.else_branch:
+            if isinstance(stmt.else_branch, IfStatement):
+                self._emit("else:")
+                self._indent += 1
+                self._emit_if(stmt.else_branch)
+                self._indent -= 1
+            else:
+                self._emit("else:")
+                self._indent += 1
+                self._emit_block(stmt.else_branch)
+                self._indent -= 1
+
+    def _emit_try(self, stmt: TryStatement) -> None:
+        self._emit("try:")
+        self._indent += 1
+        self._emit_block(stmt.try_block)
+        self._indent -= 1
+        if stmt.catch:
+            var = stmt.catch.identifier
+            self._emit(f"except Exception as {var}:")
+            self._indent += 1
+            if stmt.catch.pattern:
+                self._emit("# TODO pattern matching in catch")
+            self._emit_block(stmt.catch.body)
+            self._indent -= 1
+        if stmt.finally_block:
+            self._emit("finally:")
+            self._indent += 1
+            self._emit_block(stmt.finally_block)
+            self._indent -= 1
+
+    def _emit_routine(self, stmt: RoutineDeclaration) -> None:
+        routine_name = self._new_temp("routine")
+        self._emit(f"async def {routine_name}():")
+        self._indent += 1
+        self._push_async(True)
+        self._emit_block(stmt.body)
+        self._pop_async()
+        self._indent -= 1
+        if stmt.name:
+            self._emit(f"spawn({routine_name}, name='{stmt.name}')")
+        else:
+            self._emit(f"spawn({routine_name})")
+
+    def _emit_match_statement(self, stmt: MatchStatement) -> None:
+        value_var = self._new_temp("match_value")
+        matched_var = self._new_temp("match_flag")
+        self._emit(f"{value_var} = {self._emit_expression(stmt.value)}")
+        self._emit(f"{matched_var} = False")
+        for case in stmt.cases:
+            compiled = self._compile_pattern(case.pattern, value_var)
+            condition = compiled.condition or "True"
+            self._emit(f"if (not {matched_var}) and ({condition}):")
+            self._indent += 1
+            for binding in compiled.bindings:
+                self._emit(binding)
+            if case.guard:
+                guard = self._emit_expression(case.guard)
+                self._emit(f"if {guard}:")
+                self._indent += 1
+                self._emit(f"{matched_var} = True")
+                self._emit_case_body(case.body)
+                self._indent -= 1
+            else:
+                self._emit(f"{matched_var} = True")
+                self._emit_case_body(case.body)
+            self._indent -= 1
+        self._emit(f"if not {matched_var}:")
+        self._indent += 1
+        self._emit(f"runtime.match_exhaustive_failed({value_var})")
+        self._indent -= 1
+
+    def _emit_case_body(self, body) -> None:  # type: ignore[override]
+        if isinstance(body, Block):
+            self._emit_block(body)
+        else:
+            expr = self._emit_expression(body)
+            self._emit(expr)
+
+    def _emit_match_expression(self, expr: MatchExpression) -> str:
+        result_var = self._new_temp("match_result")
+        value_var = self._new_temp("match_value")
+        matched_var = self._new_temp("match_flag")
+        self._emit(f"{value_var} = {self._emit_expression(expr.value)}")
+        self._emit(f"{matched_var} = False")
+        self._emit(f"{result_var} = None")
+        for case in expr.cases:
+            compiled = self._compile_pattern(case.pattern, value_var)
+            condition = compiled.condition or "True"
+            self._emit(f"if (not {matched_var}) and ({condition}):")
+            self._indent += 1
+            for binding in compiled.bindings:
+                self._emit(binding)
+            if case.guard:
+                guard = self._emit_expression(case.guard)
+                self._emit(f"if {guard}:")
+                self._indent += 1
+                self._emit(f"{matched_var} = True")
+                result_expr = self._emit_expression(case.body) if not isinstance(case.body, Block) else None
+                if result_expr is None:
+                    raise NotImplementedError("Blocks as match expressions are not supported yet")
+                self._emit(f"{result_var} = {result_expr}")
+                self._indent -= 1
+            else:
+                self._emit(f"{matched_var} = True")
+                result_expr = self._emit_expression(case.body) if not isinstance(case.body, Block) else None
+                if result_expr is None:
+                    raise NotImplementedError("Blocks as match expressions are not supported yet")
+                self._emit(f"{result_var} = {result_expr}")
+            self._indent -= 1
+        self._emit(f"if not {matched_var}:")
+        self._indent += 1
+        self._emit(f"runtime.match_exhaustive_failed({value_var})")
+        self._indent -= 1
+        return result_var
+
+    # ------------------------------------------------------------------
+    # Expressions
+    # ------------------------------------------------------------------
+
+    def _emit_expression(self, expr: Expression) -> str:  # type: ignore[override]
+        if isinstance(expr, Identifier):
+            if expr.type_arguments:
+                raise NotImplementedError("Generic type arguments at runtime")
             return expr.name
-        elif isinstance(expr, FunctionCall):
-            if isinstance(expr.func_name, MemberAccess):
-                if isinstance(expr.func_name.object, Identifier) and expr.func_name.object.name == 'http':
-                    self.requires_http = True
-            elif isinstance(expr.func_name, Identifier) and expr.func_name.name == 'http':
-                self.requires_http = True
-            # Handle other function calls as before
-            if isinstance(expr.func_name, MemberAccess):
-                obj_code = self.generate_expression(expr.func_name.object)
-                member = expr.func_name.member
-                if member == 'map':
-                    # Handle map: map(fn, obj)
-                    fn_code = self.generate_expression(expr.arguments[0])
-                    return f"list(map({fn_code}, {obj_code}))"
-                elif member == 'reduce':
-                    # Handle reduce: functools.reduce(fn, obj, initial)
-                    if len(expr.arguments) != 2:
-                        raise NotImplementedError(
-                            "reduce requires two arguments: function and initial")
-                    initial = self.generate_expression(expr.arguments[1])
-                    fn_code = self.generate_expression(expr.arguments[0])
-                    self.imports_set.add("import functools")
-                    return f"functools.reduce({fn_code}, {obj_code}, {initial})"
-                else:
-                    # Handle other member functions: obj.member(args)
-                    func_full = self.generate_expression(expr.func_name)
-                    args = ", ".join([self.generate_expression(arg)
-                                     for arg in expr.arguments])
-                    return f"{func_full}({args})"
-            else:
-                # Handle regular function calls
-                func_name = self.generate_expression(expr.func_name)
-                args = ", ".join([self.generate_expression(arg)
-                                 for arg in expr.arguments])
-                return f"{func_name}({args})"
-        elif isinstance(expr, MemberAccess):
-            obj = self.generate_expression(expr.object)
-            member = expr.member
-            return f"{obj}.{member}"
-        elif isinstance(expr, LambdaExpression):
-            params = ", ".join([param[0] for param in expr.params])
-            if len(expr.body) == 1 and isinstance(expr.body[0], ReturnStatement):
-                body_expr = self.generate_expression(expr.body[0].expression)
-                return f"lambda {params}: {body_expr}"
-            else:
-                # Generate a unique function name
-                func_name = f"_lambda_{uuid.uuid4().hex}"
-                # Generate the function definition
-                func_def = f"def {func_name}({params}):\n"
-                for stmt in expr.body:
-                    func_def += self.generate_statement(
-                        stmt, indent_level=1, global_vars=set())
-                # Add the function definition to the global code
-                self.global_code.append(func_def)
-                # Return the function name
-                return func_name
-        elif isinstance(expr, ArrayLiteral):
-            elements = ", ".join([self.generate_expression(el)
-                                 for el in expr.elements])
+        if isinstance(expr, NumberLiteral):
+            return repr(expr.value)
+        if isinstance(expr, StringLiteral):
+            return repr(expr.value)
+        if isinstance(expr, BooleanLiteral):
+            return "True" if expr.value else "False"
+        if isinstance(expr, NullLiteral):
+            return "None"
+        if isinstance(expr, ArrayLiteral):
+            elements = ", ".join(self._emit_expression(el) for el in expr.elements)
             return f"[{elements}]"
-        else:
-            raise NotImplementedError(
-                f"Expression type {type(expr).__name__} not implemented.")
+        if isinstance(expr, ObjectLiteral):
+            items = ", ".join(f"{field.name!r}: {self._emit_expression(field.value)}" for field in expr.fields)
+            return f"{{{items}}}"
+        if isinstance(expr, StructLiteral):
+            args = ", ".join(f"{field.name}={self._emit_expression(field.value)}" for field in expr.fields)
+            return f"{self._emit_qualified_name(expr.type_name)}({args})"
+        if isinstance(expr, MemberExpression):
+            target = self._emit_expression(expr.object)
+            return f"{target}.{expr.member}"
+        if isinstance(expr, IndexExpression):
+            sequence = self._emit_expression(expr.sequence)
+            index = self._emit_expression(expr.index)
+            return f"{sequence}[{index}]"
+        if isinstance(expr, CallExpression):
+            callee = self._emit_expression(expr.callee)
+            args = ", ".join(self._emit_expression(arg) for arg in expr.arguments)
+            return f"{callee}({args})"
+        if isinstance(expr, BinaryExpression):
+            left = self._emit_expression(expr.left)
+            right = self._emit_expression(expr.right)
+            operator = expr.operator
+            if operator == '&&':
+                operator = 'and'
+            elif operator == '||':
+                operator = 'or'
+            return f"({left} {operator} {right})"
+        if isinstance(expr, UnaryExpression):
+            operand = self._emit_expression(expr.operand)
+            operator = expr.operator
+            if operator == '!':
+                operator = 'not '
+                return f"({operator}{operand})"
+            return f"({operator}{operand})"
+        if isinstance(expr, AwaitExpression):
+            if not self._in_async:
+                raise NotImplementedError("'await' used outside of an async context")
+            inner = self._emit_expression(expr.expression)
+            return f"await {inner}"
+        if isinstance(expr, RangeExpression):
+            start = self._emit_expression(expr.start)
+            end = self._emit_expression(expr.end)
+            return f"range({start}, {end})"
+        if isinstance(expr, LambdaExpression):
+            return self._emit_lambda(expr)
+        if isinstance(expr, ParallelExpression):
+            thunks = ", ".join(self._emit_expression(arg) for arg in expr.thunks)
+            return f"parallel([{thunks}])"
+        if isinstance(expr, AsyncBlockExpression):
+            raise NotImplementedError("async blocks as expressions are not supported yet")
+        if isinstance(expr, MatchExpression):
+            temp = self._emit_match_expression(expr)
+            return temp
+        if isinstance(expr, TypeCheckExpression):
+            value = self._emit_expression(expr.value)
+            type_expr = self._emit_type(expr.type_annotation)
+            return f"isinstance({value}, {type_expr})"
+        raise NotImplementedError(f"Unhandled expression: {type(expr).__name__}")
 
-    def generate_pattern_expression(self, pattern):
-        if isinstance(pattern, NumberPattern):
-            return str(pattern.value)
-        elif isinstance(pattern, WildcardPattern):
-            return "_"
-        else:
-            raise NotImplementedError(
-                f"Pattern type {type(pattern).__name__} not implemented.")
+    def _emit_lambda(self, expr: LambdaExpression) -> str:
+        names = [param.name for param in expr.parameters]
+        simple = (
+            len(expr.body.statements) == 1
+            and isinstance(expr.body.statements[0], ReturnStatement)
+            and expr.body.statements[0].value is not None
+        )
+        if simple:
+            value = self._emit_expression(expr.body.statements[0].value)
+            return f"lambda {', '.join(names)}: {value}"
+        func_name = self._new_temp("lambda")
+        self._emit(f"def {func_name}({', '.join(names)}):")
+        self._indent += 1
+        self._emit_block(expr.body)
+        self._indent -= 1
+        return func_name
 
-    def find_modified_globals(self, statements, global_vars):
-        """
-        Traverse the list of statements and identify any assignments
-        to variables that are in the global_vars set.
-        """
-        modified = set()
-        for stmt in statements:
-            if isinstance(stmt, Assignment):
-                target = self.get_assignment_target(stmt.target)
-                if target and target in global_vars:
-                    modified.add(target)
-            elif isinstance(stmt, FunctionDeclaration):
-                # Nested functions: handle separately if needed
-                pass
-            elif isinstance(stmt, IfStatement):
-                # Recursively check then and else branches
-                modified.update(self.find_modified_globals(
-                    stmt.then_branch, global_vars))
-                if stmt.else_branch:
-                    modified.update(self.find_modified_globals(
-                        stmt.else_branch, global_vars))
-            # Handle other statement types as needed
-        return modified
+    # ------------------------------------------------------------------
+    # Pattern compilation
+    # ------------------------------------------------------------------
 
-    def get_assignment_target(self, target):
-        """
-        Extract the variable name from the assignment target.
-        """
-        if isinstance(target, Identifier):
-            return target.name
-        elif isinstance(target, MemberAccess):
-            # For simplicity, ignore member accesses (e.g., obj.attr)
-            return None
-        else:
-            return None
+    def _compile_pattern(self, pattern: Pattern, value_expr: str) -> _PatternCompileResult:
+        if isinstance(pattern, WildcardPattern):
+            return _PatternCompileResult(condition="True", bindings=[])
+        if isinstance(pattern, IdentifierPattern):
+            binding = f"{pattern.name} = {value_expr}"
+            return _PatternCompileResult(condition="True", bindings=[binding])
+        if isinstance(pattern, LiteralPattern):
+            literal = self._emit_expression(pattern.value)
+            return _PatternCompileResult(condition=f"{value_expr} == {literal}", bindings=[])
+        if isinstance(pattern, ConstructorPattern):
+            type_expr = self._emit_qualified_name(pattern.type_name)
+            condition_parts = [f"isinstance({value_expr}, {type_expr})"]
+            bindings: List[str] = []
+            for field in pattern.fields:
+                field_expr = f"{value_expr}.{field.name}"
+                if field.pattern is None:
+                    bindings.append(f"{field.name} = {field_expr}")
+                else:
+                    sub = self._compile_pattern(field.pattern, field_expr)
+                    if sub.condition:
+                        condition_parts.append(sub.condition)
+                    bindings.extend(sub.bindings)
+            condition = " and ".join(condition_parts)
+            return _PatternCompileResult(condition=condition, bindings=bindings)
+        raise NotImplementedError(f"Pattern type {type(pattern).__name__} not supported")
+
+    def _emit_pattern_assignment(self, pattern: Pattern, source: str) -> List[str]:
+        compiled = self._compile_pattern(pattern, source)
+        lines = []
+        if compiled.condition != "True":
+            lines.append(f"if not ({compiled.condition}):")
+            lines.append("    continue")
+        lines.extend(compiled.bindings)
+        return lines
+
+    # ------------------------------------------------------------------
+    # Type helpers
+    # ------------------------------------------------------------------
+
+    def _emit_type(self, annotation) -> str:  # type: ignore[override]
+        if isinstance(annotation, SimpleType):
+            return self._emit_qualified_name(annotation.name)
+        if isinstance(annotation, ArrayType):
+            element = self._emit_type(annotation.element_type)
+            return f"List[{element}]"
+        if isinstance(annotation, TupleType):
+            elements = ", ".join(self._emit_type(el) for el in annotation.elements)
+            return f"Tuple[{elements}]"
+        if isinstance(annotation, OptionalType):
+            inner = self._emit_type(annotation.base)
+            return f"Optional[{inner}]"
+        if isinstance(annotation, UnionType):
+            members = ", ".join(self._emit_type(option) for option in annotation.options)
+            return f"Union[{members}]"
+        return "object"
+
+    def _emit_decorator(self, decorator: Decorator) -> str:
+        if decorator.arguments:
+            args = ", ".join(self._emit_expression(arg) for arg in decorator.arguments)
+            return f"@{self._emit_qualified_name(decorator.name)}({args})"
+        return f"@{self._emit_qualified_name(decorator.name)}"
+
+    def _emit_qualified_name(self, name: QualifiedName) -> str:
+        return ".".join(name.parts)
+
+
+__all__ = ["CodeGenerator"]

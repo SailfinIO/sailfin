@@ -1,8 +1,19 @@
 // examples/advanced/futures.sfn
 
-fn main() {
-    let future1 = async { computeTask1() };
-    let future2 = async { computeTask2() };
-    let results = await [future1, future2];
-    print.info("Results: {{results}}");
+async fn computeTask1() -> number {
+    return 21;
+}
+
+async fn computeTask2() -> number {
+    return 21;
+}
+
+async fn main() {
+    let future1 = computeTask1();
+    let future2 = computeTask2();
+
+    let result1 = await future1;
+    let result2 = await future2;
+
+    print.info("Results: {{[result1, result2]}}");
 }
