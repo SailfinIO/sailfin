@@ -1,6 +1,6 @@
-// self_hosted/src/token.sfn
+// compiler/src/token.sfn
 //
-// Token types shared by the self-hosted compiler front-end. The focus for the
+// Token types shared by the self-hosting compiler front-end. The focus for the
 // first milestone is a pragmatic subset that unlocks bootstrapping the parser
 // without committing to every token the language might eventually surface.
 

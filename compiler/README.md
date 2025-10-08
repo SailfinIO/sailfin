@@ -1,6 +1,6 @@
-# Sailfin Self-Hosted Compiler
+# Sailfin Compiler (Self-Hosting Effort)
 
-The long-term goal for Sailfin is a native, self-hosted toolchain written in
+The long-term goal for Sailfin is a native, self-hosting toolchain written in
 Sailfin itself. The Python bootstrap has carried us far enough to comfortable
 experimentation; from here on we can gradually re-implement the compiler in its
 own language and use the bootstrap as the stage0 builder until the new compiler
@@ -17,7 +17,7 @@ and split the compiler, runtime, and tooling into crates.
 1. **Front-end (parsing + AST)**
    - Port the bootstrap tokeniser and parser into Sailfin.
    - Encode the high-level AST using native structs/enums so later phases can be
-     shared between the bootstrap and self-hosted versions.
+     shared between the bootstrap and the self-hosting version.
 2. **Semantic analysis**
    - Rebuild name resolution, effect checking, and type analysis in Sailfin.
    - Leverage the language’s pattern matching and effect system to keep the
@@ -34,7 +34,7 @@ and split the compiler, runtime, and tooling into crates.
 ## Project Scaffolding
 
 ```
-self_hosted/
+compiler/
   README.md            # This document
   src/
     main.sfn           # Temporary entry point while we wire up modules
@@ -54,4 +54,3 @@ Over the next few iterations we will:
   round-tripping through Python.
 
 Stay tuned – this is the fun part where the language starts compiling itself.
-

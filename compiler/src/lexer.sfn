@@ -1,4 +1,4 @@
-// self_hosted/src/lexer.sfn
+// compiler/src/lexer.sfn
 //
 // Early sketch of the Sailfin lexer written in Sailfin itself. The current
 // implementation is intentionally modest: it tokenises identifier-like runs and

@@ -1,6 +1,6 @@
-"""Smoke tests for the Sailfin self-hosted compiler sources.
+"""Smoke tests for the Sailfin compiler (self-hosting) sources.
 
-We compile selected files under `self_hosted/` with the bootstrap compiler to
+We compile selected files under `compiler/` with the bootstrap compiler to
 ensure the Sailfin sources stay syntactically valid during early development.
 """
 
@@ -20,15 +20,15 @@ from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser
 
 
-SELF_HOSTED_SOURCES = [
-    pathlib.Path("self_hosted/src/main.sfn"),
-    pathlib.Path("self_hosted/src/lexer.sfn"),
-    pathlib.Path("self_hosted/src/token.sfn"),
+COMPILER_SOURCES = [
+    pathlib.Path("compiler/src/main.sfn"),
+    pathlib.Path("compiler/src/lexer.sfn"),
+    pathlib.Path("compiler/src/token.sfn"),
 ]
 
 
-@pytest.mark.parametrize("source_path", SELF_HOSTED_SOURCES)
-def test_compile_self_hosted_source(source_path: pathlib.Path) -> None:
+@pytest.mark.parametrize("source_path", COMPILER_SOURCES)
+def test_compile_compiler_source(source_path: pathlib.Path) -> None:
     full_path = REPO_ROOT / source_path
     source = full_path.read_text(encoding="utf-8")
     lexer = base_lexer.clone()
@@ -47,10 +47,10 @@ def test_compile_self_hosted_source(source_path: pathlib.Path) -> None:
     elif source_path.name == "lexer.sfn":
         namespace = {"__name__": "__main__"}
 
-        token_source = (REPO_ROOT / "self_hosted/src/token.sfn").read_text(encoding="utf-8")
+        token_source = (REPO_ROOT / "compiler/src/token.sfn").read_text(encoding="utf-8")
         token_ast = parser.parse(token_source, lexer=base_lexer.clone())
         token_python = CodeGenerator().generate_code(token_ast)
-        token_compiled = compile(token_python, str((REPO_ROOT / "self_hosted/src/token.py")), "exec")
+        token_compiled = compile(token_python, str((REPO_ROOT / "compiler/src/token.py")), "exec")
         exec(token_compiled, namespace, namespace)
 
         exec(compiled, namespace, namespace)
