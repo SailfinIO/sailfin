@@ -429,6 +429,7 @@ class ObjectLiteral(Expression):
 class StructLiteral(Expression):
     type_name: QualifiedName
     fields: List[ObjectField]
+    type_arguments: List[TypeAnnotation] = field(default_factory=list)
 
 
 @dataclass

@@ -34,6 +34,14 @@ class _Console:
 console = _Console()
 
 
+_PRIMITIVE_TYPE_ALIASES: Dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "void": (type(None),),
+}
+
+
 # ---------------------------------------------------------------------------
 # Concurrency helpers
 # ---------------------------------------------------------------------------
@@ -183,6 +191,44 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
+def _resolve_runtime_type(descriptor: str) -> Optional[type]:
+    current: Any = globals()
+    for part in descriptor.split('.'):
+        if not part:
+            return None
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            current = getattr(current, part, None)
+        if current is None:
+            return None
+    return current if isinstance(current, type) else None
+
+
+def check_type(value: Any, descriptor: str) -> bool:
+    descriptor = descriptor.strip()
+    if not descriptor:
+        return False
+    if '|' in descriptor:
+        return any(check_type(value, part.strip()) for part in descriptor.split('|'))
+    if '&' in descriptor:
+        return all(check_type(value, part.strip()) for part in descriptor.split('&'))
+    if descriptor.endswith('[]'):
+        if not isinstance(value, list):
+            return False
+        inner = descriptor[:-2].strip()
+        return all(check_type(item, inner) for item in value)
+    if descriptor.startswith('fn('):
+        return callable(value)
+    alias = _PRIMITIVE_TYPE_ALIASES.get(descriptor)
+    if alias is not None:
+        return isinstance(value, alias)
+    resolved = _resolve_runtime_type(descriptor)
+    if resolved is None:
+        return False
+    return isinstance(value, resolved)
+
+
 __all__ = [
     "Array",  # backwards compat placeholder
     "EnumInstance",
@@ -193,6 +239,7 @@ __all__ = [
     "match_exhaustive_failed",
     "parallel",
     "sleep",
+    "check_type",
     "spawn",
     "struct_repr",
 ]

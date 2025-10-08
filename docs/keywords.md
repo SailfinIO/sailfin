@@ -28,6 +28,7 @@ the language matures.
 - `interface`
 - `implements`
 - `type`
+- `is`
 - `import`
 - `from`
 - `model`

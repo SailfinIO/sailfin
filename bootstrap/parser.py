@@ -49,6 +49,7 @@ from ast_nodes import (
     NullLiteral,
     NumberLiteral,
     ObjectField,
+    ObjectLiteral,
     OptionalType,
     ParallelExpression,
     Parameter,
@@ -67,6 +68,7 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    TypeCheckExpression,
     ToolDeclaration,
     TestDeclaration,
     UnaryExpression,
@@ -76,6 +78,9 @@ from ast_nodes import (
     TypeAnnotation,
     TypeAliasDeclaration,
     TypeParameter,
+    TupleType,
+    ArrayType,
+    IntersectionType,
     FunctionType,
     UnionType,
     VariableDeclaration,
@@ -205,7 +210,15 @@ class _SailParser:
             return self._parse_variable_declaration()
         if self.tokens.check("TEST"):
             return self._parse_test()
-        return self._parse_function(decorators=self._parse_decorators())
+        decorators = self._parse_decorators()
+        if self.tokens.check("ASYNC") or self.tokens.check("FN"):
+            return self._parse_function(decorators=decorators)
+        if decorators:
+            current = self.tokens.current
+            raise ParseError(
+                f"Unexpected token {current.type} after decorator at line {current.lineno}, column {current.column}"
+            )
+        return self._parse_statement()
 
     # ------------------------------------------------------------------
     # Imports & type aliases
@@ -310,7 +323,11 @@ class _SailParser:
         mutable = bool(self.tokens.match("MUT"))
         self.tokens.match("LET")  # Allow optional `let` for readability
         name_tok = self.tokens.expect("IDENTIFIER")
-        self.tokens.expect("ARROW")
+        if not self._match_type_separator():
+            token = self.tokens.current
+            raise ParseError(
+                f"Expected type annotation for field '{name_tok.value}' at line {token.lineno}, column {token.column}"
+            )
         field_type = self._parse_type()
         self.tokens.expect("SEMICOLON")
         return FieldDeclaration(name=name_tok.value, type_annotation=field_type, mutable=mutable)
@@ -324,13 +341,27 @@ class _SailParser:
             variant_name = self.tokens.expect("IDENTIFIER").value
             fields: List[FieldDeclaration] = []
             if self.tokens.match("LBRACE"):
-                while not self.tokens.match("RBRACE"):
+                while True:
+                    if self.tokens.check("RBRACE"):
+                        self.tokens.advance()
+                        break
                     mutable = bool(self.tokens.match("MUT"))
                     field_name = self.tokens.expect("IDENTIFIER").value
-                    self.tokens.expect("ARROW")
+                    if not self._match_type_separator():
+                        token = self.tokens.current
+                        raise ParseError(
+                            f"Expected type annotation for enum field '{field_name}' at line {token.lineno}, column {token.column}"
+                        )
                     field_type = self._parse_type()
-                    self.tokens.expect("SEMICOLON")
                     fields.append(FieldDeclaration(field_name, field_type, mutable))
+                    if self.tokens.match("COMMA") or self.tokens.match("SEMICOLON"):
+                        continue
+                    if self.tokens.check("RBRACE"):
+                        continue
+                    token = self.tokens.current
+                    raise ParseError(
+                        f"Expected ',' or '}}' after enum field at line {token.lineno}, column {token.column}"
+                    )
             variants.append(EnumVariant(name=variant_name, fields=fields))
             self.tokens.match("COMMA")
         return EnumDeclaration(name=name, variants=variants)
@@ -342,7 +373,18 @@ class _SailParser:
         self.tokens.expect("LBRACE")
         members: List[FunctionSignature] = []
         while not self.tokens.match("RBRACE"):
-            members.append(self._parse_function_signature())
+            if self.tokens.check("FN"):
+                members.append(self._parse_function_signature())
+            else:
+                prop_name = self.tokens.expect("IDENTIFIER").value
+                if not self._match_type_separator():
+                    token = self.tokens.current
+                    raise ParseError(
+                        f"Expected type annotation for interface member '{prop_name}' at line {token.lineno}, column {token.column}"
+                    )
+                return_type = self._parse_type()
+                self.tokens.expect("SEMICOLON")
+                members.append(FunctionSignature(name=prop_name, parameters=[], return_type=return_type))
         return InterfaceDeclaration(name=name, members=members, type_parameters=type_params)
 
     # ------------------------------------------------------------------
@@ -382,6 +424,13 @@ class _SailParser:
                 break
         self.tokens.expect("GT")
         return params
+
+    def _match_type_separator(self) -> bool:
+        if self.tokens.match("ARROW"):
+            return True
+        if self.tokens.match("COLON"):
+            return True
+        return False
 
     def _parse_effect_list(self) -> List[str]:
         if not (self.tokens.check("NOT") and self.tokens.peek(1).type == "LBRACKET"):
@@ -455,7 +504,7 @@ class _SailParser:
         name_tok = self.tokens.expect("IDENTIFIER")
         type_annotation: Optional[TypeAnnotation] = None
         default: Optional[Expression] = None
-        if self.tokens.match("ARROW"):
+        if self._match_type_separator():
             type_annotation = self._parse_type()
         if self.tokens.match("ASSIGN"):
             default = self._parse_expression()
@@ -572,7 +621,7 @@ class _SailParser:
         mutable = bool(self.tokens.match("MUT"))
         name = self.tokens.expect("IDENTIFIER").value
         type_annotation = None
-        if self.tokens.match("ARROW"):
+        if self._match_type_separator():
             type_annotation = self._parse_type()
         initializer = None
         if self.tokens.match("ASSIGN"):
@@ -584,7 +633,7 @@ class _SailParser:
         self.tokens.expect("CONST")
         name = self.tokens.expect("IDENTIFIER").value
         type_annotation = None
-        if self.tokens.match("ARROW"):
+        if self._match_type_separator():
             type_annotation = self._parse_type()
         self.tokens.expect("ASSIGN")
         initializer = self._parse_expression()
@@ -627,9 +676,21 @@ class _SailParser:
         guard = None
         if self.tokens.match("IF"):
             guard = self._parse_expression()
-        self.tokens.expect("ARROW")
+        if not self.tokens.match("ARROW") and not self.tokens.match("FAT_ARROW"):
+            current = self.tokens.current
+            raise ParseError(
+                f"Expected '->' or '=>', found {current.type} at line {current.lineno}, column {current.column}"
+            )
         if self.tokens.check("LBRACE"):
             body = self._parse_block()
+        elif self.tokens.check("RETURN"):
+            self.tokens.advance()
+            if self.tokens.match("SEMICOLON"):
+                value = None
+            else:
+                value = self._parse_expression()
+                self.tokens.match("SEMICOLON")
+            body = Block([ReturnStatement(value=value)])
         else:
             expr = self._parse_expression()
             self.tokens.match("SEMICOLON")
@@ -641,9 +702,6 @@ class _SailParser:
         pattern = self._parse_pattern()
         self.tokens.expect("IN")
         iterable_expr = self._parse_expression()
-        if self.tokens.match("RANGE"):
-            end = self._parse_expression()
-            iterable_expr = RangeExpression(start=iterable_expr, end=end)
         body = self._parse_block()
         return ForStatement(pattern=pattern, iterable=iterable_expr, body=body)
 
@@ -706,6 +764,10 @@ class _SailParser:
             return LiteralPattern(StringLiteral(value=value))
         if self.tokens.check("IDENTIFIER"):
             ident = self.tokens.advance().value
+            parts = [ident]
+            while self.tokens.match("DOT"):
+                parts.append(self.tokens.expect("IDENTIFIER").value)
+            type_name = QualifiedName(parts)
             if self.tokens.match("LBRACE"):
                 fields: List[PatternField] = []
                 while not self.tokens.match("RBRACE"):
@@ -715,7 +777,9 @@ class _SailParser:
                         field_pattern = self._parse_pattern()
                     fields.append(PatternField(name=field_name, pattern=field_pattern))
                     self.tokens.match("COMMA")
-                return ConstructorPattern(type_name=QualifiedName([ident]), fields=fields)
+                return ConstructorPattern(type_name=type_name, fields=fields)
+            if len(parts) > 1:
+                return ConstructorPattern(type_name=type_name, fields=[])
             return IdentifierPattern(name=ident)
         token = self.tokens.current
         raise ParseError(f"Unexpected token {token.type} in pattern at line {token.lineno}, column {token.column}")
@@ -725,34 +789,91 @@ class _SailParser:
     # ------------------------------------------------------------------
 
     def _parse_type(self) -> TypeAnnotation:
-        base_name = self._parse_qualified_name()
-        type_arguments: List[TypeAnnotation] = []
-        if self.tokens.match("LT"):
-            while True:
-                type_arguments.append(self._parse_type())
-                if not self.tokens.match("COMMA"):
-                    break
-            self.tokens.expect("GT")
-        annotation: TypeAnnotation = SimpleType(name=base_name, type_arguments=type_arguments)
-        if self.tokens.match("QUESTION_MARK"):
-            annotation = OptionalType(base=annotation)
+        annotation = self._parse_intersection_type()
         while self.tokens.match("PIPE"):
-            right = self._parse_type()
+            right = self._parse_intersection_type()
             if isinstance(annotation, UnionType):
                 annotation.options.append(right)
             else:
                 annotation = UnionType(options=[annotation, right])
         return annotation
 
+    def _parse_intersection_type(self) -> TypeAnnotation:
+        annotation = self._parse_postfix_type()
+        components: List[TypeAnnotation] = []
+        while self.tokens.match("AMPERSAND"):
+            if not components:
+                components.append(annotation)
+            components.append(self._parse_postfix_type())
+        if components:
+            return IntersectionType(components=components)
+        return annotation
+
+    def _parse_postfix_type(self) -> TypeAnnotation:
+        annotation = self._parse_primary_type()
+        while True:
+            if self.tokens.match("LBRACKET"):
+                self.tokens.expect("RBRACKET")
+                annotation = ArrayType(element_type=annotation)
+                continue
+            if self.tokens.match("QUESTION_MARK"):
+                annotation = OptionalType(base=annotation)
+                continue
+            break
+        return annotation
+
+    def _parse_primary_type(self) -> TypeAnnotation:
+        if self.tokens.match("FN"):
+            self.tokens.expect("LPAREN")
+            parameters: List[TypeAnnotation] = []
+            if not self.tokens.check("RPAREN"):
+                while True:
+                    parameters.append(self._parse_type())
+                    if not self.tokens.match("COMMA"):
+                        break
+            self.tokens.expect("RPAREN")
+            self.tokens.expect("ARROW")
+            return_type = self._parse_type()
+            return FunctionType(parameters=parameters, return_type=return_type)
+        if self.tokens.match("LPAREN"):
+            elements: List[TypeAnnotation] = []
+            if not self.tokens.check("RPAREN"):
+                while True:
+                    elements.append(self._parse_type())
+                    if not self.tokens.match("COMMA"):
+                        break
+            self.tokens.expect("RPAREN")
+            if self.tokens.match("ARROW"):
+                return_type = self._parse_type()
+                return FunctionType(parameters=elements, return_type=return_type)
+            if len(elements) == 1:
+                return elements[0]
+            return TupleType(elements=elements)
+        if self.tokens.match("NULL"):
+            return SimpleType(name=QualifiedName(["null"]))
+        name = self._parse_qualified_name()
+        type_arguments: List[TypeAnnotation] = []
+        if self.tokens.match("LT"):
+            type_arguments = self._parse_type_arguments()
+        return SimpleType(name=name, type_arguments=type_arguments)
+
+    def _parse_type_arguments(self) -> List[TypeAnnotation]:
+        arguments: List[TypeAnnotation] = []
+        if self.tokens.check("GT"):
+            self.tokens.advance()
+            return arguments
+        while True:
+            arguments.append(self._parse_type())
+            if not self.tokens.match("COMMA"):
+                break
+        self.tokens.expect("GT")
+        return arguments
+
     def _parse_nominal_type(self) -> SimpleType:
         name = self._parse_qualified_name()
         type_arguments: List[TypeAnnotation] = []
         if self.tokens.match("LT"):
-            while True:
-                type_arguments.append(self._parse_type())
-                if not self.tokens.match("COMMA"):
-                    break
-            self.tokens.expect("GT")
+            type_arguments = self._parse_type_arguments()
         return SimpleType(name=name, type_arguments=type_arguments)
 
     def _parse_qualified_name(self) -> QualifiedName:
@@ -775,7 +896,14 @@ class _SailParser:
     def _parse_expression(self) -> Expression:
         if self.tokens.check("FN"):
             return self._parse_lambda_expression()
-        return self._parse_logical_or()
+        return self._parse_range_expression()
+
+    def _parse_range_expression(self) -> Expression:
+        expr = self._parse_logical_or()
+        while self.tokens.match("RANGE"):
+            end = self._parse_logical_or()
+            expr = RangeExpression(start=expr, end=end)
+        return expr
 
     def _parse_logical_or(self) -> Expression:
         expr = self._parse_logical_and()
@@ -800,6 +928,9 @@ class _SailParser:
             elif self.tokens.match("NEQ"):
                 right = self._parse_comparison()
                 expr = BinaryExpression(operator="!=", left=expr, right=right)
+            elif self.tokens.match("IS"):
+                type_annotation = self._parse_type()
+                expr = TypeCheckExpression(value=expr, type_annotation=type_annotation)
             else:
                 break
         return expr
@@ -884,6 +1015,10 @@ class _SailParser:
                     )
                 member = member_token.value
                 expr = MemberExpression(object=expr, member=member)
+            elif isinstance(expr, Identifier) and self.tokens.check("LT") and self._looks_like_type_arguments():
+                self.tokens.advance()  # consume '<'
+                expr.type_arguments = self._parse_type_arguments()
+                continue
             elif isinstance(expr, Identifier) and expr.name == "parallel" and self.tokens.check("LBRACKET"):
                 thunks = self._parse_parallel_thunks()
                 expr = ParallelExpression(thunks=thunks)
@@ -894,7 +1029,16 @@ class _SailParser:
             elif isinstance(expr, Identifier) and self.tokens.check("LBRACE") and self._looks_like_struct_literal():
                 self.tokens.advance()  # Consume '{'
                 fields = self._parse_struct_literal_fields()
-                expr = StructLiteral(type_name=QualifiedName([expr.name]), fields=fields)
+                expr = StructLiteral(
+                    type_name=QualifiedName([expr.name]),
+                    fields=fields,
+                    type_arguments=expr.type_arguments,
+                )
+            elif isinstance(expr, MemberExpression) and self.tokens.check("LBRACE") and self._looks_like_struct_literal():
+                self.tokens.advance()
+                fields = self._parse_struct_literal_fields()
+                qualified = self._qualified_name_from_member(expr)
+                expr = StructLiteral(type_name=qualified, fields=fields, type_arguments=[])
             else:
                 break
         return expr
@@ -908,14 +1052,67 @@ class _SailParser:
         second = self.tokens.peek(2)
         return second.type == "COLON"
 
+    def _qualified_name_from_member(self, expr: MemberExpression) -> QualifiedName:
+        parts: List[str] = []
+        current: Expression = expr
+        while isinstance(current, MemberExpression):
+            parts.append(current.member)
+            current = current.object
+        if isinstance(current, Identifier):
+            parts.append(current.name)
+        else:
+            token = self.tokens.current
+            raise ParseError(
+                f"Unsupported struct literal target at line {token.lineno}, column {token.column}"
+            )
+        parts.reverse()
+        return QualifiedName(parts)
+
+    def _looks_like_type_arguments(self) -> bool:
+        depth = 0
+        index = 0
+        while True:
+            token = self.tokens.peek(index)
+            if token.type == "EOF":
+                return False
+            if token.type == "LT":
+                depth += 1
+            elif token.type == "GT":
+                depth -= 1
+                if depth == 0:
+                    next_token = self.tokens.peek(index + 1)
+                    return next_token.type in {
+                        "LBRACE",
+                        "LPAREN",
+                        "DOT",
+                        "SEMICOLON",
+                        "COMMA",
+                        "RPAREN",
+                        "RBRACKET",
+                        "ARROW",
+                        "ASSIGN",
+                        "PLUS_ASSIGN",
+                        "MINUS_ASSIGN",
+                        "MULTIPLY_ASSIGN",
+                        "DIVIDE_ASSIGN",
+                    }
+            elif depth == 0 and token.type in {"SEMICOLON", "COMMA", "RPAREN", "RBRACE"}:
+                return False
+            elif depth > 0 and token.type in {"PLUS", "MINUS", "MULTIPLY", "DIVIDE", "EQ", "NEQ", "LEQ", "GEQ"}:
+                return False
+            index += 1
+
     def _parse_parallel_thunks(self) -> List[Expression]:
         self.tokens.expect("LBRACKET")
         thunks: List[Expression] = []
         if not self.tokens.check("RBRACKET"):
             while True:
                 thunks.append(self._parse_expression())
-                if not self.tokens.match("COMMA"):
-                    break
+                if self.tokens.match("COMMA"):
+                    if self.tokens.check("RBRACKET"):
+                        break
+                    continue
+                break
         self.tokens.expect("RBRACKET")
         return thunks
 
@@ -960,6 +1157,21 @@ class _SailParser:
                         break
             self.tokens.expect("RBRACKET")
             return ArrayLiteral(elements=elements)
+        if self.tokens.match("LBRACE"):
+            fields: List[ObjectField] = []
+            if not self.tokens.check("RBRACE"):
+                while True:
+                    key = self.tokens.expect("IDENTIFIER").value
+                    self.tokens.expect("COLON")
+                    value = self._parse_expression()
+                    fields.append(ObjectField(name=key, value=value))
+                    if self.tokens.match("COMMA"):
+                        if self.tokens.check("RBRACE"):
+                            break
+                        continue
+                    break
+            self.tokens.expect("RBRACE")
+            return ObjectLiteral(fields=fields)
         token = self.tokens.current
         raise ParseError(f"Unexpected token {token.type} at line {token.lineno}, column {token.column}")
 

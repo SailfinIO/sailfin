@@ -71,11 +71,13 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    FunctionType,
     ToolDeclaration,
     TestDeclaration,
     ThrowStatement,
     TryStatement,
     TupleType,
+    IntersectionType,
     TypeAliasDeclaration,
     TypeAnnotation,
     TypeCheckExpression,
@@ -374,6 +376,11 @@ class CodeGenerator:
             return "(" + ", ".join(self._type_to_string(elem) for elem in annotation.elements) + ")"
         if isinstance(annotation, ArrayType):
             return f"{self._type_to_string(annotation.element_type)}[]"
+        if isinstance(annotation, IntersectionType):
+            return " & ".join(self._type_to_string(comp) for comp in annotation.components)
+        if isinstance(annotation, FunctionType):
+            params = ", ".join(self._type_to_string(param) for param in annotation.parameters)
+            return f"fn({params}) -> {self._type_to_string(annotation.return_type)}"
         return str(annotation)
 
     def _model_property_value(self, expr: Expression) -> str:
@@ -697,8 +704,8 @@ class CodeGenerator:
             return temp
         if isinstance(expr, TypeCheckExpression):
             value = self._emit_expression(expr.value)
-            type_expr = self._emit_type(expr.type_annotation)
-            return f"isinstance({value}, {type_expr})"
+            descriptor = self._type_to_string(expr.type_annotation)
+            return f"runtime.check_type({value}, {descriptor!r})"
         raise NotImplementedError(f"Unhandled expression: {type(expr).__name__}")
 
     def _emit_lambda(self, expr: LambdaExpression) -> str:
@@ -776,6 +783,10 @@ class CodeGenerator:
         if isinstance(annotation, UnionType):
             members = ", ".join(self._emit_type(option) for option in annotation.options)
             return f"Union[{members}]"
+        if isinstance(annotation, IntersectionType):
+            return "object"
+        if isinstance(annotation, FunctionType):
+            return "object"
         return "object"
 
     def _emit_decorator(self, decorator: Decorator) -> str:

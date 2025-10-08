@@ -20,6 +20,7 @@ reserved = {
     'loop': 'LOOP',
     'async': 'ASYNC',
     'await': 'AWAIT',
+    'is': 'IS',
     'import': 'IMPORT',
     'from': 'FROM',
     'type': 'TYPE',
@@ -66,6 +67,7 @@ tokens = [
     'RBRACKET',
     'SEMICOLON',
     'ARROW',
+    'FAT_ARROW',
     'COMMA',
     'DOT',
     'LT',
@@ -102,6 +104,7 @@ t_PLUS = r'\+'
 t_MINUS = r'-'
 t_MULTIPLY = r'\*'
 t_DIVIDE = r'/'
+t_FAT_ARROW = r'=>'
 t_ASSIGN = r'='
 t_LPAREN = r'\('
 t_RPAREN = r'\)'
