@@ -71,6 +71,10 @@ lock_models = true
 provenance_strict = true
 signing = true
 
+[profiles.base]
+incremental = true
+diagnostics = "rich"
+
 [profiles.dev]
 inherits = ["base"]
 incremental = true
@@ -100,8 +104,8 @@ allow = ["io", "net", "clock", "model"]
 name    = "openai.summarizer"
 version = "3.1.0"
 digest  = "sha256:deadbeef..."
-evaluators = ["Faithfulness", "LatencyBudget(150ms)"]
-cost_cap = "USD 0.05"
+evaluators = [ Faithfulness, LatencyBudget(150ms) ]
+cost_cap = 0.05 # USD (currency literal support forthcoming)
 ```
 
 The fleet manifest orchestrates:

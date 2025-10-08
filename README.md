@@ -18,17 +18,17 @@ model Summarizer : Model<Text, Summary> {
   engine     = "gpt-neo@3.1"
   schema     = Summary
   max_tok    = 2000
-  cost_cap   = $0.05
+  cost_cap   = 0.05  // USD (currency literal support forthcoming)
   evaluators = [ Faithfulness, LatencyBudget(150ms) ]
 }
 
-type Summary {
-  title   : String
-  bullets : Vec<String>
-  risks?  : Vec<String>
+struct Summary {
+  title   -> string;
+  bullets -> Vec<string>;
+  risks?  -> Vec<string>;
 }
 
-fn summarize_doc(doc: Text) -> Summary ![model, io] {
+fn summarize_doc(doc: Text) -> Summary ![io, model] {
   prompt system {
     "You are a careful technical summarizer. Output matches `Summary`."
   }
@@ -37,7 +37,7 @@ fn summarize_doc(doc: Text) -> Summary ![model, io] {
   }
 
   let generation = Summarizer.call()
-  console.info(generation.card)    // provenance metadata
+  print.info(generation.card)      // provenance metadata (bootstrap: print is bound to runtime.console)
   generation.output                // typed `Summary`
 }
 
@@ -58,6 +58,8 @@ The Python-hosted stage0 toolchain supports a growing subset of the language whi
 - `docs/enbf.md` — evolving grammar draft.
 - `docs/package-management.md` — outlines the capsule and registry model manager.
 - `docs/keywords.md` — evolving list of reserved keywords and future directions.
+
+The docs mention `fleet.toml`, `std/`, and `runtime/` as part of the self-hosted target layout; these are not yet present in this repository.
 
 ## Architecture Overview
 

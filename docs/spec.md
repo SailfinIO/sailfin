@@ -20,10 +20,13 @@ self-hosted architecture, not the current on-disk structure.
   `_`. Identifiers are case-sensitive.
 - **Keywords** are listed in `docs/keywords.md`. They include traditional
   control-flow terms (`fn`, `async`, `await`, `match`, …) and AI-first syntax
-  such as `model`, `prompt`, `pipeline`, and `test`. (Forthcoming: `assert` will
-  be added as a statement keyword; see §8.)
+  such as `model`, `prompt`, `pipeline`, `test`, and the implemented `assert`
+  statement (see §8).
 - **Literals**:
-  - Numeric literals support integers (`42`) and decimals (`3.14`).
+  - Numeric literals support integers (`42`) and decimals (`3.14`). Currency
+    literals (e.g. `$0.05`) are **not yet parsed** in the bootstrap subset;
+    use a numeric literal plus a trailing comment for monetary values, e.g.
+    `0.05 // USD`.
   - String literals use double quotes, support escapes, and recognise
     `{{ expression }}` interpolation (see §9).
   - Boolean literals are `true` and `false`.
@@ -37,7 +40,7 @@ Functions, pipelines, tests, and tools may declare required capabilities with
 `![effect, ...]` syntax appended to the signature:
 
 ```sfn
-fn fetch_order(id: OrderId) -> Order ![io,net] { ... }
+fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 ```
 
 The bootstrap parser records the effect list; the self-hosted compiler enforces
@@ -93,7 +96,7 @@ set is `io`, `net`, `model`, `gpu`, `rand`, and `clock`. Custom effects may be
 introduced via manifests.
 
 ```sfn
-fn issue_refund(order: Order) -> Refund ![io,net,model] {
+fn issue_refund(order: Order) -> Refund ![io, model, net] {
     let decision = RiskAssessor.call(order);
     payments.refund(order.payment_id);
     decision.into_refund();
@@ -181,7 +184,7 @@ model Summarizer : Model<Text, Summary> {
   engine      = "gpt-foo@2.3.1";
   schema      = Summary;
   max_tok     = 2000;
-  cost_cap    = $0.05;
+  cost_cap    = 0.05; // USD (currency literal support forthcoming)
   evaluators  = [ Faithfulness, LatencyBudget(150ms) ];
 }
 ```
@@ -197,7 +200,7 @@ input hashes, latency, cost).
 | `engine`     | string                  | Yes      | Provider + version tag (e.g. `gpt-foo@2.3.1`) |
 | `schema`     | Type                    | Yes      | Output validation / shaping type |
 | `max_tok`    | number                  | No       | Maximum output tokens (advisory; enforced per provider) |
-| `cost_cap`   | currency literal        | No       | Maximum spend for a single call (enforced at runtime) |
+| `cost_cap`   | number (monetary; currency literal forthcoming) | No       | Maximum spend for a single call (enforced at runtime) |
 | `evaluators` | Array<Identifier|Call>  | No       | Quality/guardrail evaluators applied to generations |
 | `temperature`| number (0–2)            | No       | Stochastic sampling parameter |
 | `top_p`      | number (0–1)            | No       | Nucleus sampling parameter |
@@ -228,7 +231,7 @@ fn summarize_doc(doc: Text) -> Summary ![model] {
 compile-time shape checks.
 
 ```sfn
-pipeline index_corpus(docs: Seq<Text>) ![io,gpu] {
+pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
     docs
       |> chunk(by: "semantic", target_tokens: 512)
       |> embed(with: "e5-large")
@@ -299,36 +302,37 @@ boundaries.
   effect. The runtime batches compatible tensor work automatically.
 
 ```sfn
-async fn main() ![io,model] {
-    let scope = scope.with_timeout(1s);
-    let messages -> Channel<number> = channel(capacity: 32);
+async fn main() ![io, model] {
+  let scope = scope.with_timeout(1s);
+  let messages -> Channel<number> = channel(capacity: 32);
 
-    routine scope {
-        messages.send(42);
-    }
+  routine scope {
+    messages.send(42);
+  }
 
-    let result = await messages.receive();
-  console.info("Received: {{ result }}");
+  let result = await messages.receive();
+  print.info("Received: {{ result }}");
 }
 
-### 5.1 `is` Operator (Type / Pattern Guard)
-
-The bootstrap compiler reserves and implements a minimal `is` infix operator:
-
 ```
+
+### 5.1 is operator (type / pattern guard)
+
+The bootstrap compiler implements a minimal `is` infix operator:
+
+```sfn
 if value is SomeType { ... }
 ```
 
 Semantics (bootstrap stage0):
-1. Evaluates the right-hand side as a nominal type name.
-2. Performs a runtime instance check analogous to `check_type` in the runtime.
-3. Returns a boolean; inside the guarded block future static versions will
-   narrow the type of `value` (not yet enforced in bootstrap).
+1. Evaluate the right-hand side as a nominal type name.
+2. Perform a runtime instance check analogous to `check_type` in the runtime.
+3. Return a boolean; future static versions will narrow the type of `value`
+  inside the guarded block (not yet enforced in bootstrap).
 
-Planned evolution: `is` will integrate with pattern matching and support
+*Planned evolution*: `is` will integrate with pattern matching and support
 structured destructuring (`if response is Error { ... }`). Until then its use
 is limited to ergonomic runtime type guards.
-```
 
 ## 6. Type System Overview
 
@@ -397,7 +401,7 @@ Failures leave the placeholder intact for debugging.
 The bootstrap compiler lowers Sailfin programs into Python code backed by
 `bootstrap/runtime_support.py`. The helper module currently exposes:
 
-- `runtime.console.info` – implements the `console.info` convention.
+- `runtime.console.info` – backing implementation for source-level `print.info`.
 - `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
   primitives.
 - `runtime.models.call_model` – placeholder for model invocations; currently
@@ -410,6 +414,17 @@ The self-hosted runtime layers on:
 2. Policy engine for taint-tracked values.
 3. Determinism controls (`seed`, `temperature`, per-call randomness budgets).
 4. Telemetry: latency, cost, token counts, GPU metrics, and lineage traces.
+
+### 10.1 Printing and Logging
+
+Source code should use `print.info(...)` for standard output and `print.error(...)` for errors. In the bootstrap backend, the code generator injects `print = runtime.console`, so these calls are implemented by `runtime.console.info` and `runtime.console.error` respectively. The identifier `console` is not automatically in scope for Sailfin source; using `console.info(...)` in Sailfin code will not compile correctly under the bootstrap backend.
+
+Supported today:
+- `print.info(value)` – prints a value or interpolated string.
+- `print.error(value)` – prints a value or interpolated string to error channel (same sink in bootstrap; may diverge later).
+
+Not supported yet:
+- `print.warn`, `print.debug`, or structured logging levels. These may be added in the self-hosted runtime.
 
 ## 11. Roadmap
 
@@ -434,7 +449,7 @@ This specification will evolve with the implementation. Refer to `enbf.md` and
 | sail.json | sail.toml |
 | (harbor) registry | registry |
 | evals | evaluators |
-| print.info | console.info |
+| console.info (doc examples) | print.info (source syntax) |
 
 ### Bootstrap vs Self-Hosted Feature Matrix
 

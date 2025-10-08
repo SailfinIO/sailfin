@@ -10,7 +10,7 @@ the language matures.
 - `else`
 - `match`
 - `return`
- - `assert`
+- `assert`
 - `try`
 - `catch`
 - `finally`
@@ -40,10 +40,9 @@ the language matures.
 ### Concurrency and Utilities
 
 - `routine`
--- `console`
--- `info` (reserved temporarily for `console.info` sugar; may be folded)
 - `scope`
 - `with`
+- `print` and `info` (surface syntax for logging: use `print.info(...)`)
 
 ### Literals
 
@@ -59,6 +58,10 @@ the language matures.
 - `assistant`
 - `tool`
 
+
+### Reserved identifiers (not keywords)
+
+- None specific to printing. In the bootstrap backend, `print` is bound to `runtime.console` so that `print.info(...)` is the idiomatic and supported form. Older docs may show `console.info(...)`; prefer `print.info(...)` in source.
+
 > **Notes:**
-> * `console` / `info` are reserved to support an idiomatic `console.info(...)` logging helper. They may become a single intrinsic in a future revision.
 > * `is` is reserved for prospective pattern or type guard syntax; it is not yet part of the stable surface.

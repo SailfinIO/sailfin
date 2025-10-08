@@ -1,5 +1,7 @@
 # Sailfin Grammar (EBNF)
 
+(filename: `enbf.md`)
+
 The Sailfin grammar is written using an extended Backus–Naur form that mirrors
 current bootstrap behaviour while signalling upcoming AI-native features.
 Non-terminals are written in `PascalCase`, terminals in double quotes.
