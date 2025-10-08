@@ -1,6 +1,13 @@
 # bootstrap/compiler.py
 
 import sys
+import argparse
+try:
+    import bootstrap as _bootstrap_pkg  # when executed as part of package
+    __version__ = getattr(_bootstrap_pkg, "__version__", "0.0.0")
+except Exception:  # fallback when run standalone
+    __version__ = "0.0.0"
+
 from lexer import lexer
 from parser import parser
 from code_generator import CodeGenerator
@@ -100,8 +107,25 @@ def compile_and_run(source_file):
         traceback.print_exc()
 
 
+def main(argv: list[str]) -> int:
+    parser_cli = argparse.ArgumentParser(
+        description="Sailfin bootstrap compiler"
+    )
+    parser_cli.add_argument("source", nargs="?", help="Sailfin source file (.sfn)")
+    parser_cli.add_argument("--version", "-V", action="store_true", help="Print version and exit")
+    args = parser_cli.parse_args(argv)
+
+    if args.version:
+        print(__version__)
+        return 0
+
+    if not args.source:
+        parser_cli.print_usage()
+        return 1
+
+    compile_and_run(args.source)
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python compiler.py <source_file.sfn>")
-    else:
-        compile_and_run(sys.argv[1])
+    raise SystemExit(main(sys.argv[1:]))

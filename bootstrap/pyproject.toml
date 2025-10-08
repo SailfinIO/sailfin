@@ -26,6 +26,8 @@ python-semantic-release = "^9.17.0"
 [tool.semantic_release]
 version_source = "tag"
 upload_to_pypi = false
+build_command = "pyinstaller --onefile --name sfn bootstrap.py"
+version_variables = ["__init__.py:__version__"]
 
 # Branch configuration (dict-of-tables style expected by python-semantic-release >=9)
 [tool.semantic_release.branches.main]
@@ -37,26 +39,12 @@ match = "beta"
 prerelease = true
 prerelease_token = "beta"
 
-# Plugins (keep existing ordering). For plugin-specific config, prefer dedicated tables when possible.
-plugins = [
-    [
-        "semantic_release.commit_parser",
-        { type_enforced = true, body_required = false, merge_message_pattern = "^Merge pull request #\\d+ from .+$" }
-    ],
-    "semantic_release.release",
-    "semantic_release.changelog",
-    "semantic_release.github",
-    [
-        "semantic_release.git",
-        { message = "chore(release): ${next_release.version} [skip ci]\n\n${next_release.notes}", assets = ["bootstrap/dist/sfn"] }
-    ]
-]
+# Remove explicit plugins block to allow python-semantic-release defaults (ensures commit analysis & git/github plugins run in correct order)
 
 [tool.semantic_release.changelog]
 directory = "bootstrap"
 filename = "CHANGELOG.md"
 include_v_prefix = true
-version_variable = "__init__.py:__version__"
 
 [tool.semantic_release.git]
 tag_template = "v{version}"
@@ -64,3 +52,4 @@ commit_author = "semantic-release-bot <bot@example.com>"
 
 [tool.semantic_release.github]
 release_method = "github"
+assets = ["dist/sfn"]

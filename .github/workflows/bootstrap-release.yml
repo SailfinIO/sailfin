@@ -52,17 +52,24 @@ jobs:
           poetry install --no-interaction --no-ansi
         working-directory: bootstrap
 
-      # 7. Build the Executable with PyInstaller
-      - name: Build Executable with PyInstaller
-        run: |
-          pyinstaller --onefile --name sfn bootstrap.py
-        working-directory: bootstrap
-        # This will create the executable in the `bootstrap/dist/` directory
-
-      # 8. Semantic Release
-      - name: Semantic Release
+      # 7. (Optional) Show current & next version determination (dry run)
+      - name: Determine Next Version (dry run)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMANTIC_RELEASE_DRY_RUN: true
+        run: |
+          poetry run semantic-release version || true
+        working-directory: bootstrap
+
+      # 8. Semantic Release (will also build via build_command and attach assets)
+      - name: Semantic Release
+        env:
+          # GitHub automatically provides this token; semantic-release expects GH_TOKEN
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Uncomment for verbose troubleshooting
+          # SEMANTIC_RELEASE_LOG_LEVEL: DEBUG
         run: |
           poetry run semantic-release publish
         working-directory: bootstrap
