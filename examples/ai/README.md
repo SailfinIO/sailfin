@@ -1,8 +1,8 @@
 # AI Examples
 
-These examples showcase Sailfin's AI-oriented workflows using the bootstrap compiler's current surface area.
+Illustrates Sailfin's AI‑native primitives: model declarations, prompt composition, effect annotations, tools, pipelines, and deterministic scopes. These map to §§3.6–3.8 & 8 in `docs/spec.md`.
 
-- **`effectful-model-call.sfn`** – Demonstrates effect annotations (`![model, io]`), simple redaction helpers, and golden tests that run alongside executable code.
-- **`model-workflow.sfn`** – Captures model declarations, prompt blocks, tools, pipelines, and scoped effect controls in a single workflow.
+- **`effectful-model-call.sfn`** – Minimal effectful model invocation with a redaction helper and a `test` validating string composition.
+- **`model-workflow.sfn`** – End‑to‑end workflow: model declaration, prompt blocks (`prompt system` / `prompt user`), a `tool`, a `pipeline`, and scoped determinism helpers (`with seed(...), temperature(...)`).
 
-> The bootstrap runtime mocks model behaviour; replace the `call_model` helper with real bindings once the model runtime lands.
+> The bootstrap runtime currently mocks model behaviour. Generation cards, provenance, capability enforcement, and evaluator suites will activate in the self‑hosted runtime—treat these examples as forward‑looking scaffolds.

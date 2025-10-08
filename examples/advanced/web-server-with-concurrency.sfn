@@ -19,7 +19,7 @@ fn computeHeavyTask() -> number {
     return 42;
 }
 
-fn main() {
+fn main() ![net] {
     serve(handleRequest, { port: 8080 });
     print.info("Server is running on http://localhost:8080");
 }

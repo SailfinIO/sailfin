@@ -1,14 +1,19 @@
-# Sail Examples
+# Sailfin Examples
 
-This directory contains examples for the Sailfin programming language, demonstrating its features and capabilities.
+This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, concurrency primitives, and forthcoming AI-native features described in `docs/spec.md`.
+
+Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, remember these are partially stubbed in the current Python runtime: semantics (capability enforcement, provenance, determinism) will harden in the self‑hosted toolchain.
 
 ## Categories
 
-- [Basics](./basics/): Core language features like variables, functions, conditionals, and enums.
-- [Concurrency](./concurrency/): Examples of routines, channels, and parallel execution.
-- [Web](./web/): Networking examples, including HTTP servers and WebSocket usage.
-- [Advanced](./advanced/): More complex examples, such as encapsulation, polymorphism, and advanced algorithms.
-- [AI](./ai/): Model-centric workflows, effect annotations, and test scaffolds for AI-native code.
-- [Functional](./functional/): Functional programming concepts, like higher-order functions and map/reduce.
-- [I/O](./io/): File reading and writing examples.
-- [Types](./types/): Advanced type examples, like recursive types and tagged unions.
+- [Basics](./basics/) – Variables, functions, conditionals, pattern matching, enums, interfaces, tests, and error handling.
+- [Concurrency](./concurrency/) – Routines, channels, dynamic scheduling, and parallel execution primitives.
+- [Web](./web/) – HTTP & WebSocket server patterns plus async I/O examples.
+- [Advanced](./advanced/) – Generics, polymorphism, closures, decorators, type guards, effectful interfaces, concurrency + web integration, matrix math, and more.
+- [AI](./ai/) – Model declarations, prompt blocks, tools, pipelines, effect annotations, and deterministic scope helpers.
+- [Algorithms](./algorithms/) – Classic algorithms expressed in Sailfin (currently `quicksort`).
+- [Functional](./functional/) – Higher‑order functions, map/reduce, immutable style data transforms.
+- [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
+- [Types](./types/) – Recursive types, tagged unions, ADTs & pattern matching examples.
+
+> Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

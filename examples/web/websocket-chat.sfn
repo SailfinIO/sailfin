@@ -2,7 +2,7 @@
 
 import { websocket } from "sail/net";
 
-fn main() {
+fn main() ![net] {
     let server = websocket.serve({ port: 8080 });
     print.info("WebSocket server is running on ws://localhost:8080");
 

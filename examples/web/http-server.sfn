@@ -2,7 +2,7 @@
 
 import { serve } from "sail/http";
 
-fn main() {
+fn main() ![net] {
     serve(fn(req, res) {
         if req.path == "/" {
             res.send("Welcome to Sailfin!");

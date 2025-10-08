@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from ast_nodes import FunctionDeclaration, TestDeclaration
 from bootstrap.code_generator import CodeGenerator
+from effect_checker import EffectValidationError
 from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser
 
@@ -44,6 +45,36 @@ def test_parse_effect_annotations() -> None:
 
     assert functions and functions[0].effects == ["io", "net"]
     assert tests and tests[0].effects == ["model"]
+
+
+def test_prompt_requires_model_effect() -> None:
+    source = "\n".join(
+        [
+            "fn demo() {",
+            "    prompt system { \"Hello\"; };",
+            "}",
+        ]
+    )
+    lexer = base_lexer.clone()
+    ast = parser.parse(source, lexer=lexer)
+
+    with pytest.raises(EffectValidationError):
+        CodeGenerator().generate_code(ast)
+
+
+def test_fs_requires_io_effect() -> None:
+    source = "\n".join(
+        [
+            "fn write() {",
+            "    fs.writeFile(\"out.txt\", \"hello\");",
+            "}",
+        ]
+    )
+    lexer = base_lexer.clone()
+    ast = parser.parse(source, lexer=lexer)
+
+    with pytest.raises(EffectValidationError):
+        CodeGenerator().generate_code(ast)
 
 
 @pytest.mark.parametrize("source_path", EXAMPLE_FILES)

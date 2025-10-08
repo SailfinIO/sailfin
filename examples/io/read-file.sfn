@@ -2,7 +2,7 @@
 
 import { fs } from "sail/io";
 
-fn main() {
+fn main() ![io] {
     let content = fs.readFile("example.txt");
     print.info("File content: {{content}}");
 }
