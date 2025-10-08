@@ -28,6 +28,8 @@ version_source = "tag"
 upload_to_pypi = false
 build_command = "pyinstaller --onefile --name sfn bootstrap.py"
 version_variables = ["__init__.py:__version__"]
+commit_parser = "conventional"
+logging_use_named_masks = true
 
 # Branch configuration (dict-of-tables style expected by python-semantic-release >=9)
 [tool.semantic_release.branches.main]
