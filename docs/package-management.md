@@ -1,156 +1,224 @@
-# Sailfin Package & Model Management
+# Sailfin Capsule & Model Management
 
-Sailfin ships with a built-in package manager called **`sail`**. The tool manages
-code dependencies, model artefacts, capability manifests, and reproducible build
-metadata. It feels familiar if you have used JavaScript tooling, but it is
-designed for deterministic, AI-native projects.
+Sailfin ships with a built-in package manager called `sfn`.
+It manages code capsules, model artefacts, capability manifests, and reproducible build metadata.
+The interface feels familiar to developers used to modern dependency managers, but it is designed for deterministic, AI-native projects.
 
 ## Getting Started
 
-### Installing Packages
+### Installing Capsules
 
 ```bash
-sail install sail/http
+sfn add sailfin/http
 ```
 
-The command fetches the `sail/http` package from the Sailfin registry and records it in your `sail.json` manifest. Multiple packages can be installed at once:
+This fetches the `sailfin/http` capsule from the Sailfin registry and records it in your `sail.toml` manifest.
+Multiple capsules can be added at once:
 
 ```bash
-sail install sail/http sail/io sail/net
+sfn add sailfin/http sailfin/io sailfin/net
 ```
 
-### The `sail.json` Manifest
+### The `sail.toml` Manifest
 
-Every project contains a `sail.json` descriptor:
+Every capsule contains a `sail.toml` descriptor:
 
-```json
-{
-  "name": "my-sailfin-project",
-  "version": "1.0.0",
-  "description": "A simple Sailfin project",
-  "main": "src/main.sfn",
-  "dependencies": {
-    "sail/http": "^1.0.0",
-    "sail/io": "^0.5.0"
-  }
-}
+```toml
+[package]
+name = "my-sailfin-project"
+version = "1.0.0"
+description = "A simple Sailfin capsule"
+entry = "src/main.sfn"
+
+[dependencies]
+"sailfin/http" = "^1.0.0"
+"sailfin/io"   = "^0.5.0"
+
+[capabilities]
+allow = ["io", "net", "model"]
+
+[models]
+"openai.summarizer" = "gpt-foo@2.3.1"
 ```
 
-Paths in `sail.json` use the `.sfn` extension for Sailfin source files. The
-manifest also records **capabilities** and **model pinning**:
+Capabilities listed here gate which effects the capsule may use; the compiler rejects code that performs an undeclared effect.  
+Model entries capture exact provider versions so builds remain reproducible.
 
-```json
-{
-  "capabilities": ["io", "net", "model"],
-  "models": {
-    "openai/summarizer": "gpt-foo@2.3.1"
-  }
-}
+Projects containing multiple capsules are organised as a fleet, defined by a top-level `fleet.toml`.
+
+### Fleet Manifest Example
+
+Below is an illustrative `fleet.toml` showing how multiple capsules, shared profiles, and model provenance are declared. (Fields and syntax are evolving.)
+
+```toml
+[fleet.meta]
+name        = "sailfin"
+version     = "0.0.0"
+description = "Core language, runtime, and tooling"
+
+[registry]
+primary = "https://registry.sailfin.dev"
+cache   = "~/.sfn/cache"
+
+[build]
+opt_level = "z"
+incremental = true
+diagnostics = "rich"
+
+[provenance]
+lock_capsules = true
+lock_models = true
+provenance_strict = true
+signing = true
+
+[profiles.dev]
+inherits = ["base"]
+incremental = true
+diagnostics = "rich"
+
+[profiles.ci]
+incremental  = false
+diagnostics  = "compact"
+fail_on_warn = true
+
+[[capsule]]
+name  = "compiler.frontend"
+path  = "compiler/src"
+kind  = "lib"
+group = "compiler"
+allow = ["io", "clock"]
+deps  = ["std.core", "shared.diag"]
+
+[[capsule]]
+name  = "runtime.core"
+path  = "runtime/core"
+kind  = "runtime"
+group = "runtime"
+allow = ["io", "net", "clock", "model"]
+
+[[modelpack]]
+name    = "openai.summarizer"
+version = "3.1.0"
+digest  = "sha256:deadbeef..."
+evaluators = ["Faithfulness", "LatencyBudget(150ms)"]
+cost_cap = "USD 0.05"
 ```
 
-Capabilities listed here gate what effects the package may use; the compiler
-will reject code that performs an undeclared effect. Model entries capture the
-exact provider version so builds remain reproducible.
+The fleet manifest orchestrates:
+- Capsules and their effect capability boundaries
+- Reproducible model and dependency locking
+- Build profiles for different workflows
+- Shared evaluation / provenance policies
+
+Individual capsules still declare their own `sail.toml`; the fleet manifest aggregates and overrides where necessary.
 
 ## Common Commands
 
-| Command | Description |
-| ------- | ----------- |
-| `sail init` | Scaffold a new project with `sail.json` and a `src/` directory. |
-| `sail install <pkg>` | Add a dependency and write it to the manifest. |
-| `sail update` | Resolve the latest compatible versions for all dependencies. |
-| `sail remove <pkg>` | Remove a dependency and tidy the manifest. |
-| `sail run` | Build and execute the current project with capability checks. |
-| `sail test` | Run `test` declarations, including golden and adversarial suites. |
-| `sail publish` | Publish the current package to the registry. |
-| `sail add model <provider>:<name>@<ver>` | Pin and fetch a model artefact. |
-| `sail models sync` | Refresh local caches and provenance cards for models. |
+- `sfn init`: Scaffold a new capsule with `sail.toml` and a `src/` directory.
+- `sfn add <capsule>`: Add a dependency and record it in the manifest.
+- `sfn update`: Resolve the latest compatible versions for all dependencies.
+- `sfn remove <capsule>`: Remove a dependency and tidy the manifest.
+- `sfn run`: Build and execute the current capsule with capability checks.
+- `sfn test`: Run test declarations, including golden and adversarial suites.
+- `sfn publish`: Publish the current capsule or model pack to the registry.
+- `sfn add-model <provider>:<name>@<ver>`: Pin and fetch a model artefact.
+- `sfn models sync`: Refresh local caches and provenance cards for models.
 
 ## Managing Model Artefacts
 
-The package manager treats models as first-class dependencies. Use `sail add
-model` to pin a model version and download its schema and evaluation metadata:
+The package manager treats models as first-class dependencies.
 
 ```bash
-sail add model openai:summarizer@2.3.1
+sfn add-model openai:summarizer@2.3.1
 ```
 
-Model metadata lives under `.sail/models/` and is embedded into build outputs as
-generation-card templates. `sail models sync` re-fetches provider signatures,
-cost caps, and evaluator baselines.
+Model metadata is stored under `.sfn/models/` and embedded into build outputs as generation-card templates.  
+`sfn models sync` re-fetches provider signatures, cost caps, and evaluator baselines.
 
 ## Capability Bundles & Policies
 
-`sail capabilities audit` reports which modules require effects (`io`, `net`,
-`model`, `gpu`, etc.) and ensures policies exist for taint-tracked types such as
-`PII<T>` or `Secret<T>`. Policy bundles ship alongside packages so downstream
-consumers inherit redaction rules, retention windows, and consent flows.
+`sfn capabilities audit` reports which modules require effects (`io`, `net`, `model`, `gpu`, etc.) and ensures that policies exist for taint-tracked types such as `PII<T>` or `Secret<T>`.  
+Policy bundles ship alongside capsules so downstream consumers inherit redaction rules, retention windows, and consent flows.
 
 ## Example Workflow
 
-1. Initialise the project:
+Initialise the capsule:
 
-   ```bash
-   sail init
-   ```
+```bash
+sfn init
+```
 
-2. Install dependencies:
+Install dependencies:
 
-   ```bash
-   sail install sail/http
-   ```
+```bash
+sfn add sailfin/http
+```
 
-3. Write code using the Sailfin syntax:
+Write code using Sailfin syntax:
 
 ```sailfin
-import { serve } from "sail/http";
+import { serve } from "sailfin/http"
 
 fn main() {
     serve(fn(req, res) {
-        res.send("Hello, Sailfin!");
-    }, { port: 8080 });
+        res.send("Hello, Sailfin!")
+    }, { port: 8080 })
 }
 ```
 
-4. Run the application:
+Run the application:
 
 ```bash
-sail run
+sfn run
 ```
 
-5. Add a model dependency and run tests with deterministic seeds:
+Add a model dependency and run tests deterministically:
 
 ```bash
-sail add model openai:summarizer@2.3.1
-sail test --scope seed=42 --scope temperature=0.2
+sfn add-model openai:summarizer@2.3.1
+sfn test --scope seed=42 --scope temperature=0.2
 ```
 
-6. Publish when ready:
+Publish when ready:
 
 ```bash
-sail publish
+sfn publish --registry registry.sailfin.dev
 ```
 
 ## Registry & Provenance
 
-Sailfin packages and model artefacts are hosted on the central registry at
-<https://sailpkg.org>. Each upload includes provenance metadata: commit hashes,
-generation cards, capability manifests, and evaluator baselines. Consumers can
-replay model calls using the bundled cards.
+Sailfin capsules and model artefacts are hosted on the central registry at <https://registry.sailfin.dev>.
+
+Each upload includes provenance metadata: commit hashes, generation cards, capability manifests, and evaluator baselines.  
+Consumers can replay model calls using the bundled cards for deterministic evaluation.
 
 ## Local Cache
 
-The package manager maintains a local cache to accelerate installs and model
-downloads:
+`sfn` maintains a local cache to accelerate installs and model downloads.
 
-- Unix-like systems: `~/.sail/cache`
-- Windows: `%USERPROFILE%/.sail/cache`
+* Unix-like: `~/.sfn/cache`
+* Windows: `%USERPROFILE%\\.sfn\\cache`
 
-Clear the cache when necessary:
+Clear the cache when needed:
 
 ```bash
-sail cache clear
+sfn cache clear
 ```
 
-Use `sail cache cards --replay <trace>` to materialise generation cards for
-postmortems without contacting the provider.
+Inspect stored generation cards or replay traces:
+
+```bash
+sfn cache cards --replay <trace>
+```
+
+## ✅ Terminology Migration Summary
+
+| Old term | New term |
+|----------|----------|
+| sail CLI | sfn CLI |
+| `sail.json` | `sail.toml` |
+| package | capsule |
+| project | fleet (when multi-capsule) |
+| registry (Harbor) | registry |
+
+These changes align language tooling with capsule/fleet architecture and first-class model/version provenance.

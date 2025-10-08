@@ -30,7 +30,7 @@ subset and describes the design direction for forthcoming features.
 Functions, pipelines, tests, and tools may declare required capabilities with
 `![effect, ...]` syntax appended to the signature:
 
-```sail
+```sfn
 fn fetch_order(id: OrderId) -> Order ![io,net] { ... }
 ```
 
@@ -41,7 +41,7 @@ that all effectful operations inside the body belong to the declared set.
 
 Source files compile independently. Imports use ES-module style syntax:
 
-```sail
+```sfn
 import { Channel, channel } from "sail/async";
 ```
 
@@ -56,7 +56,7 @@ listed in the manifest or function effect set results in a compile-time error.
 Variables default to immutability and are introduced with `let`. Add `mut` to
 allow reassignment.
 
-```sail
+```sfn
 let name -> string = "Sailfin";
 let mut counter -> number = 0;
 ```
@@ -69,7 +69,7 @@ inference. Constants use `const` and require initialisers.
 `fn` declares functions. Parameters accept optional type annotations and default
 values. Return types use `->`.
 
-```sail
+```sfn
 fn add(x -> number, y -> number) -> number {
     return x + y;
 }
@@ -84,7 +84,7 @@ parsed but ignored by code generation during bootstrapping.
 set is `io`, `net`, `model`, `gpu`, `rand`, and `clock`. Custom effects may be
 introduced via manifests.
 
-```sail
+```sfn
 fn issue_refund(order: Order) -> Refund ![io,net,model] {
     let decision = RiskAssessor.call(order);
     payments.refund(order.payment_id);
@@ -99,7 +99,7 @@ model linear (must be consumed) or affine (may be dropped, not duplicated)
 resources. Borrowing and moves are forthcoming in the self-hosted compiler; the
 bootstrap toolchain records annotations for diagnostics only.
 
-```sail
+```sfn
 fn ingest(batch: Affine<Vector<1024>>) ![gpu] {
     let view = borrow(batch);
     gpu.stream(view);
@@ -112,7 +112,7 @@ Sensitive data flows through wrappers such as `PII<T>`, `Secret<T>`, and
 `Policy<T, Rule>`. Attempting to pass a `PII<Text>` to a `net` or `model`
 effect without an attached policy causes a compile-time error.
 
-```sail
+```sfn
 fn render_invoice(user: PII<User>) -> Html ![io] {
     redact(user).into_html();
 }
@@ -124,7 +124,7 @@ Structs group fields and methods. Fields are immutable unless declared with
 `mut`. Methods are declared with `fn` inside the struct body and may reference a
 `self` parameter explicitly. Interfaces provide trait-style method signatures.
 
-```sail
+```sfn
 interface Greeter {
     fn greet(self) -> string;
 }
@@ -146,7 +146,7 @@ Struct literals use `Type { field: expression }` syntax. Method calls follow the
 
 Enums mirror algebraic data types (ADTs). Variants may include payloads.
 
-```sail
+```sfn
 enum Response {
     Ok,
     Error { message -> string },
@@ -158,7 +158,7 @@ enum Response {
 Type aliases provide named shortcuts. Generics are parsed throughout the
 language; the bootstrap compiler treats them as metadata for code generation.
 
-```sail
+```sfn
 type Result<T> = Response | T;
 ```
 
@@ -168,7 +168,7 @@ Models are first-class program artefacts. A `model` block declares metadata,
 versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
 value.
 
-```sail
+```sfn
 model Summarizer : Model<Text, Summary> {
     engine    = "gpt-foo@2.3.1";
     schema    = Summary;
@@ -188,7 +188,7 @@ input hashes, latency, cost).
 `system`, `user`, `assistant`, and `tool`. Interpolated identifiers are checked
 statically.
 
-```sail
+```sfn
 fn summarize_doc(doc: Text) -> Summary ![model] {
     prompt system { "You are a concise technical summarizer." }
     prompt user   { "Summarise:\n{doc}" }
@@ -201,7 +201,7 @@ fn summarize_doc(doc: Text) -> Summary ![model] {
 `pipeline` declarations express ETL-style dataflows with zero-copy semantics and
 compile-time shape checks.
 
-```sail
+```sfn
 pipeline index_corpus(docs: Seq<Text>) ![io,gpu] {
     docs
       |> chunk(by: "semantic", target_tokens: 512)
@@ -219,7 +219,7 @@ concurrency.
 Tools are typed capabilities that models may invoke. They declare their own
 effect sets and are subject to the same capability enforcement as user code.
 
-```sail
+```sfn
 tool FetchProfile(id: Id) -> Profile ![net] { ... }
 ```
 
@@ -250,7 +250,7 @@ boundaries.
 - **Accelerators** – Operations requiring GPUs/TPUs must declare the `gpu`
   effect. The runtime batches compatible tensor work automatically.
 
-```sail
+```sfn
 async fn main() ![io,model] {
     let scope = scope.with_timeout(1s);
     let messages -> Channel<number> = channel(capacity: 32);
@@ -299,7 +299,7 @@ with linear semantics suitable for zero-copy AI workloads.
 Tests are first-class declarations introduced with `test`. They may declare
 effects and determinism scopes.
 
-```sail
+```sfn
 test "extracts totals reliably" ![model] {
     with seed(42), temperature(0.2) {
         let out = Parser.call(invoice_text);
