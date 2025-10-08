@@ -192,6 +192,8 @@ Sailfin capsules and model artefacts are hosted on the central registry at <http
 Each upload includes provenance metadata: commit hashes, generation cards, capability manifests, and evaluator baselines.  
 Consumers can replay model calls using the bundled cards for deterministic evaluation.
 
+> Placeholder: `registry.sailfin.dev` is not yet publicly available. Publish and sync commands shown above describe intended behaviour.
+
 ## Local Cache
 
 `sfn` maintains a local cache to accelerate installs and model downloads.

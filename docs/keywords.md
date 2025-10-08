@@ -10,6 +10,7 @@ the language matures.
 - `else`
 - `match`
 - `return`
+ - `assert`
 - `try`
 - `catch`
 - `finally`
@@ -39,8 +40,8 @@ the language matures.
 ### Concurrency and Utilities
 
 - `routine`
-- `print`
-- `info`
+-- `console`
+-- `info` (reserved temporarily for `console.info` sugar; may be folded)
 - `scope`
 - `with`
 
@@ -58,7 +59,6 @@ the language matures.
 - `assistant`
 - `tool`
 
-> **Note:** `print` and `info` are reserved so that the idiomatic
-> `print.info(...)` helper can be recognised uniformly. The compiler currently
-> treats them like ordinary identifiers when emitting Python code, so shadowing
-> them is discouraged but technically possible.
+> **Notes:**
+> * `console` / `info` are reserved to support an idiomatic `console.info(...)` logging helper. They may become a single intrinsic in a future revision.
+> * `is` is reserved for prospective pattern or type guard syntax; it is not yet part of the stable surface.

@@ -33,11 +33,11 @@ fn summarize_doc(doc: Text) -> Summary ![model, io] {
     "You are a careful technical summarizer. Output matches `Summary`."
   }
   prompt user {
-    "Summarize:\n{doc}"
+    "Summarize:\n{{ doc }}"
   }
 
   let generation = Summarizer.call()
-  log.trace(generation.card)       // provenance metadata
+  console.info(generation.card)    // provenance metadata
   generation.output                // typed `Summary`
 }
 
@@ -88,4 +88,6 @@ Sailfin is evolving quickly. See `CONTRIBUTING.md` (coming soon) and join the di
 For now, experiment, record findings, and propose ideas through pull requests.
 
 > Note: This repository is pre-release and not yet versioned. Expect breaking changes while core concepts stabilize.
+
+> Registry Placeholder: The domain `registry.sailfin.dev` is not yet live; publish/resolve examples are illustrative until public launch.
 

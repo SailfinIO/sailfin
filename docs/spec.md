@@ -1,6 +1,6 @@
 # Sailfin Language Specification
 
-Version: 0.2.0 (design preview)
+Version: 0.2.1 (design preview)
 Date: October 2025
 
 Sailfin is an AI-native, expression-oriented programming language that combines
@@ -9,13 +9,19 @@ bootstrap compiler implements a pragmatic subset while the self-hosted
 implementation matures. This document captures the behaviour of the bootstrap
 subset and describes the design direction for forthcoming features.
 
+NOTE: The repository currently contains a `bootstrap/` Python stage0 and early
+`compiler/` Sailfin sources. Diagrams and directory trees showing a unified
+fleet layout (with `fleet.toml`, `std/`, `runtime/`, etc.) represent the target
+self-hosted architecture, not the current on-disk structure.
+
 ## 1. Lexical Structure
 
 - **Identifiers** begin with a letter and may contain ASCII letters, digits, or
   `_`. Identifiers are case-sensitive.
 - **Keywords** are listed in `docs/keywords.md`. They include traditional
   control-flow terms (`fn`, `async`, `await`, `match`, …) and AI-first syntax
-  such as `model`, `prompt`, `pipeline`, and `test`.
+  such as `model`, `prompt`, `pipeline`, and `test`. (Forthcoming: `assert` will
+  be added as a statement keyword; see §8.)
 - **Literals**:
   - Numeric literals support integers (`42`) and decimals (`3.14`).
   - String literals use double quotes, support escapes, and recognise
@@ -39,14 +45,16 @@ that all effectful operations inside the body belong to the declared set.
 
 ## 2. Modules, Imports, and Capabilities
 
-Source files compile independently. Imports use ES-module style syntax:
+Source files compile independently. Imports use ES-module style syntax and
+canonical Sailfin-branded paths:
 
 ```sfn
-import { Channel, channel } from "sail/async";
+import { Channel, channel } from "sailfin/async";
 ```
 
-Packages declare their required capabilities in the manifest (`sail.json`). When
-self-hosted, invoking a capability (e.g. sending a network request) that is not
+Capsules declare their required capabilities in `sail.toml`; multi-capsule
+workspaces centralise shared policies in `fleet.toml`. When self-hosted,
+invoking an undeclared capability (e.g. sending a network request) that is not
 listed in the manifest or function effect set results in a compile-time error.
 
 ## 3. Declarations
@@ -133,8 +141,8 @@ struct User implements Greeter {
     id -> number;
     mut name -> string;
 
-    fn greet(self) -> string {
-        return "Hello, {{self.name}}!";
+  fn greet(self) -> string {
+    return "Hello, {{ self.name }}!";
     }
 }
 ```
@@ -170,17 +178,35 @@ value.
 
 ```sfn
 model Summarizer : Model<Text, Summary> {
-    engine    = "gpt-foo@2.3.1";
-    schema    = Summary;
-    max_tok   = 2000;
-    cost_cap  = $0.05;
-    evals     = [ Faithfulness, LatencyBudget(150ms) ];
+  engine      = "gpt-foo@2.3.1";
+  schema      = Summary;
+  max_tok     = 2000;
+  cost_cap    = $0.05;
+  evaluators  = [ Faithfulness, LatencyBudget(150ms) ];
 }
 ```
 
 Calling a model requires the `model` effect, returns a typed output, and yields
 a signed **generation card** containing provenance (engine, params, seeds,
 input hashes, latency, cost).
+
+### 3.6.1 Model Block Schema
+
+| Property     | Type                    | Required | Description |
+|--------------|-------------------------|----------|-------------|
+| `engine`     | string                  | Yes      | Provider + version tag (e.g. `gpt-foo@2.3.1`) |
+| `schema`     | Type                    | Yes      | Output validation / shaping type |
+| `max_tok`    | number                  | No       | Maximum output tokens (advisory; enforced per provider) |
+| `cost_cap`   | currency literal        | No       | Maximum spend for a single call (enforced at runtime) |
+| `evaluators` | Array<Identifier|Call>  | No       | Quality/guardrail evaluators applied to generations |
+| `temperature`| number (0–2)            | No       | Stochastic sampling parameter |
+| `top_p`      | number (0–1)            | No       | Nucleus sampling parameter |
+| `seed`       | number                  | No       | Deterministic seed for reproducible generations |
+| `notes`      | string                  | No       | Free-form provenance / intent rationale |
+
+Additional provider-specific keys MAY appear but MUST NOT change semantics of
+declared standard keys. Unknown keys are preserved in generation cards for
+observability.
 
 ### 3.7 Prompt Blocks
 
@@ -190,9 +216,9 @@ statically.
 
 ```sfn
 fn summarize_doc(doc: Text) -> Summary ![model] {
-    prompt system { "You are a concise technical summarizer." }
-    prompt user   { "Summarise:\n{doc}" }
-    Summarizer.call()
+  prompt system { "You are a concise technical summarizer." }
+  prompt user   { "Summarise:\n{{ doc }}" }
+  Summarizer.call()
 }
 ```
 
@@ -214,6 +240,21 @@ Each stage declares effect usage implicitly via the called functions. Pipelines
 can be invoked like ordinary functions and integrate with structured
 concurrency.
 
+#### 3.8.1 Pipeline Semantics
+
+- `|>` is left-associative and has lower precedence than all expression
+  operators; the right-hand side of each stage parses as a LogicalOr root.
+- Stages SHOULD be effect-pure except for declared function calls; side effects
+  aggregate into the pipeline's effect list.
+- The compiler performs (planned) shape analysis: if a stage's output union is
+  not accepted by the next stage's parameter type, a type error is issued.
+
+#### 3.8.2 Named Arguments in Stages
+
+Named arguments follow the same grammar as function calls (`identifier: expr`).
+They do not participate in overloading; their role is clarity and future
+compile-time configuration.
+
 ### 3.9 Tools and Capability Contracts
 
 Tools are typed capabilities that models may invoke. They declare their own
@@ -226,6 +267,13 @@ tool FetchProfile(id: Id) -> Profile ![net] { ... }
 Foreign adapters for Python/JavaScript run in sandboxed processes with copy-on-
 write buffers; taint wrappers (`PII`, `Secret`) propagate through adapter
 boundaries.
+
+#### 3.9.1 Tool Semantics
+
+- Tool declarations mirror functions but are externally invocable by models.
+- A tool's effect list is a superset of all effects required by its body.
+- Tool calls from model generations are mediated by a dispatcher enforcing
+  capability and taint policies before execution.
 
 ## 4. Statements and Control Flow
 
@@ -260,8 +308,26 @@ async fn main() ![io,model] {
     }
 
     let result = await messages.receive();
-    print.info("Received: {{result}}");
+  console.info("Received: {{ result }}");
 }
+
+### 5.1 `is` Operator (Type / Pattern Guard)
+
+The bootstrap compiler reserves and implements a minimal `is` infix operator:
+
+```
+if value is SomeType { ... }
+```
+
+Semantics (bootstrap stage0):
+1. Evaluates the right-hand side as a nominal type name.
+2. Performs a runtime instance check analogous to `check_type` in the runtime.
+3. Returns a boolean; inside the guarded block future static versions will
+   narrow the type of `value` (not yet enforced in bootstrap).
+
+Planned evolution: `is` will integrate with pattern matching and support
+structured destructuring (`if response is Error { ... }`). Until then its use
+is limited to ergonomic runtime type guards.
 ```
 
 ## 6. Type System Overview
@@ -274,9 +340,10 @@ async fn main() ![io,model] {
 | `void`      | No return value                                      |
 | `null`      | Explicit absence of a value                          |
 
-Composite types include structs, enums, arrays (`Type[]`), optionals (`Type?`),
-and unions (`A | B`). Function types (`fn(T) -> U`) are parsed but not emitted
-by the bootstrap backend.
+Composite types include structs, enums, generics (e.g. `Vec<T>`, `Seq<T>`),
+optionals (`T?`), and unions (`A | B`). The array sugar `Type[]` is deprecated
+in favour of explicit generic containers (`Vec<T>`). Function types (`fn(T) -> U`)
+are parsed but not emitted by the bootstrap backend.
 
 **Vector/Tensor types** – `Vector<N>` and `Tensor<Shape, DType>` are value types
 with linear semantics suitable for zero-copy AI workloads.
@@ -286,25 +353,25 @@ with linear semantics suitable for zero-copy AI workloads.
 
 ## 7. Capability-Based Security
 
-- Imports declare capabilities in `sail.json`; modules may not escalate at
-  runtime.
+- Capsules declare capabilities in `sail.toml`; fleets coordinate shared
+  policies in `fleet.toml`. Modules may not escalate at runtime.
 - Secrets cannot be logged, hashed, or serialised without explicit policies.
 - Runtime egress guards prevent `PII` from leaving the trust boundary unless a
   redaction or consent transformer is applied.
 - Policies are declarative DSLs that compile to runtime transformers; they can
   be embedded inline or sourced from policy bundles shipped with the binary.
 
-## 8. Testing, Evals, and Replay
+## 8. Testing, Evaluators, and Replay
 
 Tests are first-class declarations introduced with `test`. They may declare
 effects and determinism scopes.
 
 ```sfn
 test "extracts totals reliably" ![model] {
-    with seed(42), temperature(0.2) {
-        let out = Parser.call(invoice_text);
-        assert out.total ~= 199.99 +/- 0.01;
-    }
+  with seed(42), temperature(0.2) {
+    let out = Parser.call(invoice_text);
+    assert(out.total ~= 199.99 +/- 0.01);
+  }
 }
 ```
 
@@ -319,16 +386,18 @@ Test runners support:
 
 ## 9. String Interpolation
 
-String literals support inline expressions using `{{ expression }}`. The
-bootstrap runtime invokes `runtime.format_string` to evaluate expressions
-against the current scope. Failures leave the placeholder intact for debugging.
+String literals support inline expressions using `{{ expression }}` with
+mandatory double braces. Whitespace inside braces is ignored at the edges, so
+`{{name}}` and `{{ name }}` are equivalent. The bootstrap runtime invokes
+`runtime.format_string` to evaluate expressions against the current scope.
+Failures leave the placeholder intact for debugging.
 
 ## 10. Runtime Semantics
 
 The bootstrap compiler lowers Sailfin programs into Python code backed by
 `bootstrap/runtime_support.py`. The helper module currently exposes:
 
-- `runtime.console.info` – implements the `print.info` convention.
+- `runtime.console.info` – implements the `console.info` convention.
 - `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
   primitives.
 - `runtime.models.call_model` – placeholder for model invocations; currently
@@ -348,9 +417,44 @@ Upcoming milestones include:
 
 1. Full type-checking and inference, including linear/affine tracking.
 2. Exhaustive pattern matching with guards and destructuring.
-3. Native package manager integration for models and code.
+3. Native package manager integration for models and code (`sfn`, capsules,
+   fleets, provenance locking).
 4. Notebook and LSP support with live cost/latency overlays.
 5. Transition to the self-hosted compiler and runtime.
 
 This specification will evolve with the implementation. Refer to `enbf.md` and
 `bootstrap/tests/` for executable examples of the language.
+
+### Terminology Migration (Bootstrap -> Current)
+
+| Old | New |
+|-----|-----|
+| package | capsule |
+| project | fleet |
+| sail.json | sail.toml |
+| (harbor) registry | registry |
+| evals | evaluators |
+| print.info | console.info |
+
+### Bootstrap vs Self-Hosted Feature Matrix
+
+| Feature / Construct         | Bootstrap Parser | Bootstrap Enforced | Self-Hosted (Planned) |
+|-----------------------------|------------------|--------------------|-----------------------|
+| Generics                    | Yes (metadata)   | Partial (erased)   | Full monomorph / constraints |
+| Effects (`![...]`)          | Yes              | Recorded only      | Static + capability gates |
+| Pipelines `pipeline`        | Yes              | Basic execution    | Shape + effect analysis |
+| Models & evaluators         | Yes              | Stub call + card   | Real provider + cost/provenance |
+| String interpolation `{{}}` | Yes              | Runtime eval       | Templated + typed escapes |
+| Linear/Affine wrappers      | Parsed           | Diagnostics only   | Ownership + borrow checker |
+| `assert(...)`               | Parsed (new)     | Runtime boolean    | Rich diagnostics + shrink cases |
+| `is` operator               | Yes (runtime)    | Nominal check      | Flow-sensitive narrowing |
+| Named arguments             | Yes              | Metadata           | Reordering + default compatibility |
+| Tool declarations           | Yes              | Stub dispatch      | Sandboxed invocation + auditing |
+| Capability policies         | Manifest stub    | Not enforced       | Full static + dynamic guards |
+| Model replay cards          | Generated stub   | Minimal metadata   | Deterministic re-execution |
+| Registry integration        | Placeholder      | N/A                | Publish/resolve/verify |
+
+*Placeholder Notice*: `registry.sailfin.dev` is not yet live; interactions are illustrative until public release.
+
+`registry.sailfin.dev` is a placeholder domain pending public launch. Until
+live, examples involving publication are illustrative only.

@@ -30,7 +30,7 @@ StructDeclaration  = "struct" Identifier [ TypeParameters ]
 
 StructMember       = FieldDeclaration | MethodDeclaration ;
 
-FieldDeclaration   = [ "mut" ] [ "let" ] Identifier "->" Type ";" ;
+FieldDeclaration   = [ "mut" ] Identifier "->" Type ";" ;
 
 MethodDeclaration  = { Decorator } [ "async" ] "fn" Identifier [ TypeParameters ]
                      "(" [ Parameters ] ")" [ "->" Type ] [ EffectList ] Block ;
@@ -83,9 +83,12 @@ Statement          = VariableDeclaration
                    | ThrowStatement
                    | WithStatement
                    | PromptStatement
+                   | AssertStatement
                    | Block
                    | AssignmentStatement
                    | ExpressionStatement ;
+
+AssertStatement    = "assert" "(" Expression ")" ";" ;
 
 VariableDeclaration  = "let" [ "mut" ] Identifier [ "->" Type ]
                        [ "=" Expression ] ";" ;
@@ -140,7 +143,8 @@ PostfixOp          = "(" [ Arguments ] ")"
                    | "." Identifier
                    | "[" Expression "]" ;
 
-Arguments          = Expression { "," Expression } ;
+Argument           = [ Identifier ":" ] Expression ;
+Arguments          = Argument { "," Argument } ;
 
 Primary            = NumberLiteral
                    | StringLiteral
@@ -157,7 +161,9 @@ ArrayLiteral       = "[" [ Expression { "," Expression } ] "]" ;
 StructLiteral      = Identifier "{" [ StructField { "," StructField } ] "}" ;
 StructField        = Identifier ":" Expression ;
 
-Type               = SimpleType [ "?" ] { "|" Type } ;
+Type               = UnionType ;
+UnionType          = OptionalType { "|" OptionalType } ;
+OptionalType       = SimpleType [ "?" ] ;
 SimpleType         = QualifiedName [ "<" Type { "," Type } ">" ] ;
 NominalType        = SimpleType ;
 QualifiedName      = Identifier { "." Identifier } ;
@@ -186,14 +192,24 @@ Identifier         = Letter { Letter | Digit | '_' } ;
 
 String literals support lightweight interpolation using double braces. Any
 occurrence of `{{ expression }}` is evaluated at runtime against the current
-scope. For example `"Hello, {{name}}!"` becomes an f-style formatted string.
+scope. Whitespace at the edges of the expression is ignored (`{{name}}` == `{{ name }}`).
+For example `"Hello, {{ name }}!"` becomes a formatted string.
+
+Named arguments appear in both function calls and pipeline stages:
+
+```
+chunk(by: "semantic", target_tokens: 512)
+```
+
+The grammar’s `Argument` rule supports this form.
 
 ### Effects and Capability Tokens
 
 Effect identifiers in `![ ... ]` lists are ordinary identifiers that must
-correspond to capabilities granted via manifests. The compiler uses these lists
-to enforce deterministic, auditable use of I/O, networking, randomness, model
-invocation, and accelerator access.
+correspond to capabilities granted via manifests (`sail.toml`, aggregated in
+`fleet.toml`). The compiler uses these lists to enforce deterministic,
+auditable use of I/O (`io`), networking (`net`), randomness (`rand`), model
+invocation (`model`), accelerator usage (`gpu`), and clocks/timers (`clock`).
 
 ### Prompt Blocks
 
@@ -204,4 +220,5 @@ that typically contains string literals and interpolation.
 ### Reserved Words
 
 Keywords defined in `docs/keywords.md` are reserved and may not be used where
-an `Identifier` is expected.
+an `Identifier` is expected. `assert` is reserved for the statement form above.
+Array sugar `Type[]` is deprecated; prefer `Vec<Type>`.
