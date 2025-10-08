@@ -8,6 +8,7 @@ This directory contains examples for the Sailfin programming language, demonstra
 - [Concurrency](./concurrency/): Examples of routines, channels, and parallel execution.
 - [Web](./web/): Networking examples, including HTTP servers and WebSocket usage.
 - [Advanced](./advanced/): More complex examples, such as encapsulation, polymorphism, and advanced algorithms.
+- [AI](./ai/): Model-centric workflows, effect annotations, and test scaffolds for AI-native code.
 - [Functional](./functional/): Functional programming concepts, like higher-order functions and map/reduce.
 - [I/O](./io/): File reading and writing examples.
 - [Types](./types/): Advanced type examples, like recursive types and tagged unions.

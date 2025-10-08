@@ -151,6 +151,7 @@ class FunctionSignature(ASTNode):
     name: str
     parameters: List[Parameter]
     return_type: Optional[TypeAnnotation]
+    effects: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +163,7 @@ class FunctionDeclaration(Statement):
     decorators: List[Decorator] = field(default_factory=list)
     type_parameters: List[TypeParameter] = field(default_factory=list)
     is_async: bool = False
+    effects: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -180,6 +182,7 @@ class MethodDeclaration(ASTNode):
     decorators: List[Decorator] = field(default_factory=list)
     type_parameters: List[TypeParameter] = field(default_factory=list)
     is_async: bool = False
+    effects: List[str] = field(default_factory=list)
 
 
 StructMember = Union[FieldDeclaration, MethodDeclaration]
@@ -210,6 +213,10 @@ class EnumDeclaration(Statement):
 class TestDeclaration(Statement):
     name: str
     body: Block
+    effects: List[str] = field(default_factory=list)
+
+
+TestDeclaration.__test__ = False  # Prevent pytest from treating as a test case
 
 
 # ---------------------------------------------------------------------------
@@ -564,4 +571,3 @@ __all__ = [
     "PatternField",
     "ConstructorPattern",
 ]
-

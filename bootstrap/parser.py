@@ -15,6 +15,7 @@ from typing import Iterable, Iterator, List, Optional, Sequence
 from ast_nodes import (
     ArrayLiteral,
     Assignment,
+    AssertStatement,
     AwaitExpression,
     BinaryExpression,
     Block,
@@ -62,6 +63,7 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    TestDeclaration,
     UnaryExpression,
     ReturnStatement,
     ThrowStatement,
@@ -189,6 +191,8 @@ class _SailParser:
             return self._parse_const_declaration()
         if self.tokens.check("LET"):
             return self._parse_variable_declaration()
+        if self.tokens.check("TEST"):
+            return self._parse_test()
         return self._parse_function(decorators=self._parse_decorators())
 
     # ------------------------------------------------------------------
@@ -329,6 +333,28 @@ class _SailParser:
         self.tokens.expect("GT")
         return params
 
+    def _parse_effect_list(self) -> List[str]:
+        if not (self.tokens.check("NOT") and self.tokens.peek(1).type == "LBRACKET"):
+            return []
+        self.tokens.advance()  # '!'
+        self.tokens.expect("LBRACKET")
+        effects: List[str] = []
+        if not self.tokens.check("RBRACKET"):
+            while True:
+                token = self.tokens.current
+                if token.type == "IDENTIFIER" or token.type in {"MODEL"}:
+                    effect_name = token.value
+                    self.tokens.advance()
+                else:
+                    raise ParseError(
+                        f"Expected effect identifier, found {token.type} at line {token.lineno}, column {token.column}"
+                    )
+                effects.append(effect_name)
+                if not self.tokens.match("COMMA"):
+                    break
+        self.tokens.expect("RBRACKET")
+        return effects
+
     def _parse_function(self, *, decorators: Optional[List[Decorator]] = None, is_method: bool = False) -> Statement:
         decorators = decorators or []
         is_async = bool(self.tokens.match("ASYNC"))
@@ -339,6 +365,7 @@ class _SailParser:
         return_type: Optional[TypeAnnotation] = None
         if self.tokens.match("ARROW"):
             return_type = self._parse_type()
+        effects = self._parse_effect_list()
         body = self._parse_block()
         if is_method:
             return MethodDeclaration(
@@ -349,6 +376,7 @@ class _SailParser:
                 decorators=decorators,
                 type_parameters=type_parameters,
                 is_async=is_async,
+                effects=effects,
             )
         return FunctionDeclaration(
             name=name,
@@ -358,6 +386,7 @@ class _SailParser:
             decorators=decorators,
             type_parameters=type_parameters,
             is_async=is_async,
+            effects=effects,
         )
 
     def _parse_parameter_list(self) -> List[Parameter]:
@@ -389,8 +418,9 @@ class _SailParser:
         return_type: Optional[TypeAnnotation] = None
         if self.tokens.match("ARROW"):
             return_type = self._parse_type()
+        effects = self._parse_effect_list()
         self.tokens.expect("SEMICOLON")
-        return FunctionSignature(name=name, parameters=parameters, return_type=return_type)
+        return FunctionSignature(name=name, parameters=parameters, return_type=return_type, effects=effects)
 
     def _parse_lambda_expression(self) -> LambdaExpression:
         self.tokens.expect("FN")
@@ -400,6 +430,16 @@ class _SailParser:
             return_type = self._parse_type()
         body = self._parse_block()
         return LambdaExpression(parameters=parameters, body=body, return_type=return_type)
+
+    def _parse_test(self) -> TestDeclaration:
+        self.tokens.expect("TEST")
+        if self.tokens.match("STRING"):
+            name = self.tokens.previous.value
+        else:
+            name = self.tokens.expect("IDENTIFIER").value
+        effects = self._parse_effect_list()
+        body = self._parse_block()
+        return TestDeclaration(name=name, body=body, effects=effects)
 
     # ------------------------------------------------------------------
     # Statements
@@ -435,6 +475,8 @@ class _SailParser:
             return self._parse_try()
         if self.tokens.check("THROW"):
             return self._parse_throw()
+        if self.tokens.check("ASSERT"):
+            return self._parse_assert()
         if self.tokens.check("LBRACE"):
             return self._parse_block()
         # Fallback: expression or assignment
@@ -447,6 +489,12 @@ class _SailParser:
             return Assignment(target=expr, value=value, operator=operator)
         self.tokens.expect("SEMICOLON")
         return ExpressionStatement(expr)
+
+    def _parse_assert(self) -> AssertStatement:
+        self.tokens.expect("ASSERT")
+        expression = self._parse_expression()
+        self.tokens.expect("SEMICOLON")
+        return AssertStatement(expression=expression)
 
     def _parse_variable_declaration(self) -> VariableDeclaration:
         self.tokens.expect("LET")

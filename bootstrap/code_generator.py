@@ -68,6 +68,7 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    TestDeclaration,
     ThrowStatement,
     TryStatement,
     TupleType,
@@ -103,6 +104,7 @@ class CodeGenerator:
         self._functions: List[str] = []
         self._async_functions: set[str] = set()
         self._global_mutables: set[str] = set()
+        self._tests: List[str] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -118,6 +120,7 @@ class CodeGenerator:
             "parallel = runtime.parallel",
             "spawn = runtime.spawn",
         ]
+        self._tests = []
 
         for stmt in program.statements:
             self._emit_statement(stmt)
@@ -129,13 +132,16 @@ class CodeGenerator:
         code_lines.append("")
         code_lines.extend(self._lines)
 
-        if 'main' in self._functions:
+        if self._tests or 'main' in self._functions:
             code_lines.append("")
             code_lines.append("if __name__ == '__main__':")
-            if 'main' in self._async_functions:
-                code_lines.append("    asyncio.run(main())")
-            else:
-                code_lines.append("    main()")
+            for test_name in self._tests:
+                code_lines.append(f"    {test_name}()")
+            if 'main' in self._functions:
+                if 'main' in self._async_functions:
+                    code_lines.append("    asyncio.run(main())")
+                else:
+                    code_lines.append("    main()")
         return "\n".join(code_lines).rstrip() + "\n"
 
     # ------------------------------------------------------------------
@@ -242,6 +248,8 @@ class CodeGenerator:
         elif isinstance(stmt, ParallelExpression):
             expr = self._emit_expression(stmt)
             self._emit(expr)
+        elif isinstance(stmt, TestDeclaration):
+            self._emit_test(stmt)
         else:  # pragma: no cover - future extensions
             raise NotImplementedError(f"Unhandled statement: {type(stmt).__name__}")
 
@@ -251,6 +259,19 @@ class CodeGenerator:
             return
         for inner in block.statements:
             self._emit_statement(inner)
+
+    def _emit_test(self, decl: TestDeclaration) -> None:
+        func_name = self._new_temp("test")
+        self._tests.append(func_name)
+        self._emit(f"def {func_name}():")
+        self._indent += 1
+        self._push_async(False)
+        if decl.effects:
+            self._emit(f"# effects: {', '.join(decl.effects)}")
+        self._emit_block(decl.body)
+        self._pop_async()
+        self._indent -= 1
+        self._emit("")
 
     def _emit_struct(self, decl: StructDeclaration) -> None:
         self._emit(f"class {decl.name}:")
@@ -307,6 +328,8 @@ class CodeGenerator:
         self._emit(f"{header} {method.name}({signature}):")
         self._indent += 1
         self._push_async(method.is_async)
+        if method.effects:
+            self._emit(f"# effects: {', '.join(method.effects)}")
         self._emit_block(method.body)
         self._pop_async()
         self._indent -= 1
@@ -330,6 +353,8 @@ class CodeGenerator:
         if self._global_mutables:
             for name in sorted(self._global_mutables):
                 self._emit(f"global {name}")
+        if func.effects:
+            self._emit(f"# effects: {', '.join(func.effects)}")
         if not func.body.statements:
             self._emit("pass")
         else:

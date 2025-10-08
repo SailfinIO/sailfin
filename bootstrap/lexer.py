@@ -40,9 +40,6 @@ reserved = {
     'pipeline': 'PIPELINE',
     'tool': 'TOOL',
     'prompt': 'PROMPT',
-    'system': 'SYSTEM',
-    'user': 'USER',
-    'assistant': 'ASSISTANT',
     'with': 'WITH',
     'scope': 'SCOPE',
 }

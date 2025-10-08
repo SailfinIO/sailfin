@@ -18,6 +18,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from ast_nodes import FunctionDeclaration, TestDeclaration
 from bootstrap.code_generator import CodeGenerator
 from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser
@@ -36,9 +37,29 @@ EXAMPLE_FILES = [
     EXAMPLE_ROOT / "basics" / "structs.sfn",
     EXAMPLE_ROOT / "basics" / "interfaces.sfn",
     EXAMPLE_ROOT / "basics" / "struct-composition.sfn",
+    EXAMPLE_ROOT / "basics" / "tests.sfn",
+    EXAMPLE_ROOT / "ai" / "effectful-model-call.sfn",
     EXAMPLE_ROOT / "concurrency" / "channels.sfn",
+    EXAMPLE_ROOT / "advanced" / "effectful-interface.sfn",
     EXAMPLE_ROOT / "advanced" / "encapsulation-struct.sfn",
 ]
+
+
+def test_parse_effect_annotations() -> None:
+    source = "\n".join(
+        [
+            "fn foo() ![io, net] { return 1; }",
+            "test example ![model] { assert foo() == 1; }",
+        ]
+    )
+    lexer = base_lexer.clone()
+    ast = parser.parse(source, lexer=lexer)
+
+    functions = [stmt for stmt in ast.statements if isinstance(stmt, FunctionDeclaration)]
+    tests = [stmt for stmt in ast.statements if isinstance(stmt, TestDeclaration)]
+
+    assert functions and functions[0].effects == ["io", "net"]
+    assert tests and tests[0].effects == ["model"]
 
 
 @pytest.mark.parametrize("source_path", EXAMPLE_FILES)

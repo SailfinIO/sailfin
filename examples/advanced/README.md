@@ -9,4 +9,5 @@ This folder contains advanced examples demonstrating more complex concepts in Sa
 - **`matrix-multiplication.sfn`**: Functional example for matrix multiplication.
 - **`multithreaded-task.sfn`**: Running tasks concurrently with routines and `parallel`.
 - **`type-guards.sfn`**: Type guards with the `is` operator and pattern matching.
+- **`effectful-interface.sfn`**: Interfaces and methods annotated with effects to model capability-aware components.
 - **`unions.sfn`**: Union and intersection type usage.
