@@ -11,7 +11,8 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "ply (>=3.11,<4.0)",
     "pyinstaller (>=6.11.1,<7.0.0)",
-    "pytest (>=8.4.2,<9.0.0)"
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-cov (>=5.0.0,<6.0.0)"
 ]
 
 [build-system]
@@ -53,3 +54,46 @@ commit_author = "semantic-release-bot <bot@example.com>"
 [tool.semantic_release.github]
 release_method = "github"
 assets = ["dist/sfn"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+addopts = [
+    "-ra",
+    "--maxfail=1",
+    "--cov=bootstrap",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+]
+filterwarnings = [
+    "error::DeprecationWarning",
+    "ignore:ast.Str is deprecated:DeprecationWarning",
+]
+markers = [
+    "unit: fast, isolated tests for individual modules",
+    "integration: tests that exercise multiple components",
+    "e2e: end-to-end tests that run generated programs",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["bootstrap"]
+omit = [
+    "tests/*",
+    "parsetab.py",
+    "parser.out",
+    "build/*",
+    "dist/*",
+    "**/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == '__main__':",
+    "if TYPE_CHECKING:",
+]
