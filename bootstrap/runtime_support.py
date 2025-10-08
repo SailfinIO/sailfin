@@ -327,6 +327,14 @@ def array_reduce(
     return accumulator
 
 
+def char_code(character: str) -> int:
+    return ord(character)
+
+
+def substring(text: str, start: int, end: int) -> str:
+    return text[start:end]
+
+
 @dataclasses.dataclass
 class HttpResponse:
     status: int
@@ -441,6 +449,8 @@ __all__ = [
     "console",
     "fs",
     "make_object",
+    "char_code",
+    "substring",
     "format_string",
     "match_exhaustive_failed",
     "http",

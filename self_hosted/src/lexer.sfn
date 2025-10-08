@@ -1,0 +1,142 @@
+// self_hosted/src/lexer.sfn
+//
+// Early sketch of the Sailfin lexer written in Sailfin itself. The current
+// implementation is intentionally modest: it tokenises identifier-like runs and
+// individual punctuation characters, preserving whitespace and comments so the
+// parser can decide what to ignore.
+
+import { Token, TokenKind, eof_token } from "./token";
+
+struct LexerState {
+    source -> string;
+    index -> number;
+    line -> number;
+    column -> number;
+}
+
+fn lex(source -> string) -> Token[] {
+    let state -> LexerState = LexerState {
+        source: source,
+        index: 0,
+        line: 1,
+        column: 1,
+    };
+
+    let tokens -> Token[] = [];
+
+    loop {
+        if state.index >= state.source.length {
+            break;
+        }
+
+        let ch = state.source[state.index];
+
+        if is_whitespace(ch) {
+            let start_column = state.column;
+            loop {
+                if state.index >= state.source.length {
+                    break;
+                }
+                if !is_whitespace(state.source[state.index]) {
+                    break;
+                }
+                if state.source[state.index] == "\n" {
+                    state.line += 1;
+                    state.column = 1;
+                } else {
+                    state.column += 1;
+                }
+                state.index += 1;
+            }
+            tokens = append(tokens, Token {
+                kind: TokenKind.Whitespace,
+                lexeme: " ",
+                line: state.line,
+                column: start_column,
+            });
+            continue;
+        }
+
+        if is_identifier_start(ch) {
+            let start = state.index;
+            let start_column = state.column;
+            state.index += 1;
+            state.column += 1;
+            loop {
+                if state.index >= state.source.length {
+                    break;
+                }
+                if !is_identifier_part(state.source[state.index]) {
+                    break;
+                }
+                state.index += 1;
+                state.column += 1;
+            }
+            let value = slice(state.source, start, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.Identifier { value: value },
+                lexeme: value,
+                line: state.line,
+                column: start_column,
+            });
+            continue;
+        }
+
+        // Fallback: treat the single character as a symbol token.
+        tokens = append(tokens, Token {
+            kind: TokenKind.Symbol { value: ch },
+            lexeme: ch,
+            line: state.line,
+            column: state.column,
+        });
+
+        if ch == "\n" {
+            state.line += 1;
+            state.column = 1;
+        } else {
+            state.column += 1;
+        }
+        state.index += 1;
+    }
+
+    tokens = append(tokens, eof_token(state.line, state.column));
+    return tokens;
+}
+
+fn is_whitespace(ch -> string) -> boolean {
+    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+}
+
+fn is_identifier_start(ch -> string) -> boolean {
+    return is_letter(ch) || ch == "_";
+}
+
+fn is_identifier_part(ch -> string) -> boolean {
+    return is_identifier_start(ch) || is_digit(ch);
+}
+
+fn is_letter(ch -> string) -> boolean {
+    let code = char_code(ch);
+    return (code >= char_code("a") && code <= char_code("z"))
+        || (code >= char_code("A") && code <= char_code("Z"));
+}
+
+fn is_digit(ch -> string) -> boolean {
+    let code = char_code(ch);
+    return code >= char_code("0") && code <= char_code("9");
+}
+
+fn char_code(ch -> string) -> number {
+    // Sailfin string indexing yields single-character strings; call builtin to
+    // convert to a numeric code point once the runtime provides it. Until then,
+    // provide a tiny Python interop hook via the bootstrap runtime.
+    return runtime.char_code(ch);
+}
+
+fn slice(text -> string, start -> number, end -> number) -> string {
+    return runtime.substring(text, start, end);
+}
+
+fn append(tokens -> Token[], token -> Token) -> Token[] {
+    return tokens.concat([token]);
+}

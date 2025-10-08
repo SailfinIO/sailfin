@@ -1,0 +1,6 @@
+// self_hosted/src/main.sfn
+// Temporary entry point for the Sailfin self-hosted compiler prototype.
+
+fn main() {
+    print.info("Sailfin self-hosted compiler (stage 0)");
+}

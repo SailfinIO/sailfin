@@ -1,0 +1,32 @@
+// self_hosted/src/token.sfn
+//
+// Token types shared by the self-hosted compiler front-end. The focus for the
+// first milestone is a pragmatic subset that unlocks bootstrapping the parser
+// without committing to every token the language might eventually surface.
+
+enum TokenKind {
+    Identifier { value -> string },
+    NumberLiteral { value -> string },
+    StringLiteral { value -> string },
+    Symbol { value -> string },
+    Whitespace,
+    Comment,
+    EndOfFile,
+}
+
+struct Token {
+    kind -> TokenKind;
+    lexeme -> string;
+    line -> number;
+    column -> number;
+}
+
+fn eof_token(line -> number, column -> number) -> Token {
+    return Token {
+        kind: TokenKind.EndOfFile,
+        lexeme: "",
+        line: line,
+        column: column,
+    };
+}
+
