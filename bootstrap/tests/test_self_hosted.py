@@ -39,8 +39,33 @@ def test_compile_self_hosted_source(source_path: pathlib.Path) -> None:
 
     compiled = compile(python_source, str(full_path.with_suffix(".py")), "exec")
 
-    # Only run the entry point module; other sources may rely on imports the
-    # bootstrap emitter does not materialise yet.
+    # Only run selected modules; the others are validated by successful code
+    # generation.
     if source_path.name == "main.sfn":
         namespace: dict[str, object] = {"__name__": "__main__"}
         exec(compiled, namespace, namespace)
+    elif source_path.name == "lexer.sfn":
+        namespace = {"__name__": "__main__"}
+
+        token_source = (REPO_ROOT / "self_hosted/src/token.sfn").read_text(encoding="utf-8")
+        token_ast = parser.parse(token_source, lexer=base_lexer.clone())
+        token_python = CodeGenerator().generate_code(token_ast)
+        token_compiled = compile(token_python, str((REPO_ROOT / "self_hosted/src/token.py")), "exec")
+        exec(token_compiled, namespace, namespace)
+
+        exec(compiled, namespace, namespace)
+        lex_fn = namespace["lex"]
+
+        sample = "let title = 3.14; // number\n/* done */ const answer = 42;"
+        tokens = lex_fn(sample)
+
+        comments = [token for token in tokens if token.kind.variant == "Comment"]
+        assert comments and comments[0].lexeme.startswith("//")
+        assert len(comments) >= 2 and comments[1].lexeme.startswith("/*")
+
+        meaningful = [token for token in tokens if token.kind.variant not in {"Whitespace", "Comment"}]
+        variants = [token.kind.variant for token in meaningful]
+        assert variants[0] == "Identifier"
+        assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "3.14" for token in meaningful)
+        assert any(token.kind.variant == "Identifier" and token.kind.value == "const" for token in meaningful)
+        assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "42" for token in meaningful)

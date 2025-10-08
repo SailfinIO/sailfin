@@ -335,6 +335,18 @@ def substring(text: str, start: int, end: int) -> str:
     return text[start:end]
 
 
+def find_char(text: str, character: str, start: int = 0) -> int:
+    if len(character) != 1:
+        if character == "\\n":
+            character = "\n"
+        elif character == "\\r":
+            character = "\r"
+    try:
+        return text.index(character, start)
+    except ValueError:
+        return -1
+
+
 @dataclasses.dataclass
 class HttpResponse:
     status: int
@@ -451,6 +463,7 @@ __all__ = [
     "make_object",
     "char_code",
     "substring",
+    "find_char",
     "format_string",
     "match_exhaustive_failed",
     "http",

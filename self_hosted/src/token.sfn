@@ -23,10 +23,9 @@ struct Token {
 
 fn eof_token(line -> number, column -> number) -> Token {
     return Token {
-        kind: TokenKind.EndOfFile,
+        kind: TokenKind.EndOfFile(),
         lexeme: "",
         line: line,
         column: column,
     };
 }
-

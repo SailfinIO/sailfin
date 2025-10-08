@@ -32,6 +32,8 @@ fn lex(source -> string) -> Token[] {
         let ch = state.source[state.index];
 
         if is_whitespace(ch) {
+            let start_index = state.index;
+            let start_line = state.line;
             let start_column = state.column;
             loop {
                 if state.index >= state.source.length {
@@ -41,17 +43,191 @@ fn lex(source -> string) -> Token[] {
                     break;
                 }
                 if state.source[state.index] == "\n" {
+                    state.index += 1;
                     state.line += 1;
                     state.column = 1;
                 } else {
+                    state.index += 1;
                     state.column += 1;
                 }
-                state.index += 1;
             }
+            let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.Whitespace,
-                lexeme: " ",
-                line: state.line,
+                kind: TokenKind.Whitespace(),
+                lexeme: lexeme,
+                line: start_line,
+                column: start_column,
+            });
+            continue;
+        }
+
+        if ch == "/" {
+            let next = peek_next_char(state);
+            if next == "/" {
+                let start_index = state.index;
+                let start_line = state.line;
+                let start_column = state.column;
+
+                state.index += 2;
+                state.column += 2;
+
+                let newline_index -> number = runtime.find_char(state.source, "\n", state.index);
+                let carriage_index -> number = runtime.find_char(state.source, "\r", state.index);
+
+                let comment_end -> number = state.source.length;
+                if newline_index != -1 {
+                    comment_end = newline_index;
+                }
+                if carriage_index != -1 && carriage_index < comment_end {
+                    comment_end = carriage_index;
+                }
+
+                let lexeme = slice(state.source, start_index, comment_end);
+                let consumed_columns -> number = comment_end - state.index;
+                state.index = comment_end;
+                state.column += consumed_columns;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Comment(),
+                    lexeme: lexeme,
+                    line: start_line,
+                    column: start_column,
+                });
+                continue;
+            }
+            if next == "*" {
+                let start_index = state.index;
+                let start_line = state.line;
+                let start_column = state.column;
+
+                state.index += 2;
+                state.column += 2;
+
+                loop {
+                    if state.index >= state.source.length {
+                        break;
+                    }
+                    if state.source[state.index] == "*" && peek_next_char(state) == "/" {
+                        state.index += 2;
+                        state.column += 2;
+                        break;
+                    }
+                    if state.source[state.index] == "\n" {
+                        state.index += 1;
+                        state.line += 1;
+                        state.column = 1;
+                    } else {
+                        state.index += 1;
+                        state.column += 1;
+                    }
+                }
+
+                let lexeme = slice(state.source, start_index, state.index);
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Comment(),
+                    lexeme: lexeme,
+                    line: start_line,
+                    column: start_column,
+                });
+                continue;
+            }
+        }
+
+        if ch == "\"" {
+            let start_index = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+
+            state.index += 1;
+            state.column += 1;
+
+            let literal -> string = "";
+            let escaped -> boolean = false;
+
+            loop {
+                if state.index >= state.source.length {
+                    break;
+                }
+                let current = state.source[state.index];
+                if !escaped && current == "\"" {
+                    state.index += 1;
+                    state.column += 1;
+                    break;
+                }
+                if !escaped && current == "\\" {
+                    escaped = true;
+                    state.index += 1;
+                    state.column += 1;
+                    continue;
+                }
+                if escaped {
+                    literal = literal + interpret_escape(current);
+                    escaped = false;
+                } else {
+                    literal = literal + current;
+                }
+
+                if current == "\n" {
+                    state.index += 1;
+                    state.line += 1;
+                    state.column = 1;
+                } else {
+                    state.index += 1;
+                    state.column += 1;
+                }
+            }
+
+            let lexeme = slice(state.source, start_index, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.StringLiteral { value: literal },
+                lexeme: lexeme,
+                line: start_line,
+                column: start_column,
+            });
+            continue;
+        }
+
+        if is_digit(ch) {
+            let start_index = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+
+            state.index += 1;
+            state.column += 1;
+
+            loop {
+                if state.index >= state.source.length {
+                    break;
+                }
+                if !is_digit(state.source[state.index]) {
+                    break;
+                }
+                state.index += 1;
+                state.column += 1;
+            }
+
+            if state.index < state.source.length && state.source[state.index] == "." {
+                let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1]);
+                if next_is_digit {
+                    state.index += 1;
+                    state.column += 1;
+                    loop {
+                        if state.index >= state.source.length {
+                            break;
+                        }
+                        if !is_digit(state.source[state.index]) {
+                            break;
+                        }
+                        state.index += 1;
+                        state.column += 1;
+                    }
+                }
+            }
+
+            let lexeme = slice(state.source, start_index, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.NumberLiteral { value: lexeme },
+                lexeme: lexeme,
+                line: start_line,
                 column: start_column,
             });
             continue;
@@ -59,6 +235,7 @@ fn lex(source -> string) -> Token[] {
 
         if is_identifier_start(ch) {
             let start = state.index;
+            let start_line = state.line;
             let start_column = state.column;
             state.index += 1;
             state.column += 1;
@@ -76,27 +253,46 @@ fn lex(source -> string) -> Token[] {
             tokens = append(tokens, Token {
                 kind: TokenKind.Identifier { value: value },
                 lexeme: value,
-                line: state.line,
+                line: start_line,
                 column: start_column,
             });
             continue;
         }
 
-        // Fallback: treat the single character as a symbol token.
-        tokens = append(tokens, Token {
-            kind: TokenKind.Symbol { value: ch },
-            lexeme: ch,
-            line: state.line,
-            column: state.column,
-        });
+        let start_line = state.line;
+        let start_column = state.column;
+        let lexeme = ch;
+        let next_symbol = peek_next_char(state);
+        if next_symbol != "" {
+            let pair = ch + next_symbol;
+            if is_two_char_symbol(pair) {
+                lexeme = pair;
+                state.index += 2;
+                state.column += 2;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Symbol { value: lexeme },
+                    lexeme: lexeme,
+                    line: start_line,
+                    column: start_column,
+                });
+                continue;
+            }
+        }
 
+        state.index += 1;
         if ch == "\n" {
             state.line += 1;
             state.column = 1;
         } else {
             state.column += 1;
         }
-        state.index += 1;
+
+        tokens = append(tokens, Token {
+            kind: TokenKind.Symbol { value: lexeme },
+            lexeme: lexeme,
+            line: start_line,
+            column: start_column,
+        });
     }
 
     tokens = append(tokens, eof_token(state.line, state.column));
@@ -139,4 +335,42 @@ fn slice(text -> string, start -> number, end -> number) -> string {
 
 fn append(tokens -> Token[], token -> Token) -> Token[] {
     return tokens.concat([token]);
+}
+
+fn peek_next_char(state -> LexerState) -> string {
+    let next_index = state.index + 1;
+    if next_index >= state.source.length {
+        return "";
+    }
+    return state.source[next_index];
+}
+
+fn interpret_escape(ch -> string) -> string {
+    if ch == "n" {
+        return "\n";
+    }
+    if ch == "t" {
+        return "\t";
+    }
+    if ch == "r" {
+        return "\r";
+    }
+    if ch == "\"" {
+        return "\"";
+    }
+    if ch == "\\" {
+        return "\\";
+    }
+    return ch;
+}
+
+fn is_two_char_symbol(value -> string) -> boolean {
+    return value == "->"
+        || value == "=>"
+        || value == "=="
+        || value == "!="
+        || value == "<="
+        || value == ">="
+        || value == "&&"
+        || value == "||";
 }
