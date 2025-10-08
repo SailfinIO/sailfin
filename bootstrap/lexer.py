@@ -34,6 +34,17 @@ reserved = {
     'true': 'TRUE',
     'false': 'FALSE',
     'null': 'NULL',
+    'test': 'TEST',
+    'assert': 'ASSERT',
+    'model': 'MODEL',
+    'pipeline': 'PIPELINE',
+    'tool': 'TOOL',
+    'prompt': 'PROMPT',
+    'system': 'SYSTEM',
+    'user': 'USER',
+    'assistant': 'ASSISTANT',
+    'with': 'WITH',
+    'scope': 'SCOPE',
 }
 
 

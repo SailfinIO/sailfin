@@ -30,18 +30,32 @@ the language matures.
 - `type`
 - `import`
 - `from`
+- `model`
+- `tool`
+- `pipeline`
+- `test`
 
 ### Concurrency and Utilities
 
 - `routine`
 - `print`
 - `info`
+- `scope`
+- `with`
 
 ### Literals
 
 - `true`
 - `false`
 - `null`
+
+### Prompt Composition
+
+- `prompt`
+- `system`
+- `user`
+- `assistant`
+- `tool`
 
 > **Note:** `print` and `info` are reserved so that the idiomatic
 > `print.info(...)` helper can be recognised uniformly. The compiler currently

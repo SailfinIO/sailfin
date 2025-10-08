@@ -1,153 +1,185 @@
 # Sailfin Grammar (EBNF)
 
 The Sailfin grammar is written using an extended Backus–Naur form that mirrors
-the behaviour of the bootstrap parser. Non-terminals are written in
-`PascalCase`, terminals in double quotes. Parentheses group expressions, square
-brackets denote optional elements, and braces denote repetition (`{ x }`
-means zero or more occurrences of `x`).
+current bootstrap behaviour while signalling upcoming AI-native features.
+Non-terminals are written in `PascalCase`, terminals in double quotes.
+Parentheses group expressions, square brackets denote optional elements, and
+braces denote repetition (`{ x }` means zero or more occurrences of `x`).
 
 ```
-Program           = { ImportDeclaration | Declaration | Statement } ;
+Program            = { ImportDeclaration | Declaration | Statement } ;
 
-ImportDeclaration = "import" "{" [ Identifier { "," Identifier } ] "}" "from"
-                    StringLiteral ";" ;
+ImportDeclaration  = "import" "{" [ Identifier { "," Identifier } ] "}" "from"
+                     StringLiteral ";" ;
 
-Declaration       = StructDeclaration
-                  | EnumDeclaration
-                  | FunctionDeclaration
-                  | TypeAliasDeclaration
-                  | VariableDeclaration
-                  | ConstantDeclaration ;
+Declaration        = StructDeclaration
+                   | EnumDeclaration
+                   | InterfaceDeclaration
+                   | FunctionDeclaration
+                   | PipelineDeclaration
+                   | ToolDeclaration
+                   | ModelDeclaration
+                   | TestDeclaration
+                   | TypeAliasDeclaration
+                   | VariableDeclaration
+                   | ConstantDeclaration ;
 
-StructDeclaration = "struct" Identifier [ TypeParameters ]
-                    [ "implements" NominalType { "," NominalType } ]
-                    "{" { StructMember } "}" ;
+StructDeclaration  = "struct" Identifier [ TypeParameters ]
+                     [ "implements" NominalType { "," NominalType } ]
+                     "{" { StructMember } "}" ;
 
-StructMember      = FieldDeclaration | MethodDeclaration ;
+StructMember       = FieldDeclaration | MethodDeclaration ;
 
-FieldDeclaration  = [ "mut" ] [ "let" ] Identifier "->" Type ";" ;
+FieldDeclaration   = [ "mut" ] [ "let" ] Identifier "->" Type ";" ;
 
-MethodDeclaration = { Decorator } [ "async" ] "fn" Identifier [ TypeParameters ]
-                    "(" [ Parameters ] ")" [ "->" Type ] Block ;
+MethodDeclaration  = { Decorator } [ "async" ] "fn" Identifier [ TypeParameters ]
+                     "(" [ Parameters ] ")" [ "->" Type ] [ EffectList ] Block ;
 
 InterfaceDeclaration = "interface" Identifier [ TypeParameters ]
-                       "{" { FunctionSignature } "}" ;
+                        "{" { FunctionSignature } "}" ;
 
-FunctionSignature  = "fn" Identifier "(" [ Parameters ] ")"
-                     [ "->" Type ] ";" ;
+FunctionSignature   = "fn" Identifier "(" [ Parameters ] ")"
+                      [ "->" Type ] [ EffectList ] ";" ;
 
 TypeAliasDeclaration = "type" Identifier [ TypeParameters ] "=" Type ";" ;
 
-TypeParameters    = "<" TypeParameter { "," TypeParameter } ">" ;
-TypeParameter     = Identifier [ ":" Type ] ;
+TypeParameters     = "<" TypeParameter { "," TypeParameter } ">" ;
+TypeParameter      = Identifier [ ":" Type ] ;
 
 FunctionDeclaration = { Decorator } [ "async" ] "fn" Identifier
-                      [ TypeParameters ] "(" [ Parameters ] ")"
-                      [ "->" Type ] Block ;
+                       [ TypeParameters ] "(" [ Parameters ] ")"
+                       [ "->" Type ] [ EffectList ] Block ;
 
-Parameters        = Parameter { "," Parameter } ;
-Parameter         = [ "mut" ] Identifier [ "->" Type ] [ "=" Expression ] ;
+PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
+                      [ "->" Type ] [ EffectList ] Block ;
 
-Decorator         = "@" QualifiedName [ "(" [ Arguments ] ")" ] ;
+ToolDeclaration     = "tool" Identifier "(" [ Parameters ] ")"
+                      [ "->" Type ] [ EffectList ] Block ;
 
-Block             = "{" { Statement } "}" ;
+ModelDeclaration    = "model" Identifier ":" Type [ EffectList ] ModelBlock ;
+ModelBlock          = "{" { ModelProperty } "}" ;
+ModelProperty       = Identifier "=" ModelValue ";" ;
+ModelValue          = Expression | Type ;
 
-Statement         = VariableDeclaration
-                  | ConstantDeclaration
-                  | IfStatement
-                  | MatchStatement
-                  | TryStatement
-                  | RoutineDeclaration
-                  | ReturnStatement
-                  | ThrowStatement
-                  | Block
-                  | AssignmentStatement
-                  | ExpressionStatement ;
+TestDeclaration     = "test" ( Identifier | StringLiteral ) [ EffectList ] Block ;
 
-VariableDeclaration = "let" [ "mut" ] Identifier [ "->" Type ]
-                      [ "=" Expression ] ";" ;
+Parameters         = Parameter { "," Parameter } ;
+Parameter          = [ "mut" ] Identifier [ "->" Type ] [ "=" Expression ] ;
 
-ConstantDeclaration = "const" Identifier [ "->" Type ] "=" Expression ";" ;
+Decorator          = "@" QualifiedName [ "(" [ Arguments ] ")" ] ;
 
-IfStatement       = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
+EffectList         = "![" EffectIdentifier { "," EffectIdentifier } "]" ;
+EffectIdentifier   = Identifier ;
 
-MatchStatement    = "match" Expression "{" { MatchCase [ "," ] } "}" ;
+Block              = "{" { Statement } "}" ;
 
-MatchCase         = Pattern [ "if" Expression ] "->"
-                    ( Block | InlineExpression ) ;
+Statement          = VariableDeclaration
+                   | ConstantDeclaration
+                   | IfStatement
+                   | MatchStatement
+                   | TryStatement
+                   | RoutineDeclaration
+                   | ReturnStatement
+                   | ThrowStatement
+                   | WithStatement
+                   | PromptStatement
+                   | Block
+                   | AssignmentStatement
+                   | ExpressionStatement ;
 
-InlineExpression  = Expression [ ";" ] ;
+VariableDeclaration  = "let" [ "mut" ] Identifier [ "->" Type ]
+                       [ "=" Expression ] ";" ;
 
-TryStatement      = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
-                    [ "finally" Block ] ;
+ConstantDeclaration  = "const" Identifier [ "->" Type ] "=" Expression ";" ;
 
-RoutineDeclaration = "routine" Block ;
+IfStatement        = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
 
-ReturnStatement   = "return" [ Expression ] ";" ;
+MatchStatement     = "match" Expression "{" { MatchCase [ "," ] } "}" ;
 
-ThrowStatement    = "throw" Expression ";" ;
+MatchCase          = Pattern [ "if" Expression ] "->"
+                     ( Block | InlineExpression ) ;
+
+InlineExpression   = Expression [ ";" ] ;
+
+TryStatement       = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
+                     [ "finally" Block ] ;
+
+RoutineDeclaration = "routine" [ Expression ] Block ;
+
+ReturnStatement    = "return" [ Expression ] ";" ;
+
+ThrowStatement     = "throw" Expression ";" ;
+
+WithStatement      = "with" WithClause { "," WithClause } Block ;
+WithClause         = Identifier "(" [ Arguments ] ")" ;
+
+PromptStatement    = "prompt" PromptChannel Block ;
+PromptChannel      = "system" | "user" | "assistant" | "tool" ;
 
 AssignmentStatement = Assignment ";" ;
-Assignment        = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
+Assignment         = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
 
 ExpressionStatement = Expression ";" ;
 
-Expression        = LambdaExpression | LogicalOr ;
+Expression         = LambdaExpression | PipelineExpression ;
 
-LambdaExpression  = "fn" "(" [ Parameters ] ")" [ "->" Type ] Block ;
+LambdaExpression   = "fn" "(" [ Parameters ] ")" [ "->" Type ] [ EffectList ] Block ;
 
-LogicalOr         = LogicalAnd { "||" LogicalAnd } ;
-LogicalAnd        = Equality { "&&" Equality } ;
-Equality          = Comparison { ("==" | "!=") Comparison } ;
-Comparison        = Term { ("<" | "<=" | ">" | ">=") Term } ;
-Term              = Factor { ("+" | "-") Factor } ;
-Factor            = Unary { ("*" | "/") Unary } ;
-Unary             = ("!" | "-" | "+" | "await") Unary | Postfix ;
+PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 
-Postfix           = Primary { PostfixOp } ;
-PostfixOp         = "(" [ Arguments ] ")"
-                  | "." Identifier
-                  | "[" Expression "]" ;
+LogicalOr          = LogicalAnd { "||" LogicalAnd } ;
+LogicalAnd         = Equality { "&&" Equality } ;
+Equality           = Comparison { ("==" | "!=") Comparison } ;
+Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
+Term               = Factor { ("+" | "-") Factor } ;
+Factor             = Unary { ("*" | "/") Unary } ;
+Unary              = ("!" | "-" | "+" | "await") Unary | Postfix ;
 
-Arguments         = Expression { "," Expression } ;
+Postfix            = Primary { PostfixOp } ;
+PostfixOp          = "(" [ Arguments ] ")"
+                   | "." Identifier
+                   | "[" Expression "]" ;
 
-Primary           = NumberLiteral
-                  | StringLiteral
-                  | "true"
-                  | "false"
-                  | "null"
-                  | Identifier
-                  | "(" Expression ")"
-                  | ArrayLiteral
-                  | StructLiteral ;
+Arguments          = Expression { "," Expression } ;
 
-ArrayLiteral      = "[" [ Expression { "," Expression } ] "]" ;
+Primary            = NumberLiteral
+                   | StringLiteral
+                   | "true"
+                   | "false"
+                   | "null"
+                   | Identifier
+                   | "(" Expression ")"
+                   | ArrayLiteral
+                   | StructLiteral ;
 
-StructLiteral     = Identifier "{" [ StructField { "," StructField } ] "}" ;
-StructField       = Identifier ":" Expression ;
+ArrayLiteral       = "[" [ Expression { "," Expression } ] "]" ;
 
-Type              = SimpleType [ "?" ] { "|" Type } ;
-SimpleType        = QualifiedName [ "<" Type { "," Type } ">" ] ;
-NominalType       = SimpleType ;
-QualifiedName     = Identifier { "." Identifier } ;
+StructLiteral      = Identifier "{" [ StructField { "," StructField } ] "}" ;
+StructField        = Identifier ":" Expression ;
 
-Pattern           = "_"
-                  | LiteralPattern
-                  | IdentifierPattern
-                  | ConstructorPattern ;
+Type               = SimpleType [ "?" ] { "|" Type } ;
+SimpleType         = QualifiedName [ "<" Type { "," Type } ">" ] ;
+NominalType        = SimpleType ;
+QualifiedName      = Identifier { "." Identifier } ;
 
-LiteralPattern    = NumberLiteral | StringLiteral ;
-IdentifierPattern = Identifier ;
+Pattern            = "_"
+                   | LiteralPattern
+                   | IdentifierPattern
+                   | ConstructorPattern ;
+
+LiteralPattern     = NumberLiteral | StringLiteral | BooleanLiteral ;
+IdentifierPattern  = Identifier ;
 ConstructorPattern = Identifier "{" [ PatternField { "," PatternField } ] "}" ;
-PatternField      = Identifier [ ":" Pattern ] ;
+PatternField       = Identifier [ ":" Pattern ] ;
 ```
 
 ### Literals
 
 ```
-NumberLiteral     = Digit { Digit } [ "." Digit { Digit } ] ;
-StringLiteral     = '"' { Character | Escape } '"' ;
-Identifier        = Letter { Letter | Digit | '_' } ;
+NumberLiteral      = Digit { Digit } [ "." Digit { Digit } ] ;
+StringLiteral      = '"' { Character | Escape } '"' ;
+BooleanLiteral     = "true" | "false" ;
+Identifier         = Letter { Letter | Digit | '_' } ;
 ```
 
 ### String Interpolation
@@ -155,6 +187,19 @@ Identifier        = Letter { Letter | Digit | '_' } ;
 String literals support lightweight interpolation using double braces. Any
 occurrence of `{{ expression }}` is evaluated at runtime against the current
 scope. For example `"Hello, {{name}}!"` becomes an f-style formatted string.
+
+### Effects and Capability Tokens
+
+Effect identifiers in `![ ... ]` lists are ordinary identifiers that must
+correspond to capabilities granted via manifests. The compiler uses these lists
+to enforce deterministic, auditable use of I/O, networking, randomness, model
+invocation, and accelerator access.
+
+### Prompt Blocks
+
+`prompt` statements introduce model instruction blocks. They accept exactly one
+channel keyword (`system`, `user`, `assistant`, or `tool`) followed by a block
+that typically contains string literals and interpolation.
 
 ### Reserved Words
 
