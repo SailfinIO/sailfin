@@ -1,5 +1,10 @@
 // examples/advanced/type-guards.sfn
 
+struct User {
+    name -> string;
+    age -> number;
+}
+
 fn process(input: string | number) {
     if input is string {
         print.info("It's a string: {{input}}");
@@ -10,6 +15,8 @@ fn process(input: string | number) {
 
 process("Sail");
 process(42);
+
+let user = User { name: "Robin", age: 22 };
 
 match user {
     User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),

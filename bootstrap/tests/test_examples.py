@@ -26,28 +26,7 @@ from bootstrap.parser import parser
 
 EXAMPLE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "examples"
 
-EXAMPLE_FILES = [
-    EXAMPLE_ROOT / "basics" / "variables.sfn",
-    EXAMPLE_ROOT / "basics" / "functions.sfn",
-    EXAMPLE_ROOT / "basics" / "conditionals.sfn",
-    EXAMPLE_ROOT / "basics" / "hello-world.sfn",
-    EXAMPLE_ROOT / "basics" / "basic-enum.sfn",
-    EXAMPLE_ROOT / "basics" / "error-handling.sfn",
-    EXAMPLE_ROOT / "basics" / "try-catch-finally.sfn",
-    EXAMPLE_ROOT / "basics" / "structs.sfn",
-    EXAMPLE_ROOT / "basics" / "interfaces.sfn",
-    EXAMPLE_ROOT / "basics" / "struct-composition.sfn",
-    EXAMPLE_ROOT / "basics" / "tests.sfn",
-    EXAMPLE_ROOT / "advanced" / "generic-structures.sfn",
-    EXAMPLE_ROOT / "advanced" / "unions.sfn",
-    EXAMPLE_ROOT / "advanced" / "multithreaded-task.sfn",
-    EXAMPLE_ROOT / "functional" / "higher-order-functions.sfn",
-    EXAMPLE_ROOT / "ai" / "effectful-model-call.sfn",
-    EXAMPLE_ROOT / "ai" / "model-workflow.sfn",
-    EXAMPLE_ROOT / "concurrency" / "channels.sfn",
-    EXAMPLE_ROOT / "advanced" / "effectful-interface.sfn",
-    EXAMPLE_ROOT / "advanced" / "encapsulation-struct.sfn",
-]
+EXAMPLE_FILES = sorted(EXAMPLE_ROOT.rglob("*.sfn"))
 
 
 def test_parse_effect_annotations() -> None:

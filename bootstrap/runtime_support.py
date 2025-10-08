@@ -9,7 +9,9 @@ constructs closely enough for experimentation.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import dataclasses
+import pathlib
 import re
 import time
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
@@ -42,6 +44,49 @@ _PRIMITIVE_TYPE_ALIASES: Dict[str, tuple[type, ...]] = {
 }
 
 
+class _FileSystem:
+    def __init__(self) -> None:
+        self._writes: Dict[str, str] = {}
+
+    def readFile(self, path: str) -> str:
+        stored = self._writes.get(path)
+        if stored is not None:
+            return stored
+        target = pathlib.Path(path)
+        try:
+            if target.exists():
+                return target.read_text(encoding="utf-8")
+        except OSError:
+            pass
+        return f"[mock] contents of {path}"
+
+    def writeFile(self, path: str, contents: str) -> None:
+        self._writes[path] = contents
+        console.info(f"[fs] wrote {len(contents)} bytes to {path}")
+
+
+fs = _FileSystem()
+
+
+class _SimpleObject(dict):
+    def __getattr__(self, item: str) -> Any:
+        try:
+            return self[item]
+        except KeyError as err:  # pragma: no cover - defensive
+            raise AttributeError(item) from err
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        self[key] = value
+
+    def __repr__(self) -> str:  # pragma: no cover - helper
+        payload = ", ".join(f"{k}={v!r}" for k, v in self.items())
+        return f"Object({payload})"
+
+
+def make_object(**fields: Any) -> _SimpleObject:
+    return _SimpleObject(fields)
+
+
 # ---------------------------------------------------------------------------
 # Concurrency helpers
 # ---------------------------------------------------------------------------
@@ -65,6 +110,9 @@ class Channel:
         pass
 
 
+_TASKS: List[tuple[asyncio.AbstractEventLoop, asyncio.Task[Any]]] = []
+
+
 def channel(capacity: Optional[int] = None) -> Channel:
     return Channel(capacity)
 
@@ -74,6 +122,15 @@ def spawn(coro_factory: Callable[[], Awaitable[Any]], name: Optional[str] = None
     task = loop.create_task(coro_factory())
     if name and hasattr(task, "set_name"):
         task.set_name(name)
+    _TASKS.append((loop, task))
+
+    def _cleanup(completed: asyncio.Task[Any]) -> None:
+        for entry in list(_TASKS):
+            if entry[1] is completed:
+                _TASKS.remove(entry)
+                break
+
+    task.add_done_callback(_cleanup)
 
 
 def parallel(tasks: Iterable[Callable[[], Any]]) -> List[Any]:
@@ -82,6 +139,28 @@ def parallel(tasks: Iterable[Callable[[], Any]]) -> List[Any]:
 
 def sleep(milliseconds: int) -> None:
     time.sleep(milliseconds / 1000)
+
+
+@atexit.register
+def _cancel_pending_tasks() -> None:
+    if not _TASKS:
+        return
+    tasks_by_loop: Dict[asyncio.AbstractEventLoop, List[asyncio.Task[Any]]] = {}
+    for loop, task in list(_TASKS):
+        tasks_by_loop.setdefault(loop, []).append(task)
+    for loop, tasks in tasks_by_loop.items():
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if not tasks:
+            continue
+        try:
+            if loop.is_running():
+                continue
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        except RuntimeError:
+            # Loop already closed; nothing else to do.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -229,19 +308,150 @@ def check_type(value: Any, descriptor: str) -> bool:
     return isinstance(value, resolved)
 
 
+def array_map(iterable: Iterable[Any], mapper: Callable[[Any], Any]) -> List[Any]:
+    return [mapper(item) for item in iterable]
+
+
+def array_filter(iterable: Iterable[Any], predicate: Callable[[Any], bool]) -> List[Any]:
+    return [item for item in iterable if predicate(item)]
+
+
+def array_reduce(
+    iterable: Iterable[Any],
+    initial: Any,
+    reducer: Callable[[Any, Any], Any],
+) -> Any:
+    accumulator = initial
+    for item in iterable:
+        accumulator = reducer(accumulator, item)
+    return accumulator
+
+
+@dataclasses.dataclass
+class HttpResponse:
+    status: int
+    body: str
+    headers: Dict[str, Any] | None = None
+
+
+class _HttpModule:
+    async def get(self, url: str, headers: Optional[Dict[str, str]] = None) -> HttpResponse:
+        await asyncio.sleep(0)
+        body = f"Mock response for {url}"
+        status = 200
+        if "jsonplaceholder" in url:
+            body = "{ 'title': 'Mock Post', 'body': 'Lorem ipsum' }"
+        return HttpResponse(status=status, body=body, headers=headers or {})
+
+
+http = _HttpModule()
+
+
+def logExecution(func: Callable[..., Any]) -> Callable[..., Any]:
+    if asyncio.iscoroutinefunction(func):
+
+        async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            console.info(f"[decorator] calling {func.__name__}")
+            result = await func(*args, **kwargs)
+            console.info(f"[decorator] {func.__name__} finished")
+            return result
+
+        return _async_wrapper
+
+    def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        console.info(f"[decorator] calling {func.__name__}")
+        result = func(*args, **kwargs)
+        console.info(f"[decorator] {func.__name__} finished")
+        return result
+
+    return _sync_wrapper
+
+
+@dataclasses.dataclass
+class _Request:
+    path: str
+    method: str = "GET"
+    body: Any = None
+
+
+class _Response:
+    def __init__(self) -> None:
+        self.status = 200
+        self.body: Any = None
+
+    def send(self, body: Any, status: int = 200) -> None:
+        self.status = status
+        self.body = body
+        console.info(f"[serve] responded with {status}: {body}")
+
+
+def serve(handler: Callable[[Any, Any], Any], config: Optional[Dict[str, Any]] = None) -> None:
+    config = config or {}
+    console.info(f"[serve] mock server listening on port {config.get('port', 0)}")
+    samples = [
+        _Request(path="/", method="GET"),
+        _Request(path="/compute", method="POST", body={"payload": 1}),
+    ]
+    for req in samples:
+        res = _Response()
+        handler(req, res)
+    console.info("[serve] mock server processed sample requests")
+
+
+class _WebSocketClient:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self._handler: Optional[Callable[[str], Any]] = None
+
+    def onMessage(self, handler: Callable[[str], Any]) -> None:
+        self._handler = handler
+        handler(f"hello from {self.name}")
+
+    def send(self, message: str) -> None:
+        console.info(f"[websocket] send to {self.name}: {message}")
+
+
+class _WebSocketServer:
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self._clients = [_WebSocketClient("client-1"), _WebSocketClient("client-2")]
+
+    def clients(self) -> List[_WebSocketClient]:
+        return list(self._clients)
+
+
+class _WebSocketModule:
+    def serve(self, config: Optional[Dict[str, Any]] = None) -> _WebSocketServer:
+        port = (config or {}).get("port", 0)
+        console.info(f"[websocket] mock server listening on port {port}")
+        return _WebSocketServer(port)
+
+
+websocket = _WebSocketModule()
+
+
 __all__ = [
     "Array",  # backwards compat placeholder
     "EnumInstance",
     "EnumType",
+    "array_filter",
+    "array_map",
+    "array_reduce",
     "channel",
     "console",
+    "fs",
+    "make_object",
     "format_string",
     "match_exhaustive_failed",
+    "http",
+    "logExecution",
     "parallel",
     "sleep",
+    "serve",
     "check_type",
     "spawn",
     "struct_repr",
+    "websocket",
 ]
 
 

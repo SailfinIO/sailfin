@@ -127,6 +127,14 @@ class CodeGenerator:
             "channel = runtime.channel",
             "parallel = runtime.parallel",
             "spawn = runtime.spawn",
+            "fs = runtime.fs",
+            "serve = runtime.serve",
+            "http = runtime.http",
+            "websocket = runtime.websocket",
+            "logExecution = runtime.logExecution",
+            "array_map = runtime.array_map",
+            "array_filter = runtime.array_filter",
+            "array_reduce = runtime.array_reduce",
         ]
         self._tests = []
 
@@ -651,19 +659,37 @@ class CodeGenerator:
             elements = ", ".join(self._emit_expression(el) for el in expr.elements)
             return f"[{elements}]"
         if isinstance(expr, ObjectLiteral):
-            items = ", ".join(f"{field.name!r}: {self._emit_expression(field.value)}" for field in expr.fields)
-            return f"{{{items}}}"
+            items = ", ".join(f"{field.name}={self._emit_expression(field.value)}" for field in expr.fields)
+            return f"runtime.make_object({items})"
         if isinstance(expr, StructLiteral):
             args = ", ".join(f"{field.name}={self._emit_expression(field.value)}" for field in expr.fields)
             return f"{self._emit_qualified_name(expr.type_name)}({args})"
         if isinstance(expr, MemberExpression):
             target = self._emit_expression(expr.object)
+            if expr.member == 'length':
+                return f"len({target})"
             return f"{target}.{expr.member}"
         if isinstance(expr, IndexExpression):
             sequence = self._emit_expression(expr.sequence)
             index = self._emit_expression(expr.index)
             return f"{sequence}[{index}]"
         if isinstance(expr, CallExpression):
+            if isinstance(expr.callee, MemberExpression):
+                member = expr.callee.member
+                target = self._emit_expression(expr.callee.object)
+                if member == 'map' and len(expr.arguments) == 1:
+                    mapper = self._emit_expression(expr.arguments[0])
+                    return f"array_map({target}, {mapper})"
+                if member == 'filter' and len(expr.arguments) == 1:
+                    predicate = self._emit_expression(expr.arguments[0])
+                    return f"array_filter({target}, {predicate})"
+                if member == 'reduce' and len(expr.arguments) == 2:
+                    initial = self._emit_expression(expr.arguments[0])
+                    reducer = self._emit_expression(expr.arguments[1])
+                    return f"array_reduce({target}, {initial}, {reducer})"
+                if member == 'concat' and len(expr.arguments) == 1:
+                    other = self._emit_expression(expr.arguments[0])
+                    return f"list({target}) + list({other})"
             callee = self._emit_expression(expr.callee)
             args = ", ".join(self._emit_expression(arg) for arg in expr.arguments)
             return f"{callee}({args})"
@@ -739,8 +765,18 @@ class CodeGenerator:
             literal = self._emit_expression(pattern.value)
             return _PatternCompileResult(condition=f"{value_expr} == {literal}", bindings=[])
         if isinstance(pattern, ConstructorPattern):
-            type_expr = self._emit_qualified_name(pattern.type_name)
-            condition_parts = [f"isinstance({value_expr}, {type_expr})"]
+            parts = pattern.type_name.parts
+            if len(parts) > 1:
+                enum_name = self._emit_qualified_name(QualifiedName([parts[0]]))
+                variant = parts[-1]
+                condition_parts = [
+                    f"isinstance({value_expr}, runtime.EnumInstance)",
+                    f"{value_expr}.type is {enum_name}",
+                    f"{value_expr}.variant == '{variant}'",
+                ]
+            else:
+                type_expr = self._emit_qualified_name(pattern.type_name)
+                condition_parts = [f"isinstance({value_expr}, {type_expr})"]
             bindings: List[str] = []
             for field in pattern.fields:
                 field_expr = f"{value_expr}.{field.name}"
