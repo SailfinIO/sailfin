@@ -91,6 +91,8 @@ from ast_nodes import (
 )
 from ast_nodes import ArrayType
 
+from effect_checker import validate_effects
+
 
 @dataclass
 class _PatternCompileResult:
@@ -119,6 +121,7 @@ class CodeGenerator:
     # ------------------------------------------------------------------
 
     def generate_code(self, program: Program) -> str:
+        validate_effects(program)
         self._lines.clear()
         self._temp_counter = 0
         self._preamble = [
