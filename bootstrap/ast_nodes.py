@@ -219,6 +219,50 @@ class TestDeclaration(Statement):
 TestDeclaration.__test__ = False  # Prevent pytest from treating as a test case
 
 
+@dataclass
+class ModelProperty(ASTNode):
+    name: str
+    value: Expression
+
+
+@dataclass
+class ModelDeclaration(Statement):
+    name: str
+    model_type: TypeAnnotation
+    properties: List[ModelProperty]
+    effects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class PipelineDeclaration(Statement):
+    name: str
+    parameters: List[Parameter]
+    body: Block
+    return_type: Optional[TypeAnnotation] = None
+    effects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolDeclaration(Statement):
+    name: str
+    parameters: List[Parameter]
+    body: Block
+    return_type: Optional[TypeAnnotation] = None
+    effects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class WithStatement(Statement):
+    clauses: List[Expression]
+    body: Block
+
+
+@dataclass
+class PromptStatement(Statement):
+    channel: str
+    body: Block
+
+
 # ---------------------------------------------------------------------------
 # Statements
 # ---------------------------------------------------------------------------
@@ -523,6 +567,12 @@ __all__ = [
     "EnumVariant",
     "EnumDeclaration",
     "TestDeclaration",
+    "ModelProperty",
+    "ModelDeclaration",
+    "PipelineDeclaration",
+    "ToolDeclaration",
+    "WithStatement",
+    "PromptStatement",
     # Statements
     "VariableDeclaration",
     "ConstantDeclaration",

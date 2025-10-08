@@ -39,6 +39,7 @@ EXAMPLE_FILES = [
     EXAMPLE_ROOT / "basics" / "struct-composition.sfn",
     EXAMPLE_ROOT / "basics" / "tests.sfn",
     EXAMPLE_ROOT / "ai" / "effectful-model-call.sfn",
+    EXAMPLE_ROOT / "ai" / "model-workflow.sfn",
     EXAMPLE_ROOT / "concurrency" / "channels.sfn",
     EXAMPLE_ROOT / "advanced" / "effectful-interface.sfn",
     EXAMPLE_ROOT / "advanced" / "encapsulation-struct.sfn",

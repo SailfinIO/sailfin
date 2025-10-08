@@ -44,6 +44,8 @@ from ast_nodes import (
     MemberExpression,
     IndexExpression,
     MethodDeclaration,
+    ModelDeclaration,
+    ModelProperty,
     NullLiteral,
     NumberLiteral,
     ObjectField,
@@ -52,7 +54,9 @@ from ast_nodes import (
     Parameter,
     Pattern,
     PatternField,
+    PipelineDeclaration,
     Program,
+    PromptStatement,
     QualifiedName,
     RoutineDeclaration,
     ForStatement,
@@ -63,6 +67,7 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    ToolDeclaration,
     TestDeclaration,
     UnaryExpression,
     ReturnStatement,
@@ -74,6 +79,7 @@ from ast_nodes import (
     FunctionType,
     UnionType,
     VariableDeclaration,
+    WithStatement,
     WildcardPattern,
 )
 
@@ -185,6 +191,12 @@ class _SailParser:
             return self._parse_enum()
         if self.tokens.check("INTERFACE"):
             return self._parse_interface()
+        if self.tokens.check("MODEL"):
+            return self._parse_model()
+        if self.tokens.check("PIPELINE"):
+            return self._parse_pipeline()
+        if self.tokens.check("TOOL"):
+            return self._parse_tool()
         if self.tokens.check("TYPE"):
             return self._parse_type_alias()
         if self.tokens.check("CONST"):
@@ -225,6 +237,44 @@ class _SailParser:
         aliased = self._parse_type()
         self.tokens.expect("SEMICOLON")
         return TypeAliasDeclaration(name=name, type_parameters=type_params, aliased_type=aliased)
+
+    def _parse_model(self) -> ModelDeclaration:
+        self.tokens.expect("MODEL")
+        name = self.tokens.expect("IDENTIFIER").value
+        self.tokens.expect("COLON")
+        model_type = self._parse_type()
+        effects = self._parse_effect_list()
+        self.tokens.expect("LBRACE")
+        properties: List[ModelProperty] = []
+        while not self.tokens.match("RBRACE"):
+            prop_name = self.tokens.expect("IDENTIFIER").value
+            self.tokens.expect("ASSIGN")
+            value = self._parse_expression()
+            self.tokens.expect("SEMICOLON")
+            properties.append(ModelProperty(name=prop_name, value=value))
+        return ModelDeclaration(name=name, model_type=model_type, properties=properties, effects=effects)
+
+    def _parse_pipeline(self) -> PipelineDeclaration:
+        self.tokens.expect("PIPELINE")
+        name = self.tokens.expect("IDENTIFIER").value
+        parameters = self._parse_parameter_list()
+        return_type: Optional[TypeAnnotation] = None
+        if self.tokens.match("ARROW"):
+            return_type = self._parse_type()
+        effects = self._parse_effect_list()
+        body = self._parse_block()
+        return PipelineDeclaration(name=name, parameters=parameters, body=body, return_type=return_type, effects=effects)
+
+    def _parse_tool(self) -> ToolDeclaration:
+        self.tokens.expect("TOOL")
+        name = self.tokens.expect("IDENTIFIER").value
+        parameters = self._parse_parameter_list()
+        return_type: Optional[TypeAnnotation] = None
+        if self.tokens.match("ARROW"):
+            return_type = self._parse_type()
+        effects = self._parse_effect_list()
+        body = self._parse_block()
+        return ToolDeclaration(name=name, parameters=parameters, body=body, return_type=return_type, effects=effects)
 
     # ------------------------------------------------------------------
     # Structs and enums
@@ -477,6 +527,10 @@ class _SailParser:
             return self._parse_throw()
         if self.tokens.check("ASSERT"):
             return self._parse_assert()
+        if self.tokens.check("PROMPT"):
+            return self._parse_prompt_statement()
+        if self.tokens.check("WITH"):
+            return self._parse_with_statement()
         if self.tokens.check("LBRACE"):
             return self._parse_block()
         # Fallback: expression or assignment
@@ -495,6 +549,23 @@ class _SailParser:
         expression = self._parse_expression()
         self.tokens.expect("SEMICOLON")
         return AssertStatement(expression=expression)
+
+    def _parse_prompt_statement(self) -> PromptStatement:
+        self.tokens.expect("PROMPT")
+        channel_token = self.tokens.expect("IDENTIFIER")
+        channel = channel_token.value
+        body = self._parse_block()
+        return PromptStatement(channel=channel, body=body)
+
+    def _parse_with_statement(self) -> WithStatement:
+        self.tokens.expect("WITH")
+        clauses: List[Expression] = []
+        while True:
+            clauses.append(self._parse_expression())
+            if not self.tokens.match("COMMA"):
+                break
+        body = self._parse_block()
+        return WithStatement(clauses=clauses, body=body)
 
     def _parse_variable_declaration(self) -> VariableDeclaration:
         self.tokens.expect("LET")

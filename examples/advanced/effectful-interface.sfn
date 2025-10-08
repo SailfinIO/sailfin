@@ -1,0 +1,21 @@
+// examples/advanced/effectful-interface.sfn
+
+interface ReportGenerator {
+    fn summarize(self, text -> string) -> string ![model];
+}
+
+struct EchoSummarizer {
+    fn summarize(self, text -> string) -> string ![model] {
+        return "Summary: {{text}}";
+    }
+}
+
+fn render_report(generator -> EchoSummarizer, doc -> string) -> string ![model] {
+    return generator.summarize(doc);
+}
+
+fn main() -> void ![model, io] {
+    let summarizer -> EchoSummarizer = EchoSummarizer {};
+    let summary -> string = render_report(summarizer, "Quarterly metrics");
+    print.info(summary);
+}

@@ -50,6 +50,7 @@ from ast_nodes import (
     MatchStatement,
     MemberExpression,
     MethodDeclaration,
+    ModelDeclaration,
     NullLiteral,
     NumberLiteral,
     ObjectField,
@@ -59,7 +60,9 @@ from ast_nodes import (
     Parameter,
     Pattern,
     PatternField,
+    PipelineDeclaration,
     Program,
+    PromptStatement,
     QualifiedName,
     RangeExpression,
     ReturnStatement,
@@ -68,17 +71,20 @@ from ast_nodes import (
     StringLiteral,
     StructDeclaration,
     StructLiteral,
+    ToolDeclaration,
     TestDeclaration,
     ThrowStatement,
     TryStatement,
     TupleType,
     TypeAliasDeclaration,
+    TypeAnnotation,
     TypeCheckExpression,
     TypeParameter,
     UnionType,
     VariableDeclaration,
     WhileStatement,
     WildcardPattern,
+    WithStatement,
     UnaryExpression,
 )
 from ast_nodes import ArrayType
@@ -184,6 +190,8 @@ class CodeGenerator:
             self._emit_enum(stmt)
         elif isinstance(stmt, FunctionDeclaration):
             self._emit_function(stmt)
+        elif isinstance(stmt, ModelDeclaration):
+            self._emit_model(stmt)
         elif isinstance(stmt, VariableDeclaration):
             if self._indent == 0 and stmt.mutable:
                 self._global_mutables.add(stmt.name)
@@ -250,6 +258,14 @@ class CodeGenerator:
             self._emit(expr)
         elif isinstance(stmt, TestDeclaration):
             self._emit_test(stmt)
+        elif isinstance(stmt, PipelineDeclaration):
+            self._emit_pipeline(stmt)
+        elif isinstance(stmt, ToolDeclaration):
+            self._emit_tool(stmt)
+        elif isinstance(stmt, PromptStatement):
+            self._emit_prompt(stmt)
+        elif isinstance(stmt, WithStatement):
+            self._emit_with(stmt)
         else:  # pragma: no cover - future extensions
             raise NotImplementedError(f"Unhandled statement: {type(stmt).__name__}")
 
@@ -272,6 +288,102 @@ class CodeGenerator:
         self._pop_async()
         self._indent -= 1
         self._emit("")
+
+    def _emit_model(self, decl: ModelDeclaration) -> None:
+        type_repr = self._type_to_string(decl.model_type)
+        self._emit(f"{decl.name} = {{'type': '{type_repr}'}}")
+        if decl.effects:
+            self._emit(f"{decl.name}['effects'] = {repr(decl.effects)}")
+        for prop in decl.properties:
+            value = self._model_property_value(prop.value)
+            self._emit(f"{decl.name}['{prop.name}'] = {value}")
+        self._emit("")
+
+    def _emit_pipeline(self, decl: PipelineDeclaration) -> None:
+        param_entries = []
+        for param in decl.parameters:
+            entry = param.name
+            if param.default is not None:
+                entry += f"={self._emit_expression(param.default)}"
+            param_entries.append(entry)
+        params = ", ".join(param_entries)
+        self._emit(f"def {decl.name}({params}):")
+        self._indent += 1
+        self._push_async(False)
+        if decl.effects:
+            self._emit(f"# effects: {', '.join(decl.effects)}")
+        if not decl.body.statements:
+            self._emit("pass")
+        else:
+            self._emit_block(decl.body)
+        self._pop_async()
+        self._indent -= 1
+        self._emit("")
+
+    def _emit_tool(self, decl: ToolDeclaration) -> None:
+        param_entries = []
+        for param in decl.parameters:
+            entry = param.name
+            if param.default is not None:
+                entry += f"={self._emit_expression(param.default)}"
+            param_entries.append(entry)
+        params = ", ".join(param_entries)
+        self._emit(f"def {decl.name}({params}):")
+        self._indent += 1
+        self._push_async(False)
+        if decl.effects:
+            self._emit(f"# effects: {', '.join(decl.effects)}")
+        if not decl.body.statements:
+            self._emit("pass")
+        else:
+            self._emit_block(decl.body)
+        self._pop_async()
+        self._indent -= 1
+        self._emit("")
+
+    def _emit_prompt(self, stmt: PromptStatement) -> None:
+        self._emit(f"# prompt {stmt.channel}")
+        for inner in stmt.body.statements:
+            if isinstance(inner, ExpressionStatement):
+                expr = self._emit_expression(inner.expression)
+                self._emit(expr)
+            else:
+                self._emit_statement(inner)
+
+    def _emit_with(self, stmt: WithStatement) -> None:
+        self._emit("# with scope")
+        self._indent += 1
+        for clause in stmt.clauses:
+            expr = self._emit_expression(clause)
+            self._emit(expr)
+        self._emit_block(stmt.body)
+        self._indent -= 1
+
+    def _type_to_string(self, annotation: TypeAnnotation) -> str:
+        if isinstance(annotation, SimpleType):
+            base = ".".join(annotation.name.parts)
+            if annotation.type_arguments:
+                args = ", ".join(self._type_to_string(arg) for arg in annotation.type_arguments)
+                return f"{base}<{args}>"
+            return base
+        if isinstance(annotation, OptionalType):
+            return f"{self._type_to_string(annotation.base)}?"
+        if isinstance(annotation, UnionType):
+            return " | ".join(self._type_to_string(option) for option in annotation.options)
+        if isinstance(annotation, TupleType):
+            return "(" + ", ".join(self._type_to_string(elem) for elem in annotation.elements) + ")"
+        if isinstance(annotation, ArrayType):
+            return f"{self._type_to_string(annotation.element_type)}[]"
+        return str(annotation)
+
+    def _model_property_value(self, expr: Expression) -> str:
+        if isinstance(expr, Identifier):
+            return repr(expr.name)
+        if isinstance(expr, StringLiteral):
+            return self._emit_expression(expr)
+        if isinstance(expr, NumberLiteral):
+            return self._emit_expression(expr)
+        return self._emit_expression(expr)
 
     def _emit_struct(self, decl: StructDeclaration) -> None:
         self._emit(f"class {decl.name}:")

@@ -1,0 +1,24 @@
+// examples/ai/effectful-model-call.sfn
+
+fn call_model(name -> string, input -> string) -> string ![model] {
+    return "{{name}}::{{input}}";
+}
+
+fn redact(text -> string) -> string {
+    return "[redacted] " + text;
+}
+
+fn summarize_invoice(invoice -> string) -> string ![model, io] {
+    let payload -> string = redact(invoice);
+    let summary -> string = call_model("summarizer", payload);
+    print.info(summary);
+    return summary;
+}
+
+test "call_model wires name and input" ![model] {
+    assert call_model("demo", "hello") == "demo::hello";
+}
+
+fn main() -> void ![model, io] {
+    summarize_invoice("Invoice 42: amount 199.99");
+}
