@@ -27,15 +27,17 @@ python-semantic-release = "^9.17.0"
 version_source = "tag"
 upload_to_pypi = false
 
-# Define branch configuration properly in TOML
-[[tool.semantic_release.branches]]
-name = "main"
+# Branch configuration (dict-of-tables style expected by python-semantic-release >=9)
+[tool.semantic_release.branches.main]
+match = "main"
 prerelease = false
 
-[[tool.semantic_release.branches]]
-name = "beta"
+[tool.semantic_release.branches.beta]
+match = "beta"
 prerelease = true
+prerelease_token = "beta"
 
+# Plugins (keep existing ordering). For plugin-specific config, prefer dedicated tables when possible.
 plugins = [
     [
         "semantic_release.commit_parser",
@@ -54,7 +56,7 @@ plugins = [
 directory = "bootstrap"
 filename = "CHANGELOG.md"
 include_v_prefix = true
-version_variable = "__version__"
+version_variable = "__init__.py:__version__"
 
 [tool.semantic_release.git]
 tag_template = "v{version}"
