@@ -71,11 +71,6 @@ filterwarnings = [
     "error::DeprecationWarning",
     "ignore:ast.Str is deprecated:DeprecationWarning",
 ]
-markers = [
-    "unit: fast, isolated tests for individual modules",
-    "integration: tests that exercise multiple components",
-    "e2e: end-to-end tests that run generated programs",
-]
 
 [tool.coverage.run]
 branch = true

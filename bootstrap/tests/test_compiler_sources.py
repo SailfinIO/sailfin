@@ -10,7 +10,6 @@ import pathlib
 import sys
 
 import pytest
-pytestmark = pytest.mark.integration
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -158,6 +157,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert signature.effects == ["io"]
         assert signature.parameters[0].name == "name"
         assert signature.parameters[0].type_annotation is not None
+        assert signature.type_parameters == []
         assert fn_stmt.body.text.strip().startswith("{")
 
         traced_program = parse_program(
@@ -205,7 +205,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         collection_struct = generic_program.statements[0]
         assert collection_struct.variant == "StructDeclaration"
         assert collection_struct.name == "Collection"
-        assert collection_struct.type_parameters == ["T"]
+        assert [param.name for param in collection_struct.type_parameters] == ["T"]
         assert [impl.text for impl in collection_struct.implements_types] == ["Iterable<T>", "Debug"]
         assert len(collection_struct.decorators) == 1
         assert collection_struct.decorators[0].name == "entity"
@@ -216,6 +216,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert method.signature.name == "get"
         assert method.signature.return_type is not None and method.signature.return_type.text == "T"
         assert "io" in method.signature.effects
+        assert [param.name for param in method.signature.type_parameters] == []
         assert method.body.text.strip().startswith("{")
         assert len(method.decorators) == 1
         trace_decorator = method.decorators[0]
@@ -265,6 +266,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert pipeline_stmt.signature.name == "ingest"
         assert pipeline_stmt.signature.parameters[0].name == "data"
         assert pipeline_stmt.signature.return_type is not None
+        assert pipeline_stmt.signature.type_parameters == []
 
         tool_program = parse_program(
             "tool fetch(request -> string) -> string ![io] {\n"
@@ -276,6 +278,70 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert tool_stmt.variant == "ToolDeclaration"
         assert tool_stmt.signature.name == "fetch"
         assert "io" in tool_stmt.signature.effects
+        assert tool_stmt.signature.type_parameters == []
+
+        type_alias_program = parse_program(
+            "type Result<T> = Response | T;\n"
+        )
+        assert len(type_alias_program.statements) == 1
+        type_alias = type_alias_program.statements[0]
+        assert type_alias.variant == "TypeAliasDeclaration"
+        assert type_alias.name == "Result"
+        assert [param.name for param in type_alias.type_parameters] == ["T"]
+        assert type_alias.aliased_type.text == "Response | T"
+
+        interface_program = parse_program(
+            "interface Service<T> {\n"
+            "    fn handle(request -> T) -> T;\n"
+            "}\n"
+        )
+        assert len(interface_program.statements) == 1
+        interface_decl = interface_program.statements[0]
+        assert interface_decl.variant == "InterfaceDeclaration"
+        assert interface_decl.name == "Service"
+        assert [param.name for param in interface_decl.type_parameters] == ["T"]
+        assert len(interface_decl.members) == 1
+        signature_member = interface_decl.members[0]
+        assert signature_member.name == "handle"
+        assert signature_member.parameters[0].name == "request"
+        assert signature_member.return_type is not None
+        assert signature_member.type_parameters == []
+
+        enum_program = parse_program(
+            "enum Response {\n"
+            "    Ok;\n"
+            "    Error { message -> string; }\n"
+            "}\n"
+        )
+        assert len(enum_program.statements) == 1
+        enum_decl = enum_program.statements[0]
+        assert enum_decl.variant == "EnumDeclaration"
+        assert enum_decl.name == "Response"
+        assert len(enum_decl.variants) == 2
+        assert enum_decl.variants[0].name == "Ok"
+        error_variant = enum_decl.variants[1]
+        assert error_variant.name == "Error"
+        assert len(error_variant.fields) == 1
+        assert error_variant.fields[0].name == "message"
+        assert error_variant.fields[0].type_annotation.text == "string"
+
+        with_program = parse_program(
+            "fn run() {\n"
+            "    with seed(42) {\n"
+            "        prompt system { \"hello\"; };\n"
+            "    }\n"
+            "}\n"
+        )
+        assert len(with_program.statements) == 1
+        with_fn = with_program.statements[0]
+        assert with_fn.variant == "FunctionDeclaration"
+        assert with_fn.body.statements
+        with_stmt = with_fn.body.statements[0]
+        assert with_stmt.variant == "WithStatement"
+        assert len(with_stmt.clauses) == 1
+        inner_prompt = with_stmt.body.statements[0]
+        assert inner_prompt.variant == "PromptStatement"
+        assert inner_prompt.channel == "system"
 
         test_program = parse_program(
             "test \"runs pipeline\" ![model] {\n"
@@ -296,7 +362,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         bare_test = bare_test_program.statements[0]
         assert bare_test.variant == "TestDeclaration"
         assert bare_test.effects == []
-        assert any(token.lexeme.strip().startswith("prompt") for token in bare_test.body.tokens)
+        assert bare_test.body.statements
+        prompt_stmt = bare_test.body.statements[0]
+        assert prompt_stmt.variant == "PromptStatement"
+        assert prompt_stmt.channel == "system"
     elif source_path.name == "decorator_semantics.sfn":
         namespace = {"__name__": "__main__"}
 

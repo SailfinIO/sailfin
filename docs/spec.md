@@ -90,6 +90,10 @@ fn add(x -> number, y -> number) -> number {
 `async fn` enables `await` inside the body. Decorators (`@identifier`) are
 parsed but ignored by code generation during bootstrapping.
 
+Self-hosted status: the Sailfin parser now captures generic type parameter
+clauses (`fn map<T>(...)`) on both top-level functions and struct methods, so
+later semantic passes can mirror the bootstrap compiler's metadata.
+
 #### 3.2.1 Effect Signatures
 
 `![...]` after a signature lists the effects the body may perform. The canonical
@@ -136,6 +140,10 @@ Structs group fields and methods. Fields are immutable unless declared with
 `mut`. Methods are declared with `fn` inside the struct body and may reference a
 `self` parameter explicitly. Interfaces provide trait-style method signatures.
 
+Self-hosted status: the Sailfin compiler now emits structured `StructDeclaration`
+and `InterfaceDeclaration` nodes with explicit field/member lists and captured
+type parameters, mirroring the bootstrap AST for diffability.
+
 ```sfn
 interface Greeter {
     fn greet(self) -> string;
@@ -158,6 +166,10 @@ Struct literals use `Type { field: expression }` syntax. Method calls follow the
 
 Enums mirror algebraic data types (ADTs). Variants may include payloads.
 
+Self-hosted status: enum declarations are represented as `EnumDeclaration`
+nodes with per-variant payload fields, enabling downstream passes to reuse the
+bootstrap analysis.
+
 ```sfn
 enum Response {
     Ok,
@@ -169,6 +181,9 @@ enum Response {
 
 Type aliases provide named shortcuts. Generics are parsed throughout the
 language; the bootstrap compiler treats them as metadata for code generation.
+
+Self-hosted status: `TypeAliasDeclaration` nodes retain generic parameter
+clauses and the aliased type text for parity with stage0.
 
 ```sfn
 type Result<T> = Response | T;
@@ -228,6 +243,10 @@ Evaluation order: prompt blocks execute in source order. A typical sequence is
 `system` → `user` → `assistant` → `tool`. The bootstrap backend preserves the
 declared order when generating code and effect-checks against the presence of
 any prompt block.
+
+Self-hosted status: prompt blocks are now emitted as dedicated
+`PromptStatement` nodes inside block bodies, enabling effect analysis to reason
+about prompts without falling back to token scanning.
 
 ```sfn
 fn summarize_doc(doc: Text) -> Summary ![model] {
@@ -558,10 +577,9 @@ Note (planned): Engines, adapters, tensors, and training are specified in a draf
 | Model replay cards          | Generated stub   | Minimal metadata   | Deterministic re-execution |
 | Registry integration        | Placeholder      | N/A                | Publish/resolve/verify |
 
-*Placeholder Notice*: `registry.sailfin.dev` is not yet live; interactions are illustrative until public release.
-
-`registry.sailfin.dev` is a placeholder domain pending public launch. Until
-live, examples involving publication are illustrative only.
+`registry.sailfin.dev` is live but contains no packages yet. The bootstrap toolchain
+does not currently integrate with the registry; this is planned for the
+self-hosted compiler.
 
 ## Effect System (Bootstrap reality and planned)
 

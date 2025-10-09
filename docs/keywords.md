@@ -77,3 +77,11 @@ Note on logging identifiers:
 >   the parser. The code generator emits simple stubs: models as data objects,
 >   pipelines/tools as plain functions, and tests as ordinary routines. No
 >   special pipeline operator exists in stage0.
+
+### Self-hosted parser status
+
+- The Sailfin-native parser now surfaces `interface`, `enum`, and `type`
+	declarations as first-class AST nodes, matching the bootstrap compiler's
+	structure for downstream analysis.
+- Block bodies preserve `prompt` statements structurally, allowing effect
+	checking without heuristics.

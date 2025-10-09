@@ -66,6 +66,12 @@ We bootstrap by compiling these `.sfn` files with the existing Python toolchain,
 - Port the bootstrap parser into Sailfin module by module.
 - Introduce Sailfin-native testing so unit tests run without Python.
 
+### Recent Progress
+
+- The Sailfin parser now emits structured nodes for enums, interfaces, type
+   aliases, and prompt statements, preserving generics on function and method
+   signatures to stay diffable with the bootstrap AST.
+
 ### Future Layout (Illustrative)
 
 ```

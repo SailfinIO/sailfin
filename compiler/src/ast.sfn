@@ -14,9 +14,15 @@ struct TypeAnnotation {
     text -> string;
 }
 
+struct TypeParameter {
+    name -> string;
+    bound -> TypeAnnotation?;
+}
+
 struct Block {
     tokens -> Token[];
     text -> string;
+    statements -> Statement[];
 }
 
 enum Expression {
@@ -33,6 +39,10 @@ struct Parameter {
     type_annotation -> TypeAnnotation?;
     default_value -> Expression?;
     mutable -> boolean;
+}
+
+struct WithClause {
+    expression -> Expression;
 }
 
 struct ModelProperty {
@@ -52,12 +62,18 @@ struct MethodDeclaration {
     decorators -> Decorator[];
 }
 
+struct EnumVariant {
+    name -> string;
+    fields -> FieldDeclaration[];
+}
+
 struct FunctionSignature {
     name -> string;
     is_async -> boolean;
     parameters -> Parameter[];
     return_type -> TypeAnnotation?;
     effects -> string[];
+    type_parameters -> TypeParameter[];
 }
 
 struct PipelineDeclaration {
@@ -143,11 +159,42 @@ enum Statement {
     },
     StructDeclaration {
         name -> string;
-        type_parameters -> string[];
+        type_parameters -> TypeParameter[];
         implements_types -> TypeAnnotation[];
         fields -> FieldDeclaration[];
         methods -> MethodDeclaration[];
         decorators -> Decorator[];
+    },
+    TypeAliasDeclaration {
+        name -> string;
+        type_parameters -> TypeParameter[];
+        aliased_type -> TypeAnnotation;
+        decorators -> Decorator[];
+    },
+    InterfaceDeclaration {
+        name -> string;
+        type_parameters -> TypeParameter[];
+        members -> FunctionSignature[];
+        decorators -> Decorator[];
+    },
+    EnumDeclaration {
+        name -> string;
+        type_parameters -> TypeParameter[];
+        variants -> EnumVariant[];
+        decorators -> Decorator[];
+    },
+    PromptStatement {
+        channel -> string;
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    WithStatement {
+        clauses -> WithClause[];
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    ExpressionStatement {
+        expression -> Expression;
     },
     Unknown {
         tokens -> Token[];

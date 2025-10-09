@@ -13,7 +13,7 @@ import {
     Statement,
 } from "./ast";
 import { Token } from "./token";
-import { evaluate_decorators, infer_effects } from "./decorator_semantics";
+import { evaluate_decorators } from "./decorator_semantics";
 
 struct EffectViolation {
     routine_name -> string;
@@ -55,6 +55,7 @@ fn analyze_statement(statement -> Statement) -> EffectViolation[] {
             parameters: [],
             return_type: null,
             effects: statement.effects,
+            type_parameters: [],
         };
         let qualified = "test " + statement.name;
         return analyze_routine(signature, statement.body, statement.decorators, qualified);
@@ -68,10 +69,10 @@ fn analyze_statement(statement -> Statement) -> EffectViolation[] {
             }
             let method = statement.methods[index];
             let qualified = statement.name + "." + method.signature.name;
-        issues = append_violations(
-            issues,
-            analyze_routine(method.signature, method.body, method.decorators, qualified)
-        );
+            issues = append_violations(
+                issues,
+                analyze_routine(method.signature, method.body, method.decorators, qualified)
+            );
             index += 1;
         }
         return issues;
@@ -86,7 +87,31 @@ fn analyze_routine(
     name -> string
 ) -> EffectViolation[] {
     let decorator_info = evaluate_decorators(decorators);
-    let declared = infer_effects(signature.effects, decorator_info);
+    let mut declared -> string[] = [];
+    let mut declared_index -> number = 0;
+    loop {
+        if declared_index >= signature.effects.length {
+            break;
+        }
+        declared = append_unique_effect(declared, signature.effects[declared_index]);
+        declared_index += 1;
+    }
+    let mut requires_io_from_decorators -> boolean = false;
+    let mut decorator_index -> number = 0;
+    loop {
+        if decorator_index >= decorator_info.length {
+            break;
+        }
+    let decorator_entry = decorator_info[decorator_index];
+    if decorator_entry.name == "trace" {
+            requires_io_from_decorators = true;
+            break;
+        }
+        decorator_index += 1;
+    }
+    if requires_io_from_decorators {
+        declared = append_unique_effect(declared, "io");
+    }
     let required = required_effects(body);
     let mut missing -> string[] = [];
     let mut index -> number = 0;
@@ -95,6 +120,10 @@ fn analyze_routine(
             break;
         }
         let effect = required[index];
+        if effect == "io" && requires_io_from_decorators {
+            index += 1;
+            continue;
+        }
         if !contains_effect(declared, effect) {
             missing = append_unique_effect(missing, effect);
         }
@@ -110,7 +139,7 @@ fn analyze_routine(
 
 fn required_effects(body -> Block) -> string[] {
     let mut required -> string[] = [];
-    if block_contains_prompt(body.tokens) {
+    if block_has_prompt(body) {
         required = append_unique_effect(required, "model");
     }
     if block_contains_fs_usage(body.tokens) {
@@ -120,6 +149,28 @@ fn required_effects(body -> Block) -> string[] {
         required = append_unique_effect(required, "net");
     }
     return required;
+}
+
+fn block_has_prompt(block -> Block) -> boolean {
+    if block.statements.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= block.statements.length {
+                break;
+            }
+            let statement = block.statements[index];
+            if statement.variant == "PromptStatement" {
+                return true;
+            }
+            if statement.variant == "WithStatement" {
+                if block_has_prompt(statement.body) {
+                    return true;
+                }
+            }
+            index += 1;
+        }
+    }
+    return block_contains_prompt(block.tokens);
 }
 
 fn block_contains_prompt(tokens -> Token[]) -> boolean {

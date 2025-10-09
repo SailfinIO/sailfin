@@ -12,7 +12,6 @@ import sys
 
 import pytest
 pytest.importorskip("ply")
-pytestmark = pytest.mark.integration
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
