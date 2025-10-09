@@ -164,6 +164,18 @@ Bootstrap note: Stage0 can route ops through adapter backends (e.g., Torch/JAX) 
 
 ### 4.3 Algorithm Capsules (user-level, planned)
 
+The following are examples to illustrate the pattern for algorithm capsules; they are not exhaustive. The plan is to provide a standard, growing set of commonly used model-building algorithms as composable capsules (organized under `sailfin/layers`, `sailfin/nn`, and `sailfin/losses`). Examples of planned coverage include:
+
+- Positional encodings: Rotary, Sinusoidal, ALiBi
+- Attention variants: Multi-head attention, FlashAttention (as capability-gated kernels), KV-cache ops
+- Normalization: LayerNorm, RMSNorm, GroupNorm
+- Regularization: Dropout, Stochastic Depth, Label Smoothing
+- Activations: GELU, SiLU/Swish, ReLU, Softmax, Tanh
+- Convolutional blocks: Depthwise/Pointwise conv, Residual blocks
+- Transformer blocks: Encoder/Decoder layers, Pre/Post-norm variants
+- Pooling and projections: Avg/Max pooling, linear projections
+- Losses and metrics: CrossEntropy, MSE, CosineEmbedding, Focal loss, Accuracy/F1/Recall@k
+
 Rotary Positional Encoding:
 
 ```sfn
