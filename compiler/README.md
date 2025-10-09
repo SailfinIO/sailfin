@@ -66,6 +66,26 @@ We bootstrap by compiling these `.sfn` files with the existing Python toolchain,
 - Port the bootstrap parser into Sailfin module by module.
 - Introduce Sailfin-native testing so unit tests run without Python.
 
+### Bootstrap Compilation Helper
+
+While we are still leaning on the Python toolchain, you can materialise the
+generated Python modules for the Sailfin sources with:
+
+```bash
+conda run -n sailfin-bootstrap python -m bootstrap.compile_self_host
+```
+
+The command writes `.py` files under `compiler/build/`, mirroring the structure
+of `compiler/src/`. Point it at individual files or directories to iterate on a
+subset:
+
+```bash
+conda run -n sailfin-bootstrap python -m bootstrap.compile_self_host compiler/src/parser.sfn
+```
+
+These helpers will disappear once the Sailfin-based backend is ready, but they
+keep the workflow ergonomic in the meantime.
+
 ### Recent Progress
 
 - The Sailfin parser now emits structured nodes for enums, interfaces, type

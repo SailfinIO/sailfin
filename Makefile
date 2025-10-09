@@ -19,6 +19,7 @@ help:
 	@echo "  make bootstrap-test         # Run the full pytest suite (pass PYTEST_ARGS=... to filter)"
 	@echo "  make bootstrap-test-unit    # Run unit tests only"
 	@echo "  make bootstrap-test-integration # Run integration tests only"
+	@echo "  make bootstrap-compile      # Emit Python modules from compiler/src using the bootstrap compiler"
 	@echo "  make test                   # Alias for bootstrap-test"
 
 bootstrap-install:
@@ -32,6 +33,9 @@ bootstrap-test-unit:
 
 bootstrap-test-integration:
 	$(MAKE) bootstrap-test PYTEST_ARGS=-m\ integration
+
+bootstrap-compile:
+	$(CONDA) run -n $(CONDA_ENV) python -m bootstrap.compile_self_host
 
 test: bootstrap-test
 
