@@ -27,6 +27,7 @@ COMPILER_SOURCES = [
     pathlib.Path("compiler/src/ast.sfn"),
     pathlib.Path("compiler/src/parser.sfn"),
     pathlib.Path("compiler/src/decorator_semantics.sfn"),
+    pathlib.Path("compiler/src/effect_checker.sfn"),
     pathlib.Path("compiler/src/main.sfn"),
 ]
 
@@ -159,6 +160,17 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert signature.parameters[0].type_annotation is not None
         assert fn_stmt.body.text.strip().startswith("{")
 
+        traced_program = parse_program(
+            "@trace(level: \"debug\")\n"
+            "fn traced() {\n"
+            "    return;\n"
+            "}\n"
+        )
+        assert len(traced_program.statements) == 1
+        traced_fn = traced_program.statements[0]
+        assert traced_fn.variant == "FunctionDeclaration"
+        assert "io" in traced_fn.signature.effects
+
         struct_program = parse_program(
             "struct User {\n"
             "    id -> number;\n"
@@ -279,3 +291,57 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
 
         inferred_effects = infer_effects(fn_stmt.signature.effects, decorator_info)
         assert "io" in inferred_effects
+    elif source_path.name == "effect_checker.sfn":
+        namespace = {"__name__": "__main__"}
+
+        def compile_module(relative: str) -> None:
+            module_source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            module_ast = parser.parse(module_source, lexer=base_lexer.clone())
+            module_python = CodeGenerator().generate_code(module_ast)
+            module_compiled = compile(
+                module_python,
+                str((REPO_ROOT / relative).with_suffix(".py")),
+                "exec",
+            )
+            exec(module_compiled, namespace, namespace)
+
+        for dependency in [
+            "compiler/src/token.sfn",
+            "compiler/src/ast.sfn",
+            "compiler/src/lexer.sfn",
+            "compiler/src/decorator_semantics.sfn",
+            "compiler/src/parser.sfn",
+        ]:
+            compile_module(dependency)
+
+        exec(compiled, namespace, namespace)
+        parse_program = namespace["parse_program"]
+        validate_effects = namespace["validate_effects"]
+
+        missing_sample = (
+            "fn summarize() {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+        )
+        violations = validate_effects(parse_program(missing_sample))
+        assert violations and violations[0].missing_effects == ["model"]
+
+        network_sample = (
+            "fn serve_api() {\n"
+            "    serve(request -> request);\n"
+            "}\n"
+        )
+        net_violations = validate_effects(parse_program(network_sample))
+        assert net_violations and "net" in net_violations[0].missing_effects
+
+        ok_sample = (
+            "fn summarize_ok() ![model] {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+            "@trace(level: \"debug\")\n"
+            "fn traced_ok() {\n"
+            "    fs.writeFile(\"out.txt\", \"data\");\n"
+            "}\n"
+        )
+        ok_violations = validate_effects(parse_program(ok_sample))
+        assert not ok_violations

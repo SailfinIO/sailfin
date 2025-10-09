@@ -1,0 +1,244 @@
+// compiler/src/effect_checker.sfn
+//
+// Minimal effect validation for the Sailfin self-hosted compiler. This mirrors
+// the bootstrap checker by scanning routine bodies for constructs that require
+// explicit capability declarations.
+
+import { Program, Statement, FunctionSignature, Block, MethodDeclaration, Decorator } from "./ast";
+import { Token } from "./token";
+import { evaluate_decorators, infer_effects } from "./decorator_semantics";
+
+struct EffectViolation {
+    routine_name -> string;
+    missing_effects -> string[];
+}
+
+fn validate_effects(program -> Program) -> EffectViolation[] {
+    let mut violations -> EffectViolation[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        violations = append_violations(violations, analyze_statement(statement));
+        index += 1;
+    }
+    return violations;
+}
+
+fn analyze_statement(statement -> Statement) -> EffectViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues -> EffectViolation[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= statement.methods.length {
+                break;
+            }
+            let method = statement.methods[index];
+            let qualified = statement.name + "." + method.signature.name;
+        issues = append_violations(
+            issues,
+            analyze_routine(method.signature, method.body, method.decorators, qualified)
+        );
+            index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+fn analyze_routine(
+    signature -> FunctionSignature,
+    body -> Block,
+    decorators -> Decorator[],
+    name -> string
+) -> EffectViolation[] {
+    let decorator_info = evaluate_decorators(decorators);
+    let declared = infer_effects(signature.effects, decorator_info);
+    let required = required_effects(body);
+    let mut missing -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= required.length {
+            break;
+        }
+        let effect = required[index];
+        if !contains_effect(declared, effect) {
+            missing = append_unique_effect(missing, effect);
+        }
+        index += 1;
+    }
+    if missing.length == 0 {
+        return [];
+    }
+    let mut result -> EffectViolation[] = [];
+    result = append_violation(result, EffectViolation { routine_name: name, missing_effects: missing });
+    return result;
+}
+
+fn required_effects(body -> Block) -> string[] {
+    let mut required -> string[] = [];
+    if block_contains_prompt(body.tokens) {
+        required = append_unique_effect(required, "model");
+    }
+    if block_contains_fs_usage(body.tokens) {
+        required = append_unique_effect(required, "io");
+    }
+    if block_contains_network_usage(body.tokens) {
+        required = append_unique_effect(required, "net");
+    }
+    return required;
+}
+
+fn block_contains_prompt(tokens -> Token[]) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if is_identifier_token(token, "prompt") {
+            let channel_index = next_non_trivia(tokens, index + 1);
+            if channel_index != -1 {
+                let channel_token = tokens[channel_index];
+                if channel_token.kind.variant == "Identifier" || channel_token.kind.variant == "StringLiteral" {
+                    let brace_index = next_non_trivia(tokens, channel_index + 1);
+                    if brace_index != -1 {
+                        let brace_token = tokens[brace_index];
+                        if is_symbol_token(brace_token, "{") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn block_contains_fs_usage(tokens -> Token[]) -> boolean {
+    return contains_identifier_followed_by_symbol(tokens, "fs", ".");
+}
+
+fn block_contains_network_usage(tokens -> Token[]) -> boolean {
+    if contains_identifier_followed_by_symbol(tokens, "http", ".") {
+        return true;
+    }
+    if contains_identifier_followed_by_symbol(tokens, "websocket", ".") {
+        return true;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if is_identifier_token(token, "serve") {
+            let paren = next_non_trivia(tokens, index + 1);
+            if paren != -1 && is_symbol_token(tokens[paren], "(") {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        if is_identifier_token(tokens[index], name) {
+            let next_index = next_non_trivia(tokens, index + 1);
+            if next_index != -1 && is_symbol_token(tokens[next_index], symbol) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn next_non_trivia(tokens -> Token[], start -> number) -> number {
+    let mut index = start;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if !is_trivia_token(token) {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn is_trivia_token(token -> Token) -> boolean {
+    return token.kind.variant == "Whitespace" || token.kind.variant == "Comment";
+}
+
+fn is_identifier_token(token -> Token, expected -> string) -> boolean {
+    if token.kind.variant == "Identifier" {
+        let value = token.kind.value;
+        if value.length > 0 {
+            return value == expected;
+        }
+    }
+    return token.lexeme == expected;
+}
+
+fn is_symbol_token(token -> Token, expected -> string) -> boolean {
+    if token.kind.variant == "Symbol" {
+        let value = token.kind.value;
+        if value.length > 0 {
+            return value == expected;
+        }
+    }
+    return token.lexeme == expected;
+}
+
+fn append_violations(violations -> EffectViolation[], new_violations -> EffectViolation[]) -> EffectViolation[] {
+    let mut result = violations;
+    let mut index -> number = 0;
+    loop {
+        if index >= new_violations.length {
+            break;
+        }
+        result = result.concat([new_violations[index]]);
+        index += 1;
+    }
+    return result;
+}
+
+fn append_violation(collection -> EffectViolation[], item -> EffectViolation) -> EffectViolation[] {
+    return collection.concat([item]);
+}
+
+fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
+    if contains_effect(effects, effect) {
+        return effects;
+    }
+    return effects.concat([effect]);
+}
+
+fn contains_effect(effects -> string[], effect -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= effects.length {
+            break;
+        }
+        if effects[index] == effect {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
