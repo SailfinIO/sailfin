@@ -57,7 +57,12 @@ struct FunctionSignature {
 
 struct Decorator {
     name -> string;
-    arguments -> Expression[];
+    arguments -> DecoratorArgument[];
+}
+
+struct DecoratorArgument {
+    name -> string?;
+    expression -> Expression;
 }
 
 enum Statement {

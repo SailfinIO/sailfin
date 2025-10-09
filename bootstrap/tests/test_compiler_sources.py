@@ -185,8 +185,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert method.signature.effects == []
         assert method.body.text.strip().startswith("{")
         assert len(method.decorators) == 1
-        assert method.decorators[0].name == "trace"
-        assert len(method.decorators[0].arguments) == 1
-        trace_arg = method.decorators[0].arguments[0]
-        assert trace_arg.variant == "Raw"
-        assert "level" in trace_arg.text
+        trace_decorator = method.decorators[0]
+        assert trace_decorator.name == "trace"
+        assert len(trace_decorator.arguments) == 1
+        trace_arg = trace_decorator.arguments[0]
+        assert trace_arg.name == "level"
+        assert trace_arg.expression.variant == "Raw"
+        assert trace_arg.expression.text.strip() == '"debug"'
