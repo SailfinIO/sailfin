@@ -43,8 +43,9 @@ Functions, pipelines, tests, and tools may declare required capabilities with
 fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 ```
 
-The bootstrap parser records the effect list; the self-hosted compiler enforces
-that all effectful operations inside the body belong to the declared set.
+Bootstrap status: the parser records effect lists and a conservative validator
+(`bootstrap/effect_checker.py`) enforces a subset today. See Effect System
+section below for details.
 
 ## 2. Modules, Imports, and Capabilities
 
@@ -207,15 +208,26 @@ input hashes, latency, cost).
 | `seed`       | number                  | No       | Deterministic seed for reproducible generations |
 | `notes`      | string                  | No       | Free-form provenance / intent rationale |
 
+Bootstrap note: The parser accepts any identifier keys within a `model` block
+and the bootstrap code generator stores them verbatim in a plain object. Keys
+listed above are the canonical set; unknown keys are preserved but not
+validated by the bootstrap toolchain.
+
 Additional provider-specific keys MAY appear but MUST NOT change semantics of
 declared standard keys. Unknown keys are preserved in generation cards for
 observability.
 
 ### 3.7 Prompt Blocks
 
-`prompt` blocks compose multi-part instructions. Supported channels are
-`system`, `user`, `assistant`, and `tool`. Interpolated identifiers are checked
-statically.
+`prompt` blocks compose multi-part instructions. Channels in the bootstrap are
+parsed as identifiers and commonly use `system`, `user`, `assistant`, and `tool`.
+The bootstrap does not currently enforce the channel vocabulary; the
+self-hosted target will.
+
+Evaluation order: prompt blocks execute in source order. A typical sequence is
+`system` → `user` → `assistant` → `tool`. The bootstrap backend preserves the
+declared order when generating code and effect-checks against the presence of
+any prompt block.
 
 ```sfn
 fn summarize_doc(doc: Text) -> Summary ![model] {
@@ -223,9 +235,19 @@ fn summarize_doc(doc: Text) -> Summary ![model] {
   prompt user   { "Summarise:\n{{ doc }}" }
   Summarizer.call()
 }
+Typed prompts (planned):
+
+The design includes typed prompt channels to validate shape, e.g. `prompt
+user<SummaryRequest> { ... }`. This syntax is not accepted by the bootstrap
+parser and appears here as a forward-looking example.
+
 ```
 
 ### 3.8 Pipelines and Dataflow
+
+Bootstrap note: `pipeline` declarations parse and emit as plain functions.
+The `|>` operator shown below is a planned feature and not implemented in the
+bootstrap parser.
 
 `pipeline` declarations express ETL-style dataflows with zero-copy semantics and
 compile-time shape checks.
@@ -243,7 +265,7 @@ Each stage declares effect usage implicitly via the called functions. Pipelines
 can be invoked like ordinary functions and integrate with structured
 concurrency.
 
-#### 3.8.1 Pipeline Semantics
+#### 3.8.1 Pipeline Semantics (planned)
 
 - `|>` is left-associative and has lower precedence than all expression
   operators; the right-hand side of each stage parses as a LogicalOr root.
@@ -251,6 +273,22 @@ concurrency.
   aggregate into the pipeline's effect list.
 - The compiler performs (planned) shape analysis: if a stage's output union is
   not accepted by the next stage's parameter type, a type error is issued.
+
+#### 3.8.2 Failure behaviour and side effects
+
+- Bootstrap: Pipelines are ordinary functions. Failures follow standard
+  exception semantics; side effects occur as the function executes. There is no
+  transactional rollback or stage isolation in stage0.
+- Planned: Pipelines run with structured scopes. Side effects propagate in
+  order; failures within a stage can trigger compensations or retries based on
+  policy, and determinism settings are applied per stage.
+
+#### 3.8.3 Async and lazy pipelines (planned)
+
+Pipelines may run lazily or asynchronously, where upstream stages backpressure
+downstream consumers. The bootstrap compiler does not implement async/lazy
+pipelines; use explicit `async fn`, `routine`, and `channel(capacity)` in
+stage0.
 
 #### 3.8.2 Named Arguments in Stages
 
@@ -296,13 +334,16 @@ boundaries.
   cancellation, deadlines, and determinism knobs (`seed`, `temperature`). These
   are partially stubbed in the bootstrap runtime and fully enforced in the
   self-hosted implementation.
-- **Channels** – Channels are bounded by default, providing backpressure for
-  model pipelines.
+- **Channels** – In the bootstrap runtime, channels are unbounded by default
+  unless a capacity is provided. Use `channel(capacity: N)` to enable
+  backpressure. The self-hosted runtime will prefer bounded channels by
+  default.
 - **Accelerators** – Operations requiring GPUs/TPUs must declare the `gpu`
   effect. The runtime batches compatible tensor work automatically.
 
 ```sfn
 async fn main() ![io, model] {
+  // Future-only in bootstrap: `1s` time literal and `scope.with_timeout(...)` API.
   let scope = scope.with_timeout(1s);
   let messages -> Channel<number> = channel(capacity: 32);
 
@@ -318,14 +359,15 @@ async fn main() ![io, model] {
 
 ### 5.1 is operator (type / pattern guard)
 
-The bootstrap compiler implements a minimal `is` infix operator:
+Bootstrap implements a minimal `is`-style check using the `is` token parsed as
+a type-test operator in expressions. It lowers to `runtime.check_type`.
 
 ```sfn
 if value is SomeType { ... }
 ```
 
 Semantics (bootstrap stage0):
-1. Evaluate the right-hand side as a nominal type name.
+1. Evaluate the right-hand side as a nominal type name (no structural typing yet).
 2. Perform a runtime instance check analogous to `check_type` in the runtime.
 3. Return a boolean; future static versions will narrow the type of `value`
   inside the guarded block (not yet enforced in bootstrap).
@@ -355,6 +397,20 @@ with linear semantics suitable for zero-copy AI workloads.
 **Wrapper types** – `PII<T>`, `Secret<T>`, `Policy<T, Rule>`, `Affine<T>`, and
 `Linear<T>` compose with all other types and participate in effect enforcement.
 
+### 6.1 Ownership & Linear Types (bootstrap reality)
+
+- `Affine<T>` and `Linear<T>` are accepted syntactically as ordinary nominal
+  types. The bootstrap toolchain does not enforce move/consume rules; they are
+  carried as annotations for diagnostics and documentation only.
+- Borrowing is a planned feature in the self-hosted compiler. The tentative
+  surface syntax will include a function-style borrow `borrow(x)` and may also
+  explore a unary borrow operator `&x`. The latter is not parsed today (the `&`
+  token is currently used for type intersections, e.g. `A & B`).
+
+> Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only.
+> The bootstrap backend will not prevent aliasing, duplication, or drops of
+> `Affine<T>`/`Linear<T>` values.
+
 ## 7. Capability-Based Security
 
 - Capsules declare capabilities in `sail.toml`; fleets coordinate shared
@@ -365,6 +421,26 @@ with linear semantics suitable for zero-copy AI workloads.
 - Policies are declarative DSLs that compile to runtime transformers; they can
   be embedded inline or sourced from policy bundles shipped with the binary.
 
+### 7.1 Data wrappers and policies (bootstrap reality)
+
+- Wrappers such as `PII<T>` and `Secret<T>` exist in the type system design to
+  model taint and secrecy. In the bootstrap toolchain, they are parsed as
+  ordinary nominal types and carry no enforcement; the bootstrap runtime does
+  not provide concrete `PII`/`Secret` classes.
+- Policy annotations via decorators (e.g. `@policy(Redact(PII))`) are part of
+  the planned self-hosted semantics. While the bootstrap parser supports
+  decorators syntactically, policy decorators have no effect in stage0 and
+  should be treated as documentation only.
+
+Planned example (not valid under bootstrap runtime):
+
+```sfn
+@policy(Redact(PII))
+fn summarize(user: PII<Text>) -> Summary ![model] {
+  // ...
+}
+```
+
 ## 8. Testing, Evaluators, and Replay
 
 Tests are first-class declarations introduced with `test`. They may declare
@@ -374,6 +450,8 @@ effects and determinism scopes.
 test "extracts totals reliably" ![model] {
   with seed(42), temperature(0.2) {
     let out = Parser.call(invoice_text);
+    // Future-only in bootstrap: `~=` tolerance and `+/-` margin operators in asserts.
+    // Use ordinary boolean checks in stage0.
     assert(out.total ~= 199.99 +/- 0.01);
   }
 }
@@ -404,9 +482,18 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
 - `runtime.console.info` – backing implementation for source-level `print.info`.
 - `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
   primitives.
-- `runtime.models.call_model` – placeholder for model invocations; currently
-  simulates responses.
 - `runtime.format_string` – interpolated string support.
+
+Bootstrap stubs:
+- Model declarations (`model ... { ... }`) are parsed and emitted as plain data
+  objects. There is no `Model.call(...)` in the bootstrap backend.
+- `prompt` blocks are parsed and annotated for effect checking but do not send
+  messages to a model during code generation.
+
+Additional stubs:
+- Pipelines are emitted as plain functions; there is no special dataflow or
+  operator support in stage0. The pipeline operator `|>` shown in examples is
+  a self-hosted target and not accepted by the bootstrap parser.
 
 The self-hosted runtime layers on:
 
@@ -456,13 +543,13 @@ This specification will evolve with the implementation. Refer to `enbf.md` and
 | Feature / Construct         | Bootstrap Parser | Bootstrap Enforced | Self-Hosted (Planned) |
 |-----------------------------|------------------|--------------------|-----------------------|
 | Generics                    | Yes (metadata)   | Partial (erased)   | Full monomorph / constraints |
-| Effects (`![...]`)          | Yes              | Recorded only      | Static + capability gates |
-| Pipelines `pipeline`        | Yes              | Basic execution    | Shape + effect analysis |
+| Effects (`![...]`)          | Yes              | Partial (io, net, model) | Static + capability gates |
+| Pipelines `pipeline`        | Yes              | Parsed + emitted, semantics evolving | Shape + effect analysis |
 | Models & evaluators         | Yes              | Stub call + card   | Real provider + cost/provenance |
 | String interpolation `{{}}` | Yes              | Runtime eval       | Templated + typed escapes |
 | Linear/Affine wrappers      | Parsed           | Diagnostics only   | Ownership + borrow checker |
-| `assert(...)`               | Parsed (new)     | Runtime boolean    | Rich diagnostics + shrink cases |
-| `is` operator               | Yes (runtime)    | Nominal check      | Flow-sensitive narrowing |
+| `assert` statement          | Yes              | Runtime boolean    | Rich diagnostics + shrink cases |
+| `is` operator               | Yes (runtime)    | Nominal check via runtime.check_type | Flow-sensitive narrowing |
 | Named arguments             | Yes              | Metadata           | Reordering + default compatibility |
 | Tool declarations           | Yes              | Stub dispatch      | Sandboxed invocation + auditing |
 | Capability policies         | Manifest stub    | Not enforced       | Full static + dynamic guards |
@@ -473,3 +560,31 @@ This specification will evolve with the implementation. Refer to `enbf.md` and
 
 `registry.sailfin.dev` is a placeholder domain pending public launch. Until
 live, examples involving publication are illustrative only.
+
+## Effect System (Bootstrap reality and planned)
+
+Canonical effects today: io, net, model, gpu, rand, clock.
+
+Bootstrap enforcement status (see `bootstrap/effect_checker.py`):
+- model: required when a routine includes any `prompt ... { ... }` block.
+- io: required when calling filesystem helpers via `fs.*`.
+- net: required when using network helpers (`http.*`, `websocket.*`, or `serve`).
+
+Currently parsed but not yet enforced: gpu, rand, clock, and hierarchical effect
+names (e.g. `io.fs`, `net.http`). These are accepted by the parser and recorded
+on declarations but are not validated in the bootstrap checker.
+
+Planned (self-hosted target):
+- Hierarchical, composable effects with scoping (e.g. `io.fs.read`, `net.http`).
+- Cross-manifest capability gates (capsule/fleet manifests) for compilation and runtime.
+- Flow-sensitive effect inference and minimal annotations.
+
+Cross-reference: enforcement logic lives in `bootstrap/effect_checker.py` and is
+invoked from the code generator prior to emission.
+
+## Compatibility notes (examples)
+
+Examples under `examples/` are curated to compile under the bootstrap toolchain.
+If an example uses future syntax (such as currency literals `$0.05` or
+`scope.with_timeout(1s)`), it is marked in comments as future feature; replace
+with numeric literals and stub helpers when running with the bootstrap compiler.

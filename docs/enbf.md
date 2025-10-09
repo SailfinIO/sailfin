@@ -32,16 +32,18 @@ StructDeclaration  = "struct" Identifier [ TypeParameters ]
 
 StructMember       = FieldDeclaration | MethodDeclaration ;
 
-FieldDeclaration   = [ "mut" ] Identifier "->" Type ";" ;
+TypeSep            = "->" | ":" ;
+FieldDeclaration   = [ "mut" ] Identifier TypeSep Type ";" ;
 
 MethodDeclaration  = { Decorator } [ "async" ] "fn" Identifier [ TypeParameters ]
-                     "(" [ Parameters ] ")" [ "->" Type ] [ EffectList ] Block ;
+                     "(" [ Parameters ] ")" [ TypeSep Type ] [ EffectList ] Block ;
 
 InterfaceDeclaration = "interface" Identifier [ TypeParameters ]
-                        "{" { FunctionSignature } "}" ;
+                        "{" { FunctionSignature | PropertySignature } "}" ;
+PropertySignature   = Identifier TypeSep Type ";" ;
 
 FunctionSignature   = "fn" Identifier "(" [ Parameters ] ")"
-                      [ "->" Type ] [ EffectList ] ";" ;
+                      [ TypeSep Type ] [ EffectList ] ";" ;
 
 TypeAliasDeclaration = "type" Identifier [ TypeParameters ] "=" Type ";" ;
 
@@ -50,13 +52,13 @@ TypeParameter      = Identifier [ ":" Type ] ;
 
 FunctionDeclaration = { Decorator } [ "async" ] "fn" Identifier
                        [ TypeParameters ] "(" [ Parameters ] ")"
-                       [ "->" Type ] [ EffectList ] Block ;
+                       [ TypeSep Type ] [ EffectList ] Block ;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
-                      [ "->" Type ] [ EffectList ] Block ;
+                      [ TypeSep Type ] [ EffectList ] Block ;
 
 ToolDeclaration     = "tool" Identifier "(" [ Parameters ] ")"
-                      [ "->" Type ] [ EffectList ] Block ;
+                      [ TypeSep Type ] [ EffectList ] Block ;
 
 ModelDeclaration    = "model" Identifier ":" Type [ EffectList ] ModelBlock ;
 ModelBlock          = "{" { ModelProperty } "}" ;
@@ -66,7 +68,7 @@ ModelValue          = Expression | Type ;
 TestDeclaration     = "test" ( Identifier | StringLiteral ) [ EffectList ] Block ;
 
 Parameters         = Parameter { "," Parameter } ;
-Parameter          = [ "mut" ] Identifier [ "->" Type ] [ "=" Expression ] ;
+Parameter          = [ "mut" ] Identifier [ TypeSep Type ] [ "=" Expression ] ;
 
 Decorator          = "@" QualifiedName [ "(" [ Arguments ] ")" ] ;
 
@@ -90,12 +92,12 @@ Statement          = VariableDeclaration
                    | AssignmentStatement
                    | ExpressionStatement ;
 
-AssertStatement    = "assert" "(" Expression ")" ";" ;
+AssertStatement    = "assert" Expression ";" ;  // Bootstrap: no parentheses required
 
-VariableDeclaration  = "let" [ "mut" ] Identifier [ "->" Type ]
+VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeSep Type ]
                        [ "=" Expression ] ";" ;
 
-ConstantDeclaration  = "const" Identifier [ "->" Type ] "=" Expression ";" ;
+ConstantDeclaration  = "const" Identifier [ TypeSep Type ] "=" Expression ";" ;
 
 IfStatement        = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
 
@@ -109,17 +111,18 @@ InlineExpression   = Expression [ ";" ] ;
 TryStatement       = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
                      [ "finally" Block ] ;
 
-RoutineDeclaration = "routine" [ Expression ] Block ;
+RoutineDeclaration = "routine" [ Identifier | StringLiteral ] Block ;
 
 ReturnStatement    = "return" [ Expression ] ";" ;
 
 ThrowStatement     = "throw" Expression ";" ;
 
-WithStatement      = "with" WithClause { "," WithClause } Block ;
-WithClause         = Identifier "(" [ Arguments ] ")" ;
+WithStatement      = "with" Expression { "," Expression } Block ;
 
 PromptStatement    = "prompt" PromptChannel Block ;
-PromptChannel      = "system" | "user" | "assistant" | "tool" ;
+// Bootstrap status: channels are parsed as identifiers; canonical channel names are
+// system | user | assistant | tool (not enforced by the bootstrap lexer/parser).
+PromptChannel      = Identifier ;
 
 AssignmentStatement = Assignment ";" ;
 Assignment         = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
@@ -128,13 +131,16 @@ ExpressionStatement = Expression ";" ;
 
 Expression         = LambdaExpression | PipelineExpression ;
 
-LambdaExpression   = "fn" "(" [ Parameters ] ")" [ "->" Type ] [ EffectList ] Block ;
+LambdaExpression   = "fn" "(" [ Parameters ] ")" [ TypeSep Type ] Block ;
 
+// Planned (self-hosted target). The bootstrap parser does not implement the
+// pipeline operator; this rule is included for design reference only. `|>`
+// binds looser than all expression operators and associates left-to-right.
 PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 
 LogicalOr          = LogicalAnd { "||" LogicalAnd } ;
 LogicalAnd         = Equality { "&&" Equality } ;
-Equality           = Comparison { ("==" | "!=") Comparison } ;
+Equality           = Comparison { (("==" | "!=") Comparison) | ("is" Type) } ;
 Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
 Term               = Factor { ("+" | "-") Factor } ;
 Factor             = Unary { ("*" | "/") Unary } ;
@@ -156,9 +162,13 @@ Primary            = NumberLiteral
                    | Identifier
                    | "(" Expression ")"
                    | ArrayLiteral
+                   | ObjectLiteral
                    | StructLiteral ;
 
 ArrayLiteral       = "[" [ Expression { "," Expression } ] "]" ;
+
+ObjectLiteral      = "{" [ ObjectField { "," ObjectField } ] "}" ;
+ObjectField        = Identifier ":" Expression ;
 
 StructLiteral      = Identifier "{" [ StructField { "," StructField } ] "}" ;
 StructField        = Identifier ":" Expression ;
@@ -212,6 +222,10 @@ correspond to capabilities granted via manifests (`sail.toml`, aggregated in
 `fleet.toml`). The compiler uses these lists to enforce deterministic,
 auditable use of I/O (`io`), networking (`net`), randomness (`rand`), model
 invocation (`model`), accelerator usage (`gpu`), and clocks/timers (`clock`).
+
+Bootstrap enforcement note: The stage0 effect checker validates only `model`,
+`io`, and `net`. Other effect identifiers are parsed and recorded on
+declarations but are not enforced in bootstrap.
 
 ### Prompt Blocks
 

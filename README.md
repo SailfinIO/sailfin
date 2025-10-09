@@ -18,7 +18,7 @@ model Summarizer : Model<Text, Summary> {
   engine     = "gpt-neo@3.1"
   schema     = Summary
   max_tok    = 2000
-  cost_cap   = 0.05  // USD (currency literal support forthcoming)
+  cost_cap   = 0.05  // USD (currency literal — future; use plain number in bootstrap)
   evaluators = [ Faithfulness, LatencyBudget(150ms) ]
 }
 
@@ -37,11 +37,19 @@ fn summarize_doc(doc: Text) -> Summary ![io, model] {
   }
 
   let generation = Summarizer.call()
-  print.info(generation.card)      // provenance metadata (bootstrap: print is bound to runtime.console)
+  print.info(generation.card)      // provenance metadata (bootstrap: `print` bound to runtime.console)
   generation.output                // typed `Summary`
 }
+Prompt evaluation order: prompts execute in source order; the common sequence is
+system → user → assistant → tool.
+
+Typed prompts (planned): `prompt user<SummaryRequest> { ... }` is design-stage
+syntax for shape-checked prompts and is not accepted by the bootstrap parser.
 
 pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
+  // Future syntax note: the `|>` operator is part of the self-hosted design
+  // and not supported by the bootstrap parser. Use ordinary function calls in
+  // stage0 or treat this as illustrative pseudocode.
   docs
     |> chunk(by: "semantic", target_tokens: 512)
     |> embed(with: "e5-large")
@@ -60,6 +68,17 @@ The Python-hosted stage0 toolchain supports a growing subset of the language whi
 - `docs/keywords.md` — evolving list of reserved keywords and future directions.
 
 The docs mention `fleet.toml`, `std/`, and `runtime/` as part of the self-hosted target layout; these are not yet present in this repository.
+
+Implementation reality (bootstrap subset):
+- Effects: parser records `![...]`; bootstrap validator enforces `model`, `io`, `net` only.
+- Prompts: parsed with channel identifiers; common channels are `system`, `user`, `assistant`, `tool`.
+- Logging: use `print.info(...)` in source; `print` is injected by the code generator.
+- Pipelines: declarations compile to plain functions; the `|>` operator is not implemented in stage0.
+- Pipeline behavior: failures follow normal exception semantics in stage0; see `docs/spec.md` for planned failure/side-effect semantics.
+- Ownership: `Affine<T>`/`Linear<T>` are parsed as ordinary nominal types; no move/borrow enforcement in stage0.
+- Currency literals `$0.05`, time units like `150ms`, and APIs like `scope.with_timeout(...)` are future features; examples using them are illustrative only.
+
+See `docs/spec.md` (Effect System section) and `bootstrap/effect_checker.py` for details.
 
 ## Architecture Overview
 

@@ -40,9 +40,15 @@ the language matures.
 ### Concurrency and Utilities
 
 - `routine`
-- `scope`
+- `scope` (reserved keyword for planned structured concurrency API; not usable in bootstrap)
 - `with`
-- `print` and `info` (surface syntax for logging: use `print.info(...)`)
+
+Note on logging identifiers:
+- In the lexer, `print` and `info` are tokens that enable the `print.info(...)`
+	and `print.error(...)` style. The bootstrap code generator injects
+	`print = runtime.console` so this pattern works; avoid shadowing `print` in
+	user code. Prefer `print.info(...)` over `console.info(...)` in Sailfin
+	sources.
 
 ### Literals
 
@@ -53,15 +59,21 @@ the language matures.
 ### Prompt Composition
 
 - `prompt`
-- `system`
-- `user`
-- `assistant`
-- `tool`
+- Channel names are ordinary identifiers in bootstrap; the canonical set is
+	`system`, `user`, `assistant`, `tool`. There is no enforcement of this set in
+	stage0.
 
 
 ### Reserved identifiers (not keywords)
 
 - None specific to printing. In the bootstrap backend, `print` is bound to `runtime.console` so that `print.info(...)` is the idiomatic and supported form. Older docs may show `console.info(...)`; prefer `print.info(...)` in source.
 
-> **Notes:**
-> * `is` is reserved for prospective pattern or type guard syntax; it is not yet part of the stable surface.
+> Notes:
+> - `assert` is implemented as a statement (no parentheses required) and lowers
+>   to Python `assert` in the bootstrap backend.
+> - `is` is implemented as a binary type-check operator and lowers to
+>   `runtime.check_type(value, "Type")` in the bootstrap backend.
+> - `model`, `pipeline`, and `tool` are implemented as declarations in the
+>   parser. The code generator emits simple stubs: models as data objects,
+>   pipelines/tools as plain functions. No special pipeline operator exists in
+>   stage0.
