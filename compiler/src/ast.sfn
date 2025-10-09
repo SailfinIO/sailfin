@@ -1,0 +1,75 @@
+// compiler/src/ast.sfn
+//
+// Shared abstract syntax tree definitions for the Sailfin self-hosting effort.
+// The structures mirror a pragmatic subset of the bootstrap compiler AST so we
+// can progressively port parsing and analysis logic into Sailfin.
+
+import { Token } from "./token";
+
+struct Program {
+    statements -> Statement[];
+}
+
+struct TypeAnnotation {
+    text -> string;
+}
+
+struct Block {
+    tokens -> Token[];
+    text -> string;
+}
+
+enum Expression {
+    Identifier { name -> string },
+    NumberLiteral { value -> string },
+    StringLiteral { value -> string },
+    BooleanLiteral { value -> boolean },
+    NullLiteral,
+    Raw { text -> string },
+}
+
+struct Parameter {
+    name -> string;
+    type_annotation -> TypeAnnotation?;
+    default_value -> Expression?;
+    mutable -> boolean;
+}
+
+struct FunctionSignature {
+    name -> string;
+    is_async -> boolean;
+    parameters -> Parameter[];
+    return_type -> TypeAnnotation?;
+    effects -> string[];
+}
+
+struct Decorator {
+    name -> string;
+}
+
+enum Statement {
+    ImportDeclaration {
+        items -> string[];
+        source -> string;
+    },
+    VariableDeclaration {
+        name -> string;
+        mutable -> boolean;
+        type_annotation -> TypeAnnotation?;
+        initializer -> Expression?;
+    },
+    ConstantDeclaration {
+        name -> string;
+        type_annotation -> TypeAnnotation?;
+        initializer -> Expression?;
+    },
+    FunctionDeclaration {
+        signature -> FunctionSignature;
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    Unknown {
+        tokens -> Token[];
+        text -> string;
+    },
+}

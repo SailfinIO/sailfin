@@ -22,9 +22,11 @@ from bootstrap.parser import parser
 
 
 COMPILER_SOURCES = [
-    pathlib.Path("compiler/src/main.sfn"),
-    pathlib.Path("compiler/src/lexer.sfn"),
     pathlib.Path("compiler/src/token.sfn"),
+    pathlib.Path("compiler/src/lexer.sfn"),
+    pathlib.Path("compiler/src/ast.sfn"),
+    pathlib.Path("compiler/src/parser.sfn"),
+    pathlib.Path("compiler/src/main.sfn"),
 ]
 
 
@@ -70,3 +72,68 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "3.14" for token in meaningful)
         assert any(token.kind.variant == "Identifier" and token.kind.value == "const" for token in meaningful)
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "42" for token in meaningful)
+    elif source_path.name == "ast.sfn":
+        namespace = {"__name__": "__main__"}
+        exec(compiled, namespace, namespace)
+
+        program_class = namespace["Program"]
+        statement_enum = namespace["Statement"]
+
+        program = program_class(statements=[])
+        assert isinstance(program.statements, list)
+
+        variable = statement_enum.VariableDeclaration(
+            name="x",
+            mutable=False,
+            type_annotation=None,
+            initializer=None,
+        )
+        assert variable.variant == "VariableDeclaration"
+    elif source_path.name == "parser.sfn":
+        namespace = {"__name__": "__main__"}
+
+        def compile_module(relative: str) -> None:
+            module_source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            module_ast = parser.parse(module_source, lexer=base_lexer.clone())
+            module_python = CodeGenerator().generate_code(module_ast)
+            module_compiled = compile(
+                module_python,
+                str((REPO_ROOT / relative).with_suffix(".py")),
+                "exec",
+            )
+            exec(module_compiled, namespace, namespace)
+
+        for dependency in ["compiler/src/token.sfn", "compiler/src/ast.sfn", "compiler/src/lexer.sfn"]:
+            compile_module(dependency)
+
+        exec(compiled, namespace, namespace)
+        parse_program = namespace["parse_program"]
+
+        sample = (
+            'import { print } from "sailfin/io";\n'
+            "const answer -> number = 42;\n"
+            "fn greet(name -> string) -> string ![io] {\n"
+            "    return name;\n"
+            "}\n"
+        )
+        program = parse_program(sample)
+        assert len(program.statements) == 3
+        assert all(stmt.variant != "Unknown" for stmt in program.statements)
+
+        import_stmt = program.statements[0]
+        assert import_stmt.variant == "ImportDeclaration"
+        assert import_stmt.items == ["print"]
+        assert import_stmt.source == "sailfin/io"
+
+        const_stmt = program.statements[1]
+        assert const_stmt.variant == "ConstantDeclaration"
+        assert const_stmt.initializer is not None
+
+        fn_stmt = program.statements[2]
+        assert fn_stmt.variant == "FunctionDeclaration"
+        signature = fn_stmt.signature
+        assert signature.name == "greet"
+        assert signature.effects == ["io"]
+        assert signature.parameters[0].name == "name"
+        assert signature.parameters[0].type_annotation is not None
+        assert fn_stmt.body.text.strip().startswith("{")

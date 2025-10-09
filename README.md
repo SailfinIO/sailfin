@@ -108,7 +108,12 @@ Capsules can be published to a registry as bundles or model packs.
 Sailfin is evolving quickly. See `CONTRIBUTING.md` (coming soon) and join the discussion in issues once the repository is public.  
 For now, experiment, record findings, and propose ideas through pull requests.
 
+### Local Development
+
+- `make bootstrap-install` — install the bootstrap (stage0) toolchain into a local `.venv` inside `bootstrap/`.
+- `make bootstrap-test` — run the entire pytest suite; use `PYTEST_ARGS=-m unit` or `PYTEST_ARGS=-m integration` to focus runs.
+- `poetry run python bootstrap/bootstrap.py path/to/file.sfn` — compile a Sailfin source file with the stage0 compiler.
+
 > Note: This repository is pre-release and not yet versioned. Expect breaking changes while core concepts stabilize.
 
 > Registry Placeholder: The domain `registry.sailfin.dev` is not yet live; publish/resolve examples are illustrative until public launch.
-
