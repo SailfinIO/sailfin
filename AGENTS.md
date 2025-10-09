@@ -11,12 +11,12 @@
 - `examples/` provides runnable snippets; omit generated outputs from version control.
 
 ## Build, Test, and Development Commands
-- `make bootstrap-install` installs the Python 3.13 toolchain in an in-repo virtualenv.
+- `make bootstrap-install` creates or updates the `sailfin-bootstrap` Conda environment (Python 3.13 by default).
 - `make bootstrap-test` runs the full pytest suite (set `PYTEST_ARGS=-m unit`, `-m integration`, etc. to filter).
 - `make bootstrap-test-unit` / `make bootstrap-test-integration` provide marker shortcuts.
-- `poetry run python bootstrap/bootstrap.py path/to/file.sfn` compiles Sailfin sources and writes `bootstrap/output.py`.
-- `poetry run pyinstaller --onefile --name sfn bootstrap/bootstrap.py` builds the CLI into `bootstrap/dist/`.
-- When invoking `poetry` directly, either run from `bootstrap/` or pass `poetry --directory bootstrap …`; the Makefile handles this automatically.
+- `conda run -n sailfin-bootstrap python bootstrap/bootstrap.py path/to/file.sfn` compiles Sailfin sources and writes `bootstrap/output.py`.
+- `conda run -n sailfin-bootstrap pyinstaller --onefile --name sfn bootstrap/bootstrap.py` builds the CLI into `bootstrap/dist/`.
+- When invoking `conda run` directly, call it from the repository root; the Makefile handles the environment selection automatically.
 
 ## Coding Style & Language Conventions
 - Python code follows PEP 8 with four-space indentation, `snake_case`, and small, testable compiler phases.
@@ -31,4 +31,4 @@
 
 ## Commit & PR Checklist
 - Use Conventional Commits (`docs(spec): …`, `feat(parser): …`) with atomic scope and passing tests.
-- In PR descriptions, list verification steps (`poetry run pytest`, manual runs) and confirm bootstrap support, `print.info`, aligned effects, consistent terminology, synchronized references, and no generated artifacts.
+- In PR descriptions, list verification steps (`conda run -n sailfin-bootstrap pytest`, manual runs) and confirm bootstrap support, `print.info`, aligned effects, consistent terminology, synchronized references, and no generated artifacts.

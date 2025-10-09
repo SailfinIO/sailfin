@@ -7,21 +7,21 @@ This directory contains the bootstrap compiler for the Sailfin language. The boo
 To compile the Sailfin compiler, run the following command:
 
 ```bash
-pyinstaller --onefile --name sfn bootstrap/bootstrap.py
+conda run -n sailfin-bootstrap pyinstaller --onefile --name sfn bootstrap/bootstrap.py
 ```
 
 This will generate the `sfn` executable in the /dist directory.
 
 ## Development
 
-The bootstrap compiler is written in Python 3.13. To install the required dependencies, run the following command:
+The bootstrap compiler targets Python 3.13. Create or update the development environment with:
 
 ```bash
-poetry install
+make bootstrap-install
 ```
 
 To run the tests, run the following command:
 
 ```bash
-poetry run pytest
+make bootstrap-test
 ```

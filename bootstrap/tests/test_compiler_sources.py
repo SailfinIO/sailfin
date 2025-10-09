@@ -59,7 +59,13 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         exec(compiled, namespace, namespace)
         lex_fn = namespace["lex"]
 
-        sample = "let title = 3.14; // number\n/* done */ const answer = 42;"
+        sample = (
+            'let title = "Sailfin"; // string literal\n'
+            "let ready = true;\n"
+            "/* done */ const answer = 42;\n"
+            "let ratio = 3.14;\n"
+            "let debug = false;"
+        )
         tokens = lex_fn(sample)
 
         comments = [token for token in tokens if token.kind.variant == "Comment"]
@@ -72,6 +78,15 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "3.14" for token in meaningful)
         assert any(token.kind.variant == "Identifier" and token.kind.value == "const" for token in meaningful)
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "42" for token in meaningful)
+        has_string_literal = any(
+            token.kind.variant == "StringLiteral" and token.kind.value == "Sailfin" for token in meaningful
+        )
+        has_identifier_string = any(
+            token.kind.variant == "Identifier" and token.kind.value == "Sailfin" for token in meaningful
+        )
+        assert has_string_literal or has_identifier_string
+        assert any(token.kind.variant == "BooleanLiteral" and token.kind.value is True for token in meaningful)
+        assert any(token.kind.variant == "BooleanLiteral" and token.kind.value is False for token in meaningful)
     elif source_path.name == "ast.sfn":
         namespace = {"__name__": "__main__"}
         exec(compiled, namespace, namespace)
@@ -162,7 +177,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
             "@entity\n"
             "struct Collection<T> implements Iterable<T>, Debug {\n"
             "    size -> number;\n"
-            "    @trace(level: \"debug\")\n"
+            "    @trace(level: \"debug\", enabled: false)\n"
             "    fn get(self) -> T {\n"
             "        return self;\n"
             "    }\n"
@@ -187,8 +202,15 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert len(method.decorators) == 1
         trace_decorator = method.decorators[0]
         assert trace_decorator.name == "trace"
-        assert len(trace_decorator.arguments) == 1
-        trace_arg = trace_decorator.arguments[0]
-        assert trace_arg.name == "level"
-        assert trace_arg.expression.variant == "Raw"
-        assert trace_arg.expression.text.strip() == '"debug"'
+        assert len(trace_decorator.arguments) == 2
+        level_arg = trace_decorator.arguments[0]
+        assert level_arg.name == "level"
+        if level_arg.expression.variant == "StringLiteral":
+            assert level_arg.expression.value == "debug"
+        else:
+            assert level_arg.expression.variant == "Raw"
+            assert level_arg.expression.text.strip() == '"debug"'
+        enabled_arg = trace_decorator.arguments[1]
+        assert enabled_arg.name == "enabled"
+        assert enabled_arg.expression.variant == "BooleanLiteral"
+        assert enabled_arg.expression.value is False

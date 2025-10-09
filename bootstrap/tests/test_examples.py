@@ -18,9 +18,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ast_nodes import FunctionDeclaration, TestDeclaration
+from bootstrap.ast_nodes import FunctionDeclaration, TestDeclaration
 from bootstrap.code_generator import CodeGenerator
-from effect_checker import EffectValidationError
+from bootstrap.effect_checker import EffectValidationError
 from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser
 

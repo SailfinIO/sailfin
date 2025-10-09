@@ -13,8 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from ast_nodes import (
+from bootstrap.ast_nodes import (
     ArrayLiteral,
+    ArrayType,
     AssertStatement,
     Assignment,
     AsyncBlockExpression,
@@ -89,9 +90,8 @@ from ast_nodes import (
     WithStatement,
     UnaryExpression,
 )
-from ast_nodes import ArrayType
 
-from effect_checker import validate_effects
+from bootstrap.effect_checker import validate_effects
 
 
 @dataclass

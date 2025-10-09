@@ -8,10 +8,10 @@ try:
 except Exception:  # fallback when run standalone
     __version__ = "0.0.0"
 
-from lexer import lexer
-from parser import parser
-from code_generator import CodeGenerator
-from ast_nodes import ASTNode
+from bootstrap.lexer import lexer
+from bootstrap.parser import parser
+from bootstrap.code_generator import CodeGenerator
+from bootstrap.ast_nodes import ASTNode
 
 
 def inspect_tokens(source_code):

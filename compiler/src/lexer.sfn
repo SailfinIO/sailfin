@@ -250,12 +250,22 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
             let value = slice(state.source, start, state.index);
-            tokens = append(tokens, Token {
-                kind: TokenKind.Identifier { value: value },
-                lexeme: value,
-                line: start_line,
-                column: start_column,
-            });
+            if value == "true" || value == "false" {
+                let bool_value = value == "true";
+                tokens = append(tokens, Token {
+                    kind: TokenKind.BooleanLiteral { value: bool_value },
+                    lexeme: value,
+                    line: start_line,
+                    column: start_column,
+                });
+            } else {
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Identifier { value: value },
+                    lexeme: value,
+                    line: start_line,
+                    column: start_column,
+                });
+            }
             continue;
         }
 

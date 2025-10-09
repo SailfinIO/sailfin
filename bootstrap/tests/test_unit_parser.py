@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser, ParseError
-from ast_nodes import Program, FunctionDeclaration, VariableDeclaration, ReturnStatement
+from bootstrap.ast_nodes import Program, FunctionDeclaration, VariableDeclaration, ReturnStatement
 import pytest
 
 

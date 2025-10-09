@@ -8,6 +8,7 @@ enum TokenKind {
     Identifier { value -> string },
     NumberLiteral { value -> string },
     StringLiteral { value -> string },
+    BooleanLiteral { value -> boolean },
     Symbol { value -> string },
     Whitespace,
     Comment,
