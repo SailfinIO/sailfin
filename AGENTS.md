@@ -17,6 +17,7 @@
 - `conda run -n sailfin-bootstrap python bootstrap/bootstrap.py path/to/file.sfn` compiles Sailfin sources and writes `bootstrap/output.py`.
 - `conda run -n sailfin-bootstrap pyinstaller --onefile --name sfn bootstrap/bootstrap.py` builds the CLI into `bootstrap/dist/`.
 - When invoking `conda run` directly, call it from the repository root; the Makefile handles the environment selection automatically.
+- The self-hosted front-end now includes `decorator_semantics.sfn` and `effect_checker.sfn`; run the compiler smoke suite (`conda run -n sailfin-bootstrap pytest bootstrap/tests/test_compiler_sources.py`) when touching decorators or effect inference.
 
 ## Coding Style & Language Conventions
 - Python code follows PEP 8 with four-space indentation, `snake_case`, and small, testable compiler phases.

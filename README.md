@@ -70,7 +70,7 @@ The Python-hosted stage0 toolchain supports a growing subset of the language whi
 The docs mention `fleet.toml`, `std/`, and `runtime/` as part of the self-hosted target layout; these are not yet present in this repository.
 
 Implementation reality (bootstrap subset):
-- Effects: parser records `![...]`; bootstrap validator enforces `model`, `io`, `net` only.
+- Effects: parser records `![...]`; bootstrap validator enforces `model`, `io`, `net` only, and the self-hosted parser now infers `io` when decorators such as `@trace` appear.
 - Prompts: parsed with channel identifiers; common channels are `system`, `user`, `assistant`, `tool`.
 - Logging: use `print.info(...)` in source; `print` is injected by the code generator.
 - Pipelines: declarations compile to plain functions; the `|>` operator is not implemented in stage0.
