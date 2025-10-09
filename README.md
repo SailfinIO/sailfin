@@ -73,6 +73,7 @@ Implementation reality (bootstrap subset):
 - Effects: parser records `![...]`; bootstrap validator enforces `model`, `io`, `net` only, and the self-hosted parser now infers `io` when decorators such as `@trace` appear.
 - Prompts: parsed with channel identifiers; common channels are `system`, `user`, `assistant`, `tool`.
 - Logging: use `print.info(...)` in source; `print` is injected by the code generator.
+- Declarations: `model`, `pipeline`, `tool`, and `test` now parse identically in stage0 and the Sailfin-native parser, and their effect lists flow into the conservative checker.
 - Pipelines: declarations compile to plain functions; the `|>` operator is not implemented in stage0.
 - Pipeline behavior: failures follow normal exception semantics in stage0; see `docs/spec.md` for planned failure/side-effect semantics.
 - Ownership: `Affine<T>`/`Linear<T>` are parsed as ordinary nominal types; no move/borrow enforcement in stage0.

@@ -4,7 +4,14 @@
 // the bootstrap checker by scanning routine bodies for constructs that require
 // explicit capability declarations.
 
-import { Program, Statement, FunctionSignature, Block, MethodDeclaration, Decorator } from "./ast";
+import {
+    Block,
+    Decorator,
+    FunctionSignature,
+    MethodDeclaration,
+    Program,
+    Statement,
+} from "./ast";
 import { Token } from "./token";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";
 
@@ -30,6 +37,27 @@ fn validate_effects(program -> Program) -> EffectViolation[] {
 fn analyze_statement(statement -> Statement) -> EffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
         return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name);
+    }
+    if statement.variant == "PipelineDeclaration" {
+        let signature = statement.signature;
+        let qualified = "pipeline " + signature.name;
+        return analyze_routine(signature, statement.body, statement.decorators, qualified);
+    }
+    if statement.variant == "ToolDeclaration" {
+        let signature = statement.signature;
+        let qualified = "tool " + signature.name;
+        return analyze_routine(signature, statement.body, statement.decorators, qualified);
+    }
+    if statement.variant == "TestDeclaration" {
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+        };
+        let qualified = "test " + statement.name;
+        return analyze_routine(signature, statement.body, statement.decorators, qualified);
     }
     if statement.variant == "StructDeclaration" {
         let mut issues -> EffectViolation[] = [];

@@ -232,6 +232,71 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert enabled_arg.name == "enabled"
         assert enabled_arg.expression.variant == "BooleanLiteral"
         assert enabled_arg.expression.value is False
+
+        model_program = parse_program(
+            "model Summarizer : Model<Text, Summary> ![model] {\n"
+            "    engine = \"gpt\";\n"
+            "    cost = 0.05;\n"
+            "}\n"
+        )
+        assert len(model_program.statements) == 1
+        model_stmt = model_program.statements[0]
+        assert model_stmt.variant == "ModelDeclaration"
+        assert model_stmt.name == "Summarizer"
+        assert model_stmt.model_type.text == "Model<Text, Summary>"
+        assert model_stmt.effects == ["model"]
+        assert len(model_stmt.properties) == 2
+        assert model_stmt.properties[0].name == "engine"
+        first_property_value = model_stmt.properties[0].value
+        if first_property_value.variant == "StringLiteral":
+            assert first_property_value.value == "gpt"
+        else:
+            assert first_property_value.variant == "Raw"
+            assert '"gpt"' in first_property_value.text
+
+        pipeline_program = parse_program(
+            "pipeline ingest(data -> string) -> string {\n"
+            "    return data;\n"
+            "}\n"
+        )
+        assert len(pipeline_program.statements) == 1
+        pipeline_stmt = pipeline_program.statements[0]
+        assert pipeline_stmt.variant == "PipelineDeclaration"
+        assert pipeline_stmt.signature.name == "ingest"
+        assert pipeline_stmt.signature.parameters[0].name == "data"
+        assert pipeline_stmt.signature.return_type is not None
+
+        tool_program = parse_program(
+            "tool fetch(request -> string) -> string ![io] {\n"
+            "    return request;\n"
+            "}\n"
+        )
+        assert len(tool_program.statements) == 1
+        tool_stmt = tool_program.statements[0]
+        assert tool_stmt.variant == "ToolDeclaration"
+        assert tool_stmt.signature.name == "fetch"
+        assert "io" in tool_stmt.signature.effects
+
+        test_program = parse_program(
+            "test \"runs pipeline\" ![model] {\n"
+            "    prompt system { \"ok\"; };\n"
+            "}\n"
+        )
+        assert len(test_program.statements) == 1
+        test_stmt = test_program.statements[0]
+        assert test_stmt.variant == "TestDeclaration"
+        assert test_stmt.name == "runs pipeline"
+        assert test_stmt.effects == ["model"]
+
+        bare_test_program = parse_program(
+            "test regression {\n"
+            "    prompt system { \"ok\"; };\n"
+            "}\n"
+        )
+        bare_test = bare_test_program.statements[0]
+        assert bare_test.variant == "TestDeclaration"
+        assert bare_test.effects == []
+        assert any(token.lexeme.strip().startswith("prompt") for token in bare_test.body.tokens)
     elif source_path.name == "decorator_semantics.sfn":
         namespace = {"__name__": "__main__"}
 
@@ -345,3 +410,35 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         )
         ok_violations = validate_effects(parse_program(ok_sample))
         assert not ok_violations
+
+        pipeline_missing = (
+            "pipeline summarize_pipeline(doc -> string) {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+        )
+        pipeline_violations = validate_effects(parse_program(pipeline_missing))
+        assert pipeline_violations
+        assert "model" in pipeline_violations[0].missing_effects
+
+        pipeline_ok = (
+            "pipeline summarize_pipeline_ok() ![model] {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+        )
+        assert not validate_effects(parse_program(pipeline_ok))
+
+        test_missing = (
+            "test \"needs model\" {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+        )
+        test_violations = validate_effects(parse_program(test_missing))
+        assert test_violations
+        assert "model" in test_violations[0].missing_effects
+
+        test_ok = (
+            "test regression ![model] {\n"
+            "    prompt system { \"hi\"; };\n"
+            "}\n"
+        )
+        assert not validate_effects(parse_program(test_ok))

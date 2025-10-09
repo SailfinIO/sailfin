@@ -35,6 +35,11 @@ struct Parameter {
     mutable -> boolean;
 }
 
+struct ModelProperty {
+    name -> string;
+    value -> Expression;
+}
+
 struct FieldDeclaration {
     name -> string;
     type_annotation -> TypeAnnotation;
@@ -53,6 +58,33 @@ struct FunctionSignature {
     parameters -> Parameter[];
     return_type -> TypeAnnotation?;
     effects -> string[];
+}
+
+struct PipelineDeclaration {
+    signature -> FunctionSignature;
+    body -> Block;
+    decorators -> Decorator[];
+}
+
+struct ToolDeclaration {
+    signature -> FunctionSignature;
+    body -> Block;
+    decorators -> Decorator[];
+}
+
+struct TestDeclaration {
+    name -> string;
+    body -> Block;
+    effects -> string[];
+    decorators -> Decorator[];
+}
+
+struct ModelDeclaration {
+    name -> string;
+    model_type -> TypeAnnotation;
+    properties -> ModelProperty[];
+    effects -> string[];
+    decorators -> Decorator[];
 }
 
 struct Decorator {
@@ -80,6 +112,29 @@ enum Statement {
         name -> string;
         type_annotation -> TypeAnnotation?;
         initializer -> Expression?;
+    },
+    ModelDeclaration {
+        name -> string;
+        model_type -> TypeAnnotation;
+        properties -> ModelProperty[];
+        effects -> string[];
+        decorators -> Decorator[];
+    },
+    PipelineDeclaration {
+        signature -> FunctionSignature;
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    ToolDeclaration {
+        signature -> FunctionSignature;
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    TestDeclaration {
+        name -> string;
+        body -> Block;
+        effects -> string[];
+        decorators -> Decorator[];
     },
     FunctionDeclaration {
         signature -> FunctionSignature;

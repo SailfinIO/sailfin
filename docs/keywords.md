@@ -73,7 +73,7 @@ Note on logging identifiers:
 >   to Python `assert` in the bootstrap backend.
 > - `is` is implemented as a binary type-check operator and lowers to
 >   `runtime.check_type(value, "Type")` in the bootstrap backend.
-> - `model`, `pipeline`, and `tool` are implemented as declarations in the
->   parser. The code generator emits simple stubs: models as data objects,
->   pipelines/tools as plain functions. No special pipeline operator exists in
->   stage0.
+> - `model`, `pipeline`, `tool`, and `test` are implemented as declarations in
+>   the parser. The code generator emits simple stubs: models as data objects,
+>   pipelines/tools as plain functions, and tests as ordinary routines. No
+>   special pipeline operator exists in stage0.
