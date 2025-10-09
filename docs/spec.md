@@ -527,6 +527,8 @@ Upcoming milestones include:
 This specification will evolve with the implementation. Refer to `enbf.md` and
 `bootstrap/tests/` for executable examples of the language.
 
+Note (planned): Engines, adapters, tensors, and training are specified in a draft proposal under `docs/proposals/model-engines-and-training.md`. Until merged into the core spec, treat that document as design guidance rather than normative semantics.
+
 ### Terminology Migration (Bootstrap -> Current)
 
 | Old | New |
