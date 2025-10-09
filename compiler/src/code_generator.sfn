@@ -1,0 +1,428 @@
+// compiler/src/code_generator.sfn
+//
+// Minimal Python emitter written in Sailfin. This mirrors a sliver of the
+// bootstrap `CodeGenerator` so we can start experimenting with self-hosted
+// code generation. The current implementation intentionally focuses on
+// readability over completeness: it preserves the structure of top-level
+// declarations and records Sailfin blocks as comments while emitting valid
+// Python scaffolding.
+
+import {
+    Block,
+    Decorator,
+    FieldDeclaration,
+    FunctionSignature,
+    MethodDeclaration,
+    Parameter,
+    Program,
+    Statement,
+} from "./ast";
+
+struct CodeBuilder {
+    lines -> string[];
+    indent -> number;
+}
+
+fn generate_program(program -> Program) -> string {
+    let mut builder -> CodeBuilder = builder_new();
+    builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
+    builder = builder_emit_blank(builder);
+
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        builder = emit_statement(builder, program.statements[index]);
+        if index + 1 < program.statements.length {
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    return builder_to_string(builder);
+}
+
+fn emit_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    if statement.variant == "FunctionDeclaration" {
+        return emit_function(builder, statement.signature, statement.body, statement.decorators);
+    }
+    if statement.variant == "StructDeclaration" {
+        return emit_struct(builder, statement.name, statement.fields, statement.methods, statement.decorators);
+    }
+    if statement.variant == "TestDeclaration" {
+        let qualified = "test \"" + statement.name + "\"";
+        return emit_stub_function(builder, qualified, statement.body, statement.effects, statement.decorators);
+    }
+    if statement.variant == "PipelineDeclaration" {
+        let qualified = "pipeline " + statement.signature.name;
+        return emit_stub_function(builder, qualified, statement.body, statement.effects, statement.decorators);
+    }
+    if statement.variant == "ToolDeclaration" {
+        let qualified = "tool " + statement.signature.name;
+        return emit_stub_function(builder, qualified, statement.body, statement.effects, statement.decorators);
+    }
+    if statement.variant == "ModelDeclaration" {
+        return emit_model(builder, statement.name, statement.effects, statement.decorators);
+    }
+    builder = builder_emit(builder, "# TODO: unsupported statement: " + statement.variant);
+    return builder;
+}
+
+fn emit_function(
+    builder -> CodeBuilder,
+    signature -> FunctionSignature,
+    body -> Block,
+    decorators -> Decorator[]
+) -> CodeBuilder {
+    builder = emit_decorator_comments(builder, decorators);
+    let header = format_function_header(signature);
+    builder = builder_emit(builder, header);
+    builder = builder_push_indent(builder);
+    if signature.effects.length > 0 {
+        builder = builder_emit(builder, "# effects: " + join_with_separator(signature.effects, ", "));
+    }
+    builder = emit_block_stub(builder, body);
+    builder = builder_pop_indent(builder);
+    return builder;
+}
+
+fn emit_struct(
+    builder -> CodeBuilder,
+    name -> string,
+    fields -> FieldDeclaration[],
+    methods -> MethodDeclaration[],
+    decorators -> Decorator[]
+) -> CodeBuilder {
+    builder = emit_decorator_comments(builder, decorators);
+    builder = builder_emit(builder, "class " + name + ":");
+    builder = builder_push_indent(builder);
+
+    if fields.length == 0 && methods.length == 0 {
+        builder = builder_emit(builder, "pass");
+        builder = builder_pop_indent(builder);
+        return builder;
+    }
+
+    builder = builder_emit(builder, "def __init__(self):");
+    builder = builder_push_indent(builder);
+    if fields.length == 0 {
+        builder = builder_emit(builder, "pass");
+    } else {
+        let mut index -> number = 0;
+        loop {
+            if index >= fields.length {
+                break;
+            }
+            let field = fields[index];
+            builder = builder_emit(builder, "self." + field.name + " = None");
+            index += 1;
+        }
+    }
+    builder = builder_pop_indent(builder);
+
+    let mut method_index -> number = 0;
+    loop {
+        if method_index >= methods.length {
+            break;
+        }
+        builder = builder_emit_blank(builder);
+        builder = emit_method(builder, methods[method_index]);
+        method_index += 1;
+    }
+
+    builder = builder_pop_indent(builder);
+    return builder;
+}
+
+fn emit_method(builder -> CodeBuilder, method -> MethodDeclaration) -> CodeBuilder {
+    builder = emit_decorator_comments(builder, method.decorators);
+    let signature = method.signature;
+    let header = format_method_header(signature);
+    builder = builder_emit(builder, header);
+    builder = builder_push_indent(builder);
+    if signature.effects.length > 0 {
+        builder = builder_emit(builder, "# effects: " + join_with_separator(signature.effects, ", "));
+    }
+    builder = emit_block_stub(builder, method.body);
+    builder = builder_pop_indent(builder);
+    return builder;
+}
+
+fn emit_stub_function(
+    builder -> CodeBuilder,
+    name -> string,
+    body -> Block,
+    effects -> string[],
+    decorators -> Decorator[]
+) -> CodeBuilder {
+    builder = emit_decorator_comments(builder, decorators);
+    let header = "def " + sanitize_identifier(name) + "():";
+    builder = builder_emit(builder, header);
+    builder = builder_push_indent(builder);
+    if effects.length > 0 {
+        builder = builder_emit(builder, "# effects: " + join_with_separator(effects, ", "));
+    }
+    builder = emit_block_stub(builder, body);
+    builder = builder_pop_indent(builder);
+    return builder;
+}
+
+fn sanitize_identifier(name -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_identifier_char(ch) {
+            result = result + ch;
+        } else if ch == " " {
+            result = result + "_";
+        }
+        index += 1;
+    }
+    if result.length == 0 {
+        return "generated_test";
+    }
+    return result;
+}
+
+fn is_identifier_char(ch -> string) -> boolean {
+    if ch == "_" {
+        return true;
+    }
+    let code = runtime.char_code(ch);
+    if code >= runtime.char_code("a") && code <= runtime.char_code("z") {
+        return true;
+    }
+    if code >= runtime.char_code("A") && code <= runtime.char_code("Z") {
+        return true;
+    }
+    if code >= runtime.char_code("0") && code <= runtime.char_code("9") {
+        return true;
+    }
+    return false;
+}
+
+fn emit_model(
+    builder -> CodeBuilder,
+    name -> string,
+    effects -> string[],
+    decorators -> Decorator[]
+) -> CodeBuilder {
+    builder = emit_decorator_comments(builder, decorators);
+    let assignment = name + " = {" + "'effects': " + format_effects_array(effects) + "}";
+    builder = builder_emit(builder, assignment);
+    return builder;
+}
+
+fn format_effects_array(effects -> string[]) -> string {
+    if effects.length == 0 {
+        return "[]";
+    }
+    let mut index -> number = 0;
+    let mut values -> string[] = [];
+    loop {
+        if index >= effects.length {
+            break;
+        }
+        values = append_string(values, "'" + effects[index] + "'");
+        index += 1;
+    }
+    return "[" + join_with_separator(values, ", ") + "]";
+}
+
+fn emit_decorator_comments(builder -> CodeBuilder, decorators -> Decorator[]) -> CodeBuilder {
+    let mut index -> number = 0;
+    let mut current = builder;
+    loop {
+        if index >= decorators.length {
+            break;
+        }
+        let decorator = decorators[index];
+        current = builder_emit(current, "# @" + decorator.name);
+        index += 1;
+    }
+    return current;
+}
+
+fn emit_block_stub(builder -> CodeBuilder, block -> Block) -> CodeBuilder {
+    let mut current = builder;
+    current = builder_emit(current, "pass");
+    if block.text.length > 0 {
+        current = builder_emit(current, "# original Sailfin block omitted");
+    }
+    return current;
+}
+
+fn trim_block_text(text -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = text.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = text[start];
+        if is_whitespace_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = text[end - 1];
+        if is_whitespace_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    return runtime.substring(text, start, end);
+}
+
+fn is_whitespace_char(ch -> string) -> boolean {
+    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+}
+
+fn format_function_header(signature -> FunctionSignature) -> string {
+    let mut prefix -> string = "def ";
+    if signature.is_async {
+        prefix = "async def ";
+    }
+    let params_array = format_parameters(signature.parameters);
+    let params = join_with_separator(params_array, ", ");
+    return prefix + signature.name + "(" + params + "):";
+}
+
+fn format_method_header(signature -> FunctionSignature) -> string {
+    let mut prefix -> string = "def ";
+    if signature.is_async {
+        prefix = "async def ";
+    }
+    let params = format_method_parameters(signature.parameters);
+    return prefix + signature.name + "(" + params + "):";
+}
+
+fn format_parameters(parameters -> Parameter[]) -> string[] {
+    let mut result -> string[] = [];
+    if parameters.length == 0 {
+        return result;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        result = append_string(result, parameter.name);
+        index += 1;
+    }
+    return result;
+}
+
+fn format_method_parameters(parameters -> Parameter[]) -> string {
+    let mut names -> string[] = [];
+    let mut has_self -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        if parameter.name == "self" {
+            has_self = true;
+        }
+        names = append_string(names, parameter.name);
+        index += 1;
+    }
+    if !has_self {
+        names = prepend_string(names, "self");
+    }
+    return join_with_separator(names, ", ");
+}
+
+fn prepend_string(values -> string[], value -> string) -> string[] {
+    let mut result -> string[] = [];
+    result = append_string(result, value);
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = append_string(result, values[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    let mut result -> string = values[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = result + separator + values[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn builder_new() -> CodeBuilder {
+    return CodeBuilder { lines: [], indent: 0 };
+}
+
+fn builder_emit(builder -> CodeBuilder, line -> string) -> CodeBuilder {
+    if line.length == 0 {
+        return builder_emit_blank(builder);
+    }
+    let mut prefix -> string = "";
+    let mut count -> number = 0;
+    loop {
+        if count >= builder.indent {
+            break;
+        }
+        prefix = prefix + "    ";
+        count += 1;
+    }
+    let full_line = prefix + line;
+    let lines = append_string(builder.lines, full_line);
+    return CodeBuilder { lines: lines, indent: builder.indent };
+}
+
+fn builder_emit_blank(builder -> CodeBuilder) -> CodeBuilder {
+    let lines = append_string(builder.lines, "");
+    return CodeBuilder { lines: lines, indent: builder.indent };
+}
+
+fn builder_push_indent(builder -> CodeBuilder) -> CodeBuilder {
+    return CodeBuilder { lines: builder.lines, indent: builder.indent + 1 };
+}
+
+fn builder_pop_indent(builder -> CodeBuilder) -> CodeBuilder {
+    let mut indent = builder.indent;
+    if indent > 0 {
+        indent -= 1;
+    }
+    return CodeBuilder { lines: builder.lines, indent: indent };
+}
+
+fn builder_to_string(builder -> CodeBuilder) -> string {
+    let content = join_with_separator(builder.lines, "\n");
+    if content.length == 0 {
+        return "";
+    }
+    return content + "\n";
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    return values.concat([value]);
+}

@@ -25,6 +25,7 @@ COMPILER_SOURCES = [
     pathlib.Path("compiler/src/lexer.sfn"),
     pathlib.Path("compiler/src/ast.sfn"),
     pathlib.Path("compiler/src/parser.sfn"),
+    pathlib.Path("compiler/src/code_generator.sfn"),
     pathlib.Path("compiler/src/decorator_semantics.sfn"),
     pathlib.Path("compiler/src/effect_checker.sfn"),
     pathlib.Path("compiler/src/main.sfn"),

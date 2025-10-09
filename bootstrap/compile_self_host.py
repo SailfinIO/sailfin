@@ -57,6 +57,7 @@ def compile_module(source_path: pathlib.Path, output_dir: pathlib.Path) -> pathl
     lexer = base_lexer.clone()
     ast = bootstrap_parser.parse(source_text, lexer=lexer)
     python_source = CodeGenerator().generate_code(ast)
+    python_source = python_source.encode("utf-8").decode("unicode_escape")
     destination.write_text(python_source, encoding="utf-8")
     return destination
 
