@@ -176,7 +176,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert [impl.text for impl in collection_struct.implements_types] == ["Iterable<T>", "Debug"]
         assert len(collection_struct.decorators) == 1
         assert collection_struct.decorators[0].name == "entity"
-        assert collection_struct.decorators[0].arguments is None
+        assert collection_struct.decorators[0].arguments == []
         assert len(collection_struct.fields) == 1
         assert len(collection_struct.methods) == 1
         method = collection_struct.methods[0]
@@ -186,4 +186,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert method.body.text.strip().startswith("{")
         assert len(method.decorators) == 1
         assert method.decorators[0].name == "trace"
-        assert method.decorators[0].arguments == "level: \"debug\""
+        assert len(method.decorators[0].arguments) == 1
+        trace_arg = method.decorators[0].arguments[0]
+        assert trace_arg.variant == "Raw"
+        assert "level" in trace_arg.text

@@ -404,6 +404,9 @@ class CodeGenerator:
         return self._emit_expression(expr)
 
     def _emit_struct(self, decl: StructDeclaration) -> None:
+        for decorator in getattr(decl, "decorators", []):
+            deco = self._emit_decorator(decorator)
+            self._emit(deco)
         self._emit(f"class {decl.name}:")
         self._indent += 1
         fields = [m for m in decl.members if isinstance(m, FieldDeclaration)]

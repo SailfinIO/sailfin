@@ -628,14 +628,61 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
         current = parser_advance_raw(current);
         current = skip_trivia(current);
 
-        let mut arguments -> string? = null;
+        let mut arguments -> Expression[] = [];
         let after = parser_peek_raw(current);
         if after.kind.variant == "Symbol" && after.kind.value == "(" {
             let paren_result = collect_parenthesized(current);
             if paren_result.success {
-                let argument_text = trim_text(tokens_to_text(paren_result.tokens));
-                if argument_text.length > 0 {
-                    arguments = argument_text;
+                let mut segment_tokens -> Token[] = [];
+                let mut angle -> number = 0;
+                let mut paren -> number = 0;
+                let mut brace -> number = 0;
+                let mut bracket -> number = 0;
+
+                let mut index -> number = 0;
+                loop {
+                    if index >= paren_result.tokens.length {
+                        break;
+                    }
+                    let tok = paren_result.tokens[index];
+                    if tok.kind.variant == "Symbol" {
+                        let sym = tok.kind.value;
+                        if sym == "<" {
+                            angle += 1;
+                        } else if sym == ">" && angle > 0 {
+                            angle -= 1;
+                        } else if sym == "(" {
+                            paren += 1;
+                        } else if sym == ")" && paren > 0 {
+                            paren -= 1;
+                        } else if sym == "{" {
+                            brace += 1;
+                        } else if sym == "}" && brace > 0 {
+                            brace -= 1;
+                        } else if sym == "[" {
+                            bracket += 1;
+                        } else if sym == "]" && bracket > 0 {
+                            bracket -= 1;
+                        }
+
+                        let at_top_level = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
+                        if sym == "," && at_top_level {
+                            let candidate_text = trim_text(tokens_to_text(segment_tokens));
+                            if candidate_text.length > 0 {
+                                arguments = append_expression(arguments, expression_from_tokens(segment_tokens));
+                            }
+                            segment_tokens = [];
+                            index += 1;
+                            continue;
+                        }
+                    }
+                    segment_tokens = append_token(segment_tokens, tok);
+                    index += 1;
+                }
+
+                let trailing = trim_text(tokens_to_text(segment_tokens));
+                if trailing.length > 0 {
+                    arguments = append_expression(arguments, expression_from_tokens(segment_tokens));
                 }
                 current = paren_result.parser;
             } else {
@@ -1348,6 +1395,10 @@ fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> 
 
 fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
     return decorators.concat([decorator]);
+}
+
+fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
+    return expressions.concat([expression]);
 }
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {
