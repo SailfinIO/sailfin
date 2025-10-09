@@ -1,0 +1,85 @@
+# Top-level ignores for the whole repo
+# OS/editor
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pylint.d/
+.pyre/
+.hypothesis/
+
+# Poetry
+.poetry
+bootstrap/poetry.lock
+
+# Packaging / build
+build/
+dist/
+.eggs/
+.eggs/**
+*.egg-info/
+*.egg
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtualenvs (keep per-dir ignores as well)
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+
+# Coverage
+/htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Logs / temp
+logs/
+*.log
+*.out
+*.bak
+*.tmp
+*.temp
+*.old
+*.orig
+*.rej
+
+# Node / VS Code extension
+node_modules/
+*.vsix
+# Extension build artifacts (kept even if extension/.gitignore exists)
+extension/out/
+extension/dist/
+extension/node_modules/
+
+# Optional platform specific
+$RECYCLE.BIN/
+
+# Project-specific
+# Do not ignore Poetry lock at repo root by default. The bootstrap folder controls its own lock-file behavior.
+# Generated CLI binaries
+bootstrap/dist/
+bootstrap/output.py
+bootstrap/parser.out
+bootstrap/parsetab.py
