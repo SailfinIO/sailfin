@@ -86,11 +86,25 @@ conda run -n sailfin-bootstrap python -m bootstrap.compile_self_host compiler/sr
 These helpers will disappear once the Sailfin-based backend is ready, but they
 keep the workflow ergonomic in the meantime.
 
+### Sailfin-to-Sailfin Round-Tripping
+
+`compiler/src/main.sfn` now exposes `compile_to_sailfin(source)` which parses
+Sailfin input with the native parser and re-emits canonical Sailfin using the
+new emitter. The output includes imports from `sailfin/runtime`, which is
+backed by the stub runtime prelude. As we expand the runtime surface we can
+swap these stubs for fully effect-aware implementations while keeping the
+round-trip contract stable.
+
 ### Recent Progress
 
 - The Sailfin parser now emits structured nodes for enums, interfaces, type
    aliases, and prompt statements, preserving generics on function and method
    signatures to stay diffable with the bootstrap AST.
+- Added a Sailfin-to-Sailfin emitter (`emitter_sailfin.sfn`) that reprints the
+   parsed AST into canonical Sailfin, including runtime prelude imports, so we
+   can round-trip Sailfin sources without leaving the language.
+- Introduced a stub runtime prelude (`runtime/prelude.sfn`) that defines the
+   surface required by generated Sailfin code while we wire the real runtime.
 
 ### Future Layout (Illustrative)
 

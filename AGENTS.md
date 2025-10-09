@@ -11,7 +11,7 @@
 - `make test` or `make bootstrap-test` runs the full pytest suite; pass `PYTEST_ARGS=...` to filter (e.g., `-m unit`).
 - `make bootstrap-compile` emits Python modules from `compiler/src/` using the bootstrap compiler.
 - `make clean` clears coverage caches under `bootstrap/` when a fresh run is needed.
-- if you need to do some debugging, create a scratch directory and run/place scripts there. for example:
+- if you need to do some debugging, use the /scratch directory and run/place scripts there. for example:
     ```bash
 cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/conda run -n sailfin-bootstrap python scratch/example_script.py
     ```

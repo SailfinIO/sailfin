@@ -1,0 +1,61 @@
+// compiler/runtime/prelude.sfn
+//
+// Minimal Sailfin runtime surface used by code generated from the
+// self-hosted compiler. The implementations are intentionally stubbed; during
+// early bootstrapping we rely on the Python runtime to provide real
+// behaviour. These definitions let Sailfin sources type-check and provide a
+// single place to extend runtime semantics as the self-hosted compiler matures.
+
+struct Console {}
+
+struct Task {}
+
+struct Channel<T> {}
+
+struct Scheduler {}
+
+struct FileSystem {}
+
+struct HttpClient {}
+
+struct WebsocketClient {}
+
+fn sleep(duration -> number) ![clock] {}
+
+fn channel<T>(capacity -> number = 0) -> Channel<T> ![io] {
+    return Channel {};
+}
+
+fn parallel<T>(tasks -> T[]) -> T[] ![io] {
+    return tasks;
+}
+
+fn spawn() -> Task ![io] {
+    return Task {};
+}
+
+fn logExecution<T>(value -> T) -> T {
+    return value;
+}
+
+fn array_map<T>(items -> T[]) -> T[] {
+    return items;
+}
+
+fn array_filter<T>(items -> T[]) -> T[] {
+    return items;
+}
+
+fn array_reduce<T>(items -> T[], initial -> T) -> T {
+    if items.length == 0 {
+        return initial;
+    }
+    return items[0];
+}
+
+const scheduler -> Scheduler = Scheduler {};
+const fs -> FileSystem = FileSystem {};
+const http -> HttpClient = HttpClient {};
+const websocket -> WebsocketClient = WebsocketClient {};
+
+fn serve() ![io] {}
