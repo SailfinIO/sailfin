@@ -137,3 +137,53 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert signature.parameters[0].name == "name"
         assert signature.parameters[0].type_annotation is not None
         assert fn_stmt.body.text.strip().startswith("{")
+
+        struct_program = parse_program(
+            "struct User {\n"
+            "    id -> number;\n"
+            "    mut name -> string;\n"
+            "}\n"
+        )
+        assert len(struct_program.statements) == 1
+        struct_stmt = struct_program.statements[0]
+        assert struct_stmt.variant == "StructDeclaration"
+        assert struct_stmt.name == "User"
+        assert len(struct_stmt.fields) == 2
+        first_field = struct_stmt.fields[0]
+        assert first_field.name == "id"
+        assert first_field.type_annotation.text == "number"
+        assert first_field.mutable is False
+        second_field = struct_stmt.fields[1]
+        assert second_field.name == "name"
+        assert second_field.type_annotation.text == "string"
+        assert second_field.mutable is True
+
+        generic_program = parse_program(
+            "@entity\n"
+            "struct Collection<T> implements Iterable<T>, Debug {\n"
+            "    size -> number;\n"
+            "    @trace(level: \"debug\")\n"
+            "    fn get(self) -> T {\n"
+            "        return self;\n"
+            "    }\n"
+            "}\n"
+        )
+        assert len(generic_program.statements) == 1
+        collection_struct = generic_program.statements[0]
+        assert collection_struct.variant == "StructDeclaration"
+        assert collection_struct.name == "Collection"
+        assert collection_struct.type_parameters == ["T"]
+        assert [impl.text for impl in collection_struct.implements_types] == ["Iterable<T>", "Debug"]
+        assert len(collection_struct.decorators) == 1
+        assert collection_struct.decorators[0].name == "entity"
+        assert collection_struct.decorators[0].arguments is None
+        assert len(collection_struct.fields) == 1
+        assert len(collection_struct.methods) == 1
+        method = collection_struct.methods[0]
+        assert method.signature.name == "get"
+        assert method.signature.return_type is not None and method.signature.return_type.text == "T"
+        assert method.signature.effects == []
+        assert method.body.text.strip().startswith("{")
+        assert len(method.decorators) == 1
+        assert method.decorators[0].name == "trace"
+        assert method.decorators[0].arguments == "level: \"debug\""

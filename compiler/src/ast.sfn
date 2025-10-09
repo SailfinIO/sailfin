@@ -35,6 +35,18 @@ struct Parameter {
     mutable -> boolean;
 }
 
+struct FieldDeclaration {
+    name -> string;
+    type_annotation -> TypeAnnotation;
+    mutable -> boolean;
+}
+
+struct MethodDeclaration {
+    signature -> FunctionSignature;
+    body -> Block;
+    decorators -> Decorator[];
+}
+
 struct FunctionSignature {
     name -> string;
     is_async -> boolean;
@@ -45,6 +57,7 @@ struct FunctionSignature {
 
 struct Decorator {
     name -> string;
+    arguments -> string?;
 }
 
 enum Statement {
@@ -66,6 +79,14 @@ enum Statement {
     FunctionDeclaration {
         signature -> FunctionSignature;
         body -> Block;
+        decorators -> Decorator[];
+    },
+    StructDeclaration {
+        name -> string;
+        type_parameters -> string[];
+        implements_types -> TypeAnnotation[];
+        fields -> FieldDeclaration[];
+        methods -> MethodDeclaration[];
         decorators -> Decorator[];
     },
     Unknown {

@@ -11,7 +11,9 @@ import {
     Block,
     Decorator,
     Expression,
+    FieldDeclaration,
     FunctionSignature,
+    MethodDeclaration,
     Parameter,
     Program,
     Statement,
@@ -36,6 +38,40 @@ struct ParameterParseResult {
 struct ParameterListParseResult {
     parser -> Parser;
     parameters -> Parameter[];
+}
+
+struct StructFieldParseResult {
+    parser -> Parser;
+    field -> FieldDeclaration?;
+    success -> boolean;
+}
+
+struct MethodParseResult {
+    parser -> Parser;
+    method -> MethodDeclaration?;
+    success -> boolean;
+}
+
+struct TypeParameterParseResult {
+    parser -> Parser;
+    parameters -> string[];
+}
+
+struct ImplementsParseResult {
+    parser -> Parser;
+    types -> TypeAnnotation[];
+    found -> boolean;
+}
+
+struct DecoratorParseResult {
+    parser -> Parser;
+    decorators -> Decorator[];
+}
+
+struct ParenthesizedParseResult {
+    parser -> Parser;
+    tokens -> Token[];
+    success -> boolean;
 }
 
 struct CaptureResult {
@@ -79,31 +115,50 @@ fn parse_tokens(tokens -> Token[]) -> Program {
 }
 
 fn parse_statement(parser -> Parser) -> StatementParseResult {
+    let original = parser;
+    parser = skip_trivia(parser);
+
+    let decorator_result = parse_decorators(parser);
+    parser = decorator_result.parser;
+    let decorators = decorator_result.decorators;
+
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
 
     if identifier_matches(token, "import") {
+        if decorators.length > 0 {
+            return parse_unknown(original);
+        }
         return parse_import(parser);
     }
     if identifier_matches(token, "let") {
+        if decorators.length > 0 {
+            return parse_unknown(original);
+        }
         return parse_variable(parser);
     }
     if identifier_matches(token, "const") {
+        if decorators.length > 0 {
+            return parse_unknown(original);
+        }
         return parse_constant(parser);
     }
     if identifier_matches(token, "fn") {
-        return parse_function(parser, false);
+        return parse_function(parser, false, decorators);
     }
     if identifier_matches(token, "async") {
         let lookahead = skip_trivia(parser_advance_raw(parser));
         let after = parser_peek_raw(lookahead);
         if identifier_matches(after, "fn") {
-            return parse_function(parser, true);
+            return parse_function(parser, true, decorators);
         }
     }
+    if identifier_matches(token, "struct") {
+        return parse_struct(parser, decorators);
+    }
 
-    if token.kind.variant == "Symbol" && token.kind.value == "@" {
-        return parse_unknown(parser);
+    if decorators.length > 0 {
+        return parse_unknown(original);
     }
 
     return parse_unknown(parser);
@@ -165,6 +220,80 @@ fn parse_variable(parser -> Parser) -> StatementParseResult {
 
 fn parse_constant(parser -> Parser) -> StatementParseResult {
     return parse_variable_like(parser, true);
+}
+
+fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "struct");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    let implements_result = parse_implements_clause(parser);
+    parser = implements_result.parser;
+    let mut implements_types = implements_result.types;
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, "{");
+    parser = consume_symbol(parser, "{");
+
+    let mut fields -> FieldDeclaration[] = [];
+    let mut methods -> MethodDeclaration[] = [];
+
+    loop {
+        parser = skip_trivia(parser);
+        let member_start = parser;
+
+        let decorator_result = parse_decorators(parser);
+        parser = decorator_result.parser;
+        let member_decorators = decorator_result.decorators;
+
+        parser = skip_trivia(parser);
+        let token = parser_peek_raw(parser);
+        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let field_result = parse_struct_field(parser);
+        if field_result.success && member_decorators.length == 0 {
+            if field_result.field != null {
+                fields = append_field(fields, field_result.field);
+            }
+            parser = field_result.parser;
+            continue;
+        }
+
+        let method_result = parse_struct_method(parser, member_decorators);
+        if method_result.success {
+            if method_result.method != null {
+                methods = append_method(methods, method_result.method);
+            }
+            parser = method_result.parser;
+            continue;
+        }
+
+        parser = skip_struct_member(member_start);
+    }
+
+    let statement = Statement.StructDeclaration {
+        name: name,
+        type_parameters: type_parameters,
+        implements_types: implements_types,
+        fields: fields,
+        methods: methods,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
 }
 
 fn parse_variable_like(parser -> Parser, is_const -> boolean) -> StatementParseResult {
@@ -240,7 +369,7 @@ fn parse_variable_like(parser -> Parser, is_const -> boolean) -> StatementParseR
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_function(parser -> Parser, starts_with_async -> boolean) -> StatementParseResult {
+fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
     parser = skip_trivia(parser);
     let mut is_async = false;
     if starts_with_async {
@@ -302,7 +431,6 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean) -> StatementPa
         effects: effects,
     };
 
-    let decorators -> Decorator[] = [];
     let statement = Statement.FunctionDeclaration {
         signature: signature,
         body: body,
@@ -342,6 +470,253 @@ fn parse_parameter_list(parser -> Parser) -> ParameterListParseResult {
     }
 
     return ParameterListParseResult { parser: parser, parameters: parameters };
+}
+
+fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_mutable = false;
+    let token = parser_peek_raw(current);
+    let mut token_to_use = token;
+    if identifier_matches(token_to_use, "mut") {
+        current = parser_advance_raw(current);
+        is_mutable = true;
+        current = skip_trivia(current);
+        token_to_use = parser_peek_raw(current);
+    }
+
+    if token_to_use.kind.variant != "Identifier" {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    let name = identifier_text(token_to_use);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let separator = parser_peek_raw(current);
+    let is_type_sep = separator.kind.variant == "Symbol"
+        && (separator.kind.value == ":" || separator.kind.value == "->");
+    if !is_type_sep {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let capture = collect_until(skip_trivia(current), [";"]);
+    current = capture.parser;
+    let type_text = trim_text(tokens_to_text(capture.tokens));
+    if type_text.length == 0 {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !(terminator.kind.variant == "Symbol" && terminator.kind.value == ";") {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let field = FieldDeclaration {
+        name: name,
+        type_annotation: TypeAnnotation { text: type_text },
+        mutable: is_mutable,
+    };
+
+    return StructFieldParseResult {
+        parser: current,
+        field: field,
+        success: true,
+    };
+}
+
+fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_async = false;
+    let peek = parser_peek_raw(current);
+    if identifier_matches(peek, "async") {
+        let lookahead = skip_trivia(parser_advance_raw(current));
+        if identifier_matches(parser_peek_raw(lookahead), "fn") {
+            current = consume_keyword(current, "async");
+            is_async = true;
+        }
+    }
+
+    current = skip_trivia(current);
+    if !identifier_matches(parser_peek_raw(current), "fn") {
+        return MethodParseResult { parser: parser, method: null, success: false };
+    }
+    current = consume_keyword(current, "fn");
+
+    current = skip_trivia(current);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return MethodParseResult { parser: parser, method: null, success: false };
+    }
+    let name = identifier_text(name_token);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    current = consume_symbol(current, "(");
+    let parameter_result = parse_parameter_list(current);
+    current = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    current = skip_trivia(current);
+    let mut return_type -> TypeAnnotation? = null;
+    let separator = parser_peek_raw(current);
+    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+        current = parser_advance_raw(current);
+        let capture = collect_until(skip_trivia(current), ["!", "{"]);
+        current = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(current);
+    current = effect_result.parser;
+    let effects = effect_result.effects;
+
+    let block_result = parse_block(current);
+    current = block_result.parser;
+    let body = block_result.block;
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: is_async,
+        parameters: parameters,
+        return_type: return_type,
+        effects: effects,
+    };
+
+    let method = MethodDeclaration {
+        signature: signature,
+        body: body,
+        decorators: decorators,
+    };
+
+    return MethodParseResult {
+        parser: current,
+        method: method,
+        success: true,
+    };
+}
+
+fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
+    let mut current = parser;
+    let mut decorators -> Decorator[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if !(token.kind.variant == "Symbol" && token.kind.value == "@") {
+            break;
+        }
+
+        let decorator_start = current;
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let name_token = parser_peek_raw(current);
+        if name_token.kind.variant != "Identifier" {
+            current = decorator_start;
+            break;
+        }
+
+        let name = identifier_text(name_token);
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let mut arguments -> string? = null;
+        let after = parser_peek_raw(current);
+        if after.kind.variant == "Symbol" && after.kind.value == "(" {
+            let paren_result = collect_parenthesized(current);
+            if paren_result.success {
+                let argument_text = trim_text(tokens_to_text(paren_result.tokens));
+                if argument_text.length > 0 {
+                    arguments = argument_text;
+                }
+                current = paren_result.parser;
+            } else {
+                current = decorator_start;
+                break;
+            }
+        }
+
+        decorators = append_decorator(decorators, Decorator { name: name, arguments: arguments });
+    }
+
+    return DecoratorParseResult { parser: current, decorators: decorators };
+}
+
+fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
+    let mut current = skip_trivia(parser);
+    let token = parser_peek_raw(current);
+    if !(token.kind.variant == "Symbol" && token.kind.value == "<") {
+        return TypeParameterParseResult { parser: parser, parameters: [] };
+    }
+
+    current = parser_advance_raw(current);
+    let mut collected -> Token[] = [];
+    let mut depth -> number = 1;
+
+    loop {
+        let tok = parser_peek_raw(current);
+        if tok.kind.variant == "EndOfFile" {
+            break;
+        }
+        if tok.kind.variant == "Symbol" {
+            let sym = tok.kind.value;
+            if sym == "<" {
+                depth += 1;
+            } else if sym == ">" {
+                depth -= 1;
+                if depth == 0 {
+                    current = parser_advance_raw(current);
+                    break;
+                }
+            }
+        }
+        collected = append_token(collected, tok);
+        current = parser_advance_raw(current);
+    }
+
+    let entries = split_tokens_by_comma(collected);
+    return TypeParameterParseResult { parser: current, parameters: entries };
+}
+
+fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "implements") {
+        return ImplementsParseResult { parser: parser, types: [], found: false };
+    }
+
+    current = consume_keyword(current, "implements");
+    current = skip_trivia(current);
+
+    let capture = collect_until(current, ["{"]);
+    current = capture.parser;
+
+    let mut implements_types -> TypeAnnotation[] = [];
+    let entries = split_tokens_by_comma(capture.tokens);
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let text = trim_text(entries[index]);
+        if text.length > 0 {
+            implements_types = append_type_annotation(implements_types, TypeAnnotation { text: text });
+        }
+        index += 1;
+    }
+
+    return ImplementsParseResult {
+        parser: current,
+        types: implements_types,
+        found: true,
+    };
 }
 
 fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
@@ -652,6 +1027,43 @@ fn select_type_terminators(is_const -> boolean) -> string[] {
     return ["=", ";"];
 }
 
+fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult {
+    let mut current = skip_trivia(parser);
+    let start = parser_peek_raw(current);
+    if !(start.kind.variant == "Symbol" && start.kind.value == "(") {
+        return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
+    }
+
+    current = parser_advance_raw(current);
+    let mut tokens -> Token[] = [];
+    let mut depth -> number = 1;
+
+    loop {
+        let token = parser_peek_raw(current);
+        if token.kind.variant == "EndOfFile" {
+            return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
+        }
+
+        if token.kind.variant == "Symbol" {
+            let sym = token.kind.value;
+            if sym == "(" {
+                depth += 1;
+            } else if sym == ")" {
+                depth -= 1;
+                if depth == 0 {
+                    current = parser_advance_raw(current);
+                    break;
+                }
+            }
+        }
+
+        tokens = append_token(tokens, token);
+        current = parser_advance_raw(current);
+    }
+
+    return ParenthesizedParseResult { parser: current, tokens: tokens, success: true };
+}
+
 fn expression_from_tokens(tokens -> Token[]) -> Expression {
     let trimmed = filter_trivia(tokens);
     if trimmed.length == 0 {
@@ -799,6 +1211,50 @@ fn is_whitespace_lexeme(text -> string) -> boolean {
     return true;
 }
 
+fn advance_to_symbol(parser -> Parser, symbol -> string) -> Parser {
+    let mut current = parser;
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if token.kind.variant == "Symbol" && token.kind.value == symbol {
+            return current;
+        }
+        if token.kind.variant == "EndOfFile" {
+            return current;
+        }
+        let next = parser_advance_raw(current);
+        if next.index == current.index {
+            return current;
+        }
+        current = next;
+    }
+}
+
+fn skip_struct_member(parser -> Parser) -> Parser {
+    let mut current = parser;
+    loop {
+        let next = parser_advance_raw(current);
+        if next.index == current.index {
+            return current;
+        }
+        current = next;
+        let token = parser_peek_raw(current);
+        if token.kind.variant == "EndOfFile" {
+            return current;
+        }
+        if token.kind.variant == "Symbol" {
+            let sym = token.kind.value;
+            if sym == ";" {
+                current = parser_advance_raw(current);
+                return current;
+            }
+            if sym == "}" {
+                return current;
+            }
+        }
+    }
+}
+
 fn strip_surrounding_quotes(text -> string) -> string {
     if text.length < 2 {
         return text;
@@ -811,6 +1267,61 @@ fn strip_surrounding_quotes(text -> string) -> string {
     return text;
 }
 
+fn split_tokens_by_comma(tokens -> Token[]) -> string[] {
+    let mut parts -> string[] = [];
+    let mut segment -> string = "";
+    let mut angle -> number = 0;
+    let mut paren -> number = 0;
+    let mut brace -> number = 0;
+    let mut bracket -> number = 0;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if token.kind.variant == "Symbol" {
+            let sym = token.kind.value;
+            if sym == "<" {
+                angle += 1;
+            } else if sym == ">" && angle > 0 {
+                angle -= 1;
+            } else if sym == "(" {
+                paren += 1;
+            } else if sym == ")" && paren > 0 {
+                paren -= 1;
+            } else if sym == "{" {
+                brace += 1;
+            } else if sym == "}" && brace > 0 {
+                brace -= 1;
+            } else if sym == "[" {
+                bracket += 1;
+            } else if sym == "]" && bracket > 0 {
+                bracket -= 1;
+            }
+
+            if sym == "," && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
+                let text = trim_text(segment);
+                if text.length > 0 {
+                    parts = append_string(parts, text);
+                }
+                segment = "";
+                index += 1;
+                continue;
+            }
+        }
+        segment = segment + token.lexeme;
+        index += 1;
+    }
+
+    let tail = trim_text(segment);
+    if tail.length > 0 {
+        parts = append_string(parts, tail);
+    }
+    return parts;
+}
+
 fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
     return statements.concat([statement]);
 }
@@ -821,6 +1332,22 @@ fn append_string(values -> string[], value -> string) -> string[] {
 
 fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
     return parameters.concat([parameter]);
+}
+
+fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> FieldDeclaration[] {
+    return fields.concat([field]);
+}
+
+fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
+    return methods.concat([method]);
+}
+
+fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
+    return types.concat([item]);
+}
+
+fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
+    return decorators.concat([decorator]);
 }
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {
