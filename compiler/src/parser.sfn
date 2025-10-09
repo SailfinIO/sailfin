@@ -19,6 +19,7 @@ import {
     Statement,
     TypeAnnotation,
 } from "./ast";
+import { evaluate_decorators, infer_effects } from "./decorator_semantics";
 
 struct Parser {
     tokens -> Token[];
@@ -417,7 +418,9 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> 
 
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
-    let effects = effect_result.effects;
+    let parsed_effects = effect_result.effects;
+    let decorator_info = evaluate_decorators(decorators);
+    let inferred_effects = infer_effects(parsed_effects, decorator_info);
 
     let block_result = parse_block(parser);
     parser = block_result.parser;
@@ -428,7 +431,7 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> 
         is_async: is_async,
         parameters: parameters,
         return_type: return_type,
-        effects: effects,
+        effects: inferred_effects,
     };
 
     let statement = Statement.FunctionDeclaration {
@@ -576,7 +579,9 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
 
     let effect_result = parse_effect_list(current);
     current = effect_result.parser;
-    let effects = effect_result.effects;
+    let parsed_effects = effect_result.effects;
+    let decorator_info = evaluate_decorators(decorators);
+    let inferred_effects = infer_effects(parsed_effects, decorator_info);
 
     let block_result = parse_block(current);
     current = block_result.parser;
@@ -587,7 +592,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
         is_async: is_async,
         parameters: parameters,
         return_type: return_type,
-        effects: effects,
+        effects: inferred_effects,
     };
 
     let method = MethodDeclaration {

@@ -119,7 +119,12 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
             )
             exec(module_compiled, namespace, namespace)
 
-        for dependency in ["compiler/src/token.sfn", "compiler/src/ast.sfn", "compiler/src/lexer.sfn"]:
+        for dependency in [
+            "compiler/src/token.sfn",
+            "compiler/src/ast.sfn",
+            "compiler/src/lexer.sfn",
+            "compiler/src/decorator_semantics.sfn",
+        ]:
             compile_module(dependency)
 
         exec(compiled, namespace, namespace)
@@ -198,7 +203,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         method = collection_struct.methods[0]
         assert method.signature.name == "get"
         assert method.signature.return_type is not None and method.signature.return_type.text == "T"
-        assert method.signature.effects == []
+        assert "io" in method.signature.effects
         assert method.body.text.strip().startswith("{")
         assert len(method.decorators) == 1
         trace_decorator = method.decorators[0]
