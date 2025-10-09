@@ -8,9 +8,13 @@
 
 ## Build, Test, and Development Commands
 - `make bootstrap-install` provisions or updates the `sailfin-bootstrap` Conda env defined in `bootstrap/environment.yml`.
-- `make bootstrap-test` executes `pytest`; pass `PYTEST_ARGS="-m unit"` or use `make bootstrap-test-unit` / `make bootstrap-test-integration` to focus suites.
-- `conda run -n sailfin-bootstrap python bootstrap/bootstrap.py examples/hello_world.sfn` compiles Sailfin sources to `bootstrap/output.py` for inspection.
+- `make test` or `make bootstrap-test` runs the full pytest suite; pass `PYTEST_ARGS=...` to filter (e.g., `-m unit`).
+- `make bootstrap-compile` emits Python modules from `compiler/src/` using the bootstrap compiler.
 - `make clean` clears coverage caches under `bootstrap/` when a fresh run is needed.
+- if you need to do some debugging, create a scratch directory and run/place scripts there. for example:
+    ```bash
+cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/conda run -n sailfin-bootstrap python scratch/example_script.py
+    ```
 
 ## Coding Style & Naming Conventions
 - Python modules observe PEP 8 with four-space indentation, `snake_case` functions, and narrow compiler passes; share helpers instead of duplicating parsing logic.

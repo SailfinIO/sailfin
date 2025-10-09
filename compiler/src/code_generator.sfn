@@ -25,7 +25,10 @@ struct CodeBuilder {
 
 fn generate_program(program -> Program) -> string {
     let mut builder -> CodeBuilder = builder_new();
+    builder = builder_emit(builder, "import asyncio");
     builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
+    builder = builder_emit_blank(builder);
+    builder = emit_runtime_preamble(builder);
     builder = builder_emit_blank(builder);
 
     let mut index -> number = 0;
@@ -41,6 +44,24 @@ fn generate_program(program -> Program) -> string {
     }
 
     return builder_to_string(builder);
+}
+
+fn emit_runtime_preamble(builder -> CodeBuilder) -> CodeBuilder {
+    let mut current = builder;
+    current = builder_emit(current, "print = runtime.console");
+    current = builder_emit(current, "sleep = runtime.sleep");
+    current = builder_emit(current, "channel = runtime.channel");
+    current = builder_emit(current, "parallel = runtime.parallel");
+    current = builder_emit(current, "spawn = runtime.spawn");
+    current = builder_emit(current, "fs = runtime.fs");
+    current = builder_emit(current, "serve = runtime.serve");
+    current = builder_emit(current, "http = runtime.http");
+    current = builder_emit(current, "websocket = runtime.websocket");
+    current = builder_emit(current, "logExecution = runtime.logExecution");
+    current = builder_emit(current, "array_map = runtime.array_map");
+    current = builder_emit(current, "array_filter = runtime.array_filter");
+    current = builder_emit(current, "array_reduce = runtime.array_reduce");
+    return current;
 }
 
 fn emit_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
@@ -82,7 +103,7 @@ fn emit_function(
     if signature.effects.length > 0 {
         builder = builder_emit(builder, "# effects: " + join_with_separator(signature.effects, ", "));
     }
-    builder = emit_block_stub(builder, body);
+    builder = emit_block(builder, body);
     builder = builder_pop_indent(builder);
     return builder;
 }
@@ -144,7 +165,7 @@ fn emit_method(builder -> CodeBuilder, method -> MethodDeclaration) -> CodeBuild
     if signature.effects.length > 0 {
         builder = builder_emit(builder, "# effects: " + join_with_separator(signature.effects, ", "));
     }
-    builder = emit_block_stub(builder, method.body);
+    builder = emit_block(builder, method.body);
     builder = builder_pop_indent(builder);
     return builder;
 }
@@ -163,7 +184,7 @@ fn emit_stub_function(
     if effects.length > 0 {
         builder = builder_emit(builder, "# effects: " + join_with_separator(effects, ", "));
     }
-    builder = emit_block_stub(builder, body);
+    builder = emit_block(builder, body);
     builder = builder_pop_indent(builder);
     return builder;
 }
@@ -248,13 +269,170 @@ fn emit_decorator_comments(builder -> CodeBuilder, decorators -> Decorator[]) ->
     return current;
 }
 
-fn emit_block_stub(builder -> CodeBuilder, block -> Block) -> CodeBuilder {
+fn emit_block(builder -> CodeBuilder, block -> Block) -> CodeBuilder {
     let mut current = builder;
-    current = builder_emit(current, "pass");
-    if block.text.length > 0 {
-        current = builder_emit(current, "# original Sailfin block omitted");
+    if block.statements.length == 0 {
+        current = builder_emit(current, "pass");
+        current = emit_original_block_comment(current, block.text);
+        return current;
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= block.statements.length {
+            break;
+        }
+        current = emit_block_statement(current, block.statements[index]);
+        index += 1;
     }
     return current;
+}
+
+fn emit_block_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    if statement.variant == "ReturnStatement" {
+        if statement.expression == null {
+            return builder_emit(builder, "return");
+        }
+        let expression_text = format_expression(statement.expression);
+        return builder_emit(builder, "return " + expression_text);
+    }
+    if statement.variant == "ExpressionStatement" {
+        let expression_text = format_expression(statement.expression);
+        return builder_emit(builder, expression_text);
+    }
+    if statement.variant == "PromptStatement" {
+        return emit_prompt_block(builder, statement.channel, statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        return emit_with_block(builder, statement);
+    }
+    if statement.variant == "Unknown" {
+        return emit_unknown_comment(builder, statement.text);
+    }
+    return builder_emit(builder, "# TODO: unsupported statement: " + statement.variant);
+}
+
+fn emit_prompt_block(builder -> CodeBuilder, channel -> string, body -> Block) -> CodeBuilder {
+    let mut current = builder_emit(builder, "# prompt " + channel);
+    current = emit_original_block_comment(current, body.text);
+    return current;
+}
+
+fn emit_with_block(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let mut current = builder_emit(builder, "# with scope");
+    current = builder_push_indent(current);
+    let mut index -> number = 0;
+    loop {
+        if index >= statement.clauses.length {
+            break;
+        }
+        let clause = statement.clauses[index];
+        current = builder_emit(current, "# clause: " + format_expression(clause.expression));
+        index += 1;
+    }
+    current = emit_block(current, statement.body);
+    current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_unknown_comment(builder -> CodeBuilder, text -> string) -> CodeBuilder {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return builder_emit(builder, "# original Sailfin block omitted");
+    }
+    let collapsed = collapse_whitespace(trimmed);
+    return builder_emit(builder, "# original: " + collapsed);
+}
+
+fn emit_original_block_comment(builder -> CodeBuilder, text -> string) -> CodeBuilder {
+    let trimmed = trim_block_text(text);
+    if trimmed.length == 0 {
+        return builder;
+    }
+    return builder_emit(builder, "# original: " + collapse_whitespace(trimmed));
+}
+
+fn format_expression(expression -> Expression) -> string {
+    if expression.variant == "Identifier" {
+        return expression.name;
+    }
+    if expression.variant == "NumberLiteral" {
+        return expression.value;
+    }
+    if expression.variant == "BooleanLiteral" {
+        if expression.value {
+            return "True";
+        }
+        return "False";
+    }
+    if expression.variant == "NullLiteral" {
+        return "None";
+    }
+    if expression.variant == "StringLiteral" {
+        return quote_string(expression.value);
+    }
+    if expression.variant == "Raw" {
+        return trim_text(expression.text);
+    }
+    return "";
+}
+
+fn quote_string(value -> string) -> string {
+    let mut result -> string = "'";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        result = result + escape_string_char(ch);
+        index += 1;
+    }
+    result = result + "'";
+    return result;
+}
+
+fn escape_string_char(ch -> string) -> string {
+    if ch == "'" {
+        return "\\'";
+    }
+    if ch == "\\" {
+        return "\\\\";
+    }
+    if ch == "\n" {
+        return "\\n";
+    }
+    if ch == "\r" {
+        return "\\r";
+    }
+    if ch == "\t" {
+        return "\\t";
+    }
+    return ch;
+}
+
+fn collapse_whitespace(value -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    let mut last_was_space -> boolean = false;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        let is_space = ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+        if is_space {
+            if !last_was_space && result.length > 0 {
+                result = result + " ";
+                last_was_space = true;
+            }
+        } else {
+            result = result + ch;
+            last_was_space = false;
+        }
+        index += 1;
+    }
+    return result;
 }
 
 fn trim_block_text(text -> string) -> string {

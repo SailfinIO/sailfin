@@ -83,3 +83,5 @@ bootstrap/dist/
 bootstrap/output.py
 bootstrap/parser.out
 bootstrap/parsetab.py
+
+scratch/

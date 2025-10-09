@@ -79,6 +79,10 @@ Implementation reality (bootstrap subset):
 - Ownership: `Affine<T>`/`Linear<T>` are parsed as ordinary nominal types; no move/borrow enforcement in stage0.
 - Currency literals `$0.05`, time units like `150ms`, and APIs like `scope.with_timeout(...)` are future features; examples using them are illustrative only.
 
+Self-hosted progress:
+- The Sailfin-native parser now records `return` and expression statements inside blocks, and the Sailfin-written code generator lowers them to runnable Python with the same runtime preamble as stage0.
+- Simple functions, prompts, and literal returns round-trip through `compiler/src/*.sfn` to `compiler/build/*.py`, enabling early execution parity experiments.
+
 See `docs/spec.md` (Effect System section) and `bootstrap/effect_checker.py` for details.
 
 ## Architecture Overview

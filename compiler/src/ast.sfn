@@ -193,6 +193,9 @@ enum Statement {
         body -> Block;
         decorators -> Decorator[];
     },
+    ReturnStatement {
+        expression -> Expression?;
+    },
     ExpressionStatement {
         expression -> Expression;
     },

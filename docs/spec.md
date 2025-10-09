@@ -93,6 +93,9 @@ parsed but ignored by code generation during bootstrapping.
 Self-hosted status: the Sailfin parser now captures generic type parameter
 clauses (`fn map<T>(...)`) on both top-level functions and struct methods, so
 later semantic passes can mirror the bootstrap compiler's metadata.
+Function bodies preserve explicit `return` and expression statements, allowing
+the Sailfin-native code generator to emit runnable Python blocks instead of
+stub comments.
 
 #### 3.2.1 Effect Signatures
 

@@ -81,7 +81,7 @@ def test_generate_program_produces_python():
     exec(compiled, namespace, namespace)
 
     assert "greet" in namespace
-    assert namespace["greet"]("Sailfin") is None
+    assert namespace["greet"]("Sailfin") == "Sailfin"
     assert "User" in namespace
     user_cls = namespace["User"]
     instance = user_cls()
@@ -100,4 +100,19 @@ def test_block_stub_includes_original_source():
     )
 
     python_source = generate_program(program)
-    assert "# original Sailfin block omitted" in python_source
+    assert "# prompt system" in python_source
+    assert "hi" in python_source
+
+
+def test_function_body_emits_return_and_literals():
+    generate_program = _load_self_hosted_generator()
+    program = _parse_program(
+        """
+        fn greet(name -> string) -> string {
+            return "Hello, {{ name }}";
+        }
+        """
+    )
+
+    python_source = generate_program(program)
+    assert "return 'Hello, {{ name }}'" in python_source

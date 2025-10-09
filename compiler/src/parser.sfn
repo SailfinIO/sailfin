@@ -1599,6 +1599,17 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     if identifier_matches(token, "with") {
         return parse_with_statement(after_decorators, decorators);
     }
+    if identifier_matches(token, "return") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_return_statement(after_decorators);
+    }
+
+    let expression_result = parse_expression_statement(after_decorators, decorators);
+    if expression_result.success {
+        return expression_result;
+    }
 
     return BlockStatementParseResult { parser: original, statement: null, success: false };
 }
@@ -1691,6 +1702,81 @@ fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
         decorators: decorators,
     };
 
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "return") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "return");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+
+    let mut expression -> Expression? = null;
+    if trimmed.length > 0 {
+        expression = expression_from_tokens(trimmed);
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.ReturnStatement { expression: expression };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    if decorators.length > 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    let mut current = skip_trivia(parser);
+    let start = parser_peek_raw(current);
+    if start.kind.variant == "EndOfFile" {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+    if start.kind.variant == "Symbol" {
+        let sym = start.kind.value;
+        if sym == "}" || sym == "{" {
+            return BlockStatementParseResult { parser: parser, statement: null, success: false };
+        }
+    }
+
+    let capture = collect_until(current, [";"]);
+    if capture.tokens.length == 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    current = capture.parser;
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !(terminator.kind.variant == "Symbol" && terminator.kind.value == ";") {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let expression = expression_from_tokens(trimmed);
+    let statement = Statement.ExpressionStatement { expression: expression };
     return BlockStatementParseResult {
         parser: current,
         statement: statement,
