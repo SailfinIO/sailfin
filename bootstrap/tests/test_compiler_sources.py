@@ -26,6 +26,7 @@ COMPILER_SOURCES = [
     pathlib.Path("compiler/src/lexer.sfn"),
     pathlib.Path("compiler/src/ast.sfn"),
     pathlib.Path("compiler/src/parser.sfn"),
+    pathlib.Path("compiler/src/decorator_semantics.sfn"),
     pathlib.Path("compiler/src/main.sfn"),
 ]
 
@@ -214,3 +215,62 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert enabled_arg.name == "enabled"
         assert enabled_arg.expression.variant == "BooleanLiteral"
         assert enabled_arg.expression.value is False
+    elif source_path.name == "decorator_semantics.sfn":
+        namespace = {"__name__": "__main__"}
+
+        def compile_module(relative: str) -> None:
+            module_source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            module_ast = parser.parse(module_source, lexer=base_lexer.clone())
+            module_python = CodeGenerator().generate_code(module_ast)
+            module_compiled = compile(
+                module_python,
+                str((REPO_ROOT / relative).with_suffix(".py")),
+                "exec",
+            )
+            exec(module_compiled, namespace, namespace)
+
+        for dependency in [
+            "compiler/src/token.sfn",
+            "compiler/src/ast.sfn",
+            "compiler/src/lexer.sfn",
+            "compiler/src/parser.sfn",
+        ]:
+            compile_module(dependency)
+
+        exec(compiled, namespace, namespace)
+        parse_program = namespace["parse_program"]
+        evaluate_decorators = namespace["evaluate_decorators"]
+        infer_effects = namespace["infer_effects"]
+
+        sample = (
+            "@policy(level: \"restricted\")\n"
+            "@trace(level: \"debug\", enabled: false)\n"
+            "fn decorated() {\n"
+            "    return;\n"
+            "}\n"
+        )
+
+        program = parse_program(sample)
+        fn_stmt = program.statements[0]
+        decorator_info = evaluate_decorators(fn_stmt.decorators)
+        assert [info.name for info in decorator_info] == ["policy", "trace"]
+
+        policy_args = decorator_info[0].arguments
+        assert len(policy_args) == 1
+        assert policy_args[0].name == "level"
+        if policy_args[0].value.variant == "String":
+            assert policy_args[0].value.value == "restricted"
+
+        trace_args = decorator_info[1].arguments
+        assert len(trace_args) == 2
+        level_arg = trace_args[0]
+        assert level_arg.name == "level"
+        if level_arg.value.variant == "String":
+            assert level_arg.value.value == "debug"
+        enabled_arg = trace_args[1]
+        assert enabled_arg.name == "enabled"
+        assert enabled_arg.value.variant == "Boolean"
+        assert enabled_arg.value.value is False
+
+        inferred_effects = infer_effects(fn_stmt.signature.effects, decorator_info)
+        assert "io" in inferred_effects

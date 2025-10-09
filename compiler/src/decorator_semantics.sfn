@@ -1,0 +1,283 @@
+// compiler/src/decorator_semantics.sfn
+//
+// Lightweight helpers for interpreting decorator metadata in the Sailfin
+// self-hosting compiler. The goal is to translate syntactic decorator
+// arguments into conveniently typed values so later semantic passes can
+// consume annotations without reimplementing literal parsing.
+
+import {
+    Decorator,
+    DecoratorArgument,
+    Expression,
+    Statement,
+} from "./ast";
+
+enum LiteralValue {
+    String { value -> string },
+    Boolean { value -> boolean },
+    Number { value -> string },
+    Null,
+    Unsupported,
+}
+
+struct DecoratorArgumentInfo {
+    name -> string?;
+    value -> LiteralValue;
+}
+
+struct DecoratorInfo {
+    name -> string;
+    arguments -> DecoratorArgumentInfo[];
+}
+
+fn infer_effects(existing -> string[], decorators -> DecoratorInfo[]) -> string[] {
+    let mut effects = clone_effects(existing);
+    let mut requires_io -> boolean = contains_effect(effects, "io");
+
+    let mut index -> number = 0;
+    loop {
+        if index >= decorators.length {
+            break;
+        }
+        let decorator = decorators[index];
+        if decorator.name == "trace" {
+            requires_io = true;
+        }
+        index += 1;
+    }
+
+    if requires_io && !contains_effect(effects, "io") {
+        effects = append_string(effects, "io");
+    }
+
+    return effects;
+}
+
+fn evaluate_decorators(decorators -> Decorator[]) -> DecoratorInfo[] {
+    let mut results -> DecoratorInfo[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= decorators.length {
+            break;
+        }
+        let decorator = decorators[index];
+        let argument_infos = evaluate_arguments(decorator.arguments);
+        results = append_decorator_info(results, DecoratorInfo {
+            name: decorator.name,
+            arguments: argument_infos,
+        });
+        index += 1;
+    }
+    return results;
+}
+
+fn evaluate_arguments(arguments -> DecoratorArgument[]) -> DecoratorArgumentInfo[] {
+    let mut infos -> DecoratorArgumentInfo[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= arguments.length {
+            break;
+        }
+        let argument = arguments[index];
+        let value = evaluate_expression(argument.expression);
+        infos = append_argument_info(infos, DecoratorArgumentInfo {
+            name: argument.name,
+            value: value,
+        });
+        index += 1;
+    }
+    return infos;
+}
+
+fn evaluate_expression(expr -> Expression) -> LiteralValue {
+    if expr.variant == "StringLiteral" {
+        return LiteralValue.String { value: expr.value };
+    }
+    if expr.variant == "BooleanLiteral" {
+        return LiteralValue.Boolean { value: expr.value };
+    }
+    if expr.variant == "NumberLiteral" {
+        // Preserve the original lexeme; callers decide how to interpret scale.
+        return LiteralValue.Number { value: expr.value };
+    }
+    if expr.variant == "NullLiteral" {
+        return LiteralValue.Null();
+    }
+    if expr.variant == "Raw" {
+        let text = trim_whitespace(expr.text);
+        if text.length == 0 {
+            return LiteralValue.Unsupported();
+        }
+        if looks_like_quoted_string(text) {
+            let literal = strip_surrounding_quotes(text);
+            return LiteralValue.String { value: literal };
+        }
+        if text == "true" {
+            return LiteralValue.Boolean { value: true };
+        }
+        if text == "false" {
+            return LiteralValue.Boolean { value: false };
+        }
+        if looks_like_number(text) {
+            return LiteralValue.Number { value: text };
+        }
+    }
+    return LiteralValue.Unsupported();
+}
+
+fn evaluate_statement_decorators(statement -> Statement) -> DecoratorInfo[] {
+    if statement.variant == "FunctionDeclaration" {
+        return evaluate_decorators(statement.decorators);
+    }
+    if statement.variant == "StructDeclaration" {
+        return evaluate_decorators(statement.decorators);
+    }
+    return [];
+}
+
+fn trim_whitespace(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_whitespace_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_whitespace_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+
+    return slice_text(value, start, end);
+}
+
+fn looks_like_quoted_string(text -> string) -> boolean {
+    if text.length < 2 {
+        return false;
+    }
+    if text[0] != "\"" {
+        return false;
+    }
+    if text[text.length - 1] != "\"" {
+        return false;
+    }
+    return true;
+}
+
+fn looks_like_number(text -> string) -> boolean {
+    if text.length == 0 {
+        return false;
+    }
+    let mut has_decimal -> boolean = false;
+    let mut index -> number = 0;
+    if text[0] == "-" {
+        if text.length == 1 {
+            return false;
+        }
+        index = 1;
+    }
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "." {
+            if has_decimal {
+                return false;
+            }
+            has_decimal = true;
+            index += 1;
+            continue;
+        }
+        if !is_decimal_digit(ch) {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn is_decimal_digit(ch -> string) -> boolean {
+    return ch == "0"
+        || ch == "1"
+        || ch == "2"
+        || ch == "3"
+        || ch == "4"
+        || ch == "5"
+        || ch == "6"
+        || ch == "7"
+        || ch == "8"
+        || ch == "9";
+}
+
+fn append_decorator_info(collection -> DecoratorInfo[], item -> DecoratorInfo) -> DecoratorInfo[] {
+    return collection.concat([item]);
+}
+
+fn append_argument_info(collection -> DecoratorArgumentInfo[], item -> DecoratorArgumentInfo) -> DecoratorArgumentInfo[] {
+    return collection.concat([item]);
+}
+
+fn append_string(collection -> string[], item -> string) -> string[] {
+    return collection.concat([item]);
+}
+
+fn clone_effects(effects -> string[]) -> string[] {
+    let mut clone -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= effects.length {
+            break;
+        }
+        clone = append_string(clone, effects[index]);
+        index += 1;
+    }
+    return clone;
+}
+
+fn contains_effect(effects -> string[], effect -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= effects.length {
+            break;
+        }
+        if effects[index] == effect {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn is_whitespace_char(ch -> string) -> boolean {
+    return ch == " "
+        || ch == "\t"
+        || ch == "\n"
+        || ch == "\r";
+}
+
+fn slice_text(text -> string, start -> number, end -> number) -> string {
+    return runtime.substring(text, start, end);
+}
+
+fn strip_surrounding_quotes(value -> string) -> string {
+    if value.length < 2 {
+        return value;
+    }
+    return slice_text(value, 1, value.length - 1);
+}
