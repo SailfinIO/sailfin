@@ -425,9 +425,39 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
     elif source_path.name == "prelude.sfn":
         namespace = {"__name__": "__main__"}
         exec(compiled, namespace, namespace)
-        assert "sleep" in namespace
-        assert "channel" in namespace
-        assert "scheduler" in namespace
+
+        assert "console" in namespace
+        console_obj = namespace["console"]
+        assert hasattr(console_obj, "info")
+
+        sleep_fn = namespace["sleep"]
+        sleep_fn(0)
+
+        channel_fn = namespace["channel"]
+        channel_obj = channel_fn(1)
+        assert hasattr(channel_obj, "send")
+
+        parallel_fn = namespace["parallel"]
+        results = parallel_fn([lambda: 1, lambda: 2])
+        assert results == [1, 2]
+
+        log_execution = namespace["logExecution"]
+        wrapped = log_execution(lambda: "wrapped")
+        assert callable(wrapped)
+        assert wrapped() == "wrapped"
+
+        scheduler_obj = namespace["scheduler"]
+        assert hasattr(scheduler_obj, "spawn")
+
+        fs_obj = namespace["fs"]
+        assert hasattr(fs_obj, "readFile")
+
+        serve_fn = namespace["serve"]
+
+        def _handler(request, response):
+            response.send("ok")
+
+        serve_fn(_handler)
     elif source_path.name == "decorator_semantics.sfn":
         namespace = {"__name__": "__main__"}
 
