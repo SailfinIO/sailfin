@@ -119,6 +119,12 @@ struct MatchCaseParseResult {
     success -> boolean;
 }
 
+struct MatchCaseTokenSplit {
+    pattern_tokens -> Token[];
+    guard_tokens -> Token[];
+    has_guard -> boolean;
+}
+
 struct CaptureResult {
     parser -> Parser;
     tokens -> Token[];
@@ -1859,12 +1865,20 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         return MatchCaseParseResult { parser: original, case: null, success: false };
     }
     current = pattern_capture.parser;
-    let pattern_tokens = trim_token_edges(pattern_capture.tokens);
-    if pattern_tokens.length == 0 {
+    let split_tokens = split_match_case_tokens(pattern_capture.tokens);
+    if split_tokens.pattern_tokens.length == 0 {
         return MatchCaseParseResult { parser: original, case: null, success: false };
     }
 
-    let pattern_expression = expression_from_tokens(pattern_tokens);
+    let pattern_expression = expression_from_tokens(split_tokens.pattern_tokens);
+
+    let mut guard_expression -> Expression? = null;
+    if split_tokens.has_guard {
+        if split_tokens.guard_tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+        guard_expression = expression_from_tokens(split_tokens.guard_tokens);
+    }
 
     current = skip_trivia(current);
     let body_result = parse_block(current);
@@ -1875,7 +1889,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
     let case = MatchCase {
         pattern: pattern_expression,
-        guard: null,
+        guard: guard_expression,
         body: body_result.block,
     };
 
@@ -2300,6 +2314,35 @@ fn collect_pattern_until_arrow(parser -> Parser) -> PatternCaptureResult {
     }
 
     return PatternCaptureResult { parser: current, tokens: tokens, success: true };
+}
+
+fn split_match_case_tokens(tokens -> Token[]) -> MatchCaseTokenSplit {
+    let trimmed = trim_token_edges(tokens);
+    if trimmed.length == 0 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: [],
+            guard_tokens: [],
+            has_guard: false,
+        };
+    }
+
+    let guard_index = find_top_level_identifier(trimmed, "if");
+    if guard_index == -1 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: trimmed,
+            guard_tokens: [],
+            has_guard: false,
+        };
+    }
+
+    let pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index));
+    let guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, trimmed.length));
+
+    return MatchCaseTokenSplit {
+        pattern_tokens: pattern_tokens,
+        guard_tokens: guard_tokens,
+        has_guard: true,
+    };
 }
 
 fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {

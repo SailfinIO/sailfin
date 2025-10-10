@@ -18,10 +18,24 @@ Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, 
 - [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
 - [Types](./types/) – Recursive types, tagged unions, ADTs & pattern matching examples.
 
+## Capability Matrix
+
+| Directory | Primary effects | Bootstrap readiness | Notes |
+|-----------|-----------------|---------------------|-------|
+| `basics/` | _none_ | ✅ Fully runnable | Syntax + control-flow exercises with no effectful helpers. |
+| `algorithms/` | _none_ | ✅ Fully runnable | Pure computation demos (e.g. `quicksort`). |
+| `functional/` | _none_ | ✅ Fully runnable | Higher-order utilities; relies only on standard expressions. |
+| `types/` | _none_ | ✅ Fully runnable | Algebraic data types and pattern matching with no runtime calls. |
+| `advanced/` | mixed (`io`, `net`) | ⚠️ Effect-sensitive | Individual files note required effects; all code stays within bootstrap syntax, but mocked helpers are involved (decorators, concurrency + web). |
+| `concurrency/` | `io` (channels, `spawn`), optional `clock` | ⚠️ Effect-sensitive | Uses runtime scheduling helpers; relies on mocked concurrency adapters. |
+| `web/` | `io`, `net` | ⚠️ Effect-sensitive | Demonstrates `serve`, `http`, and WebSocket APIs backed by the mocked runtime. |
+| `io/` | `io` | ⚠️ Effect-sensitive | Uses `fs.*` helpers; no real filesystem writes occur. |
+| `ai/` | `model`, `io`, `net` | ⚠️ Effect-sensitive | Prompt blocks and tool calls target the mocked model/runtime surface. |
+
 ## Runtime Notes
 
 - **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` avoid undeclared effects and run end-to-end with mocked runtime helpers.
 - **Effect-sensitive**: `ai`, `web`, `concurrency`, and `io` rely on the mocked `http`, `websocket`, `fs`, and scheduling helpers in `bootstrap/runtime_support.py`. They validate syntax and effect enforcement but do not perform real network or file I/O.
-- **Forward-looking**: Selected files in `advanced/` and `ai/` include comments that mark syntax planned for the self-hosted compiler (e.g., currency literals, pipeline operators). Replace future syntax with bootstrap-compatible constructs when executing.
+- **Forward-looking**: Selected files in `advanced/` and `ai/` include comments that mark syntax planned for the self-hosted compiler (e.g., currency literals, pipeline operators). The executable code paths stay within the bootstrap grammar; if you introduce future syntax, gate it with comments and update this matrix.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

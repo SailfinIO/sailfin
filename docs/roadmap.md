@@ -5,12 +5,12 @@ Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
 strategy changes here. Each section is designed so an agent can pull the next
-actionable item, mark it complete, and move to the following bucket; creating new items as needed.
+actionable item, mark it complete, and move to the following bucket; creating new items as needed - this means that active workstreams need to be upated regularly.
 
 ## Active Workstreams (Do Now)
 
 1. **Bootstrap Reliability**
-   - [ ] Parser parity — Close remaining gaps between the Python and Sailfin-native parsers (block-level `if`/`else`, `for`, and `match` now parsed; pattern guards and rich expressions next). Source: `compiler/src/parser.sfn`.
+   - [ ] Parser parity — Close remaining gaps between the Python and Sailfin-native parsers (block-level `if`/`else`, `for`, and `match` now parsed; pattern guards now emit expressions, rich expression bodies next). Source: `compiler/src/parser.sfn`.
    - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
 
 2. **Registry & Capsule Workflow**

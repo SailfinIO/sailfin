@@ -401,6 +401,30 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         signature = fn_stmt.signature
         assert signature.name == "greet"
         assert signature.effects == ["io"]
+
+        guarded_sample = (
+            "fn classify(value -> number) -> number {\n"
+            "    match value {\n"
+            "        case value if value > 0 => {\n"
+            "            return value;\n"
+            "        }\n"
+            "        case _ => {\n"
+            "            return 0;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        guarded_program = parse_program(guarded_sample)
+        classify_fn = guarded_program.statements[0]
+        assert classify_fn.variant == "FunctionDeclaration"
+        match_stmt = classify_fn.body.statements[0]
+        assert match_stmt.variant == "MatchStatement"
+        assert len(match_stmt.cases) == 2
+        first_case = match_stmt.cases[0]
+        assert first_case.guard is not None
+        assert getattr(first_case.guard, "text", "").strip() == "value > 0"
+        second_case = match_stmt.cases[1]
+        assert second_case.guard is None
         assert signature.parameters[0].name == "name"
         assert signature.parameters[0].type_annotation is not None
         assert signature.type_parameters == []

@@ -27,8 +27,8 @@ roadmaps.
 - Bootstrap: Stage0 parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
   `pipeline`, `test`, `type`, and `match` declarations.
 - Self-hosted prototype: Mirrors the same surface and now recognises
-  block-level `if`/`else`, `for` loops, and `match` statements (patterns and
-  guards lower as raw expressions today); expressions within bodies currently
+  block-level `if`/`else`, `for` loops, and `match` statements with `case`
+  guards captured as expressions; expressions within bodies currently
   round-trip as literal or identifier tokens.
 
 **Effect Tracking (`![...]`)**
