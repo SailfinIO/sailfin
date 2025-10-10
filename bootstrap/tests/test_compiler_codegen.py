@@ -358,3 +358,35 @@ def test_lower_native_emits_structs_and_literals():
     assert isinstance(result, pair_cls)
     assert result.left == 3
     assert result.right == 3
+
+
+def test_lower_native_emits_enums():
+    program = _parse_program(
+        """
+        enum Color {
+            Red;
+            Green;
+            Blue;
+        }
+
+        fn identity(color -> Color) -> Color {
+            return color;
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+    assert "Color = runtime.EnumType('Color')" in python_result.source
+    assert "Color.Red = Color.variant('Red', [])" in python_result.source
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    color_type = namespace["Color"]
+    value = color_type.Green()
+    assert getattr(value, "variant") == "Green"

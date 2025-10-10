@@ -5,7 +5,7 @@
 // the pipeline self-contained while we iterate toward LLVM / WASM codegen.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport, NativeEnum, NativeEnumVariantField } from "./native_ir";
 
 struct LoweredPythonResult {
     source -> string;
@@ -22,10 +22,10 @@ fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
 
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
-    let python_source = emit_python_module(parse.functions, parse.imports, parse.structs);
+    let python_source = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums);
     return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
 }
-fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[]) -> string {
+fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[]) -> string {
     let mut builder -> PythonBuilder = builder_new();
     builder = builder_emit(builder, "import asyncio");
     builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
@@ -35,6 +35,10 @@ fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], 
     }
     builder = builder_emit_blank(builder);
     builder = emit_runtime_aliases(builder);
+    if enums.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_enum_definitions(builder, enums);
+    }
     if structs.length > 0 {
         builder = builder_emit_blank(builder);
         builder = emit_struct_definitions(builder, structs);
@@ -88,6 +92,55 @@ fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> P
         index += 1;
     }
     return current;
+}
+
+fn emit_enum_definitions(builder -> PythonBuilder, enums -> NativeEnum[]) -> PythonBuilder {
+    let mut current = builder;
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        current = emit_single_enum(current, enums[index]);
+        if index + 1 < enums.length {
+            current = builder_emit_blank(current);
+        }
+        index += 1;
+    }
+    return current;
+}
+
+fn emit_single_enum(builder -> PythonBuilder, definition -> NativeEnum) -> PythonBuilder {
+    let enum_name = sanitize_identifier(definition.name);
+    let mut current = builder_emit(builder, enum_name + " = runtime.EnumType('" + enum_name + "')");
+    let mut index -> number = 0;
+    loop {
+        if index >= definition.variants.length {
+            break;
+        }
+        let variant = definition.variants[index];
+        let variant_name = sanitize_identifier(variant.name);
+        let variant_line = enum_name + "." + variant_name + " = " + enum_name + ".variant('" + variant_name + "', [" + render_enum_variant_fields(variant.fields) + "])";
+        current = builder_emit(current, variant_line);
+        index += 1;
+    }
+    return current;
+}
+
+fn render_enum_variant_fields(fields -> NativeEnumVariantField[]) -> string {
+    if fields.length == 0 {
+        return "";
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        rendered = append_string(rendered, "'" + sanitize_identifier(fields[index].name) + "'");
+        index += 1;
+    }
+    return join_with_separator(rendered, ", ");
 }
 
 fn render_python_import(entry -> NativeImport) -> string {
