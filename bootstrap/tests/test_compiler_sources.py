@@ -44,6 +44,106 @@ def test_self_hosted_decorator_logexecution_infers_io() -> None:
     assert "io" in effects
 
 
+def _make_token(kind, lexeme, line=1, column=1):
+    from compiler.build.token import Token
+
+    return Token(kind=kind, lexeme=lexeme, line=line, column=column)
+
+
+def _validate_effects(program):
+    import compiler.build.effect_checker as effect_checker_module
+    from compiler.build.decorator_semantics import evaluate_decorators as _eval_decorators
+
+    effect_checker_module.evaluate_decorators = _eval_decorators
+    return effect_checker_module.validate_effects(program)
+
+
+def test_self_hosted_effect_checker_requires_io_for_console_usage() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="print"), "print", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=6),
+        _make_token(TokenKind.Identifier(value="info"), "info", column=7),
+        _make_token(TokenKind.Symbol(value="("), "(", column=11),
+        _make_token(TokenKind.StringLiteral(value="msg"), '"msg"', column=12),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=17),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=18),
+    ]
+
+    body = Block(tokens=tokens, text="print.info(\"msg\");", statements=[])
+    signature = FunctionSignature(
+        name="demo",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    function = Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])
+    program = Program(statements=[function])
+
+    violations = _validate_effects(program)
+    assert any("io" in violation.missing_effects for violation in violations)
+
+    signature_with_io = FunctionSignature(
+        name="demo_io",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["io"],
+        type_parameters=[],
+    )
+    function_io = Statement.FunctionDeclaration(signature=signature_with_io, body=body, decorators=[])
+    program_io = Program(statements=[function_io])
+
+    assert not _validate_effects(program_io)
+
+
+def test_self_hosted_effect_checker_requires_clock_for_sleep_usage() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="runtime"), "runtime", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=8),
+        _make_token(TokenKind.Identifier(value="sleep"), "sleep", column=9),
+        _make_token(TokenKind.Symbol(value="("), "(", column=14),
+        _make_token(TokenKind.NumberLiteral(value="42"), "42", column=15),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=17),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=18),
+    ]
+
+    body = Block(tokens=tokens, text="runtime.sleep(42);", statements=[])
+    signature = FunctionSignature(
+        name="tick",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    function = Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])
+    program = Program(statements=[function])
+
+    violations = _validate_effects(program)
+    assert any("clock" in violation.missing_effects for violation in violations)
+
+    signature_with_clock = FunctionSignature(
+        name="tick_clock",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["clock"],
+        type_parameters=[],
+    )
+    function_clock = Statement.FunctionDeclaration(signature=signature_with_clock, body=body, decorators=[])
+    program_clock = Program(statements=[function_clock])
+
+    assert not _validate_effects(program_clock)
+
+
 @pytest.mark.parametrize("source_path", COMPILER_SOURCES)
 def test_compile_compiler_source(source_path: pathlib.Path) -> None:
     full_path = REPO_ROOT / source_path

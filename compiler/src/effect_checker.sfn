@@ -153,6 +153,12 @@ fn required_effects(body -> Block) -> string[] {
     if block_contains_network_usage(body.tokens) {
         required = append_unique_effect(required, "net");
     }
+    if block_contains_console_usage(body.tokens) {
+        required = append_unique_effect(required, "io");
+    }
+    if block_contains_sleep_usage(body.tokens) {
+        required = append_unique_effect(required, "clock");
+    }
     return required;
 }
 
@@ -246,6 +252,29 @@ fn block_contains_spawn_usage(tokens -> Token[]) -> boolean {
     return contains_identifier_call(tokens, "spawn");
 }
 
+fn block_contains_console_usage(tokens -> Token[]) -> boolean {
+    if contains_identifier_followed_by_symbol(tokens, "print", ".") {
+        return true;
+    }
+    if contains_identifier_followed_by_symbol(tokens, "console", ".") {
+        return true;
+    }
+    if contains_member_chain(tokens, ["runtime", "console"]) {
+        return true;
+    }
+    return false;
+}
+
+fn block_contains_sleep_usage(tokens -> Token[]) -> boolean {
+    if contains_identifier_call(tokens, "sleep") {
+        return true;
+    }
+    if contains_member_call(tokens, ["runtime", "sleep"]) {
+        return true;
+    }
+    return false;
+}
+
 fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> boolean {
     let mut index -> number = 0;
     loop {
@@ -273,6 +302,87 @@ fn contains_identifier_call(tokens -> Token[], name -> string) -> boolean {
             let paren = next_non_trivia(tokens, index + 1);
             if paren != -1 && is_symbol_token(tokens[paren], "(") {
                 return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn contains_member_chain(tokens -> Token[], chain -> string[]) -> boolean {
+    if chain.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        if is_identifier_token(tokens[index], chain[0]) {
+            let mut cursor -> number = index;
+            let mut chain_index -> number = 1;
+            let mut matches -> boolean = true;
+            loop {
+                if chain_index >= chain.length {
+                    break;
+                }
+                let dot_index = next_non_trivia(tokens, cursor + 1);
+                if dot_index == -1 || !is_symbol_token(tokens[dot_index], ".") {
+                    matches = false;
+                    break;
+                }
+                let member_index = next_non_trivia(tokens, dot_index + 1);
+                if member_index == -1 || !is_identifier_token(tokens[member_index], chain[chain_index]) {
+                    matches = false;
+                    break;
+                }
+                cursor = member_index;
+                chain_index += 1;
+            }
+            if matches {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn contains_member_call(tokens -> Token[], chain -> string[]) -> boolean {
+    if chain.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        if is_identifier_token(tokens[index], chain[0]) {
+            let mut cursor -> number = index;
+            let mut chain_index -> number = 1;
+            let mut matches -> boolean = true;
+            loop {
+                if chain_index >= chain.length {
+                    break;
+                }
+                let dot_index = next_non_trivia(tokens, cursor + 1);
+                if dot_index == -1 || !is_symbol_token(tokens[dot_index], ".") {
+                    matches = false;
+                    break;
+                }
+                let member_index = next_non_trivia(tokens, dot_index + 1);
+                if member_index == -1 || !is_identifier_token(tokens[member_index], chain[chain_index]) {
+                    matches = false;
+                    break;
+                }
+                cursor = member_index;
+                chain_index += 1;
+            }
+            if matches {
+                let call_index = next_non_trivia(tokens, cursor + 1);
+                if call_index != -1 && is_symbol_token(tokens[call_index], "(") {
+                    return true;
+                }
             }
         }
         index += 1;
