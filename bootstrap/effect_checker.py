@@ -134,7 +134,7 @@ class _EffectVisitor:
             return self._scan_expression(statement.initializer)
         if isinstance(statement, IfStatement):
             required = self._scan_expression(statement.condition)
-            required = self._scan_block(statement.then_block)
+            required |= self._scan_block(statement.then_block)
             if isinstance(statement.else_branch, Block):
                 required |= self._scan_block(statement.else_branch)
             elif isinstance(statement.else_branch, IfStatement):
@@ -239,13 +239,26 @@ class _EffectVisitor:
                 return {"io"}
             if root in {"http", "websocket"}:
                 return {"net"}
+            if root == "runtime":
+                if callee.member == "spawn":
+                    return {"io"}
+                if callee.member == "serve":
+                    return {"net"}
         if isinstance(callee, Identifier):
             if callee.name == "serve":
                 return {"net"}
+            if callee.name == "spawn":
+                return {"io"}
         if root in {"http", "websocket"}:
             return {"net"}
         if root == "fs":
             return {"io"}
+        if root == "runtime":
+            if isinstance(callee, MemberExpression):
+                if callee.member == "spawn":
+                    return {"io"}
+                if callee.member == "serve":
+                    return {"net"}
         return set()
 
     def _root_identifier(self, expression: Expression) -> str | None:

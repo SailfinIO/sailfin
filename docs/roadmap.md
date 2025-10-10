@@ -11,7 +11,6 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 1. **Bootstrap Reliability**
    - [ ] Parser parity — Close remaining gaps between the Python and Sailfin-native parsers (control-flow expressions, pattern matching, decorator arguments). Source: `compiler/src/parser.sfn`.
-   - [ ] Effect enforcement — Extend stage0 effect checks to cover broader runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`). Source: `bootstrap/effect_checker.py`, `bootstrap/runtime_support.py`.
    - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
 
 2. **Registry & Capsule Workflow**
@@ -38,6 +37,8 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Completed Items
 
 Move checked tasks here with links to PRs / status updates for traceability.
+
+- [x] Effect enforcement — Extended stage0 effect checks to cover runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`). Validation: `bootstrap/tests/test_unit_effects.py` exercises missing-effect errors for `spawn`/`serve`.
 
 ## Coordination Notes
 

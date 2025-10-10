@@ -53,6 +53,6 @@ fn array_reduce(items, initial, reducer) {
     return runtime.array_reduce(items, initial, reducer);
 }
 
-fn serve(handler, config = null) ![io] {
+fn serve(handler, config = null) ![io, net] {
     runtime.serve(handler, config);
 }
