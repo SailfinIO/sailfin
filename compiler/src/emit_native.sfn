@@ -416,15 +416,56 @@ fn emit_match(state -> NativeState, statement -> Statement) -> NativeState {
 }
 
 fn emit_match_case(state -> NativeState, case -> MatchCase) -> NativeState {
-    let mut line -> string = ".case " + format_expression(case.pattern);
-    if case.guard != null {
-        line = line + " if " + format_expression(case.guard);
+    let inline_statement = select_inline_match_case_statement(case.body);
+    if inline_statement != null {
+        return emit_inline_match_case(state, case, inline_statement);
     }
+    let mut line -> string = ".case " + format_match_case_head(case);
     let mut current = state_emit_line(state, line);
     current = state_push_indent(current);
     current = emit_block(current, case.body);
     current = state_pop_indent(current);
     return current;
+}
+
+fn select_inline_match_case_statement(block -> Block) -> Statement? {
+    if block.statements.length != 1 {
+        return null;
+    }
+    let statement = block.statements[0];
+    if statement.variant == "ExpressionStatement" {
+        return statement;
+    }
+    if statement.variant == "ReturnStatement" {
+        return statement;
+    }
+    return null;
+}
+
+fn emit_inline_match_case(state -> NativeState, case -> MatchCase, statement -> Statement) -> NativeState {
+    let mut line -> string = format_match_case_head(case) + " => " + format_inline_case_body(statement);
+    return state_emit_line(state, line + ",");
+}
+
+fn format_match_case_head(case -> MatchCase) -> string {
+    let mut head -> string = format_expression(case.pattern);
+    if case.guard != null {
+        head = head + " if " + format_expression(case.guard);
+    }
+    return head;
+}
+
+fn format_inline_case_body(statement -> Statement) -> string {
+    if statement.variant == "ExpressionStatement" {
+        return format_expression(statement.expression);
+    }
+    if statement.variant == "ReturnStatement" {
+        if statement.expression == null {
+            return "return";
+        }
+        return "return " + format_expression(statement.expression);
+    }
+    return "";
 }
 
 fn emit_if(state -> NativeState, statement -> Statement) -> NativeState {

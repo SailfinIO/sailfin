@@ -358,6 +358,47 @@ def test_lower_native_emits_match_statements():
     assert describe(3) == "positive"
 
 
+def test_lower_native_emits_inline_match_cases():
+    program = _parse_program(
+        """
+        fn classify(value -> number) -> string {
+            match value {
+                case value if value > 0 => print.info("positive");
+                case 0 => return "zero";
+                case _ => return "other";
+            }
+            return "done";
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    text_artifact = None
+    for artifact in native_result.module.artifacts:
+        if artifact.format == "sailfin-native-text":
+            text_artifact = artifact
+            break
+    assert text_artifact is not None
+    contents = text_artifact.contents
+    assert 'value if value > 0 => print.info("positive"),' in contents
+    assert '0 => return "zero",' in contents
+    assert '_ => return "other",' in contents
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<inline-match>", "exec")
+    exec(compiled, namespace, namespace)
+
+    classify = namespace["classify"]
+    assert classify(-1) == "other"
+    assert classify(0) == "zero"
+    assert classify(5) == "done"
+
+
 def test_lower_native_emits_structs_and_literals():
     program = _parse_program(
         """

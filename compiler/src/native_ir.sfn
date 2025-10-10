@@ -86,6 +86,11 @@ struct EnumParseResult {
     diagnostics -> string[];
 }
 
+struct CaseComponents {
+    pattern -> string;
+    guard -> string?;
+}
+
 struct StructParseResult {
     definition -> NativeStruct?;
     next_index -> number;
@@ -223,8 +228,15 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
-        let instruction = parse_instruction(line);
-        current = append_instruction(current, instruction);
+        let instructions = parse_instruction(line);
+        let mut instruction_index -> number = 0;
+        loop {
+            if instruction_index >= instructions.length {
+                break;
+            }
+            current = append_instruction(current, instructions[instruction_index]);
+            instruction_index += 1;
+        }
         index += 1;
     }
 
@@ -309,19 +321,19 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
     };
 }
 
-fn parse_instruction(line -> string) -> NativeInstruction {
+fn parse_instruction(line -> string) -> NativeInstruction[] {
     if line == "noop" {
-        return NativeInstruction.Noop();
+        return [NativeInstruction.Noop()];
     }
     if starts_with(line, ".if ") {
         let condition = trim_text(strip_prefix(line, ".if "));
-        return NativeInstruction.If { condition: condition };
+        return [NativeInstruction.If { condition: condition }];
     }
     if line == ".else" {
-        return NativeInstruction.Else();
+        return [NativeInstruction.Else()];
     }
     if line == ".endif" {
-        return NativeInstruction.EndIf();
+        return [NativeInstruction.EndIf()];
     }
     if starts_with(line, ".for ") {
         let body = trim_text(strip_prefix(line, ".for "));
@@ -330,31 +342,31 @@ fn parse_instruction(line -> string) -> NativeInstruction {
         if index >= 0 {
             let target = trim_text(runtime.substring(body, 0, index));
             let iterable = trim_text(runtime.substring(body, index + separator.length, body.length));
-            return NativeInstruction.For { target: target, iterable: iterable };
+            return [NativeInstruction.For { target: target, iterable: iterable }];
         }
     }
     if line == ".endfor" {
-        return NativeInstruction.EndFor();
+        return [NativeInstruction.EndFor()];
     }
     if starts_with(line, ".match ") {
         let expression = trim_text(strip_prefix(line, ".match "));
-        return NativeInstruction.Match { expression: expression };
+        return [NativeInstruction.Match { expression: expression }];
     }
     if starts_with(line, ".case ") {
-        return parse_case_instruction(line);
+        return [parse_case_instruction(line)];
     }
     if line == ".endmatch" {
-        return NativeInstruction.EndMatch();
+        return [NativeInstruction.EndMatch()];
     }
     if starts_with(line, ".let ") {
-        return parse_let_instruction(line);
+        return [parse_let_instruction(line)];
     }
     if starts_with(line, "ret") {
         let remainder = trim_text(runtime.substring(line, 3, line.length));
         if remainder.length == 0 {
-            return NativeInstruction.Return { expression: "" };
+            return [NativeInstruction.Return { expression: "" }];
         }
-        return NativeInstruction.Return { expression: remainder };
+        return [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder) }];
     }
     if starts_with(line, "eval let ") {
         let body = trim_text(strip_prefix(line, "eval let "));
@@ -364,35 +376,76 @@ fn parse_instruction(line -> string) -> NativeInstruction {
             body = trim_text(strip_prefix(body, "mut "));
         }
         let parsed = parse_binding_components(body);
-        return NativeInstruction.Let {
+        return [NativeInstruction.Let {
             name: parsed.name,
             mutable: is_mutable,
             type_annotation: parsed.type_annotation,
-            value: parsed.value,
-        };
+            value: maybe_trim_trailing(parsed.value),
+        }];
     }
     if starts_with(line, "eval ") {
-        return NativeInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
+        return [NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))) }];
     }
-    return NativeInstruction.Unknown { text: line };
+    if index_of(line, "=>") >= 0 {
+        return parse_inline_case_instruction(line);
+    }
+    return [NativeInstruction.Unknown { text: line }];
 }
 
 fn parse_case_instruction(line -> string) -> NativeInstruction {
     let body = trim_text(strip_prefix(line, ".case "));
-    if body.length == 0 {
-        return NativeInstruction.Case { pattern: body, guard: null };
+    let split = split_case_components(body);
+    return NativeInstruction.Case { pattern: split.pattern, guard: split.guard };
+}
+
+fn parse_inline_case_instruction(line -> string) -> NativeInstruction[] {
+    let trimmed = trim_trailing_delimiters(trim_text(line));
+    let arrow_index = index_of(trimmed, "=>");
+    if arrow_index < 0 {
+        return [NativeInstruction.Unknown { text: line }];
+    }
+    let head = trim_text(runtime.substring(trimmed, 0, arrow_index));
+    let remainder = trim_trailing_delimiters(trim_text(runtime.substring(trimmed, arrow_index + 2, trimmed.length)));
+    let split = split_case_components(head);
+    let mut instructions -> NativeInstruction[] = [];
+    instructions = instructions.concat([NativeInstruction.Case { pattern: split.pattern, guard: split.guard }]);
+    if remainder.length == 0 {
+        instructions = instructions.concat([NativeInstruction.Noop()]);
+        return instructions;
+    }
+    let body_instruction = parse_inline_case_body_instruction(remainder);
+    instructions = instructions.concat([body_instruction]);
+    return instructions;
+}
+
+fn parse_inline_case_body_instruction(body -> string) -> NativeInstruction {
+    let lowered = trim_trailing_delimiters(body);
+    if starts_with(lowered, "return ") {
+        let value = trim_trailing_delimiters(trim_text(strip_prefix(lowered, "return ")));
+        return NativeInstruction.Return { expression: value };
+    }
+    if starts_with(lowered, "eval ") {
+        return NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))) };
+    }
+    return NativeInstruction.Expression { expression: lowered };
+}
+
+fn split_case_components(text -> string) -> CaseComponents {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return CaseComponents { pattern: trimmed, guard: null };
     }
     let separator = " if ";
-    let index = index_of(body, separator);
+    let index = last_index_of(trimmed, separator);
     if index < 0 {
-        return NativeInstruction.Case { pattern: body, guard: null };
+        return CaseComponents { pattern: trimmed, guard: null };
     }
-    let pattern = trim_text(runtime.substring(body, 0, index));
-    let guard_text = trim_text(runtime.substring(body, index + separator.length, body.length));
+    let pattern = trim_text(runtime.substring(trimmed, 0, index));
+    let guard_text = trim_text(runtime.substring(trimmed, index + separator.length, trimmed.length));
     if guard_text.length == 0 {
-        return NativeInstruction.Case { pattern: pattern, guard: null };
+        return CaseComponents { pattern: pattern, guard: null };
     }
-    return NativeInstruction.Case { pattern: pattern, guard: guard_text };
+    return CaseComponents { pattern: pattern, guard: guard_text };
 }
 
 fn parse_import_entry(entry -> string) -> NativeImport? {
@@ -654,6 +707,14 @@ fn trim_trailing_delimiters(text -> string) -> string {
         return text;
     }
     return runtime.substring(text, 0, end);
+}
+
+fn maybe_trim_trailing(value -> string?) -> string? {
+    if value == null {
+        return null;
+    }
+    let trimmed = trim_trailing_delimiters(value);
+    return trimmed;
 }
 
 fn parse_struct_field_line(text -> string) -> NativeStructField? {
