@@ -145,6 +145,9 @@ fn required_effects(body -> Block) -> string[] {
     if block_contains_fs_usage(body.tokens) {
         required = append_unique_effect(required, "io");
     }
+    if block_contains_spawn_usage(body.tokens) {
+        required = append_unique_effect(required, "io");
+    }
     if block_contains_network_usage(body.tokens) {
         required = append_unique_effect(required, "net");
     }
@@ -211,21 +214,14 @@ fn block_contains_network_usage(tokens -> Token[]) -> boolean {
     if contains_identifier_followed_by_symbol(tokens, "websocket", ".") {
         return true;
     }
-    let mut index -> number = 0;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        let token = tokens[index];
-        if is_identifier_token(token, "serve") {
-            let paren = next_non_trivia(tokens, index + 1);
-            if paren != -1 && is_symbol_token(tokens[paren], "(") {
-                return true;
-            }
-        }
-        index += 1;
+    if contains_identifier_call(tokens, "serve") {
+        return true;
     }
     return false;
+}
+
+fn block_contains_spawn_usage(tokens -> Token[]) -> boolean {
+    return contains_identifier_call(tokens, "spawn");
 }
 
 fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> boolean {
@@ -237,6 +233,23 @@ fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, sym
         if is_identifier_token(tokens[index], name) {
             let next_index = next_non_trivia(tokens, index + 1);
             if next_index != -1 && is_symbol_token(tokens[next_index], symbol) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn contains_identifier_call(tokens -> Token[], name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        if is_identifier_token(tokens[index], name) {
+            let paren = next_non_trivia(tokens, index + 1);
+            if paren != -1 && is_symbol_token(tokens[paren], "(") {
                 return true;
             }
         }

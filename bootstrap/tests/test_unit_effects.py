@@ -85,3 +85,65 @@ def test_serve_with_declared_net_effect():
         )
     )
     validate_effects(ast)
+
+
+def test_runtime_spawn_requires_io_effect():
+    ast = parse(
+        dedent(
+            """
+            fn worker() {}
+
+            fn demo() {
+                runtime.spawn(worker);
+            }
+            """
+        )
+    )
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_spawn_with_declared_io_effect():
+    ast = parse(
+        dedent(
+            """
+            fn worker() {}
+
+            fn demo() ![io] {
+                runtime.spawn(worker);
+            }
+            """
+        )
+    )
+    validate_effects(ast)
+
+
+def test_runtime_serve_requires_net_effect():
+    ast = parse(
+        dedent(
+            """
+            fn handler(req, res) {}
+
+            fn demo() {
+                runtime.serve(handler);
+            }
+            """
+        )
+    )
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_serve_with_declared_net_effect():
+    ast = parse(
+        dedent(
+            """
+            fn handler(req, res) {}
+
+            fn demo() ![net] {
+                runtime.serve(handler);
+            }
+            """
+        )
+    )
+    validate_effects(ast)

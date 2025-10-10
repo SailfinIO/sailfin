@@ -34,7 +34,8 @@ roadmaps.
   `bootstrap/effect_checker.py`, covering prompt blocks and runtime helpers
   such as `fs.*`, `http.*`, `websocket.*`, `serve`, and `spawn`.
 - Self-hosted prototype: Infers `io` when decorators like `@trace` appear and
-  scans blocks for prompts and runtime helpers. Hierarchical effects remain
+  scans blocks for prompts and runtime helpers, including `fs.*`,
+  `http.*`, `websocket.*`, `serve`, and `spawn`. Hierarchical effects remain
   design-stage work.
 
 **Prompt Blocks**

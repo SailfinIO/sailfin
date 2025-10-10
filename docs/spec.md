@@ -522,7 +522,8 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
 
 - `runtime.console.info` – backing implementation for source-level `print.info`.
 - `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
-  primitives.
+  primitives. Invoking `spawn` requires the `io` effect; routing through
+  `serve` requires `net`.
 - `runtime.format_string` – interpolated string support.
 
 Bootstrap stubs:
