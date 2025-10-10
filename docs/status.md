@@ -30,8 +30,9 @@ roadmaps.
   block-level `if`/`else`, `for` loops, and `match` statements with `case`
   guards captured as expressions plus inline `=>` expression or `return`
   bodies. Common expressions (member access, function calls, unary `!`/`-`,
-  and binary operators through `&&`/`||`) now lower into structured nodes
-  instead of `Raw` placeholders.
+  binary operators through `&&`/`||`, and literal forms like `[x, y]`,
+  `{ key: value }`, and `Type { field: value }`) now lower into structured
+  nodes instead of `Raw` placeholders.
 
 **Effect Tracking (`![...]`)**
 - Bootstrap: Enforces `model`, `io`, `net`, and `clock` via

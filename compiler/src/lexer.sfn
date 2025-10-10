@@ -132,7 +132,7 @@ fn lex(source -> string) -> Token[] {
             }
         }
 
-        if ch == "\"" {
+        if is_double_quote(ch) {
             let start_index = state.index;
             let start_line = state.line;
             let start_column = state.column;
@@ -148,12 +148,12 @@ fn lex(source -> string) -> Token[] {
                     break;
                 }
                 let current = state.source[state.index];
-                if !escaped && current == "\"" {
+                if !escaped && is_double_quote(current) {
                     state.index += 1;
                     state.column += 1;
                     break;
                 }
-                if !escaped && current == "\\" {
+                if !escaped && is_backslash(current) {
                     escaped = true;
                     state.index += 1;
                     state.column += 1;
@@ -339,6 +339,14 @@ fn char_code(ch -> string) -> number {
     return runtime.char_code(ch);
 }
 
+fn is_double_quote(ch -> string) -> boolean {
+    return char_code(ch) == 34;
+}
+
+fn is_backslash(ch -> string) -> boolean {
+    return char_code(ch) == 92;
+}
+
 fn slice(text -> string, start -> number, end -> number) -> string {
     return runtime.substring(text, start, end);
 }
@@ -365,10 +373,10 @@ fn interpret_escape(ch -> string) -> string {
     if ch == "r" {
         return "\r";
     }
-    if ch == "\"" {
+    if is_double_quote(ch) {
         return "\"";
     }
-    if ch == "\\" {
+    if is_backslash(ch) {
         return "\\";
     }
     return ch;

@@ -35,6 +35,9 @@ enum Expression {
     Binary { operator -> string, left -> Expression, right -> Expression },
     Member { object -> Expression, member -> string },
     Call { callee -> Expression, arguments -> Expression[] },
+    Array { elements -> Expression[] },
+    Object { fields -> ObjectField[] },
+    Struct { type_name -> string[], fields -> ObjectField[] },
     Raw { text -> string },
 }
 
@@ -47,6 +50,11 @@ struct Parameter {
 
 struct WithClause {
     expression -> Expression;
+}
+
+struct ObjectField {
+    name -> string;
+    value -> Expression;
 }
 
 struct ElseBranch {

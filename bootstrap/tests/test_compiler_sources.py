@@ -545,6 +545,56 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         loop_python = generate_program(loop_program)
         assert "for item in items:" in loop_python
 
+        literal_program = parse_program(
+            "fn config() {\n"
+            "    return { name: \"Sailfin\", version: 1 };\n"
+            "}\n"
+            "fn items() {\n"
+            "    return [1, 2, 3];\n"
+            "}\n"
+            "fn capsule() {\n"
+            "    return Capsule { id: 1 };\n"
+            "}\n"
+        )
+        assert len(literal_program.statements) == 3
+
+        config_fn = literal_program.statements[0]
+        assert config_fn.variant == "FunctionDeclaration"
+        config_return = config_fn.body.statements[0]
+        assert config_return.variant == "ReturnStatement"
+        assert config_return.expression is not None
+        config_expr = config_return.expression
+        assert config_expr.variant == "Object"
+        assert len(config_expr.fields) == 2
+        assert {field.name for field in config_expr.fields} == {"name", "version"}
+
+        items_fn = literal_program.statements[1]
+        assert items_fn.variant == "FunctionDeclaration"
+        items_return = items_fn.body.statements[0]
+        assert items_return.variant == "ReturnStatement"
+        assert items_return.expression is not None
+        items_expr = items_return.expression
+        assert items_expr.variant == "Array"
+        assert len(items_expr.elements) == 3
+        assert all(element.variant == "NumberLiteral" for element in items_expr.elements)
+
+        capsule_fn = literal_program.statements[2]
+        assert capsule_fn.variant == "FunctionDeclaration"
+        capsule_return = capsule_fn.body.statements[0]
+        assert capsule_return.variant == "ReturnStatement"
+        assert capsule_return.expression is not None
+        capsule_expr = capsule_return.expression
+        assert capsule_expr.variant == "Struct"
+        assert capsule_expr.type_name == ["Capsule"]
+        assert len(capsule_expr.fields) == 1
+        assert capsule_expr.fields[0].name == "id"
+        assert capsule_expr.fields[0].value.variant == "NumberLiteral"
+
+        literal_python = generate_program(literal_program)
+        assert "runtime.make_object" in literal_python
+        assert "Capsule(" in literal_python
+        assert "[1, 2, 3]" in literal_python
+
         match_program = parse_program(
             "fn classify(score -> number) {\n"
             "    match score {\n"

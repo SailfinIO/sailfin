@@ -494,6 +494,56 @@ fn format_expression(expression -> Expression) -> string {
         let args = join_with_separator(parts, ", ");
         return format_expression(expression.callee) + "(" + args + ")";
     }
+    if expression.variant == "Array" {
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.elements.length {
+                break;
+            }
+            rendered = append_string(rendered, format_expression(expression.elements[index]));
+            index += 1;
+        }
+        let contents = join_with_separator(rendered, ", ");
+        return "[" + contents + "]";
+    }
+    if expression.variant == "Object" {
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.fields.length {
+                break;
+            }
+            let field = expression.fields[index];
+            let value = format_expression(field.value);
+            rendered = append_string(rendered, field.name + "=" + value);
+            index += 1;
+        }
+        let args = join_with_separator(rendered, ", ");
+        if args.length == 0 {
+            return "runtime.make_object()";
+        }
+        return "runtime.make_object(" + args + ")";
+    }
+    if expression.variant == "Struct" {
+        let type_name = join_with_separator(expression.type_name, ".");
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.fields.length {
+                break;
+            }
+            let field = expression.fields[index];
+            let value = format_expression(field.value);
+            rendered = append_string(rendered, field.name + "=" + value);
+            index += 1;
+        }
+        let args = join_with_separator(rendered, ", ");
+        if args.length == 0 {
+            return type_name + "()";
+        }
+        return type_name + "(" + args + ")";
+    }
     if expression.variant == "Raw" {
         return trim_text(expression.text);
     }

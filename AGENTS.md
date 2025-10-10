@@ -16,6 +16,7 @@
     ```bash
 cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/conda run -n sailfin-bootstrap python scratch/example_script.py
     ```
+- Do not under any circumstances use  here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.
 
 ## Coding Style & Naming Conventions
 - Python modules observe PEP 8 with four-space indentation, `snake_case` functions, and narrow compiler passes; share helpers instead of duplicating parsing logic.
