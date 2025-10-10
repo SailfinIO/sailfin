@@ -232,7 +232,13 @@ fn block_contains_prompt(tokens -> Token[]) -> boolean {
 }
 
 fn block_contains_fs_usage(tokens -> Token[]) -> boolean {
-    return contains_identifier_followed_by_symbol(tokens, "fs", ".");
+    if contains_identifier_followed_by_symbol(tokens, "fs", ".") {
+        return true;
+    }
+    if contains_member_chain(tokens, ["runtime", "fs"]) {
+        return true;
+    }
+    return false;
 }
 
 fn block_contains_network_usage(tokens -> Token[]) -> boolean {
@@ -245,11 +251,26 @@ fn block_contains_network_usage(tokens -> Token[]) -> boolean {
     if contains_identifier_call(tokens, "serve") {
         return true;
     }
+    if contains_member_chain(tokens, ["runtime", "http"]) {
+        return true;
+    }
+    if contains_member_chain(tokens, ["runtime", "websocket"]) {
+        return true;
+    }
+    if contains_member_call(tokens, ["runtime", "serve"]) {
+        return true;
+    }
     return false;
 }
 
 fn block_contains_spawn_usage(tokens -> Token[]) -> boolean {
-    return contains_identifier_call(tokens, "spawn");
+    if contains_identifier_call(tokens, "spawn") {
+        return true;
+    }
+    if contains_member_call(tokens, ["runtime", "spawn"]) {
+        return true;
+    }
+    return false;
 }
 
 fn block_contains_console_usage(tokens -> Token[]) -> boolean {

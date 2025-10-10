@@ -41,8 +41,9 @@ roadmaps.
   `@logExecution` appear and scans blocks for prompts, console helpers
   (`print.*`, `console.*`, `runtime.console.*`), runtime timers
   (`sleep`, `runtime.sleep`), and capability helpers such as `fs.*`,
-  `http.*`, `websocket.*`, `serve`, and `spawn`. Hierarchical effects remain
-  design-stage work.
+  `runtime.fs.*`, `http.*`, `runtime.http.*`, `websocket.*`,
+  `runtime.websocket.*`, `serve`, `runtime.serve`, `spawn`, and
+  `runtime.spawn`. Hierarchical effects remain design-stage work.
 
 **Prompt Blocks**
 - Bootstrap: Prompts require the `model` effect; interpolation is handled by the

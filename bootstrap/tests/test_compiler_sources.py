@@ -144,6 +144,139 @@ def test_self_hosted_effect_checker_requires_clock_for_sleep_usage() -> None:
     assert not _validate_effects(program_clock)
 
 
+def test_self_hosted_effect_checker_requires_io_for_runtime_fs_usage() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="runtime"), "runtime", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=8),
+        _make_token(TokenKind.Identifier(value="fs"), "fs", column=9),
+        _make_token(TokenKind.Symbol(value="."), ".", column=11),
+        _make_token(TokenKind.Identifier(value="writeFile"), "writeFile", column=12),
+        _make_token(TokenKind.Symbol(value="("), "(", column=21),
+        _make_token(TokenKind.StringLiteral(value="out.txt"), '"out.txt"', column=22),
+        _make_token(TokenKind.Symbol(value=","), ",", column=31),
+        _make_token(TokenKind.StringLiteral(value="hi"), '"hi"', column=33),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=37),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=38),
+    ]
+
+    body = Block(tokens=tokens, text='runtime.fs.writeFile("out.txt", "hi");', statements=[])
+    signature = FunctionSignature(
+        name="store",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    program = Program(statements=[Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])])
+
+    violations = _validate_effects(program)
+    assert any("io" in violation.missing_effects for violation in violations)
+
+    signature_with_io = FunctionSignature(
+        name="store_io",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["io"],
+        type_parameters=[],
+    )
+    program_io = Program(
+        statements=[Statement.FunctionDeclaration(signature=signature_with_io, body=body, decorators=[])]
+    )
+
+    assert not _validate_effects(program_io)
+
+
+def test_self_hosted_effect_checker_requires_io_for_runtime_spawn_usage() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="runtime"), "runtime", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=8),
+        _make_token(TokenKind.Identifier(value="spawn"), "spawn", column=9),
+        _make_token(TokenKind.Symbol(value="("), "(", column=14),
+        _make_token(TokenKind.Identifier(value="worker"), "worker", column=15),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=21),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=22),
+    ]
+
+    body = Block(tokens=tokens, text="runtime.spawn(worker);", statements=[])
+    signature = FunctionSignature(
+        name="launch",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    program = Program(statements=[Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])])
+
+    violations = _validate_effects(program)
+    assert any("io" in violation.missing_effects for violation in violations)
+
+    signature_with_io = FunctionSignature(
+        name="launch_io",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["io"],
+        type_parameters=[],
+    )
+    program_io = Program(
+        statements=[Statement.FunctionDeclaration(signature=signature_with_io, body=body, decorators=[])]
+    )
+
+    assert not _validate_effects(program_io)
+
+
+def test_self_hosted_effect_checker_requires_net_for_runtime_serve_usage() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="runtime"), "runtime", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=8),
+        _make_token(TokenKind.Identifier(value="serve"), "serve", column=9),
+        _make_token(TokenKind.Symbol(value="("), "(", column=14),
+        _make_token(TokenKind.Identifier(value="handler"), "handler", column=15),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=22),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=23),
+    ]
+
+    body = Block(tokens=tokens, text="runtime.serve(handler);", statements=[])
+    signature = FunctionSignature(
+        name="boot",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    program = Program(statements=[Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])])
+
+    violations = _validate_effects(program)
+    assert any("net" in violation.missing_effects for violation in violations)
+
+    signature_with_net = FunctionSignature(
+        name="boot_net",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["net"],
+        type_parameters=[],
+    )
+    program_net = Program(
+        statements=[Statement.FunctionDeclaration(signature=signature_with_net, body=body, decorators=[])]
+    )
+
+    assert not _validate_effects(program_net)
+
+
 @pytest.mark.parametrize("source_path", COMPILER_SOURCES)
 def test_compile_compiler_source(source_path: pathlib.Path) -> None:
     full_path = REPO_ROOT / source_path
