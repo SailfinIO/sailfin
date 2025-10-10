@@ -49,6 +49,15 @@ roadmaps.
   `runtime.websocket.*`, `serve`, `runtime.serve`, `spawn`, and
   `runtime.spawn`. Hierarchical effects remain design-stage work.
 
+**Semantic Analysis**
+- Bootstrap: Performs symbol collection and effect validation inside the
+  Python pipeline; deeper type checking remains future work.
+- Self-hosted prototype: `compiler/src/typecheck.sfn` now walks top-level and
+  scoped blocks, builds symbol tables for functions/tests, and reports duplicate
+  declarations (including parameter and local name clashes). Diagnostics flow
+  through `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues
+  during round-trips.
+
 **Prompt Blocks**
 - Bootstrap: Prompts require the `model` effect; interpolation is handled by the
   runtime helpers.
@@ -83,7 +92,8 @@ roadmaps.
   statement lambdas still fall back to stubs). Block emission now preserves
   local `let`/`const` declarations, `for` loops, `if`/`else if`/`else`
   chains, and `match` statements so stage1 sources round-trip cleanly through
-  the bootstrap parser.
+  the bootstrap parser. A placeholder native backend (`emit_native.sfn`) tracks
+  diagnostics while we stand up LLVM / WASM output.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.

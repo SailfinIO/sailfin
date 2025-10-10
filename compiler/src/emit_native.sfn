@@ -1,0 +1,24 @@
+// compiler/src/emit_native.sfn
+// Placeholder for the native Sailfin backend. This module will evolve toward
+// emitting LLVM IR / WASM once the semantic passes are feature complete.
+
+import { Program } from "./ast";
+
+struct NativeModule {
+    // Future fields: target triple, entry points, embedded resources.
+    artifacts -> string[];
+}
+
+struct EmitNativeResult {
+    module -> NativeModule;
+    diagnostics -> string[];
+}
+
+fn emit_native(program -> Program) -> EmitNativeResult {
+    // TODO: convert the checked AST into a native module. For now we surface a
+    // single diagnostic so callers know the backend is unimplemented.
+    return EmitNativeResult {
+        module: NativeModule { artifacts: [] },
+        diagnostics: ["emit_native backend not implemented"]
+    };
+}

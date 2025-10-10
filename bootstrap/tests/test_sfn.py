@@ -24,9 +24,13 @@ from bootstrap.lexer import lexer as base_lexer
 from bootstrap.parser import parser
 
 
-EXAMPLE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "examples"
+EXAMPLE_ROOT = REPO_ROOT / "examples"
+COMPILER_SRC_ROOT = REPO_ROOT / "compiler" / "src"
 
-EXAMPLE_FILES = sorted(EXAMPLE_ROOT.rglob("*.sfn"))
+# Collect .sfn files from both examples/ and compiler/src/
+SFN_FILES = sorted(
+    {p for root in (EXAMPLE_ROOT, COMPILER_SRC_ROOT) for p in root.rglob("*.sfn")}
+)
 
 
 def test_parse_effect_annotations() -> None:
@@ -76,7 +80,7 @@ def test_fs_requires_io_effect() -> None:
         CodeGenerator().generate_code(ast)
 
 
-@pytest.mark.parametrize("source_path", EXAMPLE_FILES)
+@pytest.mark.parametrize("source_path", SFN_FILES)
 def test_compile_and_execute_example(source_path: pathlib.Path) -> None:
     source = source_path.read_text(encoding="utf-8")
     lexer = base_lexer.clone()

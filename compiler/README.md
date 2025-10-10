@@ -18,8 +18,12 @@ features, see `../docs/status.md`.
   infers `io` when `@trace` appears.
 - **Effect checker** — `effect_checker.sfn` scans blocks for prompts and known
   runtime helpers, reporting missing effects.
+- **Semantic analysis** — `typecheck.sfn` now walks top-level and scoped blocks,
+  enforcing duplicate checks across globals, parameters, and locals while
+  plumbing diagnostics back through `compile_to_sailfin`.
 - **Emitters** — `code_generator.sfn` produces Python scaffolding; `emitter_sailfin.sfn`
-  reprints parsed programs back into canonical Sailfin.
+  reprints parsed programs back into canonical Sailfin; `emit_native.sfn` holds
+  the placeholder diagnostics for the forthcoming native backend.
 - **Runtime prelude** — `runtime/prelude.sfn` forwards bootstrap runtime calls
   so generated Sailfin code can execute today.
 
@@ -49,11 +53,12 @@ keep the workflow ergonomic in the meantime.
 ### Sailfin-to-Sailfin Round-Tripping
 
 `compiler/src/main.sfn` now exposes `compile_to_sailfin(source)` which parses
-Sailfin input with the native parser and re-emits canonical Sailfin using the
-new emitter. The output includes imports from `sailfin/runtime`, which is
-backed by the stub runtime prelude. As we expand the runtime surface we can
-swap these stubs for fully effect-aware implementations while keeping the
-round-trip contract stable.
+Sailfin input with the native parser, runs the typechecker, and re-emits
+canonical Sailfin using the new emitter. Diagnostics are surfaced through the
+bootstrap toolchain whenever duplicate declarations are encountered. The output
+includes imports from `sailfin/runtime`, which is backed by the stub runtime
+prelude. As we expand the runtime surface we can swap these stubs for fully
+effect-aware implementations while keeping the round-trip contract stable.
 
 ### Future Layout (Illustrative)
 

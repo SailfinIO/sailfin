@@ -3,9 +3,23 @@
 
 import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
+import { typecheck_program } from "./typecheck";
 
-fn compile_to_sailfin(source -> string) -> string {
+fn compile_to_sailfin(source -> string) -> string ![io] {
     let program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= analysis_result.diagnostics.length {
+                break;
+            }
+            let diagnostic = analysis_result.diagnostics[index];
+            print.error("[typecheck] " + diagnostic.message);
+            index += 1;
+        }
+        // TODO: halt emission once diagnostics are considered fatal.
+    }
     return emit_program(program);
 }
 
