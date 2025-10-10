@@ -12,6 +12,7 @@ import {
     Decorator,
     ElseBranch,
     FieldDeclaration,
+    MatchCase,
     FunctionSignature,
     MethodDeclaration,
     Parameter,
@@ -296,6 +297,9 @@ fn emit_block_statement(builder -> CodeBuilder, statement -> Statement) -> CodeB
     if statement.variant == "IfStatement" {
         return emit_if_statement(builder, statement);
     }
+    if statement.variant == "MatchStatement" {
+        return emit_match_statement(builder, statement);
+    }
     if statement.variant == "ReturnStatement" {
         if statement.expression == null {
             return builder_emit(builder, "return");
@@ -347,6 +351,33 @@ fn emit_for_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBui
     let mut current = builder_emit(builder, header);
     current = builder_push_indent(current);
     current = emit_block(current, statement.body);
+    current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_match_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let mut current = builder_emit(builder, "# match " + format_expression(statement.expression));
+    current = builder_push_indent(current);
+    let mut index -> number = 0;
+    loop {
+        if index >= statement.cases.length {
+            break;
+        }
+        let case = statement.cases[index];
+        current = emit_match_case(current, case);
+        index += 1;
+    }
+    current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_match_case(builder -> CodeBuilder, case -> MatchCase) -> CodeBuilder {
+    let mut current = builder_emit(builder, "# case " + format_expression(case.pattern));
+    if case.guard != null {
+        current = builder_emit(current, "# guard " + format_expression(case.guard));
+    }
+    current = builder_push_indent(current);
+    current = emit_block(current, case.body);
     current = builder_pop_indent(current);
     return current;
 }

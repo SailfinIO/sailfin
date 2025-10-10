@@ -234,6 +234,30 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         generate_program = namespace["generate_program"]
         loop_python = generate_program(loop_program)
         assert "for item in items:" in loop_python
+
+        match_program = parse_program(
+            "fn classify(score -> number) {\n"
+            "    match score {\n"
+            "        case 0 -> {\n"
+            "            return;\n"
+            "        },\n"
+            "        case _ -> {\n"
+            "            return;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        assert len(match_program.statements) == 1
+        match_fn = match_program.statements[0]
+        assert match_fn.variant == "FunctionDeclaration"
+        assert len(match_fn.body.statements) == 1
+        match_stmt = match_fn.body.statements[0]
+        assert match_stmt.variant == "MatchStatement"
+        assert len(match_stmt.cases) == 2
+        first_case = match_stmt.cases[0]
+        assert first_case.pattern.variant in {"NumberLiteral", "Raw"}
+        assert len(first_case.body.statements) == 1
+        assert first_case.body.statements[0].variant == "ReturnStatement"
         generic_program = parse_program(
             "@entity\n"
             "struct Collection<T> implements Iterable<T>, Debug {\n"

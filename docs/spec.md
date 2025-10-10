@@ -525,8 +525,8 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
   primitives. Invoking `spawn` requires the `io` effect; routing through
   `serve` requires `net`.
 - `runtime.format_string` – interpolated string support.
-- Control flow constructs (`if`/`else`, `for`) in Sailfin sources lower to
-  standard Python branches and loops in the bootstrap runtime today.
+- Control flow constructs (`if`/`else`, `for`, `match`) in Sailfin sources lower
+  to descriptive Python scaffolding in the bootstrap runtime today.
 
 Bootstrap stubs:
 - Model declarations (`model ... { ... }`) are parsed and emitted as plain data
@@ -579,17 +579,6 @@ This specification will evolve with the implementation. Refer to `enbf.md` and
 `bootstrap/tests/` for executable examples of the language.
 
 Note (planned): Engines, adapters, tensors, and training are specified in a draft proposal under `docs/proposals/model-engines-and-training.md`. Until merged into the core spec, treat that document as design guidance rather than normative semantics.
-
-### Terminology Migration (Bootstrap -> Current)
-
-| Old | New |
-|-----|-----|
-| package | capsule |
-| project | fleet |
-| sail.json | sail.toml |
-| (harbor) registry | registry |
-| evals | evaluators |
-| console.info (doc examples) | print.info (source syntax) |
 
 ### Bootstrap vs Self-Hosted Feature Matrix
 

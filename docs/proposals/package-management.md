@@ -237,16 +237,3 @@ Inspect stored generation cards or replay traces:
 ```bash
 sfn cache cards --replay <trace>
 ```
-
-## ✅ Terminology Migration Summary
-
-| Old term | New term |
-|----------|----------|
-| sail CLI | sfn CLI |
-| `sail.json` | `sail.toml` |
-| package | capsule |
-| project | fleet (when multi-capsule) |
-| registry (Harbor) | registry |
-
-These changes align language tooling with capsule/fleet architecture and
-first-class model/version provenance.

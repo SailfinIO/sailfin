@@ -56,6 +56,12 @@ struct ForClause {
     tokens -> Token[];
 }
 
+struct MatchCase {
+    pattern -> Expression;
+    guard -> Expression?;
+    body -> Block;
+}
+
 struct ModelProperty {
     name -> string;
     value -> Expression;
@@ -207,6 +213,11 @@ enum Statement {
     ForStatement {
         clause -> ForClause;
         body -> Block;
+        decorators -> Decorator[];
+    },
+    MatchStatement {
+        expression -> Expression;
+        cases -> MatchCase[];
         decorators -> Decorator[];
     },
     IfStatement {

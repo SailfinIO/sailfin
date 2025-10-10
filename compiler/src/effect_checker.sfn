@@ -8,6 +8,7 @@ import {
     Block,
     Decorator,
     ElseBranch,
+    MatchCase,
     FunctionSignature,
     MethodDeclaration,
     Program,
@@ -173,6 +174,11 @@ fn block_has_prompt(block -> Block) -> boolean {
             }
             if statement.variant == "ForStatement" {
                 if block_has_prompt(statement.body) {
+                    return true;
+                }
+            }
+            if statement.variant == "MatchStatement" {
+                if match_cases_have_prompt(statement.cases) {
                     return true;
                 }
             }
@@ -374,6 +380,21 @@ fn if_statement_has_prompt(statement -> Statement) -> boolean {
     }
     if statement.else_branch != null {
         return else_branch_has_prompt(statement.else_branch);
+    }
+    return false;
+}
+
+fn match_cases_have_prompt(cases -> MatchCase[]) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= cases.length {
+            break;
+        }
+        let case = cases[index];
+        if block_has_prompt(case.body) {
+            return true;
+        }
+        index += 1;
     }
     return false;
 }
