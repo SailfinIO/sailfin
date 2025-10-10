@@ -81,8 +81,9 @@ roadmaps.
   rewrites common postfix helpers (`.map`, `.filter`, `.reduce`, `.concat`,
   `.length`) into the runtime `array_*` shims and `len(...)` calls (multi-
   statement lambdas still fall back to stubs). Block emission now preserves
-  local `let`/`const` declarations, `for` loops, and `if`/`else if`/`else`
-  chains so stage1 sources round-trip cleanly through the bootstrap parser.
+  local `let`/`const` declarations, `for` loops, `if`/`else if`/`else`
+  chains, and `match` statements so stage1 sources round-trip cleanly through
+  the bootstrap parser.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.

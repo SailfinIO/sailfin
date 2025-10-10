@@ -1057,6 +1057,29 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         regenerated_control = parse_program(control_flow_output)
         assert all(stmt.variant != "Unknown" for stmt in regenerated_control.statements)
 
+        match_source = (
+            "fn grade(score -> number) -> string {\n"
+            "    match score {\n"
+            "        case score if score > 90 => {\n"
+            "            return \"A\";\n"
+            "        }\n"
+            "        case _ => {\n"
+            "            return \"else\";\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        match_program = parse_program(match_source)
+        match_output = emit_program(match_program)
+        assert "match score" in match_output
+        assert "case score if score > 90 => {" in match_output
+        assert "case _ => {" in match_output
+        stage0_match = parser.parse(match_output, lexer=base_lexer.clone())
+        assert stage0_match is not None
+
+        regenerated_match = parse_program(match_output)
+        assert all(stmt.variant != "Unknown" for stmt in regenerated_match.statements)
+
         compile_module("compiler/src/code_generator.sfn")
         generate_program = namespace["generate_program"]
 

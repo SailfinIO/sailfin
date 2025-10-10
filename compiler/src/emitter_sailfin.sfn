@@ -15,6 +15,7 @@ import {
     FieldDeclaration,
     ForClause,
     FunctionSignature,
+    MatchCase,
     MethodDeclaration,
     ModelProperty,
     Parameter,
@@ -283,17 +284,21 @@ fn emit_struct(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
 
 fn emit_block(builder -> TextBuilder, block -> Block) -> TextBuilder {
     let mut current = emit_block_start(builder);
+    current = emit_block_body(current, block);
+    current = emit_block_end(current);
+    return current;
+}
+
+fn emit_block_body(builder -> TextBuilder, block -> Block) -> TextBuilder {
     if block.statements.length == 0 {
         let trimmed = trim_block_body(block.text);
         if trimmed.length > 0 {
-            current = builder_emit_line(current, trimmed);
-        } else {
-            current = builder_emit_line(current, "// empty body");
+            return builder_emit_line(builder, trimmed);
         }
-        current = emit_block_end(current);
-        return current;
+        return builder_emit_line(builder, "// empty body");
     }
 
+    let mut current = builder;
     let mut index -> number = 0;
     loop {
         if index >= block.statements.length {
@@ -302,8 +307,6 @@ fn emit_block(builder -> TextBuilder, block -> Block) -> TextBuilder {
         current = emit_block_statement(current, block.statements[index]);
         index += 1;
     }
-
-    current = emit_block_end(current);
     return current;
 }
 
@@ -344,6 +347,9 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
     }
     if statement.variant == "FunctionDeclaration" {
         return emit_function(builder, statement.signature, statement.body, statement.decorators);
+    }
+    if statement.variant == "MatchStatement" {
+        return emit_match(builder, statement);
     }
     return builder_emit_line(builder, "// TODO: unsupported block statement: " + statement.variant);
 }
@@ -411,6 +417,37 @@ fn emit_for(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let header = "for " + format_for_clause(statement.clause);
     current = builder_emit_line(current, header);
     return emit_block(current, statement.body);
+}
+
+fn emit_match(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
+    let mut current = emit_decorators(builder, statement.decorators);
+    let header = "match " + format_expression(statement.expression);
+    current = builder_emit_line(current, header);
+    current = builder_emit_line(current, "{");
+    current = builder_push_indent(current);
+    let mut index -> number = 0;
+    loop {
+        if index >= statement.cases.length {
+            break;
+        }
+        current = emit_match_case(current, statement.cases[index]);
+        index += 1;
+    }
+    current = builder_pop_indent(current);
+    return builder_emit_line(current, "}");
+}
+
+fn emit_match_case(builder -> TextBuilder, case -> MatchCase) -> TextBuilder {
+    let mut line -> string = "case " + format_expression(case.pattern);
+    if case.guard != null {
+        line = line + " if " + format_expression(case.guard);
+    }
+    line = line + " => {";
+    let mut current = builder_emit_line(builder, line);
+    current = builder_push_indent(current);
+    current = emit_block_body(current, case.body);
+    current = builder_pop_indent(current);
+    return builder_emit_line(current, "}");
 }
 
 fn emit_block_start(builder -> TextBuilder) -> TextBuilder {
