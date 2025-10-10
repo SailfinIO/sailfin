@@ -917,6 +917,44 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert "fn (value -> number) -> number" in lambda_output
         stage0_lambda = parser.parse(lambda_output, lexer=base_lexer.clone())
         assert stage0_lambda is not None
+
+        postfix_chain_source = (
+            "fn count(values -> number[]) -> number {\n"
+            "    return values.map(fn (value -> number) -> number {\n"
+            "        return value + 1;\n"
+            "    }).filter(fn (value -> number) -> boolean {\n"
+            "        return value > 0;\n"
+            "    }).length;\n"
+            "}\n"
+            "fn fold(values -> number[]) -> number {\n"
+            "    return values.reduce(0, fn (acc -> number, value -> number) -> number {\n"
+            "        return acc + value;\n"
+            "    });\n"
+            "}\n"
+            "fn join(values -> number[], other -> number[]) -> number[] {\n"
+            "    return values.concat(other);\n"
+            "}\n"
+        )
+        postfix_chain_program = parse_program(postfix_chain_source)
+        postfix_chain_output = emit_program(postfix_chain_program)
+        assert "values.map" in postfix_chain_output
+        assert ").filter" in postfix_chain_output
+        assert ".length" in postfix_chain_output
+        stage0_postfix_chain = parser.parse(postfix_chain_output, lexer=base_lexer.clone())
+        assert stage0_postfix_chain is not None
+
+        compile_module("compiler/src/code_generator.sfn")
+        generate_program = namespace["generate_program"]
+
+        lambda_python = generate_program(lambda_program)
+        assert "lambda value" in lambda_python or "lambda:" in lambda_python
+
+        postfix_chain_python = generate_program(postfix_chain_program)
+        assert "array_map" in postfix_chain_python
+        assert "array_filter" in postfix_chain_python
+        assert "array_reduce" in postfix_chain_python
+        assert "len(" in postfix_chain_python
+        assert "list(" in postfix_chain_python
     elif source_path.name == "prelude.sfn":
         namespace = {"__name__": "__main__"}
         exec(compiled, namespace, namespace)

@@ -479,7 +479,11 @@ fn format_expression(expression -> Expression) -> string {
         return left + spaced_op + right;
     }
     if expression.variant == "Member" {
-        return format_expression(expression.object) + "." + expression.member;
+        let target = format_expression(expression.object);
+        if expression.member == "length" {
+            return "len(" + target + ")";
+        }
+        return target + "." + expression.member;
     }
     if expression.variant == "Index" {
         let target = format_expression(expression.sequence);
@@ -487,6 +491,29 @@ fn format_expression(expression -> Expression) -> string {
         return target + "[" + offset + "]";
     }
     if expression.variant == "Call" {
+        let callee = expression.callee;
+        if callee.variant == "Member" {
+            let member_name = callee.member;
+            let target = format_expression(callee.object);
+            if member_name == "map" && expression.arguments.length == 1 {
+                let mapper = format_expression(expression.arguments[0]);
+                return "array_map(" + target + ", " + mapper + ")";
+            }
+            if member_name == "filter" && expression.arguments.length == 1 {
+                let predicate = format_expression(expression.arguments[0]);
+                return "array_filter(" + target + ", " + predicate + ")";
+            }
+            if member_name == "reduce" && expression.arguments.length == 2 {
+                let initial = format_expression(expression.arguments[0]);
+                let reducer = format_expression(expression.arguments[1]);
+                return "array_reduce(" + target + ", " + initial + ", " + reducer + ")";
+            }
+            if member_name == "concat" && expression.arguments.length == 1 {
+                let other = format_expression(expression.arguments[0]);
+                return "list(" + target + ") + list(" + other + ")";
+            }
+        }
+
         let mut parts -> string[] = [];
         let mut index -> number = 0;
         loop {

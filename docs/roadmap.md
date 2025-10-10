@@ -10,7 +10,6 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Bootstrap Reliability**
-   - [ ] Postfix expressions — Extend the Sailfin parser/emitter to mirror stage0 postfix behaviour. Sources: `compiler/src/parser.sfn`, `compiler/src/code_generator.sfn`. _(Next: handle chained member/call/index sequences so `values.map(...).length` round-trips without `Raw` fallbacks.)_
    - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
 
 2. **Registry & Capsule Workflow**
@@ -47,6 +46,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Parser parity — Self-hosted match arms now preserve guards and inline `=>` expression/`return` bodies, matching stage0 behaviour. Validation: `bootstrap/tests/test_compiler_sources.py` exercises guard, expression, and return cases.
 - [x] Lambda lowering — Sailfin lambdas now produce structured AST nodes and round-trip through the self-hosted emitter with inlined Python lambdas. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` checks both Sailfin and Python outputs.
 - [x] Postfix foundations — Indexing (`values[i]`) and range (`start..end`) expressions round-trip through the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` covers bracket access and `start..end` ranges.
+- [x] Postfix expressions — Chained member/call/index sequences now round-trip through the Sailfin parser and emitter, and code generation rewrites `.map`, `.filter`, `.reduce`, `.concat`, and `.length` into runtime helpers. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` asserts Sailfin emission and Python lowering for the helper chain.
 
 ## Coordination Notes
 

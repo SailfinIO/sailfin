@@ -75,8 +75,10 @@ roadmaps.
 - Bootstrap: Walks the full AST and emits runnable Python against
   `runtime_support.py`.
 - Self-hosted prototype: Produces Python scaffolding with block stubs; emitter
-  coverage is expanding iteratively and now lowers simple lambda expressions to
-  Python `lambda` literals (multi-statement lambdas still fall back to stubs).
+  coverage now lowers simple lambda expressions to Python `lambda` literals and
+  rewrites common postfix helpers (`.map`, `.filter`, `.reduce`, `.concat`,
+  `.length`) into the runtime `array_*` shims and `len(...)` calls (multi-
+  statement lambdas still fall back to stubs).
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.
