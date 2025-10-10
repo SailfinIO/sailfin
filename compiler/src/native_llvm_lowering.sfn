@@ -5,7 +5,7 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter } from "./native_ir";
 
 struct LoweredLLVMResult {
     ir -> string;
@@ -19,6 +19,18 @@ struct LoweredLLVMFunction {
 
 struct BodyResult {
     lines -> string[];
+    diagnostics -> string[];
+}
+
+struct ParameterBinding {
+    name -> string;
+    llvm_name -> string;
+    llvm_type -> string;
+}
+
+struct ParameterPreparation {
+    signature -> string[];
+    bindings -> ParameterBinding[];
     diagnostics -> string[];
 }
 
@@ -71,15 +83,18 @@ fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics };
     }
 
-    if function.parameters.length > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: parameters not yet supported for " + function.name);
-    }
+    let preparation = prepare_parameters(function);
+    diagnostics = diagnostics.concat(preparation.diagnostics);
 
     let mut lines -> string[] = [];
-    lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "() {");
+    let mut signature -> string = join_with_separator(preparation.signature, ", ");
+    if signature.length == 0 {
+        signature = "";
+    }
+    lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, "entry:");
 
-    let body = emit_body(function, llvm_return);
+    let body = emit_body(function, llvm_return, preparation.bindings);
     lines = lines.concat(body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
     lines = append_string(lines, "}");
@@ -87,7 +102,7 @@ fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics };
 }
 
-fn emit_body(function -> NativeFunction, llvm_return -> string) -> BodyResult {
+fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[]) -> BodyResult {
     let mut diagnostics -> string[] = [];
     let mut lines -> string[] = [];
 
@@ -108,11 +123,42 @@ fn emit_body(function -> NativeFunction, llvm_return -> string) -> BodyResult {
     }
 
     let return_expression = select_return_expression(function.instructions);
-    let lowered = lower_return_instruction(function.name, llvm_return, return_expression);
+    let lowered = lower_return_instruction(function, llvm_return, return_expression, bindings);
     lines = lines.concat(lowered.lines);
     diagnostics = diagnostics.concat(lowered.diagnostics);
 
     return BodyResult { lines: lines, diagnostics: diagnostics };
+}
+
+fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
+    let mut signature -> string[] = [];
+    let mut bindings -> ParameterBinding[] = [];
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= function.parameters.length {
+            break;
+        }
+        let parameter = function.parameters[index];
+        let mut llvm_type = map_parameter_type(parameter.type_annotation);
+        if llvm_type.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: unsupported parameter type `" + parameter.type_annotation + "` in function `" + function.name + "`");
+            llvm_type = "double";
+        }
+        if parameter.type_annotation.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
+        }
+        let sanitized = sanitize_symbol(parameter.name);
+        let llvm_name = "%" + sanitized;
+        signature = append_string(signature, llvm_type + " " + llvm_name);
+        bindings = append_parameter_binding(bindings, ParameterBinding {
+            name: parameter.name,
+            llvm_name: llvm_name,
+            llvm_type: llvm_type,
+        });
+        index += 1;
+    }
+    return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
 }
 
 fn select_return_expression(instructions -> NativeInstruction[]) -> string? {
@@ -130,7 +176,8 @@ fn select_return_expression(instructions -> NativeInstruction[]) -> string? {
     return null;
 }
 
-fn lower_return_instruction(function_name -> string, llvm_return -> string, expression -> string?) -> BodyResult {
+fn lower_return_instruction(function -> NativeFunction, llvm_return -> string, expression -> string?, bindings -> ParameterBinding[]) -> BodyResult {
+    let function_name = function.name;
     if llvm_return == "void" {
         if expression != null && expression.length > 0 {
             let diagnostics = ["llvm lowering: void function `" + function_name + "` returned a value"];
@@ -148,6 +195,15 @@ fn lower_return_instruction(function_name -> string, llvm_return -> string, expr
     if trimmed.length == 0 {
         let diagnostics = ["llvm lowering: empty return expression in `" + function_name + "`"];
         return BodyResult { lines: ["  ret " + llvm_return + " 0.0"], diagnostics: diagnostics };
+    }
+
+    let binding = find_parameter_binding(bindings, trimmed);
+    if binding != null {
+        let mut diagnostics -> string[] = [];
+        if binding.llvm_type != llvm_return {
+            diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches parameter `" + binding.name + "` of type `" + binding.llvm_type + "`");
+        }
+        return BodyResult { lines: ["  ret " + binding.llvm_type + " " + binding.llvm_name], diagnostics: diagnostics };
     }
 
     if llvm_return == "double" {
@@ -172,6 +228,32 @@ fn map_return_type(return_type -> string) -> string {
         return "double";
     }
     return "";
+}
+
+fn map_parameter_type(parameter_type -> string) -> string {
+    let trimmed = trim_text(parameter_type);
+    if trimmed.length == 0 {
+        return "double";
+    }
+    if trimmed == "number" {
+        return "double";
+    }
+    return "";
+}
+
+fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        if binding.name == name {
+            return binding;
+        }
+        index += 1;
+    }
+    return null;
 }
 
 fn sanitize_symbol(name -> string) -> string {
@@ -321,6 +403,10 @@ fn index_of(value -> string, target -> string) -> number {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
+}
+
+fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {
+    return bindings.concat([binding]);
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {

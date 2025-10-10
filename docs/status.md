@@ -94,15 +94,15 @@ roadmaps.
   chains, and `match` statements so stage1 sources round-trip cleanly through
   the bootstrap parser. The native backend (`emit_native.sfn`) now emits a
   structured `.sfn-asm` textual artifact with entry-point metadata and inline
-  annotations for unsupported constructs. Shared parsing lives in
-  `native_ir.sfn`; `native_lowering.sfn` converts the artifact into executable
-  Python scaffolding so smoke tests (see
-  `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function`)
-  can exercise the pipeline while LLVM / WASM lowering evolves. A companion
-  prototype (`native_llvm_lowering.sfn`) now translates simple return-only
-  functions into skeletal LLVM IR (validated by
-  `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`),
-  providing the first foothold toward real machine-code emission.
+  annotations for unsupported constructs. Shared parsing in `native_ir.sfn`
+  now records parameter metadata so `native_lowering.sfn` can preserve default
+  values while emitting executable Python scaffolding (validated by
+  `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function`).
+  A companion prototype (`native_llvm_lowering.sfn`) translates return-only
+  functions—including those with numeric parameters—into skeletal LLVM IR
+  (see `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`
+  and `::test_lower_native_handles_parameter_round_trip`), providing the first
+  foothold toward real machine-code emission.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.

@@ -12,9 +12,16 @@ enum NativeInstruction {
     Unknown { text -> string },
 }
 
+struct NativeParameter {
+    name -> string;
+    type_annotation -> string;
+    mutable -> boolean;
+    default_value -> string?;
+}
+
 struct NativeFunction {
     name -> string;
-    parameters -> string[];
+    parameters -> NativeParameter[];
     return_type -> string;
     effects -> string[];
     instructions -> NativeInstruction[];
@@ -104,11 +111,11 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         }
         if starts_with(line, ".param ") {
             if current != null {
-                let name = parse_param_name(strip_prefix(line, ".param "));
-                if name.length == 0 {
+                let parameter = parse_parameter_entry(strip_prefix(line, ".param "));
+                if parameter == null {
                     diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
                 } else {
-                    current = append_parameter(current, name);
+                    current = append_parameter(current, parameter);
                 }
             } else {
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line);
@@ -137,8 +144,8 @@ fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> Na
     return functions.concat([value]);
 }
 
-fn append_parameter(function -> NativeFunction, name -> string) -> NativeFunction {
-    let parameters = append_string(function.parameters, name);
+fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) -> NativeFunction {
+    let parameters = append_parameter_array(function.parameters, parameter);
     return NativeFunction {
         name: function.name,
         parameters: parameters,
@@ -210,9 +217,14 @@ fn parse_function_name(header -> string) -> string {
     return strip_generics(name);
 }
 
-fn parse_param_name(body -> string) -> string {
+fn parse_parameter_entry(body -> string) -> NativeParameter? {
     let mut trimmed = trim_text(body);
+    if trimmed.length == 0 {
+        return null;
+    }
+    let mut is_mutable -> boolean = false;
     if starts_with(trimmed, "mut ") {
+        is_mutable = true;
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
     let mut name -> string = "";
@@ -228,7 +240,39 @@ fn parse_param_name(body -> string) -> string {
         name = name + ch;
         index += 1;
     }
-    return trim_text(name);
+    name = trim_text(name);
+    if name.length == 0 {
+        return null;
+    }
+    let mut type_annotation -> string = "";
+    let mut default_value -> string? = null;
+    let mut remainder = trim_text(runtime.substring(trimmed, index, trimmed.length));
+    if remainder.length > 0 {
+        if starts_with(remainder, "->") {
+            remainder = trim_text(strip_prefix(remainder, "->"));
+            let assign_index = index_of(remainder, "=");
+            if assign_index >= 0 {
+                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
+                let default_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                if default_text.length > 0 {
+                    default_value = default_text;
+                }
+            } else {
+                type_annotation = trim_text(remainder);
+            }
+        } else if starts_with(remainder, "=") {
+            let default_text = trim_text(strip_prefix(remainder, "="));
+            if default_text.length > 0 {
+                default_value = default_text;
+            }
+        }
+    }
+    return NativeParameter {
+        name: name,
+        type_annotation: type_annotation,
+        mutable: is_mutable,
+        default_value: default_value,
+    };
 }
 
 fn parse_effect_list(text -> string) -> string[] {
@@ -309,7 +353,7 @@ fn strip_generics(name -> string) -> string {
             index += 1;
             continue;
         }
-    if ch == ">" {
+        if ch == ">" {
             if depth > 0 {
                 depth -= 1;
             }
@@ -417,4 +461,8 @@ fn index_of(value -> string, target -> string) -> number {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
+}
+
+fn append_parameter_array(values -> NativeParameter[], parameter -> NativeParameter) -> NativeParameter[] {
+    return values.concat([parameter]);
 }

@@ -5,7 +5,7 @@
 // the pipeline self-contained while we iterate toward LLVM / WASM codegen.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter } from "./native_ir";
 
 struct LoweredPythonResult {
     source -> string;
@@ -68,7 +68,8 @@ fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
 
 fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) -> PythonBuilder {
     let mut current = builder;
-    let header = "def " + sanitize_identifier(function.name) + "(" + join_with_separator(function.parameters, ", ") + "):";
+    let parameters = render_python_parameters(function.parameters);
+    let header = "def " + sanitize_identifier(function.name) + "(" + join_with_separator(parameters, ", ") + "):";
     current = builder_emit(current, header);
     current = builder_push_indent(current);
     if function.effects.length > 0 {
@@ -100,6 +101,27 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
     }
     current = builder_pop_indent(current);
     return current;
+}
+
+fn render_python_parameters(parameters -> NativeParameter[]) -> string[] {
+    if parameters.length == 0 {
+        return [];
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = parameter.name;
+        if parameter.default_value != null {
+            entry = entry + " = " + parameter.default_value;
+        }
+        rendered = append_string(rendered, entry);
+        index += 1;
+    }
+    return rendered;
 }
 
 struct PythonBuilder {

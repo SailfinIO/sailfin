@@ -242,3 +242,25 @@ def test_lower_native_to_llvm_emits_ir():
     assert llvm_result.diagnostics == []
     assert "define double @answer()" in llvm_result.ir
     assert "ret double 42.0" in llvm_result.ir
+
+
+def test_lower_native_handles_parameter_round_trip():
+    program = _parse_program(
+        """
+        fn identity(value -> number) -> number {
+            return value;
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+    assert "def identity(value):" in python_result.source
+
+    llvm_result = _lower_native_to_llvm(native_result.module)
+    assert llvm_result.diagnostics == []
+    assert "define double @identity(double %value)" in llvm_result.ir
+    assert "ret double %value" in llvm_result.ir
