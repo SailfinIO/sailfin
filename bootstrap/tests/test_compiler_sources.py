@@ -463,6 +463,31 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert signature.type_parameters == []
         assert fn_stmt.body.text.strip().startswith("{")
 
+        postfix_sample = (
+            "fn window(values -> number[]) -> number {\n"
+            "    values[0];\n"
+            "    0..values.length;\n"
+            "    return values[0];\n"
+            "}\n"
+        )
+        postfix_program = parse_program(postfix_sample)
+        window_fn = postfix_program.statements[0]
+        assert window_fn.variant == "FunctionDeclaration"
+        assert len(window_fn.body.statements) >= 3
+        first_stmt = window_fn.body.statements[0]
+        assert first_stmt.variant == "ExpressionStatement"
+        assert first_stmt.expression.variant == "Index"
+        assert first_stmt.expression.sequence.variant == "Identifier"
+        assert first_stmt.expression.sequence.name == "values"
+        assert first_stmt.expression.index.variant == "NumberLiteral"
+        assert first_stmt.expression.index.value == "0"
+        span_stmt = window_fn.body.statements[1]
+        assert span_stmt.variant == "ExpressionStatement"
+        assert span_stmt.expression.variant == "Range"
+        assert span_stmt.expression.start.variant == "NumberLiteral"
+        assert span_stmt.expression.start.value == "0"
+        assert span_stmt.expression.end.variant == "Member"
+
         traced_program = parse_program(
             "@trace(level: \"debug\")\n"
             "fn traced() {\n"

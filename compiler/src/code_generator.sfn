@@ -481,6 +481,11 @@ fn format_expression(expression -> Expression) -> string {
     if expression.variant == "Member" {
         return format_expression(expression.object) + "." + expression.member;
     }
+    if expression.variant == "Index" {
+        let target = format_expression(expression.sequence);
+        let offset = format_expression(expression.index);
+        return target + "[" + offset + "]";
+    }
     if expression.variant == "Call" {
         let mut parts -> string[] = [];
         let mut index -> number = 0;
@@ -506,6 +511,11 @@ fn format_expression(expression -> Expression) -> string {
         }
         let contents = join_with_separator(rendered, ", ");
         return "[" + contents + "]";
+    }
+    if expression.variant == "Range" {
+        let start_value = format_expression(expression.start);
+        let end_value = format_expression(expression.end);
+        return "range(" + start_value + ", " + end_value + ")";
     }
     if expression.variant == "Object" {
         let mut rendered -> string[] = [];

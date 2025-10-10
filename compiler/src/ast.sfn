@@ -35,9 +35,11 @@ enum Expression {
     Binary { operator -> string, left -> Expression, right -> Expression },
     Member { object -> Expression, member -> string },
     Call { callee -> Expression, arguments -> Expression[] },
+    Index { sequence -> Expression, index -> Expression },
     Array { elements -> Expression[] },
     Object { fields -> ObjectField[] },
     Struct { type_name -> string[], fields -> ObjectField[] },
+    Range { start -> Expression, end -> Expression },
     Raw { text -> string },
 }
 

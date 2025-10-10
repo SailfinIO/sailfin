@@ -193,6 +193,39 @@ def test_runtime_sleep_with_declared_clock_effect():
     validate_effects(ast)
 
 
+def test_runtime_http_requires_net_effect():
+    ast = parse('fn demo() { runtime.http.get("https://example.com"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_http_with_declared_net_effect():
+    ast = parse('fn demo() ![net] { runtime.http.get("https://example.com"); }')
+    validate_effects(ast)
+
+
+def test_runtime_websocket_requires_net_effect():
+    ast = parse('fn demo() { runtime.websocket.connect("wss://example.com"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_websocket_with_declared_net_effect():
+    ast = parse('fn demo() ![net] { runtime.websocket.connect("wss://example.com"); }')
+    validate_effects(ast)
+
+
+def test_runtime_fs_requires_io_effect():
+    ast = parse('fn demo() { runtime.fs.read("/tmp/data"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_fs_with_declared_io_effect():
+    ast = parse('fn demo() ![io] { runtime.fs.read("/tmp/data"); }')
+    validate_effects(ast)
+
+
 def test_decorator_requires_io_effect():
     ast = parse(
         dedent(

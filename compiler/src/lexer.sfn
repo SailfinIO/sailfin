@@ -390,5 +390,6 @@ fn is_two_char_symbol(value -> string) -> boolean {
         || value == "<="
         || value == ">="
         || value == "&&"
-        || value == "||";
+    || value == "||"
+    || value == "..";
 }

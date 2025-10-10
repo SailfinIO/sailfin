@@ -10,7 +10,9 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Bootstrap Reliability**
-   - [ ] Postfix expressions — Add indexing, range, and lambda expression support to the Sailfin parser/emitter to mirror stage0 behaviour. Sources: `compiler/src/parser.sfn`, `compiler/src/code_generator.sfn`.
+   - [ ] Postfix expressions — Extend the Sailfin parser/emitter to mirror stage0 postfix behaviour. Sources: `compiler/src/parser.sfn`, `compiler/src/code_generator.sfn`.
+     - [x] Indexing and range expressions round-trip through the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` covers bracket access and `start..end` ranges.
+     - [ ] Lambda expressions lower into structured nodes with emitter support.
    - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
 
 2. **Registry & Capsule Workflow**

@@ -2779,11 +2779,18 @@ fn parse_expression_bp(state -> ExpressionTokens, min_precedence -> number) -> E
             return expression_parse_failure(state);
         }
         current_state = rhs_result.state;
-        left_expression = Expression.Binary {
-            operator: op,
-            left: left_expression,
-            right: rhs_result.expression,
-        };
+        if op == ".." {
+            left_expression = Expression.Range {
+                start: left_expression,
+                end: rhs_result.expression,
+            };
+        } else {
+            left_expression = Expression.Binary {
+                operator: op,
+                left: left_expression,
+                right: rhs_result.expression,
+            };
+        }
     }
 
     return ExpressionParseResult {
@@ -2968,6 +2975,27 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
             current_expression = Expression.Call {
                 callee: current_expression,
                 arguments: call_result.arguments,
+            };
+            continue;
+        }
+        if sym == "[" {
+            let index_state = expression_tokens_advance(current_state);
+            let index_result = parse_expression_bp(index_state, 0);
+            if !index_result.success {
+                return expression_parse_failure(state);
+            }
+            let after_index = index_result.state;
+            if expression_tokens_is_at_end(after_index) {
+                return expression_parse_failure(state);
+            }
+            let closing = expression_tokens_peek(after_index);
+            if !(closing.kind.variant == "Symbol" && closing.kind.value == "]") {
+                return expression_parse_failure(state);
+            }
+            current_state = expression_tokens_advance(after_index);
+            current_expression = Expression.Index {
+                sequence: current_expression,
+                index: index_result.expression,
             };
             continue;
         }
@@ -3220,6 +3248,9 @@ fn collect_struct_type_name(expression -> Expression) -> StructTypeNameResult {
 }
 
 fn binary_precedence(op -> string) -> number {
+    if op == ".." {
+        return 0;
+    }
     if op == "||" {
         return 1;
     }

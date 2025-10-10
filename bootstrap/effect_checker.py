@@ -289,8 +289,14 @@ class _EffectVisitor:
             if root in {"print", "console"}:
                 return {"io"}
             if root == "runtime":
-                if len(path) >= 2 and path[1] == "console":
-                    return {"io"}
+                if len(path) >= 2:
+                    runtime_helper = path[1]
+                    if runtime_helper == "console":
+                        return {"io"}
+                    if runtime_helper == "fs":
+                        return {"io"}
+                    if runtime_helper in {"http", "websocket"}:
+                        return {"net"}
                 if member == "spawn":
                     return {"io"}
                 if member == "serve":
@@ -317,6 +323,14 @@ class _EffectVisitor:
                     return {"net"}
                 if callee.member == "sleep":
                     return {"clock"}
+                if isinstance(callee.object, MemberExpression):
+                    helper = callee.object.member
+                    if helper == "console":
+                        return {"io"}
+                    if helper == "fs":
+                        return {"io"}
+                    if helper in {"http", "websocket"}:
+                        return {"net"}
         return set()
 
     def _root_identifier(self, expression: Expression) -> str | None:
