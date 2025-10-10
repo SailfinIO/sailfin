@@ -65,9 +65,6 @@ fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
     }
-    if statement.variant == "ConstantDeclaration" {
-        return emit_constant(builder, statement);
-    }
     if statement.variant == "FunctionDeclaration" {
         return emit_function(builder, statement.signature, statement.body, statement.decorators);
     }
@@ -117,13 +114,6 @@ fn emit_variable(builder -> TextBuilder, statement -> Statement) -> TextBuilder 
     prefix = prefix + format_type_annotation(statement.type_annotation);
     prefix = prefix + format_initializer(statement.initializer);
     return builder_emit_line(builder, prefix + ";");
-}
-
-fn emit_constant(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
-    let mut line -> string = "const " + statement.name;
-    line = line + format_type_annotation(statement.type_annotation);
-    line = line + format_initializer(statement.initializer);
-    return builder_emit_line(builder, line + ";");
 }
 
 fn emit_function(
@@ -322,9 +312,6 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
     }
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
-    }
-    if statement.variant == "ConstantDeclaration" {
-        return emit_constant(builder, statement);
     }
     if statement.variant == "PromptStatement" {
         return emit_prompt(builder, statement);
@@ -839,16 +826,6 @@ fn format_lambda_statement(statement -> Statement) -> string {
             line = line + "mut ";
         }
         line = line + statement.name;
-        if statement.type_annotation != null {
-            line = line + " -> " + statement.type_annotation.text;
-        }
-        if statement.initializer != null {
-            line = line + " = " + format_expression(statement.initializer);
-        }
-        return line + ";";
-    }
-    if statement.variant == "ConstantDeclaration" {
-        let mut line -> string = "const " + statement.name;
         if statement.type_annotation != null {
             line = line + " -> " + statement.type_annotation.text;
         }

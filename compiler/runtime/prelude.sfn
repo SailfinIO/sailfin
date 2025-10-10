@@ -4,10 +4,10 @@
 // These helpers delegate to the bootstrap runtime so Sailfin sources can run
 // without bespoke Python shims once the compiler self-hosts.
 
-const console = runtime.console;
-const fs = runtime.fs;
-const http = runtime.http;
-const websocket = runtime.websocket;
+let console = runtime.console;
+let fs = runtime.fs;
+let http = runtime.http;
+let websocket = runtime.websocket;
 
 struct Scheduler {
     fn spawn(self, task, name -> string = "") ![io] {
@@ -15,7 +15,7 @@ struct Scheduler {
     }
 }
 
-const scheduler -> Scheduler = Scheduler {};
+let scheduler -> Scheduler = Scheduler {};
 
 fn sleep(milliseconds -> number) ![clock] {
     runtime.sleep(milliseconds);

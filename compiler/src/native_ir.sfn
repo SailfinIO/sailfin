@@ -9,6 +9,12 @@ import { NativeArtifact } from "./emit_native";
 enum NativeInstruction {
     Return { expression -> string },
     Expression { expression -> string },
+    Let {
+        name -> string;
+        mutable -> boolean;
+        type_annotation -> string;
+        value -> string?;
+    },
     Unknown { text -> string },
 }
 
@@ -128,6 +134,12 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
+        if starts_with(line, ".let ") {
+            let instruction = parse_let_instruction(line);
+            current = append_instruction(current, instruction);
+            index += 1;
+            continue;
+        }
         let instruction = parse_instruction(line);
         current = append_instruction(current, instruction);
         index += 1;
@@ -202,6 +214,73 @@ fn parse_instruction(line -> string) -> NativeInstruction {
         return NativeInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
     }
     return NativeInstruction.Unknown { text: line };
+}
+
+fn parse_let_instruction(line -> string) -> NativeInstruction {
+    let body = trim_text(strip_prefix(line, ".let "));
+    let mut is_mutable -> boolean = false;
+    let mut remainder -> string = body;
+    if starts_with(remainder, "mut ") {
+        is_mutable = true;
+        remainder = trim_text(strip_prefix(remainder, "mut "));
+    }
+    let parsed = parse_binding_components(remainder);
+    return NativeInstruction.Let {
+        name: parsed.name,
+        mutable: is_mutable,
+        type_annotation: parsed.type_annotation,
+        value: parsed.value,
+    };
+}
+
+struct BindingComponents {
+    name -> string;
+    type_annotation -> string;
+    value -> string?;
+}
+
+fn parse_binding_components(text -> string) -> BindingComponents {
+    let mut name -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == " " || ch == ":" || ch == "=" {
+            break;
+        }
+        name = name + ch;
+        index += 1;
+    }
+    name = trim_text(name);
+    let mut type_annotation -> string = "";
+    let mut value -> string? = null;
+    let mut remainder -> string = trim_text(runtime.substring(text, index, text.length));
+    if remainder.length > 0 {
+        if starts_with(remainder, ":") {
+            remainder = trim_text(strip_prefix(remainder, ":"));
+            let assign_index = index_of(remainder, "=");
+            if assign_index >= 0 {
+                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
+                let value_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                if value_text.length > 0 {
+                    value = value_text;
+                }
+            } else {
+                type_annotation = trim_text(remainder);
+            }
+        } else if starts_with(remainder, "=") {
+            let value_text = trim_text(strip_prefix(remainder, "="));
+            if value_text.length > 0 {
+                value = value_text;
+            }
+        } else {
+            // Fallback: treat the remainder as an initializer without prefix.
+            value = remainder;
+        }
+    }
+    return BindingComponents { name: name, type_annotation: type_annotation, value: value };
 }
 
 fn parse_function_name(header -> string) -> string {

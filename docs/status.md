@@ -90,7 +90,7 @@ roadmaps.
   rewrites common postfix helpers (`.map`, `.filter`, `.reduce`, `.concat`,
   `.length`) into the runtime `array_*` shims and `len(...)` calls (multi-
   statement lambdas still fall back to stubs). Block emission now preserves
-  local `let`/`const` declarations, `for` loops, `if`/`else if`/`else`
+  local `let` declarations (with optional `mut`), `for` loops, `if`/`else if`/`else`
   chains, and `match` statements so stage1 sources round-trip cleanly through
   the bootstrap parser. The native backend (`emit_native.sfn`) now emits a
   structured `.sfn-asm` textual artifact with entry-point metadata and inline

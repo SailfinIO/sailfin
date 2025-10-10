@@ -250,12 +250,6 @@ fn parse_statement(parser -> Parser) -> StatementParseResult {
         }
         return parse_variable(parser);
     }
-    if identifier_matches(token, "const") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
-        return parse_constant(parser);
-    }
     if identifier_matches(token, "model") {
         if decorators.length > 0 {
             return parse_unknown(original);
@@ -361,11 +355,59 @@ fn parse_import(parser -> Parser) -> StatementParseResult {
 }
 
 fn parse_variable(parser -> Parser) -> StatementParseResult {
-    return parse_variable_like(parser, false);
-}
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "let");
 
-fn parse_constant(parser -> Parser) -> StatementParseResult {
-    return parse_variable_like(parser, true);
+    let mut mutable_flag = false;
+    let look = skip_trivia(parser);
+    let token = parser_peek_raw(look);
+    if identifier_matches(token, "mut") {
+        parser = skip_trivia(parser);
+        parser = consume_keyword(parser, "mut");
+        mutable_flag = true;
+    }
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    parser = parser_advance_raw(parser);
+
+    let mut type_annotation -> TypeAnnotation? = null;
+    parser = skip_trivia(parser);
+    let separator = parser_peek_raw(parser);
+    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+        parser = parser_advance_raw(parser);
+        let capture = collect_until(skip_trivia(parser), ["=", ";"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            type_annotation = TypeAnnotation { text: text };
+        }
+    }
+
+    let mut initializer -> Expression? = null;
+    parser = skip_trivia(parser);
+    let assign = parser_peek_raw(parser);
+    if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
+        parser = parser_advance_raw(parser);
+        let capture = collect_until(skip_trivia(parser), [";"]);
+        parser = capture.parser;
+        let expression = expression_from_tokens(capture.tokens);
+        initializer = expression;
+    }
+
+    parser = skip_trivia(parser);
+    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+        parser = parser_advance_raw(parser);
+    }
+
+    let statement = Statement.VariableDeclaration {
+        name: name,
+        mutable: mutable_flag,
+        type_annotation: type_annotation,
+        initializer: initializer,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
 }
 
 fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
@@ -970,78 +1012,6 @@ fn parse_test(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_variable_like(parser -> Parser, is_const -> boolean) -> StatementParseResult {
-    parser = skip_trivia(parser);
-    if is_const {
-        parser = consume_keyword(parser, "const");
-    } else {
-        parser = consume_keyword(parser, "let");
-    }
-
-    let mut mutable_flag = false;
-    if !is_const {
-        let look = skip_trivia(parser);
-        let token = parser_peek_raw(look);
-        if identifier_matches(token, "mut") {
-            parser = skip_trivia(parser);
-            parser = consume_keyword(parser, "mut");
-            mutable_flag = true;
-        }
-    }
-
-    parser = skip_trivia(parser);
-    let name_token = parser_peek_raw(parser);
-    let name = identifier_text(name_token);
-    parser = parser_advance_raw(parser);
-
-    let mut type_annotation -> TypeAnnotation? = null;
-    parser = skip_trivia(parser);
-    let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
-        parser = parser_advance_raw(parser);
-        let capture = collect_until(skip_trivia(parser), select_type_terminators(is_const));
-        parser = capture.parser;
-        let text = trim_text(tokens_to_text(capture.tokens));
-        if text.length > 0 {
-            type_annotation = TypeAnnotation { text: text };
-        }
-    }
-
-    let mut initializer -> Expression? = null;
-    parser = skip_trivia(parser);
-    let assign = parser_peek_raw(parser);
-    if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
-        parser = parser_advance_raw(parser);
-        let capture = collect_until(skip_trivia(parser), [";"]);
-        parser = capture.parser;
-        let expression = expression_from_tokens(capture.tokens);
-        initializer = expression;
-    } else if is_const {
-        initializer = Expression.Raw { text: "" };
-    }
-
-    parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
-        parser = parser_advance_raw(parser);
-    }
-
-    if is_const {
-        let statement = Statement.ConstantDeclaration {
-            name: name,
-            type_annotation: type_annotation,
-            initializer: initializer,
-        };
-        return StatementParseResult { parser: parser, statement: statement };
-    }
-
-    let statement = Statement.VariableDeclaration {
-        name: name,
-        mutable: mutable_flag,
-        type_annotation: type_annotation,
-        initializer: initializer,
-    };
-    return StatementParseResult { parser: parser, statement: statement };
-}
 
 fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
     parser = skip_trivia(parser);
@@ -2377,13 +2347,6 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
     }
 
     return CaptureResult { parser: current, tokens: captured };
-}
-
-fn select_type_terminators(is_const -> boolean) -> string[] {
-    if is_const {
-        return ["="];
-    }
-    return ["=", ";"];
 }
 
 fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult {

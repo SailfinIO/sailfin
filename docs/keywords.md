@@ -29,7 +29,6 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `await`
 - `let`
 - `mut`
-- `const`
 - `struct`
 - `enum`
 - `interface`

@@ -23,8 +23,7 @@ Declaration        = StructDeclaration
                    | ModelDeclaration
                    | TestDeclaration
                    | TypeAliasDeclaration
-                   | VariableDeclaration
-                   | ConstantDeclaration ;
+                   | VariableDeclaration ;
 
 StructDeclaration  = "struct" Identifier [ TypeParameters ]
                      [ "implements" NominalType { "," NominalType } ]
@@ -78,7 +77,6 @@ EffectIdentifier   = Identifier ;
 Block              = "{" { Statement } "}" ;
 
 Statement          = VariableDeclaration
-                   | ConstantDeclaration
                    | IfStatement
                    | MatchStatement
                    | TryStatement
@@ -96,8 +94,6 @@ AssertStatement    = "assert" Expression ";" ;  // Bootstrap: no parentheses req
 
 VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeSep Type ]
                        [ "=" Expression ] ";" ;
-
-ConstantDeclaration  = "const" Identifier [ TypeSep Type ] "=" Expression ";" ;
 
 IfStatement        = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
 

@@ -76,7 +76,7 @@ listed in the manifest or function effect set results in a compile-time error.
 
 ## 3. Declarations
 
-### 3.1 Variables and Constants
+### 3.1 Variables
 
 Variables default to immutability and are introduced with `let`. Add `mut` to
 allow reassignment.
@@ -87,7 +87,8 @@ let mut counter -> number = 0;
 ```
 
 Type annotations are optional; the bootstrap compiler performs limited
-inference. Constants use `const` and require initialisers.
+inference. Initialisers may be omitted; the bootstrap emits `null` when a
+binding lacks an explicit expression.
 
 ### 3.2 Functions and Methods
 

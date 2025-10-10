@@ -21,7 +21,6 @@ from bootstrap.ast_nodes import (
     Assignment,
     Block,
     CatchClause,
-    ConstantDeclaration,
     Decorator,
     Expression,
     ExpressionStatement,
@@ -174,8 +173,6 @@ class _EffectVisitor:
         if isinstance(statement, Assignment):
             return self._scan_expression(statement.value)
         if isinstance(statement, VariableDeclaration):
-            return self._scan_expression(statement.initializer)
-        if isinstance(statement, ConstantDeclaration):
             return self._scan_expression(statement.initializer)
         if isinstance(statement, IfStatement):
             required = self._scan_expression(statement.condition)

@@ -26,7 +26,6 @@ from bootstrap.ast_nodes import (
     BreakStatement,
     CallExpression,
     CatchClause,
-    ConstantDeclaration,
     ConstructorPattern,
     ContinueStatement,
     Decorator,
@@ -209,8 +208,6 @@ class CodeGenerator:
             if self._indent == 0 and stmt.mutable:
                 self._global_mutables.add(stmt.name)
             self._emit_variable(stmt)
-        elif isinstance(stmt, ConstantDeclaration):
-            self._emit_constant(stmt)
         elif isinstance(stmt, ReturnStatement):
             self._emit_return(stmt)
         elif isinstance(stmt, ExpressionStatement):
@@ -523,10 +520,6 @@ class CodeGenerator:
         else:
             value = "None"
         self._emit(f"{name} = {value}")
-
-    def _emit_constant(self, decl: ConstantDeclaration) -> None:
-        value = self._emit_expression(decl.initializer)
-        self._emit(f"{decl.name} = {value}")
 
     def _emit_return(self, stmt: ReturnStatement) -> None:
         if stmt.value is None:

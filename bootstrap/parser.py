@@ -22,7 +22,6 @@ from bootstrap.ast_nodes import (
     BooleanLiteral,
     CallExpression,
     CatchClause,
-    ConstantDeclaration,
     ConstructorPattern,
     Decorator,
     EnumDeclaration,
@@ -204,8 +203,6 @@ class _SailParser:
             return self._parse_tool()
         if self.tokens.check("TYPE"):
             return self._parse_type_alias()
-        if self.tokens.check("CONST"):
-            return self._parse_const_declaration()
         if self.tokens.check("LET"):
             return self._parse_variable_declaration()
         if self.tokens.check("TEST"):
@@ -556,8 +553,6 @@ class _SailParser:
     def _parse_statement(self) -> Statement:
         if self.tokens.check("LET"):
             return self._parse_variable_declaration()
-        if self.tokens.check("CONST"):
-            return self._parse_const_declaration()
         if self.tokens.check("RETURN"):
             return self._parse_return()
         if self.tokens.check("IF"):
@@ -628,17 +623,6 @@ class _SailParser:
             initializer = self._parse_expression()
         self.tokens.expect("SEMICOLON")
         return VariableDeclaration(name=name, initializer=initializer, type_annotation=type_annotation, mutable=mutable)
-
-    def _parse_const_declaration(self) -> ConstantDeclaration:
-        self.tokens.expect("CONST")
-        name = self.tokens.expect("IDENTIFIER").value
-        type_annotation = None
-        if self._match_type_separator():
-            type_annotation = self._parse_type()
-        self.tokens.expect("ASSIGN")
-        initializer = self._parse_expression()
-        self.tokens.expect("SEMICOLON")
-        return ConstantDeclaration(name=name, initializer=initializer, type_annotation=type_annotation)
 
     def _parse_return(self) -> Statement:
         self.tokens.expect("RETURN")

@@ -277,13 +277,6 @@ class VariableDeclaration(Statement):
 
 
 @dataclass
-class ConstantDeclaration(Statement):
-    name: str
-    initializer: Expression
-    type_annotation: Optional[TypeAnnotation] = None
-
-
-@dataclass
 class ExpressionStatement(Statement):
     expression: Expression
 
@@ -576,7 +569,6 @@ __all__ = [
     "PromptStatement",
     # Statements
     "VariableDeclaration",
-    "ConstantDeclaration",
     "ExpressionStatement",
     "ReturnStatement",
     "IfStatement",

@@ -101,9 +101,6 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "VariableDeclaration" {
         return emit_variable(state, statement);
     }
-    if statement.variant == "ConstantDeclaration" {
-        return emit_constant(state, statement);
-    }
     if statement.variant == "FunctionDeclaration" {
         return emit_function(state, statement.signature, statement.body, statement.decorators);
     }
@@ -162,17 +159,6 @@ fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {
         line = line + "mut ";
     }
     line = line + statement.name;
-    if statement.type_annotation != null {
-        line = line + " : " + statement.type_annotation.text;
-    }
-    if statement.initializer != null {
-        line = line + " = " + format_expression(statement.initializer);
-    }
-    return state_emit_line(state, line);
-}
-
-fn emit_constant(state -> NativeState, statement -> Statement) -> NativeState {
-    let mut line -> string = ".const " + statement.name;
     if statement.type_annotation != null {
         line = line + " : " + statement.type_annotation.text;
     }

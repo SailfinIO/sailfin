@@ -443,7 +443,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         sample = (
             'let title = "Sailfin"; // string literal\n'
             "let ready = true;\n"
-            "/* done */ const answer = 42;\n"
+            "/* done */ let mut answer = 42;\n"
             "let ratio = 3.14;\n"
             "let debug = false;"
         )
@@ -457,7 +457,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         variants = [token.kind.variant for token in meaningful]
         assert variants[0] == "Identifier"
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "3.14" for token in meaningful)
-        assert any(token.kind.variant == "Identifier" and token.kind.value == "const" for token in meaningful)
+        assert any(token.kind.variant == "Identifier" and token.kind.value == "answer" for token in meaningful)
         assert any(token.kind.variant == "NumberLiteral" and token.kind.value == "42" for token in meaningful)
         has_string_literal = any(
             token.kind.variant == "StringLiteral" and token.kind.value == "Sailfin" for token in meaningful
@@ -512,7 +512,7 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
 
         sample = (
             'import { print } from "sailfin/io";\n'
-            "const answer -> number = 42;\n"
+            "let answer -> number = 42;\n"
             "fn greet(name -> string) -> string ![io] {\n"
             "    return name;\n"
             "}\n"
@@ -526,9 +526,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert import_stmt.items == ["print"]
         assert import_stmt.source == "sailfin/io"
 
-        const_stmt = program.statements[1]
-        assert const_stmt.variant == "ConstantDeclaration"
-        assert const_stmt.initializer is not None
+        let_stmt = program.statements[1]
+        assert let_stmt.variant == "VariableDeclaration"
+        assert let_stmt.initializer is not None
+        assert let_stmt.mutable is False
 
         fn_stmt = program.statements[2]
         assert fn_stmt.variant == "FunctionDeclaration"

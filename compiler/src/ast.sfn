@@ -156,11 +156,6 @@ enum Statement {
         type_annotation -> TypeAnnotation?;
         initializer -> Expression?;
     },
-    ConstantDeclaration {
-        name -> string;
-        type_annotation -> TypeAnnotation?;
-        initializer -> Expression?;
-    },
     ModelDeclaration {
         name -> string;
         model_type -> TypeAnnotation;

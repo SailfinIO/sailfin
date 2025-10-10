@@ -13,7 +13,6 @@ reserved = {
     'if': 'IF',
     'else': 'ELSE',
     'match': 'MATCH',
-    'const': 'CONST',
     'routine': 'ROUTINE',
     'for': 'FOR',
     'in': 'IN',

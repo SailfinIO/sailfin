@@ -89,9 +89,6 @@ fn register_top_level_symbol(statement -> Statement, existing -> SymbolEntry[]) 
     if statement.variant == "VariableDeclaration" {
         return register_symbol(statement.name, "variable", existing);
     }
-    if statement.variant == "ConstantDeclaration" {
-        return register_symbol(statement.name, "constant", existing);
-    }
     return SymbolCollectionResult {
         symbols: existing,
         diagnostics: [],
@@ -114,9 +111,6 @@ fn check_program_scopes(program -> Program) -> Diagnostic[] {
 fn check_statement(statement -> Statement, bindings -> SymbolEntry[]) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
         return register_local_symbol(bindings, statement.name, "variable");
-    }
-    if statement.variant == "ConstantDeclaration" {
-        return register_local_symbol(bindings, statement.name, "constant");
     }
     if statement.variant == "FunctionDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "function");
