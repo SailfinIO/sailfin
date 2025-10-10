@@ -45,6 +45,11 @@ struct WithClause {
     expression -> Expression;
 }
 
+struct ElseBranch {
+    statement -> Statement?;
+    body -> Block?;
+}
+
 struct ModelProperty {
     name -> string;
     value -> Expression;
@@ -191,6 +196,12 @@ enum Statement {
     WithStatement {
         clauses -> WithClause[];
         body -> Block;
+        decorators -> Decorator[];
+    },
+    IfStatement {
+        condition -> Expression;
+        then_block -> Block;
+        else_branch -> ElseBranch?;
         decorators -> Decorator[];
     },
     ReturnStatement {

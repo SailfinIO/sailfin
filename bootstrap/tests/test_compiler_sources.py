@@ -194,6 +194,26 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert second_field.type_annotation.text == "string"
         assert second_field.mutable is True
 
+
+        conditional_program = parse_program(
+            "fn check(flag -> boolean) {\n"
+            "    if flag {\n"
+            "        return;\n"
+            "    } else {\n"
+            "        return;\n"
+            "    }\n"
+            "}\n"
+        )
+        assert len(conditional_program.statements) == 1
+        conditional_fn = conditional_program.statements[0]
+        assert conditional_fn.variant == "FunctionDeclaration"
+        assert len(conditional_fn.body.statements) == 1
+        conditional_if = conditional_fn.body.statements[0]
+        assert conditional_if.variant == "IfStatement"
+        assert conditional_if.then_block.statements[0].variant == "ReturnStatement"
+        assert conditional_if.else_branch is not None
+        assert conditional_if.else_branch.body is not None
+        assert conditional_if.else_branch.body.statements[0].variant == "ReturnStatement"
         generic_program = parse_program(
             "@entity\n"
             "struct Collection<T> implements Iterable<T>, Debug {\n"

@@ -10,6 +10,7 @@
 import {
     Block,
     Decorator,
+    ElseBranch,
     FieldDeclaration,
     FunctionSignature,
     MethodDeclaration,
@@ -289,6 +290,9 @@ fn emit_block(builder -> CodeBuilder, block -> Block) -> CodeBuilder {
 }
 
 fn emit_block_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    if statement.variant == "IfStatement" {
+        return emit_if_statement(builder, statement);
+    }
     if statement.variant == "ReturnStatement" {
         if statement.expression == null {
             return builder_emit(builder, "return");
@@ -332,6 +336,46 @@ fn emit_with_block(builder -> CodeBuilder, statement -> Statement) -> CodeBuilde
     }
     current = emit_block(current, statement.body);
     current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_if_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let header = "if " + format_expression(statement.condition) + ":";
+    let mut current = builder_emit(builder, header);
+    current = builder_push_indent(current);
+    current = emit_block(current, statement.then_block);
+    current = builder_pop_indent(current);
+    if statement.else_branch != null {
+        current = emit_else_branch(current, statement.else_branch);
+    }
+    return current;
+}
+
+fn emit_else_branch(builder -> CodeBuilder, branch -> ElseBranch) -> CodeBuilder {
+    if branch.statement != null {
+        if branch.statement.variant == "IfStatement" {
+            return emit_elif_statement(builder, branch.statement);
+        }
+    }
+    if branch.body != null {
+        let mut current = builder_emit(builder, "else:");
+        current = builder_push_indent(current);
+        current = emit_block(current, branch.body);
+        current = builder_pop_indent(current);
+        return current;
+    }
+    return builder;
+}
+
+fn emit_elif_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let header = "elif " + format_expression(statement.condition) + ":";
+    let mut current = builder_emit(builder, header);
+    current = builder_push_indent(current);
+    current = emit_block(current, statement.then_block);
+    current = builder_pop_indent(current);
+    if statement.else_branch != null {
+        current = emit_else_branch(current, statement.else_branch);
+    }
     return current;
 }
 

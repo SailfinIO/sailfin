@@ -1593,6 +1593,9 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
 
     let after_decorators = skip_trivia(current);
     let token = parser_peek_raw(after_decorators);
+    if identifier_matches(token, "if") {
+        return parse_if_statement(after_decorators, decorators);
+    }
     if identifier_matches(token, "prompt") {
         return parse_prompt_statement(after_decorators, decorators);
     }
@@ -1612,6 +1615,75 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     }
 
     return BlockStatementParseResult { parser: original, statement: null, success: false };
+}
+
+fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "if") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "if");
+
+    let condition_capture = collect_until(skip_trivia(current), ["{"]);
+    current = condition_capture.parser;
+    let condition_tokens = trim_token_edges(condition_capture.tokens);
+    if condition_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    let condition_expression = expression_from_tokens(condition_tokens);
+
+    let then_result = parse_block(current);
+    if then_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = then_result.parser;
+    let then_block = then_result.block;
+
+    current = skip_trivia(current);
+    let mut else_branch -> ElseBranch? = null;
+    if identifier_matches(parser_peek_raw(current), "else") {
+        current = consume_keyword(current, "else");
+        current = skip_trivia(current);
+        let next_token = parser_peek_raw(current);
+        if identifier_matches(next_token, "if") {
+            let nested_result = parse_if_statement(current, []);
+            if !nested_result.success {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            if nested_result.statement == null {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            current = nested_result.parser;
+            else_branch = ElseBranch { statement: nested_result.statement, body: null };
+        } else {
+            let else_result = parse_block(current);
+            if else_result.block.tokens.length == 0 {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            current = else_result.parser;
+            else_branch = ElseBranch { statement: null, body: else_result.block };
+        }
+
+        current = skip_trivia(current);
+        let terminator = parser_peek_raw(current);
+        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let statement = Statement.IfStatement {
+        condition: condition_expression,
+        then_block: then_block,
+        else_branch: else_branch,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
 }
 
 fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {

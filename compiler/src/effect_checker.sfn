@@ -7,6 +7,7 @@
 import {
     Block,
     Decorator,
+    ElseBranch,
     FunctionSignature,
     MethodDeclaration,
     Program,
@@ -170,6 +171,16 @@ fn block_has_prompt(block -> Block) -> boolean {
                     return true;
                 }
             }
+            if statement.variant == "IfStatement" {
+                if block_has_prompt(statement.then_block) {
+                    return true;
+                }
+                if statement.else_branch != null {
+                    if else_branch_has_prompt(statement.else_branch) {
+                        return true;
+                    }
+                }
+            }
             index += 1;
         }
     }
@@ -331,6 +342,33 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
             return true;
         }
         index += 1;
+    }
+    return false;
+}
+
+fn else_branch_has_prompt(branch -> ElseBranch) -> boolean {
+    if branch.body != null {
+        if block_has_prompt(branch.body) {
+            return true;
+        }
+    }
+    if branch.statement != null {
+        if branch.statement.variant == "IfStatement" {
+            return if_statement_has_prompt(branch.statement);
+        }
+    }
+    return false;
+}
+
+fn if_statement_has_prompt(statement -> Statement) -> boolean {
+    if statement.variant != "IfStatement" {
+        return false;
+    }
+    if block_has_prompt(statement.then_block) {
+        return true;
+    }
+    if statement.else_branch != null {
+        return else_branch_has_prompt(statement.else_branch);
     }
     return false;
 }
