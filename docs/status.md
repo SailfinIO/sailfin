@@ -54,7 +54,10 @@ roadmaps.
   Python pipeline; deeper type checking remains future work.
 - Self-hosted prototype: `compiler/src/typecheck.sfn` now walks top-level and
   scoped blocks, builds symbol tables for functions/tests, and reports duplicate
-  declarations (including parameter and local name clashes). Diagnostics flow
+  declarations (including parameter and local name clashes). The pass also
+  enforces unique struct fields, struct methods, enum variants, interface
+  members, model properties, and type parameters so Sailfin sources surface the
+  same duplicate errors surfaced by the Python implementation. Diagnostics flow
   through `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues
   during round-trips.
 

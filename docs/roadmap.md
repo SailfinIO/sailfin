@@ -12,6 +12,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 1. **Self-Hosted Compiler Escape Velocity**
    - [ ] Closed-loop bootstrap — `compiler/src/main.sfn` parses, checks, and emits Sailfin that recompiles the entire compiler without stage0 assistance (tracked via `bootstrap/tests/test_compiler_sources.py`).
    - [ ] Semantic passes — Land name resolution, type analysis, and effect propagation in Sailfin (`compiler/src/typecheck.sfn`, updated `effect_checker.sfn`) so diagnostics match the Python implementation.
+    - [x] Enforce unique struct fields/methods, enum variants, interface members, model properties, and type parameters in `typecheck.sfn` with targeted bootstrap coverage (`bootstrap/tests/test_unit_typecheck.py`).
    - [ ] Native backend spike — Stand up the first non-Python backend (`compiler/src/emit_native.sfn`) targeting LLVM IR or WASM as described in `compiler/README.md`, with smoke tests that execute compiled binaries for simple programs.
      - [x] Emit structured `.sfn-asm` textual IR with entry-point metadata and diagnostics surfaced through `compile_to_native`; coverage lives in `bootstrap/tests/test_compiler_codegen.py::test_emit_native_produces_artifact`.
        - [x] Bridge `.sfn-asm` into executable Python scaffolding via `native_lowering.sfn`, with smoke coverage in `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function` and compiler integration in `compile_to_native_python`.
