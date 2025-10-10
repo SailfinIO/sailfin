@@ -18,24 +18,103 @@ Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, 
 - [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
 - [Types](./types/) – Recursive types, tagged unions, ADTs & pattern matching examples.
 
-## Capability Matrix
+## Capability Index
 
-| Directory | Primary effects | Bootstrap readiness | Notes |
-|-----------|-----------------|---------------------|-------|
-| `basics/` | _none_ | ✅ Fully runnable | Syntax + control-flow exercises with no effectful helpers. |
-| `algorithms/` | _none_ | ✅ Fully runnable | Pure computation demos (e.g. `quicksort`). |
-| `functional/` | _none_ | ✅ Fully runnable | Higher-order utilities; relies only on standard expressions. |
-| `types/` | _none_ | ✅ Fully runnable | Algebraic data types and pattern matching with no runtime calls. |
-| `advanced/` | mixed (`io`, `net`) | ⚠️ Effect-sensitive | Individual files note required effects; all code stays within bootstrap syntax, but mocked helpers are involved (decorators, concurrency + web). |
-| `concurrency/` | `io` (channels, `spawn`), optional `clock` | ⚠️ Effect-sensitive | Uses runtime scheduling helpers; relies on mocked concurrency adapters. |
-| `web/` | `io`, `net` | ⚠️ Effect-sensitive | Demonstrates `serve`, `http`, and WebSocket APIs backed by the mocked runtime. |
-| `io/` | `io` | ⚠️ Effect-sensitive | Uses `fs.*` helpers; no real filesystem writes occur. |
-| `ai/` | `model`, `io`, `net` | ⚠️ Effect-sensitive | Prompt blocks and tool calls target the mocked model/runtime surface. |
+Effect annotations (`![...]`) flag the runtime capabilities you need to declare before running each sample. The tables below list every runnable example, the effects it requires, and the mocked bootstrap helpers it touches.
+
+### `basics/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `basic-enum.sfn` | `io` | Enum pattern matching with console logging. |
+| `conditionals.sfn` | `io` | Branching over values with `print.info`. |
+| `error-handling.sfn` | `io` | Struct-based error propagation matched with logging. |
+| `functions.sfn` | `io` | Function defaults and overloading with console output. |
+| `hello-world.sfn` | `io` | Minimal greeting emitted via `print.info`. |
+| `interfaces.sfn` | `io` | Trait-style dispatch routed through the console. |
+| `struct-composition.sfn` | `io` | Interface composition exercised with `print.info`. |
+| `structs.sfn` | `io` | Struct constructors and method calls with logging. |
+| `tagged-enum.sfn` | `io` | Tagged union match executed inside `main`. |
+| `tests.sfn` | `model` | Bootstrap `test` block; effect mirrors the current harness expectations. |
+| `try-catch-finally.sfn` | `io` | Structured error handling with explicit failure stubs. |
+| `variables.sfn` | `io` | Mutable vs. immutable bindings with console output. |
+
+### `algorithms/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `quicksort.sfn` | `io` | Functional quicksort using `.map/.filter/.concat` helpers and logging. |
+
+### `functional/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `higher-order-functions.sfn` | `io` | Function values and callbacks with console output. |
+| `map-reduce.sfn` | `io` | Inline lambda transforms with chaining helpers. |
+
+### `types/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `recursive-types.sfn` | `io` | Recursive shape matching with `print.info`. |
+| `tagged-unions.sfn` | `io` | Union intersection sample with runtime logging. |
+
+### `concurrency/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `channels.sfn` | `io` | Channel send/receive with awaited reads. |
+| `dynamic-task-scheduling.sfn` | `io` | Work-stealing queue feeding background routines. |
+| `parallel.sfn` | `io` | `parallel [...]` execution returning aggregated results. |
+| `producer-consumer.sfn` | `clock`, `io` | Bounded buffer with `sleep` pacing producers and consumers. |
+| `routines.sfn` | `io` | Named and unnamed routines writing to the console. |
+
+### `advanced/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `decorators.sfn` | `io` | `@logExecution` decorator enforcing `io`. |
+| `effectful-interface.sfn` | `io`, `model` | Interfaces with model-bound methods and console output. |
+| `encapsulation-struct.sfn` | `io` | Mutable struct state with logging and error handling. |
+| `futures.sfn` | `io` | `async`/`await` fan-out joined with console logging. |
+| `generic-structures.sfn` | `io` | Generic struct methods manipulating collections. |
+| `interface-polymorphism.sfn` | `io` | Interface-backed dispatch printing results. |
+| `lambda-closure.sfn` | `io` | Inline closure capturing arguments and logging outputs. |
+| `matrix-multiplication.sfn` | `io` | Nested `.map/.reduce` over ranges with console output. |
+| `multithreaded-task.sfn` | `clock`, `io` | `parallel` tasks calling `sleep` and logging completion. |
+| `parametric-polymorphism.sfn` | `io` | Generic identity function with logged values. |
+| `type-guards.sfn` | `io` | Runtime type refinement and guarded matches within `main`. |
+| `unions.sfn` | `io` | Union + intersection typing with runtime checks. |
+| `web-server-with-concurrency.sfn` | `clock`, `io`, `net` | HTTP handler spawning routines and throttled background work. |
+
+### `ai/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `effectful-model-call.sfn` | `io`, `model` | Prompt-style helpers with mocked model calls and console logging. |
+| `model-workflow.sfn` | `io`, `model`, `net` | Pipeline wiring a model invocation with auxiliary `net` tool use. |
+
+### `io/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `read-file.sfn` | `io` | Mocked filesystem read via `runtime.fs.read`. |
+| `write-file.sfn` | `io` | Mocked filesystem write illustrating `fs.write`. |
+
+### `web/`
+
+| Example | Effects | Notes |
+|---------|---------|-------|
+| `async.sfn` | `io`, `net` | Async handler returning JSON responses. |
+| `fetch-data.sfn` | `io`, `net` | HTTP client fetch with logging. |
+| `http-server.sfn` | `net` | Minimal HTTP server responding to routes. |
+| `rest-api.sfn` | `io`, `net` | REST-style routing with console diagnostics. |
+| `websocket-chat.sfn` | `io`, `net` | WebSocket echo server broadcasting messages. |
 
 ## Runtime Notes
 
-- **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` avoid undeclared effects and run end-to-end with mocked runtime helpers.
-- **Effect-sensitive**: `ai`, `web`, `concurrency`, and `io` rely on the mocked `http`, `websocket`, `fs`, and scheduling helpers in `bootstrap/runtime_support.py`. They validate syntax and effect enforcement but do not perform real network or file I/O.
-- **Forward-looking**: Selected files in `advanced/` and `ai/` include comments that mark syntax planned for the self-hosted compiler (e.g., currency literals, pipeline operators). The executable code paths stay within the bootstrap grammar; if you introduce future syntax, gate it with comments and update this matrix.
+- **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs tested in stage0.
+- **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
+- **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

@@ -9,15 +9,12 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 ## Active Workstreams (Do Now)
 
-1. **Bootstrap Reliability**
-   - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
-
-2. **Registry & Capsule Workflow**
+1. **Registry & Capsule Workflow**
    - [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
    - [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the bootstrap runtime.
    - [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
 
-3. **Self-Hosted Compiler**
+2. **Self-Hosted Compiler**
    - [ ] AST + semantic passes — Introduce name resolution and effect propagation in Sailfin (`compiler/src/effect_checker.sfn`, forthcoming `typecheck.sfn`).
    - [ ] Self-hosted emitter — Expand the Sailfin emitter to cover full expression lowering and minimal runtime bindings.
    - [ ] Runtime prelude — Replace Python mock runtime with Sailfin-native implementations / FFI bridges.
@@ -47,6 +44,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Lambda lowering — Sailfin lambdas now produce structured AST nodes and round-trip through the self-hosted emitter with inlined Python lambdas. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` checks both Sailfin and Python outputs.
 - [x] Postfix foundations — Indexing (`values[i]`) and range (`start..end`) expressions round-trip through the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` covers bracket access and `start..end` ranges.
 - [x] Postfix expressions — Chained member/call/index sequences now round-trip through the Sailfin parser and emitter, and code generation rewrites `.map`, `.filter`, `.reduce`, `.concat`, and `.length` into runtime helpers. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` asserts Sailfin emission and Python lowering for the helper chain.
+- [x] Example hardening — Annotated every runnable example with declared effects, wrapped ad-hoc top-level statements in `main`, and removed undefined helper stubs. Validation: `examples/README.md` capability index plus `make bootstrap-test` ensures samples compile and execute under the bootstrap suite.
 
 ## Coordination Notes
 

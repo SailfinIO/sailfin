@@ -90,6 +90,8 @@ roadmaps.
 - `make bootstrap-test` runs unit tests for lexer, parser, effect checker,
   code generation smoke tests, and executes every example under
   `examples/`.
+- `examples/README.md` enumerates every runnable sample with its declared
+  effects so capability requirements stay in sync with the bootstrap runtime.
 - Compiler smoke tests ensure Sailfin sources under `compiler/src/` can be
   parsed by the bootstrap compiler and emitted to Python.
 - No automated tests exist yet for registry interactions or CLI workflow

@@ -13,13 +13,15 @@ fn process(input: string | number) ![io] {
     }
 }
 
-process("Sail");
-process(42);
+fn main() ![io] {
+    process("Sail");
+    process(42);
 
-let user = User { name: "Robin", age: 22 };
+    let user = User { name: "Robin", age: 22 };
 
-match user {
-    User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
-    User { name, age } => print.info("Minor user: {{name}}"),
-    _ => print.info("Unknown entity"),
+    match user {
+        User { name, age } if age >= 18 => print.info("Adult user: {{name}}"),
+        User { name, age } => print.info("Minor user: {{name}}"),
+        _ => print.info("Unknown entity"),
+    }
 }

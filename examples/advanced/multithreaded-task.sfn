@@ -8,7 +8,7 @@ fn computeTask(id -> number) -> string ![clock, io] {
     return "Result from Task {{id}}";
 }
 
-fn main() ![io] {
+fn main() ![clock, io] {
     let results = parallel [
         fn() -> string { return computeTask(1); },
         fn() -> string { return computeTask(2); },

@@ -1,5 +1,9 @@
 // examples/basics/try-catch-finally.sfn
 
+fn performRiskyOperation() -> void {
+    throw "Simulated failure";
+}
+
 fn main() ![io] {
     try {
         performRiskyOperation();
