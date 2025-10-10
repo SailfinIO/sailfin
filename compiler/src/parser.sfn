@@ -1593,6 +1593,9 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
 
     let after_decorators = skip_trivia(current);
     let token = parser_peek_raw(after_decorators);
+    if identifier_matches(token, "for") {
+        return parse_for_statement(after_decorators, decorators);
+    }
     if identifier_matches(token, "if") {
         return parse_if_statement(after_decorators, decorators);
     }
@@ -1615,6 +1618,66 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     }
 
     return BlockStatementParseResult { parser: original, statement: null, success: false };
+}
+
+fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "for") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "for");
+
+    let clause_capture = collect_until(skip_trivia(current), ["{"]);
+    current = clause_capture.parser;
+    let clause_tokens = trim_token_edges(clause_capture.tokens);
+    if clause_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let in_index = find_top_level_identifier(clause_tokens, "in");
+    if in_index == -1 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index));
+    let iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, clause_tokens.length));
+    if target_tokens.length == 0 || iterable_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let target_expression = expression_from_tokens(target_tokens);
+    let iterable_expression = expression_from_tokens(iterable_tokens);
+    let clause = ForClause {
+        target: target_expression,
+        iterable: iterable_expression,
+        tokens: clause_tokens,
+    };
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = body_result.parser;
+    let body = body_result.block;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.ForStatement {
+        clause: clause,
+        body: body,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
 }
 
 fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
@@ -2668,6 +2731,51 @@ fn find_top_level_symbol(tokens -> Token[], symbol -> string) -> number {
 
             if sym == symbol && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
                 return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_top_level_identifier(tokens -> Token[], keyword -> string) -> number {
+    let mut angle -> number = 0;
+    let mut paren -> number = 0;
+    let mut brace -> number = 0;
+    let mut bracket -> number = 0;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if token.kind.variant == "Symbol" {
+            let sym = token.kind.value;
+            if sym == "<" {
+                angle += 1;
+            } else if sym == ">" && angle > 0 {
+                angle -= 1;
+            } else if sym == "(" {
+                paren += 1;
+            } else if sym == ")" && paren > 0 {
+                paren -= 1;
+            } else if sym == "{" {
+                brace += 1;
+            } else if sym == "}" && brace > 0 {
+                brace -= 1;
+            } else if sym == "[" {
+                bracket += 1;
+            } else if sym == "]" && bracket > 0 {
+                bracket -= 1;
+            }
+        }
+
+        if token.kind.variant == "Identifier" {
+            if identifier_matches(token, keyword) {
+                if angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
+                    return index;
+                }
             }
         }
         index += 1;

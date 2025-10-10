@@ -214,6 +214,26 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert conditional_if.else_branch is not None
         assert conditional_if.else_branch.body is not None
         assert conditional_if.else_branch.body.statements[0].variant == "ReturnStatement"
+
+        loop_program = parse_program(
+            "fn iterate(items -> Array<string>) {\n"
+            "    for item in items {\n"
+            "        print.info(item);\n"
+            "    }\n"
+            "}\n"
+        )
+        assert len(loop_program.statements) == 1
+        loop_fn = loop_program.statements[0]
+        assert loop_fn.variant == "FunctionDeclaration"
+        assert len(loop_fn.body.statements) == 1
+        loop_stmt = loop_fn.body.statements[0]
+        assert loop_stmt.variant == "ForStatement"
+        assert loop_stmt.clause.target.variant == "Identifier"
+        assert loop_stmt.clause.iterable.variant == "Identifier"
+        compile_module("compiler/src/code_generator.sfn")
+        generate_program = namespace["generate_program"]
+        loop_python = generate_program(loop_program)
+        assert "for item in items:" in loop_python
         generic_program = parse_program(
             "@entity\n"
             "struct Collection<T> implements Iterable<T>, Debug {\n"

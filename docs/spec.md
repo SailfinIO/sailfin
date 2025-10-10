@@ -525,6 +525,8 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
   primitives. Invoking `spawn` requires the `io` effect; routing through
   `serve` requires `net`.
 - `runtime.format_string` – interpolated string support.
+- Control flow constructs (`if`/`else`, `for`) in Sailfin sources lower to
+  standard Python branches and loops in the bootstrap runtime today.
 
 Bootstrap stubs:
 - Model declarations (`model ... { ... }`) are parsed and emitted as plain data

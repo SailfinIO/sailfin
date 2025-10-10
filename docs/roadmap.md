@@ -10,7 +10,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Bootstrap Reliability**
-   - [ ] Parser parity — Close remaining gaps between the Python and Sailfin-native parsers (block-level `if`/`else` now parsed; pattern matching and advanced expressions next). Source: `compiler/src/parser.sfn`.
+   - [ ] Parser parity — Close remaining gaps between the Python and Sailfin-native parsers (block-level `if`/`else` and `for` loops now parsed; pattern matching and advanced expressions next). Source: `compiler/src/parser.sfn`.
    - [ ] Example hardening — Classify examples by capability usage and remove future-only syntax from runnable samples. Source: `examples/README.md`.
 
 2. **Registry & Capsule Workflow**
@@ -39,7 +39,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 Move checked tasks here with links to PRs / status updates for traceability.
 
 - [x] Effect enforcement — Extended stage0 effect checks to cover runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`). Validation: `bootstrap/tests/test_unit_effects.py` exercises missing-effect errors for `spawn`/`serve`.
-- [x] Self-hosted control flow — Added structured `if`/`else` support to the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py` asserts the new AST nodes and generated scaffolding.
+- [x] Self-hosted control flow — Added structured `if`/`else` and `for` loop support to the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py` asserts the new AST nodes and generated scaffolding.
 
 ## Coordination Notes
 

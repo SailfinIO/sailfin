@@ -27,8 +27,8 @@ roadmaps.
 - Bootstrap: Stage0 parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
   `pipeline`, `test`, and `type` declarations.
 - Self-hosted prototype: Mirrors the same surface and now recognises
-  block-level `if`/`else` control flow; expressions within bodies currently
-  round-trip as literal or identifier tokens.
+  block-level `if`/`else` control flow and `for` loops; expressions within
+  bodies currently round-trip as literal or identifier tokens.
 
 **Effect Tracking (`![...]`)**
 - Bootstrap: Enforces `model`, `io`, and `net` via

@@ -290,6 +290,9 @@ fn emit_block(builder -> CodeBuilder, block -> Block) -> CodeBuilder {
 }
 
 fn emit_block_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    if statement.variant == "ForStatement" {
+        return emit_for_statement(builder, statement);
+    }
     if statement.variant == "IfStatement" {
         return emit_if_statement(builder, statement);
     }
@@ -334,6 +337,15 @@ fn emit_with_block(builder -> CodeBuilder, statement -> Statement) -> CodeBuilde
         current = builder_emit(current, "# clause: " + format_expression(clause.expression));
         index += 1;
     }
+    current = emit_block(current, statement.body);
+    current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_for_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let header = "for " + format_expression(statement.clause.target) + " in " + format_expression(statement.clause.iterable) + ":";
+    let mut current = builder_emit(builder, header);
+    current = builder_push_indent(current);
     current = emit_block(current, statement.body);
     current = builder_pop_indent(current);
     return current;

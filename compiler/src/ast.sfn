@@ -50,6 +50,12 @@ struct ElseBranch {
     body -> Block?;
 }
 
+struct ForClause {
+    target -> Expression;
+    iterable -> Expression;
+    tokens -> Token[];
+}
+
 struct ModelProperty {
     name -> string;
     value -> Expression;
@@ -195,6 +201,11 @@ enum Statement {
     },
     WithStatement {
         clauses -> WithClause[];
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    ForStatement {
+        clause -> ForClause;
         body -> Block;
         decorators -> Decorator[];
     },

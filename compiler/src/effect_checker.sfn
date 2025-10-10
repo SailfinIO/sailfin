@@ -171,6 +171,11 @@ fn block_has_prompt(block -> Block) -> boolean {
                     return true;
                 }
             }
+            if statement.variant == "ForStatement" {
+                if block_has_prompt(statement.body) {
+                    return true;
+                }
+            }
             if statement.variant == "IfStatement" {
                 if block_has_prompt(statement.then_block) {
                     return true;
