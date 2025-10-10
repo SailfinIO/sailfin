@@ -8,7 +8,7 @@ fn computeTask2() -> number {
     return 21;
 }
 
-fn main() {
+fn main() ![io] {
     let results = parallel [
         fn() -> number { return computeTask1(); },
         fn() -> number { return computeTask2(); },

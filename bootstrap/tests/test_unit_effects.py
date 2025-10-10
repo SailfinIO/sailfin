@@ -147,3 +147,47 @@ def test_runtime_serve_with_declared_net_effect():
         )
     )
     validate_effects(ast)
+
+
+def test_print_info_requires_io_effect():
+    ast = parse('fn demo() { print.info("hi"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_print_info_with_declared_io_effect():
+    ast = parse('fn demo() ![io] { print.info("hi"); }')
+    validate_effects(ast)
+
+
+def test_runtime_console_info_requires_io_effect():
+    ast = parse('fn demo() { runtime.console.info("hi"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_console_info_with_declared_io_effect():
+    ast = parse('fn demo() ![io] { runtime.console.info("hi"); }')
+    validate_effects(ast)
+
+
+def test_sleep_requires_clock_effect():
+    ast = parse('fn demo() { sleep(42); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_sleep_with_declared_clock_effect():
+    ast = parse('fn demo() ![clock] { sleep(42); }')
+    validate_effects(ast)
+
+
+def test_runtime_sleep_requires_clock_effect():
+    ast = parse('fn demo() { runtime.sleep(42); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_sleep_with_declared_clock_effect():
+    ast = parse('fn demo() ![clock] { runtime.sleep(42); }')
+    validate_effects(ast)

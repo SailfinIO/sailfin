@@ -11,7 +11,7 @@ fn quicksort(arr -> number[]) -> number[] {
     return quicksort(less).concat(equal).concat(quicksort(greater));
 }
 
-fn main() {
+fn main() ![io] {
     let nums = [10, 7, 8, 9, 1, 5];
     print.info("Sorted: {{quicksort(nums)}}");
 }

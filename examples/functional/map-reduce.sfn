@@ -1,6 +1,6 @@
 // examples/functional/map-reduce.sfn
 
-fn main() {
+fn main() ![io] {
     let numbers = [1, 2, 3, 4, 5];
 
     let squares = numbers.map(fn(x) -> number { return x * x; });

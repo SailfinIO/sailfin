@@ -1,6 +1,6 @@
 // examples/concurrency/routines.sfn
 
-fn main() {
+fn main() ![io] {
     routine "named" {
         print.info("This is routine 1");
     }

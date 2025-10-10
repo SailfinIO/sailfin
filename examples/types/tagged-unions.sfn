@@ -14,7 +14,7 @@ fn area(shape -> Shape) -> number {
     }
 }
 
-fn main() {
+fn main() ![io] {
     let circle = Shape.Circle { radius: 5 };
     print.info("Circle area: {{area(circle)}}");
 }

@@ -7,7 +7,7 @@ async fn fetchData(url -> string) -> string ![net] {
     return response.body;
 }
 
-async fn main() -> void ![net] {
+async fn main() -> void ![io, net] {
     let data = await fetchData("https://example.com");
     print.info("Data: {{data}}");
 }

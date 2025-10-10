@@ -14,12 +14,12 @@ fn handleRequest(req, res) {
     }
 }
 
-fn computeHeavyTask() -> number {
+fn computeHeavyTask() -> number ![clock] {
     sleep(2000);
     return 42;
 }
 
-fn main() ![net] {
+fn main() ![io, net] {
     serve(handleRequest, { port: 8080 });
     print.info("Server is running on http://localhost:8080");
 }

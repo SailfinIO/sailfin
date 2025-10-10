@@ -11,7 +11,7 @@ async fn fetchData(url -> string) -> string ![net] {
     }
 }
 
-async fn main() ![net] {
+async fn main() ![io, net] {
     let url -> string = "https://jsonplaceholder.typicode.com/posts/1";
     let data = await fetchData(url);
     print.info("Fetched data: {{data}}");

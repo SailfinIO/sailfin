@@ -9,7 +9,7 @@ struct User {
     }
 }
 
-fn main() {
+fn main() ![io] {
     let user -> User = User { id: 1, name: "Alice" };
     print.info(user.greet());
 }

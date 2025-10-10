@@ -130,6 +130,11 @@ fn issue_refund(order: Order) -> Refund ![io, model, net] {
 }
 ```
 
+Bootstrap enforcement today requires routines that invoke console helpers or
+timers to declare matching effects. Calling `print.info(...)` or
+`console.error(...)` (both aliases for `runtime.console`) needs the `io`
+effect, while `sleep(ms)` or `runtime.sleep(ms)` requires the `clock` effect.
+
 #### 3.2.2 Linear and Affine Types
 
 Sailfin distinguishes between ordinary types and ownership-aware wrappers that

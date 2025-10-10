@@ -5,7 +5,7 @@ struct User {
     age -> number;
 }
 
-fn process(input: string | number) {
+fn process(input: string | number) ![io] {
     if input is string {
         print.info("It's a string: {{input}}");
     } else {

@@ -6,14 +6,14 @@ struct TreeNode {
     right -> TreeNode?;
 }
 
-fn traverse(node -> TreeNode?) {
+fn traverse(node -> TreeNode?) ![io] {
     if node == null { return; }
     traverse(node.left);
     print.info("{{node.value}}");
     traverse(node.right);
 }
 
-fn main() {
+fn main() ![io] {
     let root -> TreeNode = TreeNode {
         value: 10,
         left: TreeNode { value: 5, left: null, right: null },

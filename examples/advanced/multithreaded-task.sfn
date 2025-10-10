@@ -2,13 +2,13 @@
 
 import { sleep } from "sail/time";
 
-fn computeTask(id -> number) -> string {
+fn computeTask(id -> number) -> string ![clock, io] {
     print.info("Task {{id}} started");
     sleep(1000);
     return "Result from Task {{id}}";
 }
 
-fn main() {
+fn main() ![io] {
     let results = parallel [
         fn() -> string { return computeTask(1); },
         fn() -> string { return computeTask(2); },

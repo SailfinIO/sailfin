@@ -19,7 +19,7 @@ struct List<T> {
     }
 }
 
-fn main() {
+fn main() ![io] {
     let numbers -> List<number> = List.new();
     numbers.add(1);
     numbers.add(2);

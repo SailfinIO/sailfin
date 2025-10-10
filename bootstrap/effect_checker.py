@@ -233,22 +233,33 @@ class _EffectVisitor:
         return set()
 
     def _effects_for_call(self, callee: Expression) -> Set[str]:
-        root = self._root_identifier(callee)
-        if isinstance(callee, MemberExpression):
+        path = self._member_path(callee)
+        if path:
+            root = path[0]
+            member = path[-1]
             if root == "fs":
                 return {"io"}
             if root in {"http", "websocket"}:
                 return {"net"}
+            if root in {"print", "console"}:
+                return {"io"}
             if root == "runtime":
-                if callee.member == "spawn":
+                if len(path) >= 2 and path[1] == "console":
                     return {"io"}
-                if callee.member == "serve":
+                if member == "spawn":
+                    return {"io"}
+                if member == "serve":
                     return {"net"}
+                if member == "sleep":
+                    return {"clock"}
         if isinstance(callee, Identifier):
             if callee.name == "serve":
                 return {"net"}
             if callee.name == "spawn":
                 return {"io"}
+            if callee.name == "sleep":
+                return {"clock"}
+        root = self._root_identifier(callee)
         if root in {"http", "websocket"}:
             return {"net"}
         if root == "fs":
@@ -259,6 +270,8 @@ class _EffectVisitor:
                     return {"io"}
                 if callee.member == "serve":
                     return {"net"}
+                if callee.member == "sleep":
+                    return {"clock"}
         return set()
 
     def _root_identifier(self, expression: Expression) -> str | None:
@@ -267,6 +280,17 @@ class _EffectVisitor:
             current = current.object
         if isinstance(current, Identifier):
             return current.name
+        return None
+
+    def _member_path(self, expression: Expression) -> List[str] | None:
+        parts: List[str] = []
+        current = expression
+        while isinstance(current, MemberExpression):
+            parts.append(current.member)
+            current = current.object
+        if isinstance(current, Identifier):
+            parts.append(current.name)
+            return list(reversed(parts))
         return None
 
 

@@ -13,7 +13,7 @@ struct User implements Greeter {
   }
 }
 
-fn main() {
+fn main() ![io] {
   let greeter -> Greeter = User { id: 1, name: "Alice" };
   print.info(greeter.greet());
 }

@@ -1,6 +1,6 @@
 // examples/basics/try-catch-finally.sfn
 
-fn main() {
+fn main() ![io] {
     try {
         performRiskyOperation();
     } catch (err) {

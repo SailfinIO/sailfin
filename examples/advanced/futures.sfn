@@ -8,7 +8,7 @@ async fn computeTask2() -> number {
     return 21;
 }
 
-async fn main() {
+async fn main() ![io] {
     let future1 = computeTask1();
     let future2 = computeTask2();
 

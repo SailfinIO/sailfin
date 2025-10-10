@@ -8,7 +8,7 @@ fn double(x -> number) -> number {
     return x * 2;
 }
 
-fn main() {
+fn main() ![io] {
     let result = apply(5, double);
     print.info("Result: {{result}}");
 }

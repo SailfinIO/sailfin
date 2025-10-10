@@ -9,6 +9,6 @@ fn compile_to_sailfin(source -> string) -> string {
     return emit_program(program);
 }
 
-fn main() {
+fn main() ![io] {
     print.info("Sailfin compiler (stage 0)");
 }

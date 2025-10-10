@@ -3,7 +3,7 @@
 import { Channel, channel } from "sail/async";
 import { sleep } from "sail/time";
 
-fn main() {
+fn main() ![clock, io] {
     let buffer -> Channel<number> = channel(10); // bounded buffer
 
     routine {

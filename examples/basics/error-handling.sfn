@@ -11,7 +11,7 @@ fn safeDivide(a -> number, b -> number) -> number | DivisionError {
     return a / b;
 }
 
-fn main() {
+fn main() ![io] {
     let result = safeDivide(10, 0);
 
     match result {

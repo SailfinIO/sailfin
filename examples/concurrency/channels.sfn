@@ -2,7 +2,7 @@
 
 import { Channel, channel } from "sail/async";
 
-async fn main() {
+async fn main() ![io] {
     let messages -> Channel<number> = channel();
 
     routine {

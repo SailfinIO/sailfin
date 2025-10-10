@@ -36,7 +36,7 @@ struct BankAccount {
     }
 }
 
-fn main() {
+fn main() ![io] {
     // Create a new bank account
     let mut account -> BankAccount = BankAccount.new(100);
 

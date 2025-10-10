@@ -28,8 +28,8 @@ struct Bike {
     }
 }
 
-fn main() {
-    let vehicle1 -> Driveable = Car.new("Tesla");
+fn main() ![io] {
+    let vehicle1 -> Driveable = Car.new("Subaru");
     let vehicle2 -> Driveable = Bike.new("Yamaha");
 
     print.info(vehicle1.drive());
