@@ -92,8 +92,10 @@ roadmaps.
   statement lambdas still fall back to stubs). Block emission now preserves
   local `let`/`const` declarations, `for` loops, `if`/`else if`/`else`
   chains, and `match` statements so stage1 sources round-trip cleanly through
-  the bootstrap parser. A placeholder native backend (`emit_native.sfn`) tracks
-  diagnostics while we stand up LLVM / WASM output.
+  the bootstrap parser. The native backend (`emit_native.sfn`) now emits a
+  structured `.sfn-asm` textual artifact with entry-point metadata and inline
+  annotations for unsupported constructs, providing a deterministic surface for
+  upcoming LLVM / WASM lowering work.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.
