@@ -22,6 +22,7 @@ from bootstrap.ast_nodes import (
     Block,
     CatchClause,
     ConstantDeclaration,
+    Decorator,
     Expression,
     ExpressionStatement,
     ForStatement,
@@ -30,18 +31,22 @@ from bootstrap.ast_nodes import (
     IfStatement,
     LoopStatement,
     MatchCase,
+    MatchExpression,
     MatchStatement,
     MethodDeclaration,
     MemberExpression,
     PipelineDeclaration,
     Program,
     PromptStatement,
+    RangeExpression,
     ReturnStatement,
     RoutineDeclaration,
     StructDeclaration,
+    StructLiteral,
     TestDeclaration,
     ToolDeclaration,
     TryStatement,
+    TypeCheckExpression,
     VariableDeclaration,
     WhileStatement,
     WithStatement,
@@ -49,17 +54,25 @@ from bootstrap.ast_nodes import (
     AwaitExpression,
     BinaryExpression,
     UnaryExpression,
-    StructLiteral,
     ObjectLiteral,
     LambdaExpression,
     ParallelExpression,
-    RangeExpression,
-    MatchExpression,
-    TypeCheckExpression,
 )
 
 
 MODEL_EFFECT = "model"
+
+
+_DECORATOR_EFFECTS_BY_PATH = {
+    ("logExecution",): {"io"},
+    ("runtime", "logExecution"): {"io"},
+}
+
+
+_DECORATOR_EFFECTS_BY_NAME = {
+    "logexecution": {"io"},
+    "trace": {"io"},
+}
 
 
 class EffectValidationError(ValueError):
@@ -82,7 +95,12 @@ class _EffectVisitor:
 
     def _check_top_level(self, statement):  # type: ignore[override]
         if isinstance(statement, FunctionDeclaration):
-            self._check_routine(statement.name, statement.effects, statement.body)
+            self._check_routine(
+                statement.name,
+                statement.effects,
+                statement.body,
+                decorators=statement.decorators,
+            )
         elif isinstance(statement, PipelineDeclaration):
             self._check_routine(f"pipeline {statement.name}", statement.effects, statement.body)
         elif isinstance(statement, ToolDeclaration):
@@ -92,7 +110,12 @@ class _EffectVisitor:
         elif isinstance(statement, StructDeclaration):
             for member in statement.members:
                 if isinstance(member, MethodDeclaration):
-                    self._check_routine(f"method {statement.name}.{member.name}", member.effects, member.body)
+                    self._check_routine(
+                        f"method {statement.name}.{member.name}",
+                        member.effects,
+                        member.body,
+                        decorators=member.decorators,
+                    )
         else:
             # Other declarations do not yet participate in effect checking.
             return
@@ -101,9 +124,16 @@ class _EffectVisitor:
     # Routine analysis
     # ------------------------------------------------------------------
 
-    def _check_routine(self, name: str, declared: Iterable[str], body: Block) -> None:
+    def _check_routine(
+        self,
+        name: str,
+        declared: Iterable[str],
+        body: Block,
+        decorators: Iterable[Decorator] = (),
+    ) -> None:
         declared_set = {effect.lower() for effect in declared}
         required = self._scan_block(body)
+        required |= self._effects_for_decorators(decorators)
         missing = required - declared_set
         if missing:
             missing_list = ", ".join(sorted(missing))
@@ -112,6 +142,21 @@ class _EffectVisitor:
     # ------------------------------------------------------------------
     # Scanners
     # ------------------------------------------------------------------
+
+    def _effects_for_decorators(self, decorators: Iterable[Decorator]) -> Set[str]:
+        required: Set[str] = set()
+        for decorator in decorators:
+            parts = tuple(decorator.name.parts)
+            if not parts:
+                continue
+            direct = _DECORATOR_EFFECTS_BY_PATH.get(parts)
+            if direct:
+                required |= direct
+                continue
+            tail_effects = _DECORATOR_EFFECTS_BY_NAME.get(parts[-1].lower())
+            if tail_effects:
+                required |= tail_effects
+        return required
 
     def _scan_block(self, block: Block) -> Set[str]:
         required: Set[str] = set()

@@ -191,3 +191,28 @@ def test_runtime_sleep_requires_clock_effect():
 def test_runtime_sleep_with_declared_clock_effect():
     ast = parse('fn demo() ![clock] { runtime.sleep(42); }')
     validate_effects(ast)
+
+
+def test_decorator_requires_io_effect():
+    ast = parse(
+        dedent(
+            """
+            @logExecution
+            fn compute() {}
+            """
+        )
+    )
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_decorator_with_declared_io_effect():
+    ast = parse(
+        dedent(
+            """
+            @logExecution
+            fn compute() ![io] {}
+            """
+        )
+    )
+    validate_effects(ast)
