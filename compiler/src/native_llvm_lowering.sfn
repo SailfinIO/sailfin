@@ -1,0 +1,340 @@
+// compiler/src/native_llvm_lowering.sfn
+//
+// Initial LLVM lowering prototype. Converts textual `.sfn-asm` artifacts into
+// a skeletal LLVM IR module so we can begin validating instruction selection
+// without relying on the Python runtime scaffold.
+
+import { NativeModule } from "./emit_native";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction } from "./native_ir";
+
+struct LoweredLLVMResult {
+    ir -> string;
+    diagnostics -> string[];
+}
+
+struct LoweredLLVMFunction {
+    lines -> string[];
+    diagnostics -> string[];
+}
+
+struct BodyResult {
+    lines -> string[];
+    diagnostics -> string[];
+}
+
+fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
+    let mut diagnostics -> string[] = [];
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        return LoweredLLVMResult { ir: "", diagnostics: diagnostics };
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    diagnostics = diagnostics.concat(parse.diagnostics);
+
+    let mut lines -> string[] = [];
+    lines = append_string(lines, "; ModuleID = 'sailfin'");
+    lines = append_string(lines, "source_filename = \"sailfin\"");
+    lines = append_string(lines, "");
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parse.functions.length {
+            break;
+        }
+        let lowered = emit_function(parse.functions[index]);
+        diagnostics = diagnostics.concat(lowered.diagnostics);
+        if lowered.lines.length > 0 {
+            lines = lines.concat(lowered.lines);
+            if index + 1 < parse.functions.length {
+                lines = append_string(lines, "");
+            }
+        }
+        index += 1;
+    }
+
+    let ir = join_with_separator(lines, "\n");
+    let mut output -> string = ir;
+    if output.length > 0 {
+        output = output + "\n";
+    }
+    return LoweredLLVMResult { ir: output, diagnostics: diagnostics };
+}
+
+fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
+    let mut diagnostics -> string[] = [];
+    let sanitized = sanitize_symbol(function.name);
+    let llvm_return = map_return_type(function.return_type);
+    if llvm_return.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name);
+        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics };
+    }
+
+    if function.parameters.length > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: parameters not yet supported for " + function.name);
+    }
+
+    let mut lines -> string[] = [];
+    lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "() {");
+    lines = append_string(lines, "entry:");
+
+    let body = emit_body(function, llvm_return);
+    lines = lines.concat(body.lines);
+    diagnostics = diagnostics.concat(body.diagnostics);
+    lines = append_string(lines, "}");
+
+    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics };
+}
+
+fn emit_body(function -> NativeFunction, llvm_return -> string) -> BodyResult {
+    let mut diagnostics -> string[] = [];
+    let mut lines -> string[] = [];
+
+    let mut expression_instructions -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= function.instructions.length {
+            break;
+        }
+        let instruction = function.instructions[index];
+        if instruction.variant == "Expression" {
+            expression_instructions += 1;
+        }
+        index += 1;
+    }
+    if expression_instructions > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: expression instructions are ignored in " + function.name);
+    }
+
+    let return_expression = select_return_expression(function.instructions);
+    let lowered = lower_return_instruction(function.name, llvm_return, return_expression);
+    lines = lines.concat(lowered.lines);
+    diagnostics = diagnostics.concat(lowered.diagnostics);
+
+    return BodyResult { lines: lines, diagnostics: diagnostics };
+}
+
+fn select_return_expression(instructions -> NativeInstruction[]) -> string? {
+    let mut index -> number = instructions.length;
+    loop {
+        if index <= 0 {
+            break;
+        }
+        index -= 1;
+        let instruction = instructions[index];
+        if instruction.variant == "Return" {
+            return instruction.expression;
+        }
+    }
+    return null;
+}
+
+fn lower_return_instruction(function_name -> string, llvm_return -> string, expression -> string?) -> BodyResult {
+    if llvm_return == "void" {
+        if expression != null && expression.length > 0 {
+            let diagnostics = ["llvm lowering: void function `" + function_name + "` returned a value"];
+            return BodyResult { lines: ["  ret void"], diagnostics: diagnostics };
+        }
+        return BodyResult { lines: ["  ret void"], diagnostics: [] };
+    }
+
+    if expression == null {
+        let diagnostics = ["llvm lowering: missing return in function `" + function_name + "`"];
+        return BodyResult { lines: ["  ret " + llvm_return + " 0.0"], diagnostics: diagnostics };
+    }
+
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        let diagnostics = ["llvm lowering: empty return expression in `" + function_name + "`"];
+        return BodyResult { lines: ["  ret " + llvm_return + " 0.0"], diagnostics: diagnostics };
+    }
+
+    if llvm_return == "double" {
+        if is_number_literal(trimmed) {
+            let normalised = normalise_number_literal(trimmed);
+            return BodyResult { lines: ["  ret double " + normalised], diagnostics: [] };
+        }
+        let diagnostics = ["llvm lowering: non-numeric return expression `" + trimmed + "` in `" + function_name + "`"];
+        return BodyResult { lines: ["  ret double 0.0"], diagnostics: diagnostics };
+    }
+
+    let diagnostics = ["llvm lowering: unhandled return type `" + llvm_return + "` in `" + function_name + "`"];
+    return BodyResult { lines: ["  ret " + llvm_return + " zeroinitializer"], diagnostics: diagnostics };
+}
+
+fn map_return_type(return_type -> string) -> string {
+    let trimmed = trim_text(return_type);
+    if trimmed.length == 0 || trimmed == "void" {
+        return "void";
+    }
+    if trimmed == "number" {
+        return "double";
+    }
+    return "";
+}
+
+fn sanitize_symbol(name -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_symbol_char(ch) {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if result.length == 0 {
+        return "anon";
+    }
+    return result;
+}
+
+fn is_symbol_char(ch -> string) -> boolean {
+    if ch == "_" {
+        return true;
+    }
+    let code = runtime.char_code(ch);
+    if code >= runtime.char_code("a") && code <= runtime.char_code("z") {
+        return true;
+    }
+    if code >= runtime.char_code("A") && code <= runtime.char_code("Z") {
+        return true;
+    }
+    if code >= runtime.char_code("0") && code <= runtime.char_code("9") {
+        return true;
+    }
+    return false;
+}
+
+fn is_number_literal(text -> string) -> boolean {
+    let mut index -> number = 0;
+    let mut has_digit -> boolean = false;
+    let mut has_decimal -> boolean = false;
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return false;
+    }
+    if trimmed[0] == "-" {
+        if trimmed.length == 1 {
+            return false;
+        }
+        index = 1;
+    }
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch >= "0" && ch <= "9" {
+            has_digit = true;
+            index += 1;
+            continue;
+        }
+        if ch == "." {
+            if has_decimal {
+                return false;
+            }
+            has_decimal = true;
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    return has_digit;
+}
+
+fn normalise_number_literal(text -> string) -> string {
+    let trimmed = trim_text(text);
+    if index_of(trimmed, ".") >= 0 {
+        return trimmed;
+    }
+    return trimmed + ".0";
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return runtime.substring(value, start, end);
+}
+
+fn is_trim_char(ch -> string) -> boolean {
+    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+}
+
+fn index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return 0;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + target.length > value.length {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if value[index + match_index] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    return values.concat([value]);
+}
+
+fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    let mut result -> string = values[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = result + separator + values[index];
+        index += 1;
+    }
+    return result;
+}

@@ -16,6 +16,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
      - [x] Emit structured `.sfn-asm` textual IR with entry-point metadata and diagnostics surfaced through `compile_to_native`; coverage lives in `bootstrap/tests/test_compiler_codegen.py::test_emit_native_produces_artifact`.
        - [x] Bridge `.sfn-asm` into executable Python scaffolding via `native_lowering.sfn`, with smoke coverage in `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function` and compiler integration in `compile_to_native_python`.
      - [ ] Lower `.sfn-asm` into executable LLVM IR / WASM modules and run end-to-end smoke tests for simple programs.
+       - [x] Emit skeletal LLVM IR for return-only functions via `native_llvm_lowering.sfn`, validated by `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`.
    - [ ] Bootstrap retirement plan — Define the cut-over checklist (tests, docs, release notes) for replacing the Python toolchain once the Sailfin pipeline stays green for multiple consecutive builds.
 
 2. **Runtime & FFI Foundations**

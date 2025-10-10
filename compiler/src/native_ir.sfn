@@ -1,0 +1,420 @@
+// compiler/src/native_ir.sfn
+//
+// Shared parser utilities for textual `.sfn-asm` artifacts. Both the
+// temporary Python lowering layer and the emerging LLVM/WASM backends use
+// this module to understand the structure emitted by `emit_native.sfn`.
+
+import { NativeArtifact } from "./emit_native";
+
+enum NativeInstruction {
+    Return { expression -> string },
+    Expression { expression -> string },
+    Unknown { text -> string },
+}
+
+struct NativeFunction {
+    name -> string;
+    parameters -> string[];
+    return_type -> string;
+    effects -> string[];
+    instructions -> NativeInstruction[];
+}
+
+struct ParseNativeResult {
+    functions -> NativeFunction[];
+    diagnostics -> string[];
+}
+
+fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+    let mut index -> number = 0;
+    loop {
+        if index >= artifacts.length {
+            break;
+        }
+        let artifact = artifacts[index];
+        if artifact.format == "sailfin-native-text" {
+            return artifact;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn parse_native_artifact(text -> string) -> ParseNativeResult {
+    let lines = split_lines(text);
+    let mut diagnostics -> string[] = [];
+    let mut functions -> NativeFunction[] = [];
+    let mut current -> NativeFunction? = null;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let raw_line = lines[index];
+        let line = trim_text(raw_line);
+        if line.length == 0 {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ";") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".module ") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".import ") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".fn ") {
+            if current != null {
+                diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open");
+            }
+            current = NativeFunction {
+                name: parse_function_name(strip_prefix(line, ".fn ")),
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".endfn") {
+            if current == null {
+                diagnostics = append_string(diagnostics, "encountered .endfn without active function");
+            } else {
+                functions = append_function(functions, current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".meta ") {
+            if current != null {
+                current = apply_meta(current, strip_prefix(line, ".meta "));
+            } else {
+                diagnostics = append_string(diagnostics, "metadata outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".param ") {
+            if current != null {
+                let name = parse_param_name(strip_prefix(line, ".param "));
+                if name.length == 0 {
+                    diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
+                } else {
+                    current = append_parameter(current, name);
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "parameter outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+        if current == null {
+            diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
+            index += 1;
+            continue;
+        }
+        let instruction = parse_instruction(line);
+        current = append_instruction(current, instruction);
+        index += 1;
+    }
+
+    if current != null {
+        diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
+    }
+
+    return ParseNativeResult { functions: functions, diagnostics: diagnostics };
+}
+
+fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
+    return functions.concat([value]);
+}
+
+fn append_parameter(function -> NativeFunction, name -> string) -> NativeFunction {
+    let parameters = append_string(function.parameters, name);
+    return NativeFunction {
+        name: function.name,
+        parameters: parameters,
+        return_type: function.return_type,
+        effects: function.effects,
+        instructions: function.instructions,
+    };
+}
+
+fn append_instruction(function -> NativeFunction, instruction -> NativeInstruction) -> NativeFunction {
+    let instructions = function.instructions.concat([instruction]);
+    return NativeFunction {
+        name: function.name,
+        parameters: function.parameters,
+        return_type: function.return_type,
+        effects: function.effects,
+        instructions: instructions,
+    };
+}
+
+fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
+    let trimmed = trim_text(entry);
+    if starts_with(trimmed, "return ") {
+        let return_type = trim_text(strip_prefix(trimmed, "return "));
+        return update_function_meta(function, return_type, function.effects);
+    }
+    if starts_with(trimmed, "effects ") {
+        let list = trim_text(strip_prefix(trimmed, "effects "));
+        let effects = parse_effect_list(list);
+        return update_function_meta(function, function.return_type, effects);
+    }
+    return function;
+}
+
+fn update_function_meta(function -> NativeFunction, return_type -> string, effects -> string[]) -> NativeFunction {
+    return NativeFunction {
+        name: function.name,
+        parameters: function.parameters,
+        return_type: return_type,
+        effects: effects,
+        instructions: function.instructions,
+    };
+}
+
+fn parse_instruction(line -> string) -> NativeInstruction {
+    if starts_with(line, "ret") {
+        let remainder = trim_text(runtime.substring(line, 3, line.length));
+        if remainder.length == 0 {
+            return NativeInstruction.Return { expression: "" };
+        }
+        return NativeInstruction.Return { expression: remainder };
+    }
+    if starts_with(line, "eval ") {
+        return NativeInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
+    }
+    return NativeInstruction.Unknown { text: line };
+}
+
+fn parse_function_name(header -> string) -> string {
+    let mut trimmed = trim_text(header);
+    if starts_with(trimmed, "async ") {
+        trimmed = trim_text(strip_prefix(trimmed, "async "));
+    }
+    let paren_index = index_of(trimmed, "(");
+    let mut name -> string = trimmed;
+    if paren_index >= 0 {
+        name = trim_text(runtime.substring(trimmed, 0, paren_index));
+    }
+    return strip_generics(name);
+}
+
+fn parse_param_name(body -> string) -> string {
+    let mut trimmed = trim_text(body);
+    if starts_with(trimmed, "mut ") {
+        trimmed = trim_text(strip_prefix(trimmed, "mut "));
+    }
+    let mut name -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == " " || ch == "-" || ch == "=" {
+            break;
+        }
+        name = name + ch;
+        index += 1;
+    }
+    return trim_text(name);
+}
+
+fn parse_effect_list(text -> string) -> string[] {
+    let trimmed = trim_text(text);
+    if trimmed == "none" {
+        return [];
+    }
+    return split_comma_separated(trimmed);
+}
+
+fn split_lines(value -> string) -> string[] {
+    let mut lines -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\n" {
+            lines = append_string(lines, current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    lines = append_string(lines, current);
+    return lines;
+}
+
+fn split_comma_separated(value -> string) -> string[] {
+    let mut results -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "," {
+            results = append_string(results, trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        results = append_string(results, trim_text(current));
+    }
+    let mut filtered -> string[] = [];
+    index = 0;
+    loop {
+        if index >= results.length {
+            break;
+        }
+        let entry = results[index];
+        if entry.length > 0 {
+            filtered = append_string(filtered, entry);
+        }
+        index += 1;
+    }
+    return filtered;
+}
+
+fn strip_generics(name -> string) -> string {
+    let mut result -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if ch == "<" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+    if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return trim_text(result);
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return runtime.substring(value, start, end);
+}
+
+fn is_trim_char(ch -> string) -> boolean {
+    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+}
+
+fn starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length == 0 {
+        return true;
+    }
+    if value.length < prefix.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn strip_prefix(value -> string, prefix -> string) -> string {
+    if !starts_with(value, prefix) {
+        return value;
+    }
+    return runtime.substring(value, prefix.length, value.length);
+}
+
+fn index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return 0;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + target.length > value.length {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if value[index + match_index] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    return values.concat([value]);
+}

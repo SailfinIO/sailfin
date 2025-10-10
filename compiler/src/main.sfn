@@ -5,6 +5,7 @@ import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, EmitNativeResult } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
+import { lower_to_llvm, LoweredLLVMResult } from "./native_llvm_lowering";
 import { typecheck_program } from "./typecheck";
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
@@ -61,6 +62,28 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
     }
     return LoweredPythonResult {
         source: lowered.source,
+        diagnostics: combined,
+    };
+}
+
+fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
+    let native_result = compile_to_native(source);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResult {
+        ir: lowered.ir,
         diagnostics: combined,
     };
 }
