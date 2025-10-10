@@ -554,10 +554,45 @@ fn format_expression(expression -> Expression) -> string {
         }
         return type_name + "(" + args + ")";
     }
+    if expression.variant == "Lambda" {
+        return format_lambda_expression(expression);
+    }
     if expression.variant == "Raw" {
         return trim_text(expression.text);
     }
     return "";
+}
+
+fn format_lambda_expression(expression -> Expression) -> string {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.parameters.length {
+            break;
+        }
+        names = append_string(names, expression.parameters[index].name);
+        index += 1;
+    }
+
+    if expression.body.statements.length == 1 {
+        let single = expression.body.statements[0];
+        if single.variant == "ReturnStatement" {
+            if single.expression != null {
+                let value = format_expression(single.expression);
+                let args = join_with_separator(names, ", ");
+                if args.length == 0 {
+                    return "lambda: " + value;
+                }
+                return "lambda " + args + ": " + value;
+            }
+        }
+    }
+
+    let args = join_with_separator(names, ", ");
+    if args.length == 0 {
+        return "lambda: None";
+    }
+    return "lambda " + args + ": None";
 }
 
 fn quote_string(value -> string) -> string {

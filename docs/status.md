@@ -31,9 +31,9 @@ roadmaps.
   guards captured as expressions plus inline `=>` expression or `return`
   bodies. Common expressions (member access, function calls, unary `!`/`-`,
   binary operators through `&&`/`||`, range operators (`start..end`),
-  indexing (`target[index]`), and literal forms like `[x, y]`, `{ key: value }`,
-  and `Type { field: value }`) now lower into structured nodes instead of
-  `Raw` placeholders.
+  indexing (`target[index]`), lambda expressions (`fn (...) { ... }`), and
+  literal forms like `[x, y]`, `{ key: value }`, and `Type { field: value }`)
+  now lower into structured nodes instead of `Raw` placeholders.
 
 **Effect Tracking (`![...]`)**
 - Bootstrap: Enforces `model`, `io`, `net`, and `clock` via
@@ -75,7 +75,8 @@ roadmaps.
 - Bootstrap: Walks the full AST and emits runnable Python against
   `runtime_support.py`.
 - Self-hosted prototype: Produces Python scaffolding with block stubs; emitter
-  coverage is expanding iteratively.
+  coverage is expanding iteratively and now lowers simple lambda expressions to
+  Python `lambda` literals (multi-statement lambdas still fall back to stubs).
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.

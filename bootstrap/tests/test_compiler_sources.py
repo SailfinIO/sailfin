@@ -488,6 +488,36 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert span_stmt.expression.start.value == "0"
         assert span_stmt.expression.end.variant == "Member"
 
+        lambda_sample = (
+            "fn transform(values -> number[]) -> number[] {\n"
+            "    return values.map(fn (value -> number) -> number {\n"
+            "        return value + 1;\n"
+            "    });\n"
+            "}\n"
+        )
+        lambda_program = parse_program(lambda_sample)
+        transform_fn = lambda_program.statements[0]
+        assert transform_fn.variant == "FunctionDeclaration"
+        transform_body = transform_fn.body
+        assert transform_body.statements
+        transform_return = transform_body.statements[0]
+        assert transform_return.variant == "ReturnStatement"
+        call_expr = transform_return.expression
+        assert call_expr is not None
+        assert call_expr.variant == "Call"
+        assert call_expr.arguments
+        lambda_expr = call_expr.arguments[0]
+        assert lambda_expr.variant == "Lambda"
+        assert len(lambda_expr.parameters) == 1
+        assert lambda_expr.parameters[0].name == "value"
+        assert lambda_expr.parameters[0].type_annotation is not None
+        assert lambda_expr.parameters[0].type_annotation.text == "number"
+        assert lambda_expr.body.statements
+        lambda_body_stmt = lambda_expr.body.statements[0]
+        assert lambda_body_stmt.variant == "ReturnStatement"
+        assert lambda_body_stmt.expression is not None
+        assert lambda_body_stmt.expression.variant == "Binary"
+
         traced_program = parse_program(
             "@trace(level: \"debug\")\n"
             "fn traced() {\n"
@@ -569,6 +599,9 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         generate_program = namespace["generate_program"]
         loop_python = generate_program(loop_program)
         assert "for item in items:" in loop_python
+
+        lambda_python = generate_program(lambda_program)
+        assert "lambda value" in lambda_python or "lambda:" in lambda_python
 
         literal_program = parse_program(
             "fn config() {\n"
@@ -871,6 +904,19 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
 
         regenerated = parse_program(sailfin_output)
         assert all(stmt.variant != "Unknown" for stmt in regenerated.statements)
+
+        lambda_source = (
+            "fn apply(values -> number[]) -> number[] {\n"
+            "    return values.map(fn (value -> number) -> number {\n"
+            "        return value * 2;\n"
+            "    });\n"
+            "}\n"
+        )
+        lambda_program = parse_program(lambda_source)
+        lambda_output = emit_program(lambda_program)
+        assert "fn (value -> number) -> number" in lambda_output
+        stage0_lambda = parser.parse(lambda_output, lexer=base_lexer.clone())
+        assert stage0_lambda is not None
     elif source_path.name == "prelude.sfn":
         namespace = {"__name__": "__main__"}
         exec(compiled, namespace, namespace)
