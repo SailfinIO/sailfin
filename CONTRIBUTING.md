@@ -10,6 +10,8 @@ repository.
   navigation map.
 - Review `docs/status.md` to understand which features are implemented in the
   Python bootstrap compiler (stage0) versus the Sailfin-native prototypes.
+- Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
+  file naming, and doc/test mirroring conventions.
 - Ensure you have the `sailfin-bootstrap` Conda environment:
 
   ```bash
@@ -72,6 +74,8 @@ Reviewers will check for:
   compiler modules.
 - Sailfin (`.sfn`): explicit effect lists, `CamelCase` for models/capsules,
   `snake_case` locals, and comment future syntax when used for illustration.
+  Follow the module and file conventions in `docs/style-guide.md` (one concern
+  per file, `mod.sfn` re-exports, mirrored `*.spec.sfn` tests).
 - Examples: keep inputs minimal, avoid generated artefacts, and annotate
   future-only constructs.
 

@@ -132,7 +132,8 @@ aggregates and overrides where necessary.
 
 ## Common Commands
 
-- `sfn init`: Scaffold a new capsule with `sail.toml` and a `src/` directory.
+- `sfn init`: Scaffold a new capsule with `sail.toml`, `src/`, and mirrored
+  `tests/`/`docs/` stubs aligned with `docs/style-guide.md`.
 - `sfn add <capsule>`: Add a dependency and record it in the manifest.
 - `sfn update`: Resolve the latest compatible versions for all dependencies.
 - `sfn remove <capsule>`: Remove a dependency and tidy the manifest.

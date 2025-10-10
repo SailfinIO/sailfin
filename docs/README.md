@@ -7,6 +7,7 @@ Choose the path that fits your task:
   Pair with `docs/enbf.md` for grammar details and `docs/keywords.md` for reserved identifiers.
 - **Plan future work** → `docs/roadmap.md`
 - **Track proposals** → `docs/proposals/` (e.g., `package-management.md`, `model-engines-and-training.md`)
+- **Align structure & naming** → `docs/style-guide.md`
 - **See working samples** → `examples/` (category index in `examples/README.md`)
 
 When updating docs:
