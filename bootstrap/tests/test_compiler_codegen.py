@@ -323,6 +323,41 @@ def test_lower_native_emits_for_loop_blocks():
     assert accumulate([1, 2, 3]) == 6
 
 
+def test_lower_native_emits_match_statements():
+    program = _parse_program(
+        """
+        fn describe(value -> number) -> string {
+            match value {
+                case 0 => {
+                    return "zero";
+                }
+                case _ if value > 0 => {
+                    return "positive";
+                }
+                case _ => {
+                    return "other";
+                }
+            }
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    describe = namespace["describe"]
+    assert describe(-5) == "other"
+    assert describe(0) == "zero"
+    assert describe(3) == "positive"
+
+
 def test_lower_native_emits_structs_and_literals():
     program = _parse_program(
         """

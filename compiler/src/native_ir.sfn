@@ -23,6 +23,12 @@ enum NativeInstruction {
         iterable -> string;
     },
     EndFor,
+    Match { expression -> string },
+    Case {
+        pattern -> string;
+        guard -> string?;
+    },
+    EndMatch,
     Noop,
     Unknown { text -> string },
 }
@@ -330,6 +336,16 @@ fn parse_instruction(line -> string) -> NativeInstruction {
     if line == ".endfor" {
         return NativeInstruction.EndFor();
     }
+    if starts_with(line, ".match ") {
+        let expression = trim_text(strip_prefix(line, ".match "));
+        return NativeInstruction.Match { expression: expression };
+    }
+    if starts_with(line, ".case ") {
+        return parse_case_instruction(line);
+    }
+    if line == ".endmatch" {
+        return NativeInstruction.EndMatch();
+    }
     if starts_with(line, ".let ") {
         return parse_let_instruction(line);
     }
@@ -359,6 +375,24 @@ fn parse_instruction(line -> string) -> NativeInstruction {
         return NativeInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
     }
     return NativeInstruction.Unknown { text: line };
+}
+
+fn parse_case_instruction(line -> string) -> NativeInstruction {
+    let body = trim_text(strip_prefix(line, ".case "));
+    if body.length == 0 {
+        return NativeInstruction.Case { pattern: body, guard: null };
+    }
+    let separator = " if ";
+    let index = index_of(body, separator);
+    if index < 0 {
+        return NativeInstruction.Case { pattern: body, guard: null };
+    }
+    let pattern = trim_text(runtime.substring(body, 0, index));
+    let guard_text = trim_text(runtime.substring(body, index + separator.length, body.length));
+    if guard_text.length == 0 {
+        return NativeInstruction.Case { pattern: pattern, guard: null };
+    }
+    return NativeInstruction.Case { pattern: pattern, guard: guard_text };
 }
 
 fn parse_import_entry(entry -> string) -> NativeImport? {

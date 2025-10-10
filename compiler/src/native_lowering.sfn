@@ -12,6 +12,18 @@ struct LoweredPythonResult {
     diagnostics -> string[];
 }
 
+struct MatchContext {
+    subject_name -> string;
+    case_index -> number;
+    has_active_case -> boolean;
+}
+
+struct LoweredCaseCondition {
+    condition -> string;
+    is_default -> boolean;
+    has_guard -> boolean;
+}
+
 fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
@@ -416,6 +428,8 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
         return current;
     }
     let mut block_depth -> number = 0;
+    let mut match_stack -> MatchContext[] = [];
+    let mut match_counter -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= function.instructions.length {
@@ -463,12 +477,68 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
                 current = builder_pop_indent(current);
                 block_depth -= 1;
             }
+        } else if instruction.variant == "Match" {
+            let subject_name = generate_match_subject_name(match_counter);
+            match_counter += 1;
+            let lowered_subject = lower_expression(instruction.expression);
+            current = builder_emit(current, subject_name + " = " + lowered_subject);
+            let context = MatchContext { subject_name: subject_name, case_index: 0, has_active_case: false };
+            match_stack = append_match_context(match_stack, context);
+        } else if instruction.variant == "Case" {
+            if match_stack.length == 0 {
+                current = builder_emit(current, "# unsupported: match case without context");
+            } else {
+                let top_index = match_stack.length - 1;
+                let context = match_stack[top_index];
+                if context.has_active_case {
+                    current = builder_pop_indent(current);
+                }
+                let lowered = lower_match_case_condition(context.subject_name, instruction.pattern, instruction.guard);
+                if context.case_index == 0 {
+                    current = builder_emit(current, "if " + lowered.condition + ":");
+                } else {
+                    if lowered.is_default && !lowered.has_guard {
+                        current = builder_emit(current, "else:");
+                    } else {
+                        current = builder_emit(current, "elif " + lowered.condition + ":");
+                    }
+                }
+                current = builder_push_indent(current);
+                let updated = MatchContext {
+                    subject_name: context.subject_name,
+                    case_index: context.case_index + 1,
+                    has_active_case: true,
+                };
+                match_stack = replace_match_context(match_stack, top_index, updated);
+            }
+        } else if instruction.variant == "EndMatch" {
+            if match_stack.length == 0 {
+                current = builder_emit(current, "# unsupported: endmatch without context");
+            } else {
+                let top_index = match_stack.length - 1;
+                let context = match_stack[top_index];
+                if context.has_active_case {
+                    current = builder_pop_indent(current);
+                }
+                match_stack = truncate_match_contexts(match_stack, top_index);
+            }
         } else if instruction.variant == "Noop" {
             current = builder_emit(current, "pass");
         } else {
             current = builder_emit(current, "# unsupported: " + instruction.text);
         }
         index += 1;
+    }
+    loop {
+        if match_stack.length == 0 {
+            break;
+        }
+        let top_index = match_stack.length - 1;
+        let context = match_stack[top_index];
+        if context.has_active_case {
+            current = builder_pop_indent(current);
+        }
+        match_stack = truncate_match_contexts(match_stack, top_index);
     }
     loop {
         if block_depth <= 0 {
@@ -479,6 +549,102 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
     }
     current = builder_pop_indent(current);
     return current;
+}
+
+fn append_match_context(values -> MatchContext[], value -> MatchContext) -> MatchContext[] {
+    return values.concat([value]);
+}
+
+fn replace_match_context(values -> MatchContext[], index -> number, replacement -> MatchContext) -> MatchContext[] {
+    let mut result -> MatchContext[] = [];
+    let mut position -> number = 0;
+    loop {
+        if position >= values.length {
+            break;
+        }
+        if position == index {
+            result = append_match_context(result, replacement);
+        } else {
+            result = append_match_context(result, values[position]);
+        }
+        position += 1;
+    }
+    return result;
+}
+
+fn truncate_match_contexts(values -> MatchContext[], end_index -> number) -> MatchContext[] {
+    if end_index <= 0 {
+        return [];
+    }
+    let mut result -> MatchContext[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= end_index {
+            break;
+        }
+        result = append_match_context(result, values[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn generate_match_subject_name(counter -> number) -> string {
+    return "__match_value_" + number_to_string(counter);
+}
+
+fn lower_match_case_condition(subject_name -> string, pattern -> string, guard -> string?) -> LoweredCaseCondition {
+    let trimmed_pattern = trim_text(pattern);
+    let mut normalized_guard -> string? = null;
+    if guard != null {
+        let trimmed_guard = trim_text(guard);
+        if trimmed_guard.length > 0 {
+            normalized_guard = trimmed_guard;
+        }
+    }
+    if trimmed_pattern.length == 0 || trimmed_pattern == "_" {
+        if normalized_guard == null {
+            return LoweredCaseCondition { condition: "True", is_default: true, has_guard: false };
+        }
+        let lowered_guard = lower_expression(normalized_guard);
+        return LoweredCaseCondition { condition: lowered_guard, is_default: false, has_guard: true };
+    }
+    let lowered_pattern = lower_expression(trimmed_pattern);
+    let mut condition -> string = subject_name + " == " + lowered_pattern;
+    let mut has_guard -> boolean = false;
+    if normalized_guard != null {
+        let lowered_guard = lower_expression(normalized_guard);
+        condition = "(" + condition + ") and (" + lowered_guard + ")";
+        has_guard = true;
+    }
+    return LoweredCaseCondition { condition: condition, is_default: false, has_guard: has_guard };
+}
+
+fn number_to_string(value -> number) -> string {
+    if value == 0 {
+        return "0";
+    }
+    let digits = "0123456789";
+    let mut remaining -> number = value;
+    let mut output -> string = "";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let digit = temp;
+        let ch = runtime.substring(digits, digit, digit + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
 }
 
 fn render_python_parameters(parameters -> NativeParameter[]) -> string[] {
