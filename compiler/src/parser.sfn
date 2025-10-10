@@ -125,6 +125,23 @@ struct MatchCaseTokenSplit {
     has_guard -> boolean;
 }
 
+struct ExpressionTokens {
+    tokens -> Token[];
+    index -> number;
+}
+
+struct ExpressionParseResult {
+    state -> ExpressionTokens;
+    expression -> Expression;
+    success -> boolean;
+}
+
+struct CallArgumentsParseResult {
+    state -> ExpressionTokens;
+    arguments -> Expression[];
+    success -> boolean;
+}
+
 struct CaptureResult {
     parser -> Parser;
     tokens -> Token[];
@@ -2661,39 +2678,354 @@ fn find_top_level_colon(tokens -> Token[]) -> number {
 }
 
 fn expression_from_tokens(tokens -> Token[]) -> Expression {
-    let trimmed = filter_trivia(tokens);
-    if trimmed.length == 0 {
+    let filtered = filter_trivia(tokens);
+    if filtered.length == 0 {
         return Expression.Raw { text: "" };
     }
 
-    if trimmed.length == 1 {
-        let token = trimmed[0];
-        if token.kind.variant == "NumberLiteral" {
-            return Expression.NumberLiteral { value: token.kind.value };
-        }
-        if token.kind.variant == "BooleanLiteral" {
-            return Expression.BooleanLiteral { value: token.kind.value };
-        }
-        if token.kind.variant == "StringLiteral" {
-            return Expression.StringLiteral { value: token.kind.value };
-        }
-        if token.kind.variant == "Identifier" {
-            let value = token.kind.value;
-            if value == "true" {
-                return Expression.BooleanLiteral { value: true };
-            }
-            if value == "false" {
-                return Expression.BooleanLiteral { value: false };
-            }
-            if value == "null" {
-                return Expression.NullLiteral();
-            }
-            return Expression.Identifier { name: value };
+    if filtered.length == 1 {
+        let single = expression_from_single_token(filtered[0]);
+        if single != null {
+            return single;
         }
     }
 
-    let text = trim_text(tokens_to_text(tokens));
-    return Expression.Raw { text: text };
+    let state = ExpressionTokens { tokens: filtered, index: 0 };
+    let result = parse_expression_bp(state, 0);
+    if !result.success {
+        return Expression.Raw { text: trim_text(tokens_to_text(tokens)) };
+    }
+
+    if result.state.index != result.state.tokens.length {
+        return Expression.Raw { text: trim_text(tokens_to_text(tokens)) };
+    }
+
+    return result.expression;
+}
+
+fn expression_from_single_token(token -> Token) -> Expression? {
+    if token.kind.variant == "NumberLiteral" {
+        return Expression.NumberLiteral { value: token.kind.value };
+    }
+    if token.kind.variant == "BooleanLiteral" {
+        return Expression.BooleanLiteral { value: token.kind.value };
+    }
+    if token.kind.variant == "StringLiteral" {
+        return Expression.StringLiteral { value: token.kind.value };
+    }
+    if token.kind.variant == "Identifier" {
+        let value = identifier_text(token);
+        if value == "true" {
+            return Expression.BooleanLiteral { value: true };
+        }
+        if value == "false" {
+            return Expression.BooleanLiteral { value: false };
+        }
+        if value == "null" {
+            return Expression.NullLiteral();
+        }
+        return Expression.Identifier { name: value };
+    }
+    return null;
+}
+
+fn parse_expression_bp(state -> ExpressionTokens, min_precedence -> number) -> ExpressionParseResult {
+    let prefix_result = parse_prefix_expression(state);
+    if !prefix_result.success {
+        return prefix_result;
+    }
+
+    let mut current_state = prefix_result.state;
+    let mut left_expression = prefix_result.expression;
+
+    loop {
+        if expression_tokens_is_at_end(current_state) {
+            break;
+        }
+        let token = expression_tokens_peek(current_state);
+        if token.kind.variant != "Symbol" {
+            break;
+        }
+
+        let op = token.kind.value;
+        let precedence = binary_precedence(op);
+        if precedence == -1 {
+            break;
+        }
+        if precedence < min_precedence {
+            break;
+        }
+
+        current_state = expression_tokens_advance(current_state);
+        let rhs_result = parse_expression_bp(current_state, precedence + 1);
+        if !rhs_result.success {
+            return expression_parse_failure(state);
+        }
+        current_state = rhs_result.state;
+        left_expression = Expression.Binary {
+            operator: op,
+            left: left_expression,
+            right: rhs_result.expression,
+        };
+    }
+
+    return ExpressionParseResult {
+        state: current_state,
+        expression: left_expression,
+        success: true,
+    };
+}
+
+fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
+    if expression_tokens_is_at_end(state) {
+        return expression_parse_failure(state);
+    }
+
+    let token = expression_tokens_peek(state);
+    if token.kind.variant == "Symbol" {
+        let sym = token.kind.value;
+        if sym == "-" || sym == "!" {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success {
+                return operand_result;
+            }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Unary {
+                    operator: sym,
+                    operand: operand_result.expression,
+                },
+                success: true,
+            };
+        }
+    }
+
+    let primary_result = parse_primary_expression(state);
+    if !primary_result.success {
+        return primary_result;
+    }
+    return parse_postfix_chain(primary_result.state, primary_result.expression);
+}
+
+fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult {
+    if expression_tokens_is_at_end(state) {
+        return expression_parse_failure(state);
+    }
+
+    let token = expression_tokens_peek(state);
+    if token.kind.variant == "NumberLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.NumberLiteral { value: token.kind.value },
+            success: true,
+        };
+    }
+    if token.kind.variant == "BooleanLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.BooleanLiteral { value: token.kind.value },
+            success: true,
+        };
+    }
+    if token.kind.variant == "StringLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.StringLiteral { value: token.kind.value },
+            success: true,
+        };
+    }
+    if token.kind.variant == "Identifier" {
+        let name = identifier_text(token);
+        if name == "true" {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.BooleanLiteral { value: true },
+                success: true,
+            };
+        }
+        if name == "false" {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.BooleanLiteral { value: false },
+                success: true,
+            };
+        }
+        if name == "null" {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.NullLiteral(),
+                success: true,
+            };
+        }
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.Identifier { name: name },
+            success: true,
+        };
+    }
+    if token.kind.variant == "Symbol" && token.kind.value == "(" {
+        let inner_state = expression_tokens_advance(state);
+        let inner_result = parse_expression_bp(inner_state, 0);
+        if !inner_result.success {
+            return inner_result;
+        }
+        let after_inner = inner_result.state;
+        if expression_tokens_is_at_end(after_inner) {
+            return expression_parse_failure(state);
+        }
+        let closing = expression_tokens_peek(after_inner);
+        if !(closing.kind.variant == "Symbol" && closing.kind.value == ")") {
+            return expression_parse_failure(state);
+        }
+        return ExpressionParseResult {
+            state: expression_tokens_advance(after_inner),
+            expression: inner_result.expression,
+            success: true,
+        };
+    }
+
+    return expression_parse_failure(state);
+}
+
+fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> ExpressionParseResult {
+    let mut current_state = state;
+    let mut current_expression = expression;
+
+    loop {
+        if expression_tokens_is_at_end(current_state) {
+            break;
+        }
+        let token = expression_tokens_peek(current_state);
+        if token.kind.variant != "Symbol" {
+            break;
+        }
+
+        let sym = token.kind.value;
+        if sym == "." {
+            let after_dot = expression_tokens_advance(current_state);
+            if expression_tokens_is_at_end(after_dot) {
+                return expression_parse_failure(state);
+            }
+            let member_token = expression_tokens_peek(after_dot);
+            if member_token.kind.variant != "Identifier" {
+                return expression_parse_failure(state);
+            }
+            current_state = expression_tokens_advance(after_dot);
+            current_expression = Expression.Member {
+                object: current_expression,
+                member: identifier_text(member_token),
+            };
+            continue;
+        }
+        if sym == "(" {
+            let call_result = parse_call_arguments(current_state);
+            if !call_result.success {
+                return expression_parse_failure(state);
+            }
+            current_state = call_result.state;
+            current_expression = Expression.Call {
+                callee: current_expression,
+                arguments: call_result.arguments,
+            };
+            continue;
+        }
+        break;
+    }
+
+    return ExpressionParseResult {
+        state: current_state,
+        expression: current_expression,
+        success: true,
+    };
+}
+
+fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
+    let mut current = expression_tokens_advance(state);
+    let mut arguments -> Expression[] = [];
+
+    if expression_tokens_is_at_end(current) {
+        return CallArgumentsParseResult { state: state, arguments: [], success: false };
+    }
+
+    if expression_tokens_peek(current).kind.variant == "Symbol"
+        && expression_tokens_peek(current).kind.value == ")" {
+        current = expression_tokens_advance(current);
+        return CallArgumentsParseResult { state: current, arguments: arguments, success: true };
+    }
+
+    loop {
+        let argument_result = parse_expression_bp(current, 0);
+        if !argument_result.success {
+            return CallArgumentsParseResult { state: state, arguments: [], success: false };
+        }
+        arguments = append_expression(arguments, argument_result.expression);
+        current = argument_result.state;
+        if expression_tokens_is_at_end(current) {
+            return CallArgumentsParseResult { state: state, arguments: [], success: false };
+        }
+        let separator = expression_tokens_peek(current);
+        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+            current = expression_tokens_advance(current);
+            continue;
+        }
+        if separator.kind.variant == "Symbol" && separator.kind.value == ")" {
+            current = expression_tokens_advance(current);
+            break;
+        }
+        return CallArgumentsParseResult { state: state, arguments: [], success: false };
+    }
+
+    return CallArgumentsParseResult { state: current, arguments: arguments, success: true };
+}
+
+fn expression_parse_failure(state -> ExpressionTokens) -> ExpressionParseResult {
+    return ExpressionParseResult {
+        state: state,
+        expression: Expression.Raw { text: "" },
+        success: false,
+    };
+}
+
+fn expression_tokens_is_at_end(state -> ExpressionTokens) -> boolean {
+    return state.index >= state.tokens.length;
+}
+
+fn expression_tokens_peek(state -> ExpressionTokens) -> Token {
+    return state.tokens[state.index];
+}
+
+fn expression_tokens_advance(state -> ExpressionTokens) -> ExpressionTokens {
+    if state.index >= state.tokens.length {
+        return state;
+    }
+    return ExpressionTokens { tokens: state.tokens, index: state.index + 1 };
+}
+
+fn binary_precedence(op -> string) -> number {
+    if op == "||" {
+        return 1;
+    }
+    if op == "&&" {
+        return 2;
+    }
+    if op == "==" || op == "!=" {
+        return 3;
+    }
+    if op == "<" || op == "<=" || op == ">" || op == ">=" {
+        return 4;
+    }
+    if op == "+" || op == "-" {
+        return 5;
+    }
+    if op == "*" || op == "/" || op == "%" {
+        return 6;
+    }
+    return -1;
+}
+
+fn unary_precedence() -> number {
+    return 7;
 }
 
 fn filter_trivia(tokens -> Token[]) -> Token[] {
@@ -3124,6 +3456,10 @@ fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClau
 
 fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
     return cases.concat([case]);
+}
+
+fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
+    return expressions.concat([expression]);
 }
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {

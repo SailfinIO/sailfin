@@ -422,7 +422,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert len(match_stmt.cases) == 2
         first_case = match_stmt.cases[0]
         assert first_case.guard is not None
-        assert getattr(first_case.guard, "text", "").strip() == "value > 0"
+        assert first_case.guard.variant == "Binary"
+        assert first_case.guard.operator == ">"
+        assert first_case.guard.left.variant == "Identifier"
+        assert first_case.guard.right.variant == "NumberLiteral"
         second_case = match_stmt.cases[1]
         assert second_case.guard is None
 
@@ -444,7 +447,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         expr_stmt = expr_block.statements[0]
         assert expr_stmt.variant == "ExpressionStatement"
         expr_expression = expr_stmt.expression
-        assert getattr(expr_expression, "text", "").strip() == "score + 1"
+        assert expr_expression.variant == "Binary"
+        assert expr_expression.operator == "+"
+        assert expr_expression.left.variant == "Identifier"
+        assert expr_expression.right.variant == "NumberLiteral"
         return_case = inline_match.cases[1]
         return_block = return_case.body
         assert len(return_block.statements) == 1
@@ -524,6 +530,16 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert loop_stmt.variant == "ForStatement"
         assert loop_stmt.clause.target.variant == "Identifier"
         assert loop_stmt.clause.iterable.variant == "Identifier"
+        assert len(loop_stmt.body.statements) == 1
+        loop_expression_stmt = loop_stmt.body.statements[0]
+        assert loop_expression_stmt.variant == "ExpressionStatement"
+        call_expr = loop_expression_stmt.expression
+        assert call_expr.variant == "Call"
+        assert call_expr.callee.variant == "Member"
+        assert call_expr.callee.object.variant == "Identifier"
+        assert call_expr.callee.member == "info"
+        assert len(call_expr.arguments) == 1
+        assert call_expr.arguments[0].variant == "Identifier"
         compile_module("compiler/src/code_generator.sfn")
         generate_program = namespace["generate_program"]
         loop_python = generate_program(loop_program)

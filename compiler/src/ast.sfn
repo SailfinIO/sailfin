@@ -31,6 +31,10 @@ enum Expression {
     StringLiteral { value -> string },
     BooleanLiteral { value -> boolean },
     NullLiteral,
+    Unary { operator -> string, operand -> Expression },
+    Binary { operator -> string, left -> Expression, right -> Expression },
+    Member { object -> Expression, member -> string },
+    Call { callee -> Expression, arguments -> Expression[] },
     Raw { text -> string },
 }
 

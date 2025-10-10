@@ -458,6 +458,42 @@ fn format_expression(expression -> Expression) -> string {
     if expression.variant == "StringLiteral" {
         return quote_string(expression.value);
     }
+    if expression.variant == "Unary" {
+        let operand = format_expression(expression.operand);
+        let op = expression.operator;
+        if op == "!" {
+            return "not " + operand;
+        }
+        return op + operand;
+    }
+    if expression.variant == "Binary" {
+        let left = format_expression(expression.left);
+        let right = format_expression(expression.right);
+        let op = expression.operator;
+        let spaced_op = " " + op + " ";
+        if op == "&&" {
+            spaced_op = " and ";
+        } else if op == "||" {
+            spaced_op = " or ";
+        }
+        return left + spaced_op + right;
+    }
+    if expression.variant == "Member" {
+        return format_expression(expression.object) + "." + expression.member;
+    }
+    if expression.variant == "Call" {
+        let mut parts -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.arguments.length {
+                break;
+            }
+            parts = append_string(parts, format_expression(expression.arguments[index]));
+            index += 1;
+        }
+        let args = join_with_separator(parts, ", ");
+        return format_expression(expression.callee) + "(" + args + ")";
+    }
     if expression.variant == "Raw" {
         return trim_text(expression.text);
     }
