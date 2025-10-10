@@ -73,12 +73,16 @@ roadmaps.
 
 **Code Generation**
 - Bootstrap: Walks the full AST and emits runnable Python against
-  `runtime_support.py`.
+  `runtime_support.py`. Console helpers now cover `print.info`,
+  `print.error`, and `print.warn`, each flagged by the effect checker as
+  `io`.
 - Self-hosted prototype: Produces Python scaffolding with block stubs; emitter
   coverage now lowers simple lambda expressions to Python `lambda` literals and
   rewrites common postfix helpers (`.map`, `.filter`, `.reduce`, `.concat`,
   `.length`) into the runtime `array_*` shims and `len(...)` calls (multi-
-  statement lambdas still fall back to stubs).
+  statement lambdas still fall back to stubs). Block emission now preserves
+  local `let`/`const` declarations, `for` loops, and `if`/`else if`/`else`
+  chains so stage1 sources round-trip cleanly through the bootstrap parser.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.

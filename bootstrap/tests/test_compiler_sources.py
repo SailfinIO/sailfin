@@ -191,6 +191,94 @@ def test_self_hosted_effect_checker_requires_io_for_runtime_fs_usage() -> None:
     assert not _validate_effects(program_io)
 
 
+def test_self_hosted_effect_checker_requires_io_for_print_warn() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="print"), "print", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=6),
+        _make_token(TokenKind.Identifier(value="warn"), "warn", column=7),
+        _make_token(TokenKind.Symbol(value="("), "(", column=11),
+        _make_token(TokenKind.StringLiteral(value="heads up"), '"heads up"', column=12),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=21),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=22),
+    ]
+
+    body = Block(tokens=tokens, text='print.warn("heads up");', statements=[])
+    signature = FunctionSignature(
+        name="warn_demo",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    function = Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])
+    program = Program(statements=[function])
+
+    violations = _validate_effects(program)
+    assert any("io" in violation.missing_effects for violation in violations)
+
+    signature_with_io = FunctionSignature(
+        name="warn_demo_io",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["io"],
+        type_parameters=[],
+    )
+    function_io = Statement.FunctionDeclaration(signature=signature_with_io, body=body, decorators=[])
+    program_io = Program(statements=[function_io])
+
+    assert not _validate_effects(program_io)
+
+
+def test_self_hosted_effect_checker_requires_io_for_runtime_console_warn() -> None:
+    from compiler.build.ast import Block, FunctionSignature, Program, Statement
+    from compiler.build.token import TokenKind
+
+    tokens = [
+        _make_token(TokenKind.Identifier(value="runtime"), "runtime", column=1),
+        _make_token(TokenKind.Symbol(value="."), ".", column=8),
+        _make_token(TokenKind.Identifier(value="console"), "console", column=9),
+        _make_token(TokenKind.Symbol(value="."), ".", column=16),
+        _make_token(TokenKind.Identifier(value="warn"), "warn", column=17),
+        _make_token(TokenKind.Symbol(value="("), "(", column=21),
+        _make_token(TokenKind.StringLiteral(value="heads up"), '"heads up"', column=22),
+        _make_token(TokenKind.Symbol(value=")"), ")", column=31),
+        _make_token(TokenKind.Symbol(value=";"), ";", column=32),
+    ]
+
+    body = Block(tokens=tokens, text='runtime.console.warn("heads up");', statements=[])
+    signature = FunctionSignature(
+        name="runtime_warn_demo",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=[],
+        type_parameters=[],
+    )
+    function = Statement.FunctionDeclaration(signature=signature, body=body, decorators=[])
+    program = Program(statements=[function])
+
+    violations = _validate_effects(program)
+    assert any("io" in violation.missing_effects for violation in violations)
+
+    signature_with_io = FunctionSignature(
+        name="runtime_warn_demo_io",
+        is_async=False,
+        parameters=[],
+        return_type=None,
+        effects=["io"],
+        type_parameters=[],
+    )
+    function_io = Statement.FunctionDeclaration(signature=signature_with_io, body=body, decorators=[])
+    program_io = Program(statements=[function_io])
+
+    assert not _validate_effects(program_io)
+
+
 def test_self_hosted_effect_checker_requires_io_for_runtime_spawn_usage() -> None:
     from compiler.build.ast import Block, FunctionSignature, Program, Statement
     from compiler.build.token import TokenKind
@@ -942,6 +1030,32 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert ".length" in postfix_chain_output
         stage0_postfix_chain = parser.parse(postfix_chain_output, lexer=base_lexer.clone())
         assert stage0_postfix_chain is not None
+
+        control_flow_source = (
+            "fn classify(values -> number[]) {\n"
+            "    let mut label -> string = \"unknown\";\n"
+            "    for value in values {\n"
+            "        if value > 10 {\n"
+            "            print.info(\"large\");\n"
+            "        } else if value > 0 {\n"
+            "            print.info(\"small\");\n"
+            "        } else {\n"
+            "            print.info(\"other\");\n"
+            "        }\n"
+            "    }\n"
+            "    return;\n"
+            "}\n"
+        )
+        control_flow_program = parse_program(control_flow_source)
+        control_flow_output = emit_program(control_flow_program)
+        assert "let mut label -> string" in control_flow_output
+        assert "for value in values" in control_flow_output
+        assert "else if value > 0" in control_flow_output
+        stage0_control = parser.parse(control_flow_output, lexer=base_lexer.clone())
+        assert stage0_control is not None
+
+        regenerated_control = parse_program(control_flow_output)
+        assert all(stmt.variant != "Unknown" for stmt in regenerated_control.statements)
 
         compile_module("compiler/src/code_generator.sfn")
         generate_program = namespace["generate_program"]

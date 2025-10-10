@@ -558,9 +558,10 @@ Source code should use `print.info(...)` for standard output and `print.error(..
 Supported today:
 - `print.info(value)` – prints a value or interpolated string.
 - `print.error(value)` – prints a value or interpolated string to error channel (same sink in bootstrap; may diverge later).
+- `print.warn(value)` – emits a warning-level message. The bootstrap runtime prefixes output with `[warn]`.
 
 Not supported yet:
-- `print.warn`, `print.debug`, or structured logging levels. These may be added in the self-hosted runtime.
+- `print.debug` or structured logging levels. These may be added in the self-hosted runtime.
 
 
 ## Part B — Design Preview

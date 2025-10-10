@@ -171,6 +171,28 @@ def test_runtime_console_info_with_declared_io_effect():
     validate_effects(ast)
 
 
+def test_print_warn_requires_io_effect():
+    ast = parse('fn demo() { print.warn("heads up"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_print_warn_with_declared_io_effect():
+    ast = parse('fn demo() ![io] { print.warn("heads up"); }')
+    validate_effects(ast)
+
+
+def test_runtime_console_warn_requires_io_effect():
+    ast = parse('fn demo() { runtime.console.warn("heads up"); }')
+    with pytest.raises(EffectValidationError):
+        validate_effects(ast)
+
+
+def test_runtime_console_warn_with_declared_io_effect():
+    ast = parse('fn demo() ![io] { runtime.console.warn("heads up"); }')
+    validate_effects(ast)
+
+
 def test_sleep_requires_clock_effect():
     ast = parse('fn demo() { sleep(42); }')
     with pytest.raises(EffectValidationError):

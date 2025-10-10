@@ -32,6 +32,9 @@ class _Console:
     def error(self, message: Any) -> None:
         print(message)
 
+    def warn(self, message: Any) -> None:
+        print(f"[warn] {message}")
+
 
 console = _Console()
 

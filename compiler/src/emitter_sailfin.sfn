@@ -13,6 +13,7 @@ import {
     EnumVariant,
     Expression,
     FieldDeclaration,
+    ForClause,
     FunctionSignature,
     MethodDeclaration,
     ModelProperty,
@@ -22,7 +23,9 @@ import {
     TypeAnnotation,
     TypeParameter,
     WithClause,
+    ElseBranch,
 } from "./ast";
+import { Token } from "./token";
 
 struct TextBuilder {
     lines -> string[];
@@ -314,11 +317,23 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
     if statement.variant == "ExpressionStatement" {
         return builder_emit_line(builder, format_expression(statement.expression) + ";");
     }
+    if statement.variant == "VariableDeclaration" {
+        return emit_variable(builder, statement);
+    }
+    if statement.variant == "ConstantDeclaration" {
+        return emit_constant(builder, statement);
+    }
     if statement.variant == "PromptStatement" {
         return emit_prompt(builder, statement);
     }
     if statement.variant == "WithStatement" {
         return emit_with(builder, statement);
+    }
+    if statement.variant == "IfStatement" {
+        return emit_if(builder, statement);
+    }
+    if statement.variant == "ForStatement" {
+        return emit_for(builder, statement);
     }
     if statement.variant == "TestDeclaration" {
         return emit_test(builder, statement);
@@ -358,6 +373,44 @@ fn emit_with(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     current = builder_emit_line(current, line);
     current = emit_block(current, statement.body);
     return current;
+}
+
+fn emit_if(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
+    let mut current = emit_decorators(builder, statement.decorators);
+    let line = "if " + format_expression(statement.condition);
+    current = builder_emit_line(current, line);
+    current = emit_block(current, statement.then_block);
+    if statement.else_branch != null {
+        current = emit_else_branch(current, statement.else_branch);
+    }
+    return current;
+}
+
+fn emit_else_branch(builder -> TextBuilder, branch -> ElseBranch) -> TextBuilder {
+    if branch.body != null {
+        let current = builder_emit_line(builder, "else");
+        return emit_block(current, branch.body);
+    }
+    if branch.statement != null {
+        if branch.statement.variant == "IfStatement" {
+            let current = builder_emit_line(builder, "else if " + format_expression(branch.statement.condition));
+            let after = emit_block(current, branch.statement.then_block);
+            if branch.statement.else_branch != null {
+                return emit_else_branch(after, branch.statement.else_branch);
+            }
+            return after;
+        }
+        let current = builder_emit_line(builder, "else");
+        return emit_block_statement(current, branch.statement);
+    }
+    return builder;
+}
+
+fn emit_for(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
+    let mut current = emit_decorators(builder, statement.decorators);
+    let header = "for " + format_for_clause(statement.clause);
+    current = builder_emit_line(current, header);
+    return emit_block(current, statement.body);
 }
 
 fn emit_block_start(builder -> TextBuilder) -> TextBuilder {
@@ -411,6 +464,15 @@ fn format_decorator_argument(argument -> DecoratorArgument) -> string {
         return value;
     }
     return argument.name + ": " + value;
+}
+
+fn format_for_clause(clause -> ForClause) -> string {
+    let target = format_expression(clause.target);
+    let iterable = format_expression(clause.iterable);
+    if target.length == 0 || iterable.length == 0 {
+        return tokens_to_source(clause.tokens);
+    }
+    return target + " in " + iterable;
 }
 
 fn format_function_header(signature -> FunctionSignature) -> string {
@@ -894,6 +956,22 @@ fn collapse_whitespace(value -> string) -> string {
         index += 1;
     }
     return trim_text(result);
+}
+
+fn tokens_to_source(tokens -> Token[]) -> string {
+    if tokens.length == 0 {
+        return "";
+    }
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        parts = append_string(parts, tokens[index].lexeme);
+        index += 1;
+    }
+    return collapse_whitespace(join_with_separator(parts, ""));
 }
 
 fn builder_new() -> TextBuilder {
