@@ -399,12 +399,14 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
             "compiler/src/typecheck.sfn",
             "compiler/src/emitter_sailfin.sfn",
             "compiler/src/emit_native.sfn",
+            "compiler/src/native_lowering.sfn",
         ]:
             compile_module(dependency)
 
         exec(compiled, namespace, namespace)
         compile_to_native = namespace["compile_to_native"]
         compile_to_sailfin = namespace["compile_to_sailfin"]
+        compile_to_native_python = namespace["compile_to_native_python"]
 
         source = (
             'import { print } from "sailfin/io";\n'
@@ -422,6 +424,10 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         first_artifact = native_result.module.artifacts[0]
         assert first_artifact.format == "sailfin-native-text"
         assert ".fn entry" in first_artifact.contents
+
+        lowered = compile_to_native_python(source)
+        assert lowered.diagnostics == []
+        assert "def entry()" in lowered.source
     elif source_path.name == "lexer.sfn":
         namespace = {"__name__": "__main__"}
 

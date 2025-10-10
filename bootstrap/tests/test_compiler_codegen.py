@@ -49,12 +49,17 @@ def _load_self_hosted_environment() -> dict[str, object]:
         "compiler/src/typecheck.sfn",
         "compiler/src/emitter_sailfin.sfn",
         "compiler/src/emit_native.sfn",
+        "compiler/src/native_lowering.sfn",
         "compiler/src/code_generator.sfn",
     ]:
         if dependency == "compiler/src/emit_native.sfn":
             native_namespace = {"__name__": "compiler.build.emit_native"}
             module = compile_module(dependency, native_namespace)
             namespace["emit_native"] = module["emit_native"]
+        elif dependency == "compiler/src/native_lowering.sfn":
+            lowering_namespace = {"__name__": "compiler.build.native_lowering"}
+            module = compile_module(dependency, lowering_namespace)
+            namespace["lower_to_python"] = module["lower_to_python"]
         else:
             compile_module(dependency)
 
@@ -76,6 +81,12 @@ def _emit_native(program):
     environment = _load_self_hosted_environment()
     emit_native = environment["emit_native"]
     return emit_native(program)
+
+
+def _lower_native_to_python(native_module):
+    environment = _load_self_hosted_environment()
+    lower_to_python = environment["lower_to_python"]
+    return lower_to_python(native_module)
 
 
 def test_generate_program_produces_python():
@@ -157,5 +168,34 @@ def test_emit_native_produces_artifact():
     artifact = result.module.artifacts[0]
     assert artifact.format == "sailfin-native-text"
     assert ".fn greet" in artifact.contents
+    assert ".meta return string" in artifact.contents
+    assert ".meta effects io" in artifact.contents
+    assert ".param name -> string" in artifact.contents
     assert "ret name" in artifact.contents
     assert result.module.symbol_count >= 1
+
+
+def test_lower_native_pipeline_executes_function():
+    program = _parse_program(
+        """
+        fn answer() -> number {
+            return 42;
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    lower_result = _lower_native_to_python(native_result.module)
+    assert lower_result.diagnostics == []
+    assert "def answer()" in lower_result.source
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(lower_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    assert "answer" in namespace
+    answer_fn = namespace["answer"]
+    assert callable(answer_fn)
+    assert answer_fn() == 42

@@ -4,6 +4,7 @@
 import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, EmitNativeResult } from "./emit_native";
+import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import { typecheck_program } from "./typecheck";
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
@@ -40,6 +41,28 @@ fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
         // TODO: halt emission once diagnostics are considered fatal.
     }
     return emit_native(program);
+}
+
+fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
+    let native_result = compile_to_native(source);
+    let lowered = lower_to_python(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredPythonResult {
+        source: lowered.source,
+        diagnostics: combined,
+    };
 }
 
 fn main() ![io] {

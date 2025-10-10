@@ -1,0 +1,628 @@
+// compiler/src/native_lowering.sfn
+//
+// Prototype lowering pass that converts the textual `.sfn-asm` artifacts
+// produced by `emit_native.sfn` into executable Python scaffolding. This keeps
+// the pipeline self-contained while we iterate toward LLVM / WASM codegen.
+
+import { NativeModule, NativeArtifact } from "./emit_native";
+
+struct LoweredPythonResult {
+    source -> string;
+    diagnostics -> string[];
+}
+
+enum LoweredInstruction {
+    Return { expression -> string },
+    Expression { expression -> string },
+    Unknown { text -> string },
+}
+
+struct LoweredFunction {
+    name -> string;
+    parameters -> string[];
+    return_type -> string;
+    effects -> string[];
+    instructions -> LoweredInstruction[];
+}
+
+fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
+    let mut diagnostics -> string[] = [];
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        return LoweredPythonResult { source: "", diagnostics: diagnostics };
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    diagnostics = diagnostics.concat(parse.diagnostics);
+    let python_source = emit_python_module(parse.functions);
+    return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
+}
+
+struct ParseResult {
+    functions -> LoweredFunction[];
+    diagnostics -> string[];
+}
+
+fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+    let mut index -> number = 0;
+    loop {
+        if index >= artifacts.length {
+            break;
+        }
+        let artifact = artifacts[index];
+        if artifact.format == "sailfin-native-text" {
+            return artifact;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn parse_native_artifact(text -> string) -> ParseResult {
+    let lines = split_lines(text);
+    let mut diagnostics -> string[] = [];
+    let mut functions -> LoweredFunction[] = [];
+    let mut current -> LoweredFunction? = null;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let raw_line = lines[index];
+        let line = trim_text(raw_line);
+        if line.length == 0 {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ";") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".module ") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".import ") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".fn ") {
+            if current != null {
+                diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open");
+            }
+            current = LoweredFunction {
+                name: parse_function_name(strip_prefix(line, ".fn ")),
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".endfn") {
+            if current == null {
+                diagnostics = append_string(diagnostics, "encountered .endfn without active function");
+            } else {
+                functions = append_function(functions, current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".meta ") {
+            if current != null {
+                current = apply_meta(current, strip_prefix(line, ".meta "));
+            } else {
+                diagnostics = append_string(diagnostics, "metadata outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".param ") {
+            if current != null {
+                let name = parse_param_name(strip_prefix(line, ".param "));
+                if name.length == 0 {
+                    diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
+                } else {
+                    current = append_parameter(current, name);
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "parameter outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+        if current == null {
+            diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
+            index += 1;
+            continue;
+        }
+        let instruction = parse_instruction(line);
+        current = append_instruction(current, instruction);
+        index += 1;
+    }
+
+    if current != null {
+        diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
+    }
+
+    return ParseResult { functions: functions, diagnostics: diagnostics };
+}
+
+fn append_function(functions -> LoweredFunction[], value -> LoweredFunction) -> LoweredFunction[] {
+    return functions.concat([value]);
+}
+
+fn append_parameter(function -> LoweredFunction, name -> string) -> LoweredFunction {
+    let parameters = append_string(function.parameters, name);
+    return LoweredFunction {
+        name: function.name,
+        parameters: parameters,
+        return_type: function.return_type,
+        effects: function.effects,
+        instructions: function.instructions,
+    };
+}
+
+fn append_instruction(function -> LoweredFunction, instruction -> LoweredInstruction) -> LoweredFunction {
+    let instructions = append_instruction_array(function.instructions, instruction);
+    return LoweredFunction {
+        name: function.name,
+        parameters: function.parameters,
+        return_type: function.return_type,
+        effects: function.effects,
+        instructions: instructions,
+    };
+}
+
+fn apply_meta(function -> LoweredFunction, entry -> string) -> LoweredFunction {
+    let trimmed = trim_text(entry);
+    if starts_with(trimmed, "return ") {
+        let return_type = trim_text(strip_prefix(trimmed, "return "));
+        return update_function_meta(function, return_type, function.effects);
+    }
+    if starts_with(trimmed, "effects ") {
+        let list = trim_text(strip_prefix(trimmed, "effects "));
+        let effects = parse_effect_list(list);
+        return update_function_meta(function, function.return_type, effects);
+    }
+    return function;
+}
+
+fn update_function_meta(function -> LoweredFunction, return_type -> string, effects -> string[]) -> LoweredFunction {
+    return LoweredFunction {
+        name: function.name,
+        parameters: function.parameters,
+        return_type: return_type,
+        effects: effects,
+        instructions: function.instructions,
+    };
+}
+
+fn parse_instruction(line -> string) -> LoweredInstruction {
+    if starts_with(line, "ret") {
+        let remainder = trim_text(runtime.substring(line, 3, line.length));
+        if remainder.length == 0 {
+            return LoweredInstruction.Return { expression: "" };
+        }
+        return LoweredInstruction.Return { expression: remainder };
+    }
+    if starts_with(line, "eval ") {
+        return LoweredInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
+    }
+    return LoweredInstruction.Unknown { text: line };
+}
+
+fn parse_function_name(header -> string) -> string {
+    let mut trimmed = trim_text(header);
+    if starts_with(trimmed, "async ") {
+        trimmed = trim_text(strip_prefix(trimmed, "async "));
+    }
+    let paren_index = index_of(trimmed, "(");
+    let mut name -> string = trimmed;
+    if paren_index >= 0 {
+        name = trim_text(runtime.substring(trimmed, 0, paren_index));
+    }
+    return strip_generics(name);
+}
+
+fn parse_param_name(body -> string) -> string {
+    let mut trimmed = trim_text(body);
+    if starts_with(trimmed, "mut ") {
+        trimmed = trim_text(strip_prefix(trimmed, "mut "));
+    }
+    let mut name -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == " " || ch == "-" || ch == "=" {
+            break;
+        }
+        name = name + ch;
+        index += 1;
+    }
+    return trim_text(name);
+}
+
+fn parse_effect_list(text -> string) -> string[] {
+    let trimmed = trim_text(text);
+    if trimmed == "none" {
+        return [];
+    }
+    return split_comma_separated(trimmed);
+}
+
+fn emit_python_module(functions -> LoweredFunction[]) -> string {
+    let mut builder -> PythonBuilder = builder_new();
+    builder = builder_emit(builder, "import asyncio");
+    builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
+    builder = builder_emit_blank(builder);
+    builder = emit_runtime_aliases(builder);
+    builder = builder_emit_blank(builder);
+
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        builder = emit_python_function(builder, functions[index]);
+        if index + 1 < functions.length {
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    return builder_to_string(builder);
+}
+
+fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
+    let mut current = builder;
+    current = builder_emit(current, "print = runtime.console");
+    current = builder_emit(current, "sleep = runtime.sleep");
+    current = builder_emit(current, "channel = runtime.channel");
+    current = builder_emit(current, "parallel = runtime.parallel");
+    current = builder_emit(current, "spawn = runtime.spawn");
+    current = builder_emit(current, "fs = runtime.fs");
+    current = builder_emit(current, "serve = runtime.serve");
+    current = builder_emit(current, "http = runtime.http");
+    current = builder_emit(current, "websocket = runtime.websocket");
+    current = builder_emit(current, "logExecution = runtime.logExecution");
+    current = builder_emit(current, "array_map = runtime.array_map");
+    current = builder_emit(current, "array_filter = runtime.array_filter");
+    current = builder_emit(current, "array_reduce = runtime.array_reduce");
+    return current;
+}
+
+fn emit_python_function(builder -> PythonBuilder, function -> LoweredFunction) -> PythonBuilder {
+    let mut current = builder;
+    let header = "def " + sanitize_identifier(function.name) + "(" + join_with_separator(function.parameters, ", ") + "):";
+    current = builder_emit(current, header);
+    current = builder_push_indent(current);
+    if function.effects.length > 0 {
+        current = builder_emit(current, "# effects: " + join_with_separator(function.effects, ", "));
+    }
+    if function.instructions.length == 0 {
+        current = builder_emit(current, "pass");
+        current = builder_pop_indent(current);
+        return current;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= function.instructions.length {
+            break;
+        }
+        let instruction = function.instructions[index];
+        if instruction.variant == "Return" {
+            if instruction.expression.length == 0 {
+                current = builder_emit(current, "return");
+            } else {
+                current = builder_emit(current, "return " + instruction.expression);
+            }
+        } else if instruction.variant == "Expression" {
+            current = builder_emit(current, instruction.expression);
+        } else {
+            current = builder_emit(current, "# unsupported: " + instruction.text);
+        }
+        index += 1;
+    }
+    current = builder_pop_indent(current);
+    return current;
+}
+
+struct PythonBuilder {
+    lines -> string[];
+    indent -> number;
+}
+
+fn builder_new() -> PythonBuilder {
+    return PythonBuilder { lines: [], indent: 0 };
+}
+
+fn builder_emit(builder -> PythonBuilder, line -> string) -> PythonBuilder {
+    if line.length == 0 {
+        return builder_emit_blank(builder);
+    }
+    let mut prefix -> string = "";
+    let mut count -> number = 0;
+    loop {
+        if count >= builder.indent {
+            break;
+        }
+        prefix = prefix + "    ";
+        count += 1;
+    }
+    let full_line = prefix + line;
+    let lines = append_string(builder.lines, full_line);
+    return PythonBuilder { lines: lines, indent: builder.indent };
+}
+
+fn builder_emit_blank(builder -> PythonBuilder) -> PythonBuilder {
+    let lines = append_string(builder.lines, "");
+    return PythonBuilder { lines: lines, indent: builder.indent };
+}
+
+fn builder_push_indent(builder -> PythonBuilder) -> PythonBuilder {
+    return PythonBuilder { lines: builder.lines, indent: builder.indent + 1 };
+}
+
+fn builder_pop_indent(builder -> PythonBuilder) -> PythonBuilder {
+    let mut indent = builder.indent;
+    if indent > 0 {
+        indent -= 1;
+    }
+    return PythonBuilder { lines: builder.lines, indent: indent };
+}
+
+fn builder_to_string(builder -> PythonBuilder) -> string {
+    let content = join_with_separator(builder.lines, "\n");
+    if content.length == 0 {
+        return "";
+    }
+    return content + "\n";
+}
+
+fn sanitize_identifier(name -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_identifier_char(ch) {
+            result = result + ch;
+        } else {
+            if ch == " " {
+                result = result + "_";
+            }
+        }
+        index += 1;
+    }
+    if result.length == 0 {
+        return "generated_function";
+    }
+    return result;
+}
+
+fn is_identifier_char(ch -> string) -> boolean {
+    if ch == "_" {
+        return true;
+    }
+    let code = runtime.char_code(ch);
+    if code >= runtime.char_code("a") && code <= runtime.char_code("z") {
+        return true;
+    }
+    if code >= runtime.char_code("A") && code <= runtime.char_code("Z") {
+        return true;
+    }
+    if code >= runtime.char_code("0") && code <= runtime.char_code("9") {
+        return true;
+    }
+    return false;
+}
+
+fn strip_generics(name -> string) -> string {
+    let mut result -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if ch == "<" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return trim_text(result);
+}
+
+fn split_lines(value -> string) -> string[] {
+    let mut lines -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\n" {
+            lines = append_string(lines, current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    lines = append_string(lines, current);
+    return lines;
+}
+
+fn split_comma_separated(value -> string) -> string[] {
+    let mut results -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "," {
+            results = append_string(results, trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        results = append_string(results, trim_text(current));
+    }
+    let mut filtered -> string[] = [];
+    index = 0;
+    loop {
+        if index >= results.length {
+            break;
+        }
+        let entry = results[index];
+        if entry.length > 0 {
+            filtered = append_string(filtered, entry);
+        }
+        index += 1;
+    }
+    return filtered;
+}
+
+fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    let mut result -> string = values[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = result + separator + values[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    return values.concat([value]);
+}
+
+fn append_instruction_array(values -> LoweredInstruction[], instruction -> LoweredInstruction) -> LoweredInstruction[] {
+    return values.concat([instruction]);
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return runtime.substring(value, start, end);
+}
+
+fn is_trim_char(ch -> string) -> boolean {
+    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+}
+
+fn starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length == 0 {
+        return true;
+    }
+    if value.length < prefix.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn strip_prefix(value -> string, prefix -> string) -> string {
+    if !starts_with(value, prefix) {
+        return value;
+    }
+    return runtime.substring(value, prefix.length, value.length);
+}
+
+fn index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return 0;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + target.length > value.length {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if value[index + match_index] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
