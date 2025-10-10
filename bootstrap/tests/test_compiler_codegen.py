@@ -264,3 +264,97 @@ def test_lower_native_handles_parameter_round_trip():
     assert llvm_result.diagnostics == []
     assert "define double @identity(double %value)" in llvm_result.ir
     assert "ret double %value" in llvm_result.ir
+
+
+def test_lower_native_emits_if_else_blocks():
+    program = _parse_program(
+        """
+        fn choose(value -> number, flag -> boolean) -> number {
+            let mut result -> number = 0;
+            if flag {
+                result = value;
+            } else {
+                result = -value;
+            }
+            return result;
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    choose = namespace["choose"]
+    assert choose(5, True) == 5
+    assert choose(5, False) == -5
+
+
+def test_lower_native_emits_for_loop_blocks():
+    program = _parse_program(
+        """
+        fn accumulate(values -> number[]) -> number {
+            let mut total -> number = 0;
+            for value in values {
+                total = total + value;
+            }
+            return total;
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    accumulate = namespace["accumulate"]
+    assert accumulate([1, 2, 3]) == 6
+
+
+def test_lower_native_emits_structs_and_literals():
+    program = _parse_program(
+        """
+        struct Pair {
+            left -> number;
+            right -> number;
+        }
+
+        fn make_pair(value -> number) -> Pair {
+            return Pair { left: value, right: value };
+        }
+        """
+    )
+
+    native_result = _emit_native(program)
+    assert native_result.diagnostics == []
+
+    python_result = _lower_native_to_python(native_result.module)
+    assert python_result.diagnostics == []
+    assert "class Pair:" in python_result.source
+    assert "def __init__(self, left, right):" in python_result.source
+    assert "self.left = left" in python_result.source
+    assert "self.right = right" in python_result.source
+    assert "return Pair(left=value, right=value)" in python_result.source
+
+    namespace: dict[str, object] = {"__name__": "__native_exec__"}
+    compiled = compile(python_result.source, "<native-lowering>", "exec")
+    exec(compiled, namespace, namespace)
+
+    pair_cls = namespace["Pair"]
+    make_pair = namespace["make_pair"]
+    result = make_pair(3)
+    assert isinstance(result, pair_cls)
+    assert result.left == 3
+    assert result.right == 3

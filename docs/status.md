@@ -101,6 +101,11 @@ roadmaps.
   now records parameter metadata so `native_lowering.sfn` can preserve default
   values while emitting executable Python scaffolding (validated by
   `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function`).
+  Control-flow opcodes (`.if`, `.else`, `.endif`, `.for`, `.endfor`) and
+  structural `noop` placeholders are now parsed and lowered to real Python
+  blocks, enabling the native pipeline to execute simple conditionals and
+  loops end-to-end (see `test_lower_native_emits_if_else_blocks` and
+  `test_lower_native_emits_for_loop_blocks`).
   A companion prototype (`native_llvm_lowering.sfn`) translates return-only
   functions—including those with numeric parameters—into skeletal LLVM IR
   (see `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`

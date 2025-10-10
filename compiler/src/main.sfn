@@ -3,25 +3,39 @@
 
 import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
-import { emit_native, EmitNativeResult } from "./emit_native";
+import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import { lower_to_llvm, LoweredLLVMResult } from "./native_llvm_lowering";
 import { typecheck_program } from "./typecheck";
+import { generate_program } from "./code_generator";
+
+struct CompiledModule {
+    source_path -> string;
+    python_source -> string;
+}
+
+struct ModuleDiagnostics {
+    source_path -> string;
+    messages -> string[];
+    fatal -> boolean;
+}
+
+struct ModuleCompilationResult {
+    module -> CompiledModule?;
+    diagnostics -> ModuleDiagnostics[];
+}
+
+struct ProjectCompilation {
+    modules -> CompiledModule[];
+    diagnostics -> ModuleDiagnostics[];
+}
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
     let program = parse_program(source);
     let analysis_result = typecheck_program(program);
     if analysis_result.diagnostics.length > 0 {
-        let mut index -> number = 0;
-        loop {
-            if index >= analysis_result.diagnostics.length {
-                break;
-            }
-            let diagnostic = analysis_result.diagnostics[index];
-            print.error("[typecheck] " + diagnostic.message);
-            index += 1;
-        }
-        // TODO: halt emission once diagnostics are considered fatal.
+        report_typecheck_errors(analysis_result.diagnostics);
+        return "";
     }
     return emit_program(program);
 }
@@ -30,16 +44,11 @@ fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
     let program = parse_program(source);
     let analysis_result = typecheck_program(program);
     if analysis_result.diagnostics.length > 0 {
-        let mut index -> number = 0;
-        loop {
-            if index >= analysis_result.diagnostics.length {
-                break;
-            }
-            let diagnostic = analysis_result.diagnostics[index];
-            print.error("[typecheck] " + diagnostic.message);
-            index += 1;
-        }
-        // TODO: halt emission once diagnostics are considered fatal.
+        report_typecheck_errors(analysis_result.diagnostics);
+        return EmitNativeResult {
+            module: empty_native_module(),
+            diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics),
+        };
     }
     return emit_native(program);
 }
@@ -90,4 +99,111 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
 
 fn main() ![io] {
     print.info("Sailfin compiler (stage 0)");
+}
+
+fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
+    let mut modules -> CompiledModule[] = [];
+    let mut diagnostics -> ModuleDiagnostics[] = [];
+
+    for source_path in sources {
+        let result = compile_source_at_path(source_path);
+        if result.module != null {
+            modules.push(result.module);
+        }
+        if result.diagnostics.length > 0 {
+            diagnostics = diagnostics.concat(result.diagnostics);
+        }
+    }
+
+    return ProjectCompilation {
+        modules: modules,
+        diagnostics: diagnostics,
+    };
+}
+
+fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io] {
+    let source = fs.readFile(source_path);
+    let program = parse_program(source);
+    let analysis = typecheck_program(program);
+    if analysis.diagnostics.length > 0 {
+        return ModuleCompilationResult {
+            module: null,
+            diagnostics: [ModuleDiagnostics {
+                source_path: source_path,
+                messages: format_typecheck_diagnostics(analysis.diagnostics),
+                fatal: true,
+            }],
+        };
+    }
+
+    let native_result = emit_native(program);
+    let lowered = lower_to_python(native_result.module);
+    let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
+    let mut python_source -> string = lowered.source;
+    if python_source.length == 0 {
+        python_source = generate_program(program);
+        messages = [];
+    }
+
+    let mut entry_list -> ModuleDiagnostics[] = [];
+    if messages.length > 0 {
+        entry_list = [ModuleDiagnostics {
+            source_path: source_path,
+            messages: messages,
+            fatal: false,
+        }];
+    }
+
+    return ModuleCompilationResult {
+        module: CompiledModule {
+            source_path: source_path,
+            python_source: python_source,
+        },
+        diagnostics: entry_list,
+    };
+}
+
+fn format_typecheck_diagnostics(entries -> Diagnostic[]) -> string[] {
+    let mut messages -> string[] = [];
+    for entry in entries {
+        messages.push(entry.message);
+    }
+    return messages;
+}
+
+fn report_typecheck_errors(entries -> Diagnostic[]) ![io] {
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let diagnostic = entries[index];
+        print.error("[typecheck] " + diagnostic.message);
+        index += 1;
+    }
+}
+
+fn empty_native_module() -> NativeModule {
+    return NativeModule {
+        artifacts: [],
+        entry_points: [],
+        symbol_count: 0,
+    };
+}
+
+fn has_prefix(value -> string, prefix -> string) -> boolean {
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
 }

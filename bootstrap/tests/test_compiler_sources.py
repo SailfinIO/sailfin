@@ -1320,3 +1320,62 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
             "}\n"
         )
         assert not validate_effects(parse_program(test_ok))
+
+
+    def test_self_hosted_compile_project_generates_build(tmp_path: pathlib.Path) -> None:
+        stage1_namespace: dict[str, object] = {"__name__": "__main__"}
+
+        def compile_module(relative: str) -> None:
+            module_source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+            module_ast = parser.parse(module_source, lexer=base_lexer.clone())
+            module_python = CodeGenerator().generate_code(module_ast)
+            module_compiled = compile(
+                module_python,
+                str((REPO_ROOT / relative).with_suffix(".py")),
+                "exec",
+            )
+            exec(module_compiled, stage1_namespace, stage1_namespace)
+
+        for dependency in [
+            "compiler/src/token.sfn",
+            "compiler/src/ast.sfn",
+            "compiler/src/lexer.sfn",
+            "compiler/src/parser.sfn",
+            "compiler/src/decorator_semantics.sfn",
+            "compiler/src/effect_checker.sfn",
+            "compiler/src/typecheck.sfn",
+            "compiler/src/emitter_sailfin.sfn",
+            "compiler/src/emit_native.sfn",
+            "compiler/src/native_ir.sfn",
+            "compiler/src/native_lowering.sfn",
+            "compiler/src/native_llvm_lowering.sfn",
+            "compiler/src/code_generator.sfn",
+            "compiler/src/main.sfn",
+        ]:
+            compile_module(dependency)
+
+        compile_project = stage1_namespace["compile_project"]
+
+        absolute_sources = [str((REPO_ROOT / path).resolve()) for path in COMPILER_SOURCES]
+        result = compile_project(absolute_sources)
+
+        assert hasattr(result, "modules")
+        assert hasattr(result, "diagnostics")
+        assert all(not getattr(entry, "fatal", False) for entry in result.diagnostics)
+
+        modules_by_path = {
+            pathlib.Path(module.source_path).resolve(): module.python_source for module in result.modules
+        }
+
+        for source_path in COMPILER_SOURCES:
+            absolute_source = (REPO_ROOT / source_path).resolve()
+            assert absolute_source in modules_by_path
+            generated_python = modules_by_path[absolute_source]
+            output_path = (
+                REPO_ROOT
+                / "compiler"
+                / "build"
+                / source_path.relative_to("compiler/src").with_suffix(".py")
+            )
+            expected_python = output_path.read_text(encoding="utf-8")
+            assert generated_python == expected_python

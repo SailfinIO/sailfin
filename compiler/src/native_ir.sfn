@@ -15,6 +15,15 @@ enum NativeInstruction {
         type_annotation -> string;
         value -> string?;
     },
+    If { condition -> string },
+    Else,
+    EndIf,
+    For {
+        target -> string;
+        iterable -> string;
+    },
+    EndFor,
+    Noop,
     Unknown { text -> string },
 }
 
@@ -33,8 +42,32 @@ struct NativeFunction {
     instructions -> NativeInstruction[];
 }
 
+struct NativeImport {
+    module -> string;
+    names -> string[];
+}
+
+struct NativeStructField {
+    name -> string;
+    type_annotation -> string;
+    mutable -> boolean;
+}
+
+struct NativeStruct {
+    name -> string;
+    fields -> NativeStructField[];
+}
+
+struct StructParseResult {
+    definition -> NativeStruct?;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
 struct ParseNativeResult {
     functions -> NativeFunction[];
+    imports -> NativeImport[];
+    structs -> NativeStruct[];
     diagnostics -> string[];
 }
 
@@ -57,6 +90,8 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
     let lines = split_lines(text);
     let mut diagnostics -> string[] = [];
     let mut functions -> NativeFunction[] = [];
+    let mut imports -> NativeImport[] = [];
+    let mut structs -> NativeStruct[] = [];
     let mut current -> NativeFunction? = null;
 
     let mut index -> number = 0;
@@ -79,7 +114,22 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             continue;
         }
         if starts_with(line, ".import ") {
+            let parsed_import = parse_import_entry(strip_prefix(line, ".import "));
+            if parsed_import == null {
+                diagnostics = append_string(diagnostics, "unable to parse import: " + line);
+            } else {
+                imports = append_import(imports, parsed_import);
+            }
             index += 1;
+            continue;
+        }
+        if starts_with(line, ".struct ") {
+            let struct_result = parse_struct_definition(lines, index);
+            diagnostics = diagnostics.concat(struct_result.diagnostics);
+            if struct_result.definition != null {
+                structs = append_struct(structs, struct_result.definition);
+            }
+            index = struct_result.next_index;
             continue;
         }
         if starts_with(line, ".fn ") {
@@ -134,12 +184,6 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
-        if starts_with(line, ".let ") {
-            let instruction = parse_let_instruction(line);
-            current = append_instruction(current, instruction);
-            index += 1;
-            continue;
-        }
         let instruction = parse_instruction(line);
         current = append_instruction(current, instruction);
         index += 1;
@@ -149,11 +193,23 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
     }
 
-    return ParseNativeResult { functions: functions, diagnostics: diagnostics };
+    return ParseNativeResult { functions: functions, imports: imports, structs: structs, diagnostics: diagnostics };
 }
 
 fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
     return functions.concat([value]);
+}
+
+fn append_import(imports -> NativeImport[], value -> NativeImport) -> NativeImport[] {
+    return imports.concat([value]);
+}
+
+fn append_struct(structs -> NativeStruct[], value -> NativeStruct) -> NativeStruct[] {
+    return structs.concat([value]);
+}
+
+fn append_struct_field(fields -> NativeStructField[], field -> NativeStructField) -> NativeStructField[] {
+    return fields.concat([field]);
 }
 
 fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) -> NativeFunction {
@@ -203,6 +259,35 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
 }
 
 fn parse_instruction(line -> string) -> NativeInstruction {
+    if line == "noop" {
+        return NativeInstruction.Noop();
+    }
+    if starts_with(line, ".if ") {
+        let condition = trim_text(strip_prefix(line, ".if "));
+        return NativeInstruction.If { condition: condition };
+    }
+    if line == ".else" {
+        return NativeInstruction.Else();
+    }
+    if line == ".endif" {
+        return NativeInstruction.EndIf();
+    }
+    if starts_with(line, ".for ") {
+        let body = trim_text(strip_prefix(line, ".for "));
+        let separator = " in ";
+        let index = index_of(body, separator);
+        if index >= 0 {
+            let target = trim_text(runtime.substring(body, 0, index));
+            let iterable = trim_text(runtime.substring(body, index + separator.length, body.length));
+            return NativeInstruction.For { target: target, iterable: iterable };
+        }
+    }
+    if line == ".endfor" {
+        return NativeInstruction.EndFor();
+    }
+    if starts_with(line, ".let ") {
+        return parse_let_instruction(line);
+    }
     if starts_with(line, "ret") {
         let remainder = trim_text(runtime.substring(line, 3, line.length));
         if remainder.length == 0 {
@@ -210,10 +295,135 @@ fn parse_instruction(line -> string) -> NativeInstruction {
         }
         return NativeInstruction.Return { expression: remainder };
     }
+    if starts_with(line, "eval let ") {
+        let body = trim_text(strip_prefix(line, "eval let "));
+        let mut is_mutable -> boolean = false;
+        if starts_with(body, "mut ") {
+            is_mutable = true;
+            body = trim_text(strip_prefix(body, "mut "));
+        }
+        let parsed = parse_binding_components(body);
+        return NativeInstruction.Let {
+            name: parsed.name,
+            mutable: is_mutable,
+            type_annotation: parsed.type_annotation,
+            value: parsed.value,
+        };
+    }
     if starts_with(line, "eval ") {
         return NativeInstruction.Expression { expression: trim_text(strip_prefix(line, "eval ")) };
     }
     return NativeInstruction.Unknown { text: line };
+}
+
+fn parse_import_entry(entry -> string) -> NativeImport? {
+    let trimmed = trim_text(entry);
+    if trimmed.length == 0 {
+        return null;
+    }
+    let mut module_text -> string = trimmed;
+    let mut names -> string[] = [];
+    let brace_index = index_of(trimmed, "{");
+    if brace_index >= 0 {
+        let close_index = last_index_of(trimmed, "}");
+        if close_index < 0 || close_index <= brace_index {
+            return null;
+        }
+        module_text = trim_text(runtime.substring(trimmed, 0, brace_index));
+        let names_segment = runtime.substring(trimmed, brace_index + 1, close_index);
+        names = parse_import_names(names_segment);
+    }
+    module_text = strip_quotes(trim_text(module_text));
+    return NativeImport { module: module_text, names: names };
+}
+
+fn parse_import_names(text -> string) -> string[] {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return [];
+    }
+    return split_comma_separated(trimmed);
+}
+
+fn parse_struct_definition(lines -> string[], start_index -> number) -> StructParseResult {
+    let mut diagnostics -> string[] = [];
+    let header = trim_text(lines[start_index]);
+    let name_text = trim_text(strip_prefix(header, ".struct "));
+    let mut struct_name -> string = name_text;
+    let space_index = index_of(struct_name, " ");
+    if space_index >= 0 {
+        struct_name = trim_text(runtime.substring(struct_name, 0, space_index));
+    }
+    if struct_name.length == 0 {
+        diagnostics = append_string(diagnostics, "unable to parse struct header: " + header);
+        return StructParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
+    }
+
+    let mut fields -> NativeStructField[] = [];
+    let mut index = start_index + 1;
+    loop {
+        if index >= lines.length {
+            diagnostics = append_string(diagnostics, "unterminated struct " + struct_name);
+            return StructParseResult {
+                definition: NativeStruct { name: struct_name, fields: fields },
+                next_index: index,
+                diagnostics: diagnostics,
+            };
+        }
+        let raw_line = trim_text(lines[index]);
+        if raw_line.length == 0 || starts_with(raw_line, ";") {
+            index += 1;
+            continue;
+        }
+        if raw_line == "noop" {
+            index += 1;
+            continue;
+        }
+        if raw_line == ".endstruct" {
+            index += 1;
+            break;
+        }
+        if starts_with(raw_line, ".field ") {
+            let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "));
+            if parsed_field == null {
+                diagnostics = append_string(diagnostics, "unable to parse struct field: " + raw_line);
+            } else {
+                fields = append_struct_field(fields, parsed_field);
+            }
+            index += 1;
+            continue;
+        }
+        diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line);
+        index += 1;
+    }
+
+    return StructParseResult {
+        definition: NativeStruct { name: struct_name, fields: fields },
+        next_index: index,
+        diagnostics: diagnostics,
+    };
+}
+
+fn parse_struct_field_line(text -> string) -> NativeStructField? {
+    let mut trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return null;
+    }
+    let mut is_mutable -> boolean = false;
+    if starts_with(trimmed, "mut ") {
+        is_mutable = true;
+        trimmed = trim_text(strip_prefix(trimmed, "mut "));
+    }
+    let arrow_index = index_of(trimmed, "->");
+    if arrow_index < 0 {
+        return null;
+    }
+    let name = trim_text(runtime.substring(trimmed, 0, arrow_index));
+    if name.length == 0 {
+        return null;
+    }
+    let type_text = trim_text(runtime.substring(trimmed, arrow_index + 2, trimmed.length));
+    return NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
 fn parse_let_instruction(line -> string) -> NativeInstruction {
@@ -258,7 +468,19 @@ fn parse_binding_components(text -> string) -> BindingComponents {
     let mut value -> string? = null;
     let mut remainder -> string = trim_text(runtime.substring(text, index, text.length));
     if remainder.length > 0 {
-        if starts_with(remainder, ":") {
+        if starts_with(remainder, "->") {
+            remainder = trim_text(strip_prefix(remainder, "->"));
+            let assign_index = index_of(remainder, "=");
+            if assign_index >= 0 {
+                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
+                let value_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                if value_text.length > 0 {
+                    value = value_text;
+                }
+            } else {
+                type_annotation = trim_text(remainder);
+            }
+        } else if starts_with(remainder, ":") {
             remainder = trim_text(strip_prefix(remainder, ":"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
@@ -536,6 +758,48 @@ fn index_of(value -> string, target -> string) -> number {
         index += 1;
     }
     return -1;
+}
+
+fn last_index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return value.length;
+    }
+    let mut index -> number = value.length - target.length;
+    loop {
+        if index < 0 {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if value[index + match_index] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index -= 1;
+    }
+    return -1;
+}
+
+fn strip_quotes(value -> string) -> string {
+    if value.length >= 2 {
+        let first = value[0];
+        let last = value[value.length - 1];
+        let is_double = first == "\"" && last == "\"";
+        let is_single = first == "'" && last == "'";
+        if is_double || is_single {
+            return runtime.substring(value, 1, value.length - 1);
+        }
+    }
+    return value;
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {

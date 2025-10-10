@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import pathlib
 import shutil
+import importlib
+import sys
 from typing import Iterable
 
 from bootstrap.code_generator import CodeGenerator
@@ -102,7 +104,70 @@ def main(argv: Iterable[str] | None = None) -> int:
             display_output = output_path
         print(f"[sfn] {display_source} -> {display_output}")
 
+    _run_self_hosted_pipeline(sources, output_dir)
+
     return 0
+
+
+def _run_self_hosted_pipeline(sources: list[pathlib.Path], output_dir: pathlib.Path) -> None:
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+
+    try:
+        stage1_main = importlib.import_module("compiler.build.main")
+    except ModuleNotFoundError as exc:  # pragma: no cover - defensive
+        raise RuntimeError(
+            "Stage1 compiler modules are missing; bootstrap compilation phase must succeed first"
+        ) from exc
+
+    compile_project = getattr(stage1_main, "compile_project", None)
+    if compile_project is None:
+        raise RuntimeError("compile_project function not found in compiler.build.main")
+
+    absolute_sources = [str(path) for path in sources]
+    result = compile_project(absolute_sources)
+    diagnostics = getattr(result, "diagnostics", [])
+    fatal_entries = [entry for entry in diagnostics if getattr(entry, "fatal", False)]
+    if fatal_entries:
+        for entry in fatal_entries:
+            source_path = getattr(entry, "source_path", "<unknown>")
+            for message in getattr(entry, "messages", []):
+                print(f"[stage1][error] {source_path}: {message}")
+        raise SystemExit("Self-hosted compilation aborted due to diagnostics")
+
+    for entry in diagnostics:
+        if getattr(entry, "fatal", False):
+            continue
+        source_path = getattr(entry, "source_path", "<unknown>")
+        for message in getattr(entry, "messages", []):
+            print(f"[stage1][warn] {source_path}: {message}")
+
+    modules = getattr(result, "modules", [])
+    modules_by_source = {
+        pathlib.Path(getattr(module, "source_path")).resolve(): module for module in modules
+    }
+
+    for source_path in sources:
+        module = modules_by_source.get(source_path.resolve())
+        if module is None:
+            raise SystemExit(f"Stage1 compiler did not produce output for {source_path}")
+        try:
+            relative = source_path.relative_to(DEFAULT_SOURCE_DIR)
+        except ValueError:
+            relative = source_path.name
+        destination = (output_dir / pathlib.Path(relative)).with_suffix(".py")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        python_source = getattr(module, "python_source")
+        destination.write_text(python_source, encoding="utf-8")
+        try:
+            display_source = source_path.relative_to(REPO_ROOT)
+        except ValueError:
+            display_source = source_path
+        try:
+            display_destination = destination.relative_to(REPO_ROOT)
+        except ValueError:
+            display_destination = destination
+        print(f"[stage1] {display_source} -> {display_destination}")
 
 
 if __name__ == "__main__":

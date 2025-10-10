@@ -229,6 +229,40 @@ fn is_identifier_char(ch -> string) -> boolean {
     return false;
 }
 
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return runtime.substring(value, start, end);
+}
+
+fn is_trim_char(ch -> string) -> boolean {
+    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+}
 fn emit_model(
     builder -> CodeBuilder,
     name -> string,
