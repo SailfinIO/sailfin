@@ -104,8 +104,8 @@ fn analyze_routine(
         if decorator_index >= decorator_info.length {
             break;
         }
-    let decorator_entry = decorator_info[decorator_index];
-    if decorator_entry.name == "trace" {
+        let decorator_entry = decorator_info[decorator_index];
+        if decorator_entry.name == "trace" || decorator_entry.name == "logExecution" || decorator_entry.name == "logexecution" {
             requires_io_from_decorators = true;
             break;
         }

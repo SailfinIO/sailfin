@@ -34,6 +34,16 @@ COMPILER_SOURCES = [
 ]
 
 
+def test_self_hosted_decorator_logexecution_infers_io() -> None:
+    from compiler.build.ast import Decorator
+    from compiler.build.decorator_semantics import evaluate_decorators, infer_effects
+
+    info = evaluate_decorators([Decorator("logExecution", [])])
+    effects = infer_effects([], info)
+
+    assert "io" in effects
+
+
 @pytest.mark.parametrize("source_path", COMPILER_SOURCES)
 def test_compile_compiler_source(source_path: pathlib.Path) -> None:
     full_path = REPO_ROOT / source_path

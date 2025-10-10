@@ -37,8 +37,9 @@ roadmaps.
   (e.g. `@logExecution`), and runtime helpers such as `fs.*`, `http.*`,
   `websocket.*`, `serve`, `spawn`, `print.*`, and `sleep` (including their
   `runtime.*` aliases).
-- Self-hosted prototype: Infers `io` when decorators like `@trace` appear and
-  scans blocks for prompts and runtime helpers, including `fs.*`,
+- Self-hosted prototype: Infers `io` when decorators like `@trace` or
+  `@logExecution` appear and scans blocks for prompts and runtime helpers,
+  including `fs.*`,
   `http.*`, `websocket.*`, `serve`, and `spawn`. Hierarchical effects remain
   design-stage work.
 

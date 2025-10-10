@@ -40,7 +40,7 @@ fn infer_effects(existing -> string[], decorators -> DecoratorInfo[]) -> string[
             break;
         }
         let decorator = decorators[index];
-        if decorator.name == "trace" {
+        if decorator.name == "trace" || decorator.name == "logExecution" || decorator.name == "logexecution" {
             requires_io = true;
         }
         index += 1;
