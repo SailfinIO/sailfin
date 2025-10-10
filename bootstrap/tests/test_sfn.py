@@ -34,10 +34,7 @@ SFN_FILES = sorted(
     {p for root in (EXAMPLE_ROOT, COMPILER_SRC_ROOT) for p in root.rglob("*.sfn")}
 )
 
-COMPILER_SFN_FILES = sorted(COMPILER_SRC_ROOT.glob("*.sfn"))
-SELF_HOST_COMPILER_FILES = [
-    path for path in COMPILER_SFN_FILES if path.name not in {"parser.sfn"}
-]
+SELF_HOST_COMPILER_FILES = sorted(COMPILER_SRC_ROOT.glob("*.sfn"))
 
 @pytest.fixture(scope="session")
 def self_host_compiler(tmp_path_factory: pytest.TempPathFactory):

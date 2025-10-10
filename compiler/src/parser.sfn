@@ -3978,53 +3978,66 @@ fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> Fiel
 }
 
 fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
-    return methods.concat([method]);
+    methods.push(method);
+    return methods;
 }
 
 fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[] {
-    return signatures.concat([signature]);
+    signatures.push(signature);
+    return signatures;
 }
 
 fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[] {
-    return variants.concat([variant]);
+    variants.push(variant);
+    return variants;
 }
 
 fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
-    return types.concat([item]);
+    types.push(item);
+    return types;
 }
 
 fn append_type_parameter(parameters -> TypeParameter[], parameter -> TypeParameter) -> TypeParameter[] {
-    return parameters.concat([parameter]);
+    parameters.push(parameter);
+    return parameters;
 }
 
 fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
-    return decorators.concat([decorator]);
+    decorators.push(decorator);
+    return decorators;
 }
 
 fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[] {
-    return arguments.concat([argument]);
+    arguments.push(argument);
+    return arguments;
 }
 
 fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[] {
-    return clauses.concat([clause]);
+    clauses.push(clause);
+    return clauses;
 }
 
 fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
-    return cases.concat([case]);
+    cases.push(case);
+    return cases;
 }
 
 fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
-    return expressions.concat([expression]);
+    expressions.push(expression);
+    return expressions;
 }
 
 fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectField[] {
-    return fields.concat([field]);
+    fields.push(field);
+    return fields;
 }
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {
-    return tokens.concat([token]);
+    tokens.push(token);
+    return tokens;
 }
 
 fn append_token_array(collection -> Token[][], tokens -> Token[]) -> Token[][] {
-    return collection.concat([tokens]);
+    collection.push(tokens);
+    return collection;
 }
