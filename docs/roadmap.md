@@ -9,18 +9,25 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 ## Active Workstreams (Do Now)
 
-1. **Registry & Capsule Workflow**
-   - [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
-   - [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the bootstrap runtime.
-   - [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
+1. **Self-Hosted Compiler Escape Velocity**
+   - [ ] Closed-loop bootstrap — `compiler/src/main.sfn` parses, checks, and emits Sailfin that recompiles the entire compiler without stage0 assistance (tracked via `bootstrap/tests/test_compiler_sources.py`).
+   - [ ] Semantic passes — Land name resolution, type analysis, and effect propagation in Sailfin (`compiler/src/typecheck.sfn`, updated `effect_checker.sfn`) so diagnostics match the Python implementation.
+   - [ ] Native backend spike — Stand up the first non-Python backend (`compiler/src/emit_native.sfn`) targeting LLVM IR or WASM as described in `compiler/README.md`, with smoke tests that execute compiled binaries for simple programs.
+   - [ ] Bootstrap retirement plan — Define the cut-over checklist (tests, docs, release notes) for replacing the Python toolchain once the Sailfin pipeline stays green for multiple consecutive builds.
 
-2. **Self-Hosted Compiler**
-   - [ ] AST + semantic passes — Introduce name resolution and effect propagation in Sailfin (`compiler/src/effect_checker.sfn`, forthcoming `typecheck.sfn`).
-   - [ ] Self-hosted emitter — Expand the Sailfin emitter to cover full expression lowering and minimal runtime bindings.
-   - [ ] Runtime prelude — Replace Python mock runtime with Sailfin-native implementations / FFI bridges.
+2. **Runtime & FFI Foundations**
+   - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `compiler/runtime/`, ensuring effect annotations remain enforced.
+   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
+   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
+
+3. **Registry & Capsule Workflow**
+   - [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
+   - [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the Sailfin toolchain once native builds are viable.
+   - [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
 
 ## Ready Next (Pull When Active Stream Clears)
 
+- [ ] Self-hosted release candidate — Criteria and staging plan for shipping the Sailfin compiler/runtime bundle once the bootstrap dependency is removed.
 - [ ] `sfn` package manager release plan — Define rollout steps once CLI integration lands.
 - [ ] Registry authentication & signing — Add capability manifests and signed provenance to registry flows.
 

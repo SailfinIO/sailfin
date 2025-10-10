@@ -104,15 +104,18 @@ roadmaps.
 
 ## Active Workstreams
 
-1. **Parser & AST parity** — close gaps between bootstrap and Sailfin
-   parsers to unlock full round-trip coverage (see `compiler/src/parser.sfn`).
-2. **Effect system expansion** — extend validators to recognize filesystem
-   and network helpers beyond `fs/http/websocket`, and carry capability data
-  from manifests when available.
-3. **Registry integration** — wire manifest parsing and publish/resolve
-   commands against `registry.sailfin.dev`.
-4. **Native runtime** — replace mocked I/O with effect-aware adapters and
-   async scheduling in Sailfin code.
+1. **Self-hosted bootstrap loop** — keep the Sailfin compiler sources compiling
+  themselves without stage0 assistance while the new passes land (tracked via
+  `bootstrap/tests/test_compiler_sources.py`).
+2. **Semantic parity & diagnostics** — land name resolution, type analysis, and
+  richer error reporting in Sailfin (`compiler/src/typecheck.sfn`, expanded
+  `effect_checker.sfn`) so outputs match the Python toolchain.
+3. **Native runtime & FFI** — swap the Python runtime stubs with Sailfin
+  implementations plus minimal capability-aware bridges for filesystem, HTTP,
+  model execution, and concurrency primitives.
+4. **Registry integration** — wire manifest parsing and publish/resolve
+  commands against `registry.sailfin.dev` once the self-hosted compiler stays
+  green.
 
 Track detailed milestones and sequencing in `docs/roadmap.md`. When a
 feature graduates from prototype into stage0, update the table above and
