@@ -1881,16 +1881,94 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
     }
 
     current = skip_trivia(current);
-    let body_result = parse_block(current);
-    if body_result.block.tokens.length == 0 {
+    let next = parser_peek_raw(current);
+
+    let mut body -> Block? = null;
+
+    if next.kind.variant == "Symbol" && next.kind.value == "{" {
+        let body_result = parse_block(current);
+        if body_result.block.tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+        current = body_result.parser;
+        body = body_result.block;
+    } else if identifier_matches(next, "return") {
+        let mut block_tokens -> Token[] = [];
+
+        block_tokens = append_token(block_tokens, next);
+        current = parser_advance_raw(current);
+
+        let capture = collect_until(current, [";", "}"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        let mut return_expression -> Expression? = null;
+        if trimmed_expression_tokens.length > 0 {
+            return_expression = expression_from_tokens(trimmed_expression_tokens);
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+        block_tokens = trim_token_edges(block_tokens);
+
+        let mut statements -> Statement[] = [];
+        statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block { tokens: block_tokens, text: text, statements: statements };
+    } else {
+        let capture = collect_until(current, [";", "}"]);
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        if trimmed_expression_tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+
+        let expression = expression_from_tokens(trimmed_expression_tokens);
+
+        let mut block_tokens -> Token[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+        block_tokens = trim_token_edges(block_tokens);
+
+        let mut statements -> Statement[] = [];
+        statements = append_statement(statements, Statement.ExpressionStatement { expression: expression });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block { tokens: block_tokens, text: text, statements: statements };
+    }
+
+    if body == null {
         return MatchCaseParseResult { parser: original, case: null, success: false };
     }
-    current = body_result.parser;
 
     let case = MatchCase {
         pattern: pattern_expression,
         guard: guard_expression,
-        body: body_result.block,
+        body: body,
     };
 
     return MatchCaseParseResult { parser: current, case: case, success: true };

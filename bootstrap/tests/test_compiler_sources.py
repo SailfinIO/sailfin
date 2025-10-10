@@ -425,6 +425,33 @@ def test_compile_compiler_source(source_path: pathlib.Path) -> None:
         assert getattr(first_case.guard, "text", "").strip() == "value > 0"
         second_case = match_stmt.cases[1]
         assert second_case.guard is None
+
+        inline_sample = (
+            "fn adjust(value -> number) -> number {\n"
+            "    match value {\n"
+            "        case score => score + 1;\n"
+            "        case _ => return 0;\n"
+            "    }\n"
+            "}\n"
+        )
+        inline_program = parse_program(inline_sample)
+        adjust_fn = inline_program.statements[0]
+        inline_match = adjust_fn.body.statements[0]
+        assert inline_match.variant == "MatchStatement"
+        expr_case = inline_match.cases[0]
+        expr_block = expr_case.body
+        assert len(expr_block.statements) == 1
+        expr_stmt = expr_block.statements[0]
+        assert expr_stmt.variant == "ExpressionStatement"
+        expr_expression = expr_stmt.expression
+        assert getattr(expr_expression, "text", "").strip() == "score + 1"
+        return_case = inline_match.cases[1]
+        return_block = return_case.body
+        assert len(return_block.statements) == 1
+        return_stmt = return_block.statements[0]
+        assert return_stmt.variant == "ReturnStatement"
+        assert return_stmt.expression is not None
+        assert return_stmt.expression.variant == "NumberLiteral"
         assert signature.parameters[0].name == "name"
         assert signature.parameters[0].type_annotation is not None
         assert signature.type_parameters == []

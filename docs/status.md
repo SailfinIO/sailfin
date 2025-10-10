@@ -28,8 +28,9 @@ roadmaps.
   `pipeline`, `test`, `type`, and `match` declarations.
 - Self-hosted prototype: Mirrors the same surface and now recognises
   block-level `if`/`else`, `for` loops, and `match` statements with `case`
-  guards captured as expressions; expressions within bodies currently
-  round-trip as literal or identifier tokens.
+  guards captured as expressions plus inline `=>` expression or `return`
+  bodies; expressions within bodies currently round-trip as literal or
+  identifier tokens.
 
 **Effect Tracking (`![...]`)**
 - Bootstrap: Enforces `model`, `io`, `net`, and `clock` via
