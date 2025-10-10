@@ -27,11 +27,11 @@ bootstrap-install:
 bootstrap-test:
 	$(CONDA) run -n $(CONDA_ENV) pytest $(PYTEST_ARGS)
 
-bootstrap-compile:
-	$(CONDA) run -n $(CONDA_ENV) python -m bootstrap.compile_self_host
-
 compiler-clean:
 	rm -rf compiler/build
+
+bootstrap-compile: compiler-clean
+	$(CONDA) run -n $(CONDA_ENV) python -m bootstrap.compile_self_host
 
 test: bootstrap-test
 

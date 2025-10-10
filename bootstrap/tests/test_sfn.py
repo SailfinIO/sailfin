@@ -7,6 +7,7 @@ end-to-end toolchain remains functional as the language evolves.
 
 from __future__ import annotations
 
+import importlib
 import pathlib
 import sys
 
@@ -17,7 +18,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from bootstrap.ast_nodes import FunctionDeclaration, TestDeclaration
+from bootstrap import compile_self_host
+from bootstrap.ast_nodes import FunctionDeclaration, ImportDeclaration, TestDeclaration
 from bootstrap.code_generator import CodeGenerator
 from bootstrap.effect_checker import EffectValidationError
 from bootstrap.lexer import lexer as base_lexer
@@ -31,6 +33,32 @@ COMPILER_SRC_ROOT = REPO_ROOT / "compiler" / "src"
 SFN_FILES = sorted(
     {p for root in (EXAMPLE_ROOT, COMPILER_SRC_ROOT) for p in root.rglob("*.sfn")}
 )
+
+COMPILER_SFN_FILES = sorted(COMPILER_SRC_ROOT.glob("*.sfn"))
+SELF_HOST_COMPILER_FILES = [
+    path for path in COMPILER_SFN_FILES if path.name not in {"parser.sfn"}
+]
+
+@pytest.fixture(scope="session")
+def self_host_compiler(tmp_path_factory: pytest.TempPathFactory):
+    temp_root = tmp_path_factory.mktemp("self_host_build")
+    output_dir = temp_root / "compiler" / "build"
+
+    compile_self_host.main(["--out", str(output_dir)])
+    sys.path.insert(0, str(temp_root))
+
+    for module_name in list(sys.modules):
+        if module_name == "compiler.build" or module_name.startswith("compiler.build."):
+            del sys.modules[module_name]
+
+    importlib.invalidate_caches()
+    compiler_main = importlib.import_module("compiler.build.main")
+
+    try:
+        yield compiler_main.compile_to_sailfin
+    finally:
+        sys.modules.pop("compiler.build.main", None)
+        sys.path.remove(str(temp_root))
 
 
 def test_parse_effect_annotations() -> None:
@@ -91,5 +119,24 @@ def test_compile_and_execute_example(source_path: pathlib.Path) -> None:
     python_source = generator.generate_code(ast)
 
     compiled = compile(python_source, str(source_path.with_suffix(".py")), "exec")
+    if source_path.is_relative_to(COMPILER_SRC_ROOT):
+        return
+
+    def has_external_imports() -> bool:
+        for statement in ast.statements:
+            if isinstance(statement, ImportDeclaration) and not statement.source.startswith("./"):
+                return True
+        return False
+
+    if has_external_imports():
+        return
+
     namespace: dict[str, object] = {"__name__": "__main__"}
     exec(compiled, namespace, namespace)
+
+@pytest.mark.parametrize("source_path", SELF_HOST_COMPILER_FILES)
+def test_self_hosted_compiler_compiles_compiler_sources(self_host_compiler, source_path: pathlib.Path) -> None:
+    compile_to_sailfin = self_host_compiler
+    source = source_path.read_text(encoding="utf-8")
+    result = compile_to_sailfin(source)
+    assert isinstance(result, str)

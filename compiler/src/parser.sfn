@@ -17,14 +17,18 @@ import {
     MethodDeclaration,
     ModelDeclaration,
     ModelProperty,
+    ObjectField,
     Parameter,
     PipelineDeclaration,
+    ForClause,
     Program,
     Statement,
     TypeParameter,
     TestDeclaration,
     TypeAnnotation,
     ToolDeclaration,
+    MatchCase,
+    ElseBranch,
     WithClause,
 } from "./ast";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";

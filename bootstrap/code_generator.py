@@ -108,6 +108,7 @@ class CodeGenerator:
         self._async_stack: List[bool] = [False]
         self._imports: List[str] = [
             "import asyncio",
+                "import importlib",
             "from bootstrap import runtime_support as runtime",
         ]
         self._preamble: List[str] = []
@@ -191,8 +192,7 @@ class CodeGenerator:
 
     def _emit_statement(self, stmt) -> None:  # type: ignore[override]
         if isinstance(stmt, ImportDeclaration):
-            items = ", ".join(stmt.items)
-            self._emit(f"# TODO import {items} from {stmt.source}")
+            self._emit_import(stmt)
         elif isinstance(stmt, TypeAliasDeclaration):
             self._emit(f"# type alias {stmt.name}")
         elif isinstance(stmt, InterfaceDeclaration):
@@ -281,6 +281,23 @@ class CodeGenerator:
             self._emit_with(stmt)
         else:  # pragma: no cover - future extensions
             raise NotImplementedError(f"Unhandled statement: {type(stmt).__name__}")
+
+    def _emit_import(self, decl: ImportDeclaration) -> None:
+        module = decl.source
+        if module.startswith("./"):
+            module = module[2:]
+            module = module.replace("/", ".")
+            module = f"compiler.build.{module}"
+        else:
+            module = module.replace("/", ".")
+        temp_module = self._new_temp("module")
+        self._emit(f"{temp_module} = importlib.import_module({module!r})")
+        if decl.items:
+            for item in decl.items:
+                self._emit(f"{item} = getattr({temp_module}, {item!r})")
+        else:
+            target_name = module.split(".")[-1]
+            self._emit(f"{target_name} = {temp_module}")
 
     def _emit_block(self, block: Block) -> None:
         if not block.statements:
@@ -696,6 +713,9 @@ class CodeGenerator:
                 if member == 'concat' and len(expr.arguments) == 1:
                     other = self._emit_expression(expr.arguments[0])
                     return f"list({target}) + list({other})"
+                if member == 'push' and len(expr.arguments) == 1:
+                    element = self._emit_expression(expr.arguments[0])
+                    return f"{target}.append({element})"
             callee = self._emit_expression(expr.callee)
             args = ", ".join(self._emit_expression(arg) for arg in expr.arguments)
             return f"{callee}({args})"
