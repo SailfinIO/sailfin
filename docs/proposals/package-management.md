@@ -1,8 +1,17 @@
-# Sailfin Capsule & Model Management
+# Proposal: Sailfin Capsule & Model Management
 
-Sailfin ships with a built-in package manager called `sfn`.
-It manages code capsules, model artefacts, capability manifests, and reproducible build metadata.
-The interface feels familiar to developers used to modern dependency managers, but it is designed for deterministic, AI-native projects.
+Status: Draft (Design)  
+Last updated: October 2025  
+Owners: Tooling / Registry Working Group
+
+Sailfin ships with a built-in package manager called `sfn`. It manages code
+capsules, model artefacts, capability manifests, and reproducible build
+metadata. The interface mirrors modern dependency managers but is designed for
+deterministic, AI-native projects.
+
+> Implementation note: The Python bootstrap toolchain does not yet ship an `sfn`
+> CLI. Registry workflows live in this proposal until the integration work in
+> `docs/roadmap.md` lands.
 
 ## Getting Started
 
@@ -12,8 +21,8 @@ The interface feels familiar to developers used to modern dependency managers, b
 sfn add sailfin/http
 ```
 
-This fetches the `sailfin/http` capsule from the Sailfin registry and records it in your `sail.toml` manifest.
-Multiple capsules can be added at once:
+This fetches the `sailfin/http` capsule from the Sailfin registry and records it
+in your `sail.toml` manifest. Multiple capsules can be added at once:
 
 ```bash
 sfn add sailfin/http sailfin/io sailfin/net
@@ -41,14 +50,17 @@ allow = ["io", "net", "model"]
 "openai.summarizer" = "gpt-foo@2.3.1"
 ```
 
-Capabilities listed here gate which effects the capsule may use; the compiler rejects code that performs an undeclared effect.  
-Model entries capture exact provider versions so builds remain reproducible.
+Capabilities listed here gate which effects the capsule may use; the compiler
+rejects code that performs an undeclared effect. Model entries capture provider
+versions so builds remain reproducible.
 
-Projects containing multiple capsules are organised as a fleet, defined by a top-level `fleet.toml`.
+Projects containing multiple capsules are organised as a fleet, defined by a
+top-level `fleet.toml`.
 
 ### Fleet Manifest Example
 
-Below is an illustrative `fleet.toml` showing how multiple capsules, shared profiles, and model provenance are declared. (Fields and syntax are evolving.)
+Below is an illustrative `fleet.toml` showing how multiple capsules, shared
+profiles, and model provenance are declared. (Fields and syntax are evolving.)
 
 ```toml
 [fleet.meta]
@@ -109,12 +121,14 @@ cost_cap = 0.05 # USD (currency literal support forthcoming)
 ```
 
 The fleet manifest orchestrates:
+
 - Capsules and their effect capability boundaries
 - Reproducible model and dependency locking
 - Build profiles for different workflows
 - Shared evaluation / provenance policies
 
-Individual capsules still declare their own `sail.toml`; the fleet manifest aggregates and overrides where necessary.
+Individual capsules still declare their own `sail.toml`; the fleet manifest
+aggregates and overrides where necessary.
 
 ## Common Commands
 
@@ -136,13 +150,17 @@ The package manager treats models as first-class dependencies.
 sfn add-model openai:summarizer@2.3.1
 ```
 
-Model metadata is stored under `.sfn/models/` and embedded into build outputs as generation-card templates.  
-`sfn models sync` re-fetches provider signatures, cost caps, and evaluator baselines.
+Model metadata is stored under `.sfn/models/` and embedded into build outputs as
+generation-card templates. `sfn models sync` re-fetches provider signatures,
+cost caps, and evaluator baselines.
 
 ## Capability Bundles & Policies
 
-`sfn capabilities audit` reports which modules require effects (`io`, `net`, `model`, `gpu`, etc.) and ensures that policies exist for taint-tracked types such as `PII<T>` or `Secret<T>`.  
-Policy bundles ship alongside capsules so downstream consumers inherit redaction rules, retention windows, and consent flows.
+`sfn capabilities audit` reports which modules require effects (`io`, `net`,
+`model`, `gpu`, etc.) and ensures that policies exist for taint-tracked types
+such as `PII<T>` or `Secret<T>`. Policy bundles ship alongside capsules, so
+downstream consumers inherit redaction rules, retention windows, and consent
+flows.
 
 ## Example Workflow
 
@@ -191,19 +209,22 @@ sfn publish --registry registry.sailfin.dev
 
 ## Registry & Provenance
 
-Sailfin capsules and model artefacts are hosted on the central registry at <https://registry.sailfin.dev>.
+Sailfin capsules and model artefacts are hosted on the central registry at
+<https://registry.sailfin.dev>. Uploads include provenance metadata: commit
+hashes, generation cards, capability manifests, and evaluator baselines.
+Consumers can replay model calls using the bundled cards for deterministic
+evaluation.
 
-Each upload includes provenance metadata: commit hashes, generation cards, capability manifests, and evaluator baselines.  
-Consumers can replay model calls using the bundled cards for deterministic evaluation.
-
-> Placeholder: `registry.sailfin.dev` is not yet publicly available. Publish and sync commands shown above describe intended behaviour.
+The registry is live today, but the bootstrap toolchain lacks native commands
+for interacting with it; the flows above remain design targets until the CLI
+arrives.
 
 ## Local Cache
 
 `sfn` maintains a local cache to accelerate installs and model downloads.
 
-* Unix-like: `~/.sfn/cache`
-* Windows: `%USERPROFILE%\\.sfn\\cache`
+- Unix-like: `~/.sfn/cache`
+- Windows: `%USERPROFILE%\.sfn\cache`
 
 Clear the cache when needed:
 
@@ -227,4 +248,5 @@ sfn cache cards --replay <trace>
 | project | fleet (when multi-capsule) |
 | registry (Harbor) | registry |
 
-These changes align language tooling with capsule/fleet architecture and first-class model/version provenance.
+These changes align language tooling with capsule/fleet architecture and
+first-class model/version provenance.

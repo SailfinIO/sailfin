@@ -9,10 +9,23 @@ bootstrap compiler implements a pragmatic subset while the self-hosted
 implementation matures. This document captures the behaviour of the bootstrap
 subset and describes the design direction for forthcoming features.
 
+This specification is organised into two parts:
+
+- **Part A — Bootstrap Reference** documents only the behaviour available in the
+  Python stage0 toolchain and should stay in sync with `docs/status.md`.
+- **Part B — Design Preview** records planned extensions and references active
+  proposals under `docs/proposals/`. Treat the preview as informative until the
+  status document marks the feature as shipped.
+
+For an at-a-glance summary of what is implemented today, consult
+`docs/status.md`.
+
 NOTE: The repository currently contains a `bootstrap/` Python stage0 and early
 `compiler/` Sailfin sources. Diagrams and directory trees showing a unified
 fleet layout (with `fleet.toml`, `std/`, `runtime/`, etc.) represent the target
 self-hosted architecture, not the current on-disk structure.
+
+## Part A — Bootstrap Reference
 
 ## 1. Lexical Structure
 
@@ -541,6 +554,13 @@ Supported today:
 Not supported yet:
 - `print.warn`, `print.debug`, or structured logging levels. These may be added in the self-hosted runtime.
 
+
+## Part B — Design Preview
+
+The sections below describe the direction of the self-hosted compiler and
+adjacent tooling. They complement the roadmap (`docs/roadmap.md`) and proposals
+under `docs/proposals/`.
+
 ## 11. Roadmap
 
 Upcoming milestones include:
@@ -570,25 +590,10 @@ Note (planned): Engines, adapters, tensors, and training are specified in a draf
 
 ### Bootstrap vs Self-Hosted Feature Matrix
 
-| Feature / Construct         | Bootstrap Parser | Bootstrap Enforced | Self-Hosted (Planned) |
-|-----------------------------|------------------|--------------------|-----------------------|
-| Generics                    | Yes (metadata)   | Partial (erased)   | Full monomorph / constraints |
-| Effects (`![...]`)          | Yes              | Partial (io, net, model) | Static + capability gates |
-| Pipelines `pipeline`        | Yes              | Parsed + emitted, semantics evolving | Shape + effect analysis |
-| Models & evaluators         | Yes              | Stub call + card   | Real provider + cost/provenance |
-| String interpolation `{{}}` | Yes              | Runtime eval       | Templated + typed escapes |
-| Linear/Affine wrappers      | Parsed           | Diagnostics only   | Ownership + borrow checker |
-| `assert` statement          | Yes              | Runtime boolean    | Rich diagnostics + shrink cases |
-| `is` operator               | Yes (runtime)    | Nominal check via runtime.check_type | Flow-sensitive narrowing |
-| Named arguments             | Yes              | Metadata           | Reordering + default compatibility |
-| Tool declarations           | Yes              | Stub dispatch      | Sandboxed invocation + auditing |
-| Capability policies         | Manifest stub    | Not enforced       | Full static + dynamic guards |
-| Model replay cards          | Generated stub   | Minimal metadata   | Deterministic re-execution |
-| Registry integration        | Placeholder      | N/A                | Publish/resolve/verify |
+See `docs/status.md` for the canonical feature table and implementation notes.
 
-`registry.sailfin.dev` is live but contains no packages yet. The bootstrap toolchain
-does not currently integrate with the registry; this is planned for the
-self-hosted compiler.
+`registry.sailfin.dev` is live, but the bootstrap toolchain does not yet expose
+publish/resolve commands; integration work tracks on the roadmap.
 
 ## Effect System (Bootstrap reality and planned)
 

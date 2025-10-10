@@ -2,7 +2,9 @@
 
 This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, concurrency primitives, and forthcoming AI-native features described in `docs/spec.md`.
 
-Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, remember these are partially stubbed in the current Python runtime: semantics (capability enforcement, provenance, determinism) will harden in the self‑hosted toolchain.
+Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.
+
+Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, remember these are partially stubbed in the current Python runtime: semantics (capability enforcement, provenance, determinism) will harden in the self-hosted toolchain.
 
 ## Categories
 
@@ -15,5 +17,11 @@ Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, 
 - [Functional](./functional/) – Higher‑order functions, map/reduce, immutable style data transforms.
 - [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
 - [Types](./types/) – Recursive types, tagged unions, ADTs & pattern matching examples.
+
+## Runtime Notes
+
+- **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` avoid undeclared effects and run end-to-end with mocked runtime helpers.
+- **Effect-sensitive**: `ai`, `web`, `concurrency`, and `io` rely on the mocked `http`, `websocket`, `fs`, and scheduling helpers in `bootstrap/runtime_support.py`. They validate syntax and effect enforcement but do not perform real network or file I/O.
+- **Forward-looking**: Selected files in `advanced/` and `ai/` include comments that mark syntax planned for the self-hosted compiler (e.g., currency literals, pipeline operators). Replace future syntax with bootstrap-compatible constructs when executing.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

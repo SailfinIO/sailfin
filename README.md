@@ -59,55 +59,29 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 
 ## Current Status
 
-Sailfin is under active design and bootstrapping.  
-The Python-hosted stage0 toolchain supports a growing subset of the language while the self-hosted compiler, effect system, and runtime evolve in Sailfin itself.
+Sailfin is under active design and bootstrapping. The Python stage0 compiler is
+the production toolchain today while the Sailfin-written front end evolves
+alongside it.
 
-- `docs/spec.md` — current reference for the implemented bootstrap subset.
-- `docs/enbf.md` — evolving grammar draft.
-- `docs/package-management.md` — outlines the capsule and registry model manager.
-- `docs/keywords.md` — evolving list of reserved keywords and future directions.
-
-The docs mention `fleet.toml`, `std/`, and `runtime/` as part of the self-hosted target layout; these are not yet present in this repository.
-
-Implementation reality (bootstrap subset):
-- Effects: parser records `![...]`; bootstrap validator enforces `model`, `io`, `net` only, and the self-hosted parser now infers `io` when decorators such as `@trace` appear.
-- Prompts: parsed with channel identifiers; common channels are `system`, `user`, `assistant`, `tool`.
-- Logging: use `print.info(...)` in source; `print` is injected by the code generator.
-- Declarations: `model`, `pipeline`, `tool`, and `test` now parse identically in stage0 and the Sailfin-native parser, and their effect lists flow into the conservative checker.
-- Pipelines: declarations compile to plain functions; the `|>` operator is not implemented in stage0.
-- Pipeline behavior: failures follow normal exception semantics in stage0; see `docs/spec.md` for planned failure/side-effect semantics.
-- Ownership: `Affine<T>`/`Linear<T>` are parsed as ordinary nominal types; no move/borrow enforcement in stage0.
-- Currency literals `$0.05`, time units like `150ms`, and APIs like `scope.with_timeout(...)` are future features; examples using them are illustrative only.
-
-Self-hosted progress:
-- The Sailfin-native parser now records `return` and expression statements inside blocks, and the Sailfin-written code generator lowers them to runnable Python with the same runtime preamble as stage0.
-- Simple functions, prompts, and literal returns round-trip through `compiler/src/*.sfn` to `compiler/build/*.py`, enabling early execution parity experiments.
-- A Sailfin-to-Sailfin emitter reprints parsed programs with canonical formatting and runtime imports, and a stub runtime prelude (`compiler/runtime/prelude.sfn`) offers the surface area the generated code expects while we wire real implementations.
-
-See `docs/spec.md` (Effect System section) and `bootstrap/effect_checker.py` for details.
+- `docs/status.md` — source of truth for what the bootstrap compiler enforces
+  versus what exists only in prototypes.
+- `docs/spec.md` — bootstrap language reference with design-preview callouts.
+- `docs/enbf.md` — grammar sketch aligned to the stage0 parser.
+- `docs/keywords.md` — reserved words and runtime notes.
 
 ## Architecture Overview
 
-The project is organized into capsules, each representing a coherent, publishable unit such as a library, runtime, or tool.  
-Multiple capsules form a fleet, managed by a single `fleet.toml` workspace manifest.  
-Capsules can be published to a registry as bundles or model packs.
-
-```
-/sailfin
-  fleet.toml
-  /std
-  /runtime
-  /compiler
-  /tools
-  /packs
-```
+Sailfin targets a capsule-based architecture with fleets coordinating compiler,
+runtime, and tooling capsules. The current repository hosts the bootstrap
+compiler (`/bootstrap`) and the Sailfin-native front end experiments
+(`/compiler/src`). Future capsule manifests and fleet layout are tracked in
+`docs/roadmap.md`.
 
 ## Roadmap Highlights
 
-- Full effect and taint checking across compiler phases, including cross-capsule capability manifests.
-- Model-aware testing with golden and adversarial suites, replayable via signed generation cards.
-- GPU-native execution paths for embeddings, vector search, and differentiable kernels.
-- Self-hosted compiler with incremental type checking, LSP integration, and notebook workflows.
+Major milestones and sequencing are captured in `docs/roadmap.md`. Consult the
+status page before editing documentation or examples to confirm whether a
+feature has shipped.
 
 ## Contributing
 
@@ -120,6 +94,6 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make bootstrap-test` — run the entire pytest suite; use `PYTEST_ARGS=-m unit` or `PYTEST_ARGS=-m integration` to focus runs.
 - `conda run -n sailfin-bootstrap python bootstrap/bootstrap.py path/to/file.sfn` — compile a Sailfin source file with the stage0 compiler.
 
-> Note: This repository is pre-release and not yet versioned. Expect breaking changes while core concepts stabilize.
-
-> Registry Placeholder: The domain `registry.sailfin.dev` is not yet live; publish/resolve examples are illustrative until public launch.
+The Sailfin registry at `registry.sailfin.dev` is live for experiments; the
+bootstrap toolchain has not yet integrated manifest workflows, so treat registry
+examples in the docs as design previews.

@@ -1,10 +1,16 @@
-# Reserved Keywords in Sailfin (Bootstrap Compiler)
+# Reserved Keywords in Sailfin
 
-The bootstrap compiler recognises the following tokens as reserved keywords.
-They may not be repurposed as identifiers. The set is expected to expand as
-the language matures.
+Updated: October 2025
 
-### Control Flow and Error Handling
+This reference lists the tokens that the Python bootstrap compiler (stage0)
+reserves today, along with notes about the Sailfin-native parser experiments.
+For an implementation snapshot across the toolchain, consult `docs/status.md`.
+
+## Bootstrap Keyword Set
+
+The following keywords cannot be reused as identifiers in the stage0 compiler.
+
+### Control Flow & Errors
 
 - `if`
 - `else`
@@ -16,7 +22,7 @@ the language matures.
 - `finally`
 - `throw`
 
-### Functions, Types, and Declarations
+### Functions, Types & Declarations
 
 - `fn`
 - `async`
@@ -37,18 +43,11 @@ the language matures.
 - `pipeline`
 - `test`
 
-### Concurrency and Utilities
+### Concurrency & Utilities
 
 - `routine`
-- `scope` (reserved keyword for planned structured concurrency API; not usable in bootstrap)
+- `scope` *(reserved for future structured concurrency; not usable yet)*
 - `with`
-
-Note on logging identifiers:
-- In the lexer, `print` and `info` are tokens that enable the `print.info(...)`
-	and `print.error(...)` style. The bootstrap code generator injects
-	`print = runtime.console` so this pattern works; avoid shadowing `print` in
-	user code. Prefer `print.info(...)` over `console.info(...)` in Sailfin
-	sources.
 
 ### Literals
 
@@ -59,29 +58,28 @@ Note on logging identifiers:
 ### Prompt Composition
 
 - `prompt`
-- Channel names are ordinary identifiers in bootstrap; the canonical set is
-	`system`, `user`, `assistant`, `tool`. There is no enforcement of this set in
-	stage0.
+- Channels (`system`, `user`, `assistant`, `tool`) are ordinary identifiers in
+  bootstrap; the canonical set is not enforced.
 
+### Reserved Identifiers (Bootstrap Runtime)
 
-### Reserved identifiers (not keywords)
+- `print` and `info` tokenise specially to support `print.info(...)`. The code
+  generator injects `print = runtime.console`; avoid shadowing `print`.
 
-- None specific to printing. In the bootstrap backend, `print` is bound to `runtime.console` so that `print.info(...)` is the idiomatic and supported form. Older docs may show `console.info(...)`; prefer `print.info(...)` in source.
+> Behaviour notes:
+> - `assert` lowers to Python’s `assert`.
+> - `is` lowers to `runtime.check_type`.
+> - `model`, `pipeline`, `tool`, and `test` parse today but generate simple
+>   stubs; the pipeline operator `|>` remains design-stage syntax.
 
-> Notes:
-> - `assert` is implemented as a statement (no parentheses required) and lowers
->   to Python `assert` in the bootstrap backend.
-> - `is` is implemented as a binary type-check operator and lowers to
->   `runtime.check_type(value, "Type")` in the bootstrap backend.
-> - `model`, `pipeline`, `tool`, and `test` are implemented as declarations in
->   the parser. The code generator emits simple stubs: models as data objects,
->   pipelines/tools as plain functions, and tests as ordinary routines. No
->   special pipeline operator exists in stage0.
+## Self-Hosted Parser Notes
 
-### Self-hosted parser status
+- The Sailfin-native parser mirrors the keyword set above and emits structured
+  nodes for `interface`, `enum`, `type`, `prompt`, and decorator-bearing
+  blocks.
+- Decorator metadata is analysed so `@trace` implies an `io` effect when missing.
+- Future keywords discussed in proposals (e.g., `training`) remain unimplemented
+  until they appear in `docs/status.md`.
 
-- The Sailfin-native parser now surfaces `interface`, `enum`, and `type`
-	declarations as first-class AST nodes, matching the bootstrap compiler's
-	structure for downstream analysis.
-- Block bodies preserve `prompt` statements structurally, allowing effect
-	checking without heuristics.
+Track additions or removals through `docs/roadmap.md` and update this file when
+new keywords land in stage0.

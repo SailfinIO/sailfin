@@ -3,7 +3,8 @@
 ## Project Structure & Module Organization
 - `bootstrap/` contains the stage0 Python compiler (lexer, parser, effect checker) with tests in `bootstrap/tests/`; treat this as the operational source of truth.
 - `compiler/src/` carries the Sailfin-native front end; note design gaps here but land feature work with matching bootstrap coverage.
-- `docs/` houses the spec, ENBF grammar, keywords list, and package docs—update alongside behavior changes.
+- `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), roadmap (`docs/roadmap.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
+- `docs/proposals/` holds future-facing designs (e.g., package management); leave implementation notes there until the status page marks them shipped.
 - `examples/` provides runnable snippets; keep inputs minimal and exclude generated artefacts. Sibling `extensions/` and `registry/` hold auxiliary capsules and registry tooling.
 
 ## Build, Test, and Development Commands
@@ -25,6 +26,7 @@ cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/cond
 - Tag pytest cases with `unit`, `integration`, or `e2e`; stage tests beside code in `bootstrap/tests/` and mirror intent in `compiler/tests/` when available.
 - Prefer slim golden inputs in `examples/` plus targeted fixtures; avoid recording generated output.
 - Run `make bootstrap-test` before submitting and capture reproduction steps for regressions.
+- When adding language surface or runtime behaviour, extend coverage in both the bootstrap suite and Sailfin-native tests, and reflect the change in `docs/status.md`.
 
 ## Commit & Pull Request Guidelines
 - History mixes imperative commits and Conventional Commit prefixes; favor `feat(compiler): …`, `fix(bootstrap): …`, etc., for clarity.
