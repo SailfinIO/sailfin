@@ -1,6 +1,6 @@
 # Sailfin project automation
 
-.PHONY: help install test compile clean package
+.PHONY: help install test compile clean clean-stage1 package
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -17,8 +17,9 @@ help:
 	@echo "Common Sailfin tasks"
 	@echo "  make install      # Create or update the Conda env used for the compiler"
 	@echo "  make test         # Run the full pytest suite (pass PYTEST_ARGS=... to filter)"
-	@echo "  make compile      # Emit Python modules from compiler/src via stage0/compile_stage1.py"
-	@echo "  make clean        # Remove generated artifacts"
+	@echo "  make compile      # Emit Python modules from compiler/src via the stage1 pipeline"
+	@echo "  make clean        # Remove packaged artifacts (dist/)"
+	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -27,10 +28,13 @@ test:
 	$(CONDA) run -n $(CONDA_ENV) pytest $(PYTEST_ARGS)
 
 clean:
+	rm -rf dist
+
+clean-stage1:
 	rm -rf compiler/build
 
-compile: clean
-	$(CONDA) run -n $(CONDA_ENV) python stage0/compile_stage1.py
+compile:
+	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 
 package:
 	$(CONDA) run -n $(CONDA_ENV) python tools/package_stage1.py

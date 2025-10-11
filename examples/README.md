@@ -113,7 +113,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 ## Runtime Notes
 
-- **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs tested in stage0.
+- **Stage1-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the stage1 pipeline.
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 

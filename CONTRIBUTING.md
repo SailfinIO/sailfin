@@ -8,14 +8,14 @@ repository.
 
 - See `README.md` for a project overview and `docs/README.md` for the doc
   navigation map.
-- Review `docs/status.md` to understand which features are implemented in the
-  Python bootstrap compiler (stage0) versus the Sailfin-native prototypes.
+- Review `docs/status.md` to understand which features ship in the stage1
+  toolchain versus forward-looking designs.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
-- Ensure you have the `sailfin-bootstrap` Conda environment:
+- Ensure you have the `sailfin` Conda environment:
 
   ```bash
-  make bootstrap-install
+  make install
   ```
 
 ## 2. Coding Workflow
@@ -23,14 +23,13 @@ repository.
 1. **Branch & scope** — Keep work focused; reference open issues or roadmap
    items when possible.
 2. **Development commands**
-   - Run tests: `make bootstrap-test` (use `PYTEST_ARGS=-m unit` or
+   - Run tests: `make test` (use `PYTEST_ARGS=-m unit` or
      `-m integration` to scope).
-   - Compile Sailfin sources: `make bootstrap-compile`.
+   - Compile Sailfin sources: `make compile` (stage1 pipeline).
 3. **Testing expectations**
-   - Add or update unit tests under `bootstrap/tests/` for stage0 changes.
-   - Mirror semantics in Sailfin-native tests when relevant
-     (`compiler/src/**`, `bootstrap/tests/test_compiler_sources.py`).
-   - Run `make bootstrap-test` before submitting.
+   - Add or update unit tests under `compiler/tests/` for stage1 changes.
+   - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
+   - Run `make test` before submitting.
 
 ## 3. Documentation Process
 
@@ -40,8 +39,8 @@ When behaviour, coverage, or roadmap status changes:
 2. Sync `docs/spec.md` (bootstrap reference) and note new design work in the
    Part B preview if needed.
 3. Adjust `docs/roadmap.md` for sequencing changes.
-4. Touch the relevant folder README (e.g., `bootstrap/README.md`,
-   `compiler/README.md`, `examples/README.md`) so local guidance stays accurate.
+4. Touch the relevant folder README (e.g., `compiler/README.md`,
+   `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
 5. For future-facing designs, add or amend proposals under `docs/proposals/`.
 
 Please reference the updated documents in your pull request description.
@@ -59,7 +58,7 @@ Please reference the updated documents in your pull request description.
 Each PR should include:
 
 - Summary of the change and impacted areas.
-- Verification commands (`make bootstrap-test`, targeted pytest runs, etc.).
+- Verification commands (`make test`, targeted pytest runs, etc.).
 - Notes on documentation updates (status/spec/roadmap).
 
 Reviewers will check for:

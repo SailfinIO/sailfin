@@ -15,9 +15,10 @@ roadmaps.
   containing `compiler/build/`, the runtime prelude, and the `sailfin-stage1`
   launcher. All developer workflows (`make compile`, `make package`, CI) now go
   through this self-hosted pipeline.
-- **Stage0 (legacy)** — The Python bootstrap compiler is retained for archival
-  reference and targeted regression hunting, but it no longer participates in
-  packaging or CI. Expect the directory to freeze except for emergency diffs.
+- **Stage0 (legacy)** — The Python bootstrap compiler (archived under
+  `Legacy/stage0/`) is retained for reference and targeted regression
+  hunting, but it no longer participates in packaging or CI. Expect the
+  directory to freeze except for emergency diffs.
 - **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
   provide the initial scaffolding.
@@ -128,5 +129,5 @@ roadmaps.
   stable.
 
 Track detailed milestones and sequencing in `docs/roadmap.md`. When a
-feature graduates from prototype into stage0, update the table above and
-trim related “planned” callouts from the spec and examples.
+feature graduates from prototype into the shipping stage1 toolchain, update the
+table above and trim related “planned” callouts from the spec and examples.

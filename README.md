@@ -59,14 +59,14 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 
 ## Current Status
 
-Sailfin is under active design and bootstrapping. The Python stage0 compiler is
-the production toolchain today while the Sailfin-written front end evolves
-alongside it.
+Sailfin is under active design and bootstrapping. The Sailfin-written stage1
+compiler is the production toolchain today; the Python bootstrap lives under
+`Legacy/stage0` for archaeology and regression hunting.
 
 - `docs/status.md` — source of truth for what the bootstrap compiler enforces
   versus what exists only in prototypes.
 - `docs/spec.md` — bootstrap language reference with design-preview callouts.
-- `docs/enbf.md` — grammar sketch aligned to the stage0 parser.
+- `docs/enbf.md` — grammar sketch aligned to the stage1 parser (with notes on legacy stage0 behaviour where it still matters).
 - `docs/keywords.md` — reserved words and runtime notes.
 
 ## Installing the stage1 artifact (preview)
@@ -88,9 +88,10 @@ or `--no-link` to customize these paths.
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
-runtime, and tooling capsules. The current repository hosts the bootstrap
-compiler (`/bootstrap`) and the Sailfin-native front end experiments
-(`/compiler/src`). Future capsule manifests and fleet layout are tracked in
+runtime, and tooling capsules. The current repository hosts the stage1
+self-hosted pipeline (`compiler/src` + `compiler/build`) alongside the Sailfin
+runtime experiments (`runtime/`). The historical Python bootstrap is archived in
+`Legacy/stage0`. Future capsule manifests and fleet layout are tracked in
 `docs/roadmap.md`.
 
 ## Roadmap Highlights

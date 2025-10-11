@@ -1,8 +1,11 @@
 # Bootstrap Compiler (Stage0)
 
-The Python bootstrap compiler is Sailfin’s production toolchain today. It
-parses Sailfin source, performs conservative effect validation, and emits
-runnable Python that targets `bootstrap/runtime_support.py`.
+> **Archived**: Stage1 is the production toolchain. This directory preserves
+> the historical Python bootstrap for reference and regression hunting only.
+
+The Python bootstrap compiler parses Sailfin source, performs conservative
+effect validation, and emits runnable Python that targets
+`Legacy/stage0/runtime_support.py`.
 
 Key components:
 
@@ -20,25 +23,25 @@ document (`../docs/status.md`).
 
 ## Tooling
 
-- Create or update the Conda environment:
+- Create or update the (legacy) Conda environment:
 
   ```bash
-  make bootstrap-install
+  conda env update --file Legacy/stage0/environment.yml --name sailfin-stage0
   ```
 
-- Compile Sailfin sources to Python (self-hosted experiments):
+- Compile Sailfin sources to Python (legacy flow):
 
   ```bash
-  conda run -n sailfin-bootstrap python bootstrap/bootstrap.py path/to/file.sfn
+  conda run -n sailfin-stage0 python Legacy/stage0/bootstrap.py path/to/file.sfn
   ```
 
 - Produce a standalone `sfn` binary with PyInstaller:
 
   ```bash
-  conda run -n sailfin-bootstrap pyinstaller --onefile --name sfn bootstrap/bootstrap.py
+  conda run -n sailfin-stage0 pyinstaller --onefile --name sfn Legacy/stage0/bootstrap.py
   ```
 
-Outputs live under `bootstrap/dist/` and reuse the runtime preamble bundled in
+Outputs live under `Legacy/stage0/dist/` and reuse the runtime preamble bundled in
 this directory.
 
 ## Test Suite

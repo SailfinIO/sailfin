@@ -15,6 +15,8 @@ import textwrap
 import zipfile
 from typing import Iterable, List
 
+from tools.compile_with_stage1 import Stage1CompileError, compile_stage1
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_DIST_DIR = REPO_ROOT / "dist"
 
@@ -51,7 +53,7 @@ def build_stage1_artifact(output_dir: pathlib.Path, *, version: str | None = Non
         stage1_output = tmp_root / "compiler" / "build"
         stage1_output.parent.mkdir(parents=True, exist_ok=True)
 
-        _run_bootstrap_compile(stage1_output)
+        _run_stage1_compile(stage1_output)
 
         staging_root = tmp_root / "package"
         staging_root.mkdir(parents=True, exist_ok=True)
@@ -84,12 +86,11 @@ def build_stage1_artifact(output_dir: pathlib.Path, *, version: str | None = Non
     return archive_path
 
 
-def _run_bootstrap_compile(output_dir: pathlib.Path) -> None:
-    from stage0 import compile_stage1
-
-    result = compile_stage1.main(["--out", str(output_dir)])
-    if result not in (None, 0):
-        raise RuntimeError("stage0 compile failed with non-zero exit status")
+def _run_stage1_compile(output_dir: pathlib.Path) -> None:
+    try:
+        compile_stage1([REPO_ROOT / "compiler" / "src"], output_dir)
+    except Stage1CompileError as exc:  # pragma: no cover - exercised via tests
+        raise RuntimeError(f"stage1 compile failed: {exc}") from exc
 
 
 def _write_metadata(staging_root: pathlib.Path, *, version: str, generated_at: str) -> None:

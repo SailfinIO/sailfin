@@ -29,9 +29,7 @@ dmypy.json
 .poetry
 bootstrap/poetry.lock
 
-# Packaging / build
-build/
-compiler/build/
+# Packaging
 dist/
 .eggs/
 .eggs/**
