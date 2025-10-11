@@ -115,6 +115,10 @@ def _run_self_hosted_pipeline(sources: list[pathlib.Path], output_dir: pathlib.P
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
 
+    package_root = output_dir.parent.parent if output_dir.parent.name else output_dir.parent
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
+
     _clear_stage1_modules()
 
     try:
