@@ -24,6 +24,22 @@ struct LoweredCaseCondition {
     has_guard -> boolean;
 }
 
+struct PythonModuleEmission {
+    builder -> PythonBuilder;
+    diagnostics -> string[];
+}
+
+struct PythonFunctionEmission {
+    builder -> PythonBuilder;
+    diagnostics -> string[];
+}
+
+struct StructLiteralCapture {
+    expression -> string;
+    consumed -> number;
+    success -> boolean;
+}
+
 fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
@@ -34,11 +50,14 @@ fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
 
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
-    let python_source = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums);
+    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums);
+    diagnostics = diagnostics.concat(module.diagnostics);
+    let python_source = builder_to_string(module.builder);
     return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
 }
-fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[]) -> string {
+fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[]) -> PythonModuleEmission {
     let mut builder -> PythonBuilder = builder_new();
+    let mut diagnostics -> string[] = [];
     builder = builder_emit(builder, "import asyncio");
     builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
     if imports.length > 0 {
@@ -62,14 +81,16 @@ fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], 
         if index >= functions.length {
             break;
         }
-        builder = emit_python_function(builder, functions[index]);
+        let emission = emit_python_function(builder, functions[index]);
+        builder = emission.builder;
+        diagnostics = diagnostics.concat(emission.diagnostics);
         if index + 1 < functions.length {
             builder = builder_emit_blank(builder);
         }
         index += 1;
     }
 
-    return builder_to_string(builder);
+    return PythonModuleEmission { builder: builder, diagnostics: diagnostics };
 }
 
 fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
@@ -313,6 +334,71 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
     return sanitized_type + "(" + join_with_separator(assignments, ", ") + ")";
 }
 
+fn capture_struct_literal_expression(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> StructLiteralCapture {
+    let trimmed = trim_text(initial);
+    if !ends_with(trimmed, "{") {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    let mut expression -> string = trimmed;
+    let mut index -> number = start_index;
+    let mut consumed -> number = 0;
+    let mut depth -> number = compute_brace_balance(trimmed);
+    if depth <= 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    loop {
+        if index >= instructions.length {
+            break;
+        }
+        let candidate = instructions[index];
+        if candidate.variant != "Unknown" {
+            break;
+        }
+        let segment = trim_text(candidate.text);
+        if segment.length > 0 {
+            expression = expression + " " + segment;
+        }
+        depth += compute_brace_balance(segment);
+        consumed += 1;
+        index += 1;
+        if depth <= 0 {
+            break;
+        }
+    }
+    if depth != 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    if consumed == 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    let normalized = trim_trailing_delimiters(trim_text(expression));
+    if !ends_with(normalized, "}") {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    return StructLiteralCapture { expression: normalized, consumed: consumed, success: true };
+}
+
+fn compute_brace_balance(text -> string) -> number {
+    if text.length == 0 {
+        return 0;
+    }
+    let mut balance -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" {
+            balance += 1;
+        } else if ch == "}" {
+            balance -= 1;
+        }
+        index += 1;
+    }
+    return balance;
+}
+
 fn split_struct_field_entries(text -> string) -> string[] {
     let mut entries -> string[] = [];
     let mut current -> string = "";
@@ -416,8 +502,9 @@ fn find_matching_brace(text -> string, open_index -> number) -> number {
     return -1;
 }
 
-fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) -> PythonBuilder {
+fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) -> PythonFunctionEmission {
     let mut current = builder;
+    let mut diagnostics -> string[] = [];
     let parameters = render_python_parameters(function.parameters);
     let header = "def " + sanitize_identifier(function.name) + "(" + join_with_separator(parameters, ", ") + "):";
     current = builder_emit(current, header);
@@ -428,7 +515,7 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
     if function.instructions.length == 0 {
         current = builder_emit(current, "pass");
         current = builder_pop_indent(current);
-        return current;
+        return PythonFunctionEmission { builder: current, diagnostics: diagnostics };
     }
     let mut block_depth -> number = 0;
     let mut match_stack -> MatchContext[] = [];
@@ -443,7 +530,15 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             if instruction.expression.length == 0 {
                 current = builder_emit(current, "return");
             } else {
-                current = builder_emit(current, "return " + lower_expression(instruction.expression));
+                let capture = capture_struct_literal_expression(instruction.expression, function.instructions, index + 1);
+                let lowered_expression -> string;
+                if capture.success {
+                    lowered_expression = lower_expression(capture.expression);
+                    index += capture.consumed;
+                } else {
+                    lowered_expression = lower_expression(instruction.expression);
+                }
+                current = builder_emit(current, "return " + lowered_expression);
             }
         } else if instruction.variant == "Expression" {
             current = builder_emit(current, lower_expression(instruction.expression));
@@ -451,7 +546,15 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             let target_name = sanitize_identifier(instruction.name);
             let mut line -> string = target_name + " = ";
             if instruction.value != null {
-                line = line + lower_expression(instruction.value);
+                let capture = capture_struct_literal_expression(instruction.value, function.instructions, index + 1);
+                let lowered_value -> string;
+                if capture.success {
+                    lowered_value = lower_expression(capture.expression);
+                    index += capture.consumed;
+                } else {
+                    lowered_value = lower_expression(instruction.value);
+                }
+                line = line + lowered_value;
             } else {
                 line = line + "None";
             }
@@ -463,6 +566,8 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
         } else if instruction.variant == "Else" {
             if block_depth > 0 {
                 current = builder_pop_indent(current);
+            } else {
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, "else without matching if");
             }
             current = builder_emit(current, "else:");
             current = builder_push_indent(current);
@@ -470,6 +575,8 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             if block_depth > 0 {
                 current = builder_pop_indent(current);
                 block_depth -= 1;
+            } else {
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endif without matching if");
             }
         } else if instruction.variant == "For" {
             current = builder_emit(current, "for " + instruction.target + " in " + instruction.iterable + ":");
@@ -479,6 +586,8 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             if block_depth > 0 {
                 current = builder_pop_indent(current);
                 block_depth -= 1;
+            } else {
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endfor without matching for loop");
             }
         } else if instruction.variant == "Loop" {
             current = builder_emit(current, "while True:");
@@ -488,6 +597,8 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             if block_depth > 0 {
                 current = builder_pop_indent(current);
                 block_depth -= 1;
+            } else {
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endloop without matching loop");
             }
         } else if instruction.variant == "Break" {
             current = builder_emit(current, "break");
@@ -502,6 +613,12 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             match_stack = append_match_context(match_stack, context);
         } else if instruction.variant == "Case" {
             if match_stack.length == 0 {
+                let pattern_summary = trim_text(instruction.pattern);
+                let mut detail -> string = "match case without active match context";
+                if pattern_summary.length > 0 {
+                    detail = detail + " (pattern: " + pattern_summary + ")";
+                }
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, detail);
                 current = builder_emit(current, "# unsupported: match case without context");
             } else {
                 let top_index = match_stack.length - 1;
@@ -529,6 +646,7 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
             }
         } else if instruction.variant == "EndMatch" {
             if match_stack.length == 0 {
+                diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endmatch without active match context");
                 current = builder_emit(current, "# unsupported: endmatch without context");
             } else {
                 let top_index = match_stack.length - 1;
@@ -541,6 +659,12 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
         } else if instruction.variant == "Noop" {
             current = builder_emit(current, "pass");
         } else {
+            let trimmed_text = trim_text(instruction.text);
+            let mut detail -> string = "unsupported instruction emitted as comment";
+            if trimmed_text.length > 0 {
+                detail = detail + ": " + trimmed_text;
+            }
+            diagnostics = append_lowering_diagnostic(diagnostics, function.name, detail);
             current = builder_emit(current, "# unsupported: " + instruction.text);
         }
         index += 1;
@@ -554,6 +678,7 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
         if context.has_active_case {
             current = builder_pop_indent(current);
         }
+        diagnostics = append_lowering_diagnostic(diagnostics, function.name, "unterminated match expression");
         match_stack = truncate_match_contexts(match_stack, top_index);
     }
     loop {
@@ -562,9 +687,10 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
         }
         current = builder_pop_indent(current);
         block_depth -= 1;
+        diagnostics = append_lowering_diagnostic(diagnostics, function.name, "unterminated control-flow block");
     }
     current = builder_pop_indent(current);
-    return current;
+    return PythonFunctionEmission { builder: current, diagnostics: diagnostics };
 }
 
 fn append_match_context(values -> MatchContext[], value -> MatchContext) -> MatchContext[] {
@@ -928,6 +1054,17 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
         index += 1;
     }
     return result;
+}
+
+fn append_lowering_diagnostic(diagnostics -> string[], function_name -> string, detail -> string) -> string[] {
+    let trimmed_name = trim_text(function_name);
+    let mut entry -> string = "[lowering] ";
+    if trimmed_name.length == 0 {
+        entry = entry + detail;
+    } else {
+        entry = entry + trimmed_name + ": " + detail;
+    }
+    return append_string(diagnostics, entry);
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {

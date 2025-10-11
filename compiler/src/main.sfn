@@ -213,64 +213,74 @@ fn needs_python_fallback(source -> string) -> boolean {
     if source.length == 0 {
         return true;
     }
-    if string_contains(source, ".push(") {
+    let sanitized = strip_needs_python_fallback_literals(source);
+    let cleaned = strip_python_string_literals(sanitized);
+    let mut analysis_target -> string = cleaned;
+    if analysis_target.length == 0 {
+        analysis_target = sanitized;
+    }
+    let target = analysis_target;
+    if target.length == 0 {
         return true;
     }
-    if string_contains(source, ".concat(") {
+    if string_contains(target, ".push(") {
         return true;
     }
-    if string_contains(source, ".length") {
+    if string_contains(target, ".concat(") {
         return true;
     }
-    if string_contains(source, "\nlet ") {
+    if string_contains(target, ".length") {
         return true;
     }
-    if string_contains(source, " let ") {
+    if string_contains(target, "\nlet ") {
         return true;
     }
-    if string_contains(source, " mut ") {
+    if string_contains(target, " let ") {
         return true;
     }
-    if string_contains(source, " null") {
+    if string_contains(target, " mut ") {
         return true;
     }
-    if string_contains(source, " true") {
+    if string_contains(target, " null") {
         return true;
     }
-    if string_contains(source, " false") {
+    if string_contains(target, " true") {
         return true;
     }
-    if string_contains(source, "=true") {
+    if string_contains(target, " false") {
         return true;
     }
-    if string_contains(source, "=false") {
+    if string_contains(target, "=true") {
         return true;
     }
-    if string_contains(source, "TokenKind.variant('Identifier', [])") {
+    if string_contains(target, "=false") {
         return true;
     }
-    if string_contains(source, "TokenKind.variant('NumberLiteral', [])") {
+    if string_contains(target, "TokenKind.variant('Identifier', [])") {
         return true;
     }
-    if string_contains(source, "TokenKind.variant('StringLiteral', [])") {
+    if string_contains(target, "TokenKind.variant('NumberLiteral', [])") {
         return true;
     }
-    if string_contains(source, "TokenKind.variant('BooleanLiteral', [])") {
+    if string_contains(target, "TokenKind.variant('StringLiteral', [])") {
         return true;
     }
-    if string_contains(source, "TokenKind.variant('Symbol', [])") {
+    if string_contains(target, "TokenKind.variant('BooleanLiteral', [])") {
         return true;
     }
-    if string_contains(source, "Expression.Identifier()") {
+    if string_contains(target, "TokenKind.variant('Symbol', [])") {
         return true;
     }
-    if string_contains(source, "Expression.Raw()") {
+    if string_contains(target, "Expression.Identifier()") {
         return true;
     }
-    if string_contains(source, "ExpressionIdentifier(") {
+    if string_contains(target, "Expression.Raw()") {
         return true;
     }
-    if string_contains(source, "ExpressionRaw(") {
+    if string_contains(target, "ExpressionIdentifier(") {
+        return true;
+    }
+    if string_contains(target, "ExpressionRaw(") {
         return true;
     }
     return false;
@@ -306,4 +316,230 @@ fn string_contains(value -> string, pattern -> string) -> boolean {
         index += 1;
     }
     return false;
+}
+
+fn strip_needs_python_fallback_literals(source -> string) -> string {
+    let marker = "def needs_python_fallback";
+    let start = find_substring(source, marker);
+    if start < 0 {
+        return source;
+    }
+    let tail_marker = "return False";
+    let tail_index = find_substring_from(source, tail_marker, start);
+    if tail_index < 0 {
+        return source;
+    }
+    let tail_end = tail_index + tail_marker.length;
+    tail_end = advance_to_line_end(source, tail_end);
+    let prefix = slice_string(source, 0, start);
+    let suffix = slice_string(source, tail_end, source.length);
+    return prefix + suffix;
+}
+
+fn strip_python_string_literals(value -> string) -> string {
+    let mut index -> number = 0;
+    let mut result -> string = "";
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "'" {
+            let quote_length = python_quote_length(value, index, "'");
+            let quotes = repeat_character("'", quote_length);
+            result = result + quotes;
+            index = skip_python_string_literal(value, index + quote_length, "'", quote_length);
+            result = result + quotes;
+            continue;
+        }
+        if ch == "\"" {
+            let quote_length = python_quote_length(value, index, "\"");
+            let quotes = repeat_character("\"", quote_length);
+            result = result + quotes;
+            index = skip_python_string_literal(value, index + quote_length, "\"", quote_length);
+            result = result + quotes;
+            continue;
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
+}
+
+fn python_quote_length(value -> string, start -> number, delimiter -> string) -> number {
+    if start + 2 < value.length {
+        if value[start + 1] == delimiter {
+            if value[start + 2] == delimiter {
+                return 3;
+            }
+        }
+    }
+    return 1;
+}
+
+fn skip_python_string_literal(value -> string, position -> number, delimiter -> string, quote_length -> number) -> number {
+    if quote_length == 1 {
+        let mut index -> number = position;
+        let mut escaped -> boolean = false;
+        loop {
+            if index >= value.length {
+                return index;
+            }
+            let current = value[index];
+            index += 1;
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if current == "\\" {
+                escaped = true;
+                continue;
+            }
+            if current == delimiter {
+                return index;
+            }
+        }
+    }
+    let mut search_index -> number = position;
+    loop {
+        if search_index + quote_length > value.length {
+            return value.length;
+        }
+        let mut matches -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= quote_length {
+                break;
+            }
+            if value[search_index + offset] != delimiter {
+                matches = false;
+                break;
+            }
+            offset += 1;
+        }
+        if matches {
+            return search_index + quote_length;
+        }
+        search_index += 1;
+    }
+}
+
+fn repeat_character(ch -> string, count -> number) -> string {
+    if count <= 0 {
+        return "";
+    }
+    let mut index -> number = 0;
+    let mut result -> string = "";
+    loop {
+        if index >= count {
+            break;
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
+}
+
+fn find_substring(value -> string, pattern -> string) -> number {
+    if pattern.length == 0 {
+        return 0;
+    }
+    if value.length < pattern.length {
+        return -1;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + pattern.length > value.length {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_substring_from(value -> string, pattern -> string, start -> number) -> number {
+    if start < 0 {
+        return find_substring(value, pattern);
+    }
+    if start >= value.length {
+        return -1;
+    }
+    let mut index -> number = start;
+    loop {
+        if index + pattern.length > value.length {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn advance_to_line_end(value -> string, position -> number) -> number {
+    let mut index -> number = position;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        index += 1;
+        if ch == "\n" {
+            break;
+        }
+    }
+    return index;
+}
+
+fn slice_string(value -> string, start -> number, end -> number) -> string {
+    if start < 0 {
+        start = 0;
+    }
+    if end < start {
+        end = start;
+    }
+    if start >= value.length {
+        return "";
+    }
+    if end > value.length {
+        end = value.length;
+    }
+    let mut index -> number = start;
+    let mut result -> string = "";
+    loop {
+        if index >= end {
+            break;
+        }
+        result = result + value[index];
+        index += 1;
+    }
+    return result;
 }
