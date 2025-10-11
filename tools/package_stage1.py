@@ -17,6 +17,9 @@ from typing import Iterable, List
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_DIST_DIR = REPO_ROOT / "dist"
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 
 def build_stage1_artifact(output_dir: pathlib.Path, *, version: str | None = None,
                           archive_name: str | None = None) -> pathlib.Path:
@@ -213,13 +216,27 @@ https://github.com/SailfinIO/sailfin/issues.
 
 def _infer_version() -> str:
     try:
-        output = subprocess.check_output([
-            "git",
-            "describe",
-            "--tags",
-            "--always",
-            "--dirty",
-        ], cwd=REPO_ROOT, text=True)
+        import importlib
+
+        runtime = importlib.import_module("runtime")
+        version = getattr(runtime, "__version__", None)
+        if version:
+            return str(version)
+    except Exception:
+        pass
+
+    try:
+        output = subprocess.check_output(
+            [
+                "git",
+                "describe",
+                "--tags",
+                "--always",
+                "--dirty",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+        )
         return output.strip().replace("/", "-")
     except Exception:
         return "dev"

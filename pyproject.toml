@@ -1,0 +1,25 @@
+[tool.semantic_release]
+version_source = "file"
+version_variables = ["runtime/__init__.py:__version__"]
+upload_to_pypi = false
+build_command = "make package"
+commit_parser = "conventional"
+tag_format = "v{version}"
+
+[tool.semantic_release.changelog]
+directory = "."
+filename = "CHANGELOG.md"
+include_v_prefix = true
+
+[tool.semantic_release.github]
+release_method = "github"
+assets = ["dist/*.zip"]
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.branches.alpha]
+match = "alpha"
+prerelease = true
+prerelease_token = "alpha"

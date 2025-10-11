@@ -1,0 +1,65 @@
+name: Stage1 Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - alpha
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-activate-base: false
+          use-mamba: true
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: make test
+
+      - name: Build stage1 artifact
+        shell: bash -l {0}
+        run: make package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfin-stage1
+          path: dist/*.zip
+
+  semantic-release:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-activate-base: false
+          use-mamba: true
+
+      - name: Run semantic release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash -l {0}
+        run: semantic-release publish
