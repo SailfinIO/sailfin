@@ -59,6 +59,14 @@ jobs:
           auto-activate-base: false
           use-mamba: true
 
+      - name: Semantic release version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash -l {0}
+        run: |
+          CONDA=$(which conda) semantic-release version
+
       - name: Run semantic release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
