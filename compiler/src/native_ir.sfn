@@ -378,11 +378,17 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
         return [parse_let_instruction(line)];
     }
     if starts_with(line, "ret") {
-        let remainder = trim_text(runtime.substring(line, 3, line.length));
-        if remainder.length == 0 {
+        if line.length == 3 {
             return [NativeInstruction.Return { expression: "" }];
         }
-        return [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder) }];
+        let separator = line[3];
+        if separator == " " || separator == "\t" {
+            let remainder = trim_text(runtime.substring(line, 3, line.length));
+            if remainder.length == 0 {
+                return [NativeInstruction.Return { expression: "" }];
+            }
+            return [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder) }];
+        }
     }
     if starts_with(line, "eval let ") {
         let body = trim_text(strip_prefix(line, "eval let "));
