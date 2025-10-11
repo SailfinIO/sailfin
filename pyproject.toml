@@ -6,6 +6,9 @@ build_command = "make package"
 commit_parser = "conventional"
 tag_format = "v{version}"
 
+[tool.semantic_release.environment]
+github_token_var = "RELEASE_PAT"
+
 [tool.semantic_release.changelog]
 directory = "."
 filename = "CHANGELOG.md"
