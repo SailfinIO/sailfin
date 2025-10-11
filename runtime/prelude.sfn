@@ -26,7 +26,12 @@ fn channel<T>(capacity -> number = 0) ![io] {
 }
 
 fn parallel(tasks) ![io] {
-    return runtime.parallel(tasks);
+    let mut results = [];
+    for task in tasks {
+        let value = task();
+        results = results.concat([value]);
+    }
+    return results;
 }
 
 fn spawn(task, name -> string = "") ![io] {
@@ -42,15 +47,30 @@ fn logExecution(callable) {
 }
 
 fn array_map(items, mapper) {
-    return runtime.array_map(items, mapper);
+    let mut result = [];
+    for item in items {
+        let mapped = mapper(item);
+        result = result.concat([mapped]);
+    }
+    return result;
 }
 
 fn array_filter(items, predicate) {
-    return runtime.array_filter(items, predicate);
+    let mut result = [];
+    for item in items {
+        if predicate(item) {
+            result = result.concat([item]);
+        }
+    }
+    return result;
 }
 
 fn array_reduce(items, initial, reducer) {
-    return runtime.array_reduce(items, initial, reducer);
+    let mut accumulator = initial;
+    for item in items {
+        accumulator = reducer(accumulator, item);
+    }
+    return accumulator;
 }
 
 fn serve(handler, config = null) ![io, net] {
