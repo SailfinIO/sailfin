@@ -15,13 +15,13 @@ import textwrap
 import zipfile
 from typing import Iterable, List
 
-from tools.compile_with_stage1 import Stage1CompileError, compile_stage1
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_DIST_DIR = REPO_ROOT / "dist"
-
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from tools.compile_with_stage1 import Stage1CompileError, compile_stage1
+
+DEFAULT_DIST_DIR = REPO_ROOT / "dist"
 
 
 def build_stage1_artifact(output_dir: pathlib.Path, *, version: str | None = None,
