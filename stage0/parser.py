@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Iterator, List, Optional, Sequence
 
-from bootstrap.ast_nodes import (
+from stage0.ast_nodes import (
     ArrayLiteral,
     Assignment,
     AssertStatement,
@@ -1164,7 +1164,7 @@ class Parser:
     """Public parser facade mimicking the legacy PLY API."""
 
     def parse(self, source: str, lexer=None) -> Program:
-        from bootstrap.lexer import lexer as default_lexer  # Local import to avoid cycles
+        from stage0.lexer import lexer as default_lexer  # Local import to avoid cycles
 
         if lexer is None:
             active_lexer = default_lexer.clone()

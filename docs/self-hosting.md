@@ -21,14 +21,15 @@ features, see `../docs/status.md`.
 - **Semantic analysis** — `typecheck.sfn` now walks top-level and scoped blocks,
   enforcing duplicate checks across globals, parameters, and locals while
   plumbing diagnostics back through `compile_to_sailfin`.
-- **Emitters** — `code_generator.sfn` produces Python scaffolding; `emitter_sailfin.sfn`
-  reprints parsed programs back into canonical Sailfin; `emit_native.sfn` holds
-  the placeholder diagnostics for the forthcoming native backend.
+- **Emitters** — `emitter_sailfin.sfn` reprints parsed programs back into
+  canonical Sailfin while `emit_native.sfn` plus `native_lowering.sfn` produce
+  executable Python scaffolding (with `native_llvm_lowering.sfn` sketching the
+  future LLVM backend).
 - **Runtime prelude** — `runtime/prelude.sfn` forwards bootstrap runtime calls
   so generated Sailfin code can execute today.
 
-Unit tests under `bootstrap/tests/` compile these sources via the bootstrap
-compiler to ensure the prototypes stay runnable.
+Unit tests now live under `compiler/tests/`; they bootstrap the Sailfin
+compiler into an isolated directory and exercise the entire stage1 pipeline.
 
 ## Workflow with the Bootstrap Toolchain
 

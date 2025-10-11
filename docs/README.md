@@ -9,6 +9,7 @@ Choose the path that fits your task:
 - **Track proposals** → `docs/proposals/` (e.g., `package-management.md`, `model-engines-and-training.md`)
 - **Align structure & naming** → `docs/style-guide.md`
 - **See working samples** → `examples/` (category index in `examples/README.md`)
+- **Reference archived stage0 tests** → `docs/archive/bootstrap-tests.md`
 
 When updating docs:
 

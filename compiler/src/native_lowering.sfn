@@ -71,7 +71,7 @@ fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], 
     let mut builder -> PythonBuilder = builder_new();
     let mut diagnostics -> string[] = [];
     builder = builder_emit(builder, "import asyncio");
-    builder = builder_emit(builder, "from bootstrap import runtime_support as runtime");
+    builder = builder_emit(builder, "from stage0 import runtime_support as runtime");
     if imports.length > 0 {
         builder = builder_emit_blank(builder);
         builder = emit_python_imports(builder, imports);

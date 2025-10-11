@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from bootstrap.ast_nodes import (
+from stage0.ast_nodes import (
     ArrayLiteral,
     ArrayType,
     AssertStatement,
@@ -90,7 +90,7 @@ from bootstrap.ast_nodes import (
     UnaryExpression,
 )
 
-from bootstrap.effect_checker import validate_effects
+from stage0.effect_checker import validate_effects
 
 
 @dataclass
@@ -108,7 +108,7 @@ class CodeGenerator:
         self._imports: List[str] = [
             "import asyncio",
                 "import importlib",
-            "from bootstrap import runtime_support as runtime",
+            "from stage0 import runtime_support as runtime",
         ]
         self._preamble: List[str] = []
         self._functions: List[str] = []

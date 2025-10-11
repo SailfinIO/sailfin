@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Set
 
-from bootstrap.ast_nodes import (
+from stage0.ast_nodes import (
     ArrayLiteral,
     Assignment,
     Block,

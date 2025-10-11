@@ -3,15 +3,15 @@
 import sys
 import argparse
 try:
-    import bootstrap as _bootstrap_pkg  # when executed as part of package
-    __version__ = getattr(_bootstrap_pkg, "__version__", "0.0.0")
+    import stage0 as _stage0_pkg  # when executed as part of package
+    __version__ = getattr(_stage0_pkg, "__version__", "0.0.0")
 except Exception:  # fallback when run standalone
     __version__ = "0.0.0"
 
-from bootstrap.lexer import lexer
-from bootstrap.parser import parser
-from bootstrap.code_generator import CodeGenerator
-from bootstrap.ast_nodes import ASTNode
+from stage0.lexer import lexer
+from stage0.parser import parser
+from stage0.code_generator import CodeGenerator
+from stage0.ast_nodes import ASTNode
 
 
 def inspect_tokens(source_code):

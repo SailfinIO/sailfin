@@ -13,11 +13,12 @@ roadmaps.
   emits runnable Python. Effect checking is conservative (`model`, `io`,
   `net`). Runtime helpers for `http`, `websocket`, and `fs` are mocked for
   fast feedback.
-- **Self-hosted (stage1)** — Sailfin-written lexer, parser, and emitter
-  that round-trip common declarations, decorators, and prompts. Code
-  generation currently targets Python scaffolding and shares the bootstrap
-  runtime prelude. The stage0 fallback has been removed; lowering gaps now
-  surface as fatal diagnostics so we iterate directly on stage1.
+- **Self-hosted (stage1)** — Sailfin-written lexer, parser, and native
+  lowering pipeline that round-trip common declarations, decorators, and
+  prompts. Lowering targets Python scaffolding via `emit_native` and
+  `native_lowering`, sharing the bootstrap runtime prelude. The stage0
+  fallback has been removed; lowering gaps now surface as fatal diagnostics so
+  we iterate directly on stage1.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration into the bootstrap toolchain is not wired yet; manifests and
   CLI commands are tracked as roadmap work.
@@ -89,28 +90,14 @@ roadmaps.
   `runtime_support.py`. Console helpers now cover `print.info`,
   `print.error`, and `print.warn`, each flagged by the effect checker as
   `io`.
-- Self-hosted prototype: Produces Python scaffolding with block stubs; emitter
-  coverage now lowers simple lambda expressions to Python `lambda` literals and
-  rewrites common postfix helpers (`.map`, `.filter`, `.reduce`, `.concat`,
-  `.length`) into the runtime `array_*` shims and `len(...)` calls (multi-
-  statement lambdas still fall back to stubs). Block emission now preserves
-  local `let` declarations (with optional `mut`), `for` loops, `if`/`else if`/`else`
-  chains, and `match` statements so stage1 sources round-trip cleanly through
-  the bootstrap parser. The native backend (`emit_native.sfn`) now emits a
-  structured `.sfn-asm` textual artifact with entry-point metadata and inline
-  annotations for unsupported constructs. Shared parsing in `native_ir.sfn`
-  now records parameter metadata so `native_lowering.sfn` can preserve default
-  values while emitting executable Python scaffolding (validated by
-  `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function`).
-  Control-flow opcodes (`.if`, `.else`, `.endif`, `.for`, `.endfor`) and
-  structural `noop` placeholders are now parsed and lowered to real Python
-  blocks, enabling the native pipeline to execute simple conditionals and
-  loops end-to-end (see `test_lower_native_emits_if_else_blocks` and
-  `test_lower_native_emits_for_loop_blocks`).
-  A companion prototype (`native_llvm_lowering.sfn`) translates return-only
-  functions—including those with numeric parameters—into skeletal LLVM IR
-  (see `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`
-  and `::test_lower_native_handles_parameter_round_trip`), providing the first
+- Self-hosted prototype: Lowers Sailfin sources through the native pipeline and
+  prints Python scaffolding via `native_lowering.sfn`, rewiring postfix helpers
+  (`.map`, `.filter`, `.reduce`, `.concat`, `.length`) into runtime shims and
+  `len(...)` calls. Block emission preserves local `let` declarations, loops,
+  `if`/`else if`/`else` chains, and `match` statements so stage1 sources
+  round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
+  feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` continues to
+  translate return-only functions into skeletal LLVM IR, providing the first
   foothold toward real machine-code emission.
 
 **Package Manager (`sfn`)**
@@ -120,13 +107,13 @@ roadmaps.
 
 ## Validation Coverage
 
-- `make bootstrap-test` runs unit tests for lexer, parser, effect checker,
-  code generation smoke tests, and executes every example under
-  `examples/`.
+- `make bootstrap-test` now executes the stage1-focused pytest suite under
+  `compiler/tests/`, including the end-to-end self-host check and native
+  lowering validation.
 - `examples/README.md` enumerates every runnable sample with its declared
   effects so capability requirements stay in sync with the bootstrap runtime.
-- Compiler smoke tests ensure Sailfin sources under `compiler/src/` can be
-  parsed by the bootstrap compiler and emitted to Python.
+- Stage1 smoke tests ensure Sailfin sources under `compiler/src/` compile
+  through the native pipeline; bootstrap-specific tests have been archived.
 - No automated tests exist yet for registry interactions or CLI workflow
   beyond the bootstrap scripts.
 
@@ -134,7 +121,7 @@ roadmaps.
 
 1. **Self-hosted bootstrap loop** — keep the Sailfin compiler sources compiling
   themselves without stage0 assistance or fallbacks while new passes land
-  (tracked via `bootstrap/tests/test_compiler_sources.py`).
+  (tracked via `compiler/tests/test_stage1_integration.py`).
 2. **Semantic parity & diagnostics** — land name resolution, type analysis, and
   richer error reporting in Sailfin (`compiler/src/typecheck.sfn`, expanded
   `effect_checker.sfn`) so outputs match the Python toolchain.

@@ -184,8 +184,8 @@ The existing stage0 files map cleanly onto this layout:
 - `effect_checker.sfn` → `src/compiler/effects.rules.sfn`
 - `decorator_semantics.sfn` → `src/compiler/decorators.semantics.sfn`
 - `emitter_sailfin.sfn` → `src/compiler/emit.sailfin.sfn`
-- `code_generator.sfn` → `src/compiler/emit.python.sfn` or
-  `src/compiler/codegen.core.sfn` depending on the contents
+- `native_lowering.sfn` (with `emit_native.sfn`) → `src/compiler/emit.python.sfn`
+  or `src/compiler/codegen.core.sfn` depending on the contents
 - Add `src/compiler/mod.sfn` to re-export the public surface
 
 Follow the same mapping for the Sailfin-native compiler sources under

@@ -15,11 +15,13 @@ import shutil
 import sys
 from typing import Iterable
 
-from bootstrap.code_generator import CodeGenerator
-from bootstrap.lexer import lexer as base_lexer
-from bootstrap.parser import parser as bootstrap_parser
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from stage0.code_generator import CodeGenerator
+from stage0.lexer import lexer as base_lexer
+from stage0.parser import parser as bootstrap_parser
 DEFAULT_SOURCE_DIR = REPO_ROOT / "compiler" / "src"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "compiler" / "build"
 
