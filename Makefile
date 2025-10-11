@@ -1,6 +1,6 @@
 # Sailfin project automation
 
-.PHONY: help install test compile clean
+.PHONY: help install test compile clean package
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -31,3 +31,6 @@ clean:
 
 compile: clean
 	$(CONDA) run -n $(CONDA_ENV) python stage0/compile_stage1.py
+
+package:
+	$(CONDA) run -n $(CONDA_ENV) python tools/package_stage1.py
