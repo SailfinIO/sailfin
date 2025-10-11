@@ -23,6 +23,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 3. **Diagnostics Parity**
   - [ ] Land hierarchical effect propagation in `effect_checker.sfn` (nested prompts, async contexts).
   - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
+    - [x] Locked regression coverage for duplicate symbol diagnostics across structs, enums, interfaces, models, and type parameters via `compiler/tests/test_stage1_typecheck_duplicates.py`.
   - [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path.
 
 4. **Registry & Capsule Workflow**

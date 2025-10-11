@@ -60,9 +60,11 @@ roadmaps.
   declarations (including parameter and local name clashes). The pass also
   enforces unique struct fields, struct methods, enum variants, interface
   members, model properties, and type parameters so Sailfin sources surface the
-  same duplicate errors surfaced by the Python implementation. Diagnostics flow
-  through `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues
-  during round-trips.
+  same duplicate errors surfaced by the Python implementation. Regression
+  coverage now includes `compiler/tests/test_stage1_typecheck_duplicates.py`
+  to lock the duplicate-detection diagnostics. Diagnostics flow through
+  `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues during
+  round-trips.
 
 - Stage0 (legacy): Prompts require the `model` effect; interpolation is handled by the
   runtime helpers.
