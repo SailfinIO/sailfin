@@ -517,7 +517,7 @@ fn parse_type_alias(parser -> Parser, decorators -> Decorator[]) -> StatementPar
 
     parser = skip_trivia(parser);
     let equals = parser_peek_raw(parser);
-    if !(equals.kind.variant == "Symbol" && equals.kind.value == "=") {
+    if equals.kind.variant != "Symbol" || equals.kind.value != "=" {
         return parse_unknown(original);
     }
     parser = parser_advance_raw(parser);
@@ -1250,7 +1250,7 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if !(terminator.kind.variant == "Symbol" && terminator.kind.value == ";") {
+    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
         return StructFieldParseResult { parser: parser, field: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1279,7 +1279,7 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
 
     current = skip_trivia(current);
     let equals = parser_peek_raw(current);
-    if !(equals.kind.variant == "Symbol" && equals.kind.value == "=") {
+    if equals.kind.variant != "Symbol" || equals.kind.value != "=" {
         return ModelPropertyParseResult { parser: parser, property: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1290,7 +1290,7 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if !(terminator.kind.variant == "Symbol" && terminator.kind.value == ";") {
+    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
         return ModelPropertyParseResult { parser: parser, property: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1392,7 +1392,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-        if !(token.kind.variant == "Symbol" && token.kind.value == "@") {
+    if token.kind.variant != "Symbol" || token.kind.value != "@" {
             break;
         }
 
@@ -1484,7 +1484,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
 fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
-    if !(token.kind.variant == "Symbol" && token.kind.value == "<") {
+    if token.kind.variant != "Symbol" || token.kind.value != "<" {
         return TypeParameterParseResult { parser: parser, parameters: [] };
     }
 
@@ -1629,7 +1629,7 @@ fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
 fn parse_effect_list(parser -> Parser) -> EffectParseResult {
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if !(token.kind.variant == "Symbol" && token.kind.value == "!") {
+    if token.kind.variant != "Symbol" || token.kind.value != "!" {
         return EffectParseResult { parser: parser, effects: [] };
     }
 
@@ -1668,7 +1668,7 @@ fn parse_effect_list(parser -> Parser) -> EffectParseResult {
 fn parse_block(parser -> Parser) -> BlockParseResult {
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if !(token.kind.variant == "Symbol" && token.kind.value == "{") {
+    if token.kind.variant != "Symbol" || token.kind.value != "{" {
         return BlockParseResult {
             parser: parser,
             block: Block { tokens: [], text: "", statements: [] },
@@ -2026,7 +2026,8 @@ fn parse_match_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSt
 fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
     let mut current = skip_trivia(parser);
     current = advance_to_symbol(current, "{");
-    if !(parser_peek_raw(current).kind.variant == "Symbol" && parser_peek_raw(current).kind.value == "{") {
+    let peek = parser_peek_raw(current);
+    if peek.kind.variant != "Symbol" || peek.kind.value != "{" {
         return MatchCasesParseResult { parser: parser, cases: [], success: false };
     }
     current = parser_advance_raw(current);
@@ -2340,7 +2341,7 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     current = capture.parser;
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if !(terminator.kind.variant == "Symbol" && terminator.kind.value == ";") {
+    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -2530,7 +2531,7 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
 fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult {
     let mut current = skip_trivia(parser);
     let start = parser_peek_raw(current);
-    if !(start.kind.variant == "Symbol" && start.kind.value == "(") {
+    if start.kind.variant != "Symbol" || start.kind.value != "(" {
         return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
     }
 
@@ -2973,7 +2974,7 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
     }
     let first = expression_tokens_peek(current);
-    if !(first.kind.variant == "Symbol" && first.kind.value == "{") {
+    if first.kind.variant != "Symbol" || first.kind.value != "{" {
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
     }
 
@@ -3124,7 +3125,7 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
         return expression_parse_failure(state);
     }
     let open_paren = expression_tokens_peek(current);
-    if !(open_paren.kind.variant == "Symbol" && open_paren.kind.value == "(") {
+    if open_paren.kind.variant != "Symbol" || open_paren.kind.value != "(" {
         return expression_parse_failure(state);
     }
 
@@ -3345,7 +3346,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
             return expression_parse_failure(state);
         }
         let closing = expression_tokens_peek(after_inner);
-        if !(closing.kind.variant == "Symbol" && closing.kind.value == ")") {
+        if closing.kind.variant != "Symbol" || closing.kind.value != ")" {
             return expression_parse_failure(state);
         }
         return ExpressionParseResult {
@@ -3435,7 +3436,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
                 return expression_parse_failure(state);
             }
             let closing = expression_tokens_peek(after_index);
-            if !(closing.kind.variant == "Symbol" && closing.kind.value == "]") {
+            if closing.kind.variant != "Symbol" || closing.kind.value != "]" {
                 return expression_parse_failure(state);
             }
             current_state = expression_tokens_advance(after_index);
@@ -3584,7 +3585,7 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
             return ObjectLiteralParseResult { state: state, fields: [], success: false };
         }
         let colon = expression_tokens_peek(current);
-        if !(colon.kind.variant == "Symbol" && colon.kind.value == ":") {
+        if colon.kind.variant != "Symbol" || colon.kind.value != ":" {
             return ObjectLiteralParseResult { state: state, fields: [], success: false };
         }
         current = expression_tokens_advance(current);
@@ -4144,66 +4145,53 @@ fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> Fiel
 }
 
 fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
-    methods.push(method);
-    return methods;
+    return methods.concat([method]);
 }
 
 fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[] {
-    signatures.push(signature);
-    return signatures;
+    return signatures.concat([signature]);
 }
 
 fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[] {
-    variants.push(variant);
-    return variants;
+    return variants.concat([variant]);
 }
 
 fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
-    types.push(item);
-    return types;
+    return types.concat([item]);
 }
 
 fn append_type_parameter(parameters -> TypeParameter[], parameter -> TypeParameter) -> TypeParameter[] {
-    parameters.push(parameter);
-    return parameters;
+    return parameters.concat([parameter]);
 }
 
 fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
-    decorators.push(decorator);
-    return decorators;
+    return decorators.concat([decorator]);
 }
 
 fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[] {
-    arguments.push(argument);
-    return arguments;
+    return arguments.concat([argument]);
 }
 
 fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[] {
-    clauses.push(clause);
-    return clauses;
+    return clauses.concat([clause]);
 }
 
 fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
-    cases.push(case);
-    return cases;
+    return cases.concat([case]);
 }
 
 fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
-    expressions.push(expression);
-    return expressions;
+    return expressions.concat([expression]);
 }
 
 fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectField[] {
-    fields.push(field);
-    return fields;
+    return fields.concat([field]);
 }
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {
-    tokens.push(token);
-    return tokens;
+    return tokens.concat([token]);
 }
 
 fn append_token_array(collection -> Token[][], tokens -> Token[]) -> Token[][] {
-    collection.push(tokens);
-    return collection;
+    return collection.concat([tokens]);
 }

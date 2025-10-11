@@ -107,7 +107,7 @@ fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
     for source_path in sources {
         let result = compile_source_at_path(source_path);
         if result.module != null {
-            modules.push(result.module);
+            modules = modules.concat([result.module]);
         }
         if result.diagnostics.length > 0 {
             diagnostics = diagnostics.concat(result.diagnostics);
@@ -141,7 +141,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     let python_source = lowered.source;
     let fallback_needed = needs_python_fallback(python_source);
     if fallback_needed {
-        messages.push("native backend: lowering produced unsupported python output; stage0 fallback disabled");
+    messages = messages.concat(["native backend: lowering produced unsupported python output; stage0 fallback disabled"]);
         return ModuleCompilationResult {
             module: null,
             diagnostics: [ModuleDiagnostics {
@@ -173,7 +173,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
 fn format_typecheck_diagnostics(entries -> Diagnostic[]) -> string[] {
     let mut messages -> string[] = [];
     for entry in entries {
-        messages.push(entry.message);
+    messages = messages.concat([entry.message]);
     }
     return messages;
 }

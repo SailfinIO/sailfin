@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import builtins
 import dataclasses
 import pathlib
 import re
@@ -37,6 +38,12 @@ class _Console:
 
 
 console = _Console()
+
+# Provide Sailfin literal aliases at the Python level so bootstrap- and
+# stage1-generated modules can refer to `null` without injecting per-module
+# shims. Booleans already map to the matching Python singletons, but Python
+# lacks a built-in `null`, so expose it via the builtins table for lookups.
+builtins.null = None
 
 
 _PRIMITIVE_TYPE_ALIASES: Dict[str, tuple[type, ...]] = {

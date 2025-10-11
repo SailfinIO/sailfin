@@ -9,9 +9,9 @@ while we finish porting the backend.
 from __future__ import annotations
 
 import argparse
+import importlib
 import pathlib
 import shutil
-import importlib
 import sys
 from typing import Iterable
 
@@ -113,6 +113,8 @@ def _run_self_hosted_pipeline(sources: list[pathlib.Path], output_dir: pathlib.P
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
 
+    _clear_stage1_modules()
+
     try:
         stage1_main = importlib.import_module("compiler.build.main")
     except ModuleNotFoundError as exc:  # pragma: no cover - defensive
@@ -170,6 +172,12 @@ def _run_self_hosted_pipeline(sources: list[pathlib.Path], output_dir: pathlib.P
         except ValueError:
             display_destination = destination
         print(f"[stage1] {display_source} -> {display_destination}")
+
+
+def _clear_stage1_modules() -> None:
+    for name in list(sys.modules):
+        if name == "compiler.build" or name.startswith("compiler.build."):
+            sys.modules.pop(name, None)
 
 
 if __name__ == "__main__":

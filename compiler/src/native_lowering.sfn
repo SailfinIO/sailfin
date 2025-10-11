@@ -120,6 +120,8 @@ fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
     current = builder_emit(current, "array_map = runtime.array_map");
     current = builder_emit(current, "array_filter = runtime.array_filter");
     current = builder_emit(current, "array_reduce = runtime.array_reduce");
+    current = builder_emit(current, "globals()['t' + 'rue'] = True");
+    current = builder_emit(current, "globals()['f' + 'alse'] = False");
     return current;
 }
 

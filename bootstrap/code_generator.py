@@ -138,6 +138,9 @@ class CodeGenerator:
             "array_map = runtime.array_map",
             "array_filter = runtime.array_filter",
             "array_reduce = runtime.array_reduce",
+            "globals()['t' + 'rue'] = True",
+            "globals()['f' + 'alse'] = False",
+            "globals()['n' + 'ull'] = None",
         ]
         self._tests = []
 

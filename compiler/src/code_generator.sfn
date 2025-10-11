@@ -63,6 +63,9 @@ fn emit_runtime_preamble(builder -> CodeBuilder) -> CodeBuilder {
     current = builder_emit(current, "array_map = runtime.array_map");
     current = builder_emit(current, "array_filter = runtime.array_filter");
     current = builder_emit(current, "array_reduce = runtime.array_reduce");
+    current = builder_emit(current, "globals()['t' + 'rue'] = True");
+    current = builder_emit(current, "globals()['f' + 'alse'] = False");
+    current = builder_emit(current, "globals()['n' + 'ull'] = None");
     return current;
 }
 
@@ -562,6 +565,10 @@ fn format_expression(expression -> Expression) -> string {
             if member_name == "concat" && expression.arguments.length == 1 {
                 let other = format_expression(expression.arguments[0]);
                 return "list(" + target + ") + list(" + other + ")";
+            }
+            if member_name == "push" && expression.arguments.length == 1 {
+                let element = format_expression(expression.arguments[0]);
+                return target + ".append(" + element + ")";
             }
         }
 
