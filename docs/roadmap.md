@@ -25,7 +25,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
    - [ ] Bootstrap retirement plan — Define the cut-over checklist (tests, docs, release notes) for replacing the Python toolchain once the Sailfin pipeline stays green for multiple consecutive builds.
 
 2. **Runtime & FFI Foundations**
-   - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `compiler/runtime/`, ensuring effect annotations remain enforced.
+  - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `runtime/`, ensuring effect annotations remain enforced.
    - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
    - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
 

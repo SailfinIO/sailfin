@@ -1,4 +1,4 @@
-// compiler/runtime/prelude.sfn
+// runtime/prelude.sfn
 //
 // Runtime facade for Sailfin programs emitted by the self-hosted compiler.
 // These helpers delegate to the bootstrap runtime so Sailfin sources can run

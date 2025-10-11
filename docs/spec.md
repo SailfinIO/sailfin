@@ -103,7 +103,7 @@ fn add(x -> number, y -> number) -> number {
 
 `async fn` enables `await` inside the body. Decorators (`@identifier`) are
 
-Self-hosted runtime stub: the repository now includes `compiler/runtime/prelude.sfn`,
+Self-hosted runtime stub: the repository now includes `runtime/prelude.sfn`,
 which defines the minimal runtime surface expected by Sailfin-generated code
 during bootstrap. The prelude forwards logging, channels, and async helpers as
 no-op stubs so that Sailfin-to-Sailfin compilation can round-trip without

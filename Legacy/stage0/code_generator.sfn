@@ -28,7 +28,7 @@ struct CodeBuilder {
 fn generate_program(program -> Program) -> string {
     let mut builder -> CodeBuilder = builder_new();
     builder = builder_emit(builder, "import asyncio");
-    builder = builder_emit(builder, "from stage0 import runtime_support as runtime");
+    builder = builder_emit(builder, "from runtime import runtime_support as runtime");
     builder = builder_emit_blank(builder);
     builder = emit_runtime_preamble(builder);
     builder = builder_emit_blank(builder);

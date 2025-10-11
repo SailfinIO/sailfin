@@ -108,7 +108,7 @@ class CodeGenerator:
         self._imports: List[str] = [
             "import asyncio",
                 "import importlib",
-            "from stage0 import runtime_support as runtime",
+            "from runtime import runtime_support as runtime",
         ]
         self._preamble: List[str] = []
         self._functions: List[str] = []
