@@ -124,10 +124,21 @@ def resolve_release(repo: str, token: Optional[str], tag: Optional[str]) -> dict
     base = f"https://api.github.com/repos/{repo}/releases"
     if tag:
         url = f"{base}/tags/{tag}"
-    else:
-        url = f"{base}/latest"
-    payload = github_request(url, token)
-    return json.loads(payload)
+        payload = github_request(url, token)
+        return json.loads(payload)
+
+    try:
+        payload = github_request(f"{base}/latest", token)
+        return json.loads(payload)
+    except InstallerError as exc:
+        if "404" not in str(exc):
+            raise
+
+    payload = github_request(f"{base}?per_page=1", token)
+    releases = json.loads(payload)
+    if not releases:
+        raise InstallerError("No releases found for the repository.")
+    return releases[0]
 
 
 def find_stage1_asset(release: dict[str, object]) -> dict[str, object]:
