@@ -225,6 +225,12 @@ enum Statement {
         body -> Block;
         decorators -> Decorator[];
     },
+    LoopStatement {
+        body -> Block;
+        decorators -> Decorator[];
+    },
+    BreakStatement,
+    ContinueStatement,
     MatchStatement {
         expression -> Expression;
         cases -> MatchCase[];

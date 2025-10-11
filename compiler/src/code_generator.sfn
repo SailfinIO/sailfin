@@ -328,6 +328,15 @@ fn emit_block_statement(builder -> CodeBuilder, statement -> Statement) -> CodeB
     if statement.variant == "ForStatement" {
         return emit_for_statement(builder, statement);
     }
+    if statement.variant == "LoopStatement" {
+        return emit_loop_statement(builder, statement);
+    }
+    if statement.variant == "BreakStatement" {
+        return builder_emit(builder, "break");
+    }
+    if statement.variant == "ContinueStatement" {
+        return builder_emit(builder, "continue");
+    }
     if statement.variant == "IfStatement" {
         return emit_if_statement(builder, statement);
     }
@@ -383,6 +392,14 @@ fn emit_with_block(builder -> CodeBuilder, statement -> Statement) -> CodeBuilde
 fn emit_for_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
     let header = "for " + format_expression(statement.clause.target) + " in " + format_expression(statement.clause.iterable) + ":";
     let mut current = builder_emit(builder, header);
+    current = builder_push_indent(current);
+    current = emit_block(current, statement.body);
+    current = builder_pop_indent(current);
+    return current;
+}
+
+fn emit_loop_statement(builder -> CodeBuilder, statement -> Statement) -> CodeBuilder {
+    let mut current = builder_emit(builder, "while True:");
     current = builder_push_indent(current);
     current = emit_block(current, statement.body);
     current = builder_pop_indent(current);

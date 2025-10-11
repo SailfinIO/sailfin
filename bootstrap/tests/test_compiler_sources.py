@@ -101,6 +101,33 @@ def test_self_hosted_effect_checker_requires_io_for_console_usage() -> None:
     assert not _validate_effects(program_io)
 
 
+def test_stage1_parser_handles_loop_break_continue() -> None:
+    from compiler.build.parser import parse_program
+
+    source = """
+    fn demo() {
+        loop {
+            break;
+            continue;
+        }
+    }
+    """
+
+    program = parse_program(source)
+
+    assert program.statements
+    statement = program.statements[0]
+    assert statement.variant == "FunctionDeclaration"
+
+    body_statements = statement.body.statements
+    assert body_statements
+    loop_stmt = body_statements[0]
+    assert loop_stmt.variant == "LoopStatement"
+    assert loop_stmt.body.statements
+    assert loop_stmt.body.statements[0].variant == "BreakStatement"
+    assert loop_stmt.body.statements[1].variant == "ContinueStatement"
+
+
 def test_self_hosted_effect_checker_requires_clock_for_sleep_usage() -> None:
     from compiler.build.ast import Block, FunctionSignature, Program, Statement
     from compiler.build.token import TokenKind

@@ -220,7 +220,8 @@ fn emit_single_struct(builder -> PythonBuilder, definition -> NativeStruct) -> P
 }
 
 fn render_struct_parameters(fields -> NativeStructField[]) -> string[] {
-    let mut parameters -> string[] = [];
+    let mut required -> string[] = [];
+    let mut optional -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= fields.length {
@@ -231,11 +232,13 @@ fn render_struct_parameters(fields -> NativeStructField[]) -> string[] {
         let mut entry -> string = name;
         if is_optional_type(field.type_annotation) {
             entry = entry + "=None";
+            optional = append_string(optional, entry);
+        } else {
+            required = append_string(required, entry);
         }
-        parameters = append_string(parameters, entry);
         index += 1;
     }
-    return parameters;
+    return required.concat(optional);
 }
 
 fn is_optional_type(type_annotation -> string) -> boolean {
@@ -306,7 +309,7 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
         assignments = append_string(assignments, sanitize_identifier(name) + "=" + lowered_value);
         index += 1;
     }
-    let sanitized_type = sanitize_identifier(type_name);
+    let sanitized_type = sanitize_qualified_identifier(type_name);
     return sanitized_type + "(" + join_with_separator(assignments, ", ") + ")";
 }
 
@@ -477,6 +480,19 @@ fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) ->
                 current = builder_pop_indent(current);
                 block_depth -= 1;
             }
+        } else if instruction.variant == "Loop" {
+            current = builder_emit(current, "while True:");
+            current = builder_push_indent(current);
+            block_depth += 1;
+        } else if instruction.variant == "EndLoop" {
+            if block_depth > 0 {
+                current = builder_pop_indent(current);
+                block_depth -= 1;
+            }
+        } else if instruction.variant == "Break" {
+            current = builder_emit(current, "break");
+        } else if instruction.variant == "Continue" {
+            current = builder_emit(current, "continue");
         } else if instruction.variant == "Match" {
             let subject_name = generate_match_subject_name(match_counter);
             match_counter += 1;
@@ -741,6 +757,38 @@ fn sanitize_identifier(name -> string) -> string {
         return "generated_function";
     }
     return result;
+}
+
+fn sanitize_qualified_identifier(name -> string) -> string {
+    let trimmed = trim_text(name);
+    if trimmed.length == 0 {
+        return sanitize_identifier(trimmed);
+    }
+    let mut part -> string = "";
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "." {
+            if part.length > 0 {
+                parts = append_string(parts, sanitize_identifier(part));
+                part = "";
+            }
+        } else {
+            part = part + ch;
+        }
+        index += 1;
+    }
+    if part.length > 0 {
+        parts = append_string(parts, sanitize_identifier(part));
+    }
+    if parts.length == 0 {
+        return sanitize_identifier(trimmed);
+    }
+    return join_with_separator(parts, ".");
 }
 
 fn is_identifier_char(ch -> string) -> boolean {

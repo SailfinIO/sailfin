@@ -277,8 +277,21 @@ fn parse_statement(parser -> Parser) -> StatementParseResult {
     if identifier_matches(token, "fn") {
         return parse_function(parser, false, decorators);
     }
+    if identifier_matches(token, "loop") {
     if identifier_matches(token, "async") {
-        let lookahead = skip_trivia(parser_advance_raw(parser));
+    }
+    if identifier_matches(token, "break") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_break_statement(after_decorators);
+    }
+    if identifier_matches(token, "continue") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_continue_statement(after_decorators);
+    }
         let after = parser_peek_raw(lookahead);
         if identifier_matches(after, "fn") {
             return parse_function(parser, true, decorators);
@@ -623,7 +636,7 @@ fn parse_enum(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
             break;
         }
 
-        let variant_result = parse_enum_variant(parser);
+    let variant_result = parse_enum_variant(parser);
         if variant_result.success {
             parser = variant_result.parser;
             if variant_result.variant != null {
@@ -752,7 +765,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
                 break;
             }
 
-            let field_result = parse_struct_field(current);
+            let field_result = parse_enum_variant_field(current);
             if field_result.success {
                 current = field_result.parser;
                 if field_result.field != null {
@@ -761,7 +774,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
                 continue;
             }
 
-            current = skip_struct_member(current);
+            current = skip_enum_variant_entry(current);
         }
     }
 
@@ -781,6 +794,81 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
     return EnumVariantParseResult {
         parser: current,
         variant: variant,
+        success: true,
+    };
+}
+
+fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_mutable -> boolean = false;
+    let token = parser_peek_raw(current);
+    let mut token_to_use = token;
+    if identifier_matches(token_to_use, "mut") {
+        current = parser_advance_raw(current);
+        is_mutable = true;
+        current = skip_trivia(current);
+        token_to_use = parser_peek_raw(current);
+    }
+
+    if token_to_use.kind.variant != "Identifier" {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    let name = identifier_text(token_to_use);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let separator = parser_peek_raw(current);
+    let is_type_sep = separator.kind.variant == "Symbol"
+        && (separator.kind.value == ":" || separator.kind.value == "->");
+    if !is_type_sep {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let capture = collect_until(skip_trivia(current), [",", "}", ";"]);
+    current = capture.parser;
+    let mut type_text = trim_text(tokens_to_text(capture.tokens));
+    loop {
+        if type_text.length == 0 {
+            break;
+        }
+        let last = type_text[type_text.length - 1];
+        if last != ";" {
+            break;
+        }
+        let trimmed = runtime.substring(type_text, 0, type_text.length - 1);
+        type_text = trim_text(trimmed);
+    }
+    if type_text.length == 0 {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" {
+        if terminator.kind.value == "," {
+            current = parser_advance_raw(current);
+        } else if terminator.kind.value == ";" {
+            current = parser_advance_raw(current);
+            current = skip_trivia(current);
+            let maybe_comma = parser_peek_raw(current);
+            if maybe_comma.kind.variant == "Symbol" && maybe_comma.kind.value == "," {
+                current = parser_advance_raw(current);
+            }
+        }
+    }
+
+    let field = FieldDeclaration {
+        name: name,
+        type_annotation: TypeAnnotation { text: type_text },
+        mutable: is_mutable,
+    };
+
+    return StructFieldParseResult {
+        parser: current,
+        field: field,
         success: true,
     };
 }
@@ -1646,6 +1734,21 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     if identifier_matches(token, "for") {
         return parse_for_statement(after_decorators, decorators);
     }
+    if identifier_matches(token, "loop") {
+        return parse_loop_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "break") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_break_statement(after_decorators);
+    }
+    if identifier_matches(token, "continue") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_continue_statement(after_decorators);
+    }
     if identifier_matches(token, "if") {
         return parse_if_statement(after_decorators, decorators);
     }
@@ -1729,6 +1832,80 @@ fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStat
     return BlockStatementParseResult {
         parser: current,
         statement: statement,
+        success: true,
+    };
+}
+
+fn parse_loop_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "loop") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "loop");
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = body_result.parser;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.LoopStatement {
+        body: body_result.block,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_break_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "break") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "break");
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        current = parser_advance_raw(current);
+    }
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: Statement.BreakStatement(),
+        success: true,
+    };
+}
+
+fn parse_continue_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "continue") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "continue");
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        current = parser_advance_raw(current);
+    }
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: Statement.ContinueStatement(),
         success: true,
     };
 }
@@ -3694,6 +3871,31 @@ fn skip_struct_member(parser -> Parser) -> Parser {
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
             if sym == ";" {
+                current = parser_advance_raw(current);
+                return current;
+            }
+            if sym == "}" {
+                return current;
+            }
+        }
+    }
+}
+
+fn skip_enum_variant_entry(parser -> Parser) -> Parser {
+    let mut current = parser;
+    loop {
+        let next = parser_advance_raw(current);
+        if next.index == current.index {
+            return current;
+        }
+        current = next;
+        let token = parser_peek_raw(current);
+        if token.kind.variant == "EndOfFile" {
+            return current;
+        }
+        if token.kind.variant == "Symbol" {
+            let sym = token.kind.value;
+            if sym == "," {
                 current = parser_advance_raw(current);
                 return current;
             }

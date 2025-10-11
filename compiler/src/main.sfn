@@ -140,9 +140,10 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     let lowered = lower_to_python(native_result.module);
     let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
     let mut python_source -> string = lowered.source;
-    if python_source.length == 0 {
+    let fallback_needed = needs_python_fallback(python_source);
+    if fallback_needed {
         python_source = generate_program(program);
-        messages = [];
+        messages.push("native backend: python fallback engaged (lowering incomplete)");
     }
 
     let mut entry_list -> ModuleDiagnostics[] = [];
@@ -206,4 +207,103 @@ fn has_prefix(value -> string, prefix -> string) -> boolean {
         index += 1;
     }
     return true;
+}
+
+fn needs_python_fallback(source -> string) -> boolean {
+    if source.length == 0 {
+        return true;
+    }
+    if string_contains(source, ".push(") {
+        return true;
+    }
+    if string_contains(source, ".concat(") {
+        return true;
+    }
+    if string_contains(source, ".length") {
+        return true;
+    }
+    if string_contains(source, "\nlet ") {
+        return true;
+    }
+    if string_contains(source, " let ") {
+        return true;
+    }
+    if string_contains(source, " mut ") {
+        return true;
+    }
+    if string_contains(source, " null") {
+        return true;
+    }
+    if string_contains(source, " true") {
+        return true;
+    }
+    if string_contains(source, " false") {
+        return true;
+    }
+    if string_contains(source, "=true") {
+        return true;
+    }
+    if string_contains(source, "=false") {
+        return true;
+    }
+    if string_contains(source, "TokenKind.variant('Identifier', [])") {
+        return true;
+    }
+    if string_contains(source, "TokenKind.variant('NumberLiteral', [])") {
+        return true;
+    }
+    if string_contains(source, "TokenKind.variant('StringLiteral', [])") {
+        return true;
+    }
+    if string_contains(source, "TokenKind.variant('BooleanLiteral', [])") {
+        return true;
+    }
+    if string_contains(source, "TokenKind.variant('Symbol', [])") {
+        return true;
+    }
+    if string_contains(source, "Expression.Identifier()") {
+        return true;
+    }
+    if string_contains(source, "Expression.Raw()") {
+        return true;
+    }
+    if string_contains(source, "ExpressionIdentifier(") {
+        return true;
+    }
+    if string_contains(source, "ExpressionRaw(") {
+        return true;
+    }
+    return false;
+}
+
+fn string_contains(value -> string, pattern -> string) -> boolean {
+    if pattern.length == 0 {
+        return true;
+    }
+    if value.length < pattern.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + pattern.length > value.length {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
 }

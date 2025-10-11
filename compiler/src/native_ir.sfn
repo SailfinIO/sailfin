@@ -23,6 +23,10 @@ enum NativeInstruction {
         iterable -> string;
     },
     EndFor,
+    Loop,
+    EndLoop,
+    Break,
+    Continue,
     Match { expression -> string },
     Case {
         pattern -> string;
@@ -347,6 +351,18 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
     }
     if line == ".endfor" {
         return [NativeInstruction.EndFor()];
+    }
+    if line == ".loop" {
+        return [NativeInstruction.Loop()];
+    }
+    if line == ".endloop" {
+        return [NativeInstruction.EndLoop()];
+    }
+    if line == "break" {
+        return [NativeInstruction.Break()];
+    }
+    if line == "continue" {
+        return [NativeInstruction.Continue()];
     }
     if starts_with(line, ".match ") {
         let expression = trim_text(strip_prefix(line, ".match "));

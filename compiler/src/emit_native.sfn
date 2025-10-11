@@ -140,6 +140,15 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "MatchStatement" {
         return emit_match(state, statement);
     }
+    if statement.variant == "LoopStatement" {
+        return emit_loop(state, statement);
+    }
+    if statement.variant == "BreakStatement" {
+        return state_emit_line(state, "break");
+    }
+    if statement.variant == "ContinueStatement" {
+        return state_emit_line(state, "continue");
+    }
     if statement.variant == "IfStatement" {
         return emit_if(state, statement);
     }
@@ -394,6 +403,15 @@ fn emit_for(state -> NativeState, statement -> Statement) -> NativeState {
     current = emit_block(current, statement.body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endfor");
+}
+
+fn emit_loop(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_decorators(state, statement.decorators);
+    current = state_emit_line(current, ".loop");
+    current = state_push_indent(current);
+    current = emit_block(current, statement.body);
+    current = state_pop_indent(current);
+    return state_emit_line(current, ".endloop");
 }
 
 fn emit_match(state -> NativeState, statement -> Statement) -> NativeState {
