@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.2 (2025-10-11)
+
+### Bug Fixes
+
+- Install script release resolving
+  ([`d425395`](https://github.com/SailfinIO/sailfin/commit/d425395ac2222aec3dffa006cd3dfe6d4d11dcfb))
+
+### Documentation
+
+- Update to reference current stage1 self hosting
+  ([`7e770d2`](https://github.com/SailfinIO/sailfin/commit/7e770d243275313c860d7b75dd2004e5b163180b))
+
+
 ## v0.1.1-alpha.1 (2025-10-11)
 
 ### Bug Fixes
