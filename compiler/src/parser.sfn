@@ -10,6 +10,7 @@ import { Token, TokenKind } from "./token";
 import {
     Block,
     Decorator,
+    DecoratorArgument,
     Expression,
     FieldDeclaration,
     FunctionSignature,

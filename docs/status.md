@@ -16,7 +16,8 @@ roadmaps.
 - **Self-hosted (stage1)** — Sailfin-written lexer, parser, and emitter
   that round-trip common declarations, decorators, and prompts. Code
   generation currently targets Python scaffolding and shares the bootstrap
-  runtime prelude.
+  runtime prelude. The stage0 fallback has been removed; lowering gaps now
+  surface as fatal diagnostics so we iterate directly on stage1.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration into the bootstrap toolchain is not wired yet; manifests and
   CLI commands are tracked as roadmap work.
@@ -132,8 +133,8 @@ roadmaps.
 ## Active Workstreams
 
 1. **Self-hosted bootstrap loop** — keep the Sailfin compiler sources compiling
-  themselves without stage0 assistance while the new passes land (tracked via
-  `bootstrap/tests/test_compiler_sources.py`).
+  themselves without stage0 assistance or fallbacks while new passes land
+  (tracked via `bootstrap/tests/test_compiler_sources.py`).
 2. **Semantic parity & diagnostics** — land name resolution, type analysis, and
   richer error reporting in Sailfin (`compiler/src/typecheck.sfn`, expanded
   `effect_checker.sfn`) so outputs match the Python toolchain.

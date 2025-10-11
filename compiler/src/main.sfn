@@ -7,7 +7,6 @@ import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import { lower_to_llvm, LoweredLLVMResult } from "./native_llvm_lowering";
 import { typecheck_program } from "./typecheck";
-import { generate_program } from "./code_generator";
 
 struct CompiledModule {
     source_path -> string;
@@ -139,11 +138,18 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     let native_result = emit_native(program);
     let lowered = lower_to_python(native_result.module);
     let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
-    let mut python_source -> string = lowered.source;
+    let python_source = lowered.source;
     let fallback_needed = needs_python_fallback(python_source);
     if fallback_needed {
-        python_source = generate_program(program);
-        messages.push("native backend: python fallback engaged (lowering incomplete)");
+        messages.push("native backend: lowering produced unsupported python output; stage0 fallback disabled");
+        return ModuleCompilationResult {
+            module: null,
+            diagnostics: [ModuleDiagnostics {
+                source_path: source_path,
+                messages: messages,
+                fatal: true,
+            }],
+        };
     }
 
     let mut entry_list -> ModuleDiagnostics[] = [];
@@ -223,15 +229,6 @@ fn needs_python_fallback(source -> string) -> boolean {
     if target.length == 0 {
         return true;
     }
-    if string_contains(target, ".push(") {
-        return true;
-    }
-    if string_contains(target, ".concat(") {
-        return true;
-    }
-    if string_contains(target, ".length") {
-        return true;
-    }
     if string_contains(target, "\nlet ") {
         return true;
     }
@@ -239,21 +236,6 @@ fn needs_python_fallback(source -> string) -> boolean {
         return true;
     }
     if string_contains(target, " mut ") {
-        return true;
-    }
-    if string_contains(target, " null") {
-        return true;
-    }
-    if string_contains(target, " true") {
-        return true;
-    }
-    if string_contains(target, " false") {
-        return true;
-    }
-    if string_contains(target, "=true") {
-        return true;
-    }
-    if string_contains(target, "=false") {
         return true;
     }
     if string_contains(target, "TokenKind.variant('Identifier', [])") {

@@ -147,27 +147,19 @@ def _run_self_hosted_pipeline(sources: list[pathlib.Path], output_dir: pathlib.P
         pathlib.Path(getattr(module, "source_path")).resolve(): module for module in modules
     }
 
-    fallback_marker = "python fallback engaged"
-    fallback_sources = {
-        pathlib.Path(getattr(entry, "source_path")).resolve()
-        for entry in diagnostics
-        if any(fallback_marker in message for message in getattr(entry, "messages", []))
-    }
-
     for source_path in sources:
         module = modules_by_source.get(source_path.resolve())
         if module is None:
             raise SystemExit(f"Stage1 compiler did not produce output for {source_path}")
-        if source_path.resolve() in fallback_sources:
-            print(f"[stage1][info] {source_path}: using bootstrap python output")
-            continue
         try:
             relative = source_path.relative_to(DEFAULT_SOURCE_DIR)
         except ValueError:
             relative = source_path.name
         destination = (output_dir / pathlib.Path(relative)).with_suffix(".py")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        python_source = getattr(module, "python_source")
+        python_source = getattr(module, "python_source", None)
+        if python_source is None:
+            raise SystemExit(f"Stage1 compiler module missing python_source for {source_path}")
         destination.write_text(python_source, encoding="utf-8")
         try:
             display_source = source_path.relative_to(REPO_ROOT)

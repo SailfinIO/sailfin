@@ -531,10 +531,67 @@ fn rewrite_expression_intrinsics(expression -> string) -> string {
     }
     let mut current = expression;
     current = rewrite_literal_tokens(current);
+    current = rewrite_logical_operators(current);
     current = rewrite_push_calls(current);
     current = rewrite_concat_calls(current);
     current = rewrite_length_accesses(current);
     return current;
+}
+
+fn rewrite_logical_operators(expression -> string) -> string {
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "'" || ch == "\"" {
+            let literal_end = skip_string_literal(expression, index);
+            result = result + runtime.substring(expression, index, literal_end);
+            index = literal_end;
+            continue;
+        }
+        if ch == "&" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "&" {
+                    result = result + " and ";
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "|" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "|" {
+                    result = result + " or ";
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "!" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "=" {
+                    result = result + "!=";
+                    index += 2;
+                    continue;
+                }
+            }
+            result = result + "not ";
+            index += 1;
+            continue;
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
 }
 
 fn rewrite_literal_tokens(expression -> string) -> string {
@@ -653,9 +710,10 @@ fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan {
         if ch == "[" {
             if square_depth > 0 {
                 square_depth -= 1;
+                index -= 1;
+                continue;
             }
-            index -= 1;
-            continue;
+            break;
         }
         if ch == ")" {
             paren_depth += 1;
@@ -665,9 +723,10 @@ fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan {
         if ch == "(" {
             if paren_depth > 0 {
                 paren_depth -= 1;
+                index -= 1;
+                continue;
             }
-            index -= 1;
-            continue;
+            break;
         }
         if square_depth > 0 || paren_depth > 0 {
             index -= 1;
