@@ -9,26 +9,28 @@ roadmaps.
 
 ## Stage Overview
 
-- **Bootstrap (stage0)** — Python compiler that parses Sailfin source and
-  emits runnable Python. Effect checking is conservative (`model`, `io`,
-  `net`). Runtime helpers for `http`, `websocket`, and `fs` are mocked for
-  fast feedback.
-- **Self-hosted (stage1)** — Sailfin-written lexer, parser, and native
-  lowering pipeline that round-trip common declarations, decorators, and
-  prompts. Lowering targets Python scaffolding via `emit_native` and
-  `native_lowering`, sharing the bootstrap runtime prelude. The stage0
-  fallback has been removed; lowering gaps now surface as fatal diagnostics so
-  we iterate directly on stage1.
+- **Stage1 (production)** — Sailfin-written lexer, parser, semantic passes, and
+  native lowering pipeline that compile the Sailfin compiler itself. The stage1
+  artifact ships as a versioned release bundle (`sailfin-stage1-<version>.zip`)
+  containing `compiler/build/`, the runtime prelude, and the `sailfin-stage1`
+  launcher. All developer workflows (`make compile`, `make package`, CI) now go
+  through this self-hosted pipeline.
+- **Stage0 (legacy)** — The Python bootstrap compiler is retained for archival
+  reference and targeted regression hunting, but it no longer participates in
+  packaging or CI. Expect the directory to freeze except for emergency diffs.
+- **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
+  Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
+  provide the initial scaffolding.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
-  Integration into the bootstrap toolchain is not wired yet; manifests and
-  CLI commands are tracked as roadmap work.
+  Integration with the self-hosted toolchain remains roadmap work; manifests
+  and CLI flows are tracked separately.
 
 ## Feature Snapshot
 
 **Parsing & Declarations**
-- Bootstrap: Stage0 parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
+- Stage0 (legacy): Parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
   `pipeline`, `test`, `type`, and `match` declarations.
-- Self-hosted prototype: Mirrors the same surface and now recognises
+- Stage1: Mirrors the same surface and now recognises
   block-level `if`/`else`, `for` loops, and `match` statements with `case`
   guards captured as expressions plus inline `=>` expression or `return`
   bodies. Common expressions (member access, function calls, unary `!`/`-`,
@@ -37,13 +39,12 @@ roadmaps.
   literal forms like `[x, y]`, `{ key: value }`, and `Type { field: value }`)
   now lower into structured nodes instead of `Raw` placeholders.
 
-**Effect Tracking (`![...]`)**
-- Bootstrap: Enforces `model`, `io`, `net`, and `clock` via
+- Stage0 (legacy): Enforces `model`, `io`, `net`, and `clock` via
   `bootstrap/effect_checker.py`, covering prompt blocks, effectful decorators
   (e.g. `@logExecution`), and runtime helpers such as `fs.*`, `http.*`,
   `websocket.*`, `serve`, `spawn`, `print.*`, and `sleep` (including their
   `runtime.*` aliases).
-- Self-hosted prototype: Infers `io` when decorators like `@trace` or
+- Stage1: Infers `io` when decorators like `@trace` or
   `@logExecution` appear and scans blocks for prompts, console helpers
   (`print.*`, `console.*`, `runtime.console.*`), runtime timers
   (`sleep`, `runtime.sleep`), and capability helpers such as `fs.*`,
@@ -51,10 +52,9 @@ roadmaps.
   `runtime.websocket.*`, `serve`, `runtime.serve`, `spawn`, and
   `runtime.spawn`. Hierarchical effects remain design-stage work.
 
-**Semantic Analysis**
-- Bootstrap: Performs symbol collection and effect validation inside the
+- Stage0 (legacy): Performs symbol collection and effect validation inside the
   Python pipeline; deeper type checking remains future work.
-- Self-hosted prototype: `compiler/src/typecheck.sfn` now walks top-level and
+- Stage1: `compiler/src/typecheck.sfn` now walks top-level and
   scoped blocks, builds symbol tables for functions/tests, and reports duplicate
   declarations (including parameter and local name clashes). The pass also
   enforces unique struct fields, struct methods, enum variants, interface
@@ -63,38 +63,34 @@ roadmaps.
   through `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues
   during round-trips.
 
-**Prompt Blocks**
-- Bootstrap: Prompts require the `model` effect; interpolation is handled by the
+- Stage0 (legacy): Prompts require the `model` effect; interpolation is handled by the
   runtime helpers.
-- Self-hosted prototype: Prompt statements are preserved in the AST and emitted
+- Stage1: Prompt statements are preserved in the AST and emitted
   as comments; deterministic scopes (`with seed(...)`) parse but have stubbed
   semantics.
 
-**Models, Pipelines, Tools**
-- Bootstrap: Emit data holders and plain Python functions; no special pipeline
+- Stage0 (legacy): Emits data holders and plain Python functions; no special pipeline
   operator yet.
-- Self-hosted prototype: Uses the same emission strategy while preserving
+- Stage1: Uses the same emission strategy while preserving
   properties and effects. The planned `|>` operator remains illustrative only.
 
-**Ownership & Types**
-- Bootstrap: Parses `Affine<T>` / `Linear<T>` without enforcement.
-- Self-hosted prototype: Carries ownership metadata for future borrow checking.
+- Stage0 (legacy): Parses `Affine<T>` / `Linear<T>` without enforcement.
+- Stage1: Carries ownership metadata for future borrow checking.
 
-**Tests**
-- Bootstrap: Lowers tests to Python functions executed in the `__main__`
+- Stage0 (legacy): Lowers tests to Python functions executed in the `__main__`
   preamble, enforcing required effects.
-- Self-hosted prototype: Generates the same scaffolding.
+- Stage1: Generates the same scaffolding.
 
 **Code Generation**
 - Bootstrap: Walks the full AST and emits runnable Python against
-  `runtime_support.py`. Console helpers now cover `print.info`,
-  `print.error`, and `print.warn`, each flagged by the effect checker as
-  `io`.
-- Self-hosted prototype: Lowers Sailfin sources through the native pipeline and
-  prints Python scaffolding via `native_lowering.sfn`, rewiring postfix helpers
-  (`.map`, `.filter`, `.reduce`, `.concat`, `.length`) into runtime shims and
-  `len(...)` calls. Block emission preserves local `let` declarations, loops,
-  `if`/`else if`/`else` chains, and `match` statements so stage1 sources
+  `runtime_support.py`. Console helpers cover `print.info`, `print.error`, and
+  `print.warn`, each flagged by the effect checker as `io`. (Frozen except for
+  hotfixes.)
+- Stage1: Lowers Sailfin sources through the native pipeline and prints Python
+  scaffolding via `native_lowering.sfn`, rewiring postfix helpers (`.map`,
+  `.filter`, `.reduce`, `.concat`, `.length`) into runtime shims and `len(...)`
+  calls. Block emission preserves local `let` declarations, loops,
+  `if`/`else if`/`else` chains, and `match` statements so compiler sources
   round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
   feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` continues to
   translate return-only functions into skeletal LLVM IR, providing the first
@@ -107,30 +103,29 @@ roadmaps.
 
 ## Validation Coverage
 
-- `make bootstrap-test` now executes the stage1-focused pytest suite under
-  `compiler/tests/`, including the end-to-end self-host check and native
-  lowering validation.
-- `examples/README.md` enumerates every runnable sample with its declared
-  effects so capability requirements stay in sync with the bootstrap runtime.
-- Stage1 smoke tests ensure Sailfin sources under `compiler/src/` compile
-  through the native pipeline; bootstrap-specific tests have been archived.
-- No automated tests exist yet for registry interactions or CLI workflow
-  beyond the bootstrap scripts.
+- `make test` runs the stage1-focused pytest suite (`compiler/tests/`), covering
+  the end-to-end self-host check (`test_stage1_artifact.py`) and native lowering
+  validation.
+- CI packages the stage1 artifact, uploads it, and semantic-release tags a
+  GitHub release. The installer smoke test verifies the archive can rebuild
+  stage1 (`scripts/install_stage1.py`).
+- `examples/README.md` enumerates every runnable sample with declared effects;
+  capability requirements stay in sync with the runtime helpers.
+- Registry and CLI workflows remain manual; no automated coverage yet.
 
 ## Active Workstreams
 
-1. **Self-hosted bootstrap loop** — keep the Sailfin compiler sources compiling
-  themselves without stage0 assistance or fallbacks while new passes land
-  (tracked via `compiler/tests/test_stage1_integration.py`).
-2. **Semantic parity & diagnostics** — land name resolution, type analysis, and
-  richer error reporting in Sailfin (`compiler/src/typecheck.sfn`, expanded
-  `effect_checker.sfn`) so outputs match the Python toolchain.
-3. **Native runtime & FFI** — swap the Python runtime stubs with Sailfin
-  implementations plus minimal capability-aware bridges for filesystem, HTTP,
-  model execution, and concurrency primitives.
-4. **Registry integration** — wire manifest parsing and publish/resolve
-  commands against `registry.sailfin.dev` once the self-hosted compiler stays
-  green.
+1. **Stage2 backend** — Extend `.sfn-asm` lowering to emit runnable LLVM/WASM
+  modules, bridge capability shims, and execute smoke binaries end-to-end.
+2. **Runtime & FFI lift** — Replace Python runtime helpers with Sailfin
+  implementations that surface the same effect guarantees and provide bridged
+  access to filesystem, HTTP, model execution, and concurrency primitives.
+3. **Diagnostics deepening** — Continue parity work in `typecheck.sfn` and
+  `effect_checker.sfn` (hierarchical effects, richer messages) to match the
+  historical stage0 behaviour without regressing stage1 self-hosting.
+4. **Registry integration** — Wire manifest parsing and publish/resolve
+  commands against `registry.sailfin.dev` once the self-host loop remains
+  stable.
 
 Track detailed milestones and sequencing in `docs/roadmap.md`. When a
 feature graduates from prototype into stage0, update the table above and

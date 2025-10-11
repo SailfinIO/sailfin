@@ -9,30 +9,25 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 ## Active Workstreams (Do Now)
 
-1. **Self-Hosted Compiler Escape Velocity**
-   - [ ] Closed-loop bootstrap — `compiler/src/main.sfn` parses, checks, and emits Sailfin that recompiles the entire compiler without stage0 assistance (tracked via `bootstrap/tests/test_compiler_sources.py`).
-     - [ ] Replace `bootstrap/compile_self_host.py` with a Sailfin-native pipeline that emits the Python scaffolding for `compiler/src/**/*.sfn` using `compile_to_native_python`.
-     - [ ] Integration test: run the Sailfin-built compiler end-to-end to regenerate `compiler/build/` and verify parity without invoking the bootstrap parser/generator.
-     - [ ] Harden diagnostics/halting in `compile_to_sailfin`/`compile_to_native` so typecheck failures stop emission, matching the bootstrap CLI.
-   - [ ] Semantic passes — Land name resolution, type analysis, and effect propagation in Sailfin (`compiler/src/typecheck.sfn`, updated `effect_checker.sfn`) so diagnostics match the Python implementation.
-    - [x] Enforce unique struct fields/methods, enum variants, interface members, model properties, and type parameters in `typecheck.sfn` with targeted bootstrap coverage (`bootstrap/tests/test_unit_typecheck.py`).
-   - [ ] Native backend spike — Stand up the first non-Python backend (`compiler/src/emit_native.sfn`) targeting LLVM IR or WASM as described in `compiler/README.md`, with smoke tests that execute compiled binaries for simple programs.
-     - [x] Emit structured `.sfn-asm` textual IR with entry-point metadata and diagnostics surfaced through `compile_to_native`; coverage lives in `bootstrap/tests/test_compiler_codegen.py::test_emit_native_produces_artifact`.
-       - [x] Bridge `.sfn-asm` into executable Python scaffolding via `native_lowering.sfn`, with smoke coverage in `bootstrap/tests/test_compiler_codegen.py::test_lower_native_pipeline_executes_function` and compiler integration in `compile_to_native_python`.
-     - [ ] Lower `.sfn-asm` into executable LLVM IR / WASM modules and run end-to-end smoke tests for simple programs.
-       - [x] Emit skeletal LLVM IR for return-only functions via `native_llvm_lowering.sfn`, validated by `bootstrap/tests/test_compiler_codegen.py::test_lower_native_to_llvm_emits_ir`.
-         - [x] Capture parameter metadata in `native_ir.sfn` and emit numeric parameter signatures/returns in the LLVM prototype (`bootstrap/tests/test_compiler_codegen.py::test_lower_native_handles_parameter_round_trip`).
-   - [ ] Bootstrap retirement plan — Define the cut-over checklist (tests, docs, release notes) for replacing the Python toolchain once the Sailfin pipeline stays green for multiple consecutive builds.
+1. **Stage2 Backend Delivery**
+  - [ ] Extend `.sfn-asm` lowering to emit runnable LLVM IR / WASM modules and execute smoke binaries via CI.
+  - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
+  - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
 
 2. **Runtime & FFI Foundations**
-  - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `runtime/`, ensuring effect annotations remain enforced.
-   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
-   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
+  - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `runtime/`, preserving effect annotations.
+  - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
+  - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
 
-3. **Registry & Capsule Workflow**
-   - [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
-   - [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the Sailfin toolchain once native builds are viable.
-   - [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
+3. **Diagnostics Parity**
+  - [ ] Land hierarchical effect propagation in `effect_checker.sfn` (nested prompts, async contexts).
+  - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
+  - [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path.
+
+4. **Registry & Capsule Workflow**
+  - [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
+  - [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the Sailfin toolchain once native builds are viable.
+  - [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
 
 ## Ready Next (Pull When Active Stream Clears)
 
@@ -61,6 +56,8 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Postfix foundations — Indexing (`values[i]`) and range (`start..end`) expressions round-trip through the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` covers bracket access and `start..end` ranges.
 - [x] Postfix expressions — Chained member/call/index sequences now round-trip through the Sailfin parser and emitter, and code generation rewrites `.map`, `.filter`, `.reduce`, `.concat`, and `.length` into runtime helpers. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` asserts Sailfin emission and Python lowering for the helper chain.
 - [x] Example hardening — Annotated every runnable example with declared effects, wrapped ad-hoc top-level statements in `main`, and removed undefined helper stubs. Validation: `examples/README.md` capability index plus `make bootstrap-test` ensures samples compile and execute under the bootstrap suite.
+- [x] Stage1 closed loop — Stage1 now recompiles the compiler end-to-end, replaces stage0 in CI, and ships as the release artifact. Validation: `compiler/tests/test_stage1_artifact.py`, `.github/workflows/stage1-release.yml`.
+- [x] Stage1 installer — Added `scripts/install_stage1.py` and README docs so releases can be fetched with a PAT and installed system-wide.
 
 ## Coordination Notes
 

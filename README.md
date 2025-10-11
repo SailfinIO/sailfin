@@ -106,9 +106,10 @@ For now, experiment, record findings, and propose ideas through pull requests.
 
 ### Local Development
 
-- `make bootstrap-install` — create or update the `sailfin-bootstrap` Conda environment (Python 3.13 by default).
-- `make bootstrap-test` — run the entire pytest suite; use `PYTEST_ARGS=-m unit` or `PYTEST_ARGS=-m integration` to focus runs.
-- `conda run -n sailfin-bootstrap python bootstrap/bootstrap.py path/to/file.sfn` — compile a Sailfin source file with the stage0 compiler.
+- `make install` — create or update the `sailfin` Conda environment defined in `environment.yml`.
+- `make test` — run the stage1 pytest suite; pass `PYTEST_ARGS=...` to scope the run.
+- `make package` — build the stage1 release artifact (`dist/sailfin-stage1-<version>.zip`).
+- `sailfin-stage1 <paths> --out <dir>` — compile Sailfin sources using the installed stage1 bundle.
 
 The Sailfin registry at `registry.sailfin.dev` is live for experiments; the
 bootstrap toolchain has not yet integrated manifest workflows, so treat registry
