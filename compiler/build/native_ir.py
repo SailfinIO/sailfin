@@ -125,7 +125,7 @@ def select_text_artifact(artifacts):
         if artifact.format == "sailfin-native-text":
             return artifact
         index += 1
-    return None
+    return null
 
 def parse_native_artifact(text):
     lines = split_lines(text)
@@ -134,7 +134,7 @@ def parse_native_artifact(text):
     imports = []
     structs = []
     enums = []
-    current = None
+    current = null
     index = 0
     while True:
         if index >= len(lines):
@@ -152,7 +152,7 @@ def parse_native_artifact(text):
             continue
         if starts_with(line, ".import "):
             parsed_import = parse_import_entry(strip_prefix(line, ".import "))
-            if parsed_import == None:
+            if parsed_import == null:
                 diagnostics = append_string(diagnostics, "unable to parse import: " + line)
             else:
                 imports = append_import(imports, parsed_import)
@@ -161,42 +161,42 @@ def parse_native_artifact(text):
         if starts_with(line, ".struct "):
             struct_result = parse_struct_definition(lines, index)
             diagnostics = (diagnostics) + (struct_result.diagnostics)
-            if struct_result.definition != None:
+            if struct_result.definition != null:
                 structs = append_struct(structs, struct_result.definition)
             index = struct_result.next_index
             continue
         if starts_with(line, ".enum "):
             enum_result = parse_enum_definition(lines, index)
             diagnostics = (diagnostics) + (enum_result.diagnostics)
-            if enum_result.definition != None:
+            if enum_result.definition != null:
                 enums = append_enum(enums, enum_result.definition)
             index = enum_result.next_index
             continue
         if starts_with(line, ".fn "):
-            if current != None:
+            if current != null:
                 diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open")
             current = NativeFunction(name=parse_function_name(strip_prefix(line, ".fn ")), parameters=[], return_type="void", effects=[], instructions=[])
             index += 1
             continue
         if starts_with(line, ".endfn"):
-            if current == None:
+            if current == null:
                 diagnostics = append_string(diagnostics, "encountered .endfn without active function")
             else:
                 functions = append_function(functions, current)
-                current = None
+                current = null
             index += 1
             continue
         if starts_with(line, ".meta "):
-            if current != None:
+            if current != null:
                 current = apply_meta(current, strip_prefix(line, ".meta "))
             else:
                 diagnostics = append_string(diagnostics, "metadata outside function body: " + line)
             index += 1
             continue
         if starts_with(line, ".param "):
-            if current != None:
+            if current != null:
                 parameter = parse_parameter_entry(strip_prefix(line, ".param "))
-                if parameter == None:
+                if parameter == null:
                     diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line)
                 else:
                     current = append_parameter(current, parameter)
@@ -204,7 +204,7 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
             index += 1
             continue
-        if current == None:
+        if current == null:
             diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
             index += 1
             continue
@@ -216,7 +216,7 @@ def parse_native_artifact(text):
             current = append_instruction(current, instructions[instruction_index])
             instruction_index += 1
         index += 1
-    if current != None:
+    if current != null:
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact")
     return ParseNativeResult(functions=functions, imports=imports, structs=structs, enums=enums, diagnostics=diagnostics)
 
@@ -311,9 +311,9 @@ def parse_instruction(line):
             return [NativeInstruction.Return(expression=trim_trailing_delimiters(remainder))]
     if starts_with(line, "eval let "):
         body = trim_text(strip_prefix(line, "eval let "))
-        is_mutable = False
+        is_mutable = false
         if starts_with(body, "mut "):
-            is_mutable = True
+            is_mutable = true
             body = trim_text(strip_prefix(body, "mut "))
         parsed = parse_binding_components(body)
         return [NativeInstruction.Let(name=parsed.name, mutable=is_mutable, type_annotation=parsed.type_annotation, value=maybe_trim_trailing(parsed.value))]
@@ -357,28 +357,28 @@ def parse_inline_case_body_instruction(body):
 def split_case_components(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
-        return CaseComponents(pattern=trimmed, guard=None)
+        return CaseComponents(pattern=trimmed, guard=null)
     separator = " if "
     index = last_index_of(trimmed, separator)
     if index < 0:
-        return CaseComponents(pattern=trimmed, guard=None)
+        return CaseComponents(pattern=trimmed, guard=null)
     pattern = trim_text(runtime.substring(trimmed, 0, index))
     guard_text = trim_text(runtime.substring(trimmed, index + len(separator), len(trimmed)))
     if len(guard_text) == 0:
-        return CaseComponents(pattern=pattern, guard=None)
+        return CaseComponents(pattern=pattern, guard=null)
     return CaseComponents(pattern=pattern, guard=guard_text)
 
 def parse_import_entry(entry):
     trimmed = trim_text(entry)
     if len(trimmed) == 0:
-        return None
+        return null
     module_text = trimmed
     names = []
     brace_index = index_of(trimmed, "{")
     if brace_index >= 0:
         close_index = last_index_of(trimmed, "}")
         if close_index < 0  or  close_index <= brace_index:
-            return None
+            return null
         module_text = trim_text(runtime.substring(trimmed, 0, brace_index))
         names_segment = runtime.substring(trimmed, brace_index + 1, close_index)
         names = parse_import_names(names_segment)
@@ -402,7 +402,7 @@ def parse_struct_definition(lines, start_index):
     struct_name = strip_generics(struct_name)
     if len(struct_name) == 0:
         diagnostics = append_string(diagnostics, "unable to parse struct header: " + header)
-        return StructParseResult(definition=None, next_index=start_index + 1, diagnostics=diagnostics)
+        return StructParseResult(definition=null, next_index=start_index + 1, diagnostics=diagnostics)
     fields = []
     index = start_index + 1
     while True:
@@ -421,7 +421,7 @@ def parse_struct_definition(lines, start_index):
             break
         if starts_with(raw_line, ".field "):
             parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "))
-            if parsed_field == None:
+            if parsed_field == null:
                 diagnostics = append_string(diagnostics, "unable to parse struct field: " + raw_line)
             else:
                 fields = append_struct_field(fields, parsed_field)
@@ -442,7 +442,7 @@ def parse_enum_definition(lines, start_index):
     enum_name = strip_generics(enum_name)
     if len(enum_name) == 0:
         diagnostics = append_string(diagnostics, "unable to parse enum header: " + header)
-        return EnumParseResult(definition=None, next_index=start_index + 1, diagnostics=diagnostics)
+        return EnumParseResult(definition=null, next_index=start_index + 1, diagnostics=diagnostics)
     variants = []
     index = start_index + 1
     while True:
@@ -461,7 +461,7 @@ def parse_enum_definition(lines, start_index):
             break
         if starts_with(raw_line, ".variant "):
             parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "))
-            if parsed_variant == None:
+            if parsed_variant == null:
                 diagnostics = append_string(diagnostics, "unable to parse enum variant: " + raw_line)
             else:
                 variants = append_enum_variant(variants, parsed_variant)
@@ -474,16 +474,16 @@ def parse_enum_definition(lines, start_index):
 def parse_enum_variant_line(text):
     trimmed = trim_trailing_delimiters(trim_text(text))
     if len(trimmed) == 0:
-        return None
+        return null
     brace_index = index_of(trimmed, "{")
     if brace_index < 0:
         return NativeEnumVariant(name=strip_generics(trimmed), fields=[])
     close_index = last_index_of(trimmed, "}")
     if close_index < 0  or  close_index <= brace_index:
-        return None
+        return null
     name_text = strip_generics(trim_text(runtime.substring(trimmed, 0, brace_index)))
     if len(name_text) == 0:
-        return None
+        return null
     fields_segment = runtime.substring(trimmed, brace_index + 1, close_index)
     entries = split_enum_field_entries(fields_segment)
     fields = []
@@ -496,8 +496,8 @@ def parse_enum_variant_line(text):
             index += 1
             continue
         parsed_field = parse_enum_variant_field(entry)
-        if parsed_field == None:
-            return None
+        if parsed_field == null:
+            return null
         fields = append_enum_variant_field(fields, parsed_field)
         index += 1
     return NativeEnumVariant(name=name_text, fields=fields)
@@ -530,17 +530,17 @@ def split_enum_field_entries(text):
 def parse_enum_variant_field(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
-        return None
-    is_mutable = False
+        return null
+    is_mutable = false
     if starts_with(trimmed, "mut "):
-        is_mutable = True
+        is_mutable = true
         trimmed = trim_text(strip_prefix(trimmed, "mut "))
     arrow_index = index_of(trimmed, "->")
     if arrow_index < 0:
-        return None
+        return null
     name = trim_text(runtime.substring(trimmed, 0, arrow_index))
     if len(name) == 0:
-        return None
+        return null
     type_text = trim_text(runtime.substring(trimmed, arrow_index + 2, len(trimmed)))
     return NativeEnumVariantField(name=name, type_annotation=type_text, mutable=is_mutable)
 
@@ -559,34 +559,34 @@ def trim_trailing_delimiters(text):
     return runtime.substring(text, 0, end)
 
 def maybe_trim_trailing(value):
-    if value == None:
-        return None
+    if value == null:
+        return null
     trimmed = trim_trailing_delimiters(value)
     return trimmed
 
 def parse_struct_field_line(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
-        return None
-    is_mutable = False
+        return null
+    is_mutable = false
     if starts_with(trimmed, "mut "):
-        is_mutable = True
+        is_mutable = true
         trimmed = trim_text(strip_prefix(trimmed, "mut "))
     arrow_index = index_of(trimmed, "->")
     if arrow_index < 0:
-        return None
+        return null
     name = trim_text(runtime.substring(trimmed, 0, arrow_index))
     if len(name) == 0:
-        return None
+        return null
     type_text = trim_text(runtime.substring(trimmed, arrow_index + 2, len(trimmed)))
     return NativeStructField(name=name, type_annotation=type_text, mutable=is_mutable)
 
 def parse_let_instruction(line):
     body = trim_text(strip_prefix(line, ".let "))
-    is_mutable = False
+    is_mutable = false
     remainder = body
     if starts_with(remainder, "mut "):
-        is_mutable = True
+        is_mutable = true
         remainder = trim_text(strip_prefix(remainder, "mut "))
     parsed = parse_binding_components(remainder)
     return NativeInstruction.Let(name=parsed.name, mutable=is_mutable, type_annotation=parsed.type_annotation, value=parsed.value)
@@ -604,7 +604,7 @@ def parse_binding_components(text):
         index += 1
     name = trim_text(name)
     type_annotation = ""
-    value = None
+    value = null
     remainder = trim_text(runtime.substring(text, index, len(text)))
     if len(remainder) > 0:
         if starts_with(remainder, "->"):
@@ -650,10 +650,10 @@ def parse_function_name(header):
 def parse_parameter_entry(body):
     trimmed = trim_text(body)
     if len(trimmed) == 0:
-        return None
-    is_mutable = False
+        return null
+    is_mutable = false
     if starts_with(trimmed, "mut "):
-        is_mutable = True
+        is_mutable = true
         trimmed = trim_text(strip_prefix(trimmed, "mut "))
     name = ""
     index = 0
@@ -667,9 +667,9 @@ def parse_parameter_entry(body):
         index += 1
     name = trim_text(name)
     if len(name) == 0:
-        return None
+        return null
     type_annotation = ""
-    default_value = None
+    default_value = null
     remainder = trim_text(runtime.substring(trimmed, index, len(trimmed)))
     if len(remainder) > 0:
         if starts_with(remainder, "->"):
@@ -789,17 +789,17 @@ def is_trim_char(ch):
 
 def starts_with(value, prefix):
     if len(prefix) == 0:
-        return True
+        return true
     if len(value) < len(prefix):
-        return False
+        return false
     index = 0
     while True:
         if index >= len(prefix):
             break
         if value[index] != prefix[index]:
-            return False
+            return false
         index += 1
-    return True
+    return true
 
 def strip_prefix(value, prefix):
     if not starts_with(value, prefix):
@@ -814,12 +814,12 @@ def index_of(value, target):
         if index + len(target) > len(value):
             break
         match_index = 0
-        matches = True
+        matches = true
         while True:
             if match_index >= len(target):
                 break
             if value[index + match_index] != target[match_index]:
-                matches = False
+                matches = false
                 break
             match_index += 1
         if matches:
@@ -835,12 +835,12 @@ def last_index_of(value, target):
         if index < 0:
             break
         match_index = 0
-        matches = True
+        matches = true
         while True:
             if match_index >= len(target):
                 break
             if value[index + match_index] != target[match_index]:
-                matches = False
+                matches = false
                 break
             match_index += 1
         if matches:
