@@ -60,7 +60,6 @@ fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
         return LoweredPythonResult { source: "", diagnostics: diagnostics };
     }
-
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
     let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums);
@@ -299,7 +298,12 @@ fn lower_expression_with_depth(expression -> string, depth -> number) -> string 
     if struct_literal != null {
         return struct_literal;
     }
-    return rewrite_expression_intrinsics(trimmed);
+    let array_literal = lower_array_literal_expression(trimmed, depth);
+    if array_literal != null {
+        return array_literal;
+    }
+    let rewritten = rewrite_expression_intrinsics(trimmed);
+    return rewrite_struct_literals_inline(rewritten, depth);
 }
 
 fn lower_struct_literal_expression(expression -> string, depth -> number) -> string? {
@@ -313,6 +317,9 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
     }
     let type_name = trim_text(runtime.substring(expression, 0, brace_index));
     if type_name.length == 0 {
+        return null;
+    }
+    if !is_struct_literal_type_candidate(type_name) {
         return null;
     }
     let fields_text = runtime.substring(expression, brace_index + 1, closing_index);
@@ -345,6 +352,133 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
     }
     let sanitized_type = sanitize_qualified_identifier(type_name);
     return sanitized_type + "(" + join_with_separator(assignments, ", ") + ")";
+}
+
+fn is_struct_literal_type_candidate(text -> string) -> boolean {
+    if text.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "." {
+            index += 1;
+            continue;
+        }
+        if is_identifier_char(ch) {
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+fn lower_array_literal_expression(expression -> string, depth -> number) -> string? {
+    let trimmed = trim_text(expression);
+    if trimmed.length < 2 {
+        return null;
+    }
+    if trimmed[0] != "[" {
+        return null;
+    }
+    if trimmed[trimmed.length - 1] != "]" {
+        return null;
+    }
+    let inner = runtime.substring(trimmed, 1, trimmed.length - 1);
+    let entries = split_array_entries(inner);
+    let mut lowered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = trim_trailing_delimiters(trim_text(entries[index]));
+        if entry.length > 0 {
+            lowered = append_string(lowered, lower_expression_with_depth(entry, depth + 1));
+        }
+        index += 1;
+    }
+    return "[" + join_with_separator(lowered, ", ") + "]";
+}
+
+fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> string {
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut current -> string = expression;
+    let mut search_start -> number = 0;
+    loop {
+        if search_start >= current.length {
+            break;
+        }
+        let open_index = find_substring_from(current, "{", search_start);
+        if open_index < 0 {
+            break;
+        }
+        let mut type_end -> number = open_index;
+        loop {
+            if type_end <= 0 {
+                break;
+            }
+            let prev = current[type_end - 1];
+            if is_whitespace_char(prev) {
+                type_end -= 1;
+                continue;
+            }
+            break;
+        }
+        let mut type_start -> number = type_end;
+        loop {
+            if type_start <= 0 {
+                break;
+            }
+            let candidate_char = current[type_start - 1];
+            if candidate_char == "." {
+                type_start -= 1;
+                continue;
+            }
+            if is_identifier_char(candidate_char) {
+                type_start -= 1;
+                continue;
+            }
+            break;
+        }
+        if type_start == type_end {
+            search_start = open_index + 1;
+            continue;
+        }
+        let candidate = runtime.substring(current, type_start, type_end);
+        if !is_struct_literal_type_candidate(candidate) {
+            search_start = open_index + 1;
+            continue;
+        }
+        if type_start > 0 {
+            let prefix_char = current[type_start - 1];
+            if is_identifier_char(prefix_char) || prefix_char == "." {
+                search_start = open_index + 1;
+                continue;
+            }
+        }
+        let closing_index = find_matching_brace(current, open_index);
+        if closing_index < 0 {
+            break;
+        }
+        let struct_text = runtime.substring(current, type_start, closing_index + 1);
+        let lowered = lower_struct_literal_expression(struct_text, depth + 1);
+        if lowered == null {
+            search_start = closing_index + 1;
+            continue;
+        }
+        let prefix = runtime.substring(current, 0, type_start);
+        let suffix = runtime.substring(current, closing_index + 1, current.length);
+        current = prefix + lowered + suffix;
+        search_start = type_start + lowered.length;
+    }
+    return current;
 }
 
 fn capture_struct_literal_expression(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> StructLiteralCapture {
@@ -788,6 +922,37 @@ fn split_struct_field_entries(text -> string) -> string[] {
     return entries;
 }
 
+fn split_array_entries(text -> string) -> string[] {
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" || ch == "[" || ch == "(" {
+            depth += 1;
+        } else if ch == "}" || ch == "]" || ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        if ch == "," && depth == 0 {
+            entries = append_string(entries, current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        entries = append_string(entries, current);
+    }
+    return entries;
+}
+
 fn trim_trailing_delimiters(text -> string) -> string {
     let mut end -> number = text.length;
     loop {
@@ -854,6 +1019,44 @@ fn find_matching_brace(text -> string, open_index -> number) -> number {
             if depth == 0 {
                 return index;
             }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_substring_from(value -> string, pattern -> string, start -> number) -> number {
+    if pattern.length == 0 {
+        if start < 0 {
+            return 0;
+        }
+        if start > value.length {
+            return value.length;
+        }
+        return start;
+    }
+    let mut index -> number = start;
+    if index < 0 {
+        index = 0;
+    }
+    loop {
+        if index + pattern.length > value.length {
+            break;
+        }
+        let mut matches -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                matches = false;
+                break;
+            }
+            offset += 1;
+        }
+        if matches {
+            return index;
         }
         index += 1;
     }
@@ -1315,6 +1518,22 @@ fn is_identifier_char(ch -> string) -> boolean {
         return true;
     }
     if code >= runtime.char_code("0") && code <= runtime.char_code("9") {
+        return true;
+    }
+    return false;
+}
+
+fn is_whitespace_char(ch -> string) -> boolean {
+    if ch == " " {
+        return true;
+    }
+    if ch == "\n" {
+        return true;
+    }
+    if ch == "\r" {
+        return true;
+    }
+    if ch == "\t" {
         return true;
     }
     return false;
