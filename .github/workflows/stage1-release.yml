@@ -59,7 +59,7 @@ jobs:
         run: |
           git config user.name "Sailfin Release Bot"
           git config user.email "releases@sailfin.io"
-          git remote set-url origin "https://x-access-token:${RELEASE_PAT}@github.com/SailfinIO/sailfin.git"
+          git remote set-url origin "https://mcereal:${RELEASE_PAT}@github.com/SailfinIO/sailfin.git"
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
