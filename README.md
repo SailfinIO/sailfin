@@ -69,6 +69,22 @@ alongside it.
 - `docs/enbf.md` — grammar sketch aligned to the stage0 parser.
 - `docs/keywords.md` — reserved words and runtime notes.
 
+## Installing the stage1 artifact (preview)
+
+We publish the Sailfin stage1 compiler as a private GitHub release asset while
+the language is in alpha. With a personal access token that has `repo` scope,
+you can install the latest build via:
+
+```
+export GITHUB_TOKEN=<your-token>
+python scripts/install_stage1.py
+```
+
+The installer downloads the newest release (override with `--version` or
+`--tag`), extracts it to `~/.local/share/sailfin-stage1/<tag>/`, and symlinks the
+`sailfin-stage1` launcher into `~/.local/bin`. Use `--install-dir`, `--bin-dir`,
+or `--no-link` to customize these paths.
+
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,

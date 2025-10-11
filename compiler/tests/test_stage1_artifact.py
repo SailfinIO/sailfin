@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import os
 import pathlib
 import sys
 import zipfile
+import subprocess
 
 import pytest
 
@@ -18,6 +20,8 @@ def test_stage1_artifact_can_compile_stage1(tmp_path: pathlib.Path) -> None:
 
     extract_dir = tmp_path / "artifact"
     with zipfile.ZipFile(artifact_path) as archive:
+        info = archive.getinfo("bin/sailfin-stage1")
+        assert (info.external_attr >> 16) & 0o111, "CLI launcher lacks execute bit in archive"
         archive.extractall(extract_dir)
 
     sys.path.insert(0, str(extract_dir))
@@ -33,6 +37,18 @@ def test_stage1_artifact_can_compile_stage1(tmp_path: pathlib.Path) -> None:
         for module in modules:
             python_source = getattr(module, "python_source", None)
             assert python_source, f"module missing python_source: {module}"
+
+        launcher = extract_dir / "bin" / "sailfin-stage1"
+        assert launcher.exists(), "CLI launcher missing from artifact"
+        if not os.access(launcher, os.X_OK):
+            launcher.chmod(launcher.stat().st_mode | 0o111)
+
+        cli_output_dir = tmp_path / "stage1-cli-out"
+        subprocess.check_call(
+            [str(launcher), str(REPO_ROOT / "compiler" / "src"), "--out", str(cli_output_dir)]
+        )
+        generated = list(cli_output_dir.glob("*.py"))
+        assert generated, "CLI launcher did not generate any Python modules"
     finally:
         sys.path.remove(str(extract_dir))
         importlib.invalidate_caches()

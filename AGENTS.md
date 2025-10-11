@@ -8,13 +8,13 @@
 - `examples/` provides runnable snippets; keep inputs minimal and exclude generated artefacts. Sibling `extensions/` and `registry/` hold auxiliary capsules and registry tooling.
 
 ## Build, Test, and Development Commands
-- `make bootstrap-install` provisions or updates the `sailfin-bootstrap` Conda env defined in `bootstrap/environment.yml`.
-- `make test` or `make bootstrap-test` runs the full pytest suite; pass `PYTEST_ARGS=...` to filter (e.g., `-m unit`).
-- `make bootstrap-compile` emits Python modules from `compiler/src/` using the bootstrap compiler.
-- `make clean` clears coverage caches under `bootstrap/` when a fresh run is needed.
+- `make install` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
+- `make test` or `make test` runs the full pytest suite; pass `PYTEST_ARGS=...` to filter (e.g., `-m unit`).
+- `make compile` emits Python modules from `compiler/src/` using the stage0 compiler.
+- `make clean` clears coverage caches under `compiler/build/` when a fresh run is needed.
 - if you need to do some debugging, use the /scratch directory and run/place scripts there. for example:
     ```bash
-cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/conda run -n sailfin-bootstrap python scratch/example_script.py
+cd /home/michael/github.com/sailfin/sailfin && /home/michael/miniconda3/bin/conda run -n sailfin python scratch/example_script.py
     ```
 - Do not under any circumstances use  here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.
 
