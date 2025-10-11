@@ -27,11 +27,13 @@ jobs:
 
       - name: Run tests
         shell: bash -l {0}
-        run: make test
+        run: |
+          CONDA=$(which conda) make test
 
       - name: Build stage1 artifact
         shell: bash -l {0}
-        run: make package
+        run: |
+          CONDA=$(which conda) make package
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -62,4 +64,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash -l {0}
-        run: semantic-release publish
+        run: |
+          CONDA=$(which conda) semantic-release publish
