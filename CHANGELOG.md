@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.3 (2025-10-11)
+
+### Bug Fixes
+
+- Gitignore build dir so workflow can rebuild as well as archive stage0 and update docs
+  ([`bec69c0`](https://github.com/SailfinIO/sailfin/commit/bec69c03730b749d2bbce141c13fe78a17408bb4))
+
+- Move sys path injection
+  ([`fc6e3a4`](https://github.com/SailfinIO/sailfin/commit/fc6e3a41d6a7a00bfac0eafed868459a6987b038))
+
+
 ## v0.1.1-alpha.2 (2025-10-11)
 
 ### Bug Fixes
