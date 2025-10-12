@@ -20,6 +20,9 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [x] Added string helpers (`substring`, `find_char`) to `runtime/prelude.sfn` with regression coverage in `compiler/tests/test_runtime_prelude.py`.
     - [x] Implemented ASCII-focused `char_code` in `runtime/prelude.sfn`, falling back to the bootstrap helper for other glyphs; regression coverage in `compiler/tests/test_runtime_prelude.py`.
     - [x] Wired stage1 compiler helpers (lexer, parser, emitter, native lowering) to consume Sailfin string utilities (`compiler/src/string_utils.sfn`) instead of `runtime_support.py` fallbacks.    
+    - [ ] Promote `string_utils.sfn` into the Sailfin runtime surface (export via `runtime/prelude.sfn`) so downstream projects reuse a single implementation.
+    - [ ] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
+    - [ ] Audit remaining runtime helpers for Python dependencies (`match_exhaustive_failed`, enum utilities) and schedule Sailfin ports with paired tests.
   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
   - [x] Extend stage1 native lowering to support top-level aliases (`let console = runtime.console`) so the Sailfin prelude compiles cleanly (`compiler/tests/test_runtime_prelude.py`).
   - [ ] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings.
