@@ -24,6 +24,7 @@ import {
     WithClause,
     ElseBranch,
 } from "./ast";
+import { substring } from "./string_utils";
 
 struct NativeArtifact {
     name -> string;
@@ -865,10 +866,10 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
-    }
-    return runtime.substring(value, start, end);
+        if start == 0 && end == value.length {
+            return value;
+        }
+        return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
@@ -1039,7 +1040,7 @@ fn trim_right(value -> string) -> string {
     if end == value.length {
         return value;
     }
-    return runtime.substring(value, 0, end);
+    return substring(value, 0, end);
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {

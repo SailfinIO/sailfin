@@ -83,9 +83,10 @@ roadmaps.
   sequential `parallel` orchestration now live in `runtime/prelude.sfn`, letting
   the self-hosted runtime exercise native Sailfin loops; regression coverage
   lives in `compiler/tests/test_runtime_prelude.py`. String helpers (`substring`,
-  `find_char`) and ASCII-aware character codes (`char_code`) likewise execute
-  inside Sailfin so lexing no longer depends on the bootstrap runtime for these
-  hot paths, with non-ASCII glyphs still falling back to `runtime_support.py`.
+  `find_char`) and ASCII-aware character codes (`char_code`) now live in
+  `compiler/src/string_utils.sfn`, letting the stage1 compiler share pure
+  Sailfin implementations across the lexer, parser, native emitters, and
+  lowering passes. Non-ASCII glyphs still fall back to `runtime_support.py`.
   Native lowering now
   recognises top-level `.let` bindings (e.g., `console = runtime.console`) so
   the prelude compiles without spurious diagnostics.

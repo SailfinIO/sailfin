@@ -6,6 +6,7 @@
 
 import { NativeModule } from "./emit_native";
 import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport, NativeEnum, NativeEnumVariantField, NativeBinding } from "./native_ir";
+import { substring, char_code } from "./string_utils";
 
 struct LoweredPythonResult {
     source -> string;
@@ -230,7 +231,7 @@ fn normalize_import_module(path -> string) -> string {
         return trimmed;
     }
     if starts_with(trimmed, "./") {
-        let remainder = runtime.substring(trimmed, 2, trimmed.length);
+        let remainder = substring(trimmed, 2, trimmed.length);
         remainder = replace_all(remainder, "/", ".");
         return "compiler.build." + remainder;
     }
@@ -343,14 +344,14 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
     if closing_index < 0 {
         return null;
     }
-    let type_name = trim_text(runtime.substring(expression, 0, brace_index));
+    let type_name = trim_text(substring(expression, 0, brace_index));
     if type_name.length == 0 {
         return null;
     }
     if !is_struct_literal_type_candidate(type_name) {
         return null;
     }
-    let fields_text = runtime.substring(expression, brace_index + 1, closing_index);
+    let fields_text = substring(expression, brace_index + 1, closing_index);
     let entries = split_struct_field_entries(fields_text);
     let mut assignments -> string[] = [];
     let mut index -> number = 0;
@@ -368,8 +369,8 @@ fn lower_struct_literal_expression(expression -> string, depth -> number) -> str
             index += 1;
             continue;
         }
-        let name = trim_text(runtime.substring(entry, 0, colon_index));
-        let value_text = trim_text(runtime.substring(entry, colon_index + 1, entry.length));
+    let name = trim_text(substring(entry, 0, colon_index));
+    let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
         if name.length == 0 {
             index += 1;
             continue;
@@ -416,7 +417,7 @@ fn lower_array_literal_expression(expression -> string, depth -> number) -> stri
     if trimmed[trimmed.length - 1] != "]" {
         return null;
     }
-    let inner = runtime.substring(trimmed, 1, trimmed.length - 1);
+    let inner = substring(trimmed, 1, trimmed.length - 1);
     let entries = split_array_entries(inner);
     let mut lowered -> string[] = [];
     let mut index -> number = 0;
@@ -479,7 +480,7 @@ fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> stri
             search_start = open_index + 1;
             continue;
         }
-        let candidate = runtime.substring(current, type_start, type_end);
+    let candidate = substring(current, type_start, type_end);
         if !is_struct_literal_type_candidate(candidate) {
             search_start = open_index + 1;
             continue;
@@ -495,14 +496,14 @@ fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> stri
         if closing_index < 0 {
             break;
         }
-        let struct_text = runtime.substring(current, type_start, closing_index + 1);
+    let struct_text = substring(current, type_start, closing_index + 1);
         let lowered = lower_struct_literal_expression(struct_text, depth + 1);
         if lowered == null {
             search_start = closing_index + 1;
             continue;
         }
-        let prefix = runtime.substring(current, 0, type_start);
-        let suffix = runtime.substring(current, closing_index + 1, current.length);
+    let prefix = substring(current, 0, type_start);
+    let suffix = substring(current, closing_index + 1, current.length);
         current = prefix + lowered + suffix;
         search_start = type_start + lowered.length;
     }
@@ -579,7 +580,7 @@ fn rewrite_logical_operators(expression -> string) -> string {
         let ch = expression[index];
         if ch == "'" || ch == "\"" {
             let literal_end = skip_string_literal(expression, index);
-            result = result + runtime.substring(expression, index, literal_end);
+            result = result + substring(expression, index, literal_end);
             index = literal_end;
             continue;
         }
@@ -645,7 +646,7 @@ fn rewrite_literal_tokens(expression -> string) -> string {
                     break;
                 }
             }
-            let token = runtime.substring(expression, start, index);
+            let token = substring(expression, start, index);
             if token == "null" {
                 result = result + "None";
             } else if token == "true" {
@@ -686,8 +687,8 @@ fn rewrite_concat_calls(expression -> string) -> string {
         if !args_span.success {
             break;
         }
-        let before = runtime.substring(current, 0, object_span.start);
-        let after = runtime.substring(current, args_span.end, current.length);
+    let before = substring(current, 0, object_span.start);
+    let after = substring(current, args_span.end, current.length);
         let object_expr = trim_text(object_span.value);
         let argument_expr = trim_text(args_span.value);
         let replacement = "(" + object_expr + ") + (" + argument_expr + ")";
@@ -707,8 +708,8 @@ fn rewrite_length_accesses(expression -> string) -> string {
         if !object_span.success {
             break;
         }
-        let before = runtime.substring(current, 0, object_span.start);
-        let after = runtime.substring(current, match_index + 7, current.length);
+    let before = substring(current, 0, object_span.start);
+    let after = substring(current, match_index + 7, current.length);
         let object_expr = trim_text(object_span.value);
         if object_expr.length == 0 {
             break;
@@ -770,7 +771,7 @@ fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan {
     if start >= dot_index {
         return ExtractedSpan { value: "", start: start, end: dot_index, success: false };
     }
-    let value = runtime.substring(text, start, dot_index);
+    let value = substring(text, start, dot_index);
     return ExtractedSpan { value: value, start: start, end: dot_index, success: true };
 }
 
@@ -793,7 +794,7 @@ fn extract_parenthesized_span(text -> string, open_index -> number) -> Extracted
         } else if ch == ")" {
             depth -= 1;
             if depth == 0 {
-                let value = runtime.substring(text, open_index + 1, index);
+                let value = substring(text, open_index + 1, index);
                 return ExtractedSpan { value: value, start: open_index + 1, end: index + 1, success: true };
             }
         } else if ch == "\"" || ch == "'" {
@@ -1056,7 +1057,7 @@ fn trim_trailing_delimiters(text -> string) -> string {
     if end == text.length {
         return text;
     }
-    return runtime.substring(text, 0, end);
+    return substring(text, 0, end);
 }
 
 fn index_of(value -> string, target -> string) -> number {
@@ -1458,7 +1459,7 @@ fn number_to_string(value -> number) -> string {
             quotient += 1;
         }
         let digit = temp;
-        let ch = runtime.substring(digits, digit, digit + 1);
+    let ch = substring(digits, digit, digit + 1);
         output = ch + output;
         remaining = quotient;
     }
@@ -1597,14 +1598,14 @@ fn is_identifier_char(ch -> string) -> boolean {
     if ch == "_" {
         return true;
     }
-    let code = runtime.char_code(ch);
-    if code >= runtime.char_code("a") && code <= runtime.char_code("z") {
+    let code = char_code(ch);
+    if code >= char_code("a") && code <= char_code("z") {
         return true;
     }
-    if code >= runtime.char_code("A") && code <= runtime.char_code("Z") {
+    if code >= char_code("A") && code <= char_code("Z") {
         return true;
     }
-    if code >= runtime.char_code("0") && code <= runtime.char_code("9") {
+    if code >= char_code("0") && code <= char_code("9") {
         return true;
     }
     return false;
@@ -1654,7 +1655,7 @@ fn trim_text(value -> string) -> string {
     if start == 0 && end == value.length {
         return value;
     }
-    return runtime.substring(value, start, end);
+    return substring(value, start, end);
 }
 
 fn starts_with(value -> string, prefix -> string) -> boolean {

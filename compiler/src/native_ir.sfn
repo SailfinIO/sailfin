@@ -5,6 +5,7 @@
 // this module to understand the structure emitted by `emit_native.sfn`.
 
 import { NativeArtifact } from "./emit_native";
+import { substring } from "./string_utils";
 
 enum NativeInstruction {
     Return { expression -> string },
@@ -372,8 +373,8 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
         let separator = " in ";
         let index = index_of(body, separator);
         if index >= 0 {
-            let target = trim_text(runtime.substring(body, 0, index));
-            let iterable = trim_text(runtime.substring(body, index + separator.length, body.length));
+            let target = trim_text(substring(body, 0, index));
+            let iterable = trim_text(substring(body, index + separator.length, body.length));
             return [NativeInstruction.For { target: target, iterable: iterable }];
         }
     }
@@ -411,7 +412,7 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
         }
         let separator = line[3];
         if separator == " " || separator == "\t" {
-            let remainder = trim_text(runtime.substring(line, 3, line.length));
+            let remainder = trim_text(substring(line, 3, line.length));
             if remainder.length == 0 {
                 return [NativeInstruction.Return { expression: "" }];
             }
@@ -454,8 +455,8 @@ fn parse_inline_case_instruction(line -> string) -> NativeInstruction[] {
     if arrow_index < 0 {
         return [NativeInstruction.Unknown { text: line }];
     }
-    let head = trim_text(runtime.substring(trimmed, 0, arrow_index));
-    let remainder = trim_trailing_delimiters(trim_text(runtime.substring(trimmed, arrow_index + 2, trimmed.length)));
+    let head = trim_text(substring(trimmed, 0, arrow_index));
+    let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index + 2, trimmed.length)));
     let split = split_case_components(head);
     let mut instructions -> NativeInstruction[] = [];
     instructions = instructions.concat([NativeInstruction.Case { pattern: split.pattern, guard: split.guard }]);
@@ -490,8 +491,8 @@ fn split_case_components(text -> string) -> CaseComponents {
     if index < 0 {
         return CaseComponents { pattern: trimmed, guard: null };
     }
-    let pattern = trim_text(runtime.substring(trimmed, 0, index));
-    let guard_text = trim_text(runtime.substring(trimmed, index + separator.length, trimmed.length));
+    let pattern = trim_text(substring(trimmed, 0, index));
+    let guard_text = trim_text(substring(trimmed, index + separator.length, trimmed.length));
     if guard_text.length == 0 {
         return CaseComponents { pattern: pattern, guard: null };
     }
@@ -511,8 +512,8 @@ fn parse_import_entry(entry -> string) -> NativeImport? {
         if close_index < 0 || close_index <= brace_index {
             return null;
         }
-        module_text = trim_text(runtime.substring(trimmed, 0, brace_index));
-        let names_segment = runtime.substring(trimmed, brace_index + 1, close_index);
+    module_text = trim_text(substring(trimmed, 0, brace_index));
+    let names_segment = substring(trimmed, brace_index + 1, close_index);
         names = parse_import_names(names_segment);
     }
     module_text = strip_quotes(trim_text(module_text));
@@ -534,7 +535,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
     let mut struct_name -> string = name_text;
     let space_index = index_of(struct_name, " ");
     if space_index >= 0 {
-        struct_name = trim_text(runtime.substring(struct_name, 0, space_index));
+    struct_name = trim_text(substring(struct_name, 0, space_index));
     }
     struct_name = strip_generics(struct_name);
     if struct_name.length == 0 {
@@ -594,7 +595,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
     let mut enum_name -> string = name_text;
     let space_index = index_of(enum_name, " ");
     if space_index >= 0 {
-        enum_name = trim_text(runtime.substring(enum_name, 0, space_index));
+    enum_name = trim_text(substring(enum_name, 0, space_index));
     }
     enum_name = strip_generics(enum_name);
     if enum_name.length == 0 {
@@ -660,11 +661,11 @@ fn parse_enum_variant_line(text -> string) -> NativeEnumVariant? {
     if close_index < 0 || close_index <= brace_index {
         return null;
     }
-    let name_text = strip_generics(trim_text(runtime.substring(trimmed, 0, brace_index)));
+    let name_text = strip_generics(trim_text(substring(trimmed, 0, brace_index)));
     if name_text.length == 0 {
         return null;
     }
-    let fields_segment = runtime.substring(trimmed, brace_index + 1, close_index);
+    let fields_segment = substring(trimmed, brace_index + 1, close_index);
     let entries = split_enum_field_entries(fields_segment);
     let mut fields -> NativeEnumVariantField[] = [];
     let mut index -> number = 0;
@@ -732,11 +733,11 @@ fn parse_enum_variant_field(text -> string) -> NativeEnumVariantField? {
     if arrow_index < 0 {
         return null;
     }
-    let name = trim_text(runtime.substring(trimmed, 0, arrow_index));
+    let name = trim_text(substring(trimmed, 0, arrow_index));
     if name.length == 0 {
         return null;
     }
-    let type_text = trim_text(runtime.substring(trimmed, arrow_index + 2, trimmed.length));
+    let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length));
     return NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
@@ -756,7 +757,7 @@ fn trim_trailing_delimiters(text -> string) -> string {
     if end == text.length {
         return text;
     }
-    return runtime.substring(text, 0, end);
+    return substring(text, 0, end);
 }
 
 fn maybe_trim_trailing(value -> string?) -> string? {
@@ -781,11 +782,11 @@ fn parse_struct_field_line(text -> string) -> NativeStructField? {
     if arrow_index < 0 {
         return null;
     }
-    let name = trim_text(runtime.substring(trimmed, 0, arrow_index));
+    let name = trim_text(substring(trimmed, 0, arrow_index));
     if name.length == 0 {
         return null;
     }
-    let type_text = trim_text(runtime.substring(trimmed, arrow_index + 2, trimmed.length));
+    let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length));
     return NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
@@ -829,14 +830,14 @@ fn parse_binding_components(text -> string) -> BindingComponents {
     name = trim_text(name);
     let mut type_annotation -> string = "";
     let mut value -> string? = null;
-    let mut remainder -> string = trim_text(runtime.substring(text, index, text.length));
+    let mut remainder -> string = trim_text(substring(text, index, text.length));
     if remainder.length > 0 {
         if starts_with(remainder, "->") {
             remainder = trim_text(strip_prefix(remainder, "->"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
-                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
-                let value_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                type_annotation = trim_text(substring(remainder, 0, assign_index));
+                let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
                 if value_text.length > 0 {
                     value = value_text;
                 }
@@ -847,8 +848,8 @@ fn parse_binding_components(text -> string) -> BindingComponents {
             remainder = trim_text(strip_prefix(remainder, ":"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
-                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
-                let value_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                type_annotation = trim_text(substring(remainder, 0, assign_index));
+                let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
                 if value_text.length > 0 {
                     value = value_text;
                 }
@@ -876,7 +877,7 @@ fn parse_function_name(header -> string) -> string {
     let paren_index = index_of(trimmed, "(");
     let mut name -> string = trimmed;
     if paren_index >= 0 {
-        name = trim_text(runtime.substring(trimmed, 0, paren_index));
+        name = trim_text(substring(trimmed, 0, paren_index));
     }
     return strip_generics(name);
 }
@@ -910,14 +911,14 @@ fn parse_parameter_entry(body -> string) -> NativeParameter? {
     }
     let mut type_annotation -> string = "";
     let mut default_value -> string? = null;
-    let mut remainder = trim_text(runtime.substring(trimmed, index, trimmed.length));
+    let mut remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
         if starts_with(remainder, "->") {
             remainder = trim_text(strip_prefix(remainder, "->"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
-                type_annotation = trim_text(runtime.substring(remainder, 0, assign_index));
-                let default_text = trim_text(runtime.substring(remainder, assign_index + 1, remainder.length));
+                type_annotation = trim_text(substring(remainder, 0, assign_index));
+                let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
                 if default_text.length > 0 {
                     default_value = default_text;
                 }
@@ -1060,7 +1061,7 @@ fn trim_text(value -> string) -> string {
     if start == 0 && end == value.length {
         return value;
     }
-    return runtime.substring(value, start, end);
+    return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
@@ -1091,7 +1092,7 @@ fn strip_prefix(value -> string, prefix -> string) -> string {
     if !starts_with(value, prefix) {
         return value;
     }
-    return runtime.substring(value, prefix.length, value.length);
+    return substring(value, prefix.length, value.length);
 }
 
 fn index_of(value -> string, target -> string) -> number {
@@ -1159,7 +1160,7 @@ fn strip_quotes(value -> string) -> string {
         let is_double = first == "\"" && last == "\"";
         let is_single = first == "'" && last == "'";
         if is_double || is_single {
-            return runtime.substring(value, 1, value.length - 1);
+            return substring(value, 1, value.length - 1);
         }
     }
     return value;

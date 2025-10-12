@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import importlib
+import pathlib
+from typing import Any, Dict
+
+import pytest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_string_utils_helpers() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+    source_path = REPO_ROOT / "compiler" / "src" / "string_utils.sfn"
+
+    result = stage1_main.compile_project([str(source_path)])
+    diagnostics = getattr(result, "diagnostics", [])
+    assert not diagnostics, f"Stage1 surfaced diagnostics compiling string utils: {diagnostics}"
+
+    modules = getattr(result, "modules", [])
+    assert modules, "Stage1 returned no modules for string utils"
+
+    module = modules[0]
+    python_source = getattr(module, "python_source")
+
+    namespace: Dict[str, Any] = {"__builtins__": __builtins__}
+    exec(python_source, namespace)
+
+    substring = namespace["substring"]
+    find_char = namespace["find_char"]
+    char_code = namespace["char_code"]
+
+    assert substring("sailfin", 0, 4) == "sail"
+    assert substring("sailfin", 2, 2) == ""
+    assert substring("abc", -3, 10) == "abc"
+
+    assert find_char("hello", "l", 0) == 2
+    assert find_char("hello", "l", 3) == 3
+    assert find_char("hello", "x", 0) == -1
+    assert find_char("a\nb", "\n", 0) == 1
+    assert find_char("\tindent", "\\t", 0) == 0
+
+    assert char_code("0") == 48
+    assert char_code("9") == 57
+    assert char_code("a") == 97
+    assert char_code("z") == 122
+    assert char_code("A") == 65
+    assert char_code("Z") == 90
+    assert char_code(" ") == 32
+    assert char_code("\n") == 10
+    assert char_code("\t") == 9
+    assert char_code("\\") == 92
+    assert char_code("") == -1

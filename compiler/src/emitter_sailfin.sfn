@@ -27,6 +27,7 @@ import {
     ElseBranch,
 } from "./ast";
 import { Token } from "./token";
+import { substring, char_code } from "./string_utils";
 
 struct TextBuilder {
     lines -> string[];
@@ -924,17 +925,17 @@ fn is_identifier_start(ch -> string) -> boolean {
     if ch == "_" {
         return true;
     }
-    let code = runtime.char_code(ch);
-    return (code >= runtime.char_code("a") && code <= runtime.char_code("z"))
-        || (code >= runtime.char_code("A") && code <= runtime.char_code("Z"));
+    let code = char_code(ch);
+    return (code >= char_code("a") && code <= char_code("z"))
+        || (code >= char_code("A") && code <= char_code("Z"));
 }
 
 fn is_identifier_part(ch -> string) -> boolean {
     if is_identifier_start(ch) {
         return true;
     }
-    let code = runtime.char_code(ch);
-    return code >= runtime.char_code("0") && code <= runtime.char_code("9");
+    let code = char_code(ch);
+    return code >= char_code("0") && code <= char_code("9");
 }
 
 fn trim_block_body(text -> string) -> string {
@@ -943,7 +944,7 @@ fn trim_block_body(text -> string) -> string {
         return trimmed;
     }
     if trimmed[0] == "{" && trimmed[trimmed.length - 1] == "}" {
-        return trim_text(runtime.substring(trimmed, 1, trimmed.length - 1));
+        return trim_text(substring(trimmed, 1, trimmed.length - 1));
     }
     return trimmed;
 }
@@ -1048,7 +1049,7 @@ fn trim_right(value -> string) -> string {
     if end == value.length {
         return value;
     }
-    return runtime.substring(value, 0, end);
+    return substring(value, 0, end);
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
@@ -1099,7 +1100,7 @@ fn trim_text(value -> string) -> string {
     if start == 0 && end == value.length {
         return value;
     }
-    return runtime.substring(value, start, end);
+    return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {

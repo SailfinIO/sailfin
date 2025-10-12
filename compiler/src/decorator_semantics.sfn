@@ -6,11 +6,19 @@
 // consume annotations without reimplementing literal parsing.
 
 import {
-    Decorator,
-    DecoratorArgument,
-    Expression,
+    Program,
     Statement,
+    Decorator,
+    Expression,
+    Block,
+    FunctionSignature,
+    Parameter,
+    TypeAnnotation,
+    MatchCase,
+    ElseBranch 
 } from "./ast";
+import { Token, TokenKind } from "./token";
+import { substring } from "./string_utils";
 
 enum LiteralValue {
     String { value -> string },
@@ -272,7 +280,7 @@ fn is_whitespace_char(ch -> string) -> boolean {
 }
 
 fn slice_text(text -> string, start -> number, end -> number) -> string {
-    return runtime.substring(text, start, end);
+    return substring(text, start, end);
 }
 
 fn strip_surrounding_quotes(value -> string) -> string {

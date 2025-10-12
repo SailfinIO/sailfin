@@ -6,6 +6,7 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
+import { substring, find_char, char_code } from "./string_utils";
 
 struct LexerState {
     source -> string;
@@ -71,8 +72,8 @@ fn lex(source -> string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
 
-                let newline_index -> number = runtime.find_char(state.source, "\n", state.index);
-                let carriage_index -> number = runtime.find_char(state.source, "\r", state.index);
+                let newline_index -> number = find_char(state.source, "\n", state.index);
+                let carriage_index -> number = find_char(state.source, "\r", state.index);
 
                 let comment_end -> number = state.source.length;
                 if newline_index != -1 {
@@ -332,13 +333,6 @@ fn is_digit(ch -> string) -> boolean {
     return code >= char_code("0") && code <= char_code("9");
 }
 
-fn char_code(ch -> string) -> number {
-    // Sailfin string indexing yields single-character strings; call builtin to
-    // convert to a numeric code point once the runtime provides it. Until then,
-    // provide a tiny Python interop hook via the bootstrap runtime.
-    return runtime.char_code(ch);
-}
-
 fn is_double_quote(ch -> string) -> boolean {
     return char_code(ch) == 34;
 }
@@ -348,7 +342,7 @@ fn is_backslash(ch -> string) -> boolean {
 }
 
 fn slice(text -> string, start -> number, end -> number) -> string {
-    return runtime.substring(text, start, end);
+    return substring(text, start, end);
 }
 
 fn append(tokens -> Token[], token -> Token) -> Token[] {

@@ -33,6 +33,7 @@ import {
     WithClause,
 } from "./ast";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";
+import { substring, char_code } from "./string_utils";
 
 struct Parser {
     tokens -> Token[];
@@ -839,7 +840,7 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
         if last != ";" {
             break;
         }
-        let trimmed = runtime.substring(type_text, 0, type_text.length - 1);
+        let trimmed = substring(type_text, 0, type_text.length - 1);
         type_text = trim_text(trimmed);
     }
     if type_text.length == 0 {
@@ -3784,11 +3785,11 @@ fn trim_text(value -> string) -> string {
         break;
     }
 
-    return runtime.substring(value, start, end);
+    return substring(value, start, end);
 }
 
 fn is_trim_whitespace(ch -> string) -> boolean {
-    let code = runtime.char_code(ch);
+    let code = char_code(ch);
     return code == 32  // space
         || code == 10  // newline
         || code == 9   // tab
@@ -3912,10 +3913,10 @@ fn strip_surrounding_quotes(text -> string) -> string {
     if text.length < 2 {
         return text;
     }
-    let first = runtime.char_code(text[0]);
-    let last = runtime.char_code(text[text.length - 1]);
+    let first = char_code(text[0]);
+    let last = char_code(text[text.length - 1]);
     if first == 34 && last == 34 {
-        return runtime.substring(text, 1, text.length - 1);
+    return substring(text, 1, text.length - 1);
     }
     return text;
 }
@@ -3923,8 +3924,8 @@ fn strip_surrounding_quotes(text -> string) -> string {
 fn normalize_test_name(text -> string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length >= 2 {
-        let first = runtime.char_code(trimmed[0]);
-        let last = runtime.char_code(trimmed[trimmed.length - 1]);
+    let first = char_code(trimmed[0]);
+    let last = char_code(trimmed[trimmed.length - 1]);
         if first == 34 && last == 34 {
             return strip_surrounding_quotes(trimmed);
         }
