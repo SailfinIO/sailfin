@@ -585,6 +585,9 @@ The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpe
   - Returns ASCII code points for digits, uppercase/lowercase Latin letters, and a curated set of punctuation (`space`, newline, carriage return, tab, double quote, backslash, underscore`).
   - Decodes UTF-8 sequences up to four bytes wide directly in Sailfin, covering Latin-1, BMP, and common astral-plane glyphs (emoji, symbols) without invoking the bootstrap runtime.
   - Returns `-1` for empty input, code units longer than four bytes, or invalid continuation bytes so callers can detect malformed data.
+- `match_exhaustive_failed(value: any) -> never`
+  - Emits a ValueError with a message mirroring the bootstrap behaviour (`"Non-exhaustive match for value …"`).
+  - Serves as the runtime backstop when the compiler cannot prove match-expression exhaustiveness; once the Sailfin-native diagnostics improve this helper lets the stage1 runtime stay self-hosted.
 
 These helpers participate in the `runtime` module re-export surface, so stage1-compiled sources receive the same behaviour when targeting the Python backend today and the upcoming LLVM/WASM backends later.
 

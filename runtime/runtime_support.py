@@ -207,6 +207,10 @@ def match_exhaustive_failed(value: Any) -> None:
     raise ValueError(f"Non-exhaustive match for value {value!r}")
 
 
+def raise_value_error(message: str) -> None:
+    raise ValueError(message)
+
+
 # ---------------------------------------------------------------------------
 # Enum helpers
 # ---------------------------------------------------------------------------
@@ -476,6 +480,7 @@ __all__ = [
     "find_char",
     "format_string",
     "match_exhaustive_failed",
+    "raise_value_error",
     "http",
     "logExecution",
     "parallel",

@@ -9,7 +9,7 @@ This audit tracks runtime helpers that the Sailfin stage1 toolchain currently so
 | `array_map`, `array_filter`, `array_reduce`, `parallel` | `runtime/prelude.sfn` | Sailfin-native | Covered by `compiler/tests/test_runtime_prelude.py`. |
 | `substring`, `find_char`, `char_code`, `clamp` | `runtime/prelude.sfn` | Sailfin-native | ASCII + UTF-8 behaviour documented in `docs/spec.md` §10.2; regression coverage in `compiler/tests/test_runtime_prelude.py` and `compiler/tests/test_string_utils.py`. |
 | `sleep`, `channel`, `spawn`, `serve`, `http`, `websocket`, `logExecution`, `console`, `fs` | Aliases to `runtime.runtime_support` | Python bridge | Require Sailfin-native implementations or thin effect-aware shims; track under "Capability bridges" and "Concurrency substrate" roadmap tasks. |
-| `match_exhaustive_failed` | `runtime/runtime_support.py` | Python bridge | Port into `runtime/prelude.sfn` with a direct Sailfin `throw` once structured diagnostics exist; add matcher regression tests. |
+| `match_exhaustive_failed` | `runtime/prelude.sfn` | Sailfin-native | Raises a ValueError via `runtime.raise_value_error`; regression covered by `compiler/tests/test_runtime_prelude.py`. |
 | `EnumType`, `EnumInstance` helpers | `runtime/runtime_support.py` | Python bridge | Needed for enum constructors and reflective access; design Sailfin struct-backed equivalents plus stage1 lowering tests. |
 | `struct_repr` | `runtime/runtime_support.py` | Python bridge | Replace with Sailfin string builder helper; pair with struct emission tests. |
 | `check_type` and `_resolve_runtime_type` | `runtime/runtime_support.py` | Python bridge | Used for bootstrap `is` operator; plan Sailfin-native type reflection once semantic metadata lands. |

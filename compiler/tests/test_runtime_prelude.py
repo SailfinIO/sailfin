@@ -39,6 +39,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     substring = namespace["substring"]
     find_char = namespace["find_char"]
     char_code = namespace["char_code"]
+    match_exhaustive_failed = namespace["match_exhaustive_failed"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -90,3 +91,6 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert char_code("中") == 20013
     assert char_code("🙂") == 128578
     assert char_code("") == -1
+
+    with pytest.raises(ValueError, match="Non-exhaustive match"):
+        match_exhaustive_failed(42)
