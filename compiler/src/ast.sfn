@@ -145,9 +145,23 @@ struct DecoratorArgument {
     expression -> Expression;
 }
 
+struct ImportSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
+struct ExportSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
 enum Statement {
     ImportDeclaration {
-        items -> string[];
+        specifiers -> ImportSpecifier[];
+        source -> string;
+    },
+    ExportDeclaration {
+        specifiers -> ExportSpecifier[];
         source -> string;
     },
     VariableDeclaration {

@@ -20,6 +20,16 @@ fn main() ![io] {
 }
 """
 
+MODULE_REEXPORT_SOURCE = """
+import { substring as slice, find_char } from "./string_utils";
+export { substring, find_char as locate } from "./string_utils";
+
+fn main() ![io] {
+  let prefix = slice("sailfin", 0, 4);
+  print.info(prefix);
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -48,3 +58,29 @@ def test_typechecker_reports_duplicate_functions() -> None:
     assert any("duplicate function `main`" in message for message in messages), (
         "Stage1 typechecker did not surface duplicate function diagnostics"
     )
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_import_export_alias_round_trip() -> None:
+  stage1_main = importlib.import_module("compiler.build.main")
+
+  result = stage1_main.compile_to_native_python(MODULE_REEXPORT_SOURCE)
+  assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+
+  python_source = result.source
+  assert "from compiler.build.string_utils import substring as slice" in python_source
+  assert "from compiler.build.string_utils import substring, find_char as locate" in python_source
+
+  namespace: dict[str, object] = {"__builtins__": __builtins__}
+  exec(python_source, namespace)
+
+  exports = namespace.get("__all__")
+  assert isinstance(exports, list), "__all__ missing from lowered module"
+  assert set(exports) == {"substring", "locate"}
+
+  slice_fn = namespace.get("slice")
+  locate_fn = namespace.get("locate")
+  assert callable(slice_fn)
+  assert callable(locate_fn)
+  assert slice_fn("sailfin", 0, 4) == "sail"
+  assert locate_fn("sailfin", "f", 0) == 4

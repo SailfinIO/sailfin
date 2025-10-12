@@ -53,9 +53,15 @@ struct NativeFunction {
     instructions -> NativeInstruction[];
 }
 
+struct NativeImportSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
 struct NativeImport {
+    kind -> string;
     module -> string;
-    names -> string[];
+    specifiers -> NativeImportSpecifier[];
 }
 
 struct NativeStructField {
@@ -163,11 +169,21 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             continue;
         }
         if starts_with(line, ".import ") {
-            let parsed_import = parse_import_entry(strip_prefix(line, ".import "));
+            let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
             if parsed_import == null {
                 diagnostics = append_string(diagnostics, "unable to parse import: " + line);
             } else {
                 imports = append_import(imports, parsed_import);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".export ") {
+            let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
+            if parsed_export == null {
+                diagnostics = append_string(diagnostics, "unable to parse export: " + line);
+            } else {
+                imports = append_import(imports, parsed_export);
             }
             index += 1;
             continue;
@@ -499,33 +515,64 @@ fn split_case_components(text -> string) -> CaseComponents {
     return CaseComponents { pattern: pattern, guard: guard_text };
 }
 
-fn parse_import_entry(entry -> string) -> NativeImport? {
+fn parse_import_entry(kind -> string, entry -> string) -> NativeImport? {
     let trimmed = trim_text(entry);
     if trimmed.length == 0 {
         return null;
     }
     let mut module_text -> string = trimmed;
-    let mut names -> string[] = [];
+    let mut specifiers -> NativeImportSpecifier[] = [];
     let brace_index = index_of(trimmed, "{");
     if brace_index >= 0 {
         let close_index = last_index_of(trimmed, "}");
         if close_index < 0 || close_index <= brace_index {
             return null;
         }
-    module_text = trim_text(substring(trimmed, 0, brace_index));
-    let names_segment = substring(trimmed, brace_index + 1, close_index);
-        names = parse_import_names(names_segment);
+        module_text = trim_text(substring(trimmed, 0, brace_index));
+        let names_segment = substring(trimmed, brace_index + 1, close_index);
+        specifiers = parse_import_specifiers(names_segment);
     }
     module_text = strip_quotes(trim_text(module_text));
-    return NativeImport { module: module_text, names: names };
+    return NativeImport { kind: kind, module: module_text, specifiers: specifiers };
 }
 
-fn parse_import_names(text -> string) -> string[] {
+fn parse_import_specifiers(text -> string) -> NativeImportSpecifier[] {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return [];
     }
-    return split_comma_separated(trimmed);
+    let entries = split_comma_separated(trimmed);
+    let mut specifiers -> NativeImportSpecifier[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let parsed = parse_single_specifier(entries[index]);
+        if parsed.name.length > 0 {
+            specifiers = specifiers.concat([parsed]);
+        }
+        index += 1;
+    }
+    return specifiers;
+}
+
+fn parse_single_specifier(entry -> string) -> NativeImportSpecifier {
+    let trimmed = trim_text(entry);
+    if trimmed.length == 0 {
+        return NativeImportSpecifier { name: "", alias: null };
+    }
+    let separator = " as ";
+    let index = index_of(trimmed, separator);
+    if index < 0 {
+        return NativeImportSpecifier { name: trimmed, alias: null };
+    }
+    let name = trim_text(substring(trimmed, 0, index));
+    let alias_text = trim_text(substring(trimmed, index + separator.length, trimmed.length));
+    if alias_text.length == 0 {
+        return NativeImportSpecifier { name: name, alias: null };
+    }
+    return NativeImportSpecifier { name: name, alias: alias_text };
 }
 
 fn parse_struct_definition(lines -> string[], start_index -> number) -> StructParseResult {

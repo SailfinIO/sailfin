@@ -24,6 +24,8 @@ import {
     ForClause,
     Program,
     Statement,
+    ImportSpecifier,
+    ExportSpecifier,
     TypeParameter,
     TestDeclaration,
     TypeAnnotation,
@@ -77,6 +79,16 @@ struct InterfaceMemberParseResult {
     parser -> Parser;
     signature -> FunctionSignature?;
     success -> boolean;
+}
+
+struct SpecifierListParseResult {
+    parser -> Parser;
+    specifiers -> NamedSpecifier[];
+}
+
+struct NamedSpecifier {
+    name -> string;
+    alias -> string?;
 }
 
 struct EnumVariantParseResult {
@@ -299,6 +311,12 @@ fn parse_statement(parser -> Parser) -> StatementParseResult {
             return parse_function(parser, true, decorators);
         }
     }
+    if identifier_matches(token, "import") {
+        return parse_import(parser);
+    }
+    if identifier_matches(token, "export") {
+        return parse_export(parser);
+    }
     if identifier_matches(token, "struct") {
         return parse_struct(parser, decorators);
     }
@@ -322,31 +340,9 @@ fn parse_statement(parser -> Parser) -> StatementParseResult {
 fn parse_import(parser -> Parser) -> StatementParseResult {
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "import");
-    parser = skip_trivia(parser);
-    parser = consume_symbol(parser, "{");
-
-    let mut items -> string[] = [];
-    parser = skip_trivia(parser);
-    loop {
-        let current = parser_peek_raw(parser);
-        if current.kind.variant == "Symbol" && current.kind.value == "}" {
-            parser = parser_advance_raw(parser);
-            break;
-        }
-        if current.kind.variant != "Identifier" {
-            break;
-        }
-        let item = identifier_text(current);
-        items = append_string(items, item);
-        parser = parser_advance_raw(parser);
-        parser = skip_trivia(parser);
-        let separator = parser_peek_raw(parser);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
-            parser = parser_advance_raw(parser);
-            parser = skip_trivia(parser);
-            continue;
-        }
-    }
+    let specifier_result = parse_specifier_list(parser);
+    parser = specifier_result.parser;
+    let import_specifiers = build_import_specifiers(specifier_result.specifiers);
 
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "from");
@@ -363,7 +359,35 @@ fn parse_import(parser -> Parser) -> StatementParseResult {
     }
 
     let statement = Statement.ImportDeclaration {
-        items: items,
+        specifiers: import_specifiers,
+        source: source,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_export(parser -> Parser) -> StatementParseResult {
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "export");
+    let specifier_result = parse_specifier_list(parser);
+    parser = specifier_result.parser;
+    let export_specifiers = build_export_specifiers(specifier_result.specifiers);
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "from");
+
+    parser = skip_trivia(parser);
+    let capture = collect_until(parser, [";"]);
+    parser = capture.parser;
+    let mut source = trim_text(tokens_to_text(capture.tokens));
+    source = strip_surrounding_quotes(source);
+
+    parser = skip_trivia(parser);
+    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+        parser = parser_advance_raw(parser);
+    }
+
+    let statement = Statement.ExportDeclaration {
+        specifiers: export_specifiers,
         source: source,
     };
     return StatementParseResult { parser: parser, statement: statement };
@@ -423,6 +447,81 @@ fn parse_variable(parser -> Parser) -> StatementParseResult {
         initializer: initializer,
     };
     return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_specifier_list(parser -> Parser) -> SpecifierListParseResult {
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "{");
+
+    let mut specifiers -> NamedSpecifier[] = [];
+    parser = skip_trivia(parser);
+    loop {
+        let current = parser_peek_raw(parser);
+        if current.kind.variant == "Symbol" && current.kind.value == "}" {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if current.kind.variant != "Identifier" {
+            break;
+        }
+        let name = identifier_text(current);
+        parser = parser_advance_raw(parser);
+        parser = skip_trivia(parser);
+        let mut alias -> string? = null;
+        let potential_alias = parser_peek_raw(parser);
+        if identifier_matches(potential_alias, "as") {
+            parser = consume_keyword(parser, "as");
+            parser = skip_trivia(parser);
+            let alias_token = parser_peek_raw(parser);
+            if alias_token.kind.variant == "Identifier" {
+                alias = identifier_text(alias_token);
+                parser = parser_advance_raw(parser);
+                parser = skip_trivia(parser);
+            }
+        }
+        specifiers = specifiers.concat([NamedSpecifier { name: name, alias: alias }]);
+        let separator = parser_peek_raw(parser);
+        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+            parser = parser_advance_raw(parser);
+            parser = skip_trivia(parser);
+            continue;
+        }
+    }
+
+    parser = skip_trivia(parser);
+    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == "}" {
+        parser = parser_advance_raw(parser);
+    }
+
+    return SpecifierListParseResult { parser: parser, specifiers: specifiers };
+}
+
+fn build_import_specifiers(values -> NamedSpecifier[]) -> ImportSpecifier[] {
+    let mut result -> ImportSpecifier[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        let entry = values[index];
+        result = result.concat([ImportSpecifier { name: entry.name, alias: entry.alias }]);
+        index += 1;
+    }
+    return result;
+}
+
+fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
+    let mut result -> ExportSpecifier[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        let entry = values[index];
+        result = result.concat([ExportSpecifier { name: entry.name, alias: entry.alias }]);
+        index += 1;
+    }
+    return result;
 }
 
 fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {

@@ -86,7 +86,9 @@ roadmaps.
   `find_char`) and ASCII-aware character codes (`char_code`) now share the
   canonical implementation in `runtime/prelude.sfn`, which `compiler/src/string_utils.sfn`
   simply re-exports for the stage1 compiler. Non-ASCII glyphs still fall back to
-  `runtime_support.py`.
+  `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
+  `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;
+  regression coverage lives in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.
   Native lowering now
   recognises top-level `.let` bindings (e.g., `console = runtime.console`) so
   the prelude compiles without spurious diagnostics.

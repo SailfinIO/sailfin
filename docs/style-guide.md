@@ -111,6 +111,13 @@ Outside the domain, import only from the corresponding `mod.sfn`:
 import { parse_program, emit_sailfin } from "./compiler/mod";
 ```
 
+Aliased re-exports keep runtime helpers centralized. For example, surface a
+runtime helper under a local name and re-export alias for downstream callers:
+
+```sfn
+export { substring as stringSlice } from "./runtime/prelude";
+```
+
 ## Source File Organisation
 
 - Start with a short header comment describing the file’s role.

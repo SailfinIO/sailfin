@@ -19,6 +19,8 @@ import {
     Parameter,
     Program,
     Statement,
+    ImportSpecifier,
+    ExportSpecifier,
     TypeAnnotation,
     TypeParameter,
     WithClause,
@@ -94,8 +96,17 @@ fn emit_native(program -> Program) -> EmitNativeResult {
 fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "ImportDeclaration" {
         let mut line -> string = ".import \"" + statement.source + "\"";
-        if statement.items.length > 0 {
-            line = line + " { " + join_with_separator(statement.items, ", ") + " }";
+        let rendered = render_native_specifiers(statement.specifiers);
+        if rendered.length > 0 {
+            line = line + " { " + rendered + " }";
+        }
+        return state_emit_line(state, line);
+    }
+    if statement.variant == "ExportDeclaration" {
+        let mut line -> string = ".export \"" + statement.source + "\"";
+        let rendered = render_export_specifiers(statement.specifiers);
+        if rendered.length > 0 {
+            line = line + " { " + rendered + " }";
         }
         return state_emit_line(state, line);
     }
@@ -161,6 +172,39 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     }
     let message = "native backend: unsupported statement `" + statement.variant + "`";
     return state_add_diagnostic(state, message);
+}
+
+fn render_native_specifiers(specifiers -> ImportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn render_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn format_native_specifier(name -> string, alias -> string?) -> string {
+    if alias == null || alias.length == 0 {
+        return name;
+    }
+    return name + " as " + alias;
 }
 
 fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {

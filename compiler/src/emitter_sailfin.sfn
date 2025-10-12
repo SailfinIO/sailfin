@@ -21,6 +21,8 @@ import {
     Parameter,
     Program,
     Statement,
+    ImportSpecifier,
+    ExportSpecifier,
     TypeAnnotation,
     TypeParameter,
     WithClause,
@@ -61,7 +63,10 @@ fn emit_program(program -> Program) -> string {
 
 fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if statement.variant == "ImportDeclaration" {
-        return emit_import(builder, statement.items, statement.source);
+        return emit_import(builder, statement.specifiers, statement.source);
+    }
+    if statement.variant == "ExportDeclaration" {
+        return emit_export(builder, statement.specifiers, statement.source);
     }
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
@@ -100,9 +105,15 @@ fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder
     return builder_emit_line(builder, "// TODO: unsupported statement: " + statement.variant);
 }
 
-fn emit_import(builder -> TextBuilder, items -> string[], source -> string) -> TextBuilder {
-    let list = join_with_separator(items, ", ");
+fn emit_import(builder -> TextBuilder, specifiers -> ImportSpecifier[], source -> string) -> TextBuilder {
+    let list = format_import_specifiers(specifiers);
     let line = "import { " + list + " } from \"" + source + "\";";
+    return builder_emit_line(builder, line);
+}
+
+fn emit_export(builder -> TextBuilder, specifiers -> ExportSpecifier[], source -> string) -> TextBuilder {
+    let list = format_export_specifiers(specifiers);
+    let line = "export { " + list + " } from \"" + source + "\";";
     return builder_emit_line(builder, line);
 }
 
@@ -183,6 +194,41 @@ fn emit_model(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     current = builder_pop_indent(current);
     current = builder_emit_line(current, "}");
     return current;
+}
+
+fn format_import_specifiers(specifiers -> ImportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
+        parts = append_string(parts, entry);
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn format_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
+        parts = append_string(parts, entry);
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn format_specifier_entry(name -> string, alias -> string?) -> string {
+    if alias == null || alias.length == 0 {
+        return name;
+    }
+    return name + " as " + alias;
 }
 
 fn emit_type_alias(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
