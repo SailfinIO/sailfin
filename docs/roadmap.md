@@ -22,6 +22,12 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings.
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
 
+  5. **Toolchain De-Pythonisation**
+    - [ ] Native emission milestone — Flip the default stage1 build to target the stage2 executable backend once minimal LLVM/WASM runners exist, keeping a Python fallback only for regression hunting.
+    - [ ] Sailfin-native CLI ("sfn") — Reimplement the `sailfin-stage1` launcher, installer, and packaging flow without invoking Python entrypoints; ship the CLI as a Sailfin binary that exercises the runtime prelude directly.
+    - [ ] Release pipeline guardrails — Update CI to build the compiler, runtime, and examples using only Sailfin-generated artifacts and fail if Python runtime shims (`runtime_support.py`, bootstrap scripts) are invoked.
+    - [ ] Test harness migration — Port the stage1 pytest coverage to an equivalent Sailfin-native smoke/integration suite so compiler regressions can be detected without Python tooling.
+
 3. **Diagnostics Parity**
   - [ ] Land hierarchical effect propagation in `effect_checker.sfn` (nested prompts, async contexts).
   - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.

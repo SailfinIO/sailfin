@@ -14,7 +14,10 @@ roadmaps.
   artifact ships as a versioned release bundle (`sailfin-stage1-<version>.zip`)
   containing `compiler/build/`, the runtime prelude, and the `sailfin-stage1`
   launcher. All developer workflows (`make compile`, `make package`, CI) now go
-  through this self-hosted pipeline.
+  through this self-hosted pipeline. The emitted artifacts still target the
+  Python runtime (`runtime_support.py`) and rely on the Python-flavoured
+  installer scripts; removing those dependencies is tracked in the roadmap
+  under the Stage2 backend and toolchain de-Pythonisation workstreams.
 - **Stage0 (legacy)** — The Python bootstrap compiler (archived under
   `Legacy/stage0/`) is retained for reference and targeted regression
   hunting, but it no longer participates in packaging or CI. Expect the
