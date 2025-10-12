@@ -38,6 +38,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     parallel = namespace["parallel"]
     substring = namespace["substring"]
     find_char = namespace["find_char"]
+    char_code = namespace["char_code"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -61,3 +62,14 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert find_char("hello", "x", 0) == -1
     assert find_char("a\nb", "\n", 0) == 1
     assert find_char("a\nb", "\\n", 0) == 1
+
+    assert char_code("0") == 48
+    assert char_code("9") == 57
+    assert char_code("a") == 97
+    assert char_code("z") == 122
+    assert char_code("A") == 65
+    assert char_code("Z") == 90
+    assert char_code("\"") == 34
+    assert char_code("\\") == 92
+    assert char_code("\n") == 10
+    assert char_code("") == -1
