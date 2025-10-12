@@ -20,9 +20,13 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [x] Added string helpers (`substring`, `find_char`) to `runtime/prelude.sfn` with regression coverage in `compiler/tests/test_runtime_prelude.py`.
     - [x] Implemented ASCII-focused `char_code` in `runtime/prelude.sfn`, falling back to the bootstrap helper for other glyphs; regression coverage in `compiler/tests/test_runtime_prelude.py`.
     - [x] Wired stage1 compiler helpers (lexer, parser, emitter, native lowering) to consume Sailfin string utilities (`compiler/src/string_utils.sfn`) instead of `runtime_support.py` fallbacks.    
-    - [ ] Promote `string_utils.sfn` into the Sailfin runtime surface (export via `runtime/prelude.sfn`) so downstream projects reuse a single implementation.
+  - [ ] Document the runtime string helper surface (`substring`, `find_char`, `char_code`) in `docs/spec.md` once Unicode paths land so downstream consumers understand guarantees.
     - [ ] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
     - [ ] Audit remaining runtime helpers for Python dependencies (`match_exhaustive_failed`, enum utilities) and schedule Sailfin ports with paired tests.
+  - [ ] Module system re-exports — Teach the Sailfin module loader to expose runtime helper bindings (e.g., `substring`, `find_char`, `char_code`) via compiler surface modules without duplicating implementations.
+    - [ ] Extend import parsing to recognise `import { foo as bar } from "runtime/...";` and persist alias metadata through lowering.
+    - [ ] Update the emitter and Python bridge to generate stable re-export stubs and ensure stage1 artifacts resolve runtime bindings correctly.
+    - [ ] Add regression coverage in `compiler/tests/test_string_utils.py` (and a new Sailfin fixture) confirming re-exported helpers compile and execute without duplication.
   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
   - [x] Extend stage1 native lowering to support top-level aliases (`let console = runtime.console`) so the Sailfin prelude compiles cleanly (`compiler/tests/test_runtime_prelude.py`).
   - [ ] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings.
@@ -74,6 +78,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Example hardening — Annotated every runnable example with declared effects, wrapped ad-hoc top-level statements in `main`, and removed undefined helper stubs. Validation: `examples/README.md` capability index plus `make test` ensures samples compile and execute under the stage1 suite.
 - [x] Stage1 closed loop — Stage1 now recompiles the compiler end-to-end, replaces stage0 in CI, and ships as the release artifact. Validation: `compiler/tests/test_stage1_artifact.py`, `.github/workflows/stage1-release.yml`.
 - [x] Stage1 installer — Added `scripts/install_stage1.py` and README docs so releases can be fetched with a PAT and installed system-wide.
+- [x] Runtime string helpers — Promoted `compiler/src/string_utils.sfn` into the shared runtime prelude so downstream projects and the stage1 compiler reference a single implementation. Validation: `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`.
 
 ## Coordination Notes
 

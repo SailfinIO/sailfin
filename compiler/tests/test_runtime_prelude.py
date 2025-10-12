@@ -56,12 +56,15 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert substring("sailfin", 0, 4) == "sail"
     assert substring("sailfin", 2, 2) == ""
     assert substring("abc", -2, 5) == "abc"
+    assert substring("", 0, 3) == ""
 
     assert find_char("hello", "l", 0) == 2
     assert find_char("hello", "l", 3) == 3
     assert find_char("hello", "x", 0) == -1
     assert find_char("a\nb", "\n", 0) == 1
     assert find_char("a\nb", "\\n", 0) == 1
+    assert find_char("world", "w", -4) == 0
+    assert find_char("world", "d", 10) == -1
 
     assert char_code("0") == 48
     assert char_code("9") == 57
@@ -69,7 +72,9 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert char_code("z") == 122
     assert char_code("A") == 65
     assert char_code("Z") == 90
+    assert char_code(" ") == 32
     assert char_code("\"") == 34
     assert char_code("\\") == 92
+    assert char_code("_") == 95
     assert char_code("\n") == 10
     assert char_code("") == -1
