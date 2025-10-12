@@ -156,6 +156,36 @@ def char_code(character):
         return 92
     if ch == "_":
         return 95
-    return runtime.char_code(character)
+    encoded = ch.encode("utf-8")
+    count = len(encoded)
+    if count == 0:
+        return -1
+    if count > 4:
+        return -1
+    index = 0
+    code = 0
+    while True:
+        if index >= count:
+            break
+        byte = encoded[index]
+        if index == 0:
+            if byte < 128:
+                return byte
+            if byte >= 192  and  byte <= 223:
+                code = byte - 192
+            else:
+                if byte >= 224  and  byte <= 239:
+                    code = byte - 224
+                else:
+                    if byte >= 240  and  byte <= 247:
+                        code = byte - 240
+                    else:
+                        return -1
+        else:
+            if byte < 128  or  byte > 191:
+                return -1
+            code = (code * 64) + (byte - 128)
+        index = index + 1
+    return code
 
 __all__ = ["clamp", "substring", "find_char", "char_code"]

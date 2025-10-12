@@ -80,7 +80,7 @@ class PythonBuilder:
 def lower_to_python(native_module):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
-    if artifact == None:
+    if artifact == null:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
         return LoweredPythonResult(source="", diagnostics=diagnostics)
     parse = parse_native_artifact(artifact.contents)
@@ -156,7 +156,7 @@ def emit_top_level_bindings(builder, bindings):
         binding = bindings[index]
         name = sanitize_identifier(binding.name)
         line = name + " = "
-        if binding.value != None:
+        if binding.value != null:
             value_text = binding.value
             line = line + lower_expression(value_text)
         else:
@@ -244,7 +244,7 @@ def render_python_specifiers(specifiers):
 
 def render_python_specifier(specifier):
     base = sanitize_identifier(specifier.name)
-    if specifier.alias == None  or  len(specifier.alias) == 0:
+    if specifier.alias == null  or  len(specifier.alias) == 0:
         return base
     return base + " as " + sanitize_identifier(specifier.alias)
 
@@ -280,13 +280,13 @@ def emit_export_list(builder, exports):
         if index >= len(exports):
             break
         name = sanitize_identifier(exports[index])
-        seen = False
+        seen = false
         existing_index = 0
         while True:
             if existing_index >= len(unique):
                 break
             if unique[existing_index] == name:
-                seen = True
+                seen = true
                 break
             existing_index += 1
         if not seen:
@@ -315,7 +315,7 @@ def collect_export_names(existing, specifiers):
     return result
 
 def select_export_name(specifier):
-    if specifier.alias != None  and  len(specifier.alias) > 0:
+    if specifier.alias != null  and  len(specifier.alias) > 0:
         return specifier.alias
     return specifier.name
 
@@ -363,7 +363,7 @@ def render_struct_parameters(fields):
 def is_optional_type(type_annotation):
     trimmed = trim_text(type_annotation)
     if len(trimmed) == 0:
-        return True
+        return true
     return ends_with(trimmed, "?")
 
 def lower_expression(expression):
@@ -376,10 +376,10 @@ def lower_expression_with_depth(expression, depth):
     if len(trimmed) == 0:
         return trimmed
     struct_literal = lower_struct_literal_expression(trimmed, depth)
-    if struct_literal != None:
+    if struct_literal != null:
         return struct_literal
     array_literal = lower_array_literal_expression(trimmed, depth)
-    if array_literal != None:
+    if array_literal != null:
         return array_literal
     rewritten = rewrite_expression_intrinsics(trimmed)
     return rewrite_struct_literals_inline(rewritten, depth)
@@ -387,15 +387,15 @@ def lower_expression_with_depth(expression, depth):
 def lower_struct_literal_expression(expression, depth):
     brace_index = index_of(expression, "{")
     if brace_index < 0:
-        return None
+        return null
     closing_index = find_matching_brace(expression, brace_index)
     if closing_index < 0:
-        return None
+        return null
     type_name = trim_text(substring(expression, 0, brace_index))
     if len(type_name) == 0:
-        return None
+        return null
     if not is_struct_literal_type_candidate(type_name):
-        return None
+        return null
     fields_text = substring(expression, brace_index + 1, closing_index)
     entries = split_struct_field_entries(fields_text)
     assignments = []
@@ -424,7 +424,7 @@ def lower_struct_literal_expression(expression, depth):
 
 def is_struct_literal_type_candidate(text):
     if len(text) == 0:
-        return False
+        return false
     index = 0
     while True:
         if index >= len(text):
@@ -436,17 +436,17 @@ def is_struct_literal_type_candidate(text):
         if is_identifier_char(ch):
             index += 1
             continue
-        return False
-    return True
+        return false
+    return true
 
 def lower_array_literal_expression(expression, depth):
     trimmed = trim_text(expression)
     if len(trimmed) < 2:
-        return None
+        return null
     if trimmed[0] != "[":
-        return None
+        return null
     if trimmed[len(trimmed) - 1] != "]":
-        return None
+        return null
     inner = substring(trimmed, 1, len(trimmed) - 1)
     entries = split_array_entries(inner)
     lowered = []
@@ -509,7 +509,7 @@ def rewrite_struct_literals_inline(expression, depth):
             break
         struct_text = substring(current, type_start, closing_index + 1)
         lowered = lower_struct_literal_expression(struct_text, depth + 1)
-        if lowered == None:
+        if lowered == null:
             search_start = closing_index + 1
             continue
         prefix = substring(current, 0, type_start)
@@ -521,13 +521,13 @@ def rewrite_struct_literals_inline(expression, depth):
 def capture_struct_literal_expression(initial, instructions, start_index):
     trimmed = trim_text(initial)
     if not ends_with(trimmed, "{"):
-        return StructLiteralCapture(expression=trimmed, consumed=0, success=False)
+        return StructLiteralCapture(expression=trimmed, consumed=0, success=false)
     expression = trimmed
     index = start_index
     consumed = 0
     depth = compute_brace_balance(trimmed)
     if depth <= 0:
-        return StructLiteralCapture(expression=trimmed, consumed=0, success=False)
+        return StructLiteralCapture(expression=trimmed, consumed=0, success=false)
     while True:
         if index >= len(instructions):
             break
@@ -543,13 +543,13 @@ def capture_struct_literal_expression(initial, instructions, start_index):
         if depth <= 0:
             break
     if depth != 0:
-        return StructLiteralCapture(expression=trimmed, consumed=0, success=False)
+        return StructLiteralCapture(expression=trimmed, consumed=0, success=false)
     if consumed == 0:
-        return StructLiteralCapture(expression=trimmed, consumed=0, success=False)
+        return StructLiteralCapture(expression=trimmed, consumed=0, success=false)
     normalized = trim_trailing_delimiters(trim_text(expression))
     if not ends_with(normalized, "}"):
-        return StructLiteralCapture(expression=trimmed, consumed=0, success=False)
-    return StructLiteralCapture(expression=normalized, consumed=consumed, success=True)
+        return StructLiteralCapture(expression=trimmed, consumed=0, success=false)
+    return StructLiteralCapture(expression=normalized, consumed=consumed, success=true)
 
 def rewrite_expression_intrinsics(expression):
     if len(expression) == 0:
@@ -623,13 +623,13 @@ def rewrite_literal_tokens(expression):
                 if not is_identifier_char(next):
                     break
             token = substring(expression, start, index)
-            if token == "None":
+            if token == "null":
                 result = result + "None"
             else:
-                if token == "True":
+                if token == "true":
                     result = result + "True"
                 else:
-                    if token == "False":
+                    if token == "false":
                         result = result + "False"
                     else:
                         result = result + token
@@ -641,7 +641,7 @@ def rewrite_literal_tokens(expression):
 def rewrite_push_calls(expression):
     if len(expression) == 0:
         return expression
-    return replace_all(expression, ".append(", ".append(")
+    return replace_all(expression, ".push(", ".append(")
 
 def rewrite_concat_calls(expression):
     current = expression
@@ -683,7 +683,7 @@ def rewrite_length_accesses(expression):
 
 def extract_object_span(text, dot_index):
     if dot_index <= 0:
-        return ExtractedSpan(value="", start=0, end=0, success=False)
+        return ExtractedSpan(value="", start=0, end=0, success=false)
     index = dot_index - 1
     square_depth = 0
     paren_depth = 0
@@ -720,15 +720,15 @@ def extract_object_span(text, dot_index):
         break
     start = index + 1
     if start >= dot_index:
-        return ExtractedSpan(value="", start=start, end=dot_index, success=False)
+        return ExtractedSpan(value="", start=start, end=dot_index, success=false)
     value = substring(text, start, dot_index)
-    return ExtractedSpan(value=value, start=start, end=dot_index, success=True)
+    return ExtractedSpan(value=value, start=start, end=dot_index, success=true)
 
 def extract_parenthesized_span(text, open_index):
     if open_index >= len(text):
-        return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
+        return ExtractedSpan(value="", start=open_index, end=open_index, success=false)
     if text[open_index] != "(":
-        return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
+        return ExtractedSpan(value="", start=open_index, end=open_index, success=false)
     index = open_index + 1
     depth = 1
     while True:
@@ -742,13 +742,13 @@ def extract_parenthesized_span(text, open_index):
                 depth -= 1
                 if depth == 0:
                     value = substring(text, open_index + 1, index)
-                    return ExtractedSpan(value=value, start=open_index + 1, end=index + 1, success=True)
+                    return ExtractedSpan(value=value, start=open_index + 1, end=index + 1, success=true)
             else:
                 if ch == "\""  or  ch == "'":
                     index = skip_string_literal(text, index)
                     continue
         index += 1
-    return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
+    return ExtractedSpan(value="", start=open_index, end=open_index, success=false)
 
 def skip_string_literal(text, quote_index):
     quote = text[quote_index]
@@ -769,7 +769,7 @@ def skip_string_literal(text, quote_index):
 def capture_expression_continuation(initial, instructions, start_index):
     trimmed = trim_text(initial)
     if len(trimmed) == 0:
-        return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=False)
+        return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=false)
     paren_balance = compute_parenthesis_balance(trimmed)
     brace_balance = compute_brace_balance(trimmed)
     bracket_balance = compute_bracket_balance(trimmed)
@@ -781,7 +781,7 @@ def capture_expression_continuation(initial, instructions, start_index):
         if index >= len(instructions):
             break
         segment = continuation_segment_text(instructions[index])
-        if segment == None:
+        if segment == null:
             break
         normalized_segment = trim_text(segment)
         if len(normalized_segment) == 0:
@@ -791,7 +791,7 @@ def capture_expression_continuation(initial, instructions, start_index):
         if not attempting:
             if not segment_signals_expression_continuation(normalized_segment):
                 break
-            attempting = True
+            attempting = true
         expression = expression + " " + normalized_segment
         paren_balance += compute_parenthesis_balance(normalized_segment)
         brace_balance += compute_brace_balance(normalized_segment)
@@ -799,49 +799,49 @@ def capture_expression_continuation(initial, instructions, start_index):
         consumed += 1
         index += 1
         if paren_balance <= 0  and  brace_balance <= 0  and  bracket_balance <= 0:
-            should_finalize = True
+            should_finalize = true
             lookahead = index
             while True:
                 if lookahead >= len(instructions):
                     break
                 upcoming = continuation_segment_text(instructions[lookahead])
-                if upcoming == None:
+                if upcoming == null:
                     break
                 normalized_upcoming = trim_text(upcoming)
                 if len(normalized_upcoming) == 0:
                     lookahead += 1
                     continue
                 if segment_signals_expression_continuation(normalized_upcoming):
-                    should_finalize = False
+                    should_finalize = false
                 break
             if should_finalize:
                 finalized = trim_trailing_delimiters(trim_text(expression))
-                return ExpressionContinuationCapture(expression=finalized, consumed=consumed, success=True)
+                return ExpressionContinuationCapture(expression=finalized, consumed=consumed, success=true)
     if not attempting  or  consumed == 0:
-        return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=False)
+        return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=false)
     if paren_balance <= 0  and  brace_balance <= 0  and  bracket_balance <= 0:
         finalized = trim_trailing_delimiters(trim_text(expression))
-        return ExpressionContinuationCapture(expression=finalized, consumed=consumed, success=True)
-    return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=False)
+        return ExpressionContinuationCapture(expression=finalized, consumed=consumed, success=true)
+    return ExpressionContinuationCapture(expression=trimmed, consumed=0, success=false)
 
 def continuation_segment_text(instruction):
     if instruction.variant == "Unknown":
         return instruction.text
     if instruction.variant == "Expression":
         return instruction.expression
-    return None
+    return null
 
 def segment_signals_expression_continuation(segment):
     if len(segment) == 0:
-        return False
+        return false
     if starts_with(segment, "&&"):
-        return True
+        return true
     if starts_with(segment, "||"):
-        return True
+        return true
     first = segment[0]
     if first == "."  or  first == ")"  or  first == "]"  or  first == "}":
-        return True
-    return False
+        return true
+    return false
 
 def compute_brace_balance(text):
     if len(text) == 0:
@@ -955,12 +955,12 @@ def index_of(value, target):
         if index + len(target) > len(value):
             break
         match_index = 0
-        matches = True
+        matches = true
         while True:
             if match_index >= len(target):
                 break
             if value[index + match_index] != target[match_index]:
-                matches = False
+                matches = false
                 break
             match_index += 1
         if matches:
@@ -1000,13 +1000,13 @@ def find_substring_from(value, pattern, start):
     while True:
         if index + len(pattern) > len(value):
             break
-        matches = True
+        matches = true
         offset = 0
         while True:
             if offset >= len(pattern):
                 break
             if value[index + offset] != pattern[offset]:
-                matches = False
+                matches = false
                 break
             offset += 1
         if matches:
@@ -1071,7 +1071,7 @@ def emit_python_function(builder, function):
                 if instruction.variant == "Let":
                     target_name = sanitize_identifier(instruction.name)
                     line = target_name + " = "
-                    if instruction.value != None:
+                    if instruction.value != null:
                         value_text = instruction.value
                         struct_capture = capture_struct_literal_expression(value_text, function.instructions, index + 1)
                         consumed = 0
@@ -1146,7 +1146,7 @@ def emit_python_function(builder, function):
                                                             match_counter += 1
                                                             lowered_subject = lower_expression(instruction.expression)
                                                             current = builder_emit(current, subject_name + " = " + lowered_subject)
-                                                            context = MatchContext(subject_name=subject_name, case_index=0, has_active_case=False)
+                                                            context = MatchContext(subject_name=subject_name, case_index=0, has_active_case=false)
                                                             match_stack = append_match_context(match_stack, context)
                                                         else:
                                                             if instruction.variant == "Case":
@@ -1171,7 +1171,7 @@ def emit_python_function(builder, function):
                                                                         else:
                                                                             current = builder_emit(current, "elif " + lowered.condition + ":")
                                                                     current = builder_push_indent(current)
-                                                                    updated = MatchContext(subject_name=context.subject_name, case_index=context.case_index + 1, has_active_case=True)
+                                                                    updated = MatchContext(subject_name=context.subject_name, case_index=context.case_index + 1, has_active_case=true)
                                                                     match_stack = replace_match_context(match_stack, top_index, updated)
                                                             else:
                                                                 if instruction.variant == "EndMatch":
@@ -1246,24 +1246,24 @@ def generate_match_subject_name(counter):
 
 def lower_match_case_condition(subject_name, pattern, guard):
     trimmed_pattern = trim_text(pattern)
-    normalized_guard = None
-    if guard != None:
+    normalized_guard = null
+    if guard != null:
         trimmed_guard = trim_text(guard)
         if len(trimmed_guard) > 0:
             normalized_guard = trimmed_guard
     if len(trimmed_pattern) == 0  or  trimmed_pattern == "_":
-        if normalized_guard == None:
-            return LoweredCaseCondition(condition="True", is_default=True, has_guard=False)
+        if normalized_guard == null:
+            return LoweredCaseCondition(condition="True", is_default=true, has_guard=false)
         lowered_guard = lower_expression(normalized_guard)
-        return LoweredCaseCondition(condition=lowered_guard, is_default=False, has_guard=True)
+        return LoweredCaseCondition(condition=lowered_guard, is_default=false, has_guard=true)
     lowered_pattern = lower_expression(trimmed_pattern)
     condition = subject_name + " == " + lowered_pattern
-    has_guard = False
-    if normalized_guard != None:
+    has_guard = false
+    if normalized_guard != null:
         lowered_guard = lower_expression(normalized_guard)
         condition = "(" + condition + ") and (" + lowered_guard + ")"
-        has_guard = True
-    return LoweredCaseCondition(condition=condition, is_default=False, has_guard=has_guard)
+        has_guard = true
+    return LoweredCaseCondition(condition=condition, is_default=false, has_guard=has_guard)
 
 def number_to_string(value):
     if value == 0:
@@ -1297,7 +1297,7 @@ def render_python_parameters(parameters):
             break
         parameter = parameters[index]
         entry = parameter.name
-        if parameter.default_value != None:
+        if parameter.default_value != null:
             entry = entry + " = " + parameter.default_value
         rendered = append_string(rendered, entry)
         index += 1
@@ -1382,26 +1382,26 @@ def sanitize_qualified_identifier(name):
 
 def is_identifier_char(ch):
     if ch == "_":
-        return True
+        return true
     code = char_code(ch)
     if code >= char_code("a")  and  code <= char_code("z"):
-        return True
+        return true
     if code >= char_code("A")  and  code <= char_code("Z"):
-        return True
+        return true
     if code >= char_code("0")  and  code <= char_code("9"):
-        return True
-    return False
+        return true
+    return false
 
 def is_whitespace_char(ch):
     if ch == " ":
-        return True
+        return true
     if ch == "\n":
-        return True
+        return true
     if ch == "\r":
-        return True
+        return true
     if ch == "\t":
-        return True
-    return False
+        return true
+    return false
 
 def trim_text(value):
     start = 0
@@ -1428,31 +1428,31 @@ def trim_text(value):
 
 def starts_with(value, prefix):
     if len(prefix) == 0:
-        return True
+        return true
     if len(value) < len(prefix):
-        return False
+        return false
     index = 0
     while True:
         if index >= len(prefix):
             break
         if value[index] != prefix[index]:
-            return False
+            return false
         index += 1
-    return True
+    return true
 
 def ends_with(value, suffix):
     if len(suffix) == 0:
-        return True
+        return true
     if len(value) < len(suffix):
-        return False
+        return false
     index = 0
     while True:
         if index >= len(suffix):
             break
         if value[len(value) - len(suffix) + index] != suffix[index]:
-            return False
+            return false
         index += 1
-    return True
+    return true
 
 def replace_all(value, target, replacement):
     if len(target) == 0:
@@ -1463,13 +1463,13 @@ def replace_all(value, target, replacement):
         if index >= len(value):
             break
         if index + len(target) <= len(value):
-            matches = True
+            matches = true
             offset = 0
             while True:
                 if offset >= len(target):
                     break
                 if value[index + offset] != target[offset]:
-                    matches = False
+                    matches = false
                     break
                 offset += 1
             if matches:
