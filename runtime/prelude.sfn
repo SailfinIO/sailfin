@@ -68,3 +68,68 @@ fn array_reduce(items, initial, reducer) {
 fn serve(handler, config = null) ![io, net] {
     runtime.serve(handler, config);
 }
+
+fn substring(text -> string, start -> number, end -> number) -> string {
+    let mut normalized_start = start;
+    if normalized_start < 0 {
+        normalized_start = 0;
+    }
+
+    let mut normalized_end = end;
+    let length = text.length;
+    if normalized_end > length {
+        normalized_end = length;
+    }
+
+    if normalized_start >= normalized_end {
+        return "";
+    }
+
+    let mut index = normalized_start;
+    let mut result = "";
+    loop {
+        if index >= normalized_end {
+            break;
+        }
+        result = result + text[index];
+        index = index + 1;
+    }
+
+    return result;
+}
+
+fn find_char(text -> string, character -> string, start -> number = 0) -> number {
+    let mut normalized_start = start;
+    if normalized_start < 0 {
+        normalized_start = 0;
+    }
+
+    if normalized_start >= text.length {
+        return -1;
+    }
+
+    let mut target = character;
+    if target.length == 2 && target[0] == "\\" {
+        let escape = target[1];
+        if escape == "n" {
+            target = "\n";
+        } else if escape == "r" {
+            target = "\r";
+        } else if escape == "t" {
+            target = "\t";
+        }
+    }
+
+    let mut index = normalized_start;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        if text[index] == target {
+            return index;
+        }
+        index = index + 1;
+    }
+
+    return -1;
+}

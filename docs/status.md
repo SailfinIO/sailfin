@@ -82,7 +82,9 @@ roadmaps.
   Collection helpers (`array_map`, `array_filter`, `array_reduce`) and the
   sequential `parallel` orchestration now live in `runtime/prelude.sfn`, letting
   the self-hosted runtime exercise native Sailfin loops; regression coverage
-  lives in `compiler/tests/test_runtime_prelude.py`. Native lowering now
+  lives in `compiler/tests/test_runtime_prelude.py`. String helpers (`substring`,
+  `find_char`) likewise execute inside Sailfin so lexing no longer depends on
+  the bootstrap runtime for slicing or single-character scans. Native lowering now
   recognises top-level `.let` bindings (e.g., `console = runtime.console`) so
   the prelude compiles without spurious diagnostics.
 

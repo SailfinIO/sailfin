@@ -36,6 +36,8 @@ def test_runtime_prelude_collection_helpers() -> None:
     array_filter = namespace["array_filter"]
     array_reduce = namespace["array_reduce"]
     parallel = namespace["parallel"]
+    substring = namespace["substring"]
+    find_char = namespace["find_char"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -49,3 +51,13 @@ def test_runtime_prelude_collection_helpers() -> None:
     tasks: List[Callable[[], int]] = [lambda: 7, lambda: 11, lambda: 13]
     results = parallel(tasks)
     assert results == [7, 11, 13]
+
+    assert substring("sailfin", 0, 4) == "sail"
+    assert substring("sailfin", 2, 2) == ""
+    assert substring("abc", -2, 5) == "abc"
+
+    assert find_char("hello", "l", 0) == 2
+    assert find_char("hello", "l", 3) == 3
+    assert find_char("hello", "x", 0) == -1
+    assert find_char("a\nb", "\n", 0) == 1
+    assert find_char("a\nb", "\\n", 0) == 1
