@@ -9,14 +9,6 @@ let fs = runtime.fs;
 let http = runtime.http;
 let websocket = runtime.websocket;
 
-struct Scheduler {
-    fn spawn(self, task, name -> string = "") ![io] {
-        spawn(task, name);
-    }
-}
-
-let scheduler -> Scheduler = Scheduler {};
-
 fn sleep(milliseconds -> number) ![clock] {
     runtime.sleep(milliseconds);
 }
