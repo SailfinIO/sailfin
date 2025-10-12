@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.4 (2025-10-12)
+
+### Bug Fixes
+
+- Importing and exporting and runtime
+  ([`cc4f049`](https://github.com/SailfinIO/sailfin/commit/cc4f0490d8df3be50b043f54d31e14629a40e17e))
+
+### Documentation
+
+- Update roadmap and status for de pythonization
+  ([`29f2af9`](https://github.com/SailfinIO/sailfin/commit/29f2af953889d22533e8938074e6d965c9066ca0))
+
+
 ## v0.1.1-alpha.3 (2025-10-11)
 
 ### Bug Fixes
