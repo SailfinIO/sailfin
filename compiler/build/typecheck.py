@@ -163,11 +163,11 @@ def check_statement(statement, bindings):
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
     if statement.variant == "IfStatement":
         diagnostics = check_block(statement.then_block, bindings)
-        if statement.else_branch != null:
+        if statement.else_branch != None:
             branch = statement.else_branch
-            if branch.body != null:
+            if branch.body != None:
                 diagnostics = (diagnostics) + (check_block(branch.body, bindings))
-            if branch.statement != null:
+            if branch.statement != None:
                 result = check_statement(branch.statement, bindings)
                 diagnostics = (diagnostics) + (result.diagnostics)
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
@@ -276,8 +276,8 @@ def check_type_parameters(type_parameters):
 def contains_string(items, candidate):
     for item in items:
         if item == candidate:
-            return true
-    return false
+            return True
+    return False
 
 def register_local_symbol(bindings, name, kind):
     if has_symbol(bindings, name):
@@ -303,8 +303,8 @@ def clone_bindings(source):
 def has_symbol(symbols, name):
     for entry in symbols:
         if entry.name == name:
-            return true
-    return false
+            return True
+    return False
 
 def make_duplicate_symbol_diagnostic(name, kind):
-    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=null)
+    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=None)

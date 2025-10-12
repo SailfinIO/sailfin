@@ -49,7 +49,7 @@ def analyze_statement(statement):
         qualified = "tool " + signature.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "TestDeclaration":
-        signature = FunctionSignature(name=statement.name, is_async=false, parameters=[], return_type=null, effects=statement.effects, type_parameters=[])
+        signature = FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[])
         qualified = "test " + statement.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "StructDeclaration":
@@ -74,14 +74,14 @@ def analyze_routine(signature, body, decorators, name):
             break
         declared = append_unique_effect(declared, signature.effects[declared_index])
         declared_index += 1
-    requires_io_from_decorators = false
+    requires_io_from_decorators = False
     decorator_index = 0
     while True:
         if decorator_index >= len(decorator_info):
             break
         decorator_entry = decorator_info[decorator_index]
         if decorator_entry.name == "trace"  or  decorator_entry.name == "logExecution"  or  decorator_entry.name == "logexecution":
-            requires_io_from_decorators = true
+            requires_io_from_decorators = True
             break
         decorator_index += 1
     if requires_io_from_decorators:
@@ -129,22 +129,22 @@ def block_has_prompt(block):
                 break
             statement = block.statements[index]
             if statement.variant == "PromptStatement":
-                return true
+                return True
             if statement.variant == "WithStatement":
                 if block_has_prompt(statement.body):
-                    return true
+                    return True
             if statement.variant == "ForStatement":
                 if block_has_prompt(statement.body):
-                    return true
+                    return True
             if statement.variant == "MatchStatement":
                 if match_cases_have_prompt(statement.cases):
-                    return true
+                    return True
             if statement.variant == "IfStatement":
                 if block_has_prompt(statement.then_block):
-                    return true
-                if statement.else_branch != null:
+                    return True
+                if statement.else_branch != None:
                     if else_branch_has_prompt(statement.else_branch):
-                        return true
+                        return True
             index += 1
     return block_contains_prompt(block.tokens)
 
@@ -163,54 +163,54 @@ def block_contains_prompt(tokens):
                     if brace_index != -1:
                         brace_token = tokens[brace_index]
                         if is_symbol_token(brace_token, "{"):
-                            return true
+                            return True
         index += 1
-    return false
+    return False
 
 def block_contains_fs_usage(tokens):
     if contains_identifier_followed_by_symbol(tokens, "fs", "."):
-        return true
+        return True
     if contains_member_chain(tokens, ["runtime", "fs"]):
-        return true
-    return false
+        return True
+    return False
 
 def block_contains_network_usage(tokens):
     if contains_identifier_followed_by_symbol(tokens, "http", "."):
-        return true
+        return True
     if contains_identifier_followed_by_symbol(tokens, "websocket", "."):
-        return true
+        return True
     if contains_identifier_call(tokens, "serve"):
-        return true
+        return True
     if contains_member_chain(tokens, ["runtime", "http"]):
-        return true
+        return True
     if contains_member_chain(tokens, ["runtime", "websocket"]):
-        return true
+        return True
     if contains_member_call(tokens, ["runtime", "serve"]):
-        return true
-    return false
+        return True
+    return False
 
 def block_contains_spawn_usage(tokens):
     if contains_identifier_call(tokens, "spawn"):
-        return true
+        return True
     if contains_member_call(tokens, ["runtime", "spawn"]):
-        return true
-    return false
+        return True
+    return False
 
 def block_contains_console_usage(tokens):
     if contains_identifier_followed_by_symbol(tokens, "print", "."):
-        return true
+        return True
     if contains_identifier_followed_by_symbol(tokens, "console", "."):
-        return true
+        return True
     if contains_member_chain(tokens, ["runtime", "console"]):
-        return true
-    return false
+        return True
+    return False
 
 def block_contains_sleep_usage(tokens):
     if contains_identifier_call(tokens, "sleep"):
-        return true
+        return True
     if contains_member_call(tokens, ["runtime", "sleep"]):
-        return true
-    return false
+        return True
+    return False
 
 def contains_identifier_followed_by_symbol(tokens, name, symbol):
     index = 0
@@ -220,9 +220,9 @@ def contains_identifier_followed_by_symbol(tokens, name, symbol):
         if is_identifier_token(tokens[index], name):
             next_index = next_non_trivia(tokens, index + 1)
             if next_index != -1  and  is_symbol_token(tokens[next_index], symbol):
-                return true
+                return True
         index += 1
-    return false
+    return False
 
 def contains_identifier_call(tokens, name):
     index = 0
@@ -232,13 +232,13 @@ def contains_identifier_call(tokens, name):
         if is_identifier_token(tokens[index], name):
             paren = next_non_trivia(tokens, index + 1)
             if paren != -1  and  is_symbol_token(tokens[paren], "("):
-                return true
+                return True
         index += 1
-    return false
+    return False
 
 def contains_member_chain(tokens, chain):
     if len(chain) == 0:
-        return false
+        return False
     index = 0
     while True:
         if index >= len(tokens):
@@ -246,28 +246,28 @@ def contains_member_chain(tokens, chain):
         if is_identifier_token(tokens[index], chain[0]):
             cursor = index
             chain_index = 1
-            matches = true
+            matches = True
             while True:
                 if chain_index >= len(chain):
                     break
                 dot_index = next_non_trivia(tokens, cursor + 1)
                 if dot_index == -1  or  not is_symbol_token(tokens[dot_index], "."):
-                    matches = false
+                    matches = False
                     break
                 member_index = next_non_trivia(tokens, dot_index + 1)
                 if member_index == -1  or  not is_identifier_token(tokens[member_index], chain[chain_index]):
-                    matches = false
+                    matches = False
                     break
                 cursor = member_index
                 chain_index += 1
             if matches:
-                return true
+                return True
         index += 1
-    return false
+    return False
 
 def contains_member_call(tokens, chain):
     if len(chain) == 0:
-        return false
+        return False
     index = 0
     while True:
         if index >= len(tokens):
@@ -275,26 +275,26 @@ def contains_member_call(tokens, chain):
         if is_identifier_token(tokens[index], chain[0]):
             cursor = index
             chain_index = 1
-            matches = true
+            matches = True
             while True:
                 if chain_index >= len(chain):
                     break
                 dot_index = next_non_trivia(tokens, cursor + 1)
                 if dot_index == -1  or  not is_symbol_token(tokens[dot_index], "."):
-                    matches = false
+                    matches = False
                     break
                 member_index = next_non_trivia(tokens, dot_index + 1)
                 if member_index == -1  or  not is_identifier_token(tokens[member_index], chain[chain_index]):
-                    matches = false
+                    matches = False
                     break
                 cursor = member_index
                 chain_index += 1
             if matches:
                 call_index = next_non_trivia(tokens, cursor + 1)
                 if call_index != -1  and  is_symbol_token(tokens[call_index], "("):
-                    return true
+                    return True
         index += 1
-    return false
+    return False
 
 def next_non_trivia(tokens, start):
     index = start
@@ -348,27 +348,27 @@ def contains_effect(effects, effect):
         if index >= len(effects):
             break
         if effects[index] == effect:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def else_branch_has_prompt(branch):
-    if branch.body != null:
+    if branch.body != None:
         if block_has_prompt(branch.body):
-            return true
-    if branch.statement != null:
+            return True
+    if branch.statement != None:
         if branch.statement.variant == "IfStatement":
             return if_statement_has_prompt(branch.statement)
-    return false
+    return False
 
 def if_statement_has_prompt(statement):
     if statement.variant != "IfStatement":
-        return false
+        return False
     if block_has_prompt(statement.then_block):
-        return true
-    if statement.else_branch != null:
+        return True
+    if statement.else_branch != None:
         return else_branch_has_prompt(statement.else_branch)
-    return false
+    return False
 
 def match_cases_have_prompt(cases):
     index = 0
@@ -377,6 +377,6 @@ def match_cases_have_prompt(cases):
             break
         case = cases[index]
         if block_has_prompt(case.body):
-            return true
+            return True
         index += 1
-    return false
+    return False

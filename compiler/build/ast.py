@@ -38,7 +38,8 @@ Expression.Range = Expression.variant('Range', ['start', 'end'])
 Expression.Raw = Expression.variant('Raw', ['text'])
 
 Statement = runtime.EnumType('Statement')
-Statement.ImportDeclaration = Statement.variant('ImportDeclaration', ['items', 'source'])
+Statement.ImportDeclaration = Statement.variant('ImportDeclaration', ['specifiers', 'source'])
+Statement.ExportDeclaration = Statement.variant('ExportDeclaration', ['specifiers', 'source'])
 Statement.VariableDeclaration = Statement.variant('VariableDeclaration', ['name', 'mutable', 'type_annotation', 'initializer'])
 Statement.ModelDeclaration = Statement.variant('ModelDeclaration', ['name', 'model_type', 'properties', 'effects', 'decorators'])
 Statement.PipelineDeclaration = Statement.variant('PipelineDeclaration', ['signature', 'body', 'decorators'])
@@ -180,4 +181,14 @@ class DecoratorArgument:
     def __init__(self, expression, name=None):
         self.name = name
         self.expression = expression
+
+class ImportSpecifier:
+    def __init__(self, name, alias=None):
+        self.name = name
+        self.alias = alias
+
+class ExportSpecifier:
+    def __init__(self, name, alias=None):
+        self.name = name
+        self.alias = alias
 

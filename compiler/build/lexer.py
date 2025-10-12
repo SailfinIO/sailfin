@@ -2,6 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
+from compiler.build.string_utils import substring, find_char, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -60,8 +61,8 @@ def lex(source):
                 start_column = state.column
                 state.index += 2
                 state.column += 2
-                newline_index = runtime.find_char(state.source, "\n", state.index)
-                carriage_index = runtime.find_char(state.source, "\r", state.index)
+                newline_index = find_char(state.source, "\n", state.index)
+                carriage_index = find_char(state.source, "\r", state.index)
                 comment_end = len(state.source)
                 if newline_index != -1:
                     comment_end = newline_index
@@ -103,7 +104,7 @@ def lex(source):
             state.index += 1
             state.column += 1
             literal = ""
-            escaped = false
+            escaped = False
             while True:
                 if state.index >= len(state.source):
                     break
@@ -113,13 +114,13 @@ def lex(source):
                     state.column += 1
                     break
                 if not escaped  and  is_backslash(current):
-                    escaped = true
+                    escaped = True
                     state.index += 1
                     state.column += 1
                     continue
                 if escaped:
                     literal = literal + interpret_escape(current)
-                    escaped = false
+                    escaped = False
                 else:
                     literal = literal + current
                 if current == "\n":
@@ -174,8 +175,8 @@ def lex(source):
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
-            if value == "true"  or  value == "false":
-                bool_value = value == "true"
+            if value == "True"  or  value == "False":
+                bool_value = value == "True"
                 tokens = append(tokens, Token(kind=TokenKind.BooleanLiteral(value=bool_value), lexeme=value, line=start_line, column=start_column))
             else:
                 tokens = append(tokens, Token(kind=TokenKind.Identifier(value=value), lexeme=value, line=start_line, column=start_column))
@@ -219,9 +220,6 @@ def is_digit(ch):
     code = char_code(ch)
     return code >= char_code("0")  and  code <= char_code("9")
 
-def char_code(ch):
-    return runtime.char_code(ch)
-
 def is_double_quote(ch):
     return char_code(ch) == 34
 
@@ -229,7 +227,7 @@ def is_backslash(ch):
     return char_code(ch) == 92
 
 def slice(text, start, end):
-    return runtime.substring(text, start, end)
+    return substring(text, start, end)
 
 def append(tokens, token):
     return (tokens) + ([token])

@@ -1,8 +1,9 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.ast import Block, Decorator, DecoratorArgument, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, TypeAnnotation, TypeParameter, WithClause, ElseBranch
+from compiler.build.ast import Block, Decorator, DecoratorArgument, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch
 from compiler.build.token import Token
+from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -43,7 +44,9 @@ def emit_program(program):
 
 def emit_statement(builder, statement):
     if statement.variant == "ImportDeclaration":
-        return emit_import(builder, statement.items, statement.source)
+        return emit_import(builder, statement.specifiers, statement.source)
+    if statement.variant == "ExportDeclaration":
+        return emit_export(builder, statement.specifiers, statement.source)
     if statement.variant == "VariableDeclaration":
         return emit_variable(builder, statement)
     if statement.variant == "FunctionDeclaration":
@@ -69,9 +72,14 @@ def emit_statement(builder, statement):
         return builder_emit_line(builder, comment)
     return builder_emit_line(builder, "// TODO: unsupported statement: " + statement.variant)
 
-def emit_import(builder, items, source):
-    list = join_with_separator(items, ", ")
+def emit_import(builder, specifiers, source):
+    list = format_import_specifiers(specifiers)
     line = "import() from \"" + source + "\";"
+    return builder_emit_line(builder, line)
+
+def emit_export(builder, specifiers, source):
+    list = format_export_specifiers(specifiers)
+    line = "export() from \"" + source + "\";"
     return builder_emit_line(builder, line)
 
 def emit_variable(builder, statement):
@@ -130,6 +138,33 @@ def emit_model(builder, statement):
     current = builder_pop_indent(current)
     current = builder_emit_line(current, "}")
     return current
+
+def format_import_specifiers(specifiers):
+    parts = []
+    index = 0
+    while True:
+        if index >= len(specifiers):
+            break
+        entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias)
+        parts = append_string(parts, entry)
+        index += 1
+    return join_with_separator(parts, ", ")
+
+def format_export_specifiers(specifiers):
+    parts = []
+    index = 0
+    while True:
+        if index >= len(specifiers):
+            break
+        entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias)
+        parts = append_string(parts, entry)
+        index += 1
+    return join_with_separator(parts, ", ")
+
+def format_specifier_entry(name, alias):
+    if alias == None  or  len(alias) == 0:
+        return name
+    return name + " as " + alias
 
 def emit_type_alias(builder, statement):
     line = "type " + statement.name
@@ -223,7 +258,7 @@ def emit_block_body(builder, block):
 
 def emit_block_statement(builder, statement):
     if statement.variant == "ReturnStatement":
-        if statement.expression == null:
+        if statement.expression == None:
             return builder_emit_line(builder, "return;")
         return builder_emit_line(builder, "return " + format_expression(statement.expression) + ";")
     if statement.variant == "ExpressionStatement":
@@ -276,19 +311,19 @@ def emit_if(builder, statement):
     line = "if " + format_expression(statement.condition)
     current = builder_emit_line(current, line)
     current = emit_block(current, statement.then_block)
-    if statement.else_branch != null:
+    if statement.else_branch != None:
         current = emit_else_branch(current, statement.else_branch)
     return current
 
 def emit_else_branch(builder, branch):
-    if branch.body != null:
+    if branch.body != None:
         current = builder_emit_line(builder, "else")
         return emit_block(current, branch.body)
-    if branch.statement != null:
+    if branch.statement != None:
         if branch.statement.variant == "IfStatement":
             current = builder_emit_line(builder, "else if " + format_expression(branch.statement.condition))
             after = emit_block(current, branch.statement.then_block)
-            if branch.statement.else_branch != null:
+            if branch.statement.else_branch != None:
                 return emit_else_branch(after, branch.statement.else_branch)
             return after
         current = builder_emit_line(builder, "else")
@@ -318,7 +353,7 @@ def emit_match(builder, statement):
 
 def emit_match_case(builder, case):
     line = "case " + format_expression(case.pattern)
-    if case.guard != null:
+    if case.guard != None:
         line = line + " if " + format_expression(case.guard)
     line = line + " => {"
     current = builder_emit_line(builder, line)
@@ -364,7 +399,7 @@ def format_decorator(decorator):
 
 def format_decorator_argument(argument):
     value = format_expression(argument.expression)
-    if argument.name == null:
+    if argument.name == None:
         return value
     return argument.name + ": " + value
 
@@ -391,7 +426,7 @@ def format_signature_line(keyword, signature):
     line = prefix + keyword + " " + signature.name
     line = line + format_type_parameters(signature.type_parameters)
     line = line + "(" + format_parameters(signature.parameters) + ")"
-    if signature.return_type != null:
+    if signature.return_type != None:
         line = line + " -> " + signature.return_type.text
     effects = format_effects(signature.effects)
     if len(effects) > 0:
@@ -436,9 +471,9 @@ def format_parameter(parameter):
         line = "mut " + parameter.name
     else:
         line = parameter.name
-    if parameter.type_annotation != null:
+    if parameter.type_annotation != None:
         line = line + " -> " + parameter.type_annotation.text
-    if parameter.default_value != null:
+    if parameter.default_value != None:
         line = line + " = " + format_expression(parameter.default_value)
     return line
 
@@ -452,19 +487,19 @@ def format_type_parameters(parameters):
             break
         parameter = parameters[index]
         part = parameter.name
-        if parameter.bound != null:
+        if parameter.bound != None:
             part = part + " : " + parameter.bound.text
         names = append_string(names, part)
         index += 1
     return "<" + join_with_separator(names, ", ") + ">"
 
 def format_type_annotation(annotation):
-    if annotation == null:
+    if annotation == None:
         return ""
     return " -> " + annotation.text
 
 def format_initializer(initializer):
-    if initializer == null:
+    if initializer == None:
         return ""
     value = format_expression(initializer)
     if len(value) == 0:
@@ -495,10 +530,10 @@ def format_expression(expression):
         return expression.value
     if expression.variant == "BooleanLiteral":
         if expression.value:
-            return "true"
-        return "false"
+            return "True"
+        return "False"
     if expression.variant == "NullLiteral":
-        return "null"
+        return "None"
     if expression.variant == "StringLiteral":
         return quote_string(expression.value)
     if expression.variant == "Unary":
@@ -576,7 +611,7 @@ def format_expression(expression):
 def format_lambda_expression(expression):
     params = format_lambda_parameters(expression.parameters)
     header = "fn " + params
-    if expression.return_type != null:
+    if expression.return_type != None:
         header = header + " -> " + expression.return_type.text
     body = format_lambda_body(expression.body)
     return header + " " + body
@@ -589,7 +624,7 @@ def format_lambda_parameters(parameters):
             break
         param = parameters[index]
         entry = param.name
-        if param.type_annotation != null:
+        if param.type_annotation != None:
             entry = entry + " -> " + param.type_annotation.text
         rendered = append_string(rendered, entry)
         index += 1
@@ -612,7 +647,7 @@ def format_lambda_body(body):
 
 def format_lambda_statement(statement):
     if statement.variant == "ReturnStatement":
-        if statement.expression == null:
+        if statement.expression == None:
             return "return;"
         return "return " + format_expression(statement.expression) + ";"
     if statement.variant == "ExpressionStatement":
@@ -622,9 +657,9 @@ def format_lambda_statement(statement):
         if statement.mutable:
             line = line + "mut "
         line = line + statement.name
-        if statement.type_annotation != null:
+        if statement.type_annotation != None:
             line = line + " -> " + statement.type_annotation.text
-        if statement.initializer != null:
+        if statement.initializer != None:
             line = line + " = " + format_expression(statement.initializer)
         return line + ";"
     if statement.variant == "Unknown":
@@ -677,43 +712,43 @@ def format_test_name(name):
 
 def is_identifier(value):
     if len(value) == 0:
-        return false
+        return False
     first = value[0]
     if not is_identifier_start(first):
-        return false
+        return False
     index = 1
     while True:
         if index >= len(value):
             break
         if not is_identifier_part(value[index]):
-            return false
+            return False
         index += 1
-    return true
+    return True
 
 def is_identifier_start(ch):
     if ch == "_":
-        return true
-    code = runtime.char_code(ch)
-    return code >= runtime.char_code("a")  and  code <= runtime.char_code("z")  or  code >= runtime.char_code("A")  and  code <= runtime.char_code("Z")
+        return True
+    code = char_code(ch)
+    return code >= char_code("a")  and  code <= char_code("z")  or  code >= char_code("A")  and  code <= char_code("Z")
 
 def is_identifier_part(ch):
     if is_identifier_start(ch):
-        return true
-    code = runtime.char_code(ch)
-    return code >= runtime.char_code("0")  and  code <= runtime.char_code("9")
+        return True
+    code = char_code(ch)
+    return code >= char_code("0")  and  code <= char_code("9")
 
 def trim_block_body(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
         return trimmed
     if trimmed[0] == "{"  and  trimmed[len(trimmed) - 1] == "}":
-        return trim_text(runtime.substring(trimmed, 1, len(trimmed) - 1))
+        return trim_text(substring(trimmed, 1, len(trimmed) - 1))
     return trimmed
 
 def collapse_whitespace(value):
     result = ""
     index = 0
-    last_space = false
+    last_space = False
     while True:
         if index >= len(value):
             break
@@ -722,10 +757,10 @@ def collapse_whitespace(value):
         if is_space:
             if not last_space:
                 result = result + " "
-                last_space = true
+                last_space = True
         else:
             result = result + ch
-            last_space = false
+            last_space = False
         index += 1
     return trim_text(result)
 
@@ -787,7 +822,7 @@ def trim_right(value):
         break
     if end == len(value):
         return value
-    return runtime.substring(value, 0, end)
+    return substring(value, 0, end)
 
 def append_string(values, value):
     return (values) + ([value])
@@ -825,7 +860,7 @@ def trim_text(value):
         break
     if start == 0  and  end == len(value):
         return value
-    return runtime.substring(value, start, end)
+    return substring(value, start, end)
 
 def is_trim_char(ch):
     return ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t"
