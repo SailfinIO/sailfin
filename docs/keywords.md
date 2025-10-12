@@ -14,6 +14,8 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 
 - `if`
 - `else`
+- `for`
+- `in`
 - `match`
 - `return`
 - `assert`
@@ -21,6 +23,9 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `catch`
 - `finally`
 - `throw`
+- `loop`
+- `break`
+- `continue`
 
 ### Functions, Types & Declarations
 

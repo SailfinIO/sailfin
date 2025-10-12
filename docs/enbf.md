@@ -78,6 +78,10 @@ Block              = "{" { Statement } "}" ;
 
 Statement          = VariableDeclaration
                    | IfStatement
+                   | ForStatement
+                   | LoopStatement
+                   | BreakStatement
+                   | ContinueStatement
                    | MatchStatement
                    | TryStatement
                    | RoutineDeclaration
@@ -114,6 +118,11 @@ ReturnStatement    = "return" [ Expression ] ";" ;
 ThrowStatement     = "throw" Expression ";" ;
 
 WithStatement      = "with" Expression { "," Expression } Block ;
+
+ForStatement       = "for" Expression "in" Expression Block [ ";" ] ;
+LoopStatement      = "loop" Block [ ";" ] ;
+BreakStatement     = "break" [ ";" ] ;
+ContinueStatement  = "continue" [ ";" ] ;
 
 PromptStatement    = "prompt" PromptChannel Block ;
 // Bootstrap status: channels are parsed as identifiers; canonical channel names are

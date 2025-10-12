@@ -32,6 +32,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | `functions.sfn` | `io` | Function defaults and overloading with console output. |
 | `hello-world.sfn` | `io` | Minimal greeting emitted via `print.info`. |
 | `interfaces.sfn` | `io` | Trait-style dispatch routed through the console. |
+| `loops.sfn` | `io` | `for` iteration and `loop`/`break`/`continue` control flow. |
 | `struct-composition.sfn` | `io` | Interface composition exercised with `print.info`. |
 | `structs.sfn` | `io` | Struct constructors and method calls with logging. |
 | `tagged-enum.sfn` | `io` | Tagged union match executed inside `main`. |
