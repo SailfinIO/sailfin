@@ -5,7 +5,7 @@
 // the pipeline self-contained while we iterate toward LLVM / WASM codegen.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport, NativeEnum, NativeEnumVariantField } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport, NativeEnum, NativeEnumVariantField, NativeBinding } from "./native_ir";
 
 struct LoweredPythonResult {
     source -> string;
@@ -62,12 +62,12 @@ fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
     }
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
-    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums);
+    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings);
     diagnostics = diagnostics.concat(module.diagnostics);
     let python_source = builder_to_string(module.builder);
     return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
 }
-fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[]) -> PythonModuleEmission {
+fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[], bindings -> NativeBinding[]) -> PythonModuleEmission {
     let mut builder -> PythonBuilder = builder_new();
     let mut diagnostics -> string[] = [];
     builder = builder_emit(builder, "import asyncio");
@@ -78,6 +78,10 @@ fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], 
     }
     builder = builder_emit_blank(builder);
     builder = emit_runtime_aliases(builder);
+    if bindings.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_top_level_bindings(builder, bindings);
+    }
     if enums.length > 0 {
         builder = builder_emit_blank(builder);
         builder = emit_enum_definitions(builder, enums);
@@ -122,6 +126,28 @@ fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
     current = builder_emit(current, "array_reduce = runtime.array_reduce");
     current = builder_emit(current, "globals()['t' + 'rue'] = True");
     current = builder_emit(current, "globals()['f' + 'alse'] = False");
+    return current;
+}
+
+fn emit_top_level_bindings(builder -> PythonBuilder, bindings -> NativeBinding[]) -> PythonBuilder {
+    let mut current = builder;
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        let name = sanitize_identifier(binding.name);
+        let mut line -> string = name + " = ";
+        if binding.value != null {
+            let mut value_text -> string = binding.value;
+            line = line + lower_expression(value_text);
+        } else {
+            line = line + "None";
+        }
+        current = builder_emit(current, line);
+        index += 1;
+    }
     return current;
 }
 

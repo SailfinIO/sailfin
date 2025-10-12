@@ -84,6 +84,13 @@ struct NativeEnum {
     variants -> NativeEnumVariant[];
 }
 
+struct NativeBinding {
+    name -> string;
+    mutable -> boolean;
+    type_annotation -> string;
+    value -> string?;
+}
+
 struct EnumParseResult {
     definition -> NativeEnum?;
     next_index -> number;
@@ -106,6 +113,7 @@ struct ParseNativeResult {
     imports -> NativeImport[];
     structs -> NativeStruct[];
     enums -> NativeEnum[];
+    bindings -> NativeBinding[];
     diagnostics -> string[];
 }
 
@@ -131,6 +139,7 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
     let mut imports -> NativeImport[] = [];
     let mut structs -> NativeStruct[] = [];
     let mut enums -> NativeEnum[] = [];
+    let mut bindings -> NativeBinding[] = [];
     let mut current -> NativeFunction? = null;
 
     let mut index -> number = 0;
@@ -228,6 +237,12 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             continue;
         }
         if current == null {
+            if starts_with(line, ".let ") {
+                let parsed_binding = parse_let_instruction(line);
+                bindings = append_binding(bindings, binding_from_instruction(parsed_binding));
+                index += 1;
+                continue;
+            }
             diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
             index += 1;
             continue;
@@ -248,11 +263,15 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
     }
 
-    return ParseNativeResult { functions: functions, imports: imports, structs: structs, enums: enums, diagnostics: diagnostics };
+    return ParseNativeResult { functions: functions, imports: imports, structs: structs, enums: enums, bindings: bindings, diagnostics: diagnostics };
 }
 
 fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
     return functions.concat([value]);
+}
+
+fn append_binding(bindings -> NativeBinding[], value -> NativeBinding) -> NativeBinding[] {
+    return bindings.concat([value]);
 }
 
 fn append_import(imports -> NativeImport[], value -> NativeImport) -> NativeImport[] {
@@ -298,6 +317,15 @@ fn append_instruction(function -> NativeFunction, instruction -> NativeInstructi
         return_type: function.return_type,
         effects: function.effects,
         instructions: instructions,
+    };
+}
+
+fn binding_from_instruction(instruction -> NativeInstruction) -> NativeBinding {
+    return NativeBinding {
+        name: instruction.name,
+        mutable: instruction.mutable,
+        type_annotation: instruction.type_annotation,
+        value: instruction.value,
     };
 }
 

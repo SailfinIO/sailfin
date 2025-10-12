@@ -79,7 +79,9 @@ roadmaps.
   Collection helpers (`array_map`, `array_filter`, `array_reduce`) and the
   sequential `parallel` orchestration now live in `runtime/prelude.sfn`, letting
   the self-hosted runtime exercise native Sailfin loops; regression coverage
-  lives in `compiler/tests/test_runtime_prelude.py`.
+  lives in `compiler/tests/test_runtime_prelude.py`. Native lowering now
+  recognises top-level `.let` bindings (e.g., `console = runtime.console`) so
+  the prelude compiles without spurious diagnostics.
 
 - Stage0 (legacy): Parses `Affine<T>` / `Linear<T>` without enforcement.
 - Stage1: Carries ownership metadata for future borrow checking.

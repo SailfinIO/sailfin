@@ -25,6 +25,7 @@ def stage1_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pat
     except Stage1CompileError as exc:
         raise RuntimeError(f"stage1 compile failed during test setup: {exc}") from exc
 
+    _clear_stage1_modules()
     sys.path.insert(0, str(temp_root))
     try:
         yield temp_root

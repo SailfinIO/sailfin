@@ -16,8 +16,7 @@ def test_runtime_prelude_collection_helpers() -> None:
 
     result = stage1_main.compile_project([str(runtime_prelude)])
     diagnostics = getattr(result, "diagnostics", [])
-    fatal = [entry for entry in diagnostics if getattr(entry, "fatal", False)]
-    assert not fatal, f"Stage1 reported fatal diagnostics compiling runtime prelude: {fatal}"
+    assert not diagnostics, f"Stage1 surfaced diagnostics compiling runtime prelude: {diagnostics}"
 
     modules = getattr(result, "modules", [])
     assert modules, "Stage1 returned no modules for runtime prelude"
@@ -27,6 +26,11 @@ def test_runtime_prelude_collection_helpers() -> None:
     python_source = getattr(module, "python_source")
     namespace: dict[str, Any] = {"__builtins__": __builtins__}
     exec(python_source, namespace)
+
+    runtime_module = namespace["runtime"]
+    assert namespace["console"] is runtime_module.console
+    assert namespace["fs"] is runtime_module.fs
+    assert namespace["http"] is runtime_module.http
 
     array_map = namespace["array_map"]
     array_filter = namespace["array_filter"]
