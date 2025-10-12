@@ -9,10 +9,15 @@ Parentheses group expressions, square brackets denote optional elements, and
 braces denote repetition (`{ x }` means zero or more occurrences of `x`).
 
 ```
-Program            = { ImportDeclaration | Declaration | Statement } ;
+Program            = { ImportDeclaration | ExportDeclaration | Declaration | Statement } ;
 
-ImportDeclaration  = "import" "{" [ Identifier { "," Identifier } ] "}" "from"
-                     StringLiteral ";" ;
+ImportDeclaration  = "import" ImportSpecifierList "from" StringLiteral ";" ;
+
+ExportDeclaration  = "export" ImportSpecifierList [ "from" StringLiteral ] ";" ;
+
+ImportSpecifierList = "{" [ ImportSpecifier { "," ImportSpecifier } ] "}" ;
+
+ImportSpecifier    = Identifier [ "as" Identifier ] ;
 
 Declaration        = StructDeclaration
                    | EnumDeclaration

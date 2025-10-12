@@ -193,3 +193,5 @@ fn char_code(character -> string) -> number {
 
     return runtime.char_code(character);
 }
+
+export { clamp, substring, find_char, char_code };

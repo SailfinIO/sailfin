@@ -35,6 +35,9 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
     if not inputs:
         raise Stage1CompileError("no Sailfin sources provided to compile")
 
+    compiler_src_root = (REPO_ROOT / "compiler" / "src").resolve()
+    runtime_root = (REPO_ROOT / "runtime").resolve()
+
     result = stage1_main.compile_project([str(path) for path in inputs])
     diagnostics = getattr(result, "diagnostics", [])
     fatal = [entry for entry in diagnostics if getattr(entry, "fatal", False)]
@@ -52,11 +55,21 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
 
     output_dir.mkdir(parents=True, exist_ok=True)
     for module in modules:
-        source_path = pathlib.Path(getattr(module, "source_path"))
+        source_path = pathlib.Path(getattr(module, "source_path")).resolve()
         python_source = getattr(module, "python_source", None)
         if python_source is None:
             raise Stage1CompileError(f"module missing python_source: {module}")
         destination = output_dir / source_path.with_suffix(".py").name
+        try:
+            relative = source_path.relative_to(compiler_src_root)
+            destination = output_dir / relative.with_suffix(".py").name
+        except ValueError:
+            try:
+                relative_runtime = source_path.relative_to(runtime_root)
+                destination = output_dir / pathlib.Path("runtime") / relative_runtime.with_suffix(".py")
+            except ValueError:
+                destination = output_dir / source_path.with_suffix(".py").name
+        destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(python_source, encoding="utf-8")
 
     for entry in diagnostics:
@@ -69,8 +82,13 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compile Sailfin sources with the stage1 pipeline")
-    parser.add_argument("paths", nargs="*", default=[REPO_ROOT / "compiler" / "src"], type=pathlib.Path,
-                        help="Files or directories of .sfn sources (default: compiler/src)")
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        default=[REPO_ROOT / "compiler" / "src", REPO_ROOT / "runtime"],
+        type=pathlib.Path,
+        help="Files or directories of .sfn sources (default: compiler/src and runtime)",
+    )
     parser.add_argument("--out", dest="output", type=pathlib.Path, default=REPO_ROOT / "compiler" / "build",
                         help="Directory to receive generated Python modules (default: compiler/build)")
     return parser.parse_args(argv)

@@ -174,12 +174,17 @@ fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> P
             break;
         }
         let entry = imports[index];
+        if entry.kind == "export" {
+            exports = collect_export_names(exports, entry.specifiers);
+            let module_text = trim_text(entry.module);
+            if module_text.length == 0 {
+                index += 1;
+                continue;
+            }
+        }
         let line = render_python_import(entry);
         if line.length > 0 {
             current = builder_emit(current, line);
-        }
-        if entry.kind == "export" {
-            exports = collect_export_names(exports, entry.specifiers);
         }
         index += 1;
     }
@@ -237,6 +242,9 @@ fn render_enum_variant_fields(fields -> NativeEnumVariantField[]) -> string {
 
 fn render_python_import(entry -> NativeImport) -> string {
     let module_path = normalize_import_module(entry.module);
+    if module_path.length == 0 {
+        return "";
+    }
     if entry.specifiers.length == 0 {
         return "import " + module_path;
     }
@@ -269,6 +277,10 @@ fn normalize_import_module(path -> string) -> string {
     let trimmed = trim_text(path);
     if trimmed.length == 0 {
         return trimmed;
+    }
+    if starts_with(trimmed, "runtime/") {
+        let remainder = replace_all(trimmed, "/", ".");
+        return "compiler.build." + remainder;
     }
     if starts_with(trimmed, "./") {
         let remainder = substring(trimmed, 2, trimmed.length);

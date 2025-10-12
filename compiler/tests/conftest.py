@@ -21,7 +21,7 @@ def stage1_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pat
     temp_root = tmp_path_factory.mktemp("stage1_build")
     output_dir = temp_root / "compiler" / "build"
     try:
-        compile_stage1([REPO_ROOT / "compiler" / "src"], output_dir)
+        compile_stage1([REPO_ROOT / "compiler" / "src", REPO_ROOT / "runtime"], output_dir)
     except Stage1CompileError as exc:
         raise RuntimeError(f"stage1 compile failed during test setup: {exc}") from exc
 

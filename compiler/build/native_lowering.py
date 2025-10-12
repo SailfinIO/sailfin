@@ -173,11 +173,15 @@ def emit_python_imports(builder, imports):
         if index >= len(imports):
             break
         entry = imports[index]
+        if entry.kind == "export":
+            exports = collect_export_names(exports, entry.specifiers)
+            module_text = trim_text(entry.module)
+            if len(module_text) == 0:
+                index += 1
+                continue
         line = render_python_import(entry)
         if len(line) > 0:
             current = builder_emit(current, line)
-        if entry.kind == "export":
-            exports = collect_export_names(exports, entry.specifiers)
         index += 1
     return PythonImportEmission(builder=current, exports=exports)
 
@@ -221,6 +225,8 @@ def render_enum_variant_fields(fields):
 
 def render_python_import(entry):
     module_path = normalize_import_module(entry.module)
+    if len(module_path) == 0:
+        return ""
     if len(entry.specifiers) == 0:
         return "import " + module_path
     rendered = render_python_specifiers(entry.specifiers)
@@ -246,6 +252,9 @@ def normalize_import_module(path):
     trimmed = trim_text(path)
     if len(trimmed) == 0:
         return trimmed
+    if starts_with(trimmed, "runtime/"):
+        remainder = replace_all(trimmed, "/", ".")
+        return "compiler.build." + remainder
     if starts_with(trimmed, "./"):
         remainder = substring(trimmed, 2, len(trimmed))
         remainder = replace_all(remainder, "/", ".")

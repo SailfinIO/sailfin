@@ -41,6 +41,7 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `type`
 - `is`
 - `import`
+- `export`
 - `from`
 - `model`
 - `tool`

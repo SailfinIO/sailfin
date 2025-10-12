@@ -13,15 +13,20 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 def test_string_utils_helpers() -> None:
     stage1_main = importlib.import_module("compiler.build.main")
     source_path = REPO_ROOT / "compiler" / "src" / "string_utils.sfn"
+    runtime_prelude = REPO_ROOT / "runtime" / "prelude.sfn"
 
-    result = stage1_main.compile_project([str(source_path)])
+    result = stage1_main.compile_project([str(source_path), str(runtime_prelude)])
     diagnostics = getattr(result, "diagnostics", [])
     assert not diagnostics, f"Stage1 surfaced diagnostics compiling string utils: {diagnostics}"
 
     modules = getattr(result, "modules", [])
     assert modules, "Stage1 returned no modules for string utils"
 
-    module = modules[0]
+    module = next(
+        (entry for entry in modules if pathlib.Path(getattr(entry, "source_path")).resolve() == source_path.resolve()),
+        None,
+    )
+    assert module is not None, "String utils module missing from stage1 output"
     python_source = getattr(module, "python_source")
 
     namespace: Dict[str, Any] = {"__builtins__": __builtins__}

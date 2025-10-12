@@ -69,6 +69,13 @@ canonical Sailfin-branded paths:
 import { Channel, channel } from "sailfin/async";
 ```
 
+Modules may re-export their own declarations or items from other modules via
+`export` statements. Specifiers support aliasing for both imports and exports:
+
+```sfn
+export { substring, find_char as locate } from "./string_utils";
+```
+
 Capsules declare their required capabilities in `sail.toml`; multi-capsule
 workspaces centralise shared policies in `fleet.toml`. When self-hosted,
 invoking an undeclared capability (e.g. sending a network request) that is not

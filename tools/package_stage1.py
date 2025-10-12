@@ -88,7 +88,7 @@ def build_stage1_artifact(output_dir: pathlib.Path, *, version: str | None = Non
 
 def _run_stage1_compile(output_dir: pathlib.Path) -> None:
     try:
-        compile_stage1([REPO_ROOT / "compiler" / "src"], output_dir)
+        compile_stage1([REPO_ROOT / "compiler" / "src", REPO_ROOT / "runtime"], output_dir)
     except Stage1CompileError as exc:  # pragma: no cover - exercised via tests
         raise RuntimeError(f"stage1 compile failed: {exc}") from exc
 
