@@ -24,7 +24,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [x] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
     - [x] Audit remaining runtime helpers for Python dependencies (`match_exhaustive_failed`, enum utilities) and schedule Sailfin ports with paired tests. See `docs/runtime_audit.md`.
   - [x] Port `match_exhaustive_failed` into `runtime/prelude.sfn` and add stage1 regression coverage for non-exhaustive matches (`compiler/tests/test_runtime_prelude.py`).
-      - [ ] Design Sailfin-native `EnumType`/`EnumInstance` helpers plus `struct_repr` replacement; update lowering/tests accordingly.
+    - [x] Design Sailfin-native `EnumType`/`EnumInstance` helpers plus `struct_repr` replacement; update lowering/tests accordingly (`compiler/tests/test_runtime_prelude.py`).
       - [ ] Outline a Sailfin-native plan for `check_type` and `format_string` so the `is` operator and string interpolation no longer depend on the Python runtime.
     - [x] Add regression coverage demonstrating `find_char` escape handling and `substring` boundary clamping under stage1 (`compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`).
     - [ ] Explore grapheme-aware utilities (`grapheme_count`, `grapheme_at`) once normalization primitives land so char-oriented helpers align with user expectations on combining sequences.

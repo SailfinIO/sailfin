@@ -51,7 +51,7 @@ class ParameterPreparation:
 def lower_to_llvm(native_module):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
-    if artifact == null:
+    if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
         return LoweredLLVMResult(ir="", diagnostics=diagnostics)
     parse = parse_native_artifact(artifact.contents)
@@ -149,16 +149,16 @@ def select_return_expression(instructions):
         instruction = instructions[index]
         if instruction.variant == "Return":
             return instruction.expression
-    return null
+    return None
 
 def lower_return_instruction(function, llvm_return, expression, bindings):
     function_name = function.name
     if llvm_return == "void":
-        if expression != null  and  len(expression) > 0:
+        if expression != None  and  len(expression) > 0:
             diagnostics = ["llvm lowering: void function `" + function_name + "` returned a value"]
             return BodyResult(lines=["  ret void"], diagnostics=diagnostics)
         return BodyResult(lines=["  ret void"], diagnostics=[])
-    if expression == null:
+    if expression == None:
         diagnostics = ["llvm lowering: missing return in function `" + function_name + "`"]
         return BodyResult(lines=["  ret " + llvm_return + " 0.0"], diagnostics=diagnostics)
     trimmed = trim_text(expression)
@@ -166,7 +166,7 @@ def lower_return_instruction(function, llvm_return, expression, bindings):
         diagnostics = ["llvm lowering: empty return expression in `" + function_name + "`"]
         return BodyResult(lines=["  ret " + llvm_return + " 0.0"], diagnostics=diagnostics)
     binding = find_parameter_binding(bindings, trimmed)
-    if binding != null:
+    if binding != None:
         diagnostics = []
         if binding.llvm_type != llvm_return:
             diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches parameter `" + binding.name + "` of type `" + binding.llvm_type + "`")
@@ -205,7 +205,7 @@ def find_parameter_binding(bindings, name):
         if binding.name == name:
             return binding
         index += 1
-    return null
+    return None
 
 def sanitize_symbol(name):
     result = ""
@@ -223,42 +223,42 @@ def sanitize_symbol(name):
 
 def is_symbol_char(ch):
     if ch == "_":
-        return true
+        return True
     code = char_code(ch)
     if code >= char_code("a")  and  code <= char_code("z"):
-        return true
+        return True
     if code >= char_code("A")  and  code <= char_code("Z"):
-        return true
+        return True
     if code >= char_code("0")  and  code <= char_code("9"):
-        return true
-    return false
+        return True
+    return False
 
 def is_number_literal(text):
     index = 0
-    has_digit = false
-    has_decimal = false
+    has_digit = False
+    has_decimal = False
     trimmed = trim_text(text)
     if len(trimmed) == 0:
-        return false
+        return False
     if trimmed[0] == "-":
         if len(trimmed) == 1:
-            return false
+            return False
         index = 1
     while True:
         if index >= len(trimmed):
             break
         ch = trimmed[index]
         if ch >= "0"  and  ch <= "9":
-            has_digit = true
+            has_digit = True
             index += 1
             continue
         if ch == ".":
             if has_decimal:
-                return false
-            has_decimal = true
+                return False
+            has_decimal = True
             index += 1
             continue
-        return false
+        return False
     return has_digit
 
 def normalise_number_literal(text):
@@ -301,12 +301,12 @@ def index_of(value, target):
         if index + len(target) > len(value):
             break
         match_index = 0
-        matches = true
+        matches = True
         while True:
             if match_index >= len(target):
                 break
             if value[index + match_index] != target[match_index]:
-                matches = false
+                matches = False
                 break
             match_index += 1
         if matches:

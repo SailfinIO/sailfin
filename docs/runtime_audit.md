@@ -10,8 +10,8 @@ This audit tracks runtime helpers that the Sailfin stage1 toolchain currently so
 | `substring`, `find_char`, `char_code`, `clamp` | `runtime/prelude.sfn` | Sailfin-native | ASCII + UTF-8 behaviour documented in `docs/spec.md` §10.2; regression coverage in `compiler/tests/test_runtime_prelude.py` and `compiler/tests/test_string_utils.py`. |
 | `sleep`, `channel`, `spawn`, `serve`, `http`, `websocket`, `logExecution`, `console`, `fs` | Aliases to `runtime.runtime_support` | Python bridge | Require Sailfin-native implementations or thin effect-aware shims; track under "Capability bridges" and "Concurrency substrate" roadmap tasks. |
 | `match_exhaustive_failed` | `runtime/prelude.sfn` | Sailfin-native | Raises a ValueError via `runtime.raise_value_error`; regression covered by `compiler/tests/test_runtime_prelude.py`. |
-| `EnumType`, `EnumInstance` helpers | `runtime/runtime_support.py` | Python bridge | Needed for enum constructors and reflective access; design Sailfin struct-backed equivalents plus stage1 lowering tests. |
-| `struct_repr` | `runtime/runtime_support.py` | Python bridge | Replace with Sailfin string builder helper; pair with struct emission tests. |
+| `EnumType`, `EnumInstance` helpers | `runtime/prelude.sfn` | Sailfin-native | Enum metadata + instantiation handled in Sailfin with lowering rewrites; regression coverage in `compiler/tests/test_runtime_prelude.py`. |
+| `struct_repr` | `runtime/prelude.sfn` | Sailfin-native | Struct `__repr__` generation wired through lowering with helper coverage in `compiler/tests/test_runtime_prelude.py`. |
 | `check_type` and `_resolve_runtime_type` | `runtime/runtime_support.py` | Python bridge | Used for bootstrap `is` operator; plan Sailfin-native type reflection once semantic metadata lands. |
 | `format_string` | `runtime/runtime_support.py` | Python bridge | Stage1 string interpolation still defers to Python; needs Sailfin expression evaluation or IR support. |
 | `_WebSocket*`, `_HttpModule`, `_Request`, `_Response` mock helpers | `runtime/runtime_support.py` | Python bridge | Replace with Sailfin stubs once capability bridges are in place; covered by roadmap capability workstream. |

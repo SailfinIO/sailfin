@@ -259,21 +259,21 @@ def parse_statement(parser):
             return parse_unknown(original)
         return parse_test(parser, decorators)
     if identifier_matches(token, "fn"):
-        return parse_function(parser, false, decorators)
+        return parse_function(parser, False, decorators)
     if identifier_matches(token, "loop"):
         if identifier_matches(token, "async"):
             pass
         if identifier_matches(token, "break"):
             if len(decorators) > 0:
-                return BlockStatementParseResult(parser=original, statement=null, success=false)
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
             return parse_break_statement(after_decorators)
         if identifier_matches(token, "continue"):
             if len(decorators) > 0:
-                return BlockStatementParseResult(parser=original, statement=null, success=false)
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
             return parse_continue_statement(after_decorators)
         after = parser_peek_raw(lookahead)
         if identifier_matches(after, "fn"):
-            return parse_function(parser, true, decorators)
+            return parse_function(parser, True, decorators)
     if identifier_matches(token, "import"):
         return parse_import(parser)
     if identifier_matches(token, "export"):
@@ -331,18 +331,18 @@ def parse_export(parser):
 def parse_variable(parser):
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "let")
-    mutable_flag = false
+    mutable_flag = False
     look = skip_trivia(parser)
     token = parser_peek_raw(look)
     if identifier_matches(token, "mut"):
         parser = skip_trivia(parser)
         parser = consume_keyword(parser, "mut")
-        mutable_flag = true
+        mutable_flag = True
     parser = skip_trivia(parser)
     name_token = parser_peek_raw(parser)
     name = identifier_text(name_token)
     parser = parser_advance_raw(parser)
-    type_annotation = null
+    type_annotation = None
     parser = skip_trivia(parser)
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
@@ -352,7 +352,7 @@ def parse_variable(parser):
         text = trim_text(tokens_to_text(capture.tokens))
         if len(text) > 0:
             type_annotation = TypeAnnotation(text=text)
-    initializer = null
+    initializer = None
     parser = skip_trivia(parser)
     assign = parser_peek_raw(parser)
     if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
@@ -382,7 +382,7 @@ def parse_specifier_list(parser):
         name = identifier_text(current)
         parser = parser_advance_raw(parser)
         parser = skip_trivia(parser)
-        alias = null
+        alias = None
         potential_alias = parser_peek_raw(parser)
         if identifier_matches(potential_alias, "as"):
             parser = consume_keyword(parser, "as")
@@ -458,13 +458,13 @@ def parse_struct(parser, decorators):
             break
         field_result = parse_struct_field(parser)
         if field_result.success  and  len(member_decorators) == 0:
-            if field_result.field != null:
+            if field_result.field != None:
                 fields = append_field(fields, field_result.field)
             parser = field_result.parser
             continue
         method_result = parse_struct_method(parser, member_decorators)
         if method_result.success:
-            if method_result.method != null:
+            if method_result.method != None:
                 methods = append_method(methods, method_result.method)
             parser = method_result.parser
             continue
@@ -535,7 +535,7 @@ def parse_interface(parser, decorators):
         member_result = parse_interface_member(parser, member_decorators)
         if member_result.success:
             parser = member_result.parser
-            if member_result.signature != null:
+            if member_result.signature != None:
                 members = append_signature(members, member_result.signature)
             continue
         parser = skip_struct_member(member_start)
@@ -570,7 +570,7 @@ def parse_enum(parser, decorators):
         variant_result = parse_enum_variant(parser)
         if variant_result.success:
             parser = variant_result.parser
-            if variant_result.variant != null:
+            if variant_result.variant != None:
                 variants = append_enum_variant(variants, variant_result.variant)
             parser = skip_trailing_comma(parser)
             continue
@@ -581,21 +581,21 @@ def parse_enum(parser, decorators):
 def parse_interface_member(parser, decorators):
     original = parser
     current = skip_trivia(parser)
-    is_async = false
+    is_async = False
     peek = parser_peek_raw(current)
     if identifier_matches(peek, "async"):
         lookahead = skip_trivia(parser_advance_raw(current))
         if identifier_matches(parser_peek_raw(lookahead), "fn"):
             current = consume_keyword(current, "async")
-            is_async = true
+            is_async = True
     current = skip_trivia(current)
     if not identifier_matches(parser_peek_raw(current), "fn"):
-        return InterfaceMemberParseResult(parser=original, signature=null, success=false)
+        return InterfaceMemberParseResult(parser=original, signature=None, success=False)
     current = consume_keyword(current, "fn")
     current = skip_trivia(current)
     name_token = parser_peek_raw(current)
     if name_token.kind.variant != "Identifier":
-        return InterfaceMemberParseResult(parser=original, signature=null, success=false)
+        return InterfaceMemberParseResult(parser=original, signature=None, success=False)
     name = identifier_text(name_token)
     current = parser_advance_raw(current)
     type_param_result = parse_type_parameter_clause(current)
@@ -607,7 +607,7 @@ def parse_interface_member(parser, decorators):
     current = parameter_result.parser
     parameters = parameter_result.parameters
     current = skip_trivia(current)
-    return_type = null
+    return_type = None
     separator = parser_peek_raw(current)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         current = parser_advance_raw(current)
@@ -627,14 +627,14 @@ def parse_interface_member(parser, decorators):
         if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
     signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters)
-    return InterfaceMemberParseResult(parser=current, signature=signature, success=true)
+    return InterfaceMemberParseResult(parser=current, signature=signature, success=True)
 
 def parse_enum_variant(parser):
     original = parser
     current = skip_trivia(parser)
     name_token = parser_peek_raw(current)
     if name_token.kind.variant != "Identifier":
-        return EnumVariantParseResult(parser=original, variant=null, success=false)
+        return EnumVariantParseResult(parser=original, variant=None, success=False)
     name = identifier_text(name_token)
     current = parser_advance_raw(current)
     fields = []
@@ -653,7 +653,7 @@ def parse_enum_variant(parser):
             field_result = parse_enum_variant_field(current)
             if field_result.success:
                 current = field_result.parser
-                if field_result.field != null:
+                if field_result.field != None:
                     fields = append_field(fields, field_result.field)
                 continue
             current = skip_enum_variant_entry(current)
@@ -664,27 +664,27 @@ def parse_enum_variant(parser):
         current = skip_trivia(current)
         terminator = parser_peek_raw(current)
     variant = EnumVariant(name=name, fields=fields)
-    return EnumVariantParseResult(parser=current, variant=variant, success=true)
+    return EnumVariantParseResult(parser=current, variant=variant, success=True)
 
 def parse_enum_variant_field(parser):
     current = skip_trivia(parser)
-    is_mutable = false
+    is_mutable = False
     token = parser_peek_raw(current)
     token_to_use = token
     if identifier_matches(token_to_use, "mut"):
         current = parser_advance_raw(current)
-        is_mutable = true
+        is_mutable = True
         current = skip_trivia(current)
         token_to_use = parser_peek_raw(current)
     if token_to_use.kind.variant != "Identifier":
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     name = identifier_text(token_to_use)
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
     is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
     if not is_type_sep:
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
     capture = collect_until(skip_trivia(current), [",", "}", ";"])
     current = capture.parser
@@ -698,7 +698,7 @@ def parse_enum_variant_field(parser):
         trimmed = substring(type_text, 0, len(type_text) - 1)
         type_text = trim_text(trimmed)
     if len(type_text) == 0:
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant == "Symbol":
@@ -712,7 +712,7 @@ def parse_enum_variant_field(parser):
                 if maybe_comma.kind.variant == "Symbol"  and  maybe_comma.kind.value == ",":
                     current = parser_advance_raw(current)
     field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(text=type_text), mutable=is_mutable)
-    return StructFieldParseResult(parser=current, field=field, success=true)
+    return StructFieldParseResult(parser=current, field=field, success=True)
 
 def skip_trailing_comma(parser):
     current = skip_trivia(parser)
@@ -755,7 +755,7 @@ def parse_model(parser, decorators):
             break
         entry_start = parser
         property_result = parse_model_property(parser)
-        if property_result.success  and  property_result.property != null:
+        if property_result.success  and  property_result.property != None:
             parser = property_result.parser
             properties = append_model_property(properties, property_result.property)
             continue
@@ -786,7 +786,7 @@ def parse_pipeline(parser, decorators):
     parser = parameter_result.parser
     parameters = parameter_result.parameters
     parser = skip_trivia(parser)
-    return_type = null
+    return_type = None
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
@@ -803,7 +803,7 @@ def parse_pipeline(parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=false, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
     statement = Statement.PipelineDeclaration(signature=signature, body=body, decorators=decorators)
     return StatementParseResult(parser=parser, statement=statement)
 
@@ -820,7 +820,7 @@ def parse_tool(parser, decorators):
     parser = parameter_result.parser
     parameters = parameter_result.parameters
     parser = skip_trivia(parser)
-    return_type = null
+    return_type = None
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
@@ -837,7 +837,7 @@ def parse_tool(parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=false, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
     statement = Statement.ToolDeclaration(signature=signature, body=body, decorators=decorators)
     return StatementParseResult(parser=parser, statement=statement)
 
@@ -864,10 +864,10 @@ def parse_test(parser, decorators):
 
 def parse_function(parser, starts_with_async, decorators):
     parser = skip_trivia(parser)
-    is_async = false
+    is_async = False
     if starts_with_async:
         parser = consume_keyword(parser, "async")
-        is_async = true
+        is_async = True
     else:
         look = parser_peek_raw(parser)
         if identifier_matches(look, "async"):
@@ -876,7 +876,7 @@ def parse_function(parser, starts_with_async, decorators):
             if identifier_matches(next, "fn"):
                 parser = consume_keyword(parser, "async")
                 parser = skip_trivia(parser)
-                is_async = true
+                is_async = True
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "fn")
     parser = skip_trivia(parser)
@@ -892,7 +892,7 @@ def parse_function(parser, starts_with_async, decorators):
     parser = parameter_result.parser
     parameters = parameter_result.parameters
     parser = skip_trivia(parser)
-    return_type = null
+    return_type = None
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
@@ -939,48 +939,48 @@ def parse_parameter_list(parser):
 
 def parse_struct_field(parser):
     current = skip_trivia(parser)
-    is_mutable = false
+    is_mutable = False
     token = parser_peek_raw(current)
     token_to_use = token
     if identifier_matches(token_to_use, "mut"):
         current = parser_advance_raw(current)
-        is_mutable = true
+        is_mutable = True
         current = skip_trivia(current)
         token_to_use = parser_peek_raw(current)
     if token_to_use.kind.variant != "Identifier":
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     name = identifier_text(token_to_use)
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
     is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
     if not is_type_sep:
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
     capture = collect_until(skip_trivia(current), [";"])
     current = capture.parser
     type_text = trim_text(tokens_to_text(capture.tokens))
     if len(type_text) == 0:
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
-        return StructFieldParseResult(parser=parser, field=null, success=false)
+        return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
     field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(text=type_text), mutable=is_mutable)
-    return StructFieldParseResult(parser=current, field=field, success=true)
+    return StructFieldParseResult(parser=current, field=field, success=True)
 
 def parse_model_property(parser):
     current = skip_trivia(parser)
     name_token = parser_peek_raw(current)
     if name_token.kind.variant != "Identifier":
-        return ModelPropertyParseResult(parser=parser, property=null, success=false)
+        return ModelPropertyParseResult(parser=parser, property=None, success=False)
     name = identifier_text(name_token)
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     equals = parser_peek_raw(current)
     if equals.kind.variant != "Symbol"  or  equals.kind.value != "=":
-        return ModelPropertyParseResult(parser=parser, property=null, success=false)
+        return ModelPropertyParseResult(parser=parser, property=None, success=False)
     current = parser_advance_raw(current)
     capture = collect_until(skip_trivia(current), [";"])
     current = capture.parser
@@ -988,28 +988,28 @@ def parse_model_property(parser):
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
-        return ModelPropertyParseResult(parser=parser, property=null, success=false)
+        return ModelPropertyParseResult(parser=parser, property=None, success=False)
     current = parser_advance_raw(current)
     property = ModelProperty(name=name, value=value_expression)
-    return ModelPropertyParseResult(parser=current, property=property, success=true)
+    return ModelPropertyParseResult(parser=current, property=property, success=True)
 
 def parse_struct_method(parser, decorators):
     current = skip_trivia(parser)
-    is_async = false
+    is_async = False
     peek = parser_peek_raw(current)
     if identifier_matches(peek, "async"):
         lookahead = skip_trivia(parser_advance_raw(current))
         if identifier_matches(parser_peek_raw(lookahead), "fn"):
             current = consume_keyword(current, "async")
-            is_async = true
+            is_async = True
     current = skip_trivia(current)
     if not identifier_matches(parser_peek_raw(current), "fn"):
-        return MethodParseResult(parser=parser, method=null, success=false)
+        return MethodParseResult(parser=parser, method=None, success=False)
     current = consume_keyword(current, "fn")
     current = skip_trivia(current)
     name_token = parser_peek_raw(current)
     if name_token.kind.variant != "Identifier":
-        return MethodParseResult(parser=parser, method=null, success=false)
+        return MethodParseResult(parser=parser, method=None, success=False)
     name = identifier_text(name_token)
     current = parser_advance_raw(current)
     type_param_result = parse_type_parameter_clause(current)
@@ -1021,7 +1021,7 @@ def parse_struct_method(parser, decorators):
     current = parameter_result.parser
     parameters = parameter_result.parameters
     current = skip_trivia(current)
-    return_type = null
+    return_type = None
     separator = parser_peek_raw(current)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         current = parser_advance_raw(current)
@@ -1040,7 +1040,7 @@ def parse_struct_method(parser, decorators):
     body = block_result.block
     signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters)
     method = MethodDeclaration(signature=signature, body=body, decorators=decorators)
-    return MethodParseResult(parser=current, method=method, success=true)
+    return MethodParseResult(parser=current, method=method, success=True)
 
 def parse_decorators(parser):
     current = parser
@@ -1104,7 +1104,7 @@ def parse_decorators(parser):
                         if sym == ","  and  at_top_level:
                             trimmed_tokens = trim_token_edges(segment_tokens)
                             argument = parse_decorator_argument(trimmed_tokens)
-                            if argument != null:
+                            if argument != None:
                                 decorator_arguments = append_decorator_argument(decorator_arguments, argument)
                             segment_tokens = []
                             index += 1
@@ -1113,7 +1113,7 @@ def parse_decorators(parser):
                     index += 1
                 final_tokens = trim_token_edges(segment_tokens)
                 trailing_argument = parse_decorator_argument(final_tokens)
-                if trailing_argument != null:
+                if trailing_argument != None:
                     decorator_arguments = append_decorator_argument(decorator_arguments, trailing_argument)
                 current = paren_result.parser
             else:
@@ -1162,7 +1162,7 @@ def parse_type_parameter_clause(parser):
                 bound_tokens = token_slice(slice_tokens, colon_index + 1, len(slice_tokens))
             name_text = trim_text(tokens_to_text(name_tokens))
             if len(name_text) > 0:
-                bound = null
+                bound = None
                 bound_text = trim_text(tokens_to_text(bound_tokens))
                 if len(bound_tokens) > 0  and  len(bound_text) > 0:
                     bound = TypeAnnotation(text=bound_text)
@@ -1173,7 +1173,7 @@ def parse_type_parameter_clause(parser):
 def parse_implements_clause(parser):
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "implements"):
-        return ImplementsParseResult(parser=parser, types=[], found=false)
+        return ImplementsParseResult(parser=parser, types=[], found=False)
     current = consume_keyword(current, "implements")
     current = skip_trivia(current)
     capture = collect_until(current, ["{"])
@@ -1188,20 +1188,20 @@ def parse_implements_clause(parser):
         if len(text) > 0:
             implements_types = append_type_annotation(implements_types, TypeAnnotation(text=text))
         index += 1
-    return ImplementsParseResult(parser=current, types=implements_types, found=true)
+    return ImplementsParseResult(parser=current, types=implements_types, found=True)
 
 def parse_single_parameter(parser):
     parser = skip_trivia(parser)
-    is_mutable = false
+    is_mutable = False
     token = parser_peek_raw(parser)
     if identifier_matches(token, "mut"):
         parser = parser_advance_raw(parser)
-        is_mutable = true
+        is_mutable = True
     parser = skip_trivia(parser)
     name_token = parser_peek_raw(parser)
     name = identifier_text(name_token)
     parser = parser_advance_raw(parser)
-    type_annotation = null
+    type_annotation = None
     parser = skip_trivia(parser)
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
@@ -1211,7 +1211,7 @@ def parse_single_parameter(parser):
         text = trim_text(tokens_to_text(capture.tokens))
         if len(text) > 0:
             type_annotation = TypeAnnotation(text=text)
-    default_value = null
+    default_value = None
     parser = skip_trivia(parser)
     assign = parser_peek_raw(parser)
     if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
@@ -1273,7 +1273,7 @@ def parse_block(parser):
         block_result = parse_block_statement(current)
         if block_result.success:
             current = block_result.parser
-            if block_result.statement != null:
+            if block_result.statement != None:
                 statements = append_statement(statements, block_result.statement)
             continue
         before_index = current.index
@@ -1305,11 +1305,11 @@ def parse_block_statement(parser):
         return parse_loop_statement(after_decorators, decorators)
     if identifier_matches(token, "break"):
         if len(decorators) > 0:
-            return BlockStatementParseResult(parser=original, statement=null, success=false)
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_break_statement(after_decorators)
     if identifier_matches(token, "continue"):
         if len(decorators) > 0:
-            return BlockStatementParseResult(parser=original, statement=null, success=false)
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_continue_statement(after_decorators)
     if identifier_matches(token, "if"):
         return parse_if_statement(after_decorators, decorators)
@@ -1321,37 +1321,37 @@ def parse_block_statement(parser):
         return parse_with_statement(after_decorators, decorators)
     if identifier_matches(token, "return"):
         if len(decorators) > 0:
-            return BlockStatementParseResult(parser=original, statement=null, success=false)
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_return_statement(after_decorators)
     expression_result = parse_expression_statement(after_decorators, decorators)
     if expression_result.success:
         return expression_result
-    return BlockStatementParseResult(parser=original, statement=null, success=false)
+    return BlockStatementParseResult(parser=original, statement=None, success=False)
 
 def parse_for_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "for"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "for")
     clause_capture = collect_until(skip_trivia(current), ["{"])
     current = clause_capture.parser
     clause_tokens = trim_token_edges(clause_capture.tokens)
     if len(clause_tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     in_index = find_top_level_identifier(clause_tokens, "in")
     if in_index == -1:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index))
     iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, len(clause_tokens)))
     if len(target_tokens) == 0  or  len(iterable_tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     target_expression = expression_from_tokens(target_tokens)
     iterable_expression = expression_from_tokens(iterable_tokens)
     clause = ForClause(target=target_expression, iterable=iterable_expression, tokens=clause_tokens)
     body_result = parse_block(current)
     if len(body_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = body_result.parser
     body = body_result.block
     current = skip_trivia(current)
@@ -1359,68 +1359,68 @@ def parse_for_statement(parser, decorators):
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
     statement = Statement.ForStatement(clause=clause, body=body, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_loop_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "loop"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "loop")
     body_result = parse_block(current)
     if len(body_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = body_result.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
     statement = Statement.LoopStatement(body=body_result.block, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_break_statement(parser):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "break"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "break")
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
-    return BlockStatementParseResult(parser=current, statement=Statement.BreakStatement(), success=true)
+    return BlockStatementParseResult(parser=current, statement=Statement.BreakStatement(), success=True)
 
 def parse_continue_statement(parser):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "continue"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "continue")
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
-    return BlockStatementParseResult(parser=current, statement=Statement.ContinueStatement(), success=true)
+    return BlockStatementParseResult(parser=current, statement=Statement.ContinueStatement(), success=True)
 
 def parse_if_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "if"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "if")
     condition_capture = collect_until(skip_trivia(current), ["{"])
     current = condition_capture.parser
     condition_tokens = trim_token_edges(condition_capture.tokens)
     if len(condition_tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     condition_expression = expression_from_tokens(condition_tokens)
     then_result = parse_block(current)
     if len(then_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = then_result.parser
     then_block = then_result.block
     current = skip_trivia(current)
-    else_branch = null
+    else_branch = None
     if identifier_matches(parser_peek_raw(current), "else"):
         current = consume_keyword(current, "else")
         current = skip_trivia(current)
@@ -1428,39 +1428,39 @@ def parse_if_statement(parser, decorators):
         if identifier_matches(next_token, "if"):
             nested_result = parse_if_statement(current, [])
             if not nested_result.success:
-                return BlockStatementParseResult(parser=original, statement=null, success=false)
-            if nested_result.statement == null:
-                return BlockStatementParseResult(parser=original, statement=null, success=false)
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
+            if nested_result.statement == None:
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
             current = nested_result.parser
-            else_branch = ElseBranch(statement=nested_result.statement, body=null)
+            else_branch = ElseBranch(statement=nested_result.statement, body=None)
         else:
             else_result = parse_block(current)
             if len(else_result.block.tokens) == 0:
-                return BlockStatementParseResult(parser=original, statement=null, success=false)
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
             current = else_result.parser
-            else_branch = ElseBranch(statement=null, body=else_result.block)
+            else_branch = ElseBranch(statement=None, body=else_result.block)
         current = skip_trivia(current)
         terminator = parser_peek_raw(current)
         if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
     statement = Statement.IfStatement(condition=condition_expression, then_block=then_block, else_branch=else_branch, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_match_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "match"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "match")
     value_capture = collect_until(skip_trivia(current), ["{"])
     current = value_capture.parser
     value_tokens = trim_token_edges(value_capture.tokens)
     if len(value_tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     match_expression = expression_from_tokens(value_tokens)
     body_result = parse_match_cases(current)
     if not body_result.success:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = body_result.parser
     current = skip_trivia(current)
     if current.index < len(current.tokens):
@@ -1468,14 +1468,14 @@ def parse_match_statement(parser, decorators):
         if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
     statement = Statement.MatchStatement(expression=match_expression, cases=body_result.cases, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_match_cases(parser):
     current = skip_trivia(parser)
     current = advance_to_symbol(current, "{")
     peek = parser_peek_raw(current)
     if peek.kind.variant != "Symbol"  or  peek.kind.value != "{":
-        return MatchCasesParseResult(parser=parser, cases=[], success=false)
+        return MatchCasesParseResult(parser=parser, cases=[], success=False)
     current = parser_advance_raw(current)
     cases = []
     while True:
@@ -1485,17 +1485,17 @@ def parse_match_cases(parser):
             current = parser_advance_raw(current)
             break
         if token.kind.variant == "EndOfFile":
-            return MatchCasesParseResult(parser=parser, cases=[], success=false)
+            return MatchCasesParseResult(parser=parser, cases=[], success=False)
         case_result = parse_match_case(current)
-        if not case_result.success  or  case_result.case == null:
-            return MatchCasesParseResult(parser=parser, cases=[], success=false)
+        if not case_result.success  or  case_result.case == None:
+            return MatchCasesParseResult(parser=parser, cases=[], success=False)
         current = case_result.parser
         cases = append_match_case(cases, case_result.case)
         current = skip_trivia(current)
         separator = parser_peek_raw(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = parser_advance_raw(current)
-    return MatchCasesParseResult(parser=current, cases=cases, success=true)
+    return MatchCasesParseResult(parser=current, cases=cases, success=True)
 
 def parse_match_case(parser):
     original = parser
@@ -1505,24 +1505,24 @@ def parse_match_case(parser):
         current = skip_trivia(current)
     pattern_capture = collect_pattern_until_arrow(current)
     if not pattern_capture.success:
-        return MatchCaseParseResult(parser=original, case=null, success=false)
+        return MatchCaseParseResult(parser=original, case=None, success=False)
     current = pattern_capture.parser
     split_tokens = split_match_case_tokens(pattern_capture.tokens)
     if len(split_tokens.pattern_tokens) == 0:
-        return MatchCaseParseResult(parser=original, case=null, success=false)
+        return MatchCaseParseResult(parser=original, case=None, success=False)
     pattern_expression = expression_from_tokens(split_tokens.pattern_tokens)
-    guard_expression = null
+    guard_expression = None
     if split_tokens.has_guard:
         if len(split_tokens.guard_tokens) == 0:
-            return MatchCaseParseResult(parser=original, case=null, success=false)
+            return MatchCaseParseResult(parser=original, case=None, success=False)
         guard_expression = expression_from_tokens(split_tokens.guard_tokens)
     current = skip_trivia(current)
     next = parser_peek_raw(current)
-    body = null
+    body = None
     if next.kind.variant == "Symbol"  and  next.kind.value == "{":
         body_result = parse_block(current)
         if len(body_result.block.tokens) == 0:
-            return MatchCaseParseResult(parser=original, case=null, success=false)
+            return MatchCaseParseResult(parser=original, case=None, success=False)
         current = body_result.parser
         body = body_result.block
     else:
@@ -1538,7 +1538,7 @@ def parse_match_case(parser):
                 block_tokens = append_token(block_tokens, capture.tokens[index])
                 index += 1
             trimmed_expression_tokens = trim_token_edges(capture.tokens)
-            return_expression = null
+            return_expression = None
             if len(trimmed_expression_tokens) > 0:
                 return_expression = expression_from_tokens(trimmed_expression_tokens)
             current = skip_trivia(capture.parser)
@@ -1555,7 +1555,7 @@ def parse_match_case(parser):
             capture = collect_until(current, [";", "}"])
             trimmed_expression_tokens = trim_token_edges(capture.tokens)
             if len(trimmed_expression_tokens) == 0:
-                return MatchCaseParseResult(parser=original, case=null, success=false)
+                return MatchCaseParseResult(parser=original, case=None, success=False)
             expression = expression_from_tokens(trimmed_expression_tokens)
             block_tokens = []
             index = 0
@@ -1574,16 +1574,16 @@ def parse_match_case(parser):
             statements = append_statement(statements, Statement.ExpressionStatement(expression=expression))
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
-    if body == null:
-        return MatchCaseParseResult(parser=original, case=null, success=false)
+    if body == None:
+        return MatchCaseParseResult(parser=original, case=None, success=False)
     case = MatchCase(pattern=pattern_expression, guard=guard_expression, body=body)
-    return MatchCaseParseResult(parser=current, case=case, success=true)
+    return MatchCaseParseResult(parser=current, case=case, success=True)
 
 def parse_prompt_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "prompt"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "prompt")
     current = skip_trivia(current)
     channel_token = parser_peek_raw(current)
@@ -1596,23 +1596,23 @@ def parse_prompt_statement(parser, decorators):
             channel = string_literal_value(channel_token)
             current = parser_advance_raw(current)
         else:
-            return BlockStatementParseResult(parser=original, statement=null, success=false)
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
     block_result = parse_block(current)
     if len(block_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = block_result.parser
     body = block_result.block
     current = skip_trivia(current)
     if parser_peek_raw(current).kind.variant == "Symbol"  and  parser_peek_raw(current).kind.value == ";":
         current = parser_advance_raw(current)
     statement = Statement.PromptStatement(channel=channel, body=body, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_with_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "with"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "with")
     clauses_capture = collect_until(skip_trivia(current), ["{"])
     current = clauses_capture.parser
@@ -1629,25 +1629,25 @@ def parse_with_statement(parser, decorators):
         index += 1
     block_result = parse_block(current)
     if len(block_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = block_result.parser
     body = block_result.block
     current = skip_trivia(current)
     if parser_peek_raw(current).kind.variant == "Symbol"  and  parser_peek_raw(current).kind.value == ";":
         current = parser_advance_raw(current)
     statement = Statement.WithStatement(clauses=clauses, body=body, decorators=decorators)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_return_statement(parser):
     original = parser
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "return"):
-        return BlockStatementParseResult(parser=original, statement=null, success=false)
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = consume_keyword(current, "return")
     capture = collect_until(skip_trivia(current), [";", "}"])
     current = capture.parser
     trimmed = trim_token_edges(capture.tokens)
-    expression = null
+    expression = None
     if len(trimmed) > 0:
         expression = expression_from_tokens(trimmed)
     current = skip_trivia(current)
@@ -1655,34 +1655,34 @@ def parse_return_statement(parser):
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
     statement = Statement.ReturnStatement(expression=expression)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_expression_statement(parser, decorators):
     if len(decorators) > 0:
-        return BlockStatementParseResult(parser=parser, statement=null, success=false)
+        return BlockStatementParseResult(parser=parser, statement=None, success=False)
     current = skip_trivia(parser)
     start = parser_peek_raw(current)
     if start.kind.variant == "EndOfFile":
-        return BlockStatementParseResult(parser=parser, statement=null, success=false)
+        return BlockStatementParseResult(parser=parser, statement=None, success=False)
     if start.kind.variant == "Symbol":
         sym = start.kind.value
         if sym == "}"  or  sym == "{":
-            return BlockStatementParseResult(parser=parser, statement=null, success=false)
+            return BlockStatementParseResult(parser=parser, statement=None, success=False)
     capture = collect_until(current, [";"])
     if len(capture.tokens) == 0:
-        return BlockStatementParseResult(parser=parser, statement=null, success=false)
+        return BlockStatementParseResult(parser=parser, statement=None, success=False)
     trimmed = trim_token_edges(capture.tokens)
     if len(trimmed) == 0:
-        return BlockStatementParseResult(parser=parser, statement=null, success=false)
+        return BlockStatementParseResult(parser=parser, statement=None, success=False)
     current = capture.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
-        return BlockStatementParseResult(parser=parser, statement=null, success=false)
+        return BlockStatementParseResult(parser=parser, statement=None, success=False)
     current = parser_advance_raw(current)
     expression = expression_from_tokens(trimmed)
     statement = Statement.ExpressionStatement(expression=expression)
-    return BlockStatementParseResult(parser=current, statement=statement, success=true)
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_unknown(parser):
     parser = skip_trivia(parser)
@@ -1718,9 +1718,9 @@ def parse_unknown(parser):
 
 def identifier_matches(token, expected):
     if token.kind.variant != "Identifier":
-        return false
+        return False
     if token.kind.value == expected:
-        return true
+        return True
     return token.lexeme == expected
 
 def identifier_text(token):
@@ -1817,14 +1817,14 @@ def collect_parenthesized(parser):
     current = skip_trivia(parser)
     start = parser_peek_raw(current)
     if start.kind.variant != "Symbol"  or  start.kind.value != "(":
-        return ParenthesizedParseResult(parser=parser, tokens=[], success=false)
+        return ParenthesizedParseResult(parser=parser, tokens=[], success=False)
     current = parser_advance_raw(current)
     tokens = []
     depth = 1
     while True:
         token = parser_peek_raw(current)
         if token.kind.variant == "EndOfFile":
-            return ParenthesizedParseResult(parser=parser, tokens=[], success=false)
+            return ParenthesizedParseResult(parser=parser, tokens=[], success=False)
         if token.kind.variant == "Symbol":
             sym = token.kind.value
             if sym == "(":
@@ -1837,7 +1837,7 @@ def collect_parenthesized(parser):
                         break
         tokens = append_token(tokens, token)
         current = parser_advance_raw(current)
-    return ParenthesizedParseResult(parser=current, tokens=tokens, success=true)
+    return ParenthesizedParseResult(parser=current, tokens=tokens, success=True)
 
 def collect_pattern_until_arrow(parser):
     current = skip_trivia(parser)
@@ -1845,7 +1845,7 @@ def collect_pattern_until_arrow(parser):
     while True:
         token = parser_peek_raw(current)
         if token.kind.variant == "EndOfFile":
-            return PatternCaptureResult(parser=parser, tokens=[], success=false)
+            return PatternCaptureResult(parser=parser, tokens=[], success=False)
         if token.kind.variant == "Symbol":
             sym = token.kind.value
             if sym == "=>"  or  sym == "->":
@@ -1854,38 +1854,38 @@ def collect_pattern_until_arrow(parser):
         tokens = append_token(tokens, token)
         advanced = parser_advance_raw(current)
         if advanced.index == current.index:
-            return PatternCaptureResult(parser=parser, tokens=[], success=false)
+            return PatternCaptureResult(parser=parser, tokens=[], success=False)
         current = advanced
-    return PatternCaptureResult(parser=current, tokens=tokens, success=true)
+    return PatternCaptureResult(parser=current, tokens=tokens, success=True)
 
 def split_match_case_tokens(tokens):
     trimmed = trim_token_edges(tokens)
     if len(trimmed) == 0:
-        return MatchCaseTokenSplit(pattern_tokens=[], guard_tokens=[], has_guard=false)
+        return MatchCaseTokenSplit(pattern_tokens=[], guard_tokens=[], has_guard=False)
     guard_index = find_top_level_identifier(trimmed, "if")
     if guard_index == -1:
-        return MatchCaseTokenSplit(pattern_tokens=trimmed, guard_tokens=[], has_guard=false)
+        return MatchCaseTokenSplit(pattern_tokens=trimmed, guard_tokens=[], has_guard=False)
     pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index))
     guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, len(trimmed)))
-    return MatchCaseTokenSplit(pattern_tokens=pattern_tokens, guard_tokens=guard_tokens, has_guard=true)
+    return MatchCaseTokenSplit(pattern_tokens=pattern_tokens, guard_tokens=guard_tokens, has_guard=True)
 
 def parse_decorator_argument(tokens):
     if len(tokens) == 0:
-        return null
+        return None
     colon_index = find_top_level_colon(tokens)
     if colon_index == -1:
         trimmed_tokens = trim_token_edges(tokens)
         if len(trimmed_tokens) == 0:
-            return null
+            return None
         expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens))
-        return DecoratorArgument(name=null, expression=expr)
+        return DecoratorArgument(name=None, expression=expr)
     name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index))
     value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, len(tokens)))
     if len(value_tokens) == 0:
-        return null
+        return None
     name_text = trim_text(tokens_to_text(name_tokens))
     if len(name_text) == 0:
-        return null
+        return None
     expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens))
     if expr.variant == "Raw":
         raw_text = trim_text(tokens_to_text(value_tokens))
@@ -1893,11 +1893,11 @@ def parse_decorator_argument(tokens):
             literal = strip_surrounding_quotes(raw_text)
             expr = Expression.StringLiteral(value=literal)
         else:
-            if raw_text == "true":
-                expr = Expression.BooleanLiteral(value=true)
+            if raw_text == "True":
+                expr = Expression.BooleanLiteral(value=True)
             else:
-                if raw_text == "false":
-                    expr = Expression.BooleanLiteral(value=false)
+                if raw_text == "False":
+                    expr = Expression.BooleanLiteral(value=False)
                 else:
                     if looks_like_number(raw_text):
                         expr = Expression.NumberLiteral(value=raw_text)
@@ -1918,22 +1918,22 @@ def normalize_expression(tokens, expr):
         if len(raw_text) >= 2  and  raw_text[0] == "\""  and  raw_text[len(raw_text) - 1] == "\"":
             literal = strip_surrounding_quotes(raw_text)
             return Expression.StringLiteral(value=literal)
-        if raw_text == "true":
-            return Expression.BooleanLiteral(value=true)
-        if raw_text == "false":
-            return Expression.BooleanLiteral(value=false)
+        if raw_text == "True":
+            return Expression.BooleanLiteral(value=True)
+        if raw_text == "False":
+            return Expression.BooleanLiteral(value=False)
         if looks_like_number(raw_text):
             return Expression.NumberLiteral(value=raw_text)
     return expr
 
 def looks_like_number(text):
     if len(text) == 0:
-        return false
-    has_decimal = false
+        return False
+    has_decimal = False
     index = 0
     if text[0] == "-":
         if len(text) == 1:
-            return false
+            return False
         index = 1
     while True:
         if index >= len(text):
@@ -1941,14 +1941,14 @@ def looks_like_number(text):
         ch = text[index]
         if ch == ".":
             if has_decimal:
-                return false
-            has_decimal = true
+                return False
+            has_decimal = True
             index += 1
             continue
         if not is_decimal_digit(ch):
-            return false
+            return False
         index += 1
-    return true
+    return True
 
 def is_decimal_digit(ch):
     return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
@@ -2055,7 +2055,7 @@ def expression_from_tokens(tokens):
         return Expression.Raw(text="")
     if len(filtered) == 1:
         single = expression_from_single_token(filtered[0])
-        if single != null:
+        if single != None:
             return single
     state = ExpressionTokens(tokens=filtered, index=0)
     result = parse_expression_bp(state, 0)
@@ -2074,14 +2074,14 @@ def expression_from_single_token(token):
         return Expression.StringLiteral(value=token.kind.value)
     if token.kind.variant == "Identifier":
         value = identifier_text(token)
-        if value == "true":
-            return Expression.BooleanLiteral(value=true)
-        if value == "false":
-            return Expression.BooleanLiteral(value=false)
-        if value == "null":
+        if value == "True":
+            return Expression.BooleanLiteral(value=True)
+        if value == "False":
+            return Expression.BooleanLiteral(value=False)
+        if value == "None":
             return Expression.NullLiteral()
         return Expression.Identifier(name=value)
-    return null
+    return None
 
 def expression_tokens_collect_until(state, terminators):
     current = state
@@ -2092,7 +2092,7 @@ def expression_tokens_collect_until(state, terminators):
     bracket = 0
     while True:
         if expression_tokens_is_at_end(current):
-            return ExpressionCollectResult(state=current, tokens=collected, success=false)
+            return ExpressionCollectResult(state=current, tokens=collected, success=False)
         token = expression_tokens_peek(current)
         at_top = angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0
         if at_top  and  token.kind.variant == "Symbol"  and  string_array_contains(terminators, token.kind.value):
@@ -2128,20 +2128,20 @@ def expression_tokens_collect_until(state, terminators):
                                                 bracket -= 1
         collected = append_token(collected, token)
         current = expression_tokens_advance(current)
-    return ExpressionCollectResult(state=current, tokens=collected, success=true)
+    return ExpressionCollectResult(state=current, tokens=collected, success=True)
 
 def collect_expression_block(state):
     current = state
     if expression_tokens_is_at_end(current):
-        return ExpressionBlockParseResult(state=current, tokens=[], success=false)
+        return ExpressionBlockParseResult(state=current, tokens=[], success=False)
     first = expression_tokens_peek(current)
     if first.kind.variant != "Symbol"  or  first.kind.value != "{":
-        return ExpressionBlockParseResult(state=current, tokens=[], success=false)
+        return ExpressionBlockParseResult(state=current, tokens=[], success=False)
     tokens = []
     depth = 0
     while True:
         if expression_tokens_is_at_end(current):
-            return ExpressionBlockParseResult(state=current, tokens=tokens, success=false)
+            return ExpressionBlockParseResult(state=current, tokens=tokens, success=False)
         token = expression_tokens_peek(current)
         tokens = append_token(tokens, token)
         if token.kind.variant == "Symbol":
@@ -2155,66 +2155,66 @@ def collect_expression_block(state):
                         current = expression_tokens_advance(current)
                         break
         current = expression_tokens_advance(current)
-    return ExpressionBlockParseResult(state=current, tokens=tokens, success=true)
+    return ExpressionBlockParseResult(state=current, tokens=tokens, success=True)
 
 def parse_lambda_parameter(state):
     current = state
     if expression_tokens_is_at_end(current):
-        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=null, default_value=null, mutable=false), success=false)
-    is_mutable = false
+        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
+    is_mutable = False
     token = expression_tokens_peek(current)
     if token.kind.variant == "Identifier"  and  identifier_matches(token, "mut"):
-        is_mutable = true
+        is_mutable = True
         current = expression_tokens_advance(current)
         if expression_tokens_is_at_end(current):
-            return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=null, default_value=null, mutable=false), success=false)
+            return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
     name_token = expression_tokens_peek(current)
     if name_token.kind.variant != "Identifier":
-        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=null, default_value=null, mutable=false), success=false)
+        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
     name = identifier_text(name_token)
     current = expression_tokens_advance(current)
-    type_annotation = null
+    type_annotation = None
     if not expression_tokens_is_at_end(current):
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, ["=", ",", ")"])
             if not capture.success:
-                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=null, default_value=null, mutable=is_mutable), success=false)
+                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=None, default_value=None, mutable=is_mutable), success=False)
             type_text = trim_text(tokens_to_text(capture.tokens))
             if len(type_text) > 0:
                 type_annotation = TypeAnnotation(text=type_text)
             current = capture.state
-    default_value = null
+    default_value = None
     if not expression_tokens_is_at_end(current):
         assign = expression_tokens_peek(current)
         if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, [",", ")"])
             if not capture.success:
-                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=type_annotation, default_value=null, mutable=is_mutable), success=false)
+                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=type_annotation, default_value=None, mutable=is_mutable), success=False)
             default_value = expression_from_tokens(capture.tokens)
             current = capture.state
     parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable)
-    return LambdaParameterParseResult(state=current, parameter=parameter, success=true)
+    return LambdaParameterParseResult(state=current, parameter=parameter, success=True)
 
 def parse_lambda_parameter_list(state):
     current = state
     parameters = []
     if expression_tokens_is_at_end(current):
-        return LambdaParameterListParseResult(state=current, parameters=parameters, success=false)
+        return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
     closing = expression_tokens_peek(current)
     if closing.kind.variant == "Symbol"  and  closing.kind.value == ")":
         current = expression_tokens_advance(current)
-        return LambdaParameterListParseResult(state=current, parameters=parameters, success=true)
+        return LambdaParameterListParseResult(state=current, parameters=parameters, success=True)
     while True:
         param_result = parse_lambda_parameter(current)
         if not param_result.success:
-            return LambdaParameterListParseResult(state=current, parameters=parameters, success=false)
+            return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
         parameters = append_parameter(parameters, param_result.parameter)
         current = param_result.state
         if expression_tokens_is_at_end(current):
-            return LambdaParameterListParseResult(state=current, parameters=parameters, success=false)
+            return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol":
             if separator.kind.value == ",":
@@ -2223,8 +2223,8 @@ def parse_lambda_parameter_list(state):
             if separator.kind.value == ")":
                 current = expression_tokens_advance(current)
                 break
-        return LambdaParameterListParseResult(state=current, parameters=parameters, success=false)
-    return LambdaParameterListParseResult(state=current, parameters=parameters, success=true)
+        return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
+    return LambdaParameterListParseResult(state=current, parameters=parameters, success=True)
 
 def parse_lambda_expression(state):
     current = state
@@ -2245,7 +2245,7 @@ def parse_lambda_expression(state):
         return expression_parse_failure(state)
     current = params_result.state
     parameters = params_result.parameters
-    return_type = null
+    return_type = None
     if not expression_tokens_is_at_end(current):
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
@@ -2268,7 +2268,7 @@ def parse_lambda_expression(state):
     block_parser = Parser(tokens=block_tokens, index=0)
     parsed_block = parse_block(block_parser)
     body = parsed_block.block
-    return ExpressionParseResult(state=current, expression=Expression.Lambda(parameters=parameters, body=body, return_type=return_type), success=true)
+    return ExpressionParseResult(state=current, expression=Expression.Lambda(parameters=parameters, body=body, return_type=return_type), success=True)
 
 def parse_expression_bp(state, min_precedence):
     prefix_result = parse_prefix_expression(state)
@@ -2297,7 +2297,7 @@ def parse_expression_bp(state, min_precedence):
             left_expression = Expression.Range(start=left_expression, end=rhs_result.expression)
         else:
             left_expression = Expression.Binary(operator=op, left=left_expression, right=rhs_result.expression)
-    return ExpressionParseResult(state=current_state, expression=left_expression, success=true)
+    return ExpressionParseResult(state=current_state, expression=left_expression, success=True)
 
 def parse_prefix_expression(state):
     if expression_tokens_is_at_end(state):
@@ -2310,7 +2310,7 @@ def parse_prefix_expression(state):
             operand_result = parse_expression_bp(advanced, unary_precedence())
             if not operand_result.success:
                 return operand_result
-            return ExpressionParseResult(state=operand_result.state, expression=Expression.Unary(operator=sym, operand=operand_result.expression), success=true)
+            return ExpressionParseResult(state=operand_result.state, expression=Expression.Unary(operator=sym, operand=operand_result.expression), success=True)
     if token.kind.variant == "Identifier"  and  identifier_matches(token, "fn"):
         lambda_result = parse_lambda_expression(state)
         if lambda_result.success:
@@ -2325,20 +2325,20 @@ def parse_primary_expression(state):
         return expression_parse_failure(state)
     token = expression_tokens_peek(state)
     if token.kind.variant == "NumberLiteral":
-        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NumberLiteral(value=token.kind.value), success=true)
+        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NumberLiteral(value=token.kind.value), success=True)
     if token.kind.variant == "BooleanLiteral":
-        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=token.kind.value), success=true)
+        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=token.kind.value), success=True)
     if token.kind.variant == "StringLiteral":
-        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.StringLiteral(value=token.kind.value), success=true)
+        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.StringLiteral(value=token.kind.value), success=True)
     if token.kind.variant == "Identifier":
         name = identifier_text(token)
-        if name == "true":
-            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=true), success=true)
-        if name == "false":
-            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=false), success=true)
-        if name == "null":
-            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NullLiteral(), success=true)
-        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.Identifier(name=name), success=true)
+        if name == "True":
+            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=True), success=True)
+        if name == "False":
+            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.BooleanLiteral(value=False), success=True)
+        if name == "None":
+            return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NullLiteral(), success=True)
+        return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.Identifier(name=name), success=True)
     if token.kind.variant == "Symbol"  and  token.kind.value == "(":
         inner_state = expression_tokens_advance(state)
         inner_result = parse_expression_bp(inner_state, 0)
@@ -2350,17 +2350,17 @@ def parse_primary_expression(state):
         closing = expression_tokens_peek(after_inner)
         if closing.kind.variant != "Symbol"  or  closing.kind.value != ")":
             return expression_parse_failure(state)
-        return ExpressionParseResult(state=expression_tokens_advance(after_inner), expression=inner_result.expression, success=true)
+        return ExpressionParseResult(state=expression_tokens_advance(after_inner), expression=inner_result.expression, success=True)
     if token.kind.variant == "Symbol"  and  token.kind.value == "[":
         array_result = parse_array_literal(expression_tokens_advance(state))
         if not array_result.success:
             return expression_parse_failure(state)
-        return ExpressionParseResult(state=array_result.state, expression=Expression.Array(elements=array_result.elements), success=true)
+        return ExpressionParseResult(state=array_result.state, expression=Expression.Array(elements=array_result.elements), success=True)
     if token.kind.variant == "Symbol"  and  token.kind.value == "{":
         object_result = parse_object_literal(expression_tokens_advance(state))
         if not object_result.success:
             return expression_parse_failure(state)
-        return ExpressionParseResult(state=object_result.state, expression=Expression.Object(fields=object_result.fields), success=true)
+        return ExpressionParseResult(state=object_result.state, expression=Expression.Object(fields=object_result.fields), success=True)
     return expression_parse_failure(state)
 
 def parse_postfix_chain(state, expression):
@@ -2414,24 +2414,24 @@ def parse_postfix_chain(state, expression):
             current_expression = struct_result.expression
             continue
         break
-    return ExpressionParseResult(state=current_state, expression=current_expression, success=true)
+    return ExpressionParseResult(state=current_state, expression=current_expression, success=True)
 
 def parse_call_arguments(state):
     current = expression_tokens_advance(state)
     arguments = []
     if expression_tokens_is_at_end(current):
-        return CallArgumentsParseResult(state=state, arguments=[], success=false)
+        return CallArgumentsParseResult(state=state, arguments=[], success=False)
     if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == ")":
         current = expression_tokens_advance(current)
-        return CallArgumentsParseResult(state=current, arguments=arguments, success=true)
+        return CallArgumentsParseResult(state=current, arguments=arguments, success=True)
     while True:
         argument_result = parse_expression_bp(current, 0)
         if not argument_result.success:
-            return CallArgumentsParseResult(state=state, arguments=[], success=false)
+            return CallArgumentsParseResult(state=state, arguments=[], success=False)
         arguments = append_expression(arguments, argument_result.expression)
         current = argument_result.state
         if expression_tokens_is_at_end(current):
-            return CallArgumentsParseResult(state=state, arguments=[], success=false)
+            return CallArgumentsParseResult(state=state, arguments=[], success=False)
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
@@ -2439,30 +2439,30 @@ def parse_call_arguments(state):
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ")":
             current = expression_tokens_advance(current)
             break
-        return CallArgumentsParseResult(state=state, arguments=[], success=false)
-    return CallArgumentsParseResult(state=current, arguments=arguments, success=true)
+        return CallArgumentsParseResult(state=state, arguments=[], success=False)
+    return CallArgumentsParseResult(state=current, arguments=arguments, success=True)
 
 def parse_array_literal(state):
     current = state
     elements = []
     if expression_tokens_is_at_end(current):
-        return ArrayLiteralParseResult(state=state, elements=[], success=false)
+        return ArrayLiteralParseResult(state=state, elements=[], success=False)
     if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == "]":
         current = expression_tokens_advance(current)
-        return ArrayLiteralParseResult(state=current, elements=elements, success=true)
+        return ArrayLiteralParseResult(state=current, elements=elements, success=True)
     while True:
         element_result = parse_expression_bp(current, 0)
         if not element_result.success:
-            return ArrayLiteralParseResult(state=state, elements=[], success=false)
+            return ArrayLiteralParseResult(state=state, elements=[], success=False)
         elements = append_expression(elements, element_result.expression)
         current = element_result.state
         if expression_tokens_is_at_end(current):
-            return ArrayLiteralParseResult(state=state, elements=[], success=false)
+            return ArrayLiteralParseResult(state=state, elements=[], success=False)
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
             if expression_tokens_is_at_end(current):
-                return ArrayLiteralParseResult(state=state, elements=[], success=false)
+                return ArrayLiteralParseResult(state=state, elements=[], success=False)
             maybe_end = expression_tokens_peek(current)
             if maybe_end.kind.variant == "Symbol"  and  maybe_end.kind.value == "]":
                 current = expression_tokens_advance(current)
@@ -2471,43 +2471,43 @@ def parse_array_literal(state):
         if separator.kind.variant == "Symbol"  and  separator.kind.value == "]":
             current = expression_tokens_advance(current)
             break
-        return ArrayLiteralParseResult(state=state, elements=[], success=false)
-    return ArrayLiteralParseResult(state=current, elements=elements, success=true)
+        return ArrayLiteralParseResult(state=state, elements=[], success=False)
+    return ArrayLiteralParseResult(state=current, elements=elements, success=True)
 
 def parse_object_literal(state):
     current = state
     fields = []
     if expression_tokens_is_at_end(current):
-        return ObjectLiteralParseResult(state=state, fields=[], success=false)
+        return ObjectLiteralParseResult(state=state, fields=[], success=False)
     if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == "}":
         current = expression_tokens_advance(current)
-        return ObjectLiteralParseResult(state=current, fields=fields, success=true)
+        return ObjectLiteralParseResult(state=current, fields=fields, success=True)
     while True:
         if expression_tokens_is_at_end(current):
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         name_token = expression_tokens_peek(current)
         if name_token.kind.variant != "Identifier":
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         field_name = identifier_text(name_token)
         current = expression_tokens_advance(current)
         if expression_tokens_is_at_end(current):
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         colon = expression_tokens_peek(current)
         if colon.kind.variant != "Symbol"  or  colon.kind.value != ":":
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         current = expression_tokens_advance(current)
         value_result = parse_expression_bp(current, 0)
         if not value_result.success:
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         current = value_result.state
         fields = append_object_field(fields, ObjectField(name=field_name, value=value_result.expression))
         if expression_tokens_is_at_end(current):
-            return ObjectLiteralParseResult(state=state, fields=[], success=false)
+            return ObjectLiteralParseResult(state=state, fields=[], success=False)
         separator = expression_tokens_peek(current)
         if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
             if expression_tokens_is_at_end(current):
-                return ObjectLiteralParseResult(state=state, fields=[], success=false)
+                return ObjectLiteralParseResult(state=state, fields=[], success=False)
             maybe_end = expression_tokens_peek(current)
             if maybe_end.kind.variant == "Symbol"  and  maybe_end.kind.value == "}":
                 current = expression_tokens_advance(current)
@@ -2516,8 +2516,8 @@ def parse_object_literal(state):
         if separator.kind.variant == "Symbol"  and  separator.kind.value == "}":
             current = expression_tokens_advance(current)
             break
-        return ObjectLiteralParseResult(state=state, fields=[], success=false)
-    return ObjectLiteralParseResult(state=current, fields=fields, success=true)
+        return ObjectLiteralParseResult(state=state, fields=[], success=False)
+    return ObjectLiteralParseResult(state=current, fields=fields, success=True)
 
 def parse_struct_literal(state, target):
     type_result = collect_struct_type_name(target)
@@ -2526,10 +2526,10 @@ def parse_struct_literal(state, target):
     fields_result = parse_object_literal(state)
     if not fields_result.success:
         return expression_parse_failure(state)
-    return ExpressionParseResult(state=fields_result.state, expression=Expression.Struct(type_name=type_result.parts, fields=fields_result.fields), success=true)
+    return ExpressionParseResult(state=fields_result.state, expression=Expression.Struct(type_name=type_result.parts, fields=fields_result.fields), success=True)
 
 def expression_parse_failure(state):
-    return ExpressionParseResult(state=state, expression=Expression.Raw(text=""), success=false)
+    return ExpressionParseResult(state=state, expression=Expression.Raw(text=""), success=False)
 
 def expression_tokens_is_at_end(state):
     return state.index >= len(state.tokens)
@@ -2544,20 +2544,20 @@ def expression_tokens_advance(state):
 
 def expression_is_struct_target(expression):
     if expression.variant == "Identifier":
-        return true
+        return True
     if expression.variant == "Member":
         return expression_is_struct_target(expression.object)
-    return false
+    return False
 
 def collect_struct_type_name(expression):
     if expression.variant == "Identifier":
-        return StructTypeNameResult(parts=[expression.name], success=true)
+        return StructTypeNameResult(parts=[expression.name], success=True)
     if expression.variant == "Member":
         inner = collect_struct_type_name(expression.object)
         if not inner.success:
-            return StructTypeNameResult(parts=[], success=false)
-        return StructTypeNameResult(parts=append_string(inner.parts, expression.member), success=true)
-    return StructTypeNameResult(parts=[], success=false)
+            return StructTypeNameResult(parts=[], success=False)
+        return StructTypeNameResult(parts=append_string(inner.parts, expression.member), success=True)
+    return StructTypeNameResult(parts=[], success=False)
 
 def binary_precedence(op):
     if op == "..":
@@ -2632,30 +2632,30 @@ def string_array_contains(values, target):
         if index >= len(values):
             break
         if values[index] == target:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def is_trivia_token(token):
     if token.kind.variant == "Whitespace"  or  token.kind.variant == "Comment":
-        return true
+        return True
     if token.kind.variant == "Symbol":
         if is_whitespace_lexeme(token.lexeme):
-            return true
-    return false
+            return True
+    return False
 
 def is_whitespace_lexeme(text):
     if len(text) == 0:
-        return false
+        return False
     index = 0
     while True:
         if index >= len(text):
             break
         ch = text[index]
         if not is_trim_whitespace(ch):
-            return false
+            return False
         index += 1
-    return true
+    return True
 
 def advance_to_symbol(parser, symbol):
     current = parser

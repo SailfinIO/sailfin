@@ -23,6 +23,32 @@ fs = runtime.fs
 http = runtime.http
 websocket = runtime.websocket
 
+class EnumField:
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+class EnumVariantDefinition:
+    def __init__(self, name, field_names):
+        self.name = name
+        self.field_names = field_names
+
+class EnumType:
+    def __init__(self, name, variants):
+        self.name = name
+        self.variants = variants
+
+class EnumInstance:
+    def __init__(self, type, variant, fields):
+        self.type = type
+        self.variant = variant
+        self.fields = fields
+
+class StructField:
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
 def sleep(milliseconds):
     # effects: clock
     runtime.sleep(milliseconds)
@@ -68,6 +94,98 @@ def array_reduce(items, initial, reducer):
     for item in items:
         accumulator = reducer(accumulator, item)
     return accumulator
+
+def enum_type(name):
+    return EnumType(name=name, variants=[])
+
+def enum_field(name, value):
+    return EnumField(name=name, value=value)
+
+def enum_define_variant(enum_type, variant_name, field_names):
+    variant = EnumVariantDefinition(name=variant_name, field_names=field_names)
+    updated = (enum_type.variants) + ([variant])
+    return EnumType(name=enum_type.name, variants=updated)
+
+def enum_lookup_field(fields, name):
+    index = 0
+    while True:
+        if index >= len(fields):
+            break
+        field = fields[index]
+        if field.name == name:
+            return field
+        index = index + 1
+    return None
+
+def enum_find_variant(enum_type, variant_name):
+    index = 0
+    while True:
+        if index >= len(enum_type.variants):
+            break
+        variant = enum_type.variants[index]
+        if variant.name == variant_name:
+            return variant
+        index = index + 1
+    return None
+
+def enum_normalize_fields(definition, provided):
+    if definition == None:
+        return provided
+    expected = definition.field_names
+    if len(expected) == 0:
+        return []
+    normalized = []
+    index = 0
+    while True:
+        if index >= len(expected):
+            break
+        field_name = expected[index]
+        candidate = enum_lookup_field(provided, field_name)
+        value = None
+        if candidate != None:
+            value = candidate.value
+        normalized = (normalized) + ([EnumField(name=field_name, value=value)])
+        index = index + 1
+    return normalized
+
+def enum_instantiate(enum_type, variant_name, provided):
+    definition = enum_find_variant(enum_type, variant_name)
+    fields = enum_normalize_fields(definition, provided)
+    return EnumInstance(type=enum_type, variant=variant_name, fields=fields)
+
+def enum_get_field(instance, name):
+    index = 0
+    while True:
+        if index >= len(instance.fields):
+            break
+        field = instance.fields[index]
+        if field.name == name:
+            return field.value
+        index = index + 1
+    return None
+
+def struct_field(name, value):
+    return StructField(name=name, value=value)
+
+def struct_repr(name, fields):
+    result = name + "("
+    index = 0
+    while True:
+        if index >= len(fields):
+            break
+        if index > 0:
+            result = result + ", "
+        field = fields[index]
+        value_text = to_debug_string(field.value)
+        result = result + field.name + "=" + value_text
+        index = index + 1
+    result = result + ")"
+    return result
+
+def to_debug_string(value):
+    if value == None:
+        return "None"
+    return "" + value
 
 def serve(handler, config = null):
     # effects: io, net
@@ -125,6 +243,10 @@ def find_char(text, character, start = 0):
             return index
         index = index + 1
     return -1
+
+def match_exhaustive_failed(value):
+    message = "Non-exhaustive match for value()"
+    runtime.raise_value_error(message)
 
 def char_code(character):
     if len(character) == 0:
@@ -188,4 +310,4 @@ def char_code(character):
         index = index + 1
     return code
 
-__all__ = ["clamp", "substring", "find_char", "char_code"]
+__all__ = ["clamp", "substring", "find_char", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr"]

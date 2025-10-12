@@ -534,8 +534,9 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
 `bootstrap/runtime_support.py`. The helper module currently exposes:
 
 - `runtime.console.info` – backing implementation for source-level `print.info`.
-- `runtime.channel`, `runtime.spawn`, `runtime.EnumType` – concurrency and enum
-  primitives. Invoking `spawn` requires the `io` effect; routing through
+- `runtime.channel`, `runtime.spawn`, `runtime.enum_type`, `runtime.enum_define_variant`,
+  `runtime.enum_instantiate` – concurrency and enum primitives. Invoking `spawn`
+  requires the `io` effect; routing through
   `serve` requires `net`.
 - `runtime.format_string` – interpolated string support.
 - Control flow constructs (`if`/`else`, `for`, `match`) in Sailfin sources lower
@@ -588,6 +589,12 @@ The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpe
 - `match_exhaustive_failed(value: any) -> never`
   - Emits a ValueError with a message mirroring the bootstrap behaviour (`"Non-exhaustive match for value …"`).
   - Serves as the runtime backstop when the compiler cannot prove match-expression exhaustiveness; once the Sailfin-native diagnostics improve this helper lets the stage1 runtime stay self-hosted.
+
+Struct support:
+- `struct_field(name: string, value: any) -> StructField`
+  - Wraps a single field/value pair for consumption by struct formatting helpers.
+- `struct_repr(name: string, fields: StructField[]) -> string`
+  - Produces `name(field=value, …)` strings without invoking the bootstrap runtime. Strings use plain concatenation for now; downstream call sites may format values for debugging needs.
 
 These helpers participate in the `runtime` module re-export surface, so stage1-compiled sources receive the same behaviour when targeting the Python backend today and the upcoming LLVM/WASM backends later.
 

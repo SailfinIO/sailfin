@@ -216,13 +216,21 @@ def raise_value_error(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-class EnumInstance:
-    __slots__ = ("_type", "_variant", "_fields")
+@dataclasses.dataclass
+class EnumField:
+    name: str
+    value: Any
 
-    def __init__(self, enum_type: "EnumType", variant: str, fields: Dict[str, Any]):
+
+class EnumInstance:
+    __slots__ = ("_type", "_variant", "_fields", "_field_map")
+
+    def __init__(self, enum_type: "EnumType", variant: str, fields: Iterable[EnumField]):
+        normalized = [_coerce_field(entry) for entry in fields]
         self._type = enum_type
         self._variant = variant
-        self._fields = fields
+        self._fields = normalized
+        self._field_map = {field.name: field.value for field in normalized}
 
     @property
     def type(self) -> "EnumType":
@@ -232,32 +240,86 @@ class EnumInstance:
     def variant(self) -> str:
         return self._variant
 
+    @property
+    def fields(self) -> List[EnumField]:
+        mapped = self._field_map.get("fields")
+        if mapped is not None:
+            return mapped
+        return self._fields
+
     def __getattr__(self, item: str) -> Any:
         try:
-            return self._fields[item]
+            return self._field_map[item]
         except KeyError as err:  # pragma: no cover - defensive
             raise AttributeError(item) from err
 
     def __repr__(self) -> str:
-        payload = ", ".join(f"{k}={v!r}" for k, v in self._fields.items())
+        payload = ", ".join(f"{field.name}={field.value!r}" for field in self._fields)
         return f"{self._type.name}.{self._variant}({payload})"
 
 
 class EnumType:
     def __init__(self, name: str):
         self.name = name
+        self._variant_fields: Dict[str, List[str]] = {}
         self.variants: Dict[str, Callable[..., EnumInstance]] = {}
 
+    def register_variant(self, name: str, field_names: Iterable[str]) -> None:
+        self._variant_fields[name] = list(field_names)
+
     def variant(self, name: str, field_names: List[str]) -> Callable[..., EnumInstance]:
+        self.register_variant(name, field_names)
+
         def constructor(**kwargs: Any) -> EnumInstance:
-            fields = {}
-            for field in field_names:
-                fields[field] = kwargs.get(field)
-            return EnumInstance(self, name, fields)
+            provided = [EnumField(field, kwargs.get(field)) for field in field_names]
+            return EnumInstance(self, name, provided)
 
         constructor.__name__ = name
         self.variants[name] = constructor
         return constructor
+
+
+def _coerce_field(entry: Any) -> EnumField:
+    if isinstance(entry, EnumField):
+        return entry
+    if isinstance(entry, (tuple, list)) and len(entry) == 2:
+        return EnumField(entry[0], entry[1])
+    name = getattr(entry, "name", None)
+    value = getattr(entry, "value", None)
+    if name is not None:
+        return EnumField(name, value)
+    raise TypeError(f"Cannot interpret enum field entry: {entry!r}")
+
+
+def enum_type(name: str) -> EnumType:
+    return EnumType(name)
+
+
+def enum_define_variant(enum_type: EnumType, variant_name: str, field_names: Iterable[str]) -> EnumType:
+    constructor = enum_type.variant(variant_name, list(field_names))
+    setattr(enum_type, variant_name, constructor)
+    return enum_type
+
+
+def enum_field(name: str, value: Any) -> EnumField:
+    return EnumField(name=name, value=value)
+
+
+def enum_instantiate(enum_type: EnumType, variant_name: str, provided: Iterable[Any]) -> EnumInstance:
+    expected = enum_type._variant_fields.get(variant_name)
+    provided_list = [_coerce_field(entry) for entry in provided]
+    if not expected:
+        return EnumInstance(enum_type, variant_name, provided_list)
+    provided_map = {field.name: field.value for field in provided_list}
+    ordered = [EnumField(name, provided_map.get(name)) for name in expected]
+    return EnumInstance(enum_type, variant_name, ordered)
+
+
+def enum_get_field(instance: EnumInstance, name: str) -> Any:
+    for field in instance.fields:
+        if field.name == name:
+            return field.value
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +327,33 @@ class EnumType:
 # ---------------------------------------------------------------------------
 
 
-def struct_repr(name: str, fields: Dict[str, Any]) -> str:
-    payload = ", ".join(f"{key}={value!r}" for key, value in fields.items())
+@dataclasses.dataclass
+class StructField:
+    name: str
+    value: Any
+
+
+def _coerce_struct_field(entry: Any) -> StructField:
+    if isinstance(entry, StructField):
+        return entry
+    if isinstance(entry, (tuple, list)) and len(entry) == 2:
+        return StructField(entry[0], entry[1])
+    name = getattr(entry, "name", None)
+    value = getattr(entry, "value", None)
+    if name is not None:
+        return StructField(name, value)
+    raise TypeError(f"Cannot interpret struct field entry: {entry!r}")
+
+
+def struct_field(name: str, value: Any) -> StructField:
+    return StructField(name=name, value=value)
+
+
+def struct_repr(name: str, fields: Iterable[Any]) -> str:
+    payload = ", ".join(
+        f"{field.name}={field.value!r}"
+        for field in (_coerce_struct_field(entry) for entry in fields)
+    )
     return f"{name}({payload})"
 
 
@@ -343,6 +430,12 @@ def array_reduce(
 
 def char_code(character: str) -> int:
     return ord(character)
+
+
+def to_debug_string(value: Any) -> str:
+    if value is None:
+        return "null"
+    return str(value)
 
 
 def substring(text: str, start: int, end: int) -> str:
@@ -468,6 +561,11 @@ __all__ = [
     "Array",  # backwards compat placeholder
     "EnumInstance",
     "EnumType",
+    "enum_type",
+    "enum_define_variant",
+    "enum_field",
+    "enum_instantiate",
+    "enum_get_field",
     "array_filter",
     "array_map",
     "array_reduce",
@@ -476,6 +574,7 @@ __all__ = [
     "fs",
     "make_object",
     "char_code",
+    "to_debug_string",
     "substring",
     "find_char",
     "format_string",
@@ -489,6 +588,7 @@ __all__ = [
     "check_type",
     "spawn",
     "struct_repr",
+    "struct_field",
     "websocket",
 ]
 

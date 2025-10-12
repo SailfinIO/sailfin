@@ -40,6 +40,13 @@ def test_runtime_prelude_collection_helpers() -> None:
     find_char = namespace["find_char"]
     char_code = namespace["char_code"]
     match_exhaustive_failed = namespace["match_exhaustive_failed"]
+    enum_type = namespace["enum_type"]
+    enum_define_variant = namespace["enum_define_variant"]
+    enum_field = namespace["enum_field"]
+    enum_instantiate = namespace["enum_instantiate"]
+    enum_get_field = namespace["enum_get_field"]
+    struct_field = namespace["struct_field"]
+    struct_repr = namespace["struct_repr"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -94,3 +101,36 @@ def test_runtime_prelude_collection_helpers() -> None:
 
     with pytest.raises(ValueError, match="Non-exhaustive match"):
         match_exhaustive_failed(42)
+
+    color = enum_type("Color")
+    color = enum_define_variant(color, "Red", [])
+    color = enum_define_variant(color, "Rgb", ["r", "g", "b"])
+
+    red = enum_instantiate(color, "Red", [])
+    assert red.type.name == "Color"
+    assert red.variant == "Red"
+    assert enum_get_field(red, "r") is None
+
+    rgb = enum_instantiate(
+        color,
+        "Rgb",
+        [
+            enum_field("r", 255),
+            enum_field("g", 128),
+            enum_field("b", 64),
+        ],
+    )
+    assert rgb.r == 255
+    assert rgb.g == 128
+    assert rgb.b == 64
+    assert enum_get_field(rgb, "missing") is None
+
+    point = struct_repr(
+        "Point",
+        [
+            struct_field("x", 3),
+            struct_field("y", -4),
+            struct_field("label", "p"),
+        ],
+    )
+    assert point == "Point(x=3, y=-4, label=p)"
