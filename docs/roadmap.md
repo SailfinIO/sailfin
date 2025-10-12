@@ -18,11 +18,13 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `runtime/`, preserving effect annotations.
     - [x] Ported collection helpers (`array_map`, `array_filter`, `array_reduce`) and the sequential `parallel` runner into `runtime/prelude.sfn`, covered by `compiler/tests/test_runtime_prelude.py`.
     - [x] Added string helpers (`substring`, `find_char`) to `runtime/prelude.sfn` with regression coverage in `compiler/tests/test_runtime_prelude.py`.
-    - [x] Implemented ASCII-focused `char_code` in `runtime/prelude.sfn`, falling back to the bootstrap helper for other glyphs; regression coverage in `compiler/tests/test_runtime_prelude.py`.
+    - [x] Implemented Sailfin-native UTF-8 aware `char_code` in `runtime/prelude.sfn`, covering ASCII, Latin-1, BMP, and common emoji ranges with regression coverage in `compiler/tests/test_runtime_prelude.py` and `compiler/tests/test_string_utils.py`.
     - [x] Wired stage1 compiler helpers (lexer, parser, emitter, native lowering) to consume Sailfin string utilities (`compiler/src/string_utils.sfn`) instead of `runtime_support.py` fallbacks.    
-  - [ ] Document the runtime string helper surface (`substring`, `find_char`, `char_code`) in `docs/spec.md` once Unicode paths land so downstream consumers understand guarantees.
-    - [ ] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
+  - [x] Document the runtime string helper surface (`substring`, `find_char`, `char_code`) in `docs/spec.md` with ASCII guarantees and UTF-8 decoding coverage (see §10.2).
+    - [x] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
     - [ ] Audit remaining runtime helpers for Python dependencies (`match_exhaustive_failed`, enum utilities) and schedule Sailfin ports with paired tests.
+    - [ ] Add regression coverage demonstrating `find_char` escape handling and `substring` boundary clamping under stage1 (`compiler/tests/test_runtime_prelude.py`).
+    - [ ] Explore grapheme-aware utilities (`grapheme_count`, `grapheme_at`) once normalization primitives land so char-oriented helpers align with user expectations on combining sequences.
   - [x] Module system re-exports — Teach the Sailfin module loader to expose runtime helper bindings (e.g., `substring`, `find_char`, `char_code`) via compiler surface modules without duplicating implementations.
     - [x] Extend import parsing to recognise `import { foo as bar } from "runtime/...";` and persist alias metadata through lowering.
     - [x] Update the emitter and Python bridge to generate stable re-export stubs and ensure stage1 artifacts resolve runtime bindings correctly.

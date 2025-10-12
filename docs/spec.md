@@ -571,6 +571,23 @@ Supported today:
 Not supported yet:
 - `print.debug` or structured logging levels. These may be added in the self-hosted runtime.
 
+### 10.2 String Utilities
+
+The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpers that the stage1 compiler and downstream capsules may import via `import { substring, find_char, char_code } from "runtime/prelude";`. These helpers mirror the Python bootstrap behaviour while remaining embeddable in Sailfin-native code.
+
+- `substring(text: string, start: number, end: number) -> string`
+  - Clamps `start`/`end` to the source string bounds, returns `""` when the range is empty, and builds the slice without allocating intermediate Python strings.
+  - Negative indices are treated as `0`; indices past the string length are clamped to the end of the string.
+- `find_char(text: string, character: string, start: number = 0) -> number`
+  - Scans from `start` (clamped to the string bounds) and returns the index of the first matching code unit or `-1` when the character cannot be found.
+  - Recognises the common escape sequences `\n`, `\r`, and `\t` so callers can search for newline, carriage return, or tab literals without manually unescaping first.
+- `char_code(character: string) -> number`
+  - Returns ASCII code points for digits, uppercase/lowercase Latin letters, and a curated set of punctuation (`space`, newline, carriage return, tab, double quote, backslash, underscore`).
+  - Decodes UTF-8 sequences up to four bytes wide directly in Sailfin, covering Latin-1, BMP, and common astral-plane glyphs (emoji, symbols) without invoking the bootstrap runtime.
+  - Returns `-1` for empty input, code units longer than four bytes, or invalid continuation bytes so callers can detect malformed data.
+
+These helpers participate in the `runtime` module re-export surface, so stage1-compiled sources receive the same behaviour when targeting the Python backend today and the upcoming LLVM/WASM backends later.
+
 
 ## Part B — Design Preview
 

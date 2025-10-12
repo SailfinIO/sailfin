@@ -10,188 +10,228 @@ let http = runtime.http;
 let websocket = runtime.websocket;
 
 fn sleep(milliseconds -> number) ![clock] {
-    runtime.sleep(milliseconds);
+runtime.sleep(milliseconds);
 }
 
 fn channel<T>(capacity -> number = 0) ![io] {
-    return runtime.channel(capacity);
+return runtime.channel(capacity);
 }
 
 fn parallel(tasks) ![io] {
-    let mut results = [];
-    for task in tasks {
-        let value = task();
-        results = results.concat([value]);
-    }
-    return results;
+let mut results = [];
+for task in tasks {
+let value = task();
+results = results.concat([value]);
+}
+return results;
 }
 
 fn spawn(task, name -> string = "") ![io] {
-    if name.length == 0 {
-        runtime.spawn(task);
-        return;
-    }
-    runtime.spawn(task, name);
+if name.length == 0 {
+runtime.spawn(task);
+return;
+}
+runtime.spawn(task, name);
 }
 
 fn logExecution(callable) {
-    return runtime.logExecution(callable);
+return runtime.logExecution(callable);
 }
 
 fn array_map(items, mapper) {
-    let mut result = [];
-    for item in items {
-        let mapped = mapper(item);
-        result = result.concat([mapped]);
-    }
-    return result;
+let mut result = [];
+for item in items {
+let mapped = mapper(item);
+result = result.concat([mapped]);
+}
+return result;
 }
 
 fn array_filter(items, predicate) {
-    let mut result = [];
-    for item in items {
-        if predicate(item) {
-            result = result.concat([item]);
-        }
-    }
-    return result;
+let mut result = [];
+for item in items {
+if predicate(item) {
+result = result.concat([item]);
+}
+}
+return result;
 }
 
 fn array_reduce(items, initial, reducer) {
-    let mut accumulator = initial;
-    for item in items {
-        accumulator = reducer(accumulator, item);
-    }
-    return accumulator;
+let mut accumulator = initial;
+for item in items {
+accumulator = reducer(accumulator, item);
+}
+return accumulator;
 }
 
 fn serve(handler, config = null) ![io, net] {
-    runtime.serve(handler, config);
+runtime.serve(handler, config);
 }
 
 fn clamp(value -> number, minimum -> number, maximum -> number) -> number {
-    if value < minimum {
-        return minimum;
-    }
-    if value > maximum {
-        return maximum;
-    }
-    return value;
+if value < minimum {
+return minimum;
+}
+if value > maximum {
+return maximum;
+}
+return value;
 }
 
 fn substring(text -> string, start -> number, end -> number) -> string {
-    let length = text.length;
-    if length == 0 {
-        return "";
-    }
+let length = text.length;
+if length == 0 {
+return "";
+}
 
-    let mut normalized_start = clamp(start, 0, length);
-    let mut normalized_end = clamp(end, 0, length);
+let mut normalized_start = clamp(start, 0, length);
+let mut normalized_end = clamp(end, 0, length);
 
-    if normalized_start >= normalized_end {
-        return "";
-    }
+if normalized_start >= normalized_end {
+return "";
+}
 
-    let mut index = normalized_start;
-    let mut result = "";
-    loop {
-        if index >= normalized_end {
-            break;
-        }
-        result = result + text[index];
-        index = index + 1;
-    }
-    return result;
+let mut index = normalized_start;
+let mut result = "";
+loop {
+if index >= normalized_end {
+break;
+}
+result = result + text[index];
+index = index + 1;
+}
+return result;
 }
 
 fn find_char(text -> string, character -> string, start -> number = 0) -> number {
-    let length = text.length;
-    if length == 0 {
-        return -1;
-    }
+let length = text.length;
+if length == 0 {
+return -1;
+}
 
-    let mut normalized_start = start;
-    if normalized_start < 0 {
-        normalized_start = 0;
-    }
-    if normalized_start >= length {
-        return -1;
-    }
+let mut normalized_start = start;
+if normalized_start < 0 {
+normalized_start = 0;
+}
+if normalized_start >= length {
+return -1;
+}
 
-    let mut target = character;
-    if target.length == 2 && target[0] == "\\" {
-        let escape = target[1];
-        if escape == "n" {
-            target = "\n";
-        } else if escape == "r" {
-            target = "\r";
-        } else if escape == "t" {
-            target = "\t";
-        }
-    }
+let mut target = character;
+if target.length == 2 && target[0] == "\\" {
+let escape = target[1];
+if escape == "n" {
+target = "\n";
+} else if escape == "r" {
+target = "\r";
+} else if escape == "t" {
+target = "\t";
+}
+}
 
-    let mut index = normalized_start;
-    loop {
-        if index >= length {
-            break;
-        }
-        if text[index] == target {
-            return index;
-        }
-        index = index + 1;
-    }
+let mut index = normalized_start;
+loop {
+if index >= length {
+break;
+}
+if text[index] == target {
+return index;
+}
+index = index + 1;
+}
 
-    return -1;
+return -1;
 }
 
 fn char_code(character -> string) -> number {
-    if character.length == 0 {
-        return -1;
-    }
-
-    let ch = character[0];
-
-    let digits = "0123456789";
-    let digit_index = find_char(digits, ch, 0);
-    if digit_index >= 0 {
-        return 48 + digit_index;
-    }
-
-    let lowercase = "abcdefghijklmnopqrstuvwxyz";
-    let lowercase_index = find_char(lowercase, ch, 0);
-    if lowercase_index >= 0 {
-        return 97 + lowercase_index;
-    }
-
-    let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let uppercase_index = find_char(uppercase, ch, 0);
-    if uppercase_index >= 0 {
-        return 65 + uppercase_index;
-    }
-
-    if ch == " " {
-        return 32;
-    }
-    if ch == "\n" {
-        return 10;
-    }
-    if ch == "\r" {
-        return 13;
-    }
-    if ch == "\t" {
-        return 9;
-    }
-    if ch == "\"" {
-        return 34;
-    }
-    if ch == "\\" {
-        return 92;
-    }
-    if ch == "_" {
-        return 95;
-    }
-
-    return runtime.char_code(character);
+if character.length == 0 {
+ return -1;
 }
 
+let ch = character[0];
+
+let digits = "0123456789";
+let digit_index = find_char(digits, ch, 0);
+if digit_index >= 0 {
+ return 48 + digit_index;
+}
+
+let lowercase = "abcdefghijklmnopqrstuvwxyz";
+let lowercase_index = find_char(lowercase, ch, 0);
+if lowercase_index >= 0 {
+ return 97 + lowercase_index;
+}
+
+let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+let uppercase_index = find_char(uppercase, ch, 0);
+if uppercase_index >= 0 {
+ return 65 + uppercase_index;
+}
+
+if ch == " " {
+ return 32;
+}
+if ch == "\n" {
+ return 10;
+}
+if ch == "\r" {
+ return 13;
+}
+if ch == "\t" {
+ return 9;
+}
+if ch == "\"" {
+ return 34;
+}
+if ch == "\\" {
+ return 92;
+}
+if ch == "_" {
+ return 95;
+}
+
+let encoded = ch.encode("utf-8");
+let count = encoded.length;
+if count == 0 {
+ return -1;
+}
+if count > 4 {
+ return -1;
+}
+
+let mut index = 0;
+let mut code = 0;
+loop {
+ if index >= count {
+ break;
+ }
+
+ let byte = encoded[index];
+ if index == 0 {
+ if byte < 128 {
+  return byte;
+ }
+
+ if byte >= 192 && byte <= 223 {
+  code = byte - 192;
+ } else if byte >= 224 && byte <= 239 {
+  code = byte - 224;
+ } else if byte >= 240 && byte <= 247 {
+  code = byte - 240;
+ } else {
+  return -1;
+ }
+ } else {
+ if byte < 128 || byte > 191 {
+  return -1;
+ }
+ code = (code * 64) + (byte - 128);
+ }
+
+ index = index + 1;
+}
+
+return code;
+}
 export { clamp, substring, find_char, char_code };

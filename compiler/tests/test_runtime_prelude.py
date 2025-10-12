@@ -77,4 +77,9 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert char_code("\\") == 92
     assert char_code("_") == 95
     assert char_code("\n") == 10
+    assert char_code("ñ") == 241
+    assert char_code("Ω") == 937
+    assert char_code("€") == 8364
+    assert char_code("中") == 20013
+    assert char_code("🙂") == 128578
     assert char_code("") == -1

@@ -60,4 +60,9 @@ def test_string_utils_helpers() -> None:
     assert char_code("\t") == 9
     assert char_code("\\") == 92
     assert char_code("_") == 95
+    assert char_code("ñ") == 241
+    assert char_code("Ω") == 937
+    assert char_code("€") == 8364
+    assert char_code("中") == 20013
+    assert char_code("🙂") == 128578
     assert char_code("") == -1
