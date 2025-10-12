@@ -40,6 +40,10 @@ def test_string_utils_helpers() -> None:
     assert substring("sailfin", 2, 2) == ""
     assert substring("abc", -3, 10) == "abc"
     assert substring("", 1, 5) == ""
+    assert substring("bounds", 3, 100) == "nds"
+    assert substring("bounds", 10, 12) == ""
+    assert substring("bounds", -5, -2) == ""
+    assert substring("emoji🙂", 5, 6) == "🙂"
 
     assert find_char("hello", "l", 0) == 2
     assert find_char("hello", "l", 3) == 3
@@ -48,6 +52,9 @@ def test_string_utils_helpers() -> None:
     assert find_char("\tindent", "\\t", 0) == 0
     assert find_char("offset", "o", -5) == 0
     assert find_char("offset", "t", 99) == -1
+    assert find_char("line1\nline2", "\\n", -8) == 5
+    assert find_char("emoji🙂", "🙂", 0) == 5
+    assert find_char("emoji🙂", "🙂", 6) == -1
 
     assert char_code("0") == 48
     assert char_code("9") == 57
