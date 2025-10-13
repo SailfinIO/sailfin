@@ -18,11 +18,6 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-console = runtime.console
-fs = runtime.fs
-http = runtime.http
-websocket = runtime.websocket
-
 class EnumField:
     def __init__(self, name, value):
         self.name = name

@@ -10,320 +10,320 @@ let http = runtime.http;
 let websocket = runtime.websocket;
 
 struct EnumField {
-name -> string;
-value -> any;
+    name -> string;
+    value -> any;
 }
 
 struct EnumVariantDefinition {
-name -> string;
-field_names -> string[];
+    name -> string;
+    field_names -> string[];
 }
 
 struct EnumType {
-name -> string;
-variants -> EnumVariantDefinition[];
+    name -> string;
+    variants -> EnumVariantDefinition[];
 }
 
 struct EnumInstance {
-type -> EnumType;
-variant -> string;
-fields -> EnumField[];
+    type -> EnumType;
+    variant -> string;
+    fields -> EnumField[];
 }
 
 struct StructField {
-name -> string;
-value -> any;
+    name -> string;
+    value -> any;
 }
 
 struct TypeDescriptor {
-kind -> string;
-name -> string?;
-items -> TypeDescriptor[];
+    kind -> string;
+    name -> string?;
+    items -> TypeDescriptor[];
 }
 
 fn sleep(milliseconds -> number) ![clock] {
-runtime.sleep(milliseconds);
+    runtime.sleep(milliseconds);
 }
 
 fn channel<T>(capacity -> number = 0) ![io] {
-return runtime.channel(capacity);
+    return runtime.channel(capacity);
 }
 
 fn parallel(tasks) ![io] {
-let mut results = [];
-for task in tasks {
-let value = task();
-results = results.concat([value]);
-}
-return results;
+    let mut results = [];
+    for task in tasks {
+        let value = task();
+        results = results.concat([value]);
+    }
+    return results;
 }
 
 fn spawn(task, name -> string = "") ![io] {
-if name.length == 0 {
-runtime.spawn(task);
-return;
-}
-runtime.spawn(task, name);
+    if name.length == 0 {
+        runtime.spawn(task);
+        return;
+    }
+    runtime.spawn(task, name);
 }
 
 fn logExecution(callable) {
-return runtime.logExecution(callable);
+    return runtime.logExecution(callable);
 }
 
 fn array_map(items, mapper) {
-let mut result = [];
-for item in items {
-let mapped = mapper(item);
-result = result.concat([mapped]);
-}
-return result;
+    let mut result = [];
+    for item in items {
+        let mapped = mapper(item);
+        result = result.concat([mapped]);
+    }
+    return result;
 }
 
 fn array_filter(items, predicate) {
-let mut result = [];
-for item in items {
-if predicate(item) {
-result = result.concat([item]);
-}
-}
-return result;
+    let mut result = [];
+    for item in items {
+        if predicate(item) {
+            result = result.concat([item]);
+        }
+    }
+    return result;
 }
 
 fn array_reduce(items, initial, reducer) {
-let mut accumulator = initial;
-for item in items {
-accumulator = reducer(accumulator, item);
-}
-return accumulator;
+    let mut accumulator = initial;
+    for item in items {
+        accumulator = reducer(accumulator, item);
+    }
+    return accumulator;
 }
 
 fn enum_type(name -> string) -> EnumType {
-return EnumType { name: name, variants: [] };
+    return EnumType { name: name, variants: [] };
 }
 
 fn enum_field(name -> string, value) -> EnumField {
-return EnumField { name: name, value: value };
+    return EnumField { name: name, value: value };
 }
 
 fn enum_define_variant(enum_type -> EnumType, variant_name -> string, field_names -> string[]) -> EnumType {
-let variant = EnumVariantDefinition { name: variant_name, field_names: field_names };
-let updated = enum_type.variants.concat([variant]);
-return EnumType { name: enum_type.name, variants: updated };
+    let variant = EnumVariantDefinition { name: variant_name, field_names: field_names };
+    let updated = enum_type.variants.concat([variant]);
+    return EnumType { name: enum_type.name, variants: updated };
 }
 
 fn enum_lookup_field(fields -> EnumField[], name -> string) -> EnumField? {
-let mut index = 0;
-loop {
-if index >= fields.length {
-break;
-}
-let field = fields[index];
-if field.name == name {
-return field;
-}
-index = index + 1;
-}
-return null;
+    let mut index = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        if field.name == name {
+            return field;
+        }
+        index = index + 1;
+    }
+    return null;
 }
 
 fn enum_find_variant(enum_type -> EnumType, variant_name -> string) -> EnumVariantDefinition? {
-let mut index = 0;
-loop {
-if index >= enum_type.variants.length {
-break;
-}
-let variant = enum_type.variants[index];
-if variant.name == variant_name {
-return variant;
-}
-index = index + 1;
-}
-return null;
+    let mut index = 0;
+    loop {
+        if index >= enum_type.variants.length {
+            break;
+        }
+        let variant = enum_type.variants[index];
+        if variant.name == variant_name {
+            return variant;
+        }
+        index = index + 1;
+    }
+    return null;
 }
 
 fn enum_normalize_fields(definition -> EnumVariantDefinition?, provided -> EnumField[]) -> EnumField[] {
-if definition == null {
-return provided;
-}
-let expected = definition.field_names;
-if expected.length == 0 {
-return [];
-}
-let mut normalized -> EnumField[] = [];
-let mut index = 0;
-loop {
-if index >= expected.length {
-break;
-}
-let field_name = expected[index];
-let candidate = enum_lookup_field(provided, field_name);
-let value = null;
-if candidate != null {
-value = candidate.value;
-}
-normalized = normalized.concat([EnumField { name: field_name, value: value }]);
-index = index + 1;
-}
-return normalized;
+    if definition == null {
+        return provided;
+    }
+    let expected = definition.field_names;
+    if expected.length == 0 {
+        return [];
+    }
+    let mut normalized -> EnumField[] = [];
+    let mut index = 0;
+    loop {
+        if index >= expected.length {
+            break;
+        }
+        let field_name = expected[index];
+        let candidate = enum_lookup_field(provided, field_name);
+        let value = null;
+        if candidate != null {
+            value = candidate.value;
+        }
+        normalized = normalized.concat([EnumField { name: field_name, value: value }]);
+        index = index + 1;
+    }
+    return normalized;
 }
 
 fn enum_instantiate(enum_type -> EnumType, variant_name -> string, provided -> EnumField[]) -> EnumInstance {
-let definition = enum_find_variant(enum_type, variant_name);
-let fields = enum_normalize_fields(definition, provided);
-return EnumInstance { type: enum_type, variant: variant_name, fields: fields };
+    let definition = enum_find_variant(enum_type, variant_name);
+    let fields = enum_normalize_fields(definition, provided);
+    return EnumInstance { type: enum_type, variant: variant_name, fields: fields };
 }
 
 fn enum_get_field(instance -> EnumInstance, name -> string) {
-let mut index = 0;
-loop {
-if index >= instance.fields.length {
-break;
-}
-let field = instance.fields[index];
-if field.name == name {
-return field.value;
-}
-index = index + 1;
-}
-return null;
+    let mut index = 0;
+    loop {
+    if index >= instance.fields.length {
+        break;
+    }
+    let field = instance.fields[index];
+    if field.name == name {
+        return field.value;
+    }
+    index = index + 1;
+    }
+    return null;
 }
 
 fn struct_field(name -> string, value) -> StructField {
-return StructField { name: name, value: value };
+    return StructField { name: name, value: value };
 }
 
 fn struct_repr(name -> string, fields -> StructField[]) -> string {
-let mut result = name + "(";
-let mut index = 0;
-loop {
-if index >= fields.length {
-break;
-}
-if index > 0 {
-result = result + ", ";
-}
-let field = fields[index];
-let value_text = to_debug_string(field.value);
-result = result + field.name + "=" + value_text;
-index = index + 1;
-}
-result = result + ")";
-return result;
+    let mut result = name + "(";
+    let mut index = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        if index > 0 {
+            result = result + ", ";
+        }
+        let field = fields[index];
+        let value_text = to_debug_string(field.value);
+        result = result + field.name + "=" + value_text;
+        index = index + 1;
+    }
+    result = result + ")";
+    return result;
 }
 
 fn to_debug_string(value) -> string {
-return runtime.to_debug_string(value);
+    return runtime.to_debug_string(value);
 }
 
 fn format_interpolated(parts -> string[], values -> any[]) -> string {
-let mut result = "";
-let mut index = 0;
-loop {
-if index >= parts.length {
-break;
-}
-result = result + parts[index];
-if index < values.length {
-result = result + to_debug_string(values[index]);
-}
-index = index + 1;
-}
-return result;
+    let mut result = "";
+    let mut index = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        result = result + parts[index];
+        if index < values.length {
+            result = result + to_debug_string(values[index]);
+        }
+        index = index + 1;
+    }
+    return result;
 }
 
 fn type_descriptor(kind -> string, name -> string?, items -> TypeDescriptor[]) -> TypeDescriptor {
-return TypeDescriptor { kind: kind, name: name, items: items };
+    return TypeDescriptor { kind: kind, name: name, items: items };
 }
 
 fn type_descriptor_primitive(name -> string) -> TypeDescriptor {
-return type_descriptor("primitive", name, []);
+    return type_descriptor("primitive", name, []);
 }
 
 fn type_descriptor_union(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
-return type_descriptor("union", null, descriptors);
+    return type_descriptor("union", null, descriptors);
 }
 
 fn type_descriptor_intersection(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
-return type_descriptor("intersection", null, descriptors);
+    return type_descriptor("intersection", null, descriptors);
 }
 
 fn type_descriptor_array(inner -> TypeDescriptor) -> TypeDescriptor {
-return type_descriptor("array", null, [inner]);
+    return type_descriptor("array", null, [inner]);
 }
 
 fn type_descriptor_function() -> TypeDescriptor {
-return type_descriptor("function", null, []);
+    return type_descriptor("function", null, []);
 }
 
 fn type_descriptor_named(name -> string) -> TypeDescriptor {
-return type_descriptor("named", name, []);
+    return type_descriptor("named", name, []);
 }
 
 fn type_descriptor_unknown() -> TypeDescriptor {
-return type_descriptor("unknown", null, []);
+    return type_descriptor("unknown", null, []);
 }
 
 fn descriptor_trim(value -> string) -> string {
-let mut start = 0;
-let mut end = value.length;
-loop {
-if start >= end {
-break;
-}
-let ch = value[start];
-if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
-start = start + 1;
-continue;
-}
-break;
-}
-loop {
-if end <= start {
-break;
-}
-let ch = value[end - 1];
-if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
-end = end - 1;
-continue;
-}
-break;
-}
-return substring(value, start, end);
+    let mut start = 0;
+    let mut end = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+            start = start + 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+            end = end - 1;
+            continue;
+        }
+        break;
+    }
+    return substring(value, start, end);
 }
 
 fn string_starts_with(value -> string, prefix -> string) -> boolean {
-if prefix.length > value.length {
-return false;
-}
-let mut index = 0;
-loop {
-if index >= prefix.length {
-break;
-}
-if value[index] != prefix[index] {
-return false;
-}
-index = index + 1;
-}
-return true;
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
 }
 
 fn string_ends_with(value -> string, suffix -> string) -> boolean {
-if suffix.length > value.length {
-return false;
-}
-let mut offset = value.length - suffix.length;
-let mut index = 0;
-loop {
-if index >= suffix.length {
-break;
-}
-if value[offset + index] != suffix[index] {
-return false;
-}
-index = index + 1;
-}
-return true;
+    if suffix.length > value.length {
+        return false;
+    }
+    let mut offset = value.length - suffix.length;
+    let mut index = 0;
+    loop {
+    if index >= suffix.length {
+    break;
+    }
+    if value[offset + index] != suffix[index] {
+    return false;
+    }
+    index = index + 1;
+    }
+    return true;
 }
 
 fn descriptor_find_top_level(value -> string, needle -> string) -> number {

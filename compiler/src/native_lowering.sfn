@@ -9,186 +9,208 @@ import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInst
 import { substring, char_code } from "./string_utils";
 
 struct LoweredPythonResult {
-source -> string;
-diagnostics -> string[];
+    source -> string;
+    diagnostics -> string[];
 }
 
 struct MatchContext {
-subject_name -> string;
-case_index -> number;
-has_active_case -> boolean;
+    subject_name -> string;
+    case_index -> number;
+    has_active_case -> boolean;
 }
 
 struct LoweredCaseCondition {
-condition -> string;
-is_default -> boolean;
-has_guard -> boolean;
+    condition -> string;
+    is_default -> boolean;
+    has_guard -> boolean;
 }
 
 struct PythonModuleEmission {
-builder -> PythonBuilder;
-diagnostics -> string[];
+    builder -> PythonBuilder;
+    diagnostics -> string[];
 }
 
 struct PythonFunctionEmission {
-builder -> PythonBuilder;
-diagnostics -> string[];
+    builder -> PythonBuilder;
+    diagnostics -> string[];
 }
 
 struct PythonImportEmission {
-builder -> PythonBuilder;
-exports -> string[];
+    builder -> PythonBuilder;
+    exports -> string[];
 }
 
 struct StructLiteralCapture {
-expression -> string;
-consumed -> number;
-success -> boolean;
+    expression -> string;
+    consumed -> number;
+    success -> boolean;
 }
 
 struct ExpressionContinuationCapture {
-expression -> string;
-consumed -> number;
-success -> boolean;
+    expression -> string;
+    consumed -> number;
+    success -> boolean;
 }
 
 struct ExtractedSpan {
-value -> string;
-start -> number;
-end -> number;
-success -> boolean;
+    value -> string;
+    start -> number;
+    end -> number;
+    success -> boolean;
 }
 
 fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
-let mut diagnostics -> string[] = [];
-let artifact = select_text_artifact(native_module.artifacts);
-if artifact == null {
-diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
-return LoweredPythonResult { source: "", diagnostics: diagnostics };
-}
-let parse = parse_native_artifact(artifact.contents);
-diagnostics = diagnostics.concat(parse.diagnostics);
-let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings);
-diagnostics = diagnostics.concat(module.diagnostics);
-let python_source = builder_to_string(module.builder);
-return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
+    let mut diagnostics -> string[] = [];
+    let artifact = select_text_artifact(native_module.artifacts);
+
+    if artifact == null {
+        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        return LoweredPythonResult { source: "", diagnostics: diagnostics };
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    diagnostics = diagnostics.concat(parse.diagnostics);
+
+    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings);
+    diagnostics = diagnostics.concat(module.diagnostics);
+
+    let python_source = builder_to_string(module.builder);
+    return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
 }
 fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[], bindings -> NativeBinding[]) -> PythonModuleEmission {
-let mut builder -> PythonBuilder = builder_new();
-let mut diagnostics -> string[] = [];
-builder = builder_emit(builder, "import asyncio");
-builder = builder_emit(builder, "from runtime import runtime_support as runtime");
-let mut export_names -> string[] = [];
-if imports.length > 0 {
-builder = builder_emit_blank(builder);
-let import_emission = emit_python_imports(builder, imports);
-builder = import_emission.builder;
-export_names = import_emission.exports;
-}
-builder = builder_emit_blank(builder);
-builder = emit_runtime_aliases(builder);
-if bindings.length > 0 {
-builder = builder_emit_blank(builder);
-builder = emit_top_level_bindings(builder, bindings);
-}
-if enums.length > 0 {
-builder = builder_emit_blank(builder);
-builder = emit_enum_definitions(builder, enums);
-}
-if structs.length > 0 {
-builder = builder_emit_blank(builder);
-builder = emit_struct_definitions(builder, structs);
-}
-builder = builder_emit_blank(builder);
+    
+    let mut builder -> PythonBuilder = builder_new();
+    let mut diagnostics -> string[] = [];
 
-let mut index -> number = 0;
-loop {
-if index >= functions.length {
-break;
-}
-let emission = emit_python_function(builder, functions[index]);
-builder = emission.builder;
-diagnostics = diagnostics.concat(emission.diagnostics);
-if index + 1 < functions.length {
-builder = builder_emit_blank(builder);
-}
-index += 1;
-}
+    builder = builder_emit(builder, "import asyncio");
+    builder = builder_emit(builder, "from runtime import runtime_support as runtime");
 
-if export_names.length > 0 {
-builder = builder_emit_blank(builder);
-builder = emit_export_list(builder, export_names);
-}
+    let mut export_names -> string[] = [];
+    if imports.length > 0 {
+        builder = builder_emit_blank(builder);
+        let import_emission = emit_python_imports(builder, imports);
+        builder = import_emission.builder;
+        export_names = import_emission.exports;
+    }
 
-return PythonModuleEmission { builder: builder, diagnostics: diagnostics };
+    builder = builder_emit_blank(builder);
+    builder = emit_runtime_aliases(builder);
+
+    if bindings.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_top_level_bindings(builder, bindings);
+    }
+
+    if enums.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_enum_definitions(builder, enums);
+    }
+
+    if structs.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_struct_definitions(builder, structs);
+    }
+
+    builder = builder_emit_blank(builder);
+
+    let mut index -> number = 0;
+
+    loop {
+        if index >= functions.length {
+            break;
+        }
+
+        let emission = emit_python_function(builder, functions[index]);
+        builder = emission.builder;
+        diagnostics = diagnostics.concat(emission.diagnostics);
+
+        if index + 1 < functions.length {
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    if export_names.length > 0 {
+        builder = builder_emit_blank(builder);
+        builder = emit_export_list(builder, export_names);
+    }
+
+    return PythonModuleEmission { builder: builder, diagnostics: diagnostics };
 }
 
 fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder {
-let mut current = builder;
-current = builder_emit(current, "print = runtime.console");
-current = builder_emit(current, "sleep = runtime.sleep");
-current = builder_emit(current, "channel = runtime.channel");
-current = builder_emit(current, "parallel = runtime.parallel");
-current = builder_emit(current, "spawn = runtime.spawn");
-current = builder_emit(current, "fs = runtime.fs");
-current = builder_emit(current, "serve = runtime.serve");
-current = builder_emit(current, "http = runtime.http");
-current = builder_emit(current, "websocket = runtime.websocket");
-current = builder_emit(current, "logExecution = runtime.logExecution");
-current = builder_emit(current, "array_map = runtime.array_map");
-current = builder_emit(current, "array_filter = runtime.array_filter");
-current = builder_emit(current, "array_reduce = runtime.array_reduce");
-current = builder_emit(current, "globals()['t' + 'rue'] = True");
-current = builder_emit(current, "globals()['f' + 'alse'] = False");
-return current;
+    let mut current = builder;
+
+    current = builder_emit(current, "print = runtime.console");
+    current = builder_emit(current, "sleep = runtime.sleep");
+    current = builder_emit(current, "channel = runtime.channel");
+    current = builder_emit(current, "parallel = runtime.parallel");
+    current = builder_emit(current, "spawn = runtime.spawn");
+    current = builder_emit(current, "fs = runtime.fs");
+    current = builder_emit(current, "serve = runtime.serve");
+    current = builder_emit(current, "http = runtime.http");
+    current = builder_emit(current, "websocket = runtime.websocket");
+    current = builder_emit(current, "logExecution = runtime.logExecution");
+    current = builder_emit(current, "array_map = runtime.array_map");
+    current = builder_emit(current, "array_filter = runtime.array_filter");
+    current = builder_emit(current, "array_reduce = runtime.array_reduce");
+    current = builder_emit(current, "globals()['t' + 'rue'] = True");
+    current = builder_emit(current, "globals()['f' + 'alse'] = False");
+
+    return current;
 }
 
 fn emit_top_level_bindings(builder -> PythonBuilder, bindings -> NativeBinding[]) -> PythonBuilder {
-let mut current = builder;
-let mut index -> number = 0;
-loop {
-if index >= bindings.length {
-break;
-}
-let binding = bindings[index];
-let name = sanitize_identifier(binding.name);
-let mut line -> string = name + " = ";
-if binding.value != null {
-let mut value_text -> string = binding.value;
-line = line + lower_expression(value_text);
-} else {
-line = line + "None";
-}
-current = builder_emit(current, line);
-index += 1;
-}
-return current;
+    let mut current = builder;
+    let mut index -> number = 0;
+
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+
+        let binding = bindings[index];
+        let name = sanitize_identifier(binding.name);
+        let mut line -> string = name + " = ";
+
+        if binding.value != null {
+            let mut value_text -> string = binding.value;
+            line = line + lower_expression(value_text);
+        } else {
+            line = line + "None";
+        }
+        current = builder_emit(current, line);
+        index += 1;
+    }
+
+    return current;
 }
 
 fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> PythonImportEmission {
-let mut current = builder;
-let mut exports -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= imports.length {
-break;
-}
-let entry = imports[index];
-if entry.kind == "export" {
-exports = collect_export_names(exports, entry.specifiers);
-let module_text = trim_text(entry.module);
-if module_text.length == 0 {
-index += 1;
-continue;
-}
-}
-let line = render_python_import(entry);
-if line.length > 0 {
-current = builder_emit(current, line);
-}
-index += 1;
-}
-return PythonImportEmission { builder: current, exports: exports };
+    let mut current = builder;
+    let mut exports -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        let entry = imports[index];
+        if entry.kind == "export" {
+            exports = collect_export_names(exports, entry.specifiers);
+            let module_text = trim_text(entry.module);
+            if module_text.length == 0 {
+                index += 1;
+                continue;
+            }
+        }
+        let line = render_python_import(entry);
+        if line.length > 0 {
+            current = builder_emit(current, line);
+        }
+        index += 1;
+    }
+
+    return PythonImportEmission { builder: current, exports: exports };
 }
 
 fn emit_enum_definitions(builder -> PythonBuilder, enums -> NativeEnum[]) -> PythonBuilder {
