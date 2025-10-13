@@ -135,9 +135,11 @@ roadmaps.
   calls. Block emission preserves local `let` declarations, loops,
   `if`/`else if`/`else` chains, and `match` statements so compiler sources
   round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
-  feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` continues to
-  translate return-only functions into skeletal LLVM IR, providing the first
-  foothold toward real machine-code emission.
+  feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` now lifts
+  pure numeric routines into runnable LLVM IR (arithmetic expressions, local
+  `let`s, and intra-module calls), with
+  `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
+  `llvmlite` as a smoke guard.
 
 **Package Manager (`sfn`)**
 - Bootstrap: Not implemented yet.
@@ -149,6 +151,9 @@ roadmaps.
 - `make test` runs the stage1-focused pytest suite (`compiler/tests/`), covering
   the end-to-end self-host check (`test_stage1_artifact.py`) and native lowering
   validation.
+- `compiler/tests/test_native_llvm_execution.py` lowers a numeric sample to LLVM
+  IR and executes it through `llvmlite` so Stage2 regressions surface as
+  standard test failures.
 - CI packages the stage1 artifact, uploads it, and semantic-release tags a
   GitHub release. The installer smoke test verifies the archive can rebuild
   stage1 (`scripts/install_stage1.py`).

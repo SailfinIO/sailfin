@@ -35,6 +35,29 @@ struct ParameterPreparation {
     diagnostics -> string[];
 }
 
+struct LLVMOperand {
+    llvm_type -> string;
+    value -> string;
+}
+
+struct ExpressionResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+struct LocalBinding {
+    name -> string;
+    operand -> LLVMOperand;
+}
+
+struct OperatorMatch {
+    index -> number;
+    symbol -> string;
+    success -> boolean;
+}
+
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
@@ -56,7 +79,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         if index >= parse.functions.length {
             break;
         }
-        let lowered = emit_function(parse.functions[index]);
+    let lowered = emit_function(parse.functions[index], parse.functions);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         if lowered.lines.length > 0 {
             lines = lines.concat(lowered.lines);
@@ -75,7 +98,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     return LoweredLLVMResult { ir: output, diagnostics: diagnostics };
 }
 
-fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[]) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
     let llvm_return = map_return_type(function.return_type);
@@ -95,7 +118,7 @@ fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
     lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, "entry:");
 
-    let body = emit_body(function, llvm_return, preparation.bindings);
+    let body = emit_body(function, llvm_return, preparation.bindings, functions);
     lines = lines.concat(body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
     lines = append_string(lines, "}");
@@ -103,30 +126,85 @@ fn emit_function(function -> NativeFunction) -> LoweredLLVMFunction {
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics };
 }
 
-fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[]) -> BodyResult {
+fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[]) -> BodyResult {
     let mut diagnostics -> string[] = [];
     let mut lines -> string[] = [];
-
-    let mut expression_instructions -> number = 0;
+    let mut locals -> LocalBinding[] = [];
+    let mut temp_index -> number = 0;
+    let mut encountered_return -> boolean = false;
     let mut index -> number = 0;
     loop {
         if index >= function.instructions.length {
             break;
         }
         let instruction = function.instructions[index];
-        if instruction.variant == "Expression" {
-            expression_instructions += 1;
+        if instruction.variant == "Let" {
+            if instruction.value == null || instruction.value.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
+            } else {
+                let lowered = lower_expression(instruction.value, bindings, locals, temp_index, lines, functions);
+                diagnostics = diagnostics.concat(lowered.diagnostics);
+                lines = lowered.lines;
+                temp_index = lowered.temp_index;
+                if lowered.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to materialize value for `" + instruction.name + "` in `" + function.name + "`");
+                } else {
+                    locals = upsert_local_binding(locals, instruction.name, lowered.operand);
+                }
+            }
+        } else if instruction.variant == "Expression" {
+            let lowered = lower_expression(instruction.expression, bindings, locals, temp_index, lines, functions);
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            lines = lowered.lines;
+            temp_index = lowered.temp_index;
+        } else if instruction.variant == "Return" {
+            encountered_return = true;
+            if instruction.expression == null || instruction.expression.length == 0 {
+                if llvm_return == "void" {
+                    lines = append_string(lines, "  ret void");
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
+                    lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+                }
+            } else {
+                let lowered = lower_expression(instruction.expression, bindings, locals, temp_index, lines, functions);
+                diagnostics = diagnostics.concat(lowered.diagnostics);
+                lines = lowered.lines;
+                temp_index = lowered.temp_index;
+                if lowered.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
+                    lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+                } else if llvm_return == "void" {
+                    diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
+                    lines = append_string(lines, "  ret void");
+                } else if lowered.operand.llvm_type != llvm_return {
+                    diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches expression type `" + lowered.operand.llvm_type + "` in `" + function.name + "`");
+                    lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+                } else {
+                    lines = append_string(lines, "  ret " + lowered.operand.llvm_type + " " + lowered.operand.value);
+                }
+            }
+            index += 1;
+            if index < function.instructions.length {
+                diagnostics = append_string(diagnostics, "llvm lowering: instructions after return ignored in `" + function.name + "`");
+            }
+            break;
+        } else if instruction.variant == "Noop" {
+            // ignore placeholder instruction
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: unsupported instruction `" + instruction.variant + "` in `" + function.name + "`");
         }
         index += 1;
     }
-    if expression_instructions > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: expression instructions are ignored in " + function.name);
-    }
 
-    let return_expression = select_return_expression(function.instructions);
-    let lowered = lower_return_instruction(function, llvm_return, return_expression, bindings);
-    lines = lines.concat(lowered.lines);
-    diagnostics = diagnostics.concat(lowered.diagnostics);
+    if !encountered_return {
+        if llvm_return == "void" {
+            lines = append_string(lines, "  ret void");
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: missing return in function `" + function.name + "`");
+            lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        }
+    }
 
     return BodyResult { lines: lines, diagnostics: diagnostics };
 }
@@ -160,64 +238,6 @@ fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
         index += 1;
     }
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
-}
-
-fn select_return_expression(instructions -> NativeInstruction[]) -> string? {
-    let mut index -> number = instructions.length;
-    loop {
-        if index <= 0 {
-            break;
-        }
-        index -= 1;
-        let instruction = instructions[index];
-        if instruction.variant == "Return" {
-            return instruction.expression;
-        }
-    }
-    return null;
-}
-
-fn lower_return_instruction(function -> NativeFunction, llvm_return -> string, expression -> string?, bindings -> ParameterBinding[]) -> BodyResult {
-    let function_name = function.name;
-    if llvm_return == "void" {
-        if expression != null && expression.length > 0 {
-            let diagnostics = ["llvm lowering: void function `" + function_name + "` returned a value"];
-            return BodyResult { lines: ["  ret void"], diagnostics: diagnostics };
-        }
-        return BodyResult { lines: ["  ret void"], diagnostics: [] };
-    }
-
-    if expression == null {
-        let diagnostics = ["llvm lowering: missing return in function `" + function_name + "`"];
-        return BodyResult { lines: ["  ret " + llvm_return + " 0.0"], diagnostics: diagnostics };
-    }
-
-    let trimmed = trim_text(expression);
-    if trimmed.length == 0 {
-        let diagnostics = ["llvm lowering: empty return expression in `" + function_name + "`"];
-        return BodyResult { lines: ["  ret " + llvm_return + " 0.0"], diagnostics: diagnostics };
-    }
-
-    let binding = find_parameter_binding(bindings, trimmed);
-    if binding != null {
-        let mut diagnostics -> string[] = [];
-        if binding.llvm_type != llvm_return {
-            diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches parameter `" + binding.name + "` of type `" + binding.llvm_type + "`");
-        }
-        return BodyResult { lines: ["  ret " + binding.llvm_type + " " + binding.llvm_name], diagnostics: diagnostics };
-    }
-
-    if llvm_return == "double" {
-        if is_number_literal(trimmed) {
-            let normalised = normalise_number_literal(trimmed);
-            return BodyResult { lines: ["  ret double " + normalised], diagnostics: [] };
-        }
-        let diagnostics = ["llvm lowering: non-numeric return expression `" + trimmed + "` in `" + function_name + "`"];
-        return BodyResult { lines: ["  ret double 0.0"], diagnostics: diagnostics };
-    }
-
-    let diagnostics = ["llvm lowering: unhandled return type `" + llvm_return + "` in `" + function_name + "`"];
-    return BodyResult { lines: ["  ret " + llvm_return + " zeroinitializer"], diagnostics: diagnostics };
 }
 
 fn map_return_type(return_type -> string) -> string {
@@ -255,6 +275,529 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
         index += 1;
     }
     return null;
+}
+
+fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+    let trimmed = trim_text(expression);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: empty expression encountered");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let stripped = strip_enclosing_parentheses(trimmed);
+    if stripped != trimmed {
+        return lower_expression(stripped, bindings, locals, temp_index, lines, functions);
+    }
+
+    let additive = find_top_level_operator(stripped, "+-");
+    if additive.success {
+        return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions);
+    }
+
+    let multiplicative = find_top_level_operator(stripped, "*/");
+    if multiplicative.success {
+        return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions);
+    }
+
+    let call_index = find_call_site(stripped);
+    if call_index >= 0 && stripped[stripped.length - 1] == ")" {
+        let target = trim_text(substring(stripped, 0, call_index));
+        let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
+        let argument_entries = split_call_arguments(arguments_text);
+        return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions);
+    }
+
+    let parameter = find_parameter_binding(bindings, stripped);
+    if parameter != null {
+        let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    let local = find_local_binding(locals, stripped);
+    if local != null {
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: local, diagnostics: diagnostics };
+    }
+
+    if is_number_literal(stripped) {
+        let normalised = normalise_number_literal(stripped);
+        let operand = LLVMOperand { llvm_type: "double", value: normalised };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + stripped + "`");
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+}
+
+fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+    let left_text = trim_text(substring(expression, 0, match.index));
+    let right_text = trim_text(substring(expression, match.index + 1, expression.length));
+    let mut diagnostics -> string[] = [];
+    if left_text.length == 0 || right_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed binary expression `" + expression + "`");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions);
+    diagnostics = diagnostics.concat(left_result.diagnostics);
+    if left_result.operand == null {
+        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions);
+    diagnostics = diagnostics.concat(right_result.diagnostics);
+    if right_result.operand == null {
+        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let left_operand = left_result.operand;
+    let right_operand = right_result.operand;
+    if left_operand.llvm_type != right_operand.llvm_type {
+        diagnostics = append_string(diagnostics, "llvm lowering: type mismatch in binary expression `" + expression + "`");
+    }
+
+    let operation = operation_name_for_symbol(match.symbol, left_operand.llvm_type);
+    let temp_name = format_temp_name(right_result.temp_index);
+    let line = "  " + temp_name + " = " + operation + " " + left_operand.llvm_type + " " + left_operand.value + ", " + right_operand.value;
+    let updated_lines = append_string(right_result.lines, line);
+    let operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: temp_name };
+    return ExpressionResult { lines: updated_lines, temp_index: right_result.temp_index + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+    let mut diagnostics -> string[] = [];
+    let trimmed_target = trim_text(target);
+    if trimmed_target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let mut current_lines = lines;
+    let mut current_temp -> number = temp_index;
+    let mut operands -> LLVMOperand[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= arguments.length {
+            break;
+        }
+        let argument_text = trim_text(arguments[index]);
+        if argument_text.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
+        }
+        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions);
+        diagnostics = diagnostics.concat(lowered.diagnostics);
+        current_lines = lowered.lines;
+        current_temp = lowered.temp_index;
+        if lowered.operand != null {
+            operands = append_llvm_operand(operands, lowered.operand);
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+        }
+        index += 1;
+    }
+
+    if operands.length != arguments.length {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    let mut llvm_return -> string = "double";
+    let mut expected_params -> string[] = [];
+    let function_entry = find_function_by_name(functions, trimmed_target);
+    if function_entry != null {
+        llvm_return = map_return_type(function_entry.return_type);
+        if llvm_return.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+            llvm_return = "double";
+        }
+        expected_params = collect_parameter_types(function_entry.parameters);
+        if expected_params.length != operands.length {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
+        } else {
+            let mut type_index -> number = 0;
+            loop {
+                if type_index >= operands.length {
+                    break;
+                }
+                if expected_params[type_index] != operands[type_index].llvm_type {
+                    diagnostics = append_string(diagnostics, "llvm lowering: argument " + number_to_string(type_index) + " for call to `" + trimmed_target + "` has type `" + operands[type_index].llvm_type + "` but expected `" + expected_params[type_index] + "`");
+                }
+                type_index += 1;
+            }
+        }
+    } else {
+        diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+    }
+
+    let mut rendered_args -> string[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        rendered_args = append_string(rendered_args, format_typed_operand(operands[index]));
+        index += 1;
+    }
+    let argument_text = join_with_separator(rendered_args, ", ");
+    let sanitized_name = sanitize_symbol(trimmed_target);
+    if llvm_return == "void" {
+        let call_line = "  call void @" + sanitized_name + "(" + argument_text + ")";
+        current_lines = append_string(current_lines, call_line);
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    let temp_name = format_temp_name(current_temp);
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + sanitized_name + "(" + argument_text + ")";
+    current_lines = append_string(current_lines, call_line);
+    let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn collect_parameter_types(parameters -> NativeParameter[]) -> string[] {
+    let mut types -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let llvm_type = map_parameter_type(parameters[index].type_annotation);
+        if llvm_type.length == 0 {
+            types = append_string(types, "double");
+        } else {
+            types = append_string(types, llvm_type);
+        }
+        index += 1;
+    }
+    return types;
+}
+
+fn strip_enclosing_parentheses(expression -> string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length < 2 {
+        return trimmed;
+    }
+    if trimmed[0] != "(" || trimmed[trimmed.length - 1] != ")" {
+        return trimmed;
+    }
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "(" {
+            depth += 1;
+        } else if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                if index == trimmed.length - 1 {
+                    let inner = substring(trimmed, 1, trimmed.length - 1);
+                    return strip_enclosing_parentheses(inner);
+                }
+                return trimmed;
+            }
+        }
+        index += 1;
+    }
+    return trimmed;
+}
+
+fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch {
+    let mut depth -> number = 0;
+    let mut index -> number = expression.length;
+    loop {
+        if index <= 0 {
+            break;
+        }
+        index -= 1;
+        let ch = expression[index];
+        if ch == ")" {
+            depth += 1;
+            continue;
+        }
+        if ch == "(" {
+            if depth > 0 {
+                depth -= 1;
+                continue;
+            }
+        }
+        if depth > 0 {
+            continue;
+        }
+        if contains_char(operators, ch) {
+            if ch == "-" {
+                if !is_binary_minus(expression, index) {
+                    continue;
+                }
+            }
+            return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
+        }
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn contains_char(set -> string, ch -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= set.length {
+            break;
+        }
+        if set[index] == ch {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn is_binary_minus(expression -> string, index -> number) -> boolean {
+    let previous = find_previous_non_space_char(expression, index);
+    let next = find_next_non_space_char(expression, index);
+    if previous == null {
+        return false;
+    }
+    let prev_char = previous;
+    if prev_char == "+" || prev_char == "-" || prev_char == "*" || prev_char == "/" || prev_char == "(" || prev_char == "," {
+        return false;
+    }
+    if next == null {
+        return false;
+    }
+    let next_char = next;
+    if next_char == "+" || next_char == "-" || next_char == "*" || next_char == "/" || next_char == ")" || next_char == "," {
+        return false;
+    }
+    return true;
+}
+
+fn find_previous_non_space_char(value -> string, index -> number) -> string? {
+    let mut position -> number = index;
+    loop {
+        if position <= 0 {
+            break;
+        }
+        position -= 1;
+        let ch = value[position];
+        if !is_trim_char(ch) {
+            return ch;
+        }
+    }
+    return null;
+}
+
+fn find_next_non_space_char(value -> string, index -> number) -> string? {
+    let mut position -> number = index + 1;
+    loop {
+        if position >= value.length {
+            break;
+        }
+        let ch = value[position];
+        if !is_trim_char(ch) {
+            return ch;
+        }
+        position += 1;
+    }
+    return null;
+}
+
+fn find_call_site(expression -> string) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "(" {
+            if depth == 0 {
+                return index;
+            }
+            depth += 1;
+        } else if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn split_call_arguments(text -> string) -> string[] {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "," && depth == 0 {
+            entries = append_string(entries, trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    entries = append_string(entries, trim_text(current));
+    return entries;
+}
+
+fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
+    if llvm_type == "double" {
+        if symbol == "+" {
+            return "fadd";
+        }
+        if symbol == "-" {
+            return "fsub";
+        }
+        if symbol == "*" {
+            return "fmul";
+        }
+        if symbol == "/" {
+            return "fdiv";
+        }
+    }
+    if symbol == "+" {
+        return "add";
+    }
+    if symbol == "-" {
+        return "sub";
+    }
+    if symbol == "*" {
+        return "mul";
+    }
+    if symbol == "/" {
+        return "sdiv";
+    }
+    return "add";
+}
+
+fn format_temp_name(index -> number) -> string {
+    return "%t" + number_to_string(index);
+}
+
+fn format_typed_operand(operand -> LLVMOperand) -> string {
+    return operand.llvm_type + " " + operand.value;
+}
+
+fn default_return_literal(llvm_type -> string) -> string {
+    if llvm_type == "double" {
+        return "0.0";
+    }
+    if llvm_type == "i32" {
+        return "0";
+    }
+    if llvm_type == "i64" {
+        return "0";
+    }
+    if llvm_type == "i1" {
+        return "0";
+    }
+    return "zeroinitializer";
+}
+
+fn find_local_binding(locals -> LocalBinding[], name -> string) -> LLVMOperand? {
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            return entry.operand;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn upsert_local_binding(locals -> LocalBinding[], name -> string, operand -> LLVMOperand) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut replaced -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            result = append_local_binding(result, LocalBinding { name: name, operand: operand });
+            replaced = true;
+        } else {
+            result = append_local_binding(result, entry);
+        }
+        index += 1;
+    }
+    if !replaced {
+        result = append_local_binding(result, LocalBinding { name: name, operand: operand });
+    }
+    return result;
+}
+
+fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {
+    return values.concat([value]);
+}
+
+fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[] {
+    return values.concat([value]);
+}
+
+fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction? {
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        if functions[index].name == name {
+            return functions[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn number_to_string(value -> number) -> string {
+    if value == 0 {
+        return "0";
+    }
+    let digits = "0123456789";
+    let mut remaining -> number = value;
+    let mut output -> string = "";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let digit = temp;
+        let ch = substring(digits, digit, digit + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
 }
 
 fn sanitize_symbol(name -> string) -> string {

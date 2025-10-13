@@ -10,7 +10,9 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Stage2 Backend Delivery**
-  - [ ] Extend `.sfn-asm` lowering to emit runnable LLVM IR / WASM modules and execute smoke binaries via CI.
+  - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR / WASM modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
+  - [ ] Lower conditionals, loops, and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend.
+  - [ ] Prototype WebAssembly emission from `.sfn-asm` so parity with the LLVM path can be validated via the same smoke harness.
   - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
   - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
 
