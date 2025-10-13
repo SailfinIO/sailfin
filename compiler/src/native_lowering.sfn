@@ -221,85 +221,85 @@ fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> P
 }
 
 fn emit_enum_definitions(builder -> PythonBuilder, enums -> NativeEnum[]) -> PythonBuilder {
-let mut current = builder;
-let mut index -> number = 0;
-loop {
-if index >= enums.length {
-break;
-}
-current = emit_single_enum(current, enums[index]);
-if index + 1 < enums.length {
-current = builder_emit_blank(current);
-}
-index += 1;
-}
-return current;
+    let mut current = builder;
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        current = emit_single_enum(current, enums[index]);
+        if index + 1 < enums.length {
+            current = builder_emit_blank(current);
+        }
+        index += 1;
+    }
+    return current;
 }
 
 fn emit_single_enum(builder -> PythonBuilder, definition -> NativeEnum) -> PythonBuilder {
-let enum_name = sanitize_identifier(definition.name);
-let mut current = builder_emit(builder, enum_name + " = runtime.enum_type('" + enum_name + "')");
-let mut index -> number = 0;
-loop {
-if index >= definition.variants.length {
-break;
-}
-let variant = definition.variants[index];
-let variant_name = sanitize_identifier(variant.name);
-let variant_line = enum_name + " = runtime.enum_define_variant(" + enum_name + ", '" + variant_name + "', [" + render_enum_variant_fields(variant.fields) + "])";
-current = builder_emit(current, variant_line);
-index += 1;
-}
-return current;
+    let enum_name = sanitize_identifier(definition.name);
+    let mut current = builder_emit(builder, enum_name + " = runtime.enum_type('" + enum_name + "')");
+    let mut index -> number = 0;
+    loop {
+        if index >= definition.variants.length {
+            break;
+        }
+        let variant = definition.variants[index];
+        let variant_name = sanitize_identifier(variant.name);
+        let variant_line = enum_name + " = runtime.enum_define_variant(" + enum_name + ", '" + variant_name + "', [" + render_enum_variant_fields(variant.fields) + "])";
+        current = builder_emit(current, variant_line);
+        index += 1;
+    }
+    return current;
 }
 
 fn render_enum_variant_fields(fields -> NativeEnumVariantField[]) -> string {
-if fields.length == 0 {
-return "";
-}
-let mut rendered -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= fields.length {
-break;
-}
-rendered = append_string(rendered, "'" + sanitize_identifier(fields[index].name) + "'");
-index += 1;
-}
-return join_with_separator(rendered, ", ");
+    if fields.length == 0 {
+        return "";
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        rendered = append_string(rendered, "'" + sanitize_identifier(fields[index].name) + "'");
+        index += 1;
+    }
+    return join_with_separator(rendered, ", ");
 }
 
 fn render_python_import(entry -> NativeImport) -> string {
-let module_path = normalize_import_module(entry.module);
-if module_path.length == 0 {
-return "";
-}
-if entry.specifiers.length == 0 {
-return "import " + module_path;
-}
-let rendered = render_python_specifiers(entry.specifiers);
-return "from " + module_path + " import " + rendered;
+    let module_path = normalize_import_module(entry.module);
+    if module_path.length == 0 {
+        return "";
+    }
+    if entry.specifiers.length == 0 {
+        return "import " + module_path;
+    }
+    let rendered = render_python_specifiers(entry.specifiers);
+        return "from " + module_path + " import " + rendered;
 }
 
 fn render_python_specifiers(specifiers -> NativeImportSpecifier[]) -> string {
-let mut parts -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= specifiers.length {
-break;
-}
-parts = append_string(parts, render_python_specifier(specifiers[index]));
-index += 1;
-}
-return join_with_separator(parts, ", ");
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts = append_string(parts, render_python_specifier(specifiers[index]));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
 }
 
 fn render_python_specifier(specifier -> NativeImportSpecifier) -> string {
-let base = sanitize_identifier(specifier.name);
-if specifier.alias == null || specifier.alias.length == 0 {
-return base;
-}
-return base + " as " + sanitize_identifier(specifier.alias);
+    let base = sanitize_identifier(specifier.name);
+    if specifier.alias == null || specifier.alias.length == 0 {
+        return base;
+    }
+    return base + " as " + sanitize_identifier(specifier.alias);
 }
 
 fn normalize_import_module(path -> string) -> string {
@@ -1456,75 +1456,75 @@ return entries;
 }
 
 fn trim_trailing_delimiters(text -> string) -> string {
-let mut end -> number = text.length;
-loop {
-if end <= 0 {
-break;
-}
-let ch = text[end - 1];
-if ch == "," || ch == ";" {
-end -= 1;
-continue;
-}
-break;
-}
-if end == text.length {
-return text;
-}
-return substring(text, 0, end);
+    let mut end -> number = text.length;
+    loop {
+        if end <= 0 {
+            break;
+        }
+        let ch = text[end - 1];
+        if ch == "," || ch == ";" {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if end == text.length {
+        return text;
+    }
+    return substring(text, 0, end);
 }
 
 fn index_of(value -> string, target -> string) -> number {
-if target.length == 0 {
-return 0;
-}
-let mut index -> number = 0;
-loop {
-if index + target.length > value.length {
-break;
-}
-let mut match_index -> number = 0;
-let mut matches -> boolean = true;
-loop {
-if match_index >= target.length {
-break;
-}
-if value[index + match_index] != target[match_index] {
-matches = false;
-break;
-}
-match_index += 1;
-}
-if matches {
-return index;
-}
-index += 1;
-}
-return -1;
+    if target.length == 0 {
+        return 0;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + target.length > value.length {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if value[index + match_index] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
 }
 
 fn find_matching_brace(text -> string, open_index -> number) -> number {
-let mut depth -> number = 0;
-let mut index -> number = open_index;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "{" {
-depth += 1;
-} else if ch == "}" {
-if depth <= 0 {
-return -1;
-}
-depth -= 1;
-if depth == 0 {
-return index;
-}
-}
-index += 1;
-}
-return -1;
+    let mut depth -> number = 0;
+    let mut index -> number = open_index;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" {
+            depth += 1;
+        } else if ch == "}" {
+            if depth <= 0 {
+                return -1;
+            }
+            depth -= 1;
+            if depth == 0 {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
 }
 
 fn find_substring_from(value -> string, pattern -> string, start -> number) -> number {
@@ -1822,7 +1822,7 @@ return result;
 }
 
 fn generate_match_subject_name(counter -> number) -> string {
-return "__match_value_" + number_to_string(counter);
+    return "__match_value_" + number_to_string(counter);
 }
 
 fn lower_match_case_condition(subject_name -> string, pattern -> string, guard -> string?) -> LoweredCaseCondition {
@@ -1853,192 +1853,192 @@ return LoweredCaseCondition { condition: condition, is_default: false, has_guard
 }
 
 fn number_to_string(value -> number) -> string {
-if value == 0 {
-return "0";
-}
-let digits = "0123456789";
-let mut remaining -> number = value;
-let mut output -> string = "";
-loop {
-if remaining <= 0 {
-break;
-}
-let mut temp -> number = remaining;
-let mut quotient -> number = 0;
-loop {
-if temp < 10 {
-break;
-}
-temp -= 10;
-quotient += 1;
-}
-let digit = temp;
-let ch = substring(digits, digit, digit + 1);
-output = ch + output;
-remaining = quotient;
-}
-return output;
+    if value == 0 {
+        return "0";
+    }
+    let digits = "0123456789";
+    let mut remaining -> number = value;
+    let mut output -> string = "";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let digit = temp;
+        let ch = substring(digits, digit, digit + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
 }
 
 fn render_python_parameters(parameters -> NativeParameter[]) -> string[] {
-if parameters.length == 0 {
-return [];
-}
-let mut rendered -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= parameters.length {
-break;
-}
-let parameter = parameters[index];
-let mut entry -> string = parameter.name;
-if parameter.default_value != null {
-entry = entry + " = " + parameter.default_value;
-}
-rendered = append_string(rendered, entry);
-index += 1;
-}
-return rendered;
+    if parameters.length == 0 {
+        return [];
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = parameter.name;
+        if parameter.default_value != null {
+            entry = entry + " = " + parameter.default_value;
+        }
+        rendered = append_string(rendered, entry);
+        index += 1;
+    }
+    return rendered;
 }
 
 struct PythonBuilder {
-lines -> string[];
-indent -> number;
+    lines -> string[];
+    indent -> number;
 }
 
 fn builder_new() -> PythonBuilder {
-return PythonBuilder { lines: [], indent: 0 };
+    return PythonBuilder { lines: [], indent: 0 };
 }
 
 fn builder_emit(builder -> PythonBuilder, line -> string) -> PythonBuilder {
-if line.length == 0 {
-return builder_emit_blank(builder);
-}
-let mut prefix -> string = "";
-let mut count -> number = 0;
-loop {
-if count >= builder.indent {
-break;
-}
-prefix = prefix + "    ";
-count += 1;
-}
-let full_line = prefix + line;
-let lines = append_string(builder.lines, full_line);
-return PythonBuilder { lines: lines, indent: builder.indent };
+    if line.length == 0 {
+        return builder_emit_blank(builder);
+    }
+    let mut prefix -> string = "";
+    let mut count -> number = 0;
+    loop {
+        if count >= builder.indent {
+            break;
+        }
+        prefix = prefix + "    ";
+        count += 1;
+    }
+    let full_line = prefix + line;
+    let lines = append_string(builder.lines, full_line);
+    return PythonBuilder { lines: lines, indent: builder.indent };
 }
 
 fn builder_emit_blank(builder -> PythonBuilder) -> PythonBuilder {
-let lines = append_string(builder.lines, "");
-return PythonBuilder { lines: lines, indent: builder.indent };
+    let lines = append_string(builder.lines, "");
+    return PythonBuilder { lines: lines, indent: builder.indent };
 }
 
 fn builder_push_indent(builder -> PythonBuilder) -> PythonBuilder {
-return PythonBuilder { lines: builder.lines, indent: builder.indent + 1 };
+    return PythonBuilder { lines: builder.lines, indent: builder.indent + 1 };
 }
 
 fn builder_pop_indent(builder -> PythonBuilder) -> PythonBuilder {
-let mut indent = builder.indent;
-if indent > 0 {
-indent -= 1;
-}
-return PythonBuilder { lines: builder.lines, indent: indent };
+    let mut indent = builder.indent;
+    if indent > 0 {
+        indent -= 1;
+    }
+    return PythonBuilder { lines: builder.lines, indent: indent };
 }
 
 fn builder_to_string(builder -> PythonBuilder) -> string {
-let content = join_with_separator(builder.lines, "\n");
-if content.length == 0 {
-return "";
-}
-return content + "\n";
+    let content = join_with_separator(builder.lines, "\n");
+    if content.length == 0 {
+        return "";
+    }
+    return content + "\n";
 }
 
 fn sanitize_identifier(name -> string) -> string {
-let mut result -> string = "";
-let mut index -> number = 0;
-loop {
-if index >= name.length {
-break;
-}
-let ch = name[index];
-if is_identifier_char(ch) {
-result = result + ch;
-} else {
-if ch == " " {
-result = result + "_";
-}
-}
-index += 1;
-}
-if result.length == 0 {
-return "generated_function";
-}
-return result;
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_identifier_char(ch) {
+            result = result + ch;
+        } else {
+            if ch == " " {
+                result = result + "_";
+            }
+        }
+        index += 1;
+    }
+    if result.length == 0 {
+        return "generated_function";
+    }
+    return result;
 }
 
 fn sanitize_qualified_identifier(name -> string) -> string {
-let trimmed = trim_text(name);
-if trimmed.length == 0 {
-return sanitize_identifier(trimmed);
-}
-let mut part -> string = "";
-let mut parts -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= trimmed.length {
-break;
-}
-let ch = trimmed[index];
-if ch == "." {
-if part.length > 0 {
-parts = append_string(parts, sanitize_identifier(part));
-part = "";
-}
-} else {
-part = part + ch;
-}
-index += 1;
-}
-if part.length > 0 {
-parts = append_string(parts, sanitize_identifier(part));
-}
-if parts.length == 0 {
-return sanitize_identifier(trimmed);
-}
-return join_with_separator(parts, ".");
+    let trimmed = trim_text(name);
+    if trimmed.length == 0 {
+        return sanitize_identifier(trimmed);
+    }
+    let mut part -> string = "";
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "." {
+            if part.length > 0 {
+                parts = append_string(parts, sanitize_identifier(part));
+                part = "";
+            }
+        } else {
+            part = part + ch;
+        }
+        index += 1;
+    }
+    if part.length > 0 {
+        parts = append_string(parts, sanitize_identifier(part));
+    }
+    if parts.length == 0 {
+        return sanitize_identifier(trimmed);
+    }
+    return join_with_separator(parts, ".");
 }
 
 fn is_identifier_char(ch -> string) -> boolean {
-if ch == "_" {
-return true;
-}
-let code = char_code(ch);
-if code >= char_code("a") && code <= char_code("z") {
-return true;
-}
-if code >= char_code("A") && code <= char_code("Z") {
-return true;
-}
-if code >= char_code("0") && code <= char_code("9") {
-return true;
-}
-return false;
+    if ch == "_" {
+        return true;
+    }
+    let code = char_code(ch);
+    if code >= char_code("a") && code <= char_code("z") {
+        return true;
+    }
+    if code >= char_code("A") && code <= char_code("Z") {
+        return true;
+    }
+    if code >= char_code("0") && code <= char_code("9") {
+        return true;
+    }
+    return false;
 }
 
 fn is_whitespace_char(ch -> string) -> boolean {
-if ch == " " {
-return true;
-}
-if ch == "\n" {
-return true;
-}
-if ch == "\r" {
-return true;
-}
-if ch == "\t" {
-return true;
-}
-return false;
+    if ch == " " {
+        return true;
+    }
+    if ch == "\n" {
+        return true;
+    }
+    if ch == "\r" {
+        return true;
+    }
+    if ch == "\t" {
+        return true;
+    }
+    return false;
 }
 
 fn trim_text(value -> string) -> string {
