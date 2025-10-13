@@ -54,7 +54,10 @@ roadmaps.
   (`sleep`, `runtime.sleep`), and capability helpers such as `fs.*`,
   `runtime.fs.*`, `http.*`, `runtime.http.*`, `websocket.*`,
   `runtime.websocket.*`, `serve`, `runtime.serve`, `spawn`, and
-  `runtime.spawn`. Hierarchical effects remain design-stage work.
+  `runtime.spawn`. The effect checker now walks nested blocks,
+  lambdas, and spawned thunks so prompts and capability adapters in
+  async contexts propagate their `model`/`io`/`net`/`clock`
+  requirements to the enclosing routine.
 
 - Stage0 (legacy): Performs symbol collection and effect validation inside the
   Python pipeline; deeper type checking remains future work.

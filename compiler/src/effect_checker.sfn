@@ -8,6 +8,7 @@ import {
     Block,
     Decorator,
     ElseBranch,
+    Expression,
     MatchCase,
     FunctionSignature,
     MethodDeclaration,
@@ -140,68 +141,302 @@ fn analyze_routine(
 }
 
 fn required_effects(body -> Block) -> string[] {
-    let mut required -> string[] = [];
-    if block_has_prompt(body) {
+    return collect_effects_from_block(body);
+}
+
+fn collect_effects_from_block(block -> Block) -> string[] {
+    let mut required = collect_effects_from_tokens(block.tokens);
+    let mut index -> number = 0;
+    loop {
+        if index >= block.statements.length {
+            break;
+        }
+        required = merge_effects(required, collect_effects_from_statement(block.statements[index]));
+        index += 1;
+    }
+    return required;
+}
+
+fn collect_effects_from_statement(statement -> Statement) -> string[] {
+    if statement.variant == "PromptStatement" {
+        let mut required = collect_effects_from_block(statement.body);
         required = append_unique_effect(required, "model");
+        return required;
     }
-    if block_contains_fs_usage(body.tokens) {
+    if statement.variant == "WithStatement" {
+        let mut required = collect_effects_from_block(statement.body);
+        let mut clause_index -> number = 0;
+        loop {
+            if clause_index >= statement.clauses.length {
+                break;
+            }
+            let clause = statement.clauses[clause_index];
+            required = merge_effects(required, collect_effects_from_expression(clause.expression));
+            clause_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "ForStatement" {
+        let mut required = collect_effects_from_block(statement.body);
+        if statement.clause.target != null {
+            required = merge_effects(required, collect_effects_from_expression(statement.clause.target));
+        }
+        required = merge_effects(required, collect_effects_from_expression(statement.clause.iterable));
+        return required;
+    }
+    if statement.variant == "LoopStatement" {
+        return collect_effects_from_block(statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut required = collect_effects_from_expression(statement.expression);
+        let mut case_index -> number = 0;
+        loop {
+            if case_index >= statement.cases.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_match_case(statement.cases[case_index]));
+            case_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "IfStatement" {
+        let mut required = collect_effects_from_expression(statement.condition);
+        required = merge_effects(required, collect_effects_from_block(statement.then_block));
+        if statement.else_branch != null {
+            required = merge_effects(required, collect_effects_from_else_branch(statement.else_branch));
+        }
+        return required;
+    }
+    if statement.variant == "ReturnStatement" {
+        return collect_effects_from_expression(statement.expression);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return collect_effects_from_expression(statement.expression);
+    }
+    if statement.variant == "VariableDeclaration" {
+        return collect_effects_from_expression(statement.initializer);
+    }
+    if statement.variant == "FunctionDeclaration" {
+        return collect_effects_from_block(statement.body);
+    }
+    if statement.variant == "PipelineDeclaration" {
+        return collect_effects_from_block(statement.body);
+    }
+    if statement.variant == "ToolDeclaration" {
+        return collect_effects_from_block(statement.body);
+    }
+    if statement.variant == "TestDeclaration" {
+        return collect_effects_from_block(statement.body);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut required -> string[] = [];
+        let mut method_index -> number = 0;
+        loop {
+            if method_index >= statement.methods.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_block(statement.methods[method_index].body));
+            method_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "ModelDeclaration" {
+        let mut required -> string[] = [];
+        let mut property_index -> number = 0;
+        loop {
+            if property_index >= statement.properties.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_expression(statement.properties[property_index].value));
+            property_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "Unknown" {
+        return collect_effects_from_tokens(statement.tokens);
+    }
+    return [];
+}
+
+fn collect_effects_from_else_branch(branch -> ElseBranch) -> string[] {
+    let mut required -> string[] = [];
+    if branch.body != null {
+        required = merge_effects(required, collect_effects_from_block(branch.body));
+    }
+    if branch.statement != null {
+        required = merge_effects(required, collect_effects_from_statement(branch.statement));
+    }
+    return required;
+}
+
+fn collect_effects_from_match_case(case -> MatchCase) -> string[] {
+    let mut required = collect_effects_from_expression(case.pattern);
+    if case.guard != null {
+        required = merge_effects(required, collect_effects_from_expression(case.guard));
+    }
+    required = merge_effects(required, collect_effects_from_block(case.body));
+    return required;
+}
+
+fn collect_effects_from_expression(expression -> Expression?) -> string[] {
+    if expression == null {
+        return [];
+    }
+    if expression.variant == "Call" {
+        let mut required = collect_effects_from_expression(expression.callee);
+        let mut argument_index -> number = 0;
+        loop {
+            if argument_index >= expression.arguments.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_expression(expression.arguments[argument_index]));
+            argument_index += 1;
+        }
+        required = merge_effects(required, effects_for_call(expression.callee));
+        return required;
+    }
+    if expression.variant == "Member" {
+        return collect_effects_from_expression(expression.object);
+    }
+    if expression.variant == "Unary" {
+        return collect_effects_from_expression(expression.operand);
+    }
+    if expression.variant == "Binary" {
+        let mut required = collect_effects_from_expression(expression.left);
+        required = merge_effects(required, collect_effects_from_expression(expression.right));
+        return required;
+    }
+    if expression.variant == "Array" {
+        let mut required -> string[] = [];
+        let mut element_index -> number = 0;
+        loop {
+            if element_index >= expression.elements.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_expression(expression.elements[element_index]));
+            element_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Object" {
+        let mut required -> string[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= expression.fields.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_expression(expression.fields[field_index].value));
+            field_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Struct" {
+        let mut required -> string[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= expression.fields.length {
+                break;
+            }
+            required = merge_effects(required, collect_effects_from_expression(expression.fields[field_index].value));
+            field_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Lambda" {
+        return collect_effects_from_block(expression.body);
+    }
+    if expression.variant == "Index" {
+        let mut required = collect_effects_from_expression(expression.sequence);
+        required = merge_effects(required, collect_effects_from_expression(expression.index));
+        return required;
+    }
+    if expression.variant == "Range" {
+        let mut required = collect_effects_from_expression(expression.start);
+        required = merge_effects(required, collect_effects_from_expression(expression.end));
+        return required;
+    }
+    if expression.variant == "Raw" {
+        return [];
+    }
+    return [];
+}
+
+fn effects_for_call(callee -> Expression) -> string[] {
+    let path = resolve_member_path(callee);
+    if path == null {
+        return [];
+    }
+    let mut required -> string[] = [];
+    let root = path[0];
+    let last_index = path.length - 1;
+    let last = path[last_index];
+    if root == "fs" {
         required = append_unique_effect(required, "io");
     }
-    if block_contains_spawn_usage(body.tokens) {
-        required = append_unique_effect(required, "io");
-    }
-    if block_contains_network_usage(body.tokens) {
+    if root == "http" || root == "websocket" {
         required = append_unique_effect(required, "net");
     }
-    if block_contains_console_usage(body.tokens) {
+    if root == "print" || root == "console" {
         required = append_unique_effect(required, "io");
     }
-    if block_contains_sleep_usage(body.tokens) {
+    if root == "runtime" {
+        if path.length >= 2 {
+            let helper = path[1];
+            if helper == "console" || helper == "fs" {
+                required = append_unique_effect(required, "io");
+            }
+            if helper == "http" || helper == "websocket" {
+                required = append_unique_effect(required, "net");
+            }
+        }
+    }
+    if last == "spawn" {
+        required = append_unique_effect(required, "io");
+    }
+    if last == "serve" {
+        required = append_unique_effect(required, "net");
+    }
+    if last == "sleep" {
         required = append_unique_effect(required, "clock");
     }
     return required;
 }
 
-fn block_has_prompt(block -> Block) -> boolean {
-    if block.statements.length > 0 {
-        let mut index -> number = 0;
-        loop {
-            if index >= block.statements.length {
-                break;
-            }
-            let statement = block.statements[index];
-            if statement.variant == "PromptStatement" {
-                return true;
-            }
-            if statement.variant == "WithStatement" {
-                if block_has_prompt(statement.body) {
-                    return true;
-                }
-            }
-            if statement.variant == "ForStatement" {
-                if block_has_prompt(statement.body) {
-                    return true;
-                }
-            }
-            if statement.variant == "MatchStatement" {
-                if match_cases_have_prompt(statement.cases) {
-                    return true;
-                }
-            }
-            if statement.variant == "IfStatement" {
-                if block_has_prompt(statement.then_block) {
-                    return true;
-                }
-                if statement.else_branch != null {
-                    if else_branch_has_prompt(statement.else_branch) {
-                        return true;
-                    }
-                }
-            }
-            index += 1;
-        }
+fn resolve_member_path(expression -> Expression) -> string[]? {
+    if expression.variant == "Identifier" {
+        return [expression.name];
     }
-    return block_contains_prompt(block.tokens);
+    if expression.variant == "Member" {
+        let base = resolve_member_path(expression.object);
+        if base == null {
+            return null;
+        }
+        return base.concat([expression.member]);
+    }
+    return null;
+}
+
+fn collect_effects_from_tokens(tokens -> Token[]) -> string[] {
+    let mut required -> string[] = [];
+    if block_contains_prompt(tokens) {
+        required = append_unique_effect(required, "model");
+    }
+    if block_contains_fs_usage(tokens) {
+        required = append_unique_effect(required, "io");
+    }
+    if block_contains_spawn_usage(tokens) {
+        required = append_unique_effect(required, "io");
+    }
+    if block_contains_network_usage(tokens) {
+        required = append_unique_effect(required, "net");
+    }
+    if block_contains_console_usage(tokens) {
+        required = append_unique_effect(required, "io");
+    }
+    if block_contains_sleep_usage(tokens) {
+        required = append_unique_effect(required, "clock");
+    }
+    return required;
 }
 
 fn block_contains_prompt(tokens -> Token[]) -> boolean {
@@ -488,44 +723,15 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
     return false;
 }
 
-fn else_branch_has_prompt(branch -> ElseBranch) -> boolean {
-    if branch.body != null {
-        if block_has_prompt(branch.body) {
-            return true;
-        }
-    }
-    if branch.statement != null {
-        if branch.statement.variant == "IfStatement" {
-            return if_statement_has_prompt(branch.statement);
-        }
-    }
-    return false;
-}
-
-fn if_statement_has_prompt(statement -> Statement) -> boolean {
-    if statement.variant != "IfStatement" {
-        return false;
-    }
-    if block_has_prompt(statement.then_block) {
-        return true;
-    }
-    if statement.else_branch != null {
-        return else_branch_has_prompt(statement.else_branch);
-    }
-    return false;
-}
-
-fn match_cases_have_prompt(cases -> MatchCase[]) -> boolean {
+fn merge_effects(base -> string[], additions -> string[]) -> string[] {
+    let mut result = base;
     let mut index -> number = 0;
     loop {
-        if index >= cases.length {
+        if index >= additions.length {
             break;
         }
-        let case = cases[index];
-        if block_has_prompt(case.body) {
-            return true;
-        }
+        result = append_unique_effect(result, additions[index]);
         index += 1;
     }
-    return false;
+    return result;
 }

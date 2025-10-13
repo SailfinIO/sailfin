@@ -28,7 +28,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [ ] Test harness migration — Port the stage1 pytest coverage to an equivalent Sailfin-native smoke/integration suite so compiler regressions can be detected without Python tooling.
 
 3. **Diagnostics Parity**
-  - [ ] Land hierarchical effect propagation in `effect_checker.sfn` (nested prompts, async contexts).
+  - [ ] Effect origin tracing — Record source spans for missing-effect findings and thread structured notes into the stage1 diagnostics surface.
   - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
     - [x] Locked regression coverage for duplicate symbol diagnostics across structs, enums, interfaces, models, and type parameters via `compiler/tests/test_stage1_typecheck_duplicates.py`.
   - [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path.
@@ -54,6 +54,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Hierarchical effect propagation — Stage1 `effect_checker.sfn` now walks nested blocks, lambdas, and spawned thunks so capability requirements bubble up to the declaring routine. Validation: `compiler/tests/test_effect_checker.py::test_effect_checker_propagates_model_from_nested_lambda` and `compiler/tests/test_effect_checker.py::test_spawn_prompt_requires_io_and_model` lock the coverage.
 - [x] Effect enforcement — Extended stage0 effect checks to cover runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`, `print`, `sleep`). Validation: `bootstrap/tests/test_unit_effects.py` exercises missing-effect errors for `spawn`, `serve`, console IO, and timer usage.
 - [x] Self-hosted control flow — Added structured `if`/`else`, `for`, and `match` support to the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py` asserts the new AST nodes and generated scaffolding.
 - [x] Decorator parity — Self-hosted effect inference now recognises `@logExecution` alongside `@trace`. Validation: `bootstrap/tests/test_compiler_sources.py::test_self_hosted_decorator_logexecution_infers_io` ensures inferred `io` effects.

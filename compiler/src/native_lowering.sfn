@@ -2042,138 +2042,138 @@ return false;
 }
 
 fn trim_text(value -> string) -> string {
-let mut start -> number = 0;
-let mut end -> number = value.length;
-loop {
-if start >= end {
-break;
-}
-let ch = value[start];
-if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
-start += 1;
-continue;
-}
-break;
-}
-loop {
-if end <= start {
-break;
-}
-let ch = value[end - 1];
-if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
-end -= 1;
-continue;
-}
-break;
-}
-if start == 0 && end == value.length {
-return value;
-}
-return substring(value, start, end);
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return substring(value, start, end);
 }
 
 fn starts_with(value -> string, prefix -> string) -> boolean {
-if prefix.length == 0 {
-return true;
-}
-if value.length < prefix.length {
-return false;
-}
-let mut index -> number = 0;
-loop {
-if index >= prefix.length {
-break;
-}
-if value[index] != prefix[index] {
-return false;
-}
-index += 1;
-}
-return true;
+    if prefix.length == 0 {
+        return true;
+    }
+    if value.length < prefix.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
 }
 
 fn ends_with(value -> string, suffix -> string) -> boolean {
-if suffix.length == 0 {
-return true;
-}
-if value.length < suffix.length {
-return false;
-}
-let mut index -> number = 0;
-loop {
-if index >= suffix.length {
-break;
-}
-if value[value.length - suffix.length + index] != suffix[index] {
-return false;
-}
-index += 1;
-}
-return true;
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= suffix.length {
+            break;
+        }
+        if value[value.length - suffix.length + index] != suffix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
 }
 
 fn replace_all(value -> string, target -> string, replacement -> string) -> string {
-if target.length == 0 {
-return value;
-}
-let mut result -> string = "";
-let mut index -> number = 0;
-loop {
-if index >= value.length {
-break;
-}
-if index + target.length <= value.length {
-let mut matches -> boolean = true;
-let mut offset -> number = 0;
-loop {
-if offset >= target.length {
-break;
-}
-if value[index + offset] != target[offset] {
-matches = false;
-break;
-}
-offset += 1;
-}
-if matches {
-result = result + replacement;
-index += target.length;
-continue;
-}
-}
-result = result + value[index];
-index += 1;
-}
-return result;
+    if target.length == 0 {
+        return value;
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        if index + target.length <= value.length {
+            let mut matches -> boolean = true;
+            let mut offset -> number = 0;
+            loop {
+                if offset >= target.length {
+                    break;
+                }
+                if value[index + offset] != target[offset] {
+                    matches = false;
+                    break;
+                }
+                offset += 1;
+            }
+            if matches {
+                result = result + replacement;
+                index += target.length;
+                continue;
+            }
+        }
+        result = result + value[index];
+        index += 1;
+    }
+    return result;
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {
-if values.length == 0 {
-return "";
-}
-let mut result -> string = values[0];
-let mut index -> number = 1;
-loop {
-if index >= values.length {
-break;
-}
-result = result + separator + values[index];
-index += 1;
-}
-return result;
+    if values.length == 0 {
+        return "";
+    }
+    let mut result -> string = values[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = result + separator + values[index];
+        index += 1;
+    }
+    return result;
 }
 
 fn append_lowering_diagnostic(diagnostics -> string[], function_name -> string, detail -> string) -> string[] {
-let trimmed_name = trim_text(function_name);
-let mut entry -> string = "[lowering] ";
-if trimmed_name.length == 0 {
-entry = entry + detail;
-} else {
-entry = entry + trimmed_name + ": " + detail;
-}
-return append_string(diagnostics, entry);
+    let trimmed_name = trim_text(function_name);
+    let mut entry -> string = "[lowering] ";
+    if trimmed_name.length == 0 {
+        entry = entry + detail;
+    } else {
+        entry = entry + trimmed_name + ": " + detail;
+    }
+    return append_string(diagnostics, entry);
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-return values.concat([value]);
+    return values.concat([value]);
 }
