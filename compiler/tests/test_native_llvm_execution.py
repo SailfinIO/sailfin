@@ -106,6 +106,28 @@ fn main() -> number {
 """,
             6.0,
         ),
+        (
+            """
+fn sum_for(limit -> number) -> number {
+    let mut total -> number = 0;
+    for i in 0..limit {
+        if i == 2 {
+            continue;
+        }
+        if i == 4 {
+            break;
+        }
+        total = total + i;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return sum_for(6);
+}
+""",
+            4.0,
+        ),
     ],
 )
 def test_native_llvm_execution_runs_program(source: str, expected: float) -> None:

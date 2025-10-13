@@ -25,7 +25,8 @@ roadmaps.
 - **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
   provide the initial scaffolding, now covering local assignments, structured
-  `if`/`else` branching, `loop`/`break`/`continue`, and `match` dispatch in the
+  `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration,
+  and `match` dispatch in the
   LLVM prototype.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
