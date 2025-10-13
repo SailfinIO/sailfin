@@ -117,7 +117,7 @@ def compile_project(sources):
     diagnostics = []
     for source_path in sources:
         result = compile_source_at_path(source_path)
-        if result.module != null:
+        if result.module != None:
             modules = (modules) + ([result.module])
         if len(result.diagnostics) > 0:
             diagnostics = (diagnostics) + (result.diagnostics)
@@ -129,7 +129,7 @@ def compile_source_at_path(source_path):
     program = parse_program(source)
     analysis = typecheck_program(program)
     if len(analysis.diagnostics) > 0:
-        return ModuleCompilationResult(module=null, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics), fatal=true)])
+        return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics), fatal=True)])
     native_result = emit_native(program)
     lowered = lower_to_python(native_result.module)
     messages = (native_result.diagnostics) + (lowered.diagnostics)
@@ -137,10 +137,10 @@ def compile_source_at_path(source_path):
     fallback_needed = needs_python_fallback(python_source)
     if fallback_needed:
         messages = (messages) + (["native backend: lowering produced unsupported python output; stage0 fallback disabled"])
-        return ModuleCompilationResult(module=null, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=messages, fatal=true)])
+        return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=messages, fatal=True)])
     entry_list = []
     if len(messages) > 0:
-        entry_list = [ModuleDiagnostics(source_path=source_path, messages=messages, fatal=false)]
+        entry_list = [ModuleDiagnostics(source_path=source_path, messages=messages, fatal=False)]
     return ModuleCompilationResult(module=CompiledModule(source_path=source_path, python_source=python_source), diagnostics=entry_list)
 
 def format_typecheck_diagnostics(entries):
@@ -164,19 +164,19 @@ def empty_native_module():
 
 def has_prefix(value, prefix):
     if len(prefix) > len(value):
-        return false
+        return False
     index = 0
     while True:
         if index >= len(prefix):
             break
         if value[index] != prefix[index]:
-            return false
+            return False
         index += 1
-    return true
+    return True
 
 def needs_python_fallback(source):
     if len(source) == 0:
-        return true
+        return True
     sanitized = strip_needs_python_fallback_literals(source)
     cleaned = strip_python_string_literals(sanitized)
     analysis_target = cleaned
@@ -184,55 +184,55 @@ def needs_python_fallback(source):
         analysis_target = sanitized
     target = analysis_target
     if len(target) == 0:
-        return true
+        return True
     if string_contains(target, "\nlet "):
-        return true
+        return True
     if string_contains(target, " let "):
-        return true
+        return True
     if string_contains(target, " mut "):
-        return true
+        return True
     if string_contains(target, "TokenKind.variant('Identifier', [])"):
-        return true
+        return True
     if string_contains(target, "TokenKind.variant('NumberLiteral', [])"):
-        return true
+        return True
     if string_contains(target, "TokenKind.variant('StringLiteral', [])"):
-        return true
+        return True
     if string_contains(target, "TokenKind.variant('BooleanLiteral', [])"):
-        return true
+        return True
     if string_contains(target, "TokenKind.variant('Symbol', [])"):
-        return true
+        return True
     if string_contains(target, "Expression.Identifier()"):
-        return true
+        return True
     if string_contains(target, "Expression.Raw()"):
-        return true
+        return True
     if string_contains(target, "ExpressionIdentifier("):
-        return true
+        return True
     if string_contains(target, "ExpressionRaw("):
-        return true
-    return false
+        return True
+    return False
 
 def string_contains(value, pattern):
     if len(pattern) == 0:
-        return true
+        return True
     if len(value) < len(pattern):
-        return false
+        return False
     index = 0
     while True:
         if index + len(pattern) > len(value):
             break
-        match_flag = true
+        match_flag = True
         offset = 0
         while True:
             if offset >= len(pattern):
                 break
             if value[index + offset] != pattern[offset]:
-                match_flag = false
+                match_flag = False
                 break
             offset += 1
         if match_flag:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def strip_needs_python_fallback_literals(source):
     marker = "def needs_python_fallback"
@@ -284,17 +284,17 @@ def python_quote_length(value, start, delimiter):
 def skip_python_string_literal(value, position, delimiter, quote_length):
     if quote_length == 1:
         index = position
-        escaped = false
+        escaped = False
         while True:
             if index >= len(value):
                 return index
             current = value[index]
             index += 1
             if escaped:
-                escaped = false
+                escaped = False
                 continue
             if current == "\\":
-                escaped = true
+                escaped = True
                 continue
             if current == delimiter:
                 return index
@@ -302,13 +302,13 @@ def skip_python_string_literal(value, position, delimiter, quote_length):
     while True:
         if search_index + quote_length > len(value):
             return len(value)
-        matches = true
+        matches = True
         offset = 0
         while True:
             if offset >= quote_length:
                 break
             if value[search_index + offset] != delimiter:
-                matches = false
+                matches = False
                 break
             offset += 1
         if matches:
@@ -336,13 +336,13 @@ def find_substring(value, pattern):
     while True:
         if index + len(pattern) > len(value):
             break
-        match_flag = true
+        match_flag = True
         offset = 0
         while True:
             if offset >= len(pattern):
                 break
             if value[index + offset] != pattern[offset]:
-                match_flag = false
+                match_flag = False
                 break
             offset += 1
         if match_flag:
@@ -359,13 +359,13 @@ def find_substring_from(value, pattern, start):
     while True:
         if index + len(pattern) > len(value):
             break
-        match_flag = true
+        match_flag = True
         offset = 0
         while True:
             if offset >= len(pattern):
                 break
             if value[index + offset] != pattern[offset]:
-                match_flag = false
+                match_flag = False
                 break
             offset += 1
         if match_flag:

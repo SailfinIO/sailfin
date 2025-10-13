@@ -1259,7 +1259,7 @@ fn capture_expression_continuation(initial -> string, instructions -> NativeInst
         }
         let segment = continuation_segment_text(instructions[index]);
         if segment == null {
-    
+            break;
         }
         let normalized_segment = trim_text(segment);
         if normalized_segment.length == 0 {

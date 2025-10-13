@@ -459,6 +459,7 @@ fn format_effect_message(routine_name -> string, effect -> string, requirement -
     if requirement != null {
         message = message + "; required by " + requirement.description;
     }
+    message = message + ". hint: add ![" + effect + "] to the signature or accept the CLI fix prompt when offered";
     return message;
 }
 

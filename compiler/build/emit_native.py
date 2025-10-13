@@ -157,7 +157,7 @@ def render_export_specifiers(specifiers):
     return join_with_separator(parts, ", ")
 
 def format_native_specifier(name, alias):
-    if alias == null  or  len(alias) == 0:
+    if alias == None  or  len(alias) == 0:
         return name
     return name + " as " + alias
 
@@ -166,9 +166,9 @@ def emit_variable(state, statement):
     if statement.mutable:
         line = line + "mut "
     line = line + statement.name
-    if statement.type_annotation != null:
+    if statement.type_annotation != None:
         line = line + " : " + statement.type_annotation.text
-    if statement.initializer != null:
+    if statement.initializer != None:
         line = line + " = " + format_expression(statement.initializer)
     return state_emit_line(state, line)
 
@@ -208,7 +208,7 @@ def emit_test(state, statement):
     if len(statement.effects) > 0:
         header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
     current = state_emit_line(current, header)
-    current = emit_signature_metadata( current, FunctionSignature(name=statement.name, is_async=false, parameters=[], return_type=null, effects=statement.effects, type_parameters=[]) )
+    current = emit_signature_metadata( current, FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[]) )
     current = state_push_indent(current)
     current = emit_block(current, statement.body)
     current = state_pop_indent(current)
@@ -372,7 +372,7 @@ def emit_match(state, statement):
 
 def emit_match_case(state, case):
     inline_statement = select_inline_match_case_statement(case.body)
-    if inline_statement != null:
+    if inline_statement != None:
         return emit_inline_match_case(state, case, inline_statement)
     line = ".case " + format_match_case_head(case)
     current = state_emit_line(state, line)
@@ -383,13 +383,13 @@ def emit_match_case(state, case):
 
 def select_inline_match_case_statement(block):
     if len(block.statements) != 1:
-        return null
+        return None
     statement = block.statements[0]
     if statement.variant == "ExpressionStatement":
         return statement
     if statement.variant == "ReturnStatement":
         return statement
-    return null
+    return None
 
 def emit_inline_match_case(state, case, statement):
     line = format_match_case_head(case) + " => " + format_inline_case_body(statement)
@@ -397,7 +397,7 @@ def emit_inline_match_case(state, case, statement):
 
 def format_match_case_head(case):
     head = format_expression(case.pattern)
-    if case.guard != null:
+    if case.guard != None:
         head = head + " if " + format_expression(case.guard)
     return head
 
@@ -405,7 +405,7 @@ def format_inline_case_body(statement):
     if statement.variant == "ExpressionStatement":
         return format_expression(statement.expression)
     if statement.variant == "ReturnStatement":
-        if statement.expression == null:
+        if statement.expression == None:
             return "return"
         return "return " + format_expression(statement.expression)
     return ""
@@ -416,17 +416,17 @@ def emit_if(state, statement):
     current = state_push_indent(current)
     current = emit_block(current, statement.then_block)
     current = state_pop_indent(current)
-    if statement.else_branch != null:
+    if statement.else_branch != None:
         current = emit_else_branch(current, statement.else_branch)
     return state_emit_line(current, ".endif")
 
 def emit_else_branch(state, branch):
     current = state_emit_line(state, ".else")
     current = state_push_indent(current)
-    if branch.body != null:
+    if branch.body != None:
         current = emit_block(current, branch.body)
     else:
-        if branch.statement != null:
+        if branch.statement != None:
             current = emit_statement(current, branch.statement)
         else:
             current = state_emit_line(current, "noop")
@@ -434,7 +434,7 @@ def emit_else_branch(state, branch):
     return current
 
 def emit_return(state, expression):
-    if expression == null:
+    if expression == None:
         return state_emit_line(state, "ret")
     return state_emit_line(state, "ret " + format_expression(expression))
 
@@ -465,7 +465,7 @@ def emit_decorators(state, decorators):
 
 def emit_signature_metadata(state, signature):
     current = state
-    if signature.return_type != null:
+    if signature.return_type != None:
         current = state_emit_line(current, ".meta return " + signature.return_type.text)
     else:
         current = state_emit_line(current, ".meta return void")
@@ -488,9 +488,9 @@ def emit_parameter_metadata(state, parameters):
         if parameter.mutable:
             line = line + "mut "
         line = line + parameter.name
-        if parameter.type_annotation != null:
+        if parameter.type_annotation != None:
             line = line + " -> " + parameter.type_annotation.text
-        if parameter.default_value != null:
+        if parameter.default_value != None:
             line = line + " = " + format_expression(parameter.default_value)
         current = state_emit_line(current, line)
         index += 1
@@ -507,7 +507,7 @@ def format_decorator(decorator):
             break
         argument = decorator.arguments[index]
         value = format_expression(argument.expression)
-        if argument.name != null:
+        if argument.name != None:
             parts = append_string(parts, argument.name + "=" + value)
         else:
             parts = append_string(parts, value)
@@ -521,7 +521,7 @@ def format_function_signature(signature):
     line = prefix + signature.name
     line = line + format_type_parameters(signature.type_parameters)
     line = line + "(" + format_parameters(signature.parameters) + ")"
-    if signature.return_type != null:
+    if signature.return_type != None:
         line = line + " -> " + signature.return_type.text
     if len(signature.effects) > 0:
         line = line + " ![" + join_with_separator(signature.effects, ", ") + "]"
@@ -541,9 +541,9 @@ def format_parameters(parameters):
             entry = "mut " + parameter.name
         else:
             entry = parameter.name
-        if parameter.type_annotation != null:
+        if parameter.type_annotation != None:
             entry = entry + " -> " + parameter.type_annotation.text
-        if parameter.default_value != null:
+        if parameter.default_value != None:
             entry = entry + " = " + format_expression(parameter.default_value)
         parts = append_string(parts, entry)
         index += 1
@@ -559,7 +559,7 @@ def format_type_parameters(parameters):
             break
         parameter = parameters[index]
         entry = parameter.name
-        if parameter.bound != null:
+        if parameter.bound != None:
             entry = entry + " : " + parameter.bound.text
         parts = append_string(parts, entry)
         index += 1
@@ -591,10 +591,10 @@ def format_expression(expression):
         return expression.value
     if expression.variant == "BooleanLiteral":
         if expression.value:
-            return "true"
-        return "false"
+            return "True"
+        return "False"
     if expression.variant == "NullLiteral":
-        return "null"
+        return "None"
     if expression.variant == "StringLiteral":
         return quote_string(expression.value)
     if expression.variant == "Unary":
@@ -742,9 +742,9 @@ def contains_string(values, target):
         if index >= len(values):
             break
         if values[index] == target:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def state_new():
     return NativeState(builder=builder_new(), diagnostics=[])

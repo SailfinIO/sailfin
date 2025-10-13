@@ -59,7 +59,9 @@ roadmaps.
   async contexts propagate their `model`/`io`/`net`/`clock`
   requirements to the enclosing routine. Missing-effect diagnostics now
   emit precise source spans for the originating prompt or helper call
-  and flow through the stage1 typechecker as structured errors.
+  and flow through the stage1 typechecker as structured errors. Messages
+  include `![effect]` fix-it hints and reference the CLI fix prompt so
+  teams can annotate signatures faster.
 
 - Stage0 (legacy): Performs symbol collection and effect validation inside the
   Python pipeline; deeper type checking remains future work.

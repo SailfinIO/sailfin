@@ -36,6 +36,9 @@ def test_typecheck_reports_missing_effects_with_spans() -> None:
     messages = {diagnostic.message for diagnostic in effect_diagnostics}
     assert any("launch is missing effect 'io'" in message for message in messages)
     assert any("launch is missing effect 'model'" in message for message in messages)
+    assert any("![io]" in message for message in messages)
+    assert any("![model]" in message for message in messages)
+    assert any("CLI fix prompt" in message for message in messages)
 
     spawn_diag = _select_diagnostic(effect_diagnostics, "io")
     assert spawn_diag.primary is not None
