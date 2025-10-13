@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.runtime.prelude import clamp, substring, find_char, char_code
+from compiler.build.runtime.prelude import clamp, substring, find_char, grapheme_count, grapheme_at, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -20,4 +20,4 @@ globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 
-__all__ = ["clamp", "substring", "find_char", "char_code"]
+__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code"]

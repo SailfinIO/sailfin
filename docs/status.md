@@ -90,7 +90,11 @@ roadmaps.
   now lives in the Sailfin prelude, with unions/intersections/arrays parsed in
   Sailfin and only runtime type resolution delegated to Python bridges. String
   interpolation lowers into segment arrays that call `runtime.format_interpolated`
-  so placeholders execute without Python `eval` in Stage1 outputs.
+  so placeholders execute without Python `eval` in Stage1 outputs. Struct
+  facades now round-trip their instance methods (`struct Pair { fn sum(self) }`)
+  into Python class methods, letting the runtime prelude surface richer helper
+  shims without bootstrap fallbacks; validated via
+  `compiler/tests/test_stage1_pipeline.py::test_struct_method_lowering`.
   Non-ASCII glyphs still fall back to
   `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
   `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;

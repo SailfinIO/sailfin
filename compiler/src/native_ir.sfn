@@ -73,6 +73,7 @@ struct NativeStructField {
 struct NativeStruct {
     name -> string;
     fields -> NativeStructField[];
+    methods -> NativeFunction[];
 }
 
 struct NativeEnumVariantField {
@@ -591,12 +592,14 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
     }
 
     let mut fields -> NativeStructField[] = [];
+    let mut methods -> NativeFunction[] = [];
+    let mut current_method -> NativeFunction? = null;
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
             diagnostics = append_string(diagnostics, "unterminated struct " + struct_name);
             return StructParseResult {
-                definition: NativeStruct { name: struct_name, fields: fields },
+                definition: NativeStruct { name: struct_name, fields: fields, methods: methods },
                 next_index: index,
                 diagnostics: diagnostics,
             };
@@ -606,13 +609,57 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
             index += 1;
             continue;
         }
-        if raw_line == "noop" {
+        if raw_line == ".endstruct" {
+            if current_method != null {
+                diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name);
+                methods = append_function(methods, current_method);
+                current_method = null;
+            }
+            index += 1;
+            break;
+        }
+        if current_method != null {
+            if raw_line == ".endmethod" {
+                methods = append_function(methods, current_method);
+                current_method = null;
+                index += 1;
+                continue;
+            }
+            if starts_with(raw_line, ".meta ") {
+                current_method = apply_meta(current_method, strip_prefix(raw_line, ".meta "));
+                index += 1;
+                continue;
+            }
+            if starts_with(raw_line, ".param ") {
+                let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "));
+                if parameter == null {
+                    diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line);
+                } else {
+                    current_method = append_parameter(current_method, parameter);
+                }
+                index += 1;
+                continue;
+            }
+            if starts_with(raw_line, ".method ") {
+                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name);
+                index += 1;
+                continue;
+            }
+            let instructions = parse_instruction(raw_line);
+            let mut instruction_index -> number = 0;
+            loop {
+                if instruction_index >= instructions.length {
+                    break;
+                }
+                current_method = append_instruction(current_method, instructions[instruction_index]);
+                instruction_index += 1;
+            }
             index += 1;
             continue;
         }
-        if raw_line == ".endstruct" {
+        if raw_line == "noop" {
             index += 1;
-            break;
+            continue;
         }
         if starts_with(raw_line, ".field ") {
             let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "));
@@ -624,12 +671,27 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
             index += 1;
             continue;
         }
+        if starts_with(raw_line, ".method ") {
+            if current_method != null {
+                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name);
+            }
+            let method_name = parse_function_name(strip_prefix(raw_line, ".method "));
+            current_method = NativeFunction {
+                name: method_name,
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
         diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line);
         index += 1;
     }
 
     return StructParseResult {
-        definition: NativeStruct { name: struct_name, fields: fields },
+        definition: NativeStruct { name: struct_name, fields: fields, methods: methods },
         next_index: index,
         diagnostics: diagnostics,
     };
@@ -925,6 +987,10 @@ fn parse_function_name(header -> string) -> string {
     let mut name -> string = trimmed;
     if paren_index >= 0 {
         name = trim_text(substring(trimmed, 0, paren_index));
+    }
+    let separator_index = last_index_of(name, ".");
+    if separator_index >= 0 {
+        name = trim_text(substring(name, separator_index + 1, name.length));
     }
     return strip_generics(name);
 }

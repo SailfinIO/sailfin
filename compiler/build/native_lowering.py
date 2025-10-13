@@ -71,6 +71,14 @@ class PythonImportEmission:
     def __repr__(self):
         return runtime.struct_repr('PythonImportEmission', [runtime.struct_field('builder', self.builder), runtime.struct_field('exports', self.exports)])
 
+class PythonStructEmission:
+    def __init__(self, builder, diagnostics):
+        self.builder = builder
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('PythonStructEmission', [runtime.struct_field('builder', self.builder), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class StructLiteralCapture:
     def __init__(self, expression, consumed, success):
         self.expression = expression
@@ -141,7 +149,9 @@ def emit_python_module(functions, imports, structs, enums, bindings):
         builder = emit_enum_definitions(builder, enums)
     if len(structs) > 0:
         builder = builder_emit_blank(builder)
-        builder = emit_struct_definitions(builder, structs)
+        struct_emission = emit_struct_definitions(builder, structs)
+        builder = struct_emission.builder
+        diagnostics = (diagnostics) + (struct_emission.diagnostics)
     builder = builder_emit_blank(builder)
     index = 0
     while True:
@@ -293,15 +303,18 @@ def normalize_import_module(path):
 
 def emit_struct_definitions(builder, structs):
     current = builder
+    diagnostics = []
     index = 0
     while True:
         if index >= len(structs):
             break
-        current = emit_single_struct(current, structs[index])
+        emission = emit_single_struct(current, structs[index])
+        current = emission.builder
+        diagnostics = (diagnostics) + (emission.diagnostics)
         if index + 1 < len(structs):
             current = builder_emit_blank(current)
         index += 1
-    return current
+    return PythonStructEmission(builder=current, diagnostics=diagnostics)
 
 def emit_export_list(builder, exports):
     unique = []
@@ -353,6 +366,7 @@ def emit_single_struct(builder, definition):
     class_name = sanitize_identifier(definition.name)
     current = builder_emit(builder, "class " + class_name + ":")
     current = builder_push_indent(current)
+    diagnostics = []
     parameters = render_struct_parameters(definition.fields)
     init_signature = "def __init__(self"
     if len(parameters) > 0:
@@ -398,8 +412,21 @@ def emit_single_struct(builder, definition):
         current = builder_pop_indent(current)
         current = builder_emit(current, "raise AttributeError(item)")
         current = builder_pop_indent(current)
+    if len(definition.methods) > 0:
+        current = builder_emit_blank(current)
+        method_index = 0
+        while True:
+            if method_index >= len(definition.methods):
+                break
+            method = definition.methods[method_index]
+            emission = emit_python_function(current, method)
+            current = emission.builder
+            diagnostics = (diagnostics) + (emission.diagnostics)
+            if method_index + 1 < len(definition.methods):
+                current = builder_emit_blank(current)
+            method_index += 1
     current = builder_pop_indent(current)
-    return current
+    return PythonStructEmission(builder=current, diagnostics=diagnostics)
 
 def render_struct_parameters(fields):
     required = []

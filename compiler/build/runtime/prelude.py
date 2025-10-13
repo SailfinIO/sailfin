@@ -18,6 +18,11 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
+console = runtime.console
+fs = runtime.fs
+http = runtime.http
+websocket = runtime.websocket
+
 class EnumField:
     def __init__(self, name, value):
         self.name = name
@@ -575,6 +580,12 @@ def find_char(text, character, start = 0):
         index = index + 1
     return -1
 
+def grapheme_count(text):
+    return runtime.grapheme_count(text)
+
+def grapheme_at(text, index):
+    return runtime.grapheme_at(text, index)
+
 def match_exhaustive_failed(value):
     message = runtime.format_interpolated(['Non-exhaustive match for value ', ''], [(value)])
     runtime.raise_value_error(message)
@@ -641,4 +652,4 @@ def char_code(character):
         index = index + 1
     return code
 
-__all__ = ["clamp", "substring", "find_char", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr", "check_type", "parse_type_descriptor", "format_interpolated"]
+__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr", "check_type", "parse_type_descriptor", "format_interpolated"]

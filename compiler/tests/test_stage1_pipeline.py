@@ -30,6 +30,22 @@ fn main() ![io] {
 }
 """
 
+STRUCT_METHOD_SOURCE = """
+struct Pair {
+  left -> number;
+  right -> number;
+
+  fn sum(self -> Pair) -> number {
+    return self.left + self.right;
+  }
+}
+
+fn main() ![io] {
+  let pair = Pair { left: 1, right: 2 };
+  print.info(pair.sum());
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -84,3 +100,25 @@ def test_import_export_alias_round_trip() -> None:
   assert callable(locate_fn)
   assert slice_fn("sailfin", 0, 4) == "sail"
   assert locate_fn("sailfin", "f", 0) == 4
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_struct_method_lowering() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+
+    result = stage1_main.compile_to_native_python(STRUCT_METHOD_SOURCE)
+    assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+
+    python_source = result.source
+    assert "class Pair" in python_source
+    assert "def sum(self" in python_source
+
+    namespace: dict[str, object] = {"__builtins__": __builtins__}
+    exec(python_source, namespace)
+
+    pair_class = namespace.get("Pair")
+    assert callable(pair_class), "Pair class missing from lowered module"
+
+    pair_instance = pair_class(1, 2)
+    assert hasattr(pair_instance, "sum"), "sum method missing on struct facade"
+    assert pair_instance.sum() == 3

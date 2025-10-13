@@ -87,12 +87,13 @@ class NativeStructField:
         return runtime.struct_repr('NativeStructField', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable)])
 
 class NativeStruct:
-    def __init__(self, name, fields):
+    def __init__(self, name, fields, methods):
         self.name = name
         self.fields = fields
+        self.methods = methods
 
     def __repr__(self):
-        return runtime.struct_repr('NativeStruct', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields)])
+        return runtime.struct_repr('NativeStruct', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields), runtime.struct_field('methods', self.methods)])
 
 class NativeEnumVariantField:
     def __init__(self, name, type_annotation, mutable):
@@ -508,21 +509,58 @@ def parse_struct_definition(lines, start_index):
         diagnostics = append_string(diagnostics, "unable to parse struct header: " + header)
         return StructParseResult(definition=null, next_index=start_index + 1, diagnostics=diagnostics)
     fields = []
+    methods = []
+    current_method = null
     index = start_index + 1
     while True:
         if index >= len(lines):
             diagnostics = append_string(diagnostics, "unterminated struct " + struct_name)
-            return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields), next_index=index, diagnostics=diagnostics)
+            return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods), next_index=index, diagnostics=diagnostics)
         raw_line = trim_text(lines[index])
         if len(raw_line) == 0  or  starts_with(raw_line, ";"):
+            index += 1
+            continue
+        if raw_line == ".endstruct":
+            if current_method != null:
+                diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name)
+                methods = append_function(methods, current_method)
+                current_method = null
+            index += 1
+            break
+        if current_method != null:
+            if raw_line == ".endmethod":
+                methods = append_function(methods, current_method)
+                current_method = null
+                index += 1
+                continue
+            if starts_with(raw_line, ".meta "):
+                current_method = apply_meta(current_method, strip_prefix(raw_line, ".meta "))
+                index += 1
+                continue
+            if starts_with(raw_line, ".param "):
+                parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "))
+                if parameter == null:
+                    diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line)
+                else:
+                    current_method = append_parameter(current_method, parameter)
+                index += 1
+                continue
+            if starts_with(raw_line, ".method "):
+                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
+                index += 1
+                continue
+            instructions = parse_instruction(raw_line)
+            instruction_index = 0
+            while True:
+                if instruction_index >= len(instructions):
+                    break
+                current_method = append_instruction(current_method, instructions[instruction_index])
+                instruction_index += 1
             index += 1
             continue
         if raw_line == "noop":
             index += 1
             continue
-        if raw_line == ".endstruct":
-            index += 1
-            break
         if starts_with(raw_line, ".field "):
             parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "))
             if parsed_field == null:
@@ -531,9 +569,16 @@ def parse_struct_definition(lines, start_index):
                 fields = append_struct_field(fields, parsed_field)
             index += 1
             continue
+        if starts_with(raw_line, ".method "):
+            if current_method != null:
+                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
+            method_name = parse_function_name(strip_prefix(raw_line, ".method "))
+            current_method = NativeFunction(name=method_name, parameters=[], return_type="void", effects=[], instructions=[])
+            index += 1
+            continue
         diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line)
         index += 1
-    return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields), next_index=index, diagnostics=diagnostics)
+    return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods), next_index=index, diagnostics=diagnostics)
 
 def parse_enum_definition(lines, start_index):
     diagnostics = []
@@ -749,6 +794,9 @@ def parse_function_name(header):
     name = trimmed
     if paren_index >= 0:
         name = trim_text(substring(trimmed, 0, paren_index))
+    separator_index = last_index_of(name, ".")
+    if separator_index >= 0:
+        name = trim_text(substring(name, separator_index + 1, len(name)))
     return strip_generics(name)
 
 def parse_parameter_entry(body):

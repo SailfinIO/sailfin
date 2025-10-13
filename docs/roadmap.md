@@ -37,7 +37,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [x] Add regression coverage in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip` confirming re-exported helpers compile and execute without duplication.
   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
   - [x] Extend stage1 native lowering to support top-level aliases (`let console = runtime.console`) so the Sailfin prelude compiles cleanly (`compiler/tests/test_runtime_prelude.py`).
-  - [ ] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings.
+  - [x] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings. Validation: `compiler/tests/test_stage1_pipeline.py::test_struct_method_lowering`.
   - [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
   - [ ] Inline the grapheme segmentation tables into Sailfin-native helpers and remove the Python `unicodedata` dependency once normalization primitives solidify; extend coverage with locale-heavy fixtures.
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
