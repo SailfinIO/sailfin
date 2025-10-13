@@ -180,11 +180,11 @@ def check_statement(statement, bindings):
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
     if statement.variant == "IfStatement":
         diagnostics = check_block(statement.then_block, bindings)
-        if statement.else_branch != None:
+        if statement.else_branch != null:
             branch = statement.else_branch
-            if branch.body != None:
+            if branch.body != null:
                 diagnostics = (diagnostics) + (check_block(branch.body, bindings))
-            if branch.statement != None:
+            if branch.statement != null:
                 result = check_statement(branch.statement, bindings)
                 diagnostics = (diagnostics) + (result.diagnostics)
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
@@ -318,16 +318,16 @@ def select_requirement_for_effect(requirements, effect):
         if requirement.effect == effect:
             return requirement
         index += 1
-    return None
+    return null
 
 def requirement_primary_token(requirement):
-    if requirement == None:
-        return None
+    if requirement == null:
+        return null
     return requirement.origin
 
 def format_effect_message(routine_name, effect, requirement):
     message = routine_name + " is missing effect '" + effect + "'"
-    if requirement != None:
+    if requirement != null:
         message = message + "; required by " + requirement.description
     message = message + ". hint: add ![" + effect + "] to the signature or accept the CLI fix prompt when offered"
     return message
@@ -335,8 +335,8 @@ def format_effect_message(routine_name, effect, requirement):
 def contains_string(items, candidate):
     for item in items:
         if item == candidate:
-            return True
-    return False
+            return true
+    return false
 
 def register_local_symbol(bindings, name, kind):
     if has_symbol(bindings, name):
@@ -362,8 +362,8 @@ def clone_bindings(source):
 def has_symbol(symbols, name):
     for entry in symbols:
         if entry.name == name:
-            return True
-    return False
+            return true
+    return false
 
 def make_duplicate_symbol_diagnostic(name, kind):
-    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=None)
+    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=null)
