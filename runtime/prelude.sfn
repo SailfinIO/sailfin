@@ -9,6 +9,22 @@ let fs = runtime.fs;
 let http = runtime.http;
 let websocket = runtime.websocket;
 
+fn capability_grant(effects) {
+    return runtime.create_capability_grant(effects);
+}
+
+fn fs_bridge(grant) {
+    return runtime.create_filesystem_bridge(grant);
+}
+
+fn http_bridge(grant) {
+    return runtime.create_http_bridge(grant);
+}
+
+fn model_bridge(grant) {
+    return runtime.create_model_bridge(grant);
+}
+
 struct EnumField {
     name -> string;
     value -> any;
@@ -801,4 +817,4 @@ fn char_code(character -> string) -> number {
     return code;
 }
 
-export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };
+export { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };

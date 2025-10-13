@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import importlib
 import pathlib
 from typing import Any, Callable, List
@@ -9,8 +11,8 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.usefixtures("stage1_environment")
-def test_runtime_prelude_collection_helpers() -> None:
+@functools.lru_cache()
+def _runtime_prelude_python_source() -> str:
     stage1_main = importlib.import_module("compiler.build.main")
     runtime_prelude = REPO_ROOT / "runtime" / "prelude.sfn"
 
@@ -21,11 +23,20 @@ def test_runtime_prelude_collection_helpers() -> None:
     modules = getattr(result, "modules", [])
     assert modules, "Stage1 returned no modules for runtime prelude"
 
-    # The prelude compiles into a single Python module; execute it in isolation.
     module = modules[0]
     python_source = getattr(module, "python_source")
+    return python_source
+
+
+def load_runtime_prelude_namespace() -> dict[str, Any]:
     namespace: dict[str, Any] = {"__builtins__": __builtins__}
-    exec(python_source, namespace)
+    exec(_runtime_prelude_python_source(), namespace)
+    return namespace
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_runtime_prelude_collection_helpers() -> None:
+    namespace = load_runtime_prelude_namespace()
 
     runtime_module = namespace["runtime"]
     assert namespace["console"] is runtime_module.console
@@ -169,3 +180,72 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert format_interpolated(["Hello, ", "!"], ["World"]) == "Hello, World!"
     assert format_interpolated(["Prefix"], []) == "Prefix"
     assert format_interpolated(["a", "b", "c"], [1, 2]) == "a1b2c"
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_runtime_capability_bridges(tmp_path: pathlib.Path) -> None:
+    namespace = load_runtime_prelude_namespace()
+
+    capability_grant = namespace["capability_grant"]
+    fs_bridge = namespace["fs_bridge"]
+    http_bridge = namespace["http_bridge"]
+    model_bridge = namespace["model_bridge"]
+
+    io_grant = capability_grant(["io"])
+    fs = fs_bridge(io_grant)
+
+    sample_file = tmp_path / "sample.txt"
+    fs.write_text(str(sample_file), "hello")
+    assert fs.read_text(str(sample_file)) == "hello"
+
+    restricted = capability_grant([])
+    fs_restricted = fs_bridge(restricted)
+    with pytest.raises(PermissionError):
+        fs_restricted.read_text(str(sample_file))
+
+    net_grant = capability_grant(["net"])
+    http = http_bridge(net_grant)
+
+    async def _fetch() -> Any:
+        return await http.get("https://example.com", headers={"x-mock": "1"})
+
+    response = asyncio.run(_fetch())
+    assert response.status == 200
+    assert "example.com" in response.body
+
+    http_restricted = http_bridge(restricted)
+
+    async def _restricted_fetch() -> Any:
+        return await http_restricted.get("https://example.com")
+
+    with pytest.raises(PermissionError):
+        asyncio.run(_restricted_fetch())
+
+    model_grant = capability_grant(["model"])
+    model = model_bridge(model_grant)
+
+    async def _invoke_default() -> Any:
+        return await model.invoke("hi there")
+
+    default_result = asyncio.run(_invoke_default())
+    assert default_result["prompt"] == "hi there"
+    assert default_result["model"] == "mock"
+
+    model.register_stub(
+        "custom",
+        lambda prompt, options: {"model": "custom", "prompt": prompt, "output": "stub"},
+    )
+
+    async def _invoke_stub() -> Any:
+        return await model.invoke("use stub", model="custom")
+
+    stub_result = asyncio.run(_invoke_stub())
+    assert stub_result["output"] == "stub"
+
+    model_restricted = model_bridge(restricted)
+
+    async def _invoke_restricted() -> Any:
+        return await model_restricted.invoke("not allowed")
+
+    with pytest.raises(PermissionError):
+        asyncio.run(_invoke_restricted())

@@ -145,6 +145,10 @@ Bootstrap enforcement today requires routines that invoke console helpers or
 timers to declare matching effects. Calling `print.info(...)` or
 `console.error(...)` (both aliases for `runtime.console`) needs the `io`
 effect, while `sleep(ms)` or `runtime.sleep(ms)` requires the `clock` effect.
+Self-hosted builds expose `capability_grant`, `fs_bridge`, `http_bridge`, and
+`model_bridge` helpers in `runtime/prelude.sfn`; the bridges enforce runtime
+permissions while delegating to the bootstrap Python shims until native
+backends replace them.
 
 #### 3.2.2 Linear and Affine Types
 

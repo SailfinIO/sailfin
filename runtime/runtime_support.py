@@ -16,7 +16,7 @@ import pathlib
 import re
 import time
 import unicodedata
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +77,52 @@ class _FileSystem:
 
 
 fs = _FileSystem()
+
+
+# ---------------------------------------------------------------------------
+# Capability bridge primitives
+# ---------------------------------------------------------------------------
+
+
+class CapabilityGrant:
+    """Tracks which effects a caller is authorised to exercise."""
+
+    def __init__(self, effects: Iterable[str]):
+        self._effects = {effect for effect in (effect.strip() for effect in effects) if effect}
+
+    def allow(self, effect: str) -> bool:
+        return effect in self._effects
+
+    def require(self, effect: str) -> None:
+        if effect not in self._effects:
+            allowed = ", ".join(sorted(self._effects)) or "<none>"
+            raise PermissionError(f"capability '{effect}' not granted; allowed effects: {allowed}")
+
+
+def create_capability_grant(effects: Iterable[str]) -> CapabilityGrant:
+    return CapabilityGrant(effects)
+
+
+class FilesystemBridge:
+    def __init__(self, grant: CapabilityGrant, delegate: Optional[_FileSystem] = None):
+        self._grant = grant
+        self._delegate = delegate or fs
+
+    def read_text(self, path: str) -> str:
+        self._grant.require("io")
+        return self._delegate.readFile(path)
+
+    def write_text(self, path: str, contents: str) -> None:
+        self._grant.require("io")
+        self._delegate.writeFile(path, contents)
+
+
+def create_filesystem_bridge(
+    grant: CapabilityGrant,
+    *,
+    delegate: Optional[_FileSystem] = None,
+) -> FilesystemBridge:
+    return FilesystemBridge(grant, delegate)
 
 
 class _SimpleObject(dict):
@@ -620,6 +666,24 @@ class _HttpModule:
 http = _HttpModule()
 
 
+class HttpBridge:
+    def __init__(self, grant: CapabilityGrant, delegate: Optional[_HttpModule] = None):
+        self._grant = grant
+        self._delegate = delegate or http
+
+    async def get(self, url: str, headers: Optional[Dict[str, str]] = None) -> HttpResponse:
+        self._grant.require("net")
+        return await self._delegate.get(url, headers=headers)
+
+
+def create_http_bridge(
+    grant: CapabilityGrant,
+    *,
+    delegate: Optional[_HttpModule] = None,
+) -> HttpBridge:
+    return HttpBridge(grant, delegate)
+
+
 def logExecution(func: Callable[..., Any]) -> Callable[..., Any]:
     if asyncio.iscoroutinefunction(func):
 
@@ -703,8 +767,43 @@ class _WebSocketModule:
 websocket = _WebSocketModule()
 
 
+class ModelBridge:
+    def __init__(self, grant: CapabilityGrant, handlers: Optional[Mapping[str, Callable[..., Any]]] = None):
+        self._grant = grant
+        self._handlers: Dict[str, Callable[..., Any]] = dict(handlers or {})
+
+    def register_stub(self, name: str, handler: Callable[..., Any]) -> None:
+        self._handlers[name] = handler
+
+    async def invoke(self, prompt: str, /, **options: Any) -> Dict[str, Any]:
+        self._grant.require("model")
+        model_name = options.get("model", "mock")
+        handler = self._handlers.get(model_name)
+        if handler is None:
+            await asyncio.sleep(0)
+            return {
+                "model": model_name,
+                "prompt": prompt,
+                "output": f"[mock:model] {prompt}",
+                "options": options,
+            }
+        result = handler(prompt, options)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
+
+
+def create_model_bridge(
+    grant: CapabilityGrant,
+    *,
+    handlers: Optional[Mapping[str, Callable[..., Any]]] = None,
+) -> ModelBridge:
+    return ModelBridge(grant, handlers)
+
+
 __all__ = [
     "Array",  # backwards compat placeholder
+    "CapabilityGrant",
     "EnumInstance",
     "EnumType",
     "enum_type",
@@ -717,7 +816,12 @@ __all__ = [
     "array_reduce",
     "channel",
     "console",
+    "create_capability_grant",
+    "create_filesystem_bridge",
+    "create_http_bridge",
+    "create_model_bridge",
     "fs",
+    "FilesystemBridge",
     "make_object",
     "char_code",
     "to_debug_string",
@@ -728,6 +832,7 @@ __all__ = [
     "raise_value_error",
     "http",
     "logExecution",
+    "ModelBridge",
     "parallel",
     "sleep",
     "serve",

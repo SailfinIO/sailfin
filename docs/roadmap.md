@@ -15,7 +15,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
 
 2. **Runtime & FFI Foundations**
-  - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
+  - [ ] Capability adapter injection — Wire the new runtime capability bridges to host-provided adapters in the stage2 runner so filesystem, HTTP, and model calls no longer depend on `runtime_support.py`; ship adapter docs alongside samples.
   - [ ] Runtime type metadata — Emit module descriptors so `check_type` no longer relies on `runtime.resolve_runtime_type`; update `docs/runtime_audit.md` once the bridge is removed.
   - [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
   - [ ] Inline the grapheme segmentation tables into Sailfin-native helpers and remove the Python `unicodedata` dependency once normalization primitives solidify; extend coverage with locale-heavy fixtures.
@@ -70,6 +70,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Stage1 installer — Added `scripts/install_stage1.py` and README docs so releases can be fetched with a PAT and installed system-wide.
 - [x] Runtime string helpers — Promoted `compiler/src/string_utils.sfn` into the shared runtime prelude so downstream projects and the stage1 compiler reference a single implementation. Validation: `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`.
 - [x] Module re-export support — Parser, emitter, native lowering, and Python bridge now preserve aliased `import`/`export` specifiers so runtime helpers can be re-exported directly. Validation: `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.
+- [x] Capability bridges — Introduced runtime capability grants and filesystem/HTTP/model bridge helpers that enforce permissions while delegating to bootstrap shims. Validation: `compiler/tests/test_runtime_prelude.py::test_runtime_capability_bridges`.
 
 ## Coordination Notes
 

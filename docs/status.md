@@ -99,6 +99,10 @@ roadmaps.
   `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
   `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;
   regression coverage lives in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.
+  Capability grants plus `fs`/`http`/`model` bridges now expose effect-aware
+  shims from `runtime/prelude.sfn` while still delegating to the Python runtime;
+  runtime permissions are enforced in
+  `compiler/tests/test_runtime_prelude.py::test_runtime_capability_bridges`.
   Native lowering now
   recognises top-level `.let` bindings (e.g., `console = runtime.console`) so
   the prelude compiles without spurious diagnostics.
