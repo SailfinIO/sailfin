@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.ast import Block, Decorator, ElseBranch, MatchCase, FunctionSignature, MethodDeclaration, Program, Statement
+from compiler.build.ast import Block, Decorator, ElseBranch, Expression, MatchCase, FunctionSignature, MethodDeclaration, Program, Statement
 from compiler.build.token import Token
 from compiler.build.decorator_semantics import evaluate_decorators
 
@@ -21,13 +21,23 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-class EffectViolation:
-    def __init__(self, routine_name, missing_effects):
-        self.routine_name = routine_name
-        self.missing_effects = missing_effects
+class EffectRequirement:
+    def __init__(self, effect, description, origin=None):
+        self.effect = effect
+        self.origin = origin
+        self.description = description
 
     def __repr__(self):
-        return runtime.struct_repr('EffectViolation', [runtime.struct_field('routine_name', self.routine_name), runtime.struct_field('missing_effects', self.missing_effects)])
+        return runtime.struct_repr('EffectRequirement', [runtime.struct_field('effect', self.effect), runtime.struct_field('origin', self.origin), runtime.struct_field('description', self.description)])
+
+class EffectViolation:
+    def __init__(self, routine_name, missing_effects, requirements):
+        self.routine_name = routine_name
+        self.missing_effects = missing_effects
+        self.requirements = requirements
+
+    def __repr__(self):
+        return runtime.struct_repr('EffectViolation', [runtime.struct_field('routine_name', self.routine_name), runtime.struct_field('missing_effects', self.missing_effects), runtime.struct_field('requirements', self.requirements)])
 
 def validate_effects(program):
     violations = []
@@ -91,67 +101,207 @@ def analyze_routine(signature, body, decorators, name):
         declared = append_unique_effect(declared, "io")
     required = required_effects(body)
     missing = []
+    missing_requirements = []
     index = 0
     while True:
         if index >= len(required):
             break
-        effect = required[index]
+        requirement = required[index]
+        effect = requirement.effect
         if effect == "io"  and  requires_io_from_decorators:
             index += 1
             continue
-        if not contains_effect(declared, effect):
-            missing = append_unique_effect(missing, effect)
+        if contains_effect(declared, effect):
+            index += 1
+            continue
+        missing = append_unique_effect(missing, effect)
+        if not contains_requirement_for_effect(missing_requirements, effect):
+            missing_requirements = append_requirement(missing_requirements, requirement)
         index += 1
     if len(missing) == 0:
         return []
     result = []
-    result = append_violation(result, EffectViolation(routine_name=name, missing_effects=missing))
+    result = append_violation( result, EffectViolation(routine_name=name, missing_effects=missing, requirements=missing_requirements) )
     return result
 
 def required_effects(body):
-    required = []
-    if block_has_prompt(body):
-        required = append_unique_effect(required, "model")
-    if block_contains_fs_usage(body.tokens):
-        required = append_unique_effect(required, "io")
-    if block_contains_spawn_usage(body.tokens):
-        required = append_unique_effect(required, "io")
-    if block_contains_network_usage(body.tokens):
-        required = append_unique_effect(required, "net")
-    if block_contains_console_usage(body.tokens):
-        required = append_unique_effect(required, "io")
-    if block_contains_sleep_usage(body.tokens):
-        required = append_unique_effect(required, "clock")
+    return collect_effects_from_block(body)
+
+def collect_effects_from_block(block):
+    required = collect_effects_from_tokens(block.tokens)
+    index = 0
+    while True:
+        if index >= len(block.statements):
+            break
+        required = merge_requirements(required, collect_effects_from_statement(block.statements[index]))
+        index += 1
     return required
 
-def block_has_prompt(block):
-    if len(block.statements) > 0:
-        index = 0
+def collect_effects_from_statement(statement):
+    if statement.variant == "PromptStatement":
+        required = collect_effects_from_block(statement.body)
+        required = append_requirement( required, EffectRequirement(effect="model", origin=statement.keyword_token, description="prompt \"" + statement.channel + "\"") )
+        return required
+    if statement.variant == "WithStatement":
+        required = collect_effects_from_block(statement.body)
+        clause_index = 0
         while True:
-            if index >= len(block.statements):
+            if clause_index >= len(statement.clauses):
                 break
-            statement = block.statements[index]
-            if statement.variant == "PromptStatement":
-                return true
-            if statement.variant == "WithStatement":
-                if block_has_prompt(statement.body):
-                    return true
-            if statement.variant == "ForStatement":
-                if block_has_prompt(statement.body):
-                    return true
-            if statement.variant == "MatchStatement":
-                if match_cases_have_prompt(statement.cases):
-                    return true
-            if statement.variant == "IfStatement":
-                if block_has_prompt(statement.then_block):
-                    return true
-                if statement.else_branch != null:
-                    if else_branch_has_prompt(statement.else_branch):
-                        return true
-            index += 1
-    return block_contains_prompt(block.tokens)
+            clause = statement.clauses[clause_index]
+            required = merge_requirements(required, collect_effects_from_expression(clause.expression))
+            clause_index += 1
+        return required
+    if statement.variant == "ForStatement":
+        required = collect_effects_from_block(statement.body)
+        if statement.clause.target != null:
+            required = merge_requirements(required, collect_effects_from_expression(statement.clause.target))
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable))
+        return required
+    if statement.variant == "LoopStatement":
+        return collect_effects_from_block(statement.body)
+    if statement.variant == "MatchStatement":
+        required = collect_effects_from_expression(statement.expression)
+        case_index = 0
+        while True:
+            if case_index >= len(statement.cases):
+                break
+            required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index]))
+            case_index += 1
+        return required
+    if statement.variant == "IfStatement":
+        required = collect_effects_from_expression(statement.condition)
+        required = merge_requirements(required, collect_effects_from_block(statement.then_block))
+        if statement.else_branch != null:
+            required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch))
+        return required
+    if statement.variant == "ReturnStatement":
+        return collect_effects_from_expression(statement.expression)
+    if statement.variant == "ExpressionStatement":
+        return collect_effects_from_expression(statement.expression)
+    if statement.variant == "VariableDeclaration":
+        return collect_effects_from_expression(statement.initializer)
+    if statement.variant == "FunctionDeclaration":
+        return collect_effects_from_block(statement.body)
+    if statement.variant == "PipelineDeclaration":
+        return collect_effects_from_block(statement.body)
+    if statement.variant == "ToolDeclaration":
+        return collect_effects_from_block(statement.body)
+    if statement.variant == "TestDeclaration":
+        return collect_effects_from_block(statement.body)
+    if statement.variant == "StructDeclaration":
+        required = []
+        method_index = 0
+        while True:
+            if method_index >= len(statement.methods):
+                break
+            required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body))
+            method_index += 1
+        return required
+    if statement.variant == "ModelDeclaration":
+        required = []
+        property_index = 0
+        while True:
+            if property_index >= len(statement.properties):
+                break
+            required = merge_requirements(required, collect_effects_from_expression(statement.properties[property_index].value))
+            property_index += 1
+        return required
+    if statement.variant == "Unknown":
+        return collect_effects_from_tokens(statement.tokens)
+    return []
 
-def block_contains_prompt(tokens):
+def collect_effects_from_else_branch(branch):
+    required = []
+    if branch.body != null:
+        required = merge_requirements(required, collect_effects_from_block(branch.body))
+    if branch.statement != null:
+        required = merge_requirements(required, collect_effects_from_statement(branch.statement))
+    return required
+
+def collect_effects_from_match_case(case):
+    required = collect_effects_from_expression(case.pattern)
+    if case.guard != null:
+        required = merge_requirements(required, collect_effects_from_expression(case.guard))
+    required = merge_requirements(required, collect_effects_from_block(case.body))
+    return required
+
+def collect_effects_from_expression(expression):
+    if expression == null:
+        return []
+    if expression.variant == "Call":
+        required = collect_effects_from_expression(expression.callee)
+        argument_index = 0
+        while True:
+            if argument_index >= len(expression.arguments):
+                break
+            required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index]))
+            argument_index += 1
+        return required
+    if expression.variant == "Member":
+        return collect_effects_from_expression(expression.object)
+    if expression.variant == "Unary":
+        return collect_effects_from_expression(expression.operand)
+    if expression.variant == "Binary":
+        required = collect_effects_from_expression(expression.left)
+        required = merge_requirements(required, collect_effects_from_expression(expression.right))
+        return required
+    if expression.variant == "Array":
+        required = []
+        element_index = 0
+        while True:
+            if element_index >= len(expression.elements):
+                break
+            required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index]))
+            element_index += 1
+        return required
+    if expression.variant == "Object":
+        required = []
+        field_index = 0
+        while True:
+            if field_index >= len(expression.fields):
+                break
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value))
+            field_index += 1
+        return required
+    if expression.variant == "Struct":
+        required = []
+        field_index = 0
+        while True:
+            if field_index >= len(expression.fields):
+                break
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value))
+            field_index += 1
+        return required
+    if expression.variant == "Lambda":
+        return collect_effects_from_block(expression.body)
+    if expression.variant == "Index":
+        required = collect_effects_from_expression(expression.sequence)
+        required = merge_requirements(required, collect_effects_from_expression(expression.index))
+        return required
+    if expression.variant == "Range":
+        required = collect_effects_from_expression(expression.start)
+        required = merge_requirements(required, collect_effects_from_expression(expression.end))
+        return required
+    if expression.variant == "Raw":
+        return []
+    return []
+
+def collect_effects_from_tokens(tokens):
+    required = []
+    required = append_prompt_effect(required, tokens)
+    required = append_identifier_dot_effect(required, tokens, "fs", "io", "filesystem helper usage")
+    required = append_identifier_dot_effect(required, tokens, "print", "io", "print helper usage")
+    required = append_identifier_dot_effect(required, tokens, "console", "io", "console helper usage")
+    required = append_identifier_dot_effect(required, tokens, "http", "net", "http helper usage")
+    required = append_identifier_dot_effect(required, tokens, "websocket", "net", "websocket helper usage")
+    required = append_identifier_call_effect(required, tokens, "spawn", "io", "spawn call")
+    required = append_identifier_call_effect(required, tokens, "serve", "net", "serve call")
+    required = append_identifier_call_effect(required, tokens, "sleep", "clock", "sleep call")
+    return required
+
+def append_prompt_effect(requirements, tokens):
+    result = requirements
     index = 0
     while True:
         if index >= len(tokens):
@@ -159,63 +309,44 @@ def block_contains_prompt(tokens):
         token = tokens[index]
         if is_identifier_token(token, "prompt"):
             channel_index = next_non_trivia(tokens, index + 1)
+            description = "prompt block"
             if channel_index != -1:
                 channel_token = tokens[channel_index]
                 if channel_token.kind.variant == "Identifier"  or  channel_token.kind.variant == "StringLiteral":
+                    description = "prompt " + channel_token.lexeme
                     brace_index = next_non_trivia(tokens, channel_index + 1)
-                    if brace_index != -1:
-                        brace_token = tokens[brace_index]
-                        if is_symbol_token(brace_token, "{"):
-                            return true
+                    if brace_index != -1  and  is_symbol_token(tokens[brace_index], "{"):
+                        result = append_requirement( result, EffectRequirement(effect="model", origin=token, description=description) )
+                        index += 1
+                        continue
+            result = append_requirement( result, EffectRequirement(effect="model", origin=token, description=description) )
         index += 1
-    return false
+    return result
 
-def block_contains_fs_usage(tokens):
-    if contains_identifier_followed_by_symbol(tokens, "fs", "."):
-        return true
-    if contains_member_chain(tokens, ["runtime", "fs"]):
-        return true
-    return false
+def append_identifier_dot_effect(requirements, tokens, identifier, effect, description):
+    matches = find_identifier_followed_by_symbol(tokens, identifier, ".")
+    result = requirements
+    index = 0
+    while True:
+        if index >= len(matches):
+            break
+        result = append_requirement( result, EffectRequirement(effect=effect, origin=matches[index], description=description) )
+        index += 1
+    return result
 
-def block_contains_network_usage(tokens):
-    if contains_identifier_followed_by_symbol(tokens, "http", "."):
-        return true
-    if contains_identifier_followed_by_symbol(tokens, "websocket", "."):
-        return true
-    if contains_identifier_call(tokens, "serve"):
-        return true
-    if contains_member_chain(tokens, ["runtime", "http"]):
-        return true
-    if contains_member_chain(tokens, ["runtime", "websocket"]):
-        return true
-    if contains_member_call(tokens, ["runtime", "serve"]):
-        return true
-    return false
+def append_identifier_call_effect(requirements, tokens, identifier, effect, description):
+    matches = find_identifier_call(tokens, identifier)
+    result = requirements
+    index = 0
+    while True:
+        if index >= len(matches):
+            break
+        result = append_requirement( result, EffectRequirement(effect=effect, origin=matches[index], description=description) )
+        index += 1
+    return result
 
-def block_contains_spawn_usage(tokens):
-    if contains_identifier_call(tokens, "spawn"):
-        return true
-    if contains_member_call(tokens, ["runtime", "spawn"]):
-        return true
-    return false
-
-def block_contains_console_usage(tokens):
-    if contains_identifier_followed_by_symbol(tokens, "print", "."):
-        return true
-    if contains_identifier_followed_by_symbol(tokens, "console", "."):
-        return true
-    if contains_member_chain(tokens, ["runtime", "console"]):
-        return true
-    return false
-
-def block_contains_sleep_usage(tokens):
-    if contains_identifier_call(tokens, "sleep"):
-        return true
-    if contains_member_call(tokens, ["runtime", "sleep"]):
-        return true
-    return false
-
-def contains_identifier_followed_by_symbol(tokens, name, symbol):
+def find_identifier_followed_by_symbol(tokens, name, symbol):
+    matches = []
     index = 0
     while True:
         if index >= len(tokens):
@@ -223,11 +354,12 @@ def contains_identifier_followed_by_symbol(tokens, name, symbol):
         if is_identifier_token(tokens[index], name):
             next_index = next_non_trivia(tokens, index + 1)
             if next_index != -1  and  is_symbol_token(tokens[next_index], symbol):
-                return true
+                matches = (matches) + ([tokens[index]])
         index += 1
-    return false
+    return matches
 
-def contains_identifier_call(tokens, name):
+def find_identifier_call(tokens, name):
+    matches = []
     index = 0
     while True:
         if index >= len(tokens):
@@ -235,69 +367,9 @@ def contains_identifier_call(tokens, name):
         if is_identifier_token(tokens[index], name):
             paren = next_non_trivia(tokens, index + 1)
             if paren != -1  and  is_symbol_token(tokens[paren], "("):
-                return true
+                matches = (matches) + ([tokens[index]])
         index += 1
-    return false
-
-def contains_member_chain(tokens, chain):
-    if len(chain) == 0:
-        return false
-    index = 0
-    while True:
-        if index >= len(tokens):
-            break
-        if is_identifier_token(tokens[index], chain[0]):
-            cursor = index
-            chain_index = 1
-            matches = true
-            while True:
-                if chain_index >= len(chain):
-                    break
-                dot_index = next_non_trivia(tokens, cursor + 1)
-                if dot_index == -1  or  not is_symbol_token(tokens[dot_index], "."):
-                    matches = false
-                    break
-                member_index = next_non_trivia(tokens, dot_index + 1)
-                if member_index == -1  or  not is_identifier_token(tokens[member_index], chain[chain_index]):
-                    matches = false
-                    break
-                cursor = member_index
-                chain_index += 1
-            if matches:
-                return true
-        index += 1
-    return false
-
-def contains_member_call(tokens, chain):
-    if len(chain) == 0:
-        return false
-    index = 0
-    while True:
-        if index >= len(tokens):
-            break
-        if is_identifier_token(tokens[index], chain[0]):
-            cursor = index
-            chain_index = 1
-            matches = true
-            while True:
-                if chain_index >= len(chain):
-                    break
-                dot_index = next_non_trivia(tokens, cursor + 1)
-                if dot_index == -1  or  not is_symbol_token(tokens[dot_index], "."):
-                    matches = false
-                    break
-                member_index = next_non_trivia(tokens, dot_index + 1)
-                if member_index == -1  or  not is_identifier_token(tokens[member_index], chain[chain_index]):
-                    matches = false
-                    break
-                cursor = member_index
-                chain_index += 1
-            if matches:
-                call_index = next_non_trivia(tokens, cursor + 1)
-                if call_index != -1  and  is_symbol_token(tokens[call_index], "("):
-                    return true
-        index += 1
-    return false
+    return matches
 
 def next_non_trivia(tokens, start):
     index = start
@@ -355,31 +427,25 @@ def contains_effect(effects, effect):
         index += 1
     return false
 
-def else_branch_has_prompt(branch):
-    if branch.body != null:
-        if block_has_prompt(branch.body):
-            return true
-    if branch.statement != null:
-        if branch.statement.variant == "IfStatement":
-            return if_statement_has_prompt(branch.statement)
-    return false
+def append_requirement(collection, item):
+    return (collection) + ([item])
 
-def if_statement_has_prompt(statement):
-    if statement.variant != "IfStatement":
-        return false
-    if block_has_prompt(statement.then_block):
-        return true
-    if statement.else_branch != null:
-        return else_branch_has_prompt(statement.else_branch)
-    return false
-
-def match_cases_have_prompt(cases):
+def merge_requirements(base, additions):
+    result = base
     index = 0
     while True:
-        if index >= len(cases):
+        if index >= len(additions):
             break
-        case = cases[index]
-        if block_has_prompt(case.body):
+        result = (result) + ([additions[index]])
+        index += 1
+    return result
+
+def contains_requirement_for_effect(requirements, effect):
+    index = 0
+    while True:
+        if index >= len(requirements):
+            break
+        if requirements[index].effect == effect:
             return true
         index += 1
     return false

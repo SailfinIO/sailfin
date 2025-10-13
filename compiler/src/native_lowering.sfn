@@ -303,430 +303,430 @@ fn render_python_specifier(specifier -> NativeImportSpecifier) -> string {
 }
 
 fn normalize_import_module(path -> string) -> string {
-let trimmed = trim_text(path);
-if trimmed.length == 0 {
-return trimmed;
-}
-if starts_with(trimmed, "runtime/") {
-let remainder = replace_all(trimmed, "/", ".");
-return "compiler.build." + remainder;
-}
-if starts_with(trimmed, "./") {
-let remainder = substring(trimmed, 2, trimmed.length);
-remainder = replace_all(remainder, "/", ".");
-return "compiler.build." + remainder;
-}
-return replace_all(trimmed, "/", ".");
+    let trimmed = trim_text(path);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    if starts_with(trimmed, "runtime/") {
+        let remainder = replace_all(trimmed, "/", ".");
+        return "compiler.build." + remainder;
+    }
+    if starts_with(trimmed, "./") {
+        let remainder = substring(trimmed, 2, trimmed.length);
+        remainder = replace_all(remainder, "/", ".");
+        return "compiler.build." + remainder;
+    }
+    return replace_all(trimmed, "/", ".");
 }
 
 fn emit_struct_definitions(builder -> PythonBuilder, structs -> NativeStruct[]) -> PythonStructEmission {
-let mut current = builder;
-let mut diagnostics -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= structs.length {
-break;
-}
-let emission = emit_single_struct(current, structs[index]);
-current = emission.builder;
-diagnostics = diagnostics.concat(emission.diagnostics);
-if index + 1 < structs.length {
-current = builder_emit_blank(current);
-}
-index += 1;
-}
-return PythonStructEmission { builder: current, diagnostics: diagnostics };
+    let mut current = builder;
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let emission = emit_single_struct(current, structs[index]);
+        current = emission.builder;
+        diagnostics = diagnostics.concat(emission.diagnostics);
+        if index + 1 < structs.length {
+            current = builder_emit_blank(current);
+        }
+        index += 1;
+    }
+    return PythonStructEmission { builder: current, diagnostics: diagnostics };
 }
 
 fn emit_export_list(builder -> PythonBuilder, exports -> string[]) -> PythonBuilder {
-let mut unique -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= exports.length {
-break;
-}
-let name = sanitize_identifier(exports[index]);
-let mut seen -> boolean = false;
-let mut existing_index -> number = 0;
-loop {
-if existing_index >= unique.length {
-break;
-}
-if unique[existing_index] == name {
-seen = true;
-break;
-}
-existing_index += 1;
-}
-if !seen {
-unique = append_string(unique, name);
-}
-index += 1;
-}
-let mut quoted -> string[] = [];
-index = 0;
-loop {
-if index >= unique.length {
-break;
-}
-quoted = append_string(quoted, "\"" + unique[index] + "\"");
-index += 1;
-}
-return builder_emit(builder, "__all__ = [" + join_with_separator(quoted, ", ") + "]");
+    let mut unique -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= exports.length {
+            break;
+        }
+        let name = sanitize_identifier(exports[index]);
+        let mut seen -> boolean = false;
+        let mut existing_index -> number = 0;
+        loop {
+            if existing_index >= unique.length {
+                break;
+            }
+            if unique[existing_index] == name {
+                seen = true;
+                break;
+            }
+            existing_index += 1;
+        }
+        if !seen {
+            unique = append_string(unique, name);
+        }
+        index += 1;
+    }
+    let mut quoted -> string[] = [];
+    index = 0;
+    loop {
+        if index >= unique.length {
+            break;
+        }
+        quoted = append_string(quoted, "\"" + unique[index] + "\"");
+        index += 1;
+    }
+    return builder_emit(builder, "__all__ = [" + join_with_separator(quoted, ", ") + "]");
 }
 
 fn collect_export_names(existing -> string[], specifiers -> NativeImportSpecifier[]) -> string[] {
-let mut result = existing;
-let mut index -> number = 0;
-loop {
-if index >= specifiers.length {
-break;
-}
-let specifier = specifiers[index];
-let exported = select_export_name(specifier);
-if exported.length > 0 {
-result = append_string(result, exported);
-}
-index += 1;
-}
-return result;
+    let mut result = existing;
+    let mut index -> number = 0;
+    loop {
+    if index >= specifiers.length {
+            break;
+        }
+        let specifier = specifiers[index];
+        let exported = select_export_name(specifier);
+        if exported.length > 0 {
+            result = append_string(result, exported);
+        }
+        index += 1;
+    }
+    return result;
 }
 
 fn select_export_name(specifier -> NativeImportSpecifier) -> string {
-if specifier.alias != null && specifier.alias.length > 0 {
-return specifier.alias;
-}
-return specifier.name;
+    if specifier.alias != null && specifier.alias.length > 0 {
+        return specifier.alias;
+    }
+    return specifier.name;
 }
 
 fn emit_single_struct(builder -> PythonBuilder, definition -> NativeStruct) -> PythonStructEmission {
-let class_name = sanitize_identifier(definition.name);
-let mut current = builder_emit(builder, "class " + class_name + ":");
-current = builder_push_indent(current);
-let mut diagnostics -> string[] = [];
-let parameters = render_struct_parameters(definition.fields);
-let init_signature = "def __init__(self";
-if parameters.length > 0 {
-init_signature = init_signature + ", " + join_with_separator(parameters, ", ");
-}
-init_signature = init_signature + ")";
-current = builder_emit(current, init_signature + ":");
-current = builder_push_indent(current);
-if definition.fields.length == 0 {
-current = builder_emit(current, "pass");
-} else {
-let mut index -> number = 0;
-loop {
-if index >= definition.fields.length {
-break;
-}
-let field = definition.fields[index];
-let attr_name = sanitize_identifier(field.name);
-current = builder_emit(current, "self." + attr_name + " = " + attr_name);
-index += 1;
-}
-}
-current = builder_pop_indent(current);
-current = builder_emit_blank(current);
-current = builder_emit(current, "def __repr__(self):");
-current = builder_push_indent(current);
-let repr_fields = render_struct_repr_fields(class_name, definition.fields);
-current = builder_emit(current, repr_fields);
-current = builder_pop_indent(current);
-if class_name == "EnumInstance" {
-current = builder_emit_blank(current);
-current = builder_emit(current, "def __getattr__(self, item):");
-current = builder_push_indent(current);
-current = builder_emit(current, "index = 0");
-current = builder_emit(current, "while True:");
-current = builder_push_indent(current);
-current = builder_emit(current, "if index >= len(self.fields):");
-current = builder_push_indent(current);
-current = builder_emit(current, "break");
-current = builder_pop_indent(current);
-current = builder_emit(current, "field = self.fields[index]");
-current = builder_emit(current, "if field.name == item:");
-current = builder_push_indent(current);
-current = builder_emit(current, "return field.value");
-current = builder_pop_indent(current);
-current = builder_emit(current, "index += 1");
-current = builder_pop_indent(current);
-current = builder_emit(current, "raise AttributeError(item)");
-current = builder_pop_indent(current);
-}
-if definition.methods.length > 0 {
-current = builder_emit_blank(current);
-let mut method_index -> number = 0;
-loop {
-if method_index >= definition.methods.length {
-break;
-}
-let method = definition.methods[method_index];
-let emission = emit_python_function(current, method);
-current = emission.builder;
-diagnostics = diagnostics.concat(emission.diagnostics);
-if method_index + 1 < definition.methods.length {
-current = builder_emit_blank(current);
-}
-method_index += 1;
-}
-}
-current = builder_pop_indent(current);
-return PythonStructEmission { builder: current, diagnostics: diagnostics };
+    let class_name = sanitize_identifier(definition.name);
+    let mut current = builder_emit(builder, "class " + class_name + ":");
+    current = builder_push_indent(current);
+    let mut diagnostics -> string[] = [];
+    let parameters = render_struct_parameters(definition.fields);
+    let init_signature = "def __init__(self";
+    if parameters.length > 0 {
+        init_signature = init_signature + ", " + join_with_separator(parameters, ", ");
+    }
+    init_signature = init_signature + ")";
+    current = builder_emit(current, init_signature + ":");
+    current = builder_push_indent(current);
+    if definition.fields.length == 0 {
+        current = builder_emit(current, "pass");
+    } else {
+    let mut index -> number = 0;
+    loop {
+        if index >= definition.fields.length {
+            break;
+        }
+        let field = definition.fields[index];
+        let attr_name = sanitize_identifier(field.name);
+        current = builder_emit(current, "self." + attr_name + " = " + attr_name);
+        index += 1;
+    }
+    }
+    current = builder_pop_indent(current);
+    current = builder_emit_blank(current);
+    current = builder_emit(current, "def __repr__(self):");
+    current = builder_push_indent(current);
+    let repr_fields = render_struct_repr_fields(class_name, definition.fields);
+    current = builder_emit(current, repr_fields);
+    current = builder_pop_indent(current);
+    if class_name == "EnumInstance" {
+        current = builder_emit_blank(current);
+        current = builder_emit(current, "def __getattr__(self, item):");
+        current = builder_push_indent(current);
+        current = builder_emit(current, "index = 0");
+        current = builder_emit(current, "while True:");
+        current = builder_push_indent(current);
+        current = builder_emit(current, "if index >= len(self.fields):");
+        current = builder_push_indent(current);
+        current = builder_emit(current, "break");
+        current = builder_pop_indent(current);
+        current = builder_emit(current, "field = self.fields[index]");
+        current = builder_emit(current, "if field.name == item:");
+        current = builder_push_indent(current);
+        current = builder_emit(current, "return field.value");
+        current = builder_pop_indent(current);
+        current = builder_emit(current, "index += 1");
+        current = builder_pop_indent(current);
+        current = builder_emit(current, "raise AttributeError(item)");
+        current = builder_pop_indent(current);
+    }
+    if definition.methods.length > 0 {
+        current = builder_emit_blank(current);
+        let mut method_index -> number = 0;
+        loop {
+            if method_index >= definition.methods.length {
+                break;
+            }
+            let method = definition.methods[method_index];
+            let emission = emit_python_function(current, method);
+            current = emission.builder;
+            diagnostics = diagnostics.concat(emission.diagnostics);
+            if method_index + 1 < definition.methods.length {
+                current = builder_emit_blank(current);
+            }
+            method_index += 1;
+        }
+    }
+    current = builder_pop_indent(current);
+    return PythonStructEmission { builder: current, diagnostics: diagnostics };
 }
 
 fn render_struct_parameters(fields -> NativeStructField[]) -> string[] {
-let mut required -> string[] = [];
-let mut optional -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= fields.length {
-break;
-}
-let field = fields[index];
-let name = sanitize_identifier(field.name);
-let mut entry -> string = name;
-if is_optional_type(field.type_annotation) {
-entry = entry + "=None";
-optional = append_string(optional, entry);
-} else {
-required = append_string(required, entry);
-}
-index += 1;
-}
-return required.concat(optional);
+    let mut required -> string[] = [];
+    let mut optional -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        let name = sanitize_identifier(field.name);
+        let mut entry -> string = name;
+        if is_optional_type(field.type_annotation) {
+            entry = entry + "=None";
+            optional = append_string(optional, entry);
+        } else {
+            required = append_string(required, entry);
+        }
+        index += 1;
+    }
+    return required.concat(optional);
 }
 
 fn render_struct_repr_fields(class_name -> string, fields -> NativeStructField[]) -> string {
-if fields.length == 0 {
-return "return runtime.struct_repr('" + class_name + "', [])";
-}
-let mut rendered -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= fields.length {
-break;
-}
-let field = fields[index];
-let name = sanitize_identifier(field.name);
-rendered = append_string(rendered, "runtime.struct_field('" + name + "', self." + name + ")");
-index += 1;
-}
-return "return runtime.struct_repr('" + class_name + "', [" + join_with_separator(rendered, ", ") + "])";
+    if fields.length == 0 {
+        return "return runtime.struct_repr('" + class_name + "', [])";
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        let name = sanitize_identifier(field.name);
+        rendered = append_string(rendered, "runtime.struct_field('" + name + "', self." + name + ")");
+        index += 1;
+    }
+    return "return runtime.struct_repr('" + class_name + "', [" + join_with_separator(rendered, ", ") + "])";
 }
 
 fn is_optional_type(type_annotation -> string) -> boolean {
-let trimmed = trim_text(type_annotation);
-if trimmed.length == 0 {
-return true;
-}
-return ends_with(trimmed, "?");
+    let trimmed = trim_text(type_annotation);
+    if trimmed.length == 0 {
+        return true;
+    }
+    return ends_with(trimmed, "?");
 }
 
 fn lower_expression(expression -> string) -> string {
-return lower_expression_with_depth(expression, 0);
+    return lower_expression_with_depth(expression, 0);
 }
 
 fn lower_expression_with_depth(expression -> string, depth -> number) -> string {
-if depth > 8 {
-return trim_text(expression);
-}
-let trimmed = trim_text(expression);
-if trimmed.length == 0 {
-return trimmed;
-}
-let interpolated = rewrite_interpolated_string_literal(trimmed);
-if interpolated != null {
-return interpolated;
-}
-let struct_literal = lower_struct_literal_expression(trimmed, depth);
-if struct_literal != null {
-return struct_literal;
-}
-let array_literal = lower_array_literal_expression(trimmed, depth);
-if array_literal != null {
-return array_literal;
-}
-let rewritten = rewrite_expression_intrinsics(trimmed);
-return rewrite_struct_literals_inline(rewritten, depth);
+    if depth > 8 {
+        return trim_text(expression);
+    }
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    let interpolated = rewrite_interpolated_string_literal(trimmed);
+    if interpolated != null {
+        return interpolated;
+    }
+    let struct_literal = lower_struct_literal_expression(trimmed, depth);
+    if struct_literal != null {
+        return struct_literal;
+    }
+    let array_literal = lower_array_literal_expression(trimmed, depth);
+    if array_literal != null {
+        return array_literal;
+    }
+    let rewritten = rewrite_expression_intrinsics(trimmed);
+    return rewrite_struct_literals_inline(rewritten, depth);
 }
 
 fn rewrite_interpolated_string_literal(expression -> string) -> string? {
-if expression.length < 2 {
-return null;
-}
-let decoded = decode_string_literal(expression);
-if decoded == null {
-return null;
-}
-if find_substring(decoded, "{{") < 0 {
-return null;
-}
-if find_substring(decoded, "}}") < 0 {
-return null;
-}
-let mut parts -> string[] = [];
-let mut expressions -> string[] = [];
-let mut index = 0;
-loop {
-if index > decoded.length {
-break;
-}
-let start = find_substring_from(decoded, "{{", index);
-if start < 0 {
-let tail = substring(decoded, index, decoded.length);
-parts = append_string(parts, tail);
-break;
-}
-let prefix = substring(decoded, index, start);
-parts = append_string(parts, prefix);
-let end = find_substring_from(decoded, "}}", start + 2);
-if end < 0 {
-return null;
-}
-let expr_text = trim_text(substring(decoded, start + 2, end));
-if expr_text.length == 0 {
-return null;
-}
-expressions = append_string(expressions, expr_text);
-index = end + 2;
-}
-if expressions.length == 0 {
-return null;
-}
-let mut encoded_parts -> string[] = [];
-let mut part_index -> number = 0;
-loop {
-if part_index >= parts.length {
-break;
-}
-encoded_parts = append_string(encoded_parts, python_string_literal(parts[part_index]));
-part_index = part_index + 1;
-}
-let mut value_entries -> string[] = [];
-part_index = 0;
-loop {
-if part_index >= expressions.length {
-break;
-}
-value_entries = append_string(value_entries, "(" + expressions[part_index] + ")");
-part_index = part_index + 1;
-}
-let part_list = "[" + join_with_separator(encoded_parts, ", ") + "]";
-let value_list = "[" + join_with_separator(value_entries, ", ") + "]";
-return "runtime.format_interpolated(" + part_list + ", " + value_list + ")";
+    if expression.length < 2 {
+        return null;
+    }
+    let decoded = decode_string_literal(expression);
+    if decoded == null {
+        return null;
+    }
+    if find_substring(decoded, "{{") < 0 {
+        return null;
+    }
+    if find_substring(decoded, "}}") < 0 {
+        return null;
+    }
+    let mut parts -> string[] = [];
+    let mut expressions -> string[] = [];
+    let mut index = 0;
+    loop {
+        if index > decoded.length {
+            break;
+        }
+        let start = find_substring_from(decoded, "{{", index);
+        if start < 0 {
+            let tail = substring(decoded, index, decoded.length);
+            parts = append_string(parts, tail);
+            break;
+        }
+        let prefix = substring(decoded, index, start);
+        parts = append_string(parts, prefix);
+        let end = find_substring_from(decoded, "}}", start + 2);
+        if end < 0 {
+            return null;
+        }
+        let expr_text = trim_text(substring(decoded, start + 2, end));
+        if expr_text.length == 0 {
+            return null;
+        }
+        expressions = append_string(expressions, expr_text);
+        index = end + 2;
+    }
+    if expressions.length == 0 {
+        return null;
+    }
+    let mut encoded_parts -> string[] = [];
+    let mut part_index -> number = 0;
+    loop {
+        if part_index >= parts.length {
+            break;
+        }
+        encoded_parts = append_string(encoded_parts, python_string_literal(parts[part_index]));
+        part_index = part_index + 1;
+    }
+    let mut value_entries -> string[] = [];
+    part_index = 0;
+    loop {
+        if part_index >= expressions.length {
+            break;
+        }
+        value_entries = append_string(value_entries, "(" + expressions[part_index] + ")");
+        part_index = part_index + 1;
+    }
+    let part_list = "[" + join_with_separator(encoded_parts, ", ") + "]";
+    let value_list = "[" + join_with_separator(value_entries, ", ") + "]";
+    return "runtime.format_interpolated(" + part_list + ", " + value_list + ")";
 }
 
 fn decode_string_literal(expression -> string) -> string? {
-if expression.length < 2 {
-return null;
-}
-let quote = expression[0];
-if quote != "\"" && quote != "'" {
-return null;
-}
-if expression[expression.length - 1] != quote {
-return null;
-}
-let mut result = "";
-let mut index = 1;
-loop {
-if index >= expression.length - 1 {
-break;
-}
-let ch = expression[index];
-if ch == "\\" {
-index = index + 1;
-if index >= expression.length - 1 {
-return null;
-}
-let escape = expression[index];
-result = result + decode_escape_sequence(escape, quote);
-index = index + 1;
-continue;
-}
-result = result + ch;
-index = index + 1;
-}
-return result;
+    if expression.length < 2 {
+        return null;
+    }
+    let quote = expression[0];
+    if quote != "\"" && quote != "'" {
+        return null;
+    }
+    if expression[expression.length - 1] != quote {
+        return null;
+    }
+    let mut result = "";
+    let mut index = 1;
+    loop {
+        if index >= expression.length - 1 {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "\\" {
+            index = index + 1;
+            if index >= expression.length - 1 {
+                return null;
+            }
+            let escape = expression[index];
+            result = result + decode_escape_sequence(escape, quote);
+            index = index + 1;
+            continue;
+        }
+        result = result + ch;
+        index = index + 1;
+    }
+    return result;
 }
 
 fn decode_escape_sequence(escape -> string, quote -> string) -> string {
-if escape == "n" {
-return "\n";
-}
-if escape == "r" {
-return "\r";
-}
-if escape == "t" {
-return "\t";
-}
-if escape == "\\" {
-return "\\";
-}
-if escape == quote {
-return quote;
-}
-return escape;
+    if escape == "n" {
+        return "\n";
+    }
+    if escape == "r" {
+        return "\r";
+    }
+    if escape == "t" {
+        return "\t";
+    }
+    if escape == "\\" {
+        return "\\";
+    }
+    if escape == quote {
+        return quote;
+    }
+    return escape;
 }
 
 fn python_string_literal(value -> string) -> string {
-let mut result = "'";
-let mut index = 0;
-loop {
-if index >= value.length {
-break;
-}
-let ch = value[index];
-if ch == "\\" {
-result = result + "\\\\";
-} else if ch == "'" {
-result = result + "\\'";
-} else if ch == "\n" {
-result = result + "\\n";
-} else if ch == "\r" {
-result = result + "\\r";
-} else if ch == "\t" {
-result = result + "\\t";
-} else {
-result = result + ch;
-}
-index = index + 1;
-}
-result = result + "'";
-return result;
+    let mut result = "'";
+    let mut index = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\\" {
+            result = result + "\\\\";
+        } else if ch == "'" {
+            result = result + "\\'";
+        } else if ch == "\n" {
+            result = result + "\\n";
+        } else if ch == "\r" {
+            result = result + "\\r";
+        } else if ch == "\t" {
+            result = result + "\\t";
+        } else {
+            result = result + ch;
+        }
+        index = index + 1;
+    }
+    result = result + "'";
+    return result;
 }
 
 fn find_substring(value -> string, pattern -> string) -> number {
-if pattern.length == 0 {
-return 0;
-}
-if value.length < pattern.length {
-return -1;
-}
-let mut index = 0;
-loop {
-if index + pattern.length > value.length {
-break;
-}
-let mut matches = true;
-let mut offset = 0;
-loop {
-if offset >= pattern.length {
- break;
-}
-if value[index + offset] != pattern[offset] {
- matches = false;
- break;
-}
-offset = offset + 1;
-}
-if matches {
-return index;
-}
-index = index + 1;
-}
-return -1;
+    if pattern.length == 0 {
+        return 0;
+    }
+    if value.length < pattern.length {
+        return -1;
+    }
+    let mut index = 0;
+    loop {
+        if index + pattern.length > value.length {
+        break;
+        }
+        let mut matches = true;
+        let mut offset = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                matches = false;
+                break;
+        }
+        offset = offset + 1;
+        }
+        if matches {
+            return index;
+        }
+        index = index + 1;
+    }
+    return -1;
 }
 
 fn lower_struct_literal_expression(expression -> string, depth -> number) -> string? {

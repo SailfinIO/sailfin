@@ -1681,7 +1681,8 @@ def parse_match_case(parser):
 def parse_prompt_statement(parser, decorators):
     original = parser
     current = skip_trivia(parser)
-    if not identifier_matches(parser_peek_raw(current), "prompt"):
+    prompt_token = parser_peek_raw(current)
+    if not identifier_matches(prompt_token, "prompt"):
         return BlockStatementParseResult(parser=original, statement=null, success=false)
     current = consume_keyword(current, "prompt")
     current = skip_trivia(current)
@@ -1704,7 +1705,7 @@ def parse_prompt_statement(parser, decorators):
     current = skip_trivia(current)
     if parser_peek_raw(current).kind.variant == "Symbol"  and  parser_peek_raw(current).kind.value == ";":
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'PromptStatement', [runtime.enum_field('channel', channel), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'PromptStatement', [runtime.enum_field('channel', channel), runtime.enum_field('keyword_token', prompt_token), runtime.enum_field('channel_token', channel_token), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=true)
 
 def parse_with_statement(parser, decorators):

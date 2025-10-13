@@ -53,6 +53,11 @@ def test_effect_checker_propagates_model_from_nested_lambda() -> None:
     violation = violations[0]
     assert violation.routine_name == "outer"
     assert set(violation.missing_effects) == {"model"}
+    assert violation.requirements
+    requirement = violation.requirements[0]
+    assert requirement.effect == "model"
+    assert requirement.description.startswith("prompt")
+    assert requirement.origin.lexeme == "prompt"
 
 
 @pytest.mark.usefixtures("stage1_environment")
@@ -67,6 +72,15 @@ def test_spawn_prompt_requires_io_and_model() -> None:
     violation = violations[0]
     assert violation.routine_name == "launch"
     assert set(violation.missing_effects) == {"io", "model"}
+    assert violation.requirements
+    effects = {req.effect for req in violation.requirements}
+    assert effects == {"io", "model"}
+    spawn_requirement = _select_requirement(violation.requirements, "io")
+    assert spawn_requirement.description == "spawn call"
+    assert spawn_requirement.origin.lexeme == "spawn"
+    prompt_requirement = _select_requirement(violation.requirements, "model")
+    assert prompt_requirement.description.startswith("prompt")
+    assert prompt_requirement.origin.lexeme == "prompt"
 
 
 @pytest.mark.usefixtures("stage1_environment")
@@ -78,3 +92,10 @@ def test_effect_checker_respects_declared_effects_for_spawn_prompt() -> None:
     violations = effect_checker.validate_effects(program)
 
     assert not violations
+
+
+def _select_requirement(requirements, effect: str):
+    for requirement in requirements:
+        if requirement.effect == effect:
+            return requirement
+    raise AssertionError(f"missing requirement for effect: {effect}")

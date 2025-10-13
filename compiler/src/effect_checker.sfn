@@ -18,9 +18,16 @@ import {
 import { Token } from "./token";
 import { evaluate_decorators } from "./decorator_semantics";
 
+struct EffectRequirement {
+    effect -> string;
+    origin -> Token?;
+    description -> string;
+}
+
 struct EffectViolation {
     routine_name -> string;
     missing_effects -> string[];
+    requirements -> EffectRequirement[];
 }
 
 fn validate_effects(program -> Program) -> EffectViolation[] {
@@ -117,18 +124,25 @@ fn analyze_routine(
     }
     let required = required_effects(body);
     let mut missing -> string[] = [];
+    let mut missing_requirements -> EffectRequirement[] = [];
     let mut index -> number = 0;
     loop {
         if index >= required.length {
             break;
         }
-        let effect = required[index];
+        let requirement = required[index];
+        let effect = requirement.effect;
         if effect == "io" && requires_io_from_decorators {
             index += 1;
             continue;
         }
-        if !contains_effect(declared, effect) {
-            missing = append_unique_effect(missing, effect);
+        if contains_effect(declared, effect) {
+            index += 1;
+            continue;
+        }
+        missing = append_unique_effect(missing, effect);
+        if !contains_requirement_for_effect(missing_requirements, effect) {
+            missing_requirements = append_requirement(missing_requirements, requirement);
         }
         index += 1;
     }
@@ -136,31 +150,45 @@ fn analyze_routine(
         return [];
     }
     let mut result -> EffectViolation[] = [];
-    result = append_violation(result, EffectViolation { routine_name: name, missing_effects: missing });
+    result = append_violation(
+        result,
+        EffectViolation {
+            routine_name: name,
+            missing_effects: missing,
+            requirements: missing_requirements,
+        }
+    );
     return result;
 }
 
-fn required_effects(body -> Block) -> string[] {
+fn required_effects(body -> Block) -> EffectRequirement[] {
     return collect_effects_from_block(body);
 }
 
-fn collect_effects_from_block(block -> Block) -> string[] {
+fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
     let mut required = collect_effects_from_tokens(block.tokens);
     let mut index -> number = 0;
     loop {
         if index >= block.statements.length {
             break;
         }
-        required = merge_effects(required, collect_effects_from_statement(block.statements[index]));
+        required = merge_requirements(required, collect_effects_from_statement(block.statements[index]));
         index += 1;
     }
     return required;
 }
 
-fn collect_effects_from_statement(statement -> Statement) -> string[] {
+fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[] {
     if statement.variant == "PromptStatement" {
         let mut required = collect_effects_from_block(statement.body);
-        required = append_unique_effect(required, "model");
+        required = append_requirement(
+            required,
+            EffectRequirement {
+                effect: "model",
+                origin: statement.keyword_token,
+                description: "prompt \"" + statement.channel + "\"",
+            }
+        );
         return required;
     }
     if statement.variant == "WithStatement" {
@@ -171,7 +199,7 @@ fn collect_effects_from_statement(statement -> Statement) -> string[] {
                 break;
             }
             let clause = statement.clauses[clause_index];
-            required = merge_effects(required, collect_effects_from_expression(clause.expression));
+            required = merge_requirements(required, collect_effects_from_expression(clause.expression));
             clause_index += 1;
         }
         return required;
@@ -179,9 +207,9 @@ fn collect_effects_from_statement(statement -> Statement) -> string[] {
     if statement.variant == "ForStatement" {
         let mut required = collect_effects_from_block(statement.body);
         if statement.clause.target != null {
-            required = merge_effects(required, collect_effects_from_expression(statement.clause.target));
+            required = merge_requirements(required, collect_effects_from_expression(statement.clause.target));
         }
-        required = merge_effects(required, collect_effects_from_expression(statement.clause.iterable));
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable));
         return required;
     }
     if statement.variant == "LoopStatement" {
@@ -194,16 +222,16 @@ fn collect_effects_from_statement(statement -> Statement) -> string[] {
             if case_index >= statement.cases.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_match_case(statement.cases[case_index]));
+            required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index]));
             case_index += 1;
         }
         return required;
     }
     if statement.variant == "IfStatement" {
         let mut required = collect_effects_from_expression(statement.condition);
-        required = merge_effects(required, collect_effects_from_block(statement.then_block));
+        required = merge_requirements(required, collect_effects_from_block(statement.then_block));
         if statement.else_branch != null {
-            required = merge_effects(required, collect_effects_from_else_branch(statement.else_branch));
+            required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch));
         }
         return required;
     }
@@ -229,25 +257,25 @@ fn collect_effects_from_statement(statement -> Statement) -> string[] {
         return collect_effects_from_block(statement.body);
     }
     if statement.variant == "StructDeclaration" {
-        let mut required -> string[] = [];
+        let mut required -> EffectRequirement[] = [];
         let mut method_index -> number = 0;
         loop {
             if method_index >= statement.methods.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_block(statement.methods[method_index].body));
+            required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body));
             method_index += 1;
         }
         return required;
     }
     if statement.variant == "ModelDeclaration" {
-        let mut required -> string[] = [];
+        let mut required -> EffectRequirement[] = [];
         let mut property_index -> number = 0;
         loop {
             if property_index >= statement.properties.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_expression(statement.properties[property_index].value));
+            required = merge_requirements(required, collect_effects_from_expression(statement.properties[property_index].value));
             property_index += 1;
         }
         return required;
@@ -258,27 +286,27 @@ fn collect_effects_from_statement(statement -> Statement) -> string[] {
     return [];
 }
 
-fn collect_effects_from_else_branch(branch -> ElseBranch) -> string[] {
-    let mut required -> string[] = [];
+fn collect_effects_from_else_branch(branch -> ElseBranch) -> EffectRequirement[] {
+    let mut required -> EffectRequirement[] = [];
     if branch.body != null {
-        required = merge_effects(required, collect_effects_from_block(branch.body));
+        required = merge_requirements(required, collect_effects_from_block(branch.body));
     }
     if branch.statement != null {
-        required = merge_effects(required, collect_effects_from_statement(branch.statement));
+        required = merge_requirements(required, collect_effects_from_statement(branch.statement));
     }
     return required;
 }
 
-fn collect_effects_from_match_case(case -> MatchCase) -> string[] {
+fn collect_effects_from_match_case(case -> MatchCase) -> EffectRequirement[] {
     let mut required = collect_effects_from_expression(case.pattern);
     if case.guard != null {
-        required = merge_effects(required, collect_effects_from_expression(case.guard));
+        required = merge_requirements(required, collect_effects_from_expression(case.guard));
     }
-    required = merge_effects(required, collect_effects_from_block(case.body));
+    required = merge_requirements(required, collect_effects_from_block(case.body));
     return required;
 }
 
-fn collect_effects_from_expression(expression -> Expression?) -> string[] {
+fn collect_effects_from_expression(expression -> Expression?) -> EffectRequirement[] {
     if expression == null {
         return [];
     }
@@ -289,10 +317,9 @@ fn collect_effects_from_expression(expression -> Expression?) -> string[] {
             if argument_index >= expression.arguments.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_expression(expression.arguments[argument_index]));
+            required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index]));
             argument_index += 1;
         }
-        required = merge_effects(required, effects_for_call(expression.callee));
         return required;
     }
     if expression.variant == "Member" {
@@ -303,41 +330,41 @@ fn collect_effects_from_expression(expression -> Expression?) -> string[] {
     }
     if expression.variant == "Binary" {
         let mut required = collect_effects_from_expression(expression.left);
-        required = merge_effects(required, collect_effects_from_expression(expression.right));
+        required = merge_requirements(required, collect_effects_from_expression(expression.right));
         return required;
     }
     if expression.variant == "Array" {
-        let mut required -> string[] = [];
+        let mut required -> EffectRequirement[] = [];
         let mut element_index -> number = 0;
         loop {
             if element_index >= expression.elements.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_expression(expression.elements[element_index]));
+            required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index]));
             element_index += 1;
         }
         return required;
     }
     if expression.variant == "Object" {
-        let mut required -> string[] = [];
+        let mut required -> EffectRequirement[] = [];
         let mut field_index -> number = 0;
         loop {
             if field_index >= expression.fields.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_expression(expression.fields[field_index].value));
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value));
             field_index += 1;
         }
         return required;
     }
     if expression.variant == "Struct" {
-        let mut required -> string[] = [];
+        let mut required -> EffectRequirement[] = [];
         let mut field_index -> number = 0;
         loop {
             if field_index >= expression.fields.length {
                 break;
             }
-            required = merge_effects(required, collect_effects_from_expression(expression.fields[field_index].value));
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value));
             field_index += 1;
         }
         return required;
@@ -347,12 +374,12 @@ fn collect_effects_from_expression(expression -> Expression?) -> string[] {
     }
     if expression.variant == "Index" {
         let mut required = collect_effects_from_expression(expression.sequence);
-        required = merge_effects(required, collect_effects_from_expression(expression.index));
+        required = merge_requirements(required, collect_effects_from_expression(expression.index));
         return required;
     }
     if expression.variant == "Range" {
         let mut required = collect_effects_from_expression(expression.start);
-        required = merge_effects(required, collect_effects_from_expression(expression.end));
+        required = merge_requirements(required, collect_effects_from_expression(expression.end));
         return required;
     }
     if expression.variant == "Raw" {
@@ -360,86 +387,22 @@ fn collect_effects_from_expression(expression -> Expression?) -> string[] {
     }
     return [];
 }
-
-fn effects_for_call(callee -> Expression) -> string[] {
-    let path = resolve_member_path(callee);
-    if path == null {
-        return [];
-    }
-    let mut required -> string[] = [];
-    let root = path[0];
-    let last_index = path.length - 1;
-    let last = path[last_index];
-    if root == "fs" {
-        required = append_unique_effect(required, "io");
-    }
-    if root == "http" || root == "websocket" {
-        required = append_unique_effect(required, "net");
-    }
-    if root == "print" || root == "console" {
-        required = append_unique_effect(required, "io");
-    }
-    if root == "runtime" {
-        if path.length >= 2 {
-            let helper = path[1];
-            if helper == "console" || helper == "fs" {
-                required = append_unique_effect(required, "io");
-            }
-            if helper == "http" || helper == "websocket" {
-                required = append_unique_effect(required, "net");
-            }
-        }
-    }
-    if last == "spawn" {
-        required = append_unique_effect(required, "io");
-    }
-    if last == "serve" {
-        required = append_unique_effect(required, "net");
-    }
-    if last == "sleep" {
-        required = append_unique_effect(required, "clock");
-    }
+fn collect_effects_from_tokens(tokens -> Token[]) -> EffectRequirement[] {
+    let mut required -> EffectRequirement[] = [];
+    required = append_prompt_effect(required, tokens);
+    required = append_identifier_dot_effect(required, tokens, "fs", "io", "filesystem helper usage");
+    required = append_identifier_dot_effect(required, tokens, "print", "io", "print helper usage");
+    required = append_identifier_dot_effect(required, tokens, "console", "io", "console helper usage");
+    required = append_identifier_dot_effect(required, tokens, "http", "net", "http helper usage");
+    required = append_identifier_dot_effect(required, tokens, "websocket", "net", "websocket helper usage");
+    required = append_identifier_call_effect(required, tokens, "spawn", "io", "spawn call");
+    required = append_identifier_call_effect(required, tokens, "serve", "net", "serve call");
+    required = append_identifier_call_effect(required, tokens, "sleep", "clock", "sleep call");
     return required;
 }
 
-fn resolve_member_path(expression -> Expression) -> string[]? {
-    if expression.variant == "Identifier" {
-        return [expression.name];
-    }
-    if expression.variant == "Member" {
-        let base = resolve_member_path(expression.object);
-        if base == null {
-            return null;
-        }
-        return base.concat([expression.member]);
-    }
-    return null;
-}
-
-fn collect_effects_from_tokens(tokens -> Token[]) -> string[] {
-    let mut required -> string[] = [];
-    if block_contains_prompt(tokens) {
-        required = append_unique_effect(required, "model");
-    }
-    if block_contains_fs_usage(tokens) {
-        required = append_unique_effect(required, "io");
-    }
-    if block_contains_spawn_usage(tokens) {
-        required = append_unique_effect(required, "io");
-    }
-    if block_contains_network_usage(tokens) {
-        required = append_unique_effect(required, "net");
-    }
-    if block_contains_console_usage(tokens) {
-        required = append_unique_effect(required, "io");
-    }
-    if block_contains_sleep_usage(tokens) {
-        required = append_unique_effect(required, "clock");
-    }
-    return required;
-}
-
-fn block_contains_prompt(tokens -> Token[]) -> boolean {
+fn append_prompt_effect(requirements -> EffectRequirement[], tokens -> Token[]) -> EffectRequirement[] {
+    let mut result = requirements;
     let mut index -> number = 0;
     loop {
         if index >= tokens.length {
@@ -448,90 +411,96 @@ fn block_contains_prompt(tokens -> Token[]) -> boolean {
         let token = tokens[index];
         if is_identifier_token(token, "prompt") {
             let channel_index = next_non_trivia(tokens, index + 1);
+            let mut description -> string = "prompt block";
             if channel_index != -1 {
                 let channel_token = tokens[channel_index];
                 if channel_token.kind.variant == "Identifier" || channel_token.kind.variant == "StringLiteral" {
+                    description = "prompt " + channel_token.lexeme;
                     let brace_index = next_non_trivia(tokens, channel_index + 1);
-                    if brace_index != -1 {
-                        let brace_token = tokens[brace_index];
-                        if is_symbol_token(brace_token, "{") {
-                            return true;
-                        }
+                    if brace_index != -1 && is_symbol_token(tokens[brace_index], "{") {
+                        result = append_requirement(
+                            result,
+                            EffectRequirement {
+                                effect: "model",
+                                origin: token,
+                                description: description,
+                            }
+                        );
+                        index += 1;
+                        continue;
                     }
                 }
             }
+            result = append_requirement(
+                result,
+                EffectRequirement {
+                    effect: "model",
+                    origin: token,
+                    description: description,
+                }
+            );
         }
         index += 1;
     }
-    return false;
+    return result;
 }
 
-fn block_contains_fs_usage(tokens -> Token[]) -> boolean {
-    if contains_identifier_followed_by_symbol(tokens, "fs", ".") {
-        return true;
+fn append_identifier_dot_effect(
+    requirements -> EffectRequirement[],
+    tokens -> Token[],
+    identifier -> string,
+    effect -> string,
+    description -> string
+) -> EffectRequirement[] {
+    let matches = find_identifier_followed_by_symbol(tokens, identifier, ".");
+    let mut result = requirements;
+    let mut index -> number = 0;
+    loop {
+        if index >= matches.length {
+            break;
+        }
+        result = append_requirement(
+            result,
+            EffectRequirement {
+                effect: effect,
+                origin: matches[index],
+                description: description,
+            }
+        );
+        index += 1;
     }
-    if contains_member_chain(tokens, ["runtime", "fs"]) {
-        return true;
-    }
-    return false;
+    return result;
 }
 
-fn block_contains_network_usage(tokens -> Token[]) -> boolean {
-    if contains_identifier_followed_by_symbol(tokens, "http", ".") {
-        return true;
+fn append_identifier_call_effect(
+    requirements -> EffectRequirement[],
+    tokens -> Token[],
+    identifier -> string,
+    effect -> string,
+    description -> string
+) -> EffectRequirement[] {
+    let matches = find_identifier_call(tokens, identifier);
+    let mut result = requirements;
+    let mut index -> number = 0;
+    loop {
+        if index >= matches.length {
+            break;
+        }
+        result = append_requirement(
+            result,
+            EffectRequirement {
+                effect: effect,
+                origin: matches[index],
+                description: description,
+            }
+        );
+        index += 1;
     }
-    if contains_identifier_followed_by_symbol(tokens, "websocket", ".") {
-        return true;
-    }
-    if contains_identifier_call(tokens, "serve") {
-        return true;
-    }
-    if contains_member_chain(tokens, ["runtime", "http"]) {
-        return true;
-    }
-    if contains_member_chain(tokens, ["runtime", "websocket"]) {
-        return true;
-    }
-    if contains_member_call(tokens, ["runtime", "serve"]) {
-        return true;
-    }
-    return false;
+    return result;
 }
 
-fn block_contains_spawn_usage(tokens -> Token[]) -> boolean {
-    if contains_identifier_call(tokens, "spawn") {
-        return true;
-    }
-    if contains_member_call(tokens, ["runtime", "spawn"]) {
-        return true;
-    }
-    return false;
-}
-
-fn block_contains_console_usage(tokens -> Token[]) -> boolean {
-    if contains_identifier_followed_by_symbol(tokens, "print", ".") {
-        return true;
-    }
-    if contains_identifier_followed_by_symbol(tokens, "console", ".") {
-        return true;
-    }
-    if contains_member_chain(tokens, ["runtime", "console"]) {
-        return true;
-    }
-    return false;
-}
-
-fn block_contains_sleep_usage(tokens -> Token[]) -> boolean {
-    if contains_identifier_call(tokens, "sleep") {
-        return true;
-    }
-    if contains_member_call(tokens, ["runtime", "sleep"]) {
-        return true;
-    }
-    return false;
-}
-
-fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> boolean {
+fn find_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> Token[] {
+    let mut matches -> Token[] = [];
     let mut index -> number = 0;
     loop {
         if index >= tokens.length {
@@ -540,15 +509,16 @@ fn contains_identifier_followed_by_symbol(tokens -> Token[], name -> string, sym
         if is_identifier_token(tokens[index], name) {
             let next_index = next_non_trivia(tokens, index + 1);
             if next_index != -1 && is_symbol_token(tokens[next_index], symbol) {
-                return true;
+                matches = matches.concat([tokens[index]]);
             }
         }
         index += 1;
     }
-    return false;
+    return matches;
 }
 
-fn contains_identifier_call(tokens -> Token[], name -> string) -> boolean {
+fn find_identifier_call(tokens -> Token[], name -> string) -> Token[] {
+    let mut matches -> Token[] = [];
     let mut index -> number = 0;
     loop {
         if index >= tokens.length {
@@ -557,93 +527,12 @@ fn contains_identifier_call(tokens -> Token[], name -> string) -> boolean {
         if is_identifier_token(tokens[index], name) {
             let paren = next_non_trivia(tokens, index + 1);
             if paren != -1 && is_symbol_token(tokens[paren], "(") {
-                return true;
+                matches = matches.concat([tokens[index]]);
             }
         }
         index += 1;
     }
-    return false;
-}
-
-fn contains_member_chain(tokens -> Token[], chain -> string[]) -> boolean {
-    if chain.length == 0 {
-        return false;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        if is_identifier_token(tokens[index], chain[0]) {
-            let mut cursor -> number = index;
-            let mut chain_index -> number = 1;
-            let mut matches -> boolean = true;
-            loop {
-                if chain_index >= chain.length {
-                    break;
-                }
-                let dot_index = next_non_trivia(tokens, cursor + 1);
-                if dot_index == -1 || !is_symbol_token(tokens[dot_index], ".") {
-                    matches = false;
-                    break;
-                }
-                let member_index = next_non_trivia(tokens, dot_index + 1);
-                if member_index == -1 || !is_identifier_token(tokens[member_index], chain[chain_index]) {
-                    matches = false;
-                    break;
-                }
-                cursor = member_index;
-                chain_index += 1;
-            }
-            if matches {
-                return true;
-            }
-        }
-        index += 1;
-    }
-    return false;
-}
-
-fn contains_member_call(tokens -> Token[], chain -> string[]) -> boolean {
-    if chain.length == 0 {
-        return false;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        if is_identifier_token(tokens[index], chain[0]) {
-            let mut cursor -> number = index;
-            let mut chain_index -> number = 1;
-            let mut matches -> boolean = true;
-            loop {
-                if chain_index >= chain.length {
-                    break;
-                }
-                let dot_index = next_non_trivia(tokens, cursor + 1);
-                if dot_index == -1 || !is_symbol_token(tokens[dot_index], ".") {
-                    matches = false;
-                    break;
-                }
-                let member_index = next_non_trivia(tokens, dot_index + 1);
-                if member_index == -1 || !is_identifier_token(tokens[member_index], chain[chain_index]) {
-                    matches = false;
-                    break;
-                }
-                cursor = member_index;
-                chain_index += 1;
-            }
-            if matches {
-                let call_index = next_non_trivia(tokens, cursor + 1);
-                if call_index != -1 && is_symbol_token(tokens[call_index], "(") {
-                    return true;
-                }
-            }
-        }
-        index += 1;
-    }
-    return false;
+    return matches;
 }
 
 fn next_non_trivia(tokens -> Token[], start -> number) -> number {
@@ -723,15 +612,33 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
     return false;
 }
 
-fn merge_effects(base -> string[], additions -> string[]) -> string[] {
+fn append_requirement(collection -> EffectRequirement[], item -> EffectRequirement) -> EffectRequirement[] {
+    return collection.concat([item]);
+}
+
+fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequirement[]) -> EffectRequirement[] {
     let mut result = base;
     let mut index -> number = 0;
     loop {
         if index >= additions.length {
             break;
         }
-        result = append_unique_effect(result, additions[index]);
+        result = result.concat([additions[index]]);
         index += 1;
     }
     return result;
+}
+
+fn contains_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= requirements.length {
+            break;
+        }
+        if requirements[index].effect == effect {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
 }

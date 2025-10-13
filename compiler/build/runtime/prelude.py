@@ -84,6 +84,18 @@ class TypeDescriptor:
     def __repr__(self):
         return runtime.struct_repr('TypeDescriptor', [runtime.struct_field('kind', self.kind), runtime.struct_field('name', self.name), runtime.struct_field('items', self.items)])
 
+def capability_grant(effects):
+    return runtime.create_capability_grant(effects)
+
+def fs_bridge(grant):
+    return runtime.create_filesystem_bridge(grant)
+
+def http_bridge(grant):
+    return runtime.create_http_bridge(grant)
+
+def model_bridge(grant):
+    return runtime.create_model_bridge(grant)
+
 def sleep(milliseconds):
     # effects: clock
     runtime.sleep(milliseconds)
@@ -652,4 +664,4 @@ def char_code(character):
         index = index + 1
     return code
 
-__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr", "check_type", "parse_type_descriptor", "format_interpolated"]
+__all__ = ["capability_grant", "fs_bridge", "http_bridge", "model_bridge", "clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr", "check_type", "parse_type_descriptor", "format_interpolated"]

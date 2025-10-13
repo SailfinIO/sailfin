@@ -226,6 +226,8 @@ enum Statement {
     },
     PromptStatement {
         channel -> string;
+        keyword_token -> Token;
+        channel_token -> Token;
         body -> Block;
         decorators -> Decorator[];
     },

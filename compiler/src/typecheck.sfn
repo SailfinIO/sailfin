@@ -5,6 +5,7 @@
 
 import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter } from "./ast";
 import { Token } from "./token";
+import { validate_effects, EffectRequirement, EffectViolation } from "./effect_checker";
 
 struct Diagnostic {
     code -> string;
@@ -35,9 +36,10 @@ struct ScopeResult {
 fn typecheck_program(program -> Program) -> TypecheckResult {
     let top_level = collect_top_level_symbols(program);
     let scoped_diagnostics = check_program_scopes(program);
+    let effect_diagnostics = build_effect_diagnostics(program);
 
     return TypecheckResult {
-        diagnostics: top_level.diagnostics.concat(scoped_diagnostics),
+        diagnostics: top_level.diagnostics.concat(scoped_diagnostics).concat(effect_diagnostics),
         symbols: top_level.symbols,
     };
 }
@@ -398,6 +400,66 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
     }
 
     return diagnostics;
+}
+
+fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
+    let violations = validate_effects(program);
+    let mut diagnostics -> Diagnostic[] = [];
+    let mut violation_index -> number = 0;
+    loop {
+        if violation_index >= violations.length {
+            break;
+        }
+        let violation = violations[violation_index];
+        let mut effect_index -> number = 0;
+        loop {
+            if effect_index >= violation.missing_effects.length {
+                break;
+            }
+            let effect = violation.missing_effects[effect_index];
+            let requirement = select_requirement_for_effect(violation.requirements, effect);
+            diagnostics = diagnostics.concat([
+                Diagnostic {
+                    code: "effects.missing",
+                    message: format_effect_message(violation.routine_name, effect, requirement),
+                    primary: requirement_primary_token(requirement),
+                }
+            ]);
+            effect_index += 1;
+        }
+        violation_index += 1;
+    }
+    return diagnostics;
+}
+
+fn select_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> EffectRequirement? {
+    let mut index -> number = 0;
+    loop {
+        if index >= requirements.length {
+            break;
+        }
+        let requirement = requirements[index];
+        if requirement.effect == effect {
+            return requirement;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn requirement_primary_token(requirement -> EffectRequirement?) -> Token? {
+    if requirement == null {
+        return null;
+    }
+    return requirement.origin;
+}
+
+fn format_effect_message(routine_name -> string, effect -> string, requirement -> EffectRequirement?) -> string {
+    let mut message = routine_name + " is missing effect '" + effect + "'";
+    if requirement != null {
+        message = message + "; required by " + requirement.description;
+    }
+    return message;
 }
 
 fn contains_string(items -> string[], candidate -> string) -> boolean {

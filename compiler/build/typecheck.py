@@ -3,6 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.ast import Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter
 from compiler.build.token import Token
+from compiler.build.effect_checker import validate_effects, EffectRequirement, EffectViolation
 
 print = runtime.console
 sleep = runtime.sleep
@@ -64,7 +65,8 @@ class ScopeResult:
 def typecheck_program(program):
     top_level = collect_top_level_symbols(program)
     scoped_diagnostics = check_program_scopes(program)
-    return TypecheckResult(diagnostics=(top_level.diagnostics) + (scoped_diagnostics), symbols=top_level.symbols)
+    effect_diagnostics = build_effect_diagnostics(program)
+    return TypecheckResult(diagnostics=(top_level.diagnostics) + ((scoped_diagnostics)) + (effect_diagnostics), symbols=top_level.symbols)
 
 def collect_top_level_symbols(program):
     symbols = []
@@ -287,6 +289,47 @@ def check_type_parameters(type_parameters):
         else:
             seen = (seen) + ([name])
     return diagnostics
+
+def build_effect_diagnostics(program):
+    violations = validate_effects(program)
+    diagnostics = []
+    violation_index = 0
+    while True:
+        if violation_index >= len(violations):
+            break
+        violation = violations[violation_index]
+        effect_index = 0
+        while True:
+            if effect_index >= len(violation.missing_effects):
+                break
+            effect = violation.missing_effects[effect_index]
+            requirement = select_requirement_for_effect(violation.requirements, effect)
+            diagnostics = (diagnostics) + ([ Diagnostic(code="effects.missing", message=format_effect_message(violation.routine_name, effect, requirement), primary=requirement_primary_token(requirement)) ])
+            effect_index += 1
+        violation_index += 1
+    return diagnostics
+
+def select_requirement_for_effect(requirements, effect):
+    index = 0
+    while True:
+        if index >= len(requirements):
+            break
+        requirement = requirements[index]
+        if requirement.effect == effect:
+            return requirement
+        index += 1
+    return null
+
+def requirement_primary_token(requirement):
+    if requirement == null:
+        return null
+    return requirement.origin
+
+def format_effect_message(routine_name, effect, requirement):
+    message = routine_name + " is missing effect '" + effect + "'"
+    if requirement != null:
+        message = message + "; required by " + requirement.description
+    return message
 
 def contains_string(items, candidate):
     for item in items:

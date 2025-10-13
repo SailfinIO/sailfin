@@ -2288,7 +2288,8 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
-    if !identifier_matches(parser_peek_raw(current), "prompt") {
+    let prompt_token = parser_peek_raw(current);
+    if !identifier_matches(prompt_token, "prompt") {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
     current = consume_keyword(current, "prompt");
@@ -2320,6 +2321,8 @@ fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockS
 
     let statement = Statement.PromptStatement {
         channel: channel,
+        keyword_token: prompt_token,
+        channel_token: channel_token,
         body: body,
         decorators: decorators,
     };
