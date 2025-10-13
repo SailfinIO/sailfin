@@ -73,6 +73,39 @@ fn main() -> number {
 """,
             12.0,
         ),
+        (
+            """
+fn loop_and_match(limit -> number) -> number {
+    let mut total -> number = 0;
+    let mut current -> number = 0;
+    loop {
+        if current == limit {
+            break;
+        }
+        if current == 3 {
+            current = current + 1;
+            continue;
+        }
+        total = total + current;
+        current = current + 1;
+    }
+    return total + classify(limit);
+}
+
+fn classify(value -> number) -> number {
+    match value {
+        0 => return 10,
+        1 => return 20,
+        _ => return -1,
+    }
+}
+
+fn main() -> number {
+    return loop_and_match(5);
+}
+""",
+            6.0,
+        ),
     ],
 )
 def test_native_llvm_execution_runs_program(source: str, expected: float) -> None:

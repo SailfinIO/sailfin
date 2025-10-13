@@ -164,7 +164,7 @@ def enum_lookup_field(fields, name):
         if field.name == name:
             return field
         index = index + 1
-    return None
+    return null
 
 def enum_find_variant(enum_type, variant_name):
     index = 0
@@ -175,10 +175,10 @@ def enum_find_variant(enum_type, variant_name):
         if variant.name == variant_name:
             return variant
         index = index + 1
-    return None
+    return null
 
 def enum_normalize_fields(definition, provided):
-    if definition == None:
+    if definition == null:
         return provided
     expected = definition.field_names
     if len(expected) == 0:
@@ -190,8 +190,8 @@ def enum_normalize_fields(definition, provided):
             break
         field_name = expected[index]
         candidate = enum_lookup_field(provided, field_name)
-        value = None
-        if candidate != None:
+        value = null
+        if candidate != null:
             value = candidate.value
         normalized = (normalized) + ([EnumField(name=field_name, value=value)])
         index = index + 1
@@ -211,7 +211,7 @@ def enum_get_field(instance, name):
         if field.name == name:
             return field.value
         index = index + 1
-    return None
+    return null
 
 def struct_field(name, value):
     return StructField(name=name, value=value)
@@ -253,22 +253,22 @@ def type_descriptor_primitive(name):
     return type_descriptor("primitive", name, [])
 
 def type_descriptor_union(descriptors):
-    return type_descriptor("union", None, descriptors)
+    return type_descriptor("union", null, descriptors)
 
 def type_descriptor_intersection(descriptors):
-    return type_descriptor("intersection", None, descriptors)
+    return type_descriptor("intersection", null, descriptors)
 
 def type_descriptor_array(inner):
-    return type_descriptor("array", None, [inner])
+    return type_descriptor("array", null, [inner])
 
 def type_descriptor_function():
-    return type_descriptor("function", None, [])
+    return type_descriptor("function", null, [])
 
 def type_descriptor_named(name):
     return type_descriptor("named", name, [])
 
 def type_descriptor_unknown():
-    return type_descriptor("unknown", None, [])
+    return type_descriptor("unknown", null, [])
 
 def descriptor_trim(value):
     start = 0
@@ -293,28 +293,28 @@ def descriptor_trim(value):
 
 def string_starts_with(value, prefix):
     if len(prefix) > len(value):
-        return False
+        return false
     index = 0
     while True:
         if index >= len(prefix):
             break
         if value[index] != prefix[index]:
-            return False
+            return false
         index = index + 1
-    return True
+    return true
 
 def string_ends_with(value, suffix):
     if len(suffix) > len(value):
-        return False
+        return false
     offset = len(value) - len(suffix)
     index = 0
     while True:
         if index >= len(suffix):
             break
         if value[offset + index] != suffix[index]:
-            return False
+            return false
         index = index + 1
-    return True
+    return true
 
 def descriptor_find_top_level(value, needle):
     trimmed = descriptor_trim(value)
@@ -365,7 +365,7 @@ def descriptor_strip_outer_parens(value):
             return current
         depth = 0
         index = 0
-        valid = True
+        valid = true
         while True:
             if index >= len(current):
                 break
@@ -376,10 +376,10 @@ def descriptor_strip_outer_parens(value):
                 if ch == ")":
                     depth = depth - 1
                     if depth < 0:
-                        valid = False
+                        valid = false
                         break
                     if depth == 0  and  index < len(current) - 1:
-                        valid = False
+                        valid = false
                         break
             index = index + 1
         if not valid  or  depth != 0:
@@ -483,12 +483,12 @@ def check_type_primitive(value, name):
         return runtime.is_boolean(value)
     if name == "void":
         return runtime.is_void(value)
-    return False
+    return false
 
 def check_type_descriptor(value, descriptor):
     if descriptor.kind == "primitive":
-        if descriptor.name == None:
-            return False
+        if descriptor.name == null:
+            return false
         return check_type_primitive(value, descriptor.name)
     if descriptor.kind == "union":
         index = 0
@@ -496,42 +496,42 @@ def check_type_descriptor(value, descriptor):
             if index >= len(descriptor.items):
                 break
             if check_type_descriptor(value, descriptor.items[index]):
-                return True
+                return true
             index = index + 1
-        return False
+        return false
     if descriptor.kind == "intersection":
         index = 0
         while True:
             if index >= len(descriptor.items):
                 break
             if not check_type_descriptor(value, descriptor.items[index]):
-                return False
+                return false
             index = index + 1
         return len(descriptor.items) > 0
     if descriptor.kind == "array":
         if len(descriptor.items) == 0:
             return runtime.is_array(value)
         if not runtime.is_array(value):
-            return False
+            return false
         element_descriptor = descriptor.items[0]
         index = 0
         while True:
             if index >= len(value):
                 break
             if not check_type_descriptor(value[index], element_descriptor):
-                return False
+                return false
             index = index + 1
-        return True
+        return true
     if descriptor.kind == "function":
         return runtime.is_callable(value)
     if descriptor.kind == "named":
-        if descriptor.name == None:
-            return False
+        if descriptor.name == null:
+            return false
         resolved = runtime.resolve_runtime_type(descriptor.name)
         return runtime.instance_of(value, resolved)
     if descriptor.kind == "unknown":
-        return False
-    return False
+        return false
+    return false
 
 def check_type(value, descriptor):
     parsed = parse_type_descriptor(descriptor)
@@ -665,7 +665,7 @@ def is_regional_indicator(codepoint):
 
 def is_variation_selector(codepoint):
     if codepoint >= 65024  and  codepoint <= 65039:
-        return True
+        return true
     return codepoint >= 917760  and  codepoint <= 917999
 
 def is_emoji_modifier(codepoint):
@@ -681,17 +681,17 @@ def is_codepoint_in_ranges(codepoint, ranges):
         if codepoint < start:
             break
         if codepoint <= end:
-            return True
+            return true
         index = index + 2
-    return False
+    return false
 
 def is_grapheme_extend(codepoint):
     if codepoint < 0:
-        return False
+        return false
     if is_variation_selector(codepoint):
-        return True
+        return true
     if is_emoji_modifier(codepoint):
-        return True
+        return true
     return is_codepoint_in_ranges(codepoint, GRAPHEME_EXTEND_RANGES)
 
 def iter_grapheme_clusters(text):
@@ -714,23 +714,23 @@ def iter_grapheme_clusters(text):
         is_joiner = codepoint == ZERO_WIDTH_JOINER
         is_extend = is_grapheme_extend(codepoint)
         is_ri = is_regional_indicator(codepoint)
-        start_new = False
+        start_new = false
         if prev_code == 13  and  codepoint == 10:
-            start_new = False
+            start_new = false
         else:
             if prev_was_joiner:
-                start_new = False
+                start_new = false
             else:
                 if is_joiner:
-                    start_new = False
+                    start_new = false
                 else:
                     if is_extend:
-                        start_new = False
+                        start_new = false
                     else:
                         if is_ri  and  prev_was_ri  and  ri_run_length % 2 == 1:
-                            start_new = False
+                            start_new = false
                         else:
-                            start_new = True
+                            start_new = true
         if start_new:
             clusters = (clusters) + ([current])
             current = character
@@ -748,7 +748,7 @@ def iter_grapheme_clusters(text):
         prev_code = codepoint
         prev_was_joiner = is_joiner
         if is_joiner:
-            prev_was_ri = False
+            prev_was_ri = false
             ri_run_length = 0
         else:
             if is_extend:

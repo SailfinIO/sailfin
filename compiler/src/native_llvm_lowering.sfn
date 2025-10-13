@@ -95,7 +95,48 @@ struct IfStructure {
     diagnostics -> string[];
 }
 
+struct LoopContext {
+    break_label -> string;
+    continue_label -> string;
+}
+
+struct LoopStructure {
+    body_start -> number;
+    body_end -> number;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
+struct MatchCaseStructure {
+    pattern -> string;
+    guard -> string?;
+    body_start -> number;
+    body_end -> number;
+    is_default -> boolean;
+}
+
+struct MatchStructure {
+    cases -> MatchCaseStructure[];
+    end_index -> number;
+    diagnostics -> string[];
+}
+
+struct MatchCaseCondition {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+    is_default -> boolean;
+}
+
 struct ConditionConversion {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+struct ComparisonEmission {
     lines -> string[];
     temp_index -> number;
     operand -> LLVMOperand?;
@@ -212,7 +253,8 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         0,
         0,
         0,
-        functions
+        functions,
+        []
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
@@ -243,7 +285,8 @@ fn lower_instruction_range(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[]
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -253,6 +296,7 @@ fn lower_instruction_range(
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
     let mut terminated -> boolean = false;
+    let mut current_loop_stack -> LoopContext[] = loop_stack;
     let mut index -> number = start_index;
 
     loop {
@@ -298,6 +342,65 @@ fn lower_instruction_range(
                 current_block_counter,
                 current_next_local,
                 functions,
+                current_loop_stack,
+                end
+            );
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            current_lines = lowered.lines;
+            current_allocas = lowered.allocas;
+            current_locals = lowered.locals;
+            current_temp = lowered.temp_index;
+            current_block_counter = lowered.block_counter;
+            current_next_local = lowered.next_local_id;
+            terminated = lowered.terminated;
+            index = lowered.next_index;
+            if terminated {
+                break;
+            }
+            continue;
+        } else if instruction.variant == "Loop" {
+            let lowered = lower_loop_instruction(
+                function,
+                index,
+                llvm_return,
+                bindings,
+                current_locals,
+                current_allocas,
+                current_lines,
+                current_temp,
+                current_block_counter,
+                current_next_local,
+                functions,
+                current_loop_stack,
+                end
+            );
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            current_lines = lowered.lines;
+            current_allocas = lowered.allocas;
+            current_locals = lowered.locals;
+            current_temp = lowered.temp_index;
+            current_block_counter = lowered.block_counter;
+            current_next_local = lowered.next_local_id;
+            terminated = lowered.terminated;
+            index = lowered.next_index;
+            if terminated {
+                break;
+            }
+            continue;
+        } else if instruction.variant == "Match" {
+            let lowered = lower_match_instruction(
+                function,
+                index,
+                llvm_return,
+                bindings,
+                current_locals,
+                current_allocas,
+                current_lines,
+                current_temp,
+                current_block_counter,
+                current_next_local,
+                functions,
+                current_loop_stack,
                 end
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -315,6 +418,36 @@ fn lower_instruction_range(
             continue;
         } else if instruction.variant == "Else" || instruction.variant == "EndIf" {
             break;
+        } else if instruction.variant == "EndLoop" || instruction.variant == "EndMatch" || instruction.variant == "EndFor" {
+            break;
+        } else if instruction.variant == "Break" {
+            if current_loop_stack.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: `break` outside loop in `" + function.name + "`");
+            } else {
+                let context = last_loop_context(current_loop_stack);
+                current_lines = append_string(current_lines, "  br label %" + context.break_label);
+                terminated = true;
+            }
+            index += 1;
+            if index < end && terminated {
+                diagnostics = append_string(diagnostics, "llvm lowering: instructions after break ignored in `" + function.name + "`");
+            }
+            break;
+        } else if instruction.variant == "Continue" {
+            if current_loop_stack.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: `continue` outside loop in `" + function.name + "`");
+            } else {
+                let context = last_loop_context(current_loop_stack);
+                current_lines = append_string(current_lines, "  br label %" + context.continue_label);
+                terminated = true;
+            }
+            index += 1;
+            if index < end && terminated {
+                diagnostics = append_string(diagnostics, "llvm lowering: instructions after continue ignored in `" + function.name + "`");
+            }
+            break;
+        } else if instruction.variant == "For" {
+            diagnostics = append_string(diagnostics, "llvm lowering: `.for` loops are not yet supported in `" + function.name + "`");
         } else if instruction.variant == "Noop" {
             // ignore placeholder instruction
         } else {
@@ -411,6 +544,522 @@ fn collect_if_structure(
     }
 }
 
+fn collect_loop_structure(
+    instructions -> NativeInstruction[],
+    start_index -> number,
+    end -> number,
+    function_name -> string
+) -> LoopStructure {
+    let mut diagnostics -> string[] = [];
+    let body_start = start_index + 1;
+    let mut body_end = end;
+    let mut depth -> number = 0;
+    let mut index -> number = body_start;
+    let mut limit -> number = end;
+    if limit > instructions.length {
+        limit = instructions.length;
+    }
+    loop {
+        if index >= limit {
+            if limit <= 0 {
+                limit = 0;
+            }
+            diagnostics = append_string(diagnostics, "llvm lowering: unterminated `.loop` in `" + function_name + "`");
+            return LoopStructure {
+                body_start: body_start,
+                body_end: limit,
+                next_index: limit - 1,
+                diagnostics: diagnostics,
+            };
+        }
+        let current = instructions[index];
+        if current.variant == "Loop" || current.variant == "For" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if current.variant == "EndLoop" {
+            if depth == 0 {
+                body_end = index;
+                return LoopStructure {
+                    body_start: body_start,
+                    body_end: body_end,
+                    next_index: index,
+                    diagnostics: diagnostics,
+                };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if current.variant == "EndFor" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+}
+
+fn append_loop_context(values -> LoopContext[], value -> LoopContext) -> LoopContext[] {
+    return values.concat([value]);
+}
+
+fn last_loop_context(values -> LoopContext[]) -> LoopContext {
+    let mut index -> number = values.length;
+    if index <= 0 {
+        return LoopContext { break_label: "", continue_label: "" };
+    }
+    index -= 1;
+    return values[index];
+}
+
+fn lower_loop_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+
+    let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
+    diagnostics = diagnostics.concat(structure.diagnostics);
+
+    let loop_alloc = allocate_block_label("loop", current_block_counter);
+    let loop_label = loop_alloc.label;
+    current_block_counter = loop_alloc.next_counter;
+
+    let exit_alloc = allocate_block_label("afterloop", current_block_counter);
+    let exit_label = exit_alloc.label;
+    current_block_counter = exit_alloc.next_counter;
+
+    current_lines = append_string(current_lines, "  br label %" + loop_label);
+    current_lines = append_string(current_lines, loop_label + ":");
+
+    let context = LoopContext { break_label: exit_label, continue_label: loop_label };
+    let stacked = append_loop_context(loop_stack, context);
+
+    let base_locals = current_locals;
+    let base_allocas = current_allocas;
+    let base_local_id = current_next_local;
+
+    let body_result = lower_instruction_range(
+        function,
+        structure.body_start,
+        structure.body_end,
+        llvm_return,
+        bindings,
+        base_locals,
+        base_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        base_local_id,
+        functions,
+        stacked
+    );
+
+    diagnostics = diagnostics.concat(body_result.diagnostics);
+    current_lines = current_lines.concat(body_result.lines);
+    current_allocas = body_result.allocas;
+    current_locals = base_locals;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
+
+    if !body_result.terminated {
+        current_lines = append_string(current_lines, "  br label %" + loop_label);
+    }
+
+    current_lines = append_string(current_lines, exit_label + ":");
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        next_index: structure.next_index + 1,
+    };
+}
+
+fn collect_match_structure(
+    instructions -> NativeInstruction[],
+    start_index -> number,
+    end -> number,
+    function_name -> string
+) -> MatchStructure {
+    let mut diagnostics -> string[] = [];
+    let mut cases -> MatchCaseStructure[] = [];
+    let mut current_case -> MatchCaseStructure? = null;
+    let mut index -> number = start_index + 1;
+    let mut depth -> number = 0;
+    let mut limit -> number = end;
+    if limit > instructions.length {
+        limit = instructions.length;
+    }
+    loop {
+        if index >= limit {
+            diagnostics = append_string(diagnostics, "llvm lowering: unterminated `.match` in `" + function_name + "`");
+            if current_case != null {
+                let finished = finalize_match_case(current_case, limit);
+                cases = append_match_case(cases, finished);
+            }
+            return MatchStructure { cases: cases, end_index: limit - 1, diagnostics: diagnostics };
+        }
+        let instruction = instructions[index];
+        if instruction.variant == "Match" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if instruction.variant == "EndMatch" {
+            if depth == 0 {
+                if current_case != null {
+                    let finished = finalize_match_case(current_case, index);
+                    cases = append_match_case(cases, finished);
+                    current_case = null;
+                }
+                return MatchStructure { cases: cases, end_index: index, diagnostics: diagnostics };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if depth > 0 {
+            index += 1;
+            continue;
+        }
+        if instruction.variant == "Case" {
+            if current_case != null {
+                let finished = finalize_match_case(current_case, index);
+                cases = append_match_case(cases, finished);
+            }
+            let mut guard_text -> string? = null;
+            if instruction.guard != null {
+                guard_text = instruction.guard;
+            }
+            current_case = MatchCaseStructure {
+                pattern: instruction.pattern,
+                guard: guard_text,
+                body_start: index + 1,
+                body_end: index + 1,
+                is_default: is_default_pattern(instruction.pattern),
+            };
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+}
+
+fn append_match_case(cases -> MatchCaseStructure[], value -> MatchCaseStructure) -> MatchCaseStructure[] {
+    return cases.concat([value]);
+}
+
+fn finalize_match_case(case -> MatchCaseStructure?, body_end -> number) -> MatchCaseStructure {
+    let value = case;
+    return MatchCaseStructure {
+        pattern: value.pattern,
+        guard: value.guard,
+        body_start: value.body_start,
+        body_end: body_end,
+        is_default: value.is_default,
+    };
+}
+
+fn is_default_pattern(pattern -> string) -> boolean {
+    let trimmed = trim_text(pattern);
+    if trimmed.length == 0 {
+        return true;
+    }
+    if trimmed == "_" {
+        return true;
+    }
+    return false;
+}
+
+fn lower_match_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+
+    let structure = collect_match_structure(function.instructions, start_index, end, function.name);
+    diagnostics = diagnostics.concat(structure.diagnostics);
+
+    let subject_instruction = function.instructions[start_index];
+    let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions);
+    diagnostics = diagnostics.concat(subject_result.diagnostics);
+    current_lines = subject_result.lines;
+    current_temp = subject_result.temp_index;
+
+    if subject_result.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match subject in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            next_index: structure.end_index + 1,
+        };
+    }
+
+    let subject_operand = subject_result.operand;
+    if structure.cases.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`");
+        let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
+        let merge_label = merge_alloc.label;
+        current_block_counter = merge_alloc.next_counter;
+        current_lines = append_string(current_lines, "  br label %" + merge_label);
+        current_lines = append_string(current_lines, merge_label + ":");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            next_index: structure.end_index + 1,
+        };
+    }
+
+    let mut test_labels -> string[] = [];
+    let mut body_labels -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= structure.cases.length {
+            break;
+        }
+        let test_alloc = allocate_block_label("matchcase", current_block_counter);
+        let body_alloc = allocate_block_label("matchbody", test_alloc.next_counter);
+        test_labels = append_string(test_labels, test_alloc.label);
+        body_labels = append_string(body_labels, body_alloc.label);
+        current_block_counter = body_alloc.next_counter;
+        index += 1;
+    }
+
+    let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
+    let merge_label = merge_alloc.label;
+    current_block_counter = merge_alloc.next_counter;
+
+    current_lines = append_string(current_lines, "  br label %" + test_labels[0]);
+
+    let mut all_terminated -> boolean = true;
+    let mut has_unconditional_default -> boolean = false;
+
+    index = 0;
+    loop {
+        if index >= structure.cases.length {
+            break;
+        }
+        let case = structure.cases[index];
+        let mut failure_target -> string = merge_label;
+        if index + 1 < structure.cases.length {
+            failure_target = test_labels[index + 1];
+        }
+
+        current_lines = append_string(current_lines, test_labels[index] + ":");
+        let lowered_condition = lower_match_case_condition(
+            function.name,
+            subject_operand,
+            case,
+            bindings,
+            current_locals,
+            current_temp,
+            current_lines,
+            functions
+        );
+        diagnostics = diagnostics.concat(lowered_condition.diagnostics);
+        current_lines = lowered_condition.lines;
+        current_temp = lowered_condition.temp_index;
+
+        if lowered_condition.is_default {
+            has_unconditional_default = true;
+            current_lines = append_string(current_lines, "  br label %" + body_labels[index]);
+        } else if lowered_condition.operand != null {
+            current_lines = append_string(current_lines, "  br i1 " + lowered_condition.operand.value + ", label %" + body_labels[index] + ", label %" + failure_target);
+        } else {
+            current_lines = append_string(current_lines, "  br label %" + failure_target);
+        }
+
+        current_lines = append_string(current_lines, body_labels[index] + ":");
+
+        let base_locals = current_locals;
+        let base_allocas = current_allocas;
+        let base_local_id = current_next_local;
+
+        let body_result = lower_instruction_range(
+            function,
+            case.body_start,
+            case.body_end,
+            llvm_return,
+            bindings,
+            base_locals,
+            base_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            base_local_id,
+            functions,
+            loop_stack
+        );
+
+        diagnostics = diagnostics.concat(body_result.diagnostics);
+        current_lines = current_lines.concat(body_result.lines);
+        current_allocas = body_result.allocas;
+        current_locals = base_locals;
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+
+        if !body_result.terminated {
+            current_lines = append_string(current_lines, "  br label %" + merge_label);
+            all_terminated = false;
+        } else {
+            all_terminated = all_terminated && true;
+        }
+
+        index += 1;
+    }
+
+    let terminated = all_terminated && has_unconditional_default;
+
+    if !terminated {
+        current_lines = append_string(current_lines, merge_label + ":");
+    }
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: terminated,
+        next_local_id: current_next_local,
+        next_index: structure.end_index + 1,
+    };
+}
+
+fn lower_match_case_condition(
+    function_name -> string,
+    subject_operand -> LLVMOperand,
+    case -> MatchCaseStructure,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    temp_index -> number,
+    lines -> string[],
+    functions -> NativeFunction[]
+) -> MatchCaseCondition {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut condition_operand -> LLVMOperand? = null;
+
+    if !case.is_default {
+        let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions);
+        diagnostics = diagnostics.concat(pattern_result.diagnostics);
+        current_lines = pattern_result.lines;
+        current_temp = pattern_result.temp_index;
+        if pattern_result.operand != null {
+            let comparison = emit_comparison_instruction("==", subject_operand, pattern_result.operand, current_temp, current_lines);
+            diagnostics = diagnostics.concat(comparison.diagnostics);
+            current_lines = comparison.lines;
+            current_temp = comparison.temp_index;
+            condition_operand = comparison.operand;
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`");
+        }
+    }
+
+    if case.guard != null {
+        let guard_text = trim_text(case.guard);
+        if guard_text.length > 0 {
+            let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions);
+            diagnostics = diagnostics.concat(guard_condition.diagnostics);
+            current_lines = guard_condition.lines;
+            current_temp = guard_condition.temp_index;
+            if guard_condition.operand != null {
+                if condition_operand == null {
+                    condition_operand = guard_condition.operand;
+                } else {
+                    let merged = emit_boolean_and(condition_operand, guard_condition.operand, current_temp, current_lines);
+                    diagnostics = diagnostics.concat(merged.diagnostics);
+                    current_lines = merged.lines;
+                    current_temp = merged.temp_index;
+                    condition_operand = merged.operand;
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to lower guard in match case for `" + function_name + "`");
+            }
+        }
+    }
+
+    let mut is_unconditional_default -> boolean = false;
+    if case.is_default {
+        if case.guard == null {
+            is_unconditional_default = true;
+        } else {
+            let guard_trimmed = trim_text(case.guard);
+            if guard_trimmed.length == 0 {
+                is_unconditional_default = true;
+            }
+        }
+    }
+
+    return MatchCaseCondition {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: condition_operand,
+        diagnostics: diagnostics,
+        is_default: is_unconditional_default,
+    };
+}
+
 fn allocate_block_label(prefix -> string, counter -> number) -> BlockLabelResult {
     return BlockLabelResult { label: prefix + number_to_string(counter), next_counter: counter + 1 };
 }
@@ -469,6 +1118,7 @@ fn lower_if_instruction(
     block_counter -> number,
     next_local_id -> number,
     functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
     end -> number
 ) -> BlockLoweringResult {
     let mut current_lines -> string[] = lines;
@@ -551,7 +1201,8 @@ fn lower_if_instruction(
         base_temp,
         base_block_counter,
         base_local_id,
-        functions
+        functions,
+        loop_stack
     );
     diagnostics = diagnostics.concat(then_result.diagnostics);
     current_allocas = then_result.allocas;
@@ -580,7 +1231,8 @@ fn lower_if_instruction(
             current_temp,
             current_block_counter,
             current_next_local,
-            functions
+            functions,
+            loop_stack
         );
         diagnostics = diagnostics.concat(else_result.diagnostics);
         current_allocas = else_result.allocas;
@@ -919,6 +1571,11 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions);
     }
 
+    let comparison = find_comparison_operator(stripped);
+    if comparison.success {
+        return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions);
+    }
+
     let additive = find_top_level_operator(stripped, "+-");
     if additive.success {
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions);
@@ -993,6 +1650,37 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     let updated_lines = append_string(right_result.lines, line);
     let operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: temp_name };
     return ExpressionResult { lines: updated_lines, temp_index: right_result.temp_index + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+    let operator_length = match.symbol.length;
+    let left_text = trim_text(substring(expression, 0, match.index));
+    let right_text = trim_text(substring(expression, match.index + operator_length, expression.length));
+    let mut diagnostics -> string[] = [];
+    if left_text.length == 0 || right_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed comparison expression `" + expression + "`");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions);
+    diagnostics = diagnostics.concat(left_result.diagnostics);
+    if left_result.operand == null {
+        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions);
+    diagnostics = diagnostics.concat(right_result.diagnostics);
+    if right_result.operand == null {
+        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let comparison = emit_comparison_instruction(match.symbol, left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    diagnostics = diagnostics.concat(comparison.diagnostics);
+    if comparison.operand == null {
+        return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: comparison.operand, diagnostics: diagnostics };
 }
 
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
@@ -1082,6 +1770,85 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     current_lines = append_string(current_lines, call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    if left_operand.llvm_type != right_operand.llvm_type {
+        diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
+    }
+    let llvm_type = left_operand.llvm_type;
+    let predicate = comparison_predicate_for_symbol(symbol, llvm_type);
+    if predicate.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported comparison operator `" + symbol + "` for type `" + llvm_type + "`");
+        return ComparisonEmission { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+    let temp_name = format_temp_name(temp_index);
+    current_lines = append_string(current_lines, "  " + temp_name + " = " + predicate + " " + llvm_type + " " + left_operand.value + ", " + right_operand.value);
+    let operand = LLVMOperand { llvm_type: "i1", value: temp_name };
+    return ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    if left_operand.llvm_type != "i1" {
+        diagnostics = append_string(diagnostics, "llvm lowering: expected boolean operand for `and`, found `" + left_operand.llvm_type + "`");
+    }
+    if right_operand.llvm_type != "i1" {
+        diagnostics = append_string(diagnostics, "llvm lowering: expected boolean operand for `and`, found `" + right_operand.llvm_type + "`");
+    }
+    let temp_name = format_temp_name(temp_index);
+    current_lines = append_string(current_lines, "  " + temp_name + " = and i1 " + left_operand.value + ", " + right_operand.value);
+    let operand = LLVMOperand { llvm_type: "i1", value: temp_name };
+    return ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> string {
+    if llvm_type == "double" {
+        if symbol == "==" {
+            return "fcmp oeq";
+        }
+        if symbol == "!=" {
+            return "fcmp une";
+        }
+        if symbol == "<" {
+            return "fcmp olt";
+        }
+        if symbol == "<=" {
+            return "fcmp ole";
+        }
+        if symbol == ">" {
+            return "fcmp ogt";
+        }
+        if symbol == ">=" {
+            return "fcmp oge";
+        }
+        return "";
+    }
+    if llvm_type == "i32" || llvm_type == "i64" {
+        if symbol == "==" {
+            return "icmp eq";
+        }
+        if symbol == "!=" {
+            return "icmp ne";
+        }
+        if symbol == "<" {
+            return "icmp slt";
+        }
+        if symbol == "<=" {
+            return "icmp sle";
+        }
+        if symbol == ">" {
+            return "icmp sgt";
+        }
+        if symbol == ">=" {
+            return "icmp sge";
+        }
+        return "";
+    }
+    return "";
 }
 
 fn collect_parameter_types(parameters -> NativeParameter[]) -> string[] {
@@ -1180,6 +1947,44 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
             }
             return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
         }
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn find_comparison_operator(expression -> string) -> OperatorMatch {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "(" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth > 0 {
+            index += 1;
+            continue;
+        }
+        if index + 1 < expression.length {
+            let two = substring(expression, index, index + 2);
+            if two == "==" || two == "!=" || two == "<=" || two == ">=" {
+                return OperatorMatch { index: index, symbol: two, success: true };
+            }
+        }
+        if ch == "<" || ch == ">" {
+            return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
+        }
+        index += 1;
     }
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
