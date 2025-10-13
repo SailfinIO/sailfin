@@ -730,352 +730,352 @@ fn find_substring(value -> string, pattern -> string) -> number {
 }
 
 fn lower_struct_literal_expression(expression -> string, depth -> number) -> string? {
-let brace_index = index_of(expression, "{");
-if brace_index < 0 {
-return null;
-}
-let closing_index = find_matching_brace(expression, brace_index);
-if closing_index < 0 {
-return null;
-}
-let type_name = trim_text(substring(expression, 0, brace_index));
-if type_name.length == 0 {
-return null;
-}
-if !is_struct_literal_type_candidate(type_name) {
-return null;
-}
-let fields_text = substring(expression, brace_index + 1, closing_index);
-let entries = split_struct_field_entries(fields_text);
-let mut assignments -> string[] = [];
-let mut enum_fields -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= entries.length {
-break;
-}
-let entry = trim_trailing_delimiters(trim_text(entries[index]));
-if entry.length == 0 {
-index += 1;
-continue;
-}
-let colon_index = index_of(entry, ":");
-if colon_index < 0 {
-index += 1;
-continue;
-}
-let name = trim_text(substring(entry, 0, colon_index));
-let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
-if name.length == 0 {
-index += 1;
-continue;
-}
-let lowered_value = lower_expression_with_depth(value_text, depth + 1);
-let sanitized_name = sanitize_identifier(name);
-assignments = append_string(assignments, sanitized_name + "=" + lowered_value);
-enum_fields = append_string(enum_fields, "runtime.enum_field('" + sanitized_name + "', " + lowered_value + ")");
-index += 1;
-}
-let sanitized_type = sanitize_qualified_identifier(type_name);
-let mut last_dot -> number = -1;
-index = 0;
-loop {
-if index >= sanitized_type.length {
-break;
-}
-if sanitized_type[index] == "." {
-last_dot = index;
-}
-index += 1;
-}
-if last_dot >= 0 {
-let enum_target = substring(sanitized_type, 0, last_dot);
-let variant_name = substring(sanitized_type, last_dot + 1, sanitized_type.length);
-let field_list = "[" + join_with_separator(enum_fields, ", ") + "]";
-return "runtime.enum_instantiate(" + enum_target + ", '" + variant_name + "', " + field_list + ")";
-}
-return sanitized_type + "(" + join_with_separator(assignments, ", ") + ")";
+    let brace_index = index_of(expression, "{");
+    if brace_index < 0 {
+        return null;
+    }
+    let closing_index = find_matching_brace(expression, brace_index);
+    if closing_index < 0 {
+        return null;
+    }
+    let type_name = trim_text(substring(expression, 0, brace_index));
+    if type_name.length == 0 {
+        return null;
+    }
+    if !is_struct_literal_type_candidate(type_name) {
+        return null;
+    }
+    let fields_text = substring(expression, brace_index + 1, closing_index);
+    let entries = split_struct_field_entries(fields_text);
+    let mut assignments -> string[] = [];
+    let mut enum_fields -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = trim_trailing_delimiters(trim_text(entries[index]));
+        if entry.length == 0 {
+            index += 1;
+            continue;
+        }
+        let colon_index = index_of(entry, ":");
+        if colon_index < 0 {
+            index += 1;
+            continue;
+        }
+        let name = trim_text(substring(entry, 0, colon_index));
+        let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+        if name.length == 0 {
+            index += 1;
+            continue;
+        }
+        let lowered_value = lower_expression_with_depth(value_text, depth + 1);
+        let sanitized_name = sanitize_identifier(name);
+        assignments = append_string(assignments, sanitized_name + "=" + lowered_value);
+        enum_fields = append_string(enum_fields, "runtime.enum_field('" + sanitized_name + "', " + lowered_value + ")");
+        index += 1;
+    }
+    let sanitized_type = sanitize_qualified_identifier(type_name);
+    let mut last_dot -> number = -1;
+    index = 0;
+    loop {
+        if index >= sanitized_type.length {
+            break;
+        }
+        if sanitized_type[index] == "." {
+            last_dot = index;
+        }
+        index += 1;
+    }
+    if last_dot >= 0 {
+        let enum_target = substring(sanitized_type, 0, last_dot);
+        let variant_name = substring(sanitized_type, last_dot + 1, sanitized_type.length);
+        let field_list = "[" + join_with_separator(enum_fields, ", ") + "]";
+        return "runtime.enum_instantiate(" + enum_target + ", '" + variant_name + "', " + field_list + ")";
+    }
+    return sanitized_type + "(" + join_with_separator(assignments, ", ") + ")";
 }
 
 fn is_struct_literal_type_candidate(text -> string) -> boolean {
-if text.length == 0 {
-return false;
-}
-let mut index -> number = 0;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "." {
-index += 1;
-continue;
-}
-if is_identifier_char(ch) {
-index += 1;
-continue;
-}
-return false;
-}
-return true;
+    if text.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "." {
+            index += 1;
+            continue;
+        }
+        if is_identifier_char(ch) {
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 
 fn lower_array_literal_expression(expression -> string, depth -> number) -> string? {
-let trimmed = trim_text(expression);
-if trimmed.length < 2 {
-return null;
-}
-if trimmed[0] != "[" {
-return null;
-}
-if trimmed[trimmed.length - 1] != "]" {
-return null;
-}
-let inner = substring(trimmed, 1, trimmed.length - 1);
-let entries = split_array_entries(inner);
-let mut lowered -> string[] = [];
-let mut index -> number = 0;
-loop {
-if index >= entries.length {
-break;
-}
-let entry = trim_trailing_delimiters(trim_text(entries[index]));
-if entry.length > 0 {
-lowered = append_string(lowered, lower_expression_with_depth(entry, depth + 1));
-}
-index += 1;
-}
-return "[" + join_with_separator(lowered, ", ") + "]";
+    let trimmed = trim_text(expression);
+    if trimmed.length < 2 {
+        return null;
+    }
+    if trimmed[0] != "[" {
+        return null;
+    }
+    if trimmed[trimmed.length - 1] != "]" {
+        return null;
+    }
+    let inner = substring(trimmed, 1, trimmed.length - 1);
+    let entries = split_array_entries(inner);
+    let mut lowered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = trim_trailing_delimiters(trim_text(entries[index]));
+        if entry.length > 0 {
+            lowered = append_string(lowered, lower_expression_with_depth(entry, depth + 1));
+        }
+        index += 1;
+    }
+    return "[" + join_with_separator(lowered, ", ") + "]";
 }
 
 fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> string {
-if expression.length == 0 {
-return expression;
-}
-let mut current -> string = expression;
-let mut search_start -> number = 0;
-loop {
-if search_start >= current.length {
-break;
-}
-let open_index = find_substring_from(current, "{", search_start);
-if open_index < 0 {
-break;
-}
-let mut type_end -> number = open_index;
-loop {
-if type_end <= 0 {
-break;
-}
-let prev = current[type_end - 1];
-if is_whitespace_char(prev) {
-type_end -= 1;
-continue;
-}
-break;
-}
-let mut type_start -> number = type_end;
-loop {
-if type_start <= 0 {
-break;
-}
-let candidate_char = current[type_start - 1];
-if candidate_char == "." {
-type_start -= 1;
-continue;
-}
-if is_identifier_char(candidate_char) {
-type_start -= 1;
-continue;
-}
-break;
-}
-if type_start == type_end {
-search_start = open_index + 1;
-continue;
-}
-let candidate = substring(current, type_start, type_end);
-if !is_struct_literal_type_candidate(candidate) {
-search_start = open_index + 1;
-continue;
-}
-if type_start > 0 {
-let prefix_char = current[type_start - 1];
-if is_identifier_char(prefix_char) || prefix_char == "." {
-search_start = open_index + 1;
-continue;
-}
-}
-let closing_index = find_matching_brace(current, open_index);
-if closing_index < 0 {
-break;
-}
-let struct_text = substring(current, type_start, closing_index + 1);
-let lowered = lower_struct_literal_expression(struct_text, depth + 1);
-if lowered == null {
-search_start = closing_index + 1;
-continue;
-}
-let prefix = substring(current, 0, type_start);
-let suffix = substring(current, closing_index + 1, current.length);
-current = prefix + lowered + suffix;
-search_start = type_start + lowered.length;
-}
-return current;
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut current -> string = expression;
+    let mut search_start -> number = 0;
+    loop {
+        if search_start >= current.length {
+            break;
+        }
+        let open_index = find_substring_from(current, "{", search_start);
+        if open_index < 0 {
+            break;
+        }
+        let mut type_end -> number = open_index;
+        loop {
+            if type_end <= 0 {
+                break;
+            }
+            let prev = current[type_end - 1];
+            if is_whitespace_char(prev) {
+                type_end -= 1;
+                continue;
+            }
+            break;
+        }
+        let mut type_start -> number = type_end;
+        loop {
+            if type_start <= 0 {
+                break;
+            }
+            let candidate_char = current[type_start - 1];
+            if candidate_char == "." {
+                type_start -= 1;
+                continue;
+            }
+            if is_identifier_char(candidate_char) {
+                type_start -= 1;
+                continue;
+            }
+            break;
+        }
+        if type_start == type_end {
+            search_start = open_index + 1;
+            continue;
+        }
+        let candidate = substring(current, type_start, type_end);
+        if !is_struct_literal_type_candidate(candidate) {
+            search_start = open_index + 1;
+            continue;
+        }
+        if type_start > 0 {
+            let prefix_char = current[type_start - 1];
+            if is_identifier_char(prefix_char) || prefix_char == "." {
+                search_start = open_index + 1;
+                continue;
+            }
+        }
+        let closing_index = find_matching_brace(current, open_index);
+        if closing_index < 0 {
+            break;
+        }
+        let struct_text = substring(current, type_start, closing_index + 1);
+        let lowered = lower_struct_literal_expression(struct_text, depth + 1);
+        if lowered == null {
+            search_start = closing_index + 1;
+            continue;
+        }
+        let prefix = substring(current, 0, type_start);
+        let suffix = substring(current, closing_index + 1, current.length);
+        current = prefix + lowered + suffix;
+        search_start = type_start + lowered.length;
+    }
+    return current;
 }
 
 fn capture_struct_literal_expression(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> StructLiteralCapture {
-let trimmed = trim_text(initial);
-if !ends_with(trimmed, "{") {
-return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
-}
-let mut expression -> string = trimmed;
-let mut index -> number = start_index;
-let mut consumed -> number = 0;
-let mut depth -> number = compute_brace_balance(trimmed);
-if depth <= 0 {
-return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
-}
-loop {
-if index >= instructions.length {
-break;
-}
-let candidate = instructions[index];
-if candidate.variant != "Unknown" {
-break;
-}
-let segment = trim_text(candidate.text);
-if segment.length > 0 {
-expression = expression + " " + segment;
-}
-depth += compute_brace_balance(segment);
-consumed += 1;
-index += 1;
-if depth <= 0 {
-break;
-}
-}
-if depth != 0 {
-return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
-}
-if consumed == 0 {
-return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
-}
-let normalized = trim_trailing_delimiters(trim_text(expression));
-if !ends_with(normalized, "}") {
-return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
-}
-return StructLiteralCapture { expression: normalized, consumed: consumed, success: true };
+    let trimmed = trim_text(initial);
+    if !ends_with(trimmed, "{") {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    let mut expression -> string = trimmed;
+    let mut index -> number = start_index;
+    let mut consumed -> number = 0;
+    let mut depth -> number = compute_brace_balance(trimmed);
+    if depth <= 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    loop {
+        if index >= instructions.length {
+            break;
+        }
+        let candidate = instructions[index];
+        if candidate.variant != "Unknown" {
+            break;
+        }
+        let segment = trim_text(candidate.text);
+        if segment.length > 0 {
+            expression = expression + " " + segment;
+        }
+        depth += compute_brace_balance(segment);
+        consumed += 1;
+        index += 1;
+        if depth <= 0 {
+            break;
+        }
+    }
+    if depth != 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    if consumed == 0 {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    let normalized = trim_trailing_delimiters(trim_text(expression));
+    if !ends_with(normalized, "}") {
+        return StructLiteralCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    return StructLiteralCapture { expression: normalized, consumed: consumed, success: true };
 }
 
 fn rewrite_expression_intrinsics(expression -> string) -> string {
-if expression.length == 0 {
-return expression;
-}
-let mut current = expression;
-current = rewrite_literal_tokens(current);
-current = rewrite_logical_operators(current);
-current = rewrite_push_calls(current);
-current = rewrite_concat_calls(current);
-current = rewrite_length_accesses(current);
-return current;
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut current = expression;
+    current = rewrite_literal_tokens(current);
+    current = rewrite_logical_operators(current);
+    current = rewrite_push_calls(current);
+    current = rewrite_concat_calls(current);
+    current = rewrite_length_accesses(current);
+    return current;
 }
 
 fn rewrite_logical_operators(expression -> string) -> string {
-if expression.length == 0 {
-return expression;
-}
-let mut result -> string = "";
-let mut index -> number = 0;
-loop {
-if index >= expression.length {
-break;
-}
-let ch = expression[index];
-if ch == "'" || ch == "\"" {
-let literal_end = skip_string_literal(expression, index);
-result = result + substring(expression, index, literal_end);
-index = literal_end;
-continue;
-}
-if ch == "&" {
-if index + 1 < expression.length {
-let next = expression[index + 1];
-if next == "&" {
-result = result + " and ";
-index += 2;
-continue;
-}
-}
-}
-if ch == "|" {
-if index + 1 < expression.length {
-let next = expression[index + 1];
-if next == "|" {
-result = result + " or ";
-index += 2;
-continue;
-}
-}
-}
-if ch == "!" {
-if index + 1 < expression.length {
-let next = expression[index + 1];
-if next == "=" {
-result = result + "!=";
-index += 2;
-continue;
-}
-}
-result = result + "not ";
-index += 1;
-continue;
-}
-result = result + ch;
-index += 1;
-}
-return result;
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "'" || ch == "\"" {
+            let literal_end = skip_string_literal(expression, index);
+            result = result + substring(expression, index, literal_end);
+            index = literal_end;
+            continue;
+        }
+        if ch == "&" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "&" {
+                    result = result + " and ";
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "|" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "|" {
+                    result = result + " or ";
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "!" {
+            if index + 1 < expression.length {
+                let next = expression[index + 1];
+                if next == "=" {
+                    result = result + "!=";
+                    index += 2;
+                    continue;
+                }
+            }
+            result = result + "not ";
+            index += 1;
+            continue;
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
 }
 
 fn rewrite_literal_tokens(expression -> string) -> string {
-if expression.length == 0 {
-return expression;
-}
-let mut result -> string = "";
-let mut index -> number = 0;
-loop {
-if index >= expression.length {
-break;
-}
-let ch = expression[index];
-if is_identifier_char(ch) {
-let start = index;
-loop {
-index += 1;
-if index >= expression.length {
-break;
-}
-let next = expression[index];
-if !is_identifier_char(next) {
-break;
-}
-}
-let token = substring(expression, start, index);
-if token == "null" {
-result = result + "None";
-} else if token == "true" {
-result = result + "True";
-} else if token == "false" {
-result = result + "False";
-} else {
-result = result + token;
-}
-continue;
-}
-result = result + ch;
-index += 1;
-}
-return result;
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if is_identifier_char(ch) {
+            let start = index;
+            loop {
+                index += 1;
+                if index >= expression.length {
+                    break;
+                }
+                let next = expression[index];
+                if !is_identifier_char(next) {
+                    break;
+                }
+            }
+            let token = substring(expression, start, index);
+            if token == "null" {
+                result = result + "None";
+            } else if token == "true" {
+                result = result + "True";
+            } else if token == "false" {
+                result = result + "False";
+            } else {
+                result = result + token;
+            }
+            continue;
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
 }
 
 fn rewrite_push_calls(expression -> string) -> string {
@@ -1086,373 +1086,373 @@ return replace_all(expression, ".push(", ".append(");
 }
 
 fn rewrite_concat_calls(expression -> string) -> string {
-let mut current = expression;
-loop {
-let match_index = index_of(current, ".concat(");
-if match_index < 0 {
-break;
-}
-let object_span = extract_object_span(current, match_index);
-if !object_span.success {
-break;
-}
-let paren_index = match_index + 7;
-let args_span = extract_parenthesized_span(current, paren_index);
-if !args_span.success {
-break;
-}
-let before = substring(current, 0, object_span.start);
-let after = substring(current, args_span.end, current.length);
-let object_expr = trim_text(object_span.value);
-let argument_expr = trim_text(args_span.value);
-let replacement = "(" + object_expr + ") + (" + argument_expr + ")";
-current = before + replacement + after;
-}
-return current;
+    let mut current = expression;
+    loop {
+        let match_index = index_of(current, ".concat(");
+        if match_index < 0 {
+            break;
+        }
+        let object_span = extract_object_span(current, match_index);
+        if !object_span.success {
+            break;
+        }
+        let paren_index = match_index + 7;
+        let args_span = extract_parenthesized_span(current, paren_index);
+        if !args_span.success {
+            break;
+        }
+        let before = substring(current, 0, object_span.start);
+        let after = substring(current, args_span.end, current.length);
+        let object_expr = trim_text(object_span.value);
+        let argument_expr = trim_text(args_span.value);
+        let replacement = "(" + object_expr + ") + (" + argument_expr + ")";
+        current = before + replacement + after;
+    }
+    return current;
 }
 
 fn rewrite_length_accesses(expression -> string) -> string {
-let mut current = expression;
-loop {
-let match_index = index_of(current, ".length");
-if match_index < 0 {
-break;
-}
-let object_span = extract_object_span(current, match_index);
-if !object_span.success {
-break;
-}
-let before = substring(current, 0, object_span.start);
-let after = substring(current, match_index + 7, current.length);
-let object_expr = trim_text(object_span.value);
-if object_expr.length == 0 {
-break;
-}
-current = before + "len(" + object_expr + ")" + after;
-}
-return current;
+    let mut current = expression;
+    loop {
+        let match_index = index_of(current, ".length");
+        if match_index < 0 {
+            break;
+        }
+        let object_span = extract_object_span(current, match_index);
+        if !object_span.success {
+            break;
+        }
+        let before = substring(current, 0, object_span.start);
+        let after = substring(current, match_index + 7, current.length);
+        let object_expr = trim_text(object_span.value);
+        if object_expr.length == 0 {
+            break;
+        }
+        current = before + "len(" + object_expr + ")" + after;
+    }
+    return current;
 }
 
 fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan {
-if dot_index <= 0 {
-return ExtractedSpan { value: "", start: 0, end: 0, success: false };
-}
-let mut index -> number = dot_index - 1;
-let mut square_depth -> number = 0;
-let mut paren_depth -> number = 0;
-loop {
-if index < 0 {
-break;
-}
-let ch = text[index];
-if ch == "]" {
-square_depth += 1;
-index -= 1;
-continue;
-}
-if ch == "[" {
-if square_depth > 0 {
-square_depth -= 1;
-index -= 1;
-continue;
-}
-break;
-}
-if ch == ")" {
-paren_depth += 1;
-index -= 1;
-continue;
-}
-if ch == "(" {
-if paren_depth > 0 {
-paren_depth -= 1;
-index -= 1;
-continue;
-}
-break;
-}
-if square_depth > 0 || paren_depth > 0 {
-index -= 1;
-continue;
-}
-if is_identifier_char(ch) || ch == "." {
-index -= 1;
-continue;
-}
-break;
-}
-let start = index + 1;
-if start >= dot_index {
-return ExtractedSpan { value: "", start: start, end: dot_index, success: false };
-}
-let value = substring(text, start, dot_index);
-return ExtractedSpan { value: value, start: start, end: dot_index, success: true };
+    if dot_index <= 0 {
+        return ExtractedSpan { value: "", start: 0, end: 0, success: false };
+    }
+    let mut index -> number = dot_index - 1;
+    let mut square_depth -> number = 0;
+    let mut paren_depth -> number = 0;
+    loop {
+        if index < 0 {
+            break;
+        }
+        let ch = text[index];
+        if ch == "]" {
+            square_depth += 1;
+            index -= 1;
+            continue;
+        }
+        if ch == "[" {
+            if square_depth > 0 {
+                square_depth -= 1;
+                index -= 1;
+                continue;
+            }
+            break;
+        }
+        if ch == ")" {
+            paren_depth += 1;
+            index -= 1;
+            continue;
+        }
+        if ch == "(" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+                index -= 1;
+                continue;
+            }
+            break;
+        }
+        if square_depth > 0 || paren_depth > 0 {
+            index -= 1;
+            continue;
+        }
+        if is_identifier_char(ch) || ch == "." {
+            index -= 1;
+            continue;
+        }
+        break;
+    }
+    let start = index + 1;
+    if start >= dot_index {
+        return ExtractedSpan { value: "", start: start, end: dot_index, success: false };
+    }
+    let value = substring(text, start, dot_index);
+    return ExtractedSpan { value: value, start: start, end: dot_index, success: true };
 }
 
 fn extract_parenthesized_span(text -> string, open_index -> number) -> ExtractedSpan {
-if open_index >= text.length {
-return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
-}
-if text[open_index] != "(" {
-return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
-}
-let mut index -> number = open_index + 1;
-let mut depth -> number = 1;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "(" {
-depth += 1;
-} else if ch == ")" {
-depth -= 1;
-if depth == 0 {
-let value = substring(text, open_index + 1, index);
-return ExtractedSpan { value: value, start: open_index + 1, end: index + 1, success: true };
-}
-} else if ch == "\"" || ch == "'" {
-index = skip_string_literal(text, index);
-continue;
-}
-index += 1;
-}
-return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
+    if open_index >= text.length {
+        return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
+    }
+    if text[open_index] != "(" {
+        return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
+    }
+    let mut index -> number = open_index + 1;
+    let mut depth -> number = 1;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+        } else if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                let value = substring(text, open_index + 1, index);
+                return ExtractedSpan { value: value, start: open_index + 1, end: index + 1, success: true };
+            }
+        } else if ch == "\"" || ch == "'" {
+            index = skip_string_literal(text, index);
+            continue;
+        }
+        index += 1;
+    }
+    return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
 }
 
 fn skip_string_literal(text -> string, quote_index -> number) -> number {
-let quote = text[quote_index];
-let mut index -> number = quote_index + 1;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "\\" {
-index += 2;
-continue;
-}
-if ch == quote {
-index += 1;
-break;
-}
-index += 1;
-}
-return index;
+    let quote = text[quote_index];
+    let mut index -> number = quote_index + 1;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "\\" {
+            index += 2;
+            continue;
+        }
+        if ch == quote {
+            index += 1;
+            break;
+        }
+        index += 1;
+    }
+    return index;
 }
 
 fn capture_expression_continuation(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> ExpressionContinuationCapture {
-let trimmed = trim_text(initial);
-if trimmed.length == 0 {
-return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
-}
-let mut paren_balance -> number = compute_parenthesis_balance(trimmed);
-let mut brace_balance -> number = compute_brace_balance(trimmed);
-let mut bracket_balance -> number = compute_bracket_balance(trimmed);
-let mut expression -> string = trimmed;
-let mut index -> number = start_index;
-let mut consumed -> number = 0;
-let mut attempting -> boolean = paren_balance > 0 || brace_balance > 0 || bracket_balance > 0;
-loop {
-if index >= instructions.length {
-break;
-}
-let segment = continuation_segment_text(instructions[index]);
-if segment == null {
-break;
-}
-let normalized_segment = trim_text(segment);
-if normalized_segment.length == 0 {
-index += 1;
-consumed += 1;
-continue;
-}
-if !attempting {
-if !segment_signals_expression_continuation(normalized_segment) {
-break;
-}
-attempting = true;
-}
-expression = expression + " " + normalized_segment;
-paren_balance += compute_parenthesis_balance(normalized_segment);
-brace_balance += compute_brace_balance(normalized_segment);
-bracket_balance += compute_bracket_balance(normalized_segment);
-consumed += 1;
-index += 1;
-if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0 {
-let mut should_finalize -> boolean = true;
-let mut lookahead -> number = index;
-loop {
-if lookahead >= instructions.length {
-break;
-}
-let upcoming = continuation_segment_text(instructions[lookahead]);
-if upcoming == null {
-break;
-}
-let normalized_upcoming = trim_text(upcoming);
-if normalized_upcoming.length == 0 {
-lookahead += 1;
-continue;
-}
-if segment_signals_expression_continuation(normalized_upcoming) {
-should_finalize = false;
-}
-break;
-}
-if should_finalize {
-let finalized = trim_trailing_delimiters(trim_text(expression));
-return ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true };
-}
-}
-}
-if !attempting || consumed == 0 {
-return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
-}
-if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0 {
-let finalized = trim_trailing_delimiters(trim_text(expression));
-return ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true };
-}
-return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
+    let trimmed = trim_text(initial);
+    if trimmed.length == 0 {
+        return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    let mut paren_balance -> number = compute_parenthesis_balance(trimmed);
+    let mut brace_balance -> number = compute_brace_balance(trimmed);
+    let mut bracket_balance -> number = compute_bracket_balance(trimmed);
+    let mut expression -> string = trimmed;
+    let mut index -> number = start_index;
+    let mut consumed -> number = 0;
+    let mut attempting -> boolean = paren_balance > 0 || brace_balance > 0 || bracket_balance > 0;
+    loop {
+        if index >= instructions.length {
+            break;
+        }
+        let segment = continuation_segment_text(instructions[index]);
+        if segment == null {
+    
+        }
+        let normalized_segment = trim_text(segment);
+        if normalized_segment.length == 0 {
+            index += 1;
+            consumed += 1;
+            continue;
+        }
+        if !attempting {
+            if !segment_signals_expression_continuation(normalized_segment) {
+                break;
+            }
+            attempting = true;
+        }
+        expression = expression + " " + normalized_segment;
+        paren_balance += compute_parenthesis_balance(normalized_segment);
+        brace_balance += compute_brace_balance(normalized_segment);
+        bracket_balance += compute_bracket_balance(normalized_segment);
+        consumed += 1;
+        index += 1;
+        if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0 {
+            let mut should_finalize -> boolean = true;
+            let mut lookahead -> number = index;
+            loop {
+                if lookahead >= instructions.length {
+                    break;
+                }
+                let upcoming = continuation_segment_text(instructions[lookahead]);
+                if upcoming == null {
+                    break;
+                }
+                let normalized_upcoming = trim_text(upcoming);
+                if normalized_upcoming.length == 0 {
+                    lookahead += 1;
+                    continue;
+                }
+                if segment_signals_expression_continuation(normalized_upcoming) {
+                    should_finalize = false;
+                }
+                break;
+            }
+            if should_finalize {
+                let finalized = trim_trailing_delimiters(trim_text(expression));
+                return ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true };
+            }
+        }
+    }
+    if !attempting || consumed == 0 {
+        return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
+    }
+    if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0 {
+        let finalized = trim_trailing_delimiters(trim_text(expression));
+        return ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true };
+    }
+    return ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false };
 }
 
 fn continuation_segment_text(instruction -> NativeInstruction) -> string? {
-if instruction.variant == "Unknown" {
-return instruction.text;
-}
-if instruction.variant == "Expression" {
-return instruction.expression;
-}
-return null;
+    if instruction.variant == "Unknown" {
+        return instruction.text;
+    }
+    if instruction.variant == "Expression" {
+        return instruction.expression;
+    }
+    return null;
 }
 
 fn segment_signals_expression_continuation(segment -> string) -> boolean {
-if segment.length == 0 {
-return false;
-}
-if starts_with(segment, "&&") {
-return true;
-}
-if starts_with(segment, "||") {
-return true;
-}
-let first = segment[0];
-if first == "." || first == ")" || first == "]" || first == "}" {
-return true;
-}
-return false;
+    if segment.length == 0 {
+        return false;
+    }
+    if starts_with(segment, "&&") {
+        return true;
+    }
+    if starts_with(segment, "||") {
+        return true;
+    }
+    let first = segment[0];
+    if first == "." || first == ")" || first == "]" || first == "}" {
+        return true;
+    }
+    return false;
 }
 
 fn compute_brace_balance(text -> string) -> number {
-if text.length == 0 {
-return 0;
-}
-let mut balance -> number = 0;
-let mut index -> number = 0;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "{" {
-balance += 1;
-} else if ch == "}" {
-balance -= 1;
-}
-index += 1;
-}
-return balance;
+    if text.length == 0 {
+        return 0;
+    }
+    let mut balance -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" {
+            balance += 1;
+        } else if ch == "}" {
+            balance -= 1;
+        }
+        index += 1;
+    }
+    return balance;
 }
 
 fn compute_parenthesis_balance(text -> string) -> number {
-return compute_symbol_balance(text, "(", ")");
+    return compute_symbol_balance(text, "(", ")");
 }
 
 fn compute_bracket_balance(text -> string) -> number {
-return compute_symbol_balance(text, "[", "]");
+    return compute_symbol_balance(text, "[", "]");
 }
 
 fn compute_symbol_balance(text -> string, open -> string, close -> string) -> number {
-if text.length == 0 {
-return 0;
-}
-let mut balance -> number = 0;
-let mut index -> number = 0;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == open {
-balance += 1;
-} else if ch == close {
-balance -= 1;
-}
-index += 1;
-}
-return balance;
+    if text.length == 0 {
+        return 0;
+    }
+    let mut balance -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == open {
+            balance += 1;
+        } else if ch == close {
+            balance -= 1;
+        }
+        index += 1;
+    }
+    return balance;
 }
 
 fn split_struct_field_entries(text -> string) -> string[] {
-let mut entries -> string[] = [];
-let mut current -> string = "";
-let mut depth -> number = 0;
-let mut index -> number = 0;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "{" || ch == "[" || ch == "(" {
-depth += 1;
-} else if ch == "}" || ch == "]" || ch == ")" {
-if depth > 0 {
-depth -= 1;
-}
-}
-if ch == "," && depth == 0 {
-entries = append_string(entries, current);
-current = "";
-} else {
-current = current + ch;
-}
-index += 1;
-}
-if current.length > 0 {
-entries = append_string(entries, current);
-}
-return entries;
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" || ch == "[" || ch == "(" {
+            depth += 1;
+        } else if ch == "}" || ch == "]" || ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        if ch == "," && depth == 0 {
+            entries = append_string(entries, current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        entries = append_string(entries, current);
+    }
+    return entries;
 }
 
 fn split_array_entries(text -> string) -> string[] {
-let mut entries -> string[] = [];
-let mut current -> string = "";
-let mut depth -> number = 0;
-let mut index -> number = 0;
-loop {
-if index >= text.length {
-break;
-}
-let ch = text[index];
-if ch == "{" || ch == "[" || ch == "(" {
-depth += 1;
-} else if ch == "}" || ch == "]" || ch == ")" {
-if depth > 0 {
-depth -= 1;
-}
-}
-if ch == "," && depth == 0 {
-entries = append_string(entries, current);
-current = "";
-} else {
-current = current + ch;
-}
-index += 1;
-}
-if current.length > 0 {
-entries = append_string(entries, current);
-}
-return entries;
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" || ch == "[" || ch == "(" {
+            depth += 1;
+        } else if ch == "}" || ch == "]" || ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        if ch == "," && depth == 0 {
+            entries = append_string(entries, current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        entries = append_string(entries, current);
+    }
+    return entries;
 }
 
 fn trim_trailing_delimiters(text -> string) -> string {

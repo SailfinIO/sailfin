@@ -61,8 +61,12 @@ def test_string_utils_helpers() -> None:
     assert grapheme_count("stage") == 5
     assert grapheme_count("naïve") == 5
     assert grapheme_count("🏳️‍⚧️") == 1
+    assert grapheme_count("a\u0308") == 1
+    assert grapheme_count("🇺🇳") == 1
     assert grapheme_at("naïve", 2) == "ï"
     assert grapheme_at("🏳️‍⚧️", 0) == "🏳️‍⚧️"
+    assert grapheme_at("🇺🇳", 0) == "🇺🇳"
+    assert grapheme_at("a\u0308", 0) == "a\u0308"
     assert grapheme_at("stage", 9) == ""
 
     assert char_code("0") == 48

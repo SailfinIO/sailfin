@@ -18,8 +18,8 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Capability adapter injection — Wire the new runtime capability bridges to host-provided adapters in the stage2 runner so filesystem, HTTP, and model calls no longer depend on `runtime_support.py`; ship adapter docs alongside samples.
   - [ ] Runtime type metadata — Emit module descriptors so `check_type` no longer relies on `runtime.resolve_runtime_type`; update `docs/runtime_audit.md` once the bridge is removed.
   - [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
-  - [ ] Inline the grapheme segmentation tables into Sailfin-native helpers and remove the Python `unicodedata` dependency once normalization primitives solidify; extend coverage with locale-heavy fixtures.
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
+  - [ ] Unicode normalization helpers — Expose NFC/NFD routines in the Sailfin runtime so locale-aware casing and future stage2 pipelines stay Python-free.
 
   5. **Toolchain De-Pythonisation**
     - [ ] Native emission milestone — Flip the default stage1 build to target the stage2 executable backend once minimal LLVM/WASM runners exist, keeping a Python fallback only for regression hunting.
@@ -54,6 +54,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Grapheme segmentation — Stage1 runtime prelude now embeds the Unicode extend tables so `grapheme_count` and `grapheme_at` execute without Python `unicodedata`. Validation: `compiler/tests/test_string_utils.py` covers combining-mark accents, regional-indicator flags, and the transgender flag sequence.
 - [x] Hierarchical effect propagation — Stage1 `effect_checker.sfn` now walks nested blocks, lambdas, and spawned thunks so capability requirements bubble up to the declaring routine. Validation: `compiler/tests/test_effect_checker.py::test_effect_checker_propagates_model_from_nested_lambda` and `compiler/tests/test_effect_checker.py::test_spawn_prompt_requires_io_and_model` lock the coverage.
 - [x] Effect origin tracing — Stage1 effect diagnostics now attach prompt and helper call spans, and the typechecker surfaces missing-effect errors with structured context. Validation: `compiler/tests/test_effect_checker.py::test_effect_checker_propagates_model_from_nested_lambda`, `compiler/tests/test_effect_checker.py::test_spawn_prompt_requires_io_and_model`, and `compiler/tests/test_stage1_typecheck_effects.py::test_typecheck_reports_missing_effects_with_spans`.
 - [x] Effect enforcement — Extended stage0 effect checks to cover runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`, `print`, `sleep`). Validation: `bootstrap/tests/test_unit_effects.py` exercises missing-effect errors for `spawn`, `serve`, console IO, and timer usage.

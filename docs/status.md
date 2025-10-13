@@ -100,8 +100,11 @@ roadmaps.
   into Python class methods, letting the runtime prelude surface richer helper
   shims without bootstrap fallbacks; validated via
   `compiler/tests/test_stage1_pipeline.py::test_struct_method_lowering`.
-  Non-ASCII glyphs still fall back to
-  `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
+  Grapheme helpers now inline the Unicode segmentation tables so
+  `grapheme_count`/`grapheme_at` execute without touching
+  `runtime_support.py`; regression coverage lives in
+  `compiler/tests/test_string_utils.py` (flag, combining-mark fixtures).
+  Module parsing, emission, and lowering recognise aliased
   `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;
   regression coverage lives in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.
   Capability grants plus `fs`/`http`/`model` bridges now expose effect-aware
