@@ -3,6 +3,6 @@
 // Shared string helpers surfaced via the runtime prelude. The compiler and
 // downstream projects import from here to keep a single implementation.
 
-import { clamp, substring, find_char, char_code } from "runtime/prelude";
+import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code } from "runtime/prelude";
 
-export { clamp, substring, find_char, char_code };
+export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code };

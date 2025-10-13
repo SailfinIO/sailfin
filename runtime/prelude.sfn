@@ -686,6 +686,14 @@ index = index + 1;
 return -1;
 }
 
+fn grapheme_count(text -> string) -> number {
+    return runtime.grapheme_count(text);
+}
+
+fn grapheme_at(text -> string, index -> number) -> string {
+    return runtime.grapheme_at(text, index);
+}
+
 fn match_exhaustive_failed(value) -> void {
 let message = "Non-exhaustive match for value {{ value }}";
 runtime.raise_value_error(message);
@@ -782,4 +790,4 @@ index = index + 1;
 return code;
 }
 
-export { clamp, substring, find_char, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };
+export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };

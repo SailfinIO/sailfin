@@ -38,6 +38,8 @@ def test_runtime_prelude_collection_helpers() -> None:
     parallel = namespace["parallel"]
     substring = namespace["substring"]
     find_char = namespace["find_char"]
+    grapheme_count = namespace["grapheme_count"]
+    grapheme_at = namespace["grapheme_at"]
     char_code = namespace["char_code"]
     match_exhaustive_failed = namespace["match_exhaustive_failed"]
     enum_type = namespace["enum_type"]
@@ -82,6 +84,18 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert find_char("line1\nline2", "\\n", -8) == 5
     assert find_char("emoji🙂", "🙂", 0) == 5
     assert find_char("emoji🙂", "🙂", 6) == -1
+
+    assert grapheme_count("sailfin") == 7
+    assert grapheme_count("e\u0301") == 1
+    assert grapheme_count("👨\u200d👩\u200d👧\u200d👦") == 1
+    assert grapheme_count("🇺🇸🇬🇧") == 2
+    assert grapheme_count("thumbs👍🏿") == 7
+    assert grapheme_at("sailfin", 3) == "l"
+    assert grapheme_at("e\u0301", 0) == "e\u0301"
+    assert grapheme_at("🇺🇸🇬🇧", 1) == "🇬🇧"
+    assert grapheme_at("thumbs👍🏿", 6) == "👍🏿"
+    assert grapheme_at("thumbs👍🏿", 99) == ""
+    assert grapheme_at("", 0) == ""
 
     assert char_code("0") == 48
     assert char_code("9") == 57

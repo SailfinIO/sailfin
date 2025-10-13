@@ -582,7 +582,7 @@ Not supported yet:
 
 ### 10.2 String Utilities
 
-The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpers that the stage1 compiler and downstream capsules may import via `import { substring, find_char, char_code } from "runtime/prelude";`. These helpers mirror the Python bootstrap behaviour while remaining embeddable in Sailfin-native code.
+The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpers that the stage1 compiler and downstream capsules may import via `import { substring, find_char, grapheme_count, grapheme_at, char_code } from "runtime/prelude";`. These helpers mirror the Python bootstrap behaviour while remaining embeddable in Sailfin-native code.
 
 - `substring(text: string, start: number, end: number) -> string`
   - Clamps `start`/`end` to the source string bounds, returns `""` when the range is empty, and builds the slice without allocating intermediate Python strings.
@@ -590,6 +590,12 @@ The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpe
 - `find_char(text: string, character: string, start: number = 0) -> number`
   - Scans from `start` (clamped to the string bounds) and returns the index of the first matching code unit or `-1` when the character cannot be found.
   - Recognises the common escape sequences `\n`, `\r`, and `\t` so callers can search for newline, carriage return, or tab literals without manually unescaping first.
+- `grapheme_count(text: string) -> number`
+  - Returns the number of user-perceived characters (Unicode grapheme clusters), coalescing combining marks, emoji modifiers, and zero-width joiner sequences.
+  - Delegates segmentation to the shared runtime helpers so both the stage1 compiler and downstream capsules agree on cluster boundaries even for complex emoji (family sequences, pride flags) and accent chains.
+  - Inputs are not normalized automatically; visually distinct-but-equivalent sequences remain distinct if Unicode assigns separate clusters.
+- `grapheme_at(text: string, index: number) -> string`
+  - Retrieves the grapheme cluster at `index`, returning `""` for out-of-range access. The helper respects the same segmentation rules as `grapheme_count`.
 - `char_code(character: string) -> number`
   - Returns ASCII code points for digits, uppercase/lowercase Latin letters, and a curated set of punctuation (`space`, newline, carriage return, tab, double quote, backslash, underscore`).
   - Decodes UTF-8 sequences up to four bytes wide directly in Sailfin, covering Latin-1, BMP, and common astral-plane glyphs (emoji, symbols) without invoking the bootstrap runtime.

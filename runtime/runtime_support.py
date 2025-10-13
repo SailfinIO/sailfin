@@ -15,6 +15,7 @@ import dataclasses
 import pathlib
 import re
 import time
+import unicodedata
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 
 
@@ -178,6 +179,101 @@ def _cancel_pending_tasks() -> None:
 # ---------------------------------------------------------------------------
 
 _INTERPOLATION_PATTERN = re.compile(r"{{\s*(.+?)\s*}}")
+
+
+def _is_regional_indicator(codepoint: int) -> bool:
+    return 0x1F1E6 <= codepoint <= 0x1F1FF
+
+
+def _is_variation_selector(codepoint: int) -> bool:
+    return (0xFE00 <= codepoint <= 0xFE0F) or (0xE0100 <= codepoint <= 0xE01EF)
+
+
+def _is_emoji_modifier(codepoint: int) -> bool:
+    return 0x1F3FB <= codepoint <= 0x1F3FF
+
+
+def _is_extend(codepoint: int, character: str) -> bool:
+    if _is_variation_selector(codepoint) or _is_emoji_modifier(codepoint):
+        return True
+    category = unicodedata.category(character)
+    if category in {"Mn", "Mc", "Me"}:
+        return True
+    if unicodedata.combining(character) != 0:
+        return True
+    return False
+
+
+def _iter_grapheme_clusters(text: str) -> List[str]:
+    clusters: List[str] = []
+    if not text:
+        return clusters
+
+    current = text[0]
+    prev_code = ord(text[0])
+    prev_was_joiner = prev_code == 0x200D
+    prev_was_ri = _is_regional_indicator(prev_code)
+    ri_run_length = 1 if prev_was_ri else 0
+
+    for character in text[1:]:
+        codepoint = ord(character)
+        is_joiner = codepoint == 0x200D
+        is_extend = _is_extend(codepoint, character)
+        is_ri = _is_regional_indicator(codepoint)
+
+        start_new = False
+        if prev_code == 0x000D and codepoint == 0x000A:
+            start_new = False
+        elif prev_was_joiner:
+            start_new = False
+        elif is_joiner:
+            start_new = False
+        elif is_extend:
+            start_new = False
+        elif is_ri and prev_was_ri and (ri_run_length % 2 == 1):
+            start_new = False
+        else:
+            start_new = True
+
+        if start_new:
+            clusters.append(current)
+            current = character
+            ri_run_length = 1 if is_ri else 0
+        else:
+            current += character
+            if is_ri:
+                ri_run_length += 1
+            elif not is_joiner and not is_extend:
+                ri_run_length = 0
+
+        prev_code = codepoint
+        prev_was_joiner = is_joiner
+        if is_joiner:
+            prev_was_ri = False
+            ri_run_length = 0
+        elif is_extend:
+            # Preserve the previous RI state so RI pairs stay aligned after modifiers.
+            prev_was_ri = prev_was_ri
+        else:
+            prev_was_ri = is_ri
+            if not is_ri:
+                ri_run_length = 0
+
+    clusters.append(current)
+    return clusters
+
+
+def grapheme_count(text: str) -> int:
+    return len(_iter_grapheme_clusters(text))
+
+
+def grapheme_at(text: str, index: int) -> str:
+    if index < 0:
+        return ""
+    clusters = _iter_grapheme_clusters(text)
+    if index >= len(clusters):
+        return ""
+    return clusters[index]
 
 
 def format_string(template: str, local_scope: Dict[str, Any], global_scope: Dict[str, Any]) -> str:
@@ -649,6 +745,8 @@ __all__ = [
     "is_array",
     "is_callable",
     "format_interpolated",
+    "grapheme_at",
+    "grapheme_count",
 ]
 
 

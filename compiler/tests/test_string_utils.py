@@ -34,6 +34,8 @@ def test_string_utils_helpers() -> None:
 
     substring = namespace["substring"]
     find_char = namespace["find_char"]
+    grapheme_count = namespace["grapheme_count"]
+    grapheme_at = namespace["grapheme_at"]
     char_code = namespace["char_code"]
 
     assert substring("sailfin", 0, 4) == "sail"
@@ -55,6 +57,13 @@ def test_string_utils_helpers() -> None:
     assert find_char("line1\nline2", "\\n", -8) == 5
     assert find_char("emoji🙂", "🙂", 0) == 5
     assert find_char("emoji🙂", "🙂", 6) == -1
+
+    assert grapheme_count("stage") == 5
+    assert grapheme_count("naïve") == 5
+    assert grapheme_count("🏳️‍⚧️") == 1
+    assert grapheme_at("naïve", 2) == "ï"
+    assert grapheme_at("🏳️‍⚧️", 0) == "🏳️‍⚧️"
+    assert grapheme_at("stage", 9) == ""
 
     assert char_code("0") == 48
     assert char_code("9") == 57

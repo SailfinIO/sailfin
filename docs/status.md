@@ -83,8 +83,9 @@ roadmaps.
   sequential `parallel` orchestration now live in `runtime/prelude.sfn`, letting
   the self-hosted runtime exercise native Sailfin loops; regression coverage
   lives in `compiler/tests/test_runtime_prelude.py`. String helpers (`substring`,
-  `find_char`) and ASCII-aware character codes (`char_code`) now share the
-  canonical implementation in `runtime/prelude.sfn`, which `compiler/src/string_utils.sfn`
+  `find_char`), grapheme-aware utilities (`grapheme_count`, `grapheme_at`), and
+  ASCII-aware character codes (`char_code`) now share the canonical
+  implementation in `runtime/prelude.sfn`, which `compiler/src/string_utils.sfn`
   simply re-exports for the stage1 compiler. Descriptor-driven `check_type`
   now lives in the Sailfin prelude, with unions/intersections/arrays parsed in
   Sailfin and only runtime type resolution delegated to Python bridges. String
