@@ -47,6 +47,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     enum_get_field = namespace["enum_get_field"]
     struct_field = namespace["struct_field"]
     struct_repr = namespace["struct_repr"]
+    check_type = namespace["check_type"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -134,3 +135,18 @@ def test_runtime_prelude_collection_helpers() -> None:
         ],
     )
     assert point == "Point(x=3, y=-4, label=p)"
+
+    assert check_type("hello", "string") is True
+    assert check_type(123, "number") is True
+    assert check_type(True, "boolean") is True
+    assert check_type(None, "void") is True
+    assert check_type("hello", "number") is False
+    assert check_type([1, 2, 3], "number[]") is True
+    assert check_type([1, "two"], "number[]") is False
+    assert check_type("hi", "string | number") is True
+    assert check_type(42, "string | number") is True
+    assert check_type(True, "string | number") is True
+    assert check_type(True, "boolean & number") is True
+    assert check_type(42, "string & number") is False
+    assert check_type(None, "string?") is True
+    assert check_type("value", "string?") is True

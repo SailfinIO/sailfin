@@ -385,6 +385,40 @@ def _resolve_runtime_type(descriptor: str) -> Optional[type]:
     return current if isinstance(current, type) else None
 
 
+def resolve_runtime_type(descriptor: str) -> Optional[type]:
+    return _resolve_runtime_type(descriptor)
+
+
+def instance_of(value: Any, runtime_type: Optional[type]) -> bool:
+    if runtime_type is None:
+        return False
+    return isinstance(value, runtime_type)
+
+
+def is_string(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def is_number(value: Any) -> bool:
+    return isinstance(value, (int, float))
+
+
+def is_boolean(value: Any) -> bool:
+    return isinstance(value, bool)
+
+
+def is_void(value: Any) -> bool:
+    return value is None
+
+
+def is_array(value: Any) -> bool:
+    return isinstance(value, list)
+
+
+def is_callable(value: Any) -> bool:
+    return callable(value)
+
+
 def check_type(value: Any, descriptor: str) -> bool:
     descriptor = descriptor.strip()
     if not descriptor:
@@ -590,6 +624,14 @@ __all__ = [
     "struct_repr",
     "struct_field",
     "websocket",
+    "resolve_runtime_type",
+    "instance_of",
+    "is_string",
+    "is_number",
+    "is_boolean",
+    "is_void",
+    "is_array",
+    "is_callable",
 ]
 
 

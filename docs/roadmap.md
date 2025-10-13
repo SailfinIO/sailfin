@@ -26,7 +26,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [x] Port `match_exhaustive_failed` into `runtime/prelude.sfn` and add stage1 regression coverage for non-exhaustive matches (`compiler/tests/test_runtime_prelude.py`).
     - [x] Design Sailfin-native `EnumType`/`EnumInstance` helpers plus `struct_repr` replacement; update lowering/tests accordingly (`compiler/tests/test_runtime_prelude.py`).
   - [x] Outline a Sailfin-native plan for `check_type` and `format_string` so the `is` operator and string interpolation no longer depend on the Python runtime. (See `docs/proposals/runtime-check-type-format-string.md`.)
-  - [ ] Implement descriptor serialization + Sailfin-native `check_type` helpers per the plan.
+  - [x] Implement descriptor serialization + Sailfin-native `check_type` helpers per the plan (`runtime/prelude.sfn`, `compiler/tests/test_runtime_prelude.py`).
   - [ ] Lower interpolated strings into Sailfin segment arrays and retire the Python `format_string` bridge.
     - [x] Add regression coverage demonstrating `find_char` escape handling and `substring` boundary clamping under stage1 (`compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`).
     - [x] Routed `struct_repr` and related formatting helpers through a shared `runtime.to_debug_string` implementation so Sailfin-native enums/structs survive stage1 compilation (`compiler/tests/test_runtime_prelude.py`).

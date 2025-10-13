@@ -85,7 +85,10 @@ roadmaps.
   lives in `compiler/tests/test_runtime_prelude.py`. String helpers (`substring`,
   `find_char`) and ASCII-aware character codes (`char_code`) now share the
   canonical implementation in `runtime/prelude.sfn`, which `compiler/src/string_utils.sfn`
-  simply re-exports for the stage1 compiler. Non-ASCII glyphs still fall back to
+  simply re-exports for the stage1 compiler. Descriptor-driven `check_type`
+  now lives in the Sailfin prelude, with unions/intersections/arrays parsed in
+  Sailfin and only runtime type resolution delegated to Python bridges.
+  Non-ASCII glyphs still fall back to
   `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
   `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;
   regression coverage lives in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.

@@ -539,6 +539,10 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
   requires the `io` effect; routing through
   `serve` requires `net`.
 - `runtime.format_string` – interpolated string support.
+- `runtime.check_type` – descriptor-based runtime type testing used by the `is`
+  operator. The Sailfin prelude now parses descriptors (`string`, unions,
+  intersections, arrays, optionals) directly and calls into lightweight Python
+  bridges only to resolve concrete runtime types.
 - Control flow constructs (`if`/`else`, `for`, `match`) in Sailfin sources lower
   to descriptive Python scaffolding in the bootstrap runtime today.
 

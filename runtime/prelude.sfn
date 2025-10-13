@@ -35,6 +35,12 @@ name -> string;
 value -> any;
 }
 
+struct TypeDescriptor {
+kind -> string;
+name -> string?;
+items -> TypeDescriptor[];
+}
+
 fn sleep(milliseconds -> number) ![clock] {
 runtime.sleep(milliseconds);
 }
@@ -207,6 +213,382 @@ return result;
 
 fn to_debug_string(value) -> string {
 return runtime.to_debug_string(value);
+}
+
+fn type_descriptor(kind -> string, name -> string?, items -> TypeDescriptor[]) -> TypeDescriptor {
+return TypeDescriptor { kind: kind, name: name, items: items };
+}
+
+fn type_descriptor_primitive(name -> string) -> TypeDescriptor {
+return type_descriptor("primitive", name, []);
+}
+
+fn type_descriptor_union(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
+return type_descriptor("union", null, descriptors);
+}
+
+fn type_descriptor_intersection(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
+return type_descriptor("intersection", null, descriptors);
+}
+
+fn type_descriptor_array(inner -> TypeDescriptor) -> TypeDescriptor {
+return type_descriptor("array", null, [inner]);
+}
+
+fn type_descriptor_function() -> TypeDescriptor {
+return type_descriptor("function", null, []);
+}
+
+fn type_descriptor_named(name -> string) -> TypeDescriptor {
+return type_descriptor("named", name, []);
+}
+
+fn type_descriptor_unknown() -> TypeDescriptor {
+return type_descriptor("unknown", null, []);
+}
+
+fn descriptor_trim(value -> string) -> string {
+let mut start = 0;
+let mut end = value.length;
+loop {
+if start >= end {
+break;
+}
+let ch = value[start];
+if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+start = start + 1;
+continue;
+}
+break;
+}
+loop {
+if end <= start {
+break;
+}
+let ch = value[end - 1];
+if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+end = end - 1;
+continue;
+}
+break;
+}
+return substring(value, start, end);
+}
+
+fn string_starts_with(value -> string, prefix -> string) -> boolean {
+if prefix.length > value.length {
+return false;
+}
+let mut index = 0;
+loop {
+if index >= prefix.length {
+break;
+}
+if value[index] != prefix[index] {
+return false;
+}
+index = index + 1;
+}
+return true;
+}
+
+fn string_ends_with(value -> string, suffix -> string) -> boolean {
+if suffix.length > value.length {
+return false;
+}
+let mut offset = value.length - suffix.length;
+let mut index = 0;
+loop {
+if index >= suffix.length {
+break;
+}
+if value[offset + index] != suffix[index] {
+return false;
+}
+index = index + 1;
+}
+return true;
+}
+
+fn descriptor_find_top_level(value -> string, needle -> string) -> number {
+let trimmed = descriptor_trim(value);
+if needle.length != 1 {
+return -1;
+}
+let target = needle[0];
+let mut index = 0;
+let mut paren_depth = 0;
+let mut angle_depth = 0;
+let mut bracket_depth = 0;
+loop {
+if index >= trimmed.length {
+break;
+}
+let ch = trimmed[index];
+if ch == "(" {
+paren_depth = paren_depth + 1;
+} else if ch == ")" {
+if paren_depth > 0 {
+paren_depth = paren_depth - 1;
+}
+} else if ch == "<" {
+angle_depth = angle_depth + 1;
+} else if ch == ">" {
+if angle_depth > 0 {
+angle_depth = angle_depth - 1;
+}
+} else if ch == "[" {
+bracket_depth = bracket_depth + 1;
+} else if ch == "]" {
+if bracket_depth > 0 {
+bracket_depth = bracket_depth - 1;
+}
+}
+if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
+return index;
+}
+index = index + 1;
+}
+return -1;
+}
+
+fn descriptor_strip_outer_parens(value -> string) -> string {
+let mut current = descriptor_trim(value);
+loop {
+if current.length < 2 {
+return current;
+}
+if current[0] != "(" {
+return current;
+}
+if current[current.length - 1] != ")" {
+return current;
+}
+let mut depth = 0;
+let mut index = 0;
+let mut valid = true;
+loop {
+if index >= current.length {
+break;
+}
+let ch = current[index];
+if ch == "(" {
+depth = depth + 1;
+} else if ch == ")" {
+depth = depth - 1;
+if depth < 0 {
+valid = false;
+break;
+}
+if depth == 0 && index < current.length - 1 {
+valid = false;
+break;
+}
+}
+index = index + 1;
+}
+if !valid || depth != 0 {
+return current;
+}
+current = descriptor_trim(substring(current, 1, current.length - 1));
+}
+}
+
+fn split_descriptor(value -> string, separator -> string) -> string[] {
+let trimmed = descriptor_trim(value);
+if separator.length != 1 {
+return [trimmed];
+}
+let mut parts -> string[] = [];
+let mut start = 0;
+let mut index = 0;
+let mut paren_depth = 0;
+let mut angle_depth = 0;
+let mut bracket_depth = 0;
+let target = separator[0];
+loop {
+if index >= trimmed.length {
+break;
+}
+let ch = trimmed[index];
+if ch == "(" {
+paren_depth = paren_depth + 1;
+} else if ch == ")" {
+if paren_depth > 0 {
+paren_depth = paren_depth - 1;
+}
+} else if ch == "<" {
+angle_depth = angle_depth + 1;
+} else if ch == ">" {
+if angle_depth > 0 {
+angle_depth = angle_depth - 1;
+}
+} else if ch == "[" {
+bracket_depth = bracket_depth + 1;
+} else if ch == "]" {
+if bracket_depth > 0 {
+bracket_depth = bracket_depth - 1;
+}
+}
+if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
+let segment = substring(trimmed, start, index);
+parts = parts.concat([descriptor_trim(segment)]);
+start = index + 1;
+}
+index = index + 1;
+}
+let tail = substring(trimmed, start, trimmed.length);
+let cleaned_tail = descriptor_trim(tail);
+if cleaned_tail.length > 0 || parts.length == 0 {
+parts = parts.concat([cleaned_tail]);
+}
+return parts;
+}
+
+fn parse_descriptor_list(parts -> string[]) -> TypeDescriptor[] {
+let mut descriptors -> TypeDescriptor[] = [];
+let mut index = 0;
+loop {
+if index >= parts.length {
+break;
+}
+let entry = parts[index];
+if entry.length > 0 {
+descriptors = descriptors.concat([parse_type_descriptor(entry)]);
+}
+index = index + 1;
+}
+return descriptors;
+}
+
+fn parse_type_descriptor(text -> string) -> TypeDescriptor {
+let trimmed = descriptor_strip_outer_parens(text);
+if trimmed.length == 0 {
+return type_descriptor_unknown();
+}
+let union_parts = split_descriptor(trimmed, "|");
+if union_parts.length > 1 {
+return type_descriptor_union(parse_descriptor_list(union_parts));
+}
+let intersection_parts = split_descriptor(trimmed, "&");
+if intersection_parts.length > 1 {
+return type_descriptor_intersection(parse_descriptor_list(intersection_parts));
+}
+if string_ends_with(trimmed, "[]") {
+let inner_text = substring(trimmed, 0, trimmed.length - 2);
+return type_descriptor_array(parse_type_descriptor(inner_text));
+}
+if string_starts_with(trimmed, "fn(") {
+return type_descriptor_function();
+}
+if trimmed[trimmed.length - 1] == "?" {
+let base_text = substring(trimmed, 0, trimmed.length - 1);
+let base_descriptor = parse_type_descriptor(base_text);
+let void_descriptor = type_descriptor_primitive("void");
+return type_descriptor_union([base_descriptor, void_descriptor]);
+}
+let generic_index = descriptor_find_top_level(trimmed, "<");
+let mut normalized = trimmed;
+if generic_index >= 0 {
+normalized = descriptor_trim(substring(trimmed, 0, generic_index));
+}
+if string_starts_with(normalized, "runtime.") {
+normalized = descriptor_trim(substring(normalized, 8, normalized.length));
+}
+if normalized == "string" || normalized == "number" || normalized == "boolean" || normalized == "void" {
+return type_descriptor_primitive(normalized);
+}
+return type_descriptor_named(normalized);
+}
+
+fn check_type_primitive(value, name -> string) -> boolean {
+if name == "string" {
+return runtime.is_string(value);
+}
+if name == "number" {
+return runtime.is_number(value);
+}
+if name == "boolean" {
+return runtime.is_boolean(value);
+}
+if name == "void" {
+return runtime.is_void(value);
+}
+return false;
+}
+
+fn check_type_descriptor(value, descriptor -> TypeDescriptor) -> boolean {
+if descriptor.kind == "primitive" {
+if descriptor.name == null {
+return false;
+}
+return check_type_primitive(value, descriptor.name);
+}
+if descriptor.kind == "union" {
+let mut index = 0;
+loop {
+if index >= descriptor.items.length {
+break;
+}
+if check_type_descriptor(value, descriptor.items[index]) {
+return true;
+}
+index = index + 1;
+}
+return false;
+}
+if descriptor.kind == "intersection" {
+let mut index = 0;
+loop {
+if index >= descriptor.items.length {
+break;
+}
+if !check_type_descriptor(value, descriptor.items[index]) {
+return false;
+}
+index = index + 1;
+}
+return descriptor.items.length > 0;
+}
+if descriptor.kind == "array" {
+if descriptor.items.length == 0 {
+return runtime.is_array(value);
+}
+if !runtime.is_array(value) {
+return false;
+}
+let element_descriptor = descriptor.items[0];
+let mut index = 0;
+loop {
+if index >= value.length {
+break;
+}
+if !check_type_descriptor(value[index], element_descriptor) {
+return false;
+}
+index = index + 1;
+}
+return true;
+}
+if descriptor.kind == "function" {
+return runtime.is_callable(value);
+}
+if descriptor.kind == "named" {
+if descriptor.name == null {
+return false;
+}
+let resolved = runtime.resolve_runtime_type(descriptor.name);
+return runtime.instance_of(value, resolved);
+}
+if descriptor.kind == "unknown" {
+return false;
+}
+return false;
+}
+
+fn check_type(value, descriptor -> string) -> boolean {
+let parsed = parse_type_descriptor(descriptor);
+return check_type_descriptor(value, parsed);
 }
 
 fn serve(handler, config = null) ![io, net] {
@@ -384,4 +766,4 @@ index = index + 1;
 return code;
 }
 
-export { clamp, substring, find_char, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr };
+export { clamp, substring, find_char, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor };
