@@ -27,6 +27,9 @@ class LexerState:
         self.line = line
         self.column = column
 
+    def __repr__(self):
+        return runtime.struct_repr('LexerState', [runtime.struct_field('source', self.source), runtime.struct_field('index', self.index), runtime.struct_field('line', self.line), runtime.struct_field('column', self.column)])
+
 def lex(source):
     state = LexerState(source=source, index=0, line=1, column=1)
     tokens = []
@@ -104,7 +107,7 @@ def lex(source):
             state.index += 1
             state.column += 1
             literal = ""
-            escaped = False
+            escaped = false
             while True:
                 if state.index >= len(state.source):
                     break
@@ -114,13 +117,13 @@ def lex(source):
                     state.column += 1
                     break
                 if not escaped  and  is_backslash(current):
-                    escaped = True
+                    escaped = true
                     state.index += 1
                     state.column += 1
                     continue
                 if escaped:
                     literal = literal + interpret_escape(current)
-                    escaped = False
+                    escaped = false
                 else:
                     literal = literal + current
                 if current == "\n":
@@ -131,7 +134,7 @@ def lex(source):
                     state.index += 1
                     state.column += 1
             lexeme = slice(state.source, start_index, state.index)
-            tokens = append(tokens, Token(kind=TokenKind.StringLiteral(value=literal), lexeme=lexeme, line=start_line, column=start_column))
+            tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'StringLiteral', [runtime.enum_field('value', literal)]), lexeme=lexeme, line=start_line, column=start_column))
             continue
         if is_digit(ch):
             start_index = state.index
@@ -159,7 +162,7 @@ def lex(source):
                         state.index += 1
                         state.column += 1
             lexeme = slice(state.source, start_index, state.index)
-            tokens = append(tokens, Token(kind=TokenKind.NumberLiteral(value=lexeme), lexeme=lexeme, line=start_line, column=start_column))
+            tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'NumberLiteral', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
             continue
         if is_identifier_start(ch):
             start = state.index
@@ -175,11 +178,11 @@ def lex(source):
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
-            if value == "True"  or  value == "False":
-                bool_value = value == "True"
-                tokens = append(tokens, Token(kind=TokenKind.BooleanLiteral(value=bool_value), lexeme=value, line=start_line, column=start_column))
+            if value == "true"  or  value == "false":
+                bool_value = value == "true"
+                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'BooleanLiteral', [runtime.enum_field('value', bool_value)]), lexeme=value, line=start_line, column=start_column))
             else:
-                tokens = append(tokens, Token(kind=TokenKind.Identifier(value=value), lexeme=value, line=start_line, column=start_column))
+                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))
             continue
         start_line = state.line
         start_column = state.column
@@ -191,7 +194,7 @@ def lex(source):
                 lexeme = pair
                 state.index += 2
                 state.column += 2
-                tokens = append(tokens, Token(kind=TokenKind.Symbol(value=lexeme), lexeme=lexeme, line=start_line, column=start_column))
+                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Symbol', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
                 continue
         state.index += 1
         if ch == "\n":
@@ -199,7 +202,7 @@ def lex(source):
             state.column = 1
         else:
             state.column += 1
-        tokens = append(tokens, Token(kind=TokenKind.Symbol(value=lexeme), lexeme=lexeme, line=start_line, column=start_column))
+        tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Symbol', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
     tokens = append(tokens, eof_token(state.line, state.column))
     return tokens
 

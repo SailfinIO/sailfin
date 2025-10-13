@@ -215,6 +215,22 @@ fn to_debug_string(value) -> string {
 return runtime.to_debug_string(value);
 }
 
+fn format_interpolated(parts -> string[], values -> any[]) -> string {
+let mut result = "";
+let mut index = 0;
+loop {
+if index >= parts.length {
+break;
+}
+result = result + parts[index];
+if index < values.length {
+result = result + to_debug_string(values[index]);
+}
+index = index + 1;
+}
+return result;
+}
+
 fn type_descriptor(kind -> string, name -> string?, items -> TypeDescriptor[]) -> TypeDescriptor {
 return TypeDescriptor { kind: kind, name: name, items: items };
 }
@@ -766,4 +782,4 @@ index = index + 1;
 return code;
 }
 
-export { clamp, substring, find_char, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor };
+export { clamp, substring, find_char, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };

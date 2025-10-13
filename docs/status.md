@@ -87,7 +87,9 @@ roadmaps.
   canonical implementation in `runtime/prelude.sfn`, which `compiler/src/string_utils.sfn`
   simply re-exports for the stage1 compiler. Descriptor-driven `check_type`
   now lives in the Sailfin prelude, with unions/intersections/arrays parsed in
-  Sailfin and only runtime type resolution delegated to Python bridges.
+  Sailfin and only runtime type resolution delegated to Python bridges. String
+  interpolation lowers into segment arrays that call `runtime.format_interpolated`
+  so placeholders execute without Python `eval` in Stage1 outputs.
   Non-ASCII glyphs still fall back to
   `runtime_support.py`. Module parsing, emission, and lowering recognise aliased
   `import`/`export` specifiers so Sailfin sources can re-export runtime helpers;

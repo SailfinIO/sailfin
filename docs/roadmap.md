@@ -27,7 +27,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
     - [x] Design Sailfin-native `EnumType`/`EnumInstance` helpers plus `struct_repr` replacement; update lowering/tests accordingly (`compiler/tests/test_runtime_prelude.py`).
   - [x] Outline a Sailfin-native plan for `check_type` and `format_string` so the `is` operator and string interpolation no longer depend on the Python runtime. (See `docs/proposals/runtime-check-type-format-string.md`.)
   - [x] Implement descriptor serialization + Sailfin-native `check_type` helpers per the plan (`runtime/prelude.sfn`, `compiler/tests/test_runtime_prelude.py`).
-  - [ ] Lower interpolated strings into Sailfin segment arrays and retire the Python `format_string` bridge.
+  - [x] Lower interpolated strings into Sailfin segment arrays and retire the Python `format_string` bridge (`runtime/prelude.sfn`, `compiler/build/native_lowering.py`, `compiler/tests/test_string_interpolation.py`).
     - [x] Add regression coverage demonstrating `find_char` escape handling and `substring` boundary clamping under stage1 (`compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`).
     - [x] Routed `struct_repr` and related formatting helpers through a shared `runtime.to_debug_string` implementation so Sailfin-native enums/structs survive stage1 compilation (`compiler/tests/test_runtime_prelude.py`).
     - [ ] Explore grapheme-aware utilities (`grapheme_count`, `grapheme_at`) once normalization primitives land so char-oriented helpers align with user expectations on combining sequences.
@@ -38,7 +38,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
   - [x] Extend stage1 native lowering to support top-level aliases (`let console = runtime.console`) so the Sailfin prelude compiles cleanly (`compiler/tests/test_runtime_prelude.py`).
   - [ ] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings.
-  - [ ] Port remaining Python-only helpers (`check_type`, `format_string`, async runtime glue) into Sailfin modules now that enum/struct formatting is stable.
+  - [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
 
   5. **Toolchain De-Pythonisation**

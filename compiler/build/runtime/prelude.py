@@ -28,15 +28,24 @@ class EnumField:
         self.name = name
         self.value = value
 
+    def __repr__(self):
+        return runtime.struct_repr('EnumField', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
+
 class EnumVariantDefinition:
     def __init__(self, name, field_names):
         self.name = name
         self.field_names = field_names
 
+    def __repr__(self):
+        return runtime.struct_repr('EnumVariantDefinition', [runtime.struct_field('name', self.name), runtime.struct_field('field_names', self.field_names)])
+
 class EnumType:
     def __init__(self, name, variants):
         self.name = name
         self.variants = variants
+
+    def __repr__(self):
+        return runtime.struct_repr('EnumType', [runtime.struct_field('name', self.name), runtime.struct_field('variants', self.variants)])
 
 class EnumInstance:
     def __init__(self, type, variant, fields):
@@ -44,10 +53,36 @@ class EnumInstance:
         self.variant = variant
         self.fields = fields
 
+    def __repr__(self):
+        return runtime.struct_repr('EnumInstance', [runtime.struct_field('type', self.type), runtime.struct_field('variant', self.variant), runtime.struct_field('fields', self.fields)])
+
+    def __getattr__(self, item):
+        index = 0
+        while True:
+            if index >= len(self.fields):
+                break
+            field = self.fields[index]
+            if field.name == item:
+                return field.value
+            index += 1
+        raise AttributeError(item)
+
 class StructField:
     def __init__(self, name, value):
         self.name = name
         self.value = value
+
+    def __repr__(self):
+        return runtime.struct_repr('StructField', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
+
+class TypeDescriptor:
+    def __init__(self, kind, items, name=None):
+        self.kind = kind
+        self.name = name
+        self.items = items
+
+    def __repr__(self):
+        return runtime.struct_repr('TypeDescriptor', [runtime.struct_field('kind', self.kind), runtime.struct_field('name', self.name), runtime.struct_field('items', self.items)])
 
 def sleep(milliseconds):
     # effects: clock
@@ -115,7 +150,7 @@ def enum_lookup_field(fields, name):
         if field.name == name:
             return field
         index = index + 1
-    return None
+    return null
 
 def enum_find_variant(enum_type, variant_name):
     index = 0
@@ -126,10 +161,10 @@ def enum_find_variant(enum_type, variant_name):
         if variant.name == variant_name:
             return variant
         index = index + 1
-    return None
+    return null
 
 def enum_normalize_fields(definition, provided):
-    if definition == None:
+    if definition == null:
         return provided
     expected = definition.field_names
     if len(expected) == 0:
@@ -141,8 +176,8 @@ def enum_normalize_fields(definition, provided):
             break
         field_name = expected[index]
         candidate = enum_lookup_field(provided, field_name)
-        value = None
-        if candidate != None:
+        value = null
+        if candidate != null:
             value = candidate.value
         normalized = (normalized) + ([EnumField(name=field_name, value=value)])
         index = index + 1
@@ -162,7 +197,7 @@ def enum_get_field(instance, name):
         if field.name == name:
             return field.value
         index = index + 1
-    return None
+    return null
 
 def struct_field(name, value):
     return StructField(name=name, value=value)
@@ -183,9 +218,310 @@ def struct_repr(name, fields):
     return result
 
 def to_debug_string(value):
-    if value == None:
-        return "None"
-    return "" + value
+    return runtime.to_debug_string(value)
+
+def format_interpolated(parts, values):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(parts):
+            break
+        result = result + parts[index]
+        if index < len(values):
+            result = result + to_debug_string(values[index])
+        index = index + 1
+    return result
+
+def type_descriptor(kind, name, items):
+    return TypeDescriptor(kind=kind, name=name, items=items)
+
+def type_descriptor_primitive(name):
+    return type_descriptor("primitive", name, [])
+
+def type_descriptor_union(descriptors):
+    return type_descriptor("union", null, descriptors)
+
+def type_descriptor_intersection(descriptors):
+    return type_descriptor("intersection", null, descriptors)
+
+def type_descriptor_array(inner):
+    return type_descriptor("array", null, [inner])
+
+def type_descriptor_function():
+    return type_descriptor("function", null, [])
+
+def type_descriptor_named(name):
+    return type_descriptor("named", name, [])
+
+def type_descriptor_unknown():
+    return type_descriptor("unknown", null, [])
+
+def descriptor_trim(value):
+    start = 0
+    end = len(value)
+    while True:
+        if start >= end:
+            break
+        ch = value[start]
+        if ch == " "  or  ch == "\n"  or  ch == "\t"  or  ch == "\r":
+            start = start + 1
+            continue
+        break
+    while True:
+        if end <= start:
+            break
+        ch = value[end - 1]
+        if ch == " "  or  ch == "\n"  or  ch == "\t"  or  ch == "\r":
+            end = end - 1
+            continue
+        break
+    return substring(value, start, end)
+
+def string_starts_with(value, prefix):
+    if len(prefix) > len(value):
+        return false
+    index = 0
+    while True:
+        if index >= len(prefix):
+            break
+        if value[index] != prefix[index]:
+            return false
+        index = index + 1
+    return true
+
+def string_ends_with(value, suffix):
+    if len(suffix) > len(value):
+        return false
+    offset = len(value) - len(suffix)
+    index = 0
+    while True:
+        if index >= len(suffix):
+            break
+        if value[offset + index] != suffix[index]:
+            return false
+        index = index + 1
+    return true
+
+def descriptor_find_top_level(value, needle):
+    trimmed = descriptor_trim(value)
+    if len(needle) != 1:
+        return -1
+    target = needle[0]
+    index = 0
+    paren_depth = 0
+    angle_depth = 0
+    bracket_depth = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "(":
+            paren_depth = paren_depth + 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth = paren_depth - 1
+            else:
+                if ch == "<":
+                    angle_depth = angle_depth + 1
+                else:
+                    if ch == ">":
+                        if angle_depth > 0:
+                            angle_depth = angle_depth - 1
+                    else:
+                        if ch == "[":
+                            bracket_depth = bracket_depth + 1
+                        else:
+                            if ch == "]":
+                                if bracket_depth > 0:
+                                    bracket_depth = bracket_depth - 1
+        if ch == target  and  paren_depth == 0  and  angle_depth == 0  and  bracket_depth == 0:
+            return index
+        index = index + 1
+    return -1
+
+def descriptor_strip_outer_parens(value):
+    current = descriptor_trim(value)
+    while True:
+        if len(current) < 2:
+            return current
+        if current[0] != "(":
+            return current
+        if current[len(current) - 1] != ")":
+            return current
+        depth = 0
+        index = 0
+        valid = true
+        while True:
+            if index >= len(current):
+                break
+            ch = current[index]
+            if ch == "(":
+                depth = depth + 1
+            else:
+                if ch == ")":
+                    depth = depth - 1
+                    if depth < 0:
+                        valid = false
+                        break
+                    if depth == 0  and  index < len(current) - 1:
+                        valid = false
+                        break
+            index = index + 1
+        if not valid  or  depth != 0:
+            return current
+        current = descriptor_trim(substring(current, 1, len(current) - 1))
+
+def split_descriptor(value, separator):
+    trimmed = descriptor_trim(value)
+    if len(separator) != 1:
+        return [trimmed]
+    parts = []
+    start = 0
+    index = 0
+    paren_depth = 0
+    angle_depth = 0
+    bracket_depth = 0
+    target = separator[0]
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "(":
+            paren_depth = paren_depth + 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth = paren_depth - 1
+            else:
+                if ch == "<":
+                    angle_depth = angle_depth + 1
+                else:
+                    if ch == ">":
+                        if angle_depth > 0:
+                            angle_depth = angle_depth - 1
+                    else:
+                        if ch == "[":
+                            bracket_depth = bracket_depth + 1
+                        else:
+                            if ch == "]":
+                                if bracket_depth > 0:
+                                    bracket_depth = bracket_depth - 1
+        if ch == target  and  paren_depth == 0  and  angle_depth == 0  and  bracket_depth == 0:
+            segment = substring(trimmed, start, index)
+            parts = (parts) + ([descriptor_trim(segment)])
+            start = index + 1
+        index = index + 1
+    tail = substring(trimmed, start, len(trimmed))
+    cleaned_tail = descriptor_trim(tail)
+    if len(cleaned_tail) > 0  or  len(parts) == 0:
+        parts = (parts) + ([cleaned_tail])
+    return parts
+
+def parse_descriptor_list(parts):
+    descriptors = []
+    index = 0
+    while True:
+        if index >= len(parts):
+            break
+        entry = parts[index]
+        if len(entry) > 0:
+            descriptors = (descriptors) + ([parse_type_descriptor(entry)])
+        index = index + 1
+    return descriptors
+
+def parse_type_descriptor(text):
+    trimmed = descriptor_strip_outer_parens(text)
+    if len(trimmed) == 0:
+        return type_descriptor_unknown()
+    union_parts = split_descriptor(trimmed, "|")
+    if len(union_parts) > 1:
+        return type_descriptor_union(parse_descriptor_list(union_parts))
+    intersection_parts = split_descriptor(trimmed, "&")
+    if len(intersection_parts) > 1:
+        return type_descriptor_intersection(parse_descriptor_list(intersection_parts))
+    if string_ends_with(trimmed, "[]"):
+        inner_text = substring(trimmed, 0, len(trimmed) - 2)
+        return type_descriptor_array(parse_type_descriptor(inner_text))
+    if string_starts_with(trimmed, "fn("):
+        return type_descriptor_function()
+    if trimmed[len(trimmed) - 1] == "?":
+        base_text = substring(trimmed, 0, len(trimmed) - 1)
+        base_descriptor = parse_type_descriptor(base_text)
+        void_descriptor = type_descriptor_primitive("void")
+        return type_descriptor_union([base_descriptor, void_descriptor])
+    generic_index = descriptor_find_top_level(trimmed, "<")
+    normalized = trimmed
+    if generic_index >= 0:
+        normalized = descriptor_trim(substring(trimmed, 0, generic_index))
+    if string_starts_with(normalized, "runtime."):
+        normalized = descriptor_trim(substring(normalized, 8, len(normalized)))
+    if normalized == "string"  or  normalized == "number"  or  normalized == "boolean"  or  normalized == "void":
+        return type_descriptor_primitive(normalized)
+    return type_descriptor_named(normalized)
+
+def check_type_primitive(value, name):
+    if name == "string":
+        return runtime.is_string(value)
+    if name == "number":
+        return runtime.is_number(value)
+    if name == "boolean":
+        return runtime.is_boolean(value)
+    if name == "void":
+        return runtime.is_void(value)
+    return false
+
+def check_type_descriptor(value, descriptor):
+    if descriptor.kind == "primitive":
+        if descriptor.name == null:
+            return false
+        return check_type_primitive(value, descriptor.name)
+    if descriptor.kind == "union":
+        index = 0
+        while True:
+            if index >= len(descriptor.items):
+                break
+            if check_type_descriptor(value, descriptor.items[index]):
+                return true
+            index = index + 1
+        return false
+    if descriptor.kind == "intersection":
+        index = 0
+        while True:
+            if index >= len(descriptor.items):
+                break
+            if not check_type_descriptor(value, descriptor.items[index]):
+                return false
+            index = index + 1
+        return len(descriptor.items) > 0
+    if descriptor.kind == "array":
+        if len(descriptor.items) == 0:
+            return runtime.is_array(value)
+        if not runtime.is_array(value):
+            return false
+        element_descriptor = descriptor.items[0]
+        index = 0
+        while True:
+            if index >= len(value):
+                break
+            if not check_type_descriptor(value[index], element_descriptor):
+                return false
+            index = index + 1
+        return true
+    if descriptor.kind == "function":
+        return runtime.is_callable(value)
+    if descriptor.kind == "named":
+        if descriptor.name == null:
+            return false
+        resolved = runtime.resolve_runtime_type(descriptor.name)
+        return runtime.instance_of(value, resolved)
+    if descriptor.kind == "unknown":
+        return false
+    return false
+
+def check_type(value, descriptor):
+    parsed = parse_type_descriptor(descriptor)
+    return check_type_descriptor(value, parsed)
 
 def serve(handler, config = null):
     # effects: io, net
@@ -245,7 +581,7 @@ def find_char(text, character, start = 0):
     return -1
 
 def match_exhaustive_failed(value):
-    message = "Non-exhaustive match for value()"
+    message = runtime.format_interpolated(['Non-exhaustive match for value ', ''], [(value)])
     runtime.raise_value_error(message)
 
 def char_code(character):
@@ -310,4 +646,4 @@ def char_code(character):
         index = index + 1
     return code
 
-__all__ = ["clamp", "substring", "find_char", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr"]
+__all__ = ["clamp", "substring", "find_char", "char_code", "match_exhaustive_failed", "enum_type", "enum_define_variant", "enum_field", "enum_instantiate", "enum_get_field", "struct_field", "struct_repr", "check_type", "parse_type_descriptor", "format_interpolated"]

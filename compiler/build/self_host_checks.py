@@ -27,18 +27,21 @@ class SelfHostCheckResult:
         self.fatal_diagnostics = fatal_diagnostics
         self.missing_sources = missing_sources
 
+    def __repr__(self):
+        return runtime.struct_repr('SelfHostCheckResult', [runtime.struct_field('success', self.success), runtime.struct_field('compiled_count', self.compiled_count), runtime.struct_field('expected_count', self.expected_count), runtime.struct_field('fatal_diagnostics', self.fatal_diagnostics), runtime.struct_field('missing_sources', self.missing_sources)])
+
 def run_self_host_check(sources):
     # effects: io
     compilation = compile_project(sources)
     fatal_entries = collect_fatal_diagnostics(compilation.diagnostics)
     missing_sources = collect_missing_sources(sources, compilation)
-    success = True
+    success = true
     if len(fatal_entries) > 0:
-        success = False
+        success = false
     if len(missing_sources) > 0:
-        success = False
+        success = false
     if len(compilation.modules) != len(sources):
-        success = False
+        success = false
     return SelfHostCheckResult(success=success, compiled_count=len(compilation.modules), expected_count=len(sources), fatal_diagnostics=fatal_entries, missing_sources=missing_sources)
 
 def collect_fatal_diagnostics(entries):
@@ -71,6 +74,6 @@ def module_present(target, modules):
         if index >= len(modules):
             break
         if modules[index].source_path == target:
-            return True
+            return true
         index += 1
-    return False
+    return false

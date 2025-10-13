@@ -198,6 +198,22 @@ def format_string(template: str, local_scope: Dict[str, Any], global_scope: Dict
     return _INTERPOLATION_PATTERN.sub(_replace, template)
 
 
+def format_interpolated(parts: Iterable[str], values: Iterable[Any]) -> str:
+    result_parts: List[str] = []
+    value_iter = iter(values)
+    for part in parts:
+        result_parts.append(part)
+        try:
+            value = next(value_iter)
+        except StopIteration:
+            continue
+        result_parts.append(to_debug_string(value))
+    # Exhaust remaining values to mirror the stage1 helper semantics.
+    for leftover in value_iter:
+        result_parts.append(to_debug_string(leftover))
+    return "".join(result_parts)
+
+
 # ---------------------------------------------------------------------------
 # Pattern matching helpers (very small and incomplete)
 # ---------------------------------------------------------------------------
@@ -632,6 +648,7 @@ __all__ = [
     "is_void",
     "is_array",
     "is_callable",
+    "format_interpolated",
 ]
 
 

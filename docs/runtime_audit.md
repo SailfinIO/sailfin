@@ -13,11 +13,11 @@ This audit tracks runtime helpers that the Sailfin stage1 toolchain currently so
 | `EnumType`, `EnumInstance` helpers | `runtime/prelude.sfn` | Sailfin-native | Enum metadata + instantiation handled in Sailfin with lowering rewrites; regression coverage in `compiler/tests/test_runtime_prelude.py`. |
 | `struct_repr` | `runtime/prelude.sfn` | Sailfin-native | Struct `__repr__` generation wired through lowering with helper coverage in `compiler/tests/test_runtime_prelude.py`. |
 | `check_type` and `_resolve_runtime_type` | `runtime/prelude.sfn` (+ helpers in `runtime/runtime_support.py`) | Sailfin-native | Descriptor parser + recursive evaluator now live in Sailfin; still depends on `resolve_runtime_type` bridge until module metadata lands. |
-| `format_string` | `runtime/runtime_support.py` | Python bridge | Plan covers segment-based interpolation without Python `eval` (`docs/proposals/runtime-check-type-format-string.md`). |
+| `format_interpolated` | `runtime/prelude.sfn` (+ shim in `runtime/runtime_support.py`) | Sailfin-native | Interpolation now lowers to segment arrays without Python `eval`; coverage in `compiler/tests/test_runtime_prelude.py` and `compiler/tests/test_string_interpolation.py`. |
 | `_WebSocket*`, `_HttpModule`, `_Request`, `_Response` mock helpers | `runtime/runtime_support.py` | Python bridge | Replace with Sailfin stubs once capability bridges are in place; covered by roadmap capability workstream. |
 
 Next actions:
 
 1. Generate module type metadata so named descriptors no longer rely on `resolve_runtime_type` bridge.
-2. Teach the emitters to lower interpolated strings into segment arrays and execute them through a Sailfin helper.
+2. Update the legacy Stage0 fallback to share the Sailfin interpolation helper so `runtime.format_string` can retire.
 3. Remove the remaining Python bridges once regression coverage proves the Sailfin-native helpers pass across Stage0/Stage1 pipelines.

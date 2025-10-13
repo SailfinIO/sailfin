@@ -26,25 +26,40 @@ class Diagnostic:
         self.message = message
         self.primary = primary
 
+    def __repr__(self):
+        return runtime.struct_repr('Diagnostic', [runtime.struct_field('code', self.code), runtime.struct_field('message', self.message), runtime.struct_field('primary', self.primary)])
+
 class SymbolEntry:
     def __init__(self, name, kind):
         self.name = name
         self.kind = kind
+
+    def __repr__(self):
+        return runtime.struct_repr('SymbolEntry', [runtime.struct_field('name', self.name), runtime.struct_field('kind', self.kind)])
 
 class TypecheckResult:
     def __init__(self, diagnostics, symbols):
         self.diagnostics = diagnostics
         self.symbols = symbols
 
+    def __repr__(self):
+        return runtime.struct_repr('TypecheckResult', [runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('symbols', self.symbols)])
+
 class SymbolCollectionResult:
     def __init__(self, symbols, diagnostics):
         self.symbols = symbols
         self.diagnostics = diagnostics
 
+    def __repr__(self):
+        return runtime.struct_repr('SymbolCollectionResult', [runtime.struct_field('symbols', self.symbols), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class ScopeResult:
     def __init__(self, bindings, diagnostics):
         self.bindings = bindings
         self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('ScopeResult', [runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
 
 def typecheck_program(program):
     top_level = collect_top_level_symbols(program)
@@ -163,11 +178,11 @@ def check_statement(statement, bindings):
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
     if statement.variant == "IfStatement":
         diagnostics = check_block(statement.then_block, bindings)
-        if statement.else_branch != None:
+        if statement.else_branch != null:
             branch = statement.else_branch
-            if branch.body != None:
+            if branch.body != null:
                 diagnostics = (diagnostics) + (check_block(branch.body, bindings))
-            if branch.statement != None:
+            if branch.statement != null:
                 result = check_statement(branch.statement, bindings)
                 diagnostics = (diagnostics) + (result.diagnostics)
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
@@ -276,8 +291,8 @@ def check_type_parameters(type_parameters):
 def contains_string(items, candidate):
     for item in items:
         if item == candidate:
-            return True
-    return False
+            return true
+    return false
 
 def register_local_symbol(bindings, name, kind):
     if has_symbol(bindings, name):
@@ -303,8 +318,8 @@ def clone_bindings(source):
 def has_symbol(symbols, name):
     for entry in symbols:
         if entry.name == name:
-            return True
-    return False
+            return true
+    return false
 
 def make_duplicate_symbol_diagnostic(name, kind):
-    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=None)
+    return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=null)

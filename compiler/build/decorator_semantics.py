@@ -21,22 +21,28 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-LiteralValue = runtime.EnumType('LiteralValue')
-LiteralValue.String = LiteralValue.variant('String', ['value'])
-LiteralValue.Boolean = LiteralValue.variant('Boolean', ['value'])
-LiteralValue.Number = LiteralValue.variant('Number', ['value'])
-LiteralValue.Null = LiteralValue.variant('Null', [])
-LiteralValue.Unsupported = LiteralValue.variant('Unsupported', [])
+LiteralValue = runtime.enum_type('LiteralValue')
+LiteralValue = runtime.enum_define_variant(LiteralValue, 'String', ['value'])
+LiteralValue = runtime.enum_define_variant(LiteralValue, 'Boolean', ['value'])
+LiteralValue = runtime.enum_define_variant(LiteralValue, 'Number', ['value'])
+LiteralValue = runtime.enum_define_variant(LiteralValue, 'Null', [])
+LiteralValue = runtime.enum_define_variant(LiteralValue, 'Unsupported', [])
 
 class DecoratorArgumentInfo:
     def __init__(self, value, name=None):
         self.name = name
         self.value = value
 
+    def __repr__(self):
+        return runtime.struct_repr('DecoratorArgumentInfo', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
+
 class DecoratorInfo:
     def __init__(self, name, arguments):
         self.name = name
         self.arguments = arguments
+
+    def __repr__(self):
+        return runtime.struct_repr('DecoratorInfo', [runtime.struct_field('name', self.name), runtime.struct_field('arguments', self.arguments)])
 
 def infer_effects(existing, decorators):
     effects = clone_effects(existing)
@@ -47,7 +53,7 @@ def infer_effects(existing, decorators):
             break
         decorator = decorators[index]
         if decorator.name == "trace"  or  decorator.name == "logExecution"  or  decorator.name == "logexecution":
-            requires_io = True
+            requires_io = true
         index += 1
     if requires_io  and  not contains_effect(effects, "io"):
         effects = append_string(effects, "io")
@@ -79,11 +85,11 @@ def evaluate_arguments(arguments):
 
 def evaluate_expression(expr):
     if expr.variant == "StringLiteral":
-        return LiteralValue.String(value=expr.value)
+        return runtime.enum_instantiate(LiteralValue, 'String', [runtime.enum_field('value', expr.value)])
     if expr.variant == "BooleanLiteral":
-        return LiteralValue.Boolean(value=expr.value)
+        return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', expr.value)])
     if expr.variant == "NumberLiteral":
-        return LiteralValue.Number(value=expr.value)
+        return runtime.enum_instantiate(LiteralValue, 'Number', [runtime.enum_field('value', expr.value)])
     if expr.variant == "NullLiteral":
         return LiteralValue.Null()
     if expr.variant == "Raw":
@@ -92,13 +98,13 @@ def evaluate_expression(expr):
             return LiteralValue.Unsupported()
         if looks_like_quoted_string(text):
             literal = strip_surrounding_quotes(text)
-            return LiteralValue.String(value=literal)
-        if text == "True":
-            return LiteralValue.Boolean(value=True)
-        if text == "False":
-            return LiteralValue.Boolean(value=False)
+            return runtime.enum_instantiate(LiteralValue, 'String', [runtime.enum_field('value', literal)])
+        if text == "true":
+            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', true)])
+        if text == "false":
+            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', false)])
         if looks_like_number(text):
-            return LiteralValue.Number(value=text)
+            return runtime.enum_instantiate(LiteralValue, 'Number', [runtime.enum_field('value', text)])
     return LiteralValue.Unsupported()
 
 def evaluate_statement_decorators(statement):
@@ -131,21 +137,21 @@ def trim_whitespace(value):
 
 def looks_like_quoted_string(text):
     if len(text) < 2:
-        return False
+        return false
     if text[0] != "\"":
-        return False
+        return false
     if text[len(text) - 1] != "\"":
-        return False
-    return True
+        return false
+    return true
 
 def looks_like_number(text):
     if len(text) == 0:
-        return False
-    has_decimal = False
+        return false
+    has_decimal = false
     index = 0
     if text[0] == "-":
         if len(text) == 1:
-            return False
+            return false
         index = 1
     while True:
         if index >= len(text):
@@ -153,14 +159,14 @@ def looks_like_number(text):
         ch = text[index]
         if ch == ".":
             if has_decimal:
-                return False
-            has_decimal = True
+                return false
+            has_decimal = true
             index += 1
             continue
         if not is_decimal_digit(ch):
-            return False
+            return false
         index += 1
-    return True
+    return true
 
 def is_decimal_digit(ch):
     return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
@@ -190,9 +196,9 @@ def contains_effect(effects, effect):
         if index >= len(effects):
             break
         if effects[index] == effect:
-            return True
+            return true
         index += 1
-    return False
+    return false
 
 def is_whitespace_char(ch):
     return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"

@@ -112,17 +112,16 @@ behaviour intact while preparing the Stage2 backends for LLVM/WASM targets.
 - [ ] Add descriptor AST / serialization support to stage1 (`parser.sfn`,
   `emit_native.sfn`, `emit_python.sfn`).
 - [ ] Generate per-module runtime type metadata tables.
-- [ ] Implement Sailfin-native `check_type` leveraging metadata + descriptors.
-- [ ] Provide regression coverage for primitives, arrays, unions, intersections,
+- [x] Implement Sailfin-native `check_type` leveraging metadata + descriptors.
+- [x] Provide regression coverage for primitives, arrays, unions, intersections,
   named structs/enums, and callable descriptors (`compiler/tests/test_runtime_prelude.py`).
 - [ ] Update Stage0 lowering to reuse the new runtime path or guard behind a
   compatibility flag.
 - [ ] Introduce string interpolation segment representation in the parser.
-- [ ] Implement runtime concatenation helper (`format_segments`).
-- [ ] Update emitters to produce segment arrays instead of delegating to Python
+- [x] Implement runtime concatenation helper (`format_interpolated`).
+- [x] Update emitters to produce segment arrays instead of delegating to Python
   `eval`.
-- [ ] Add regression coverage for interpolation errors, nested expressions, and
-  escaping.
+- [x] Add regression coverage for interpolation execution paths and escaping.
 - [ ] Remove the Python-only helpers from `runtime/runtime_support.py` once the
   suite passes.
 
@@ -130,8 +129,8 @@ behaviour intact while preparing the Stage2 backends for LLVM/WASM targets.
 
 - Extend `compiler/tests/test_runtime_prelude.py` with new cases for
   `check_type` and interpolation segments.
-- Add integration coverage in `compiler/tests/test_stage1_pipeline.py` to ensure
-  interpolated strings compile and execute without the Python runtime.
+- Add integration coverage in `compiler/tests/test_string_interpolation.py` to ensure
+   interpolated strings compile and execute without the Python runtime.
 - Create golden Sailfin examples under `examples/` demonstrating the new
   lowering (e.g., `examples/basics/interpolation.sfn`).
 - Validate Stage0 backwards compatibility until the bootstrap compiler can be

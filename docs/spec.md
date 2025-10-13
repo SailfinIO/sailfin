@@ -524,9 +524,11 @@ Test runners support:
 
 String literals support inline expressions using `{{ expression }}` with
 mandatory double braces. Whitespace inside braces is ignored at the edges, so
-`{{name}}` and `{{ name }}` are equivalent. The bootstrap runtime invokes
-`runtime.format_string` to evaluate expressions against the current scope.
-Failures leave the placeholder intact for debugging.
+`{{name}}` and `{{ name }}` are equivalent. Stage1 lowers interpolated strings
+into segment arrays and calls `runtime.format_interpolated`, evaluating each
+embedded expression directly without relying on Python `eval`. Legacy Stage0
+paths still reference `runtime.format_string` until the bootstrap toolchain is
+fully retired.
 
 ## 10. Runtime Semantics
 
@@ -538,7 +540,9 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
   `runtime.enum_instantiate` – concurrency and enum primitives. Invoking `spawn`
   requires the `io` effect; routing through
   `serve` requires `net`.
-- `runtime.format_string` – interpolated string support.
+- `runtime.format_interpolated` – interpolated string support for the
+  self-hosted pipeline; Stage0 still exposes `runtime.format_string` as a
+  compatibility shim.
 - `runtime.check_type` – descriptor-based runtime type testing used by the `is`
   operator. The Sailfin prelude now parses descriptors (`string`, unions,
   intersections, arrays, optionals) directly and calls into lightweight Python

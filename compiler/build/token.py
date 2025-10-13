@@ -17,15 +17,15 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-TokenKind = runtime.EnumType('TokenKind')
-TokenKind.Identifier = TokenKind.variant('Identifier', ['value'])
-TokenKind.NumberLiteral = TokenKind.variant('NumberLiteral', ['value'])
-TokenKind.StringLiteral = TokenKind.variant('StringLiteral', ['value'])
-TokenKind.BooleanLiteral = TokenKind.variant('BooleanLiteral', ['value'])
-TokenKind.Symbol = TokenKind.variant('Symbol', ['value'])
-TokenKind.Whitespace = TokenKind.variant('Whitespace', [])
-TokenKind.Comment = TokenKind.variant('Comment', [])
-TokenKind.EndOfFile = TokenKind.variant('EndOfFile', [])
+TokenKind = runtime.enum_type('TokenKind')
+TokenKind = runtime.enum_define_variant(TokenKind, 'Identifier', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'NumberLiteral', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'StringLiteral', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'BooleanLiteral', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'Symbol', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'Whitespace', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'Comment', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'EndOfFile', [])
 
 class Token:
     def __init__(self, kind, lexeme, line, column):
@@ -33,6 +33,9 @@ class Token:
         self.lexeme = lexeme
         self.line = line
         self.column = column
+
+    def __repr__(self):
+        return runtime.struct_repr('Token', [runtime.struct_field('kind', self.kind), runtime.struct_field('lexeme', self.lexeme), runtime.struct_field('line', self.line), runtime.struct_field('column', self.column)])
 
 def eof_token(line, column):
     return Token(kind=TokenKind.EndOfFile(), lexeme="", line=line, column=column)

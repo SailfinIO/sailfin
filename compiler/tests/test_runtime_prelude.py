@@ -48,6 +48,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     struct_field = namespace["struct_field"]
     struct_repr = namespace["struct_repr"]
     check_type = namespace["check_type"]
+    format_interpolated = namespace["format_interpolated"]
 
     doubled = array_map([1, 2, 3], lambda value: value * 2)
     assert doubled == [2, 4, 6]
@@ -150,3 +151,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert check_type(42, "string & number") is False
     assert check_type(None, "string?") is True
     assert check_type("value", "string?") is True
+
+    assert format_interpolated(["Hello, ", "!"], ["World"]) == "Hello, World!"
+    assert format_interpolated(["Prefix"], []) == "Prefix"
+    assert format_interpolated(["a", "b", "c"], [1, 2]) == "a1b2c"
