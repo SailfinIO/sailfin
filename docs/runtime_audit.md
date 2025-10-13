@@ -12,12 +12,12 @@ This audit tracks runtime helpers that the Sailfin stage1 toolchain currently so
 | `match_exhaustive_failed` | `runtime/prelude.sfn` | Sailfin-native | Raises a ValueError via `runtime.raise_value_error`; regression covered by `compiler/tests/test_runtime_prelude.py`. |
 | `EnumType`, `EnumInstance` helpers | `runtime/prelude.sfn` | Sailfin-native | Enum metadata + instantiation handled in Sailfin with lowering rewrites; regression coverage in `compiler/tests/test_runtime_prelude.py`. |
 | `struct_repr` | `runtime/prelude.sfn` | Sailfin-native | Struct `__repr__` generation wired through lowering with helper coverage in `compiler/tests/test_runtime_prelude.py`. |
-| `check_type` and `_resolve_runtime_type` | `runtime/runtime_support.py` | Python bridge | Used for bootstrap `is` operator; plan Sailfin-native type reflection once semantic metadata lands. |
-| `format_string` | `runtime/runtime_support.py` | Python bridge | Stage1 string interpolation still defers to Python; needs Sailfin expression evaluation or IR support. |
+| `check_type` and `_resolve_runtime_type` | `runtime/runtime_support.py` | Python bridge | Sailfin-native reflection plan drafted (`docs/proposals/runtime-check-type-format-string.md`); pending descriptor metadata + runtime implementation. |
+| `format_string` | `runtime/runtime_support.py` | Python bridge | Plan covers segment-based interpolation without Python `eval` (`docs/proposals/runtime-check-type-format-string.md`). |
 | `_WebSocket*`, `_HttpModule`, `_Request`, `_Response` mock helpers | `runtime/runtime_support.py` | Python bridge | Replace with Sailfin stubs once capability bridges are in place; covered by roadmap capability workstream. |
 
 Next actions:
 
-1. Port `match_exhaustive_failed` into `runtime/prelude.sfn`, extending stage1 match lowering tests.
-2. Design Sailfin-native enum container (`EnumType`/`EnumInstance`) plus struct formatting utility, then update the emitter to exercise them.
-3. Define a plan for type reflection (`check_type`) and string interpolation (`format_string`) that does not depend on Python evaluation.
+1. Implement descriptor-aware `check_type` in `runtime/prelude.sfn` using the serialized metadata outlined in the plan.
+2. Teach the emitters to lower interpolated strings into segment arrays and execute them through a Sailfin helper.
+3. Remove the Python bridge once regression coverage proves the Sailfin-native helpers pass across Stage0/Stage1 pipelines.
