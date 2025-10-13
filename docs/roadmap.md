@@ -11,7 +11,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 1. **Stage2 Backend Delivery**
   - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR / WASM modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
-  - [ ] Lower conditionals, loops, and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend.
+  - [ ] Lower loops and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend. (Conditional `if`/`else` lowering landed in `native_llvm_lowering.sfn` and is covered by `compiler/tests/test_native_llvm_execution.py`.)
   - [ ] Prototype WebAssembly emission from `.sfn-asm` so parity with the LLVM path can be validated via the same smoke harness.
   - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
   - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
@@ -77,6 +77,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Runtime string helpers — Promoted `compiler/src/string_utils.sfn` into the shared runtime prelude so downstream projects and the stage1 compiler reference a single implementation. Validation: `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`.
 - [x] Module re-export support — Parser, emitter, native lowering, and Python bridge now preserve aliased `import`/`export` specifiers so runtime helpers can be re-exported directly. Validation: `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.
 - [x] Capability bridges — Introduced runtime capability grants and filesystem/HTTP/model bridge helpers that enforce permissions while delegating to bootstrap shims. Validation: `compiler/tests/test_runtime_prelude.py::test_runtime_capability_bridges`.
+- [x] Stage2 conditionals — `native_llvm_lowering.sfn` now lowers local assignments and structured `if`/`else` blocks into LLVM IR. Validation: `compiler/tests/test_native_llvm_execution.py` exercises branching via `choose`.
 
 ## Coordination Notes
 

@@ -24,7 +24,8 @@ roadmaps.
   directory to freeze except for emergency diffs.
 - **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
-  provide the initial scaffolding.
+  provide the initial scaffolding, now covering local assignments and
+  structured `if`/`else` branching in the LLVM prototype.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.
@@ -136,8 +137,8 @@ roadmaps.
   `if`/`else if`/`else` chains, and `match` statements so compiler sources
   round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
   feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` now lifts
-  pure numeric routines into runnable LLVM IR (arithmetic expressions, local
-  `let`s, and intra-module calls), with
+  arithmetic routines with local `let`s, assignments, and simple `if`/`else`
+  control flow into runnable LLVM IR, with
   `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
   `llvmlite` as a smoke guard.
 

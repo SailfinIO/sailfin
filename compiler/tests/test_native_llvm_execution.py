@@ -55,6 +55,24 @@ fn main() -> number {
 """,
             42.0,
         ),
+        (
+            """
+fn choose(flag -> number, a -> number, b -> number) -> number {
+    let selected -> number = 0;
+    if flag {
+        selected = a;
+    } else {
+        selected = b;
+    }
+    return selected;
+}
+
+fn main() -> number {
+    return choose(1, 7, -3) + choose(0, -1, 5);
+}
+""",
+            12.0,
+        ),
     ],
 )
 def test_native_llvm_execution_runs_program(source: str, expected: float) -> None:
@@ -62,6 +80,10 @@ def test_native_llvm_execution_runs_program(source: str, expected: float) -> Non
     assert lowered.diagnostics == []
     assert "define double @add" in lowered.ir
     assert "define double @main" in lowered.ir
+
+    if "choose" in source:
+        assert "define double @choose" in lowered.ir
+        assert "br i1" in lowered.ir
 
     engine, module = _compile_ir(lowered.ir)
     try:
