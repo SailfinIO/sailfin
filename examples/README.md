@@ -99,6 +99,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 | Example | Effects | Notes |
 |---------|---------|-------|
+| `capability_bridges.sfn` | `io` | Uses runtime capability grants and filesystem bridge helpers. |
 | `read-file.sfn` | `io` | Mocked filesystem read via `runtime.fs.read`. |
 | `write-file.sfn` | `io` | Mocked filesystem write illustrating `fs.write`. |
 
