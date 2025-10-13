@@ -1,10 +1,10 @@
 # Sailfin Compiler (Self-Hosting Effort)
 
-The long-term goal is a native, self-hosting Sailfin toolchain built entirely in
-Sailfin. The Python bootstrap (stage0) compiler remains the production path; the
-files under `compiler/src/` mirror its behaviour so we can transition when the
-Sailfin implementation is complete. For an up-to-date snapshot of supported
-features, see `../docs/status.md`.
+The Sailfin-written stage1 compiler now ships as the production toolchain. The
+Python bootstrap (stage0) compiler is retained only for archaeology and targeted
+regression hunting, while the Sailfin sources under `compiler/src/` continue to
+expand coverage and retire the final Python bridges. For the day-to-day feature
+matrix, see `../docs/status.md`.
 
 ## Current Capabilities
 
@@ -30,6 +30,8 @@ features, see `../docs/status.md`.
 
 Unit tests now live under `compiler/tests/`; they bootstrap the Sailfin
 compiler into an isolated directory and exercise the entire stage1 pipeline.
+Remaining runtime helpers that still defer to Python are tracked in
+`../docs/runtime_audit.md`.
 
 ## Workflow with the Bootstrap Toolchain
 
@@ -48,8 +50,8 @@ subset:
 conda run -n sailfin-bootstrap python -m bootstrap.compile_self_host compiler/src/parser.sfn
 ```
 
-These helpers will disappear once the Sailfin-based backend is ready, but they
-keep the workflow ergonomic in the meantime.
+These helpers will disappear as the remaining capability bridges move into
+Sailfin, but they keep the workflow ergonomic in the meantime.
 
 ### Sailfin-to-Sailfin Round-Tripping
 
@@ -82,8 +84,10 @@ effect-aware implementations while keeping the round-trip contract stable.
 
 ## The Road Ahead
 
-When the self-hosted compiler can emit a working binary, it becomes the new stage0, and Sailfin becomes self-sustaining.  
-From there we can iterate on performance, incremental compilation, richer diagnostics, and a more expressive runtime.
+With stage1 active, the next milestone is eliminating the residual Python
+dependencies so the Sailfin runtime and capability bridges are fully native.
+From there we can iterate on performance, incremental compilation, richer
+diagnostics, and a more expressive runtime.
 
 Stay tuned—this is where the language begins to compile itself.
 

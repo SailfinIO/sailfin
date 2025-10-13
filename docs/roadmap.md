@@ -15,29 +15,8 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
 
 2. **Runtime & FFI Foundations**
-  - [ ] Sailfin runtime core — Reimplement the bootstrap runtime helpers (`runtime_support.py`) in Sailfin under `runtime/`, preserving effect annotations.
-    - [x] Ported collection helpers (`array_map`, `array_filter`, `array_reduce`) and the sequential `parallel` runner into `runtime/prelude.sfn`, covered by `compiler/tests/test_runtime_prelude.py`.
-    - [x] Added string helpers (`substring`, `find_char`) to `runtime/prelude.sfn` with regression coverage in `compiler/tests/test_runtime_prelude.py`.
-    - [x] Implemented Sailfin-native UTF-8 aware `char_code` in `runtime/prelude.sfn`, covering ASCII, Latin-1, BMP, and common emoji ranges with regression coverage in `compiler/tests/test_runtime_prelude.py` and `compiler/tests/test_string_utils.py`.
-    - [x] Wired stage1 compiler helpers (lexer, parser, emitter, native lowering) to consume Sailfin string utilities (`compiler/src/string_utils.sfn`) instead of `runtime_support.py` fallbacks.    
-  - [x] Document the runtime string helper surface (`substring`, `find_char`, `char_code`) in `docs/spec.md` with ASCII guarantees and UTF-8 decoding coverage (see §10.2).
-    - [x] Replace the bootstrap fallback in `char_code` with a Sailfin-native Unicode path covering common UTF-8 ranges; expand coverage in `compiler/tests/test_string_utils.py`.
-    - [x] Audit remaining runtime helpers for Python dependencies (`match_exhaustive_failed`, enum utilities) and schedule Sailfin ports with paired tests. See `docs/runtime_audit.md`.
-  - [x] Port `match_exhaustive_failed` into `runtime/prelude.sfn` and add stage1 regression coverage for non-exhaustive matches (`compiler/tests/test_runtime_prelude.py`).
-    - [x] Design Sailfin-native `EnumType`/`EnumInstance` helpers plus `struct_repr` replacement; update lowering/tests accordingly (`compiler/tests/test_runtime_prelude.py`).
-  - [x] Outline a Sailfin-native plan for `check_type` and `format_string` so the `is` operator and string interpolation no longer depend on the Python runtime. (See `docs/proposals/runtime-check-type-format-string.md`.)
-  - [x] Implement descriptor serialization + Sailfin-native `check_type` helpers per the plan (`runtime/prelude.sfn`, `compiler/tests/test_runtime_prelude.py`).
-  - [x] Lower interpolated strings into Sailfin segment arrays and retire the Python `format_string` bridge (`runtime/prelude.sfn`, `compiler/build/native_lowering.py`, `compiler/tests/test_string_interpolation.py`).
-    - [x] Add regression coverage demonstrating `find_char` escape handling and `substring` boundary clamping under stage1 (`compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`).
-    - [x] Routed `struct_repr` and related formatting helpers through a shared `runtime.to_debug_string` implementation so Sailfin-native enums/structs survive stage1 compilation (`compiler/tests/test_runtime_prelude.py`).
-    - [x] Explore grapheme-aware utilities (`grapheme_count`, `grapheme_at`) once normalization primitives land so char-oriented helpers align with user expectations on combining sequences. Validation: `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py` cover accent chains, emoji ZWJ families, and pride flags.
-  - [x] Module system re-exports — Teach the Sailfin module loader to expose runtime helper bindings (e.g., `substring`, `find_char`, `char_code`) via compiler surface modules without duplicating implementations.
-    - [x] Extend import parsing to recognise `import { foo as bar } from "runtime/...";` and persist alias metadata through lowering.
-    - [x] Update the emitter and Python bridge to generate stable re-export stubs and ensure stage1 artifacts resolve runtime bindings correctly.
-    - [x] Add regression coverage in `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip` confirming re-exported helpers compile and execute without duplication.
   - [ ] Capability bridges — Provide minimal FFI shims for filesystem, HTTP, and model execution so native binaries can interact with external resources while respecting capability policies.
-  - [x] Extend stage1 native lowering to support top-level aliases (`let console = runtime.console`) so the Sailfin prelude compiles cleanly (`compiler/tests/test_runtime_prelude.py`).
-  - [x] Teach the lowering pipeline to handle simple struct facades/method shims so `runtime/prelude.sfn` can expose richer wrappers without falling back to bootstrap warnings. Validation: `compiler/tests/test_stage1_pipeline.py::test_struct_method_lowering`.
+  - [ ] Runtime type metadata — Emit module descriptors so `check_type` no longer relies on `runtime.resolve_runtime_type`; update `docs/runtime_audit.md` once the bridge is removed.
   - [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
   - [ ] Inline the grapheme segmentation tables into Sailfin-native helpers and remove the Python `unicodedata` dependency once normalization primitives solidify; extend coverage with locale-heavy fixtures.
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
@@ -78,6 +57,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Effect enforcement — Extended stage0 effect checks to cover runtime helpers (`fs`, `http`, `websocket`, `serve`, `spawn`, `print`, `sleep`). Validation: `bootstrap/tests/test_unit_effects.py` exercises missing-effect errors for `spawn`, `serve`, console IO, and timer usage.
 - [x] Self-hosted control flow — Added structured `if`/`else`, `for`, and `match` support to the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py` asserts the new AST nodes and generated scaffolding.
 - [x] Decorator parity — Self-hosted effect inference now recognises `@logExecution` alongside `@trace`. Validation: `bootstrap/tests/test_compiler_sources.py::test_self_hosted_decorator_logexecution_infers_io` ensures inferred `io` effects.
+- [x] Runtime core parity — Moved collection/string helpers, enum & struct repr, descriptor-backed `check_type`, and interpolation lowering into Sailfin’s runtime prelude; regression coverage in `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`, and `compiler/tests/test_string_interpolation.py`.
 - [x] Self-hosted effect helpers — Added console IO, `sleep`, and `runtime.*` helper detection (`runtime.fs`, `runtime.http`, `runtime.spawn`, `runtime.serve`) to the Sailfin effect checker. Validation: `bootstrap/tests/test_compiler_sources.py` covers missing `io`/`net`/`clock` enforcement.
 - [x] Literal coverage — Array, object, and struct literals now emit structured AST nodes and generate Python via `runtime.make_object`/type constructors. Validation: `bootstrap/tests/test_compiler_sources.py` exercises literal parsing and generation.
 - [x] Expression normalisation — Pratt parser covers member access, calls, unary `!`/`-`, and common binary operators, replacing `Raw` placeholders. Validation: `bootstrap/tests/test_compiler_sources.py` asserts structured guard and inline match expressions, plus member-call lowering within loop bodies.

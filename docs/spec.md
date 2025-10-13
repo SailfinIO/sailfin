@@ -57,7 +57,10 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 ```
 
 Bootstrap status: the parser records effect lists and a conservative validator
-(`bootstrap/effect_checker.py`) enforces a subset today. See Effect System
+(`bootstrap/effect_checker.py`) enforces a subset today. Stage1 ships with its
+own Sailfin-written checker (`compiler/src/effect_checker.sfn`) that mirrors the
+bootstrap coverage for prompts, console I/O, filesystem/HTTP/WebSocket helpers,
+`spawn`/`serve`, `sleep`, and decorators that imply `io`. See Effect System
 section below for details.
 
 ## 2. Modules, Imports, and Capabilities
@@ -555,6 +558,13 @@ Bootstrap stubs:
   objects. There is no `Model.call(...)` in the bootstrap backend.
 - `prompt` blocks are parsed and annotated for effect checking but do not send
   messages to a model during code generation.
+
+The Sailfin runtime prelude (`runtime/prelude.sfn`) implements most of these
+helpers natively for stage1; remaining capability bridges (`console`, `fs`,
+`http`, `websocket`, `spawn`, `serve`, `channel`, `sleep`, `logExecution`, and
+type resolution via `runtime.resolve_runtime_type`) still delegate to the Python
+runtime until the capability workstream lands. Track the current state in
+`docs/runtime_audit.md`.
 
 Additional stubs:
 - Pipelines are emitted as plain functions; there is no special dataflow or
