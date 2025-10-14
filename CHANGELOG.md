@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.5 (2025-10-14)
+
+### Bug Fixes
+
+- .push to .append rewrite after re-build
+  ([`fa3bdab`](https://github.com/SailfinIO/sailfin/commit/fa3bdabe439e738f40886a40c6fd0d2297f09136))
+
+- Rewrite push calls scans expression
+  ([`35da81b`](https://github.com/SailfinIO/sailfin/commit/35da81b60e7d0fd82b43d0714237943d1e2f4b8b))
+
+### Documentation
+
+- Runtime assesment
+  ([`0c1f6d6`](https://github.com/SailfinIO/sailfin/commit/0c1f6d684e189bd0dc67e03dccfc3c3579c55dba))
+
+- Update roadmap
+  ([`ef63d55`](https://github.com/SailfinIO/sailfin/commit/ef63d556cd0ac5a07f8f4b836f4edf1cf61c0af3))
+
+
 ## v0.1.1-alpha.4 (2025-10-12)
 
 ### Bug Fixes
