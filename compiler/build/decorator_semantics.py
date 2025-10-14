@@ -99,9 +99,9 @@ def evaluate_expression(expr):
         if looks_like_quoted_string(text):
             literal = strip_surrounding_quotes(text)
             return runtime.enum_instantiate(LiteralValue, 'String', [runtime.enum_field('value', literal)])
-        if text == "True":
+        if text == "true":
             return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', True)])
-        if text == "False":
+        if text == "false":
             return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', False)])
         if looks_like_number(text):
             return runtime.enum_instantiate(LiteralValue, 'Number', [runtime.enum_field('value', text)])

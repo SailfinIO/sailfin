@@ -485,7 +485,8 @@ def lower_expression_with_depth(expression, depth):
     if array_literal != None:
         return array_literal
     rewritten = rewrite_expression_intrinsics(trimmed)
-    return rewrite_struct_literals_inline(rewritten, depth)
+    arrays_lowered = rewrite_array_literals_inline(rewritten, depth)
+    return rewrite_struct_literals_inline(arrays_lowered, depth)
 
 def rewrite_interpolated_string_literal(expression):
     if len(expression) < 2:
@@ -709,7 +710,7 @@ def lower_array_literal_expression(expression, depth):
     inner = substring(trimmed, 1, len(trimmed) - 1)
     entries = split_array_entries(inner)
     lowered = []
-    index = 0
+    index = array_literal_start_index(entries)
     while True:
         if index >= len(entries):
             break
@@ -717,7 +718,52 @@ def lower_array_literal_expression(expression, depth):
         if len(entry) > 0:
             lowered = append_string(lowered, lower_expression_with_depth(entry, depth + 1))
         index += 1
-    return "[" + join_with_separator(lowered, ", ") + "]"
+    if len(lowered) == 0:
+        return "[]"
+    body = join_with_separator(lowered, ", ")
+    return "[" + body + "]"
+
+def array_literal_start_index(entries):
+    if len(entries) == 0:
+        return 0
+    first = trim_trailing_delimiters(trim_text(entries[0]))
+    if is_array_metadata_entry(first):
+        return 1
+    return 0
+
+def is_array_metadata_entry(entry):
+    trimmed = trim_text(entry)
+    if len(trimmed) == 0:
+        return False
+    if not starts_with(trimmed, "#element:"):
+        return False
+    annotation = trim_text(substring(trimmed, 9, len(trimmed)))
+    return len(annotation) > 0
+
+def rewrite_array_literals_inline(expression, depth):
+    if len(expression) == 0:
+        return expression
+    current = expression
+    search_start = 0
+    while True:
+        if search_start >= len(current):
+            break
+        open_index = find_next_square_open(current, search_start)
+        if open_index < 0:
+            break
+        closing_index = find_matching_square(current, open_index)
+        if closing_index < 0:
+            break
+        array_text = substring(current, open_index, closing_index + 1)
+        lowered = lower_array_literal_expression(array_text, depth + 1)
+        if lowered == None:
+            search_start = open_index + 1
+            continue
+        prefix = substring(current, 0, open_index)
+        suffix = substring(current, closing_index + 1, len(current))
+        current = prefix + lowered + suffix
+        search_start = open_index + len(lowered)
+    return current
 
 def rewrite_struct_literals_inline(expression, depth):
     if len(expression) == 0:
@@ -872,6 +918,11 @@ def rewrite_literal_tokens(expression):
         if index >= len(expression):
             break
         ch = expression[index]
+        if ch == "'"  or  ch == "\"":
+            literal_end = skip_string_literal(expression, index)
+            result = result + substring(expression, index, literal_end)
+            index = literal_end
+            continue
         if is_identifier_char(ch):
             start = index
             while True:
@@ -882,13 +933,13 @@ def rewrite_literal_tokens(expression):
                 if not is_identifier_char(next):
                     break
             token = substring(expression, start, index)
-            if token == "None":
+            if token == "null":
                 result = result + "None"
             else:
-                if token == "True":
+                if token == "true":
                     result = result + "True"
                 else:
-                    if token == "False":
+                    if token == "false":
                         result = result + "False"
                     else:
                         result = result + token
@@ -1147,10 +1198,29 @@ def split_struct_field_entries(text):
     current = ""
     depth = 0
     index = 0
+    in_string = False
+    string_quote = ""
     while True:
         if index >= len(text):
             break
         ch = text[index]
+        if in_string:
+            current = current + ch
+            if ch == "\\":
+                index += 1
+                if index < len(text):
+                    current = current + text[index]
+            else:
+                if ch == string_quote:
+                    in_string = False
+            index += 1
+            continue
+        if ch == "\""  or  ch == "'":
+            in_string = True
+            string_quote = ch
+            current = current + ch
+            index += 1
+            continue
         if ch == "{"  or  ch == "["  or  ch == "(":
             depth += 1
         else:
@@ -1172,10 +1242,29 @@ def split_array_entries(text):
     current = ""
     depth = 0
     index = 0
+    in_string = False
+    string_quote = ""
     while True:
         if index >= len(text):
             break
         ch = text[index]
+        if in_string:
+            current = current + ch
+            if ch == "\\":
+                index += 1
+                if index < len(text):
+                    current = current + text[index]
+            else:
+                if ch == string_quote:
+                    in_string = False
+            index += 1
+            continue
+        if ch == "\""  or  ch == "'":
+            in_string = True
+            string_quote = ch
+            current = current + ch
+            index += 1
+            continue
         if ch == "{"  or  ch == "["  or  ch == "(":
             depth += 1
         else:
@@ -1243,6 +1332,80 @@ def find_matching_brace(text, open_index):
                 depth -= 1
                 if depth == 0:
                     return index
+        index += 1
+    return -1
+
+def is_escaped_quote(text, position):
+    if position <= 0:
+        return False
+    escapes = 0
+    index = position - 1
+    while True:
+        if index < 0:
+            break
+        if text[index] != "\\":
+            break
+        escapes += 1
+        index -= 1
+    if escapes % 2 == 1:
+        return True
+    return False
+
+def find_next_square_open(text, start):
+    index = start
+    in_single = False
+    in_double = False
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "'":
+            if not in_double  and  not is_escaped_quote(text, index):
+                in_single = not in_single
+            index += 1
+            continue
+        if ch == "\"":
+            if not in_single  and  not is_escaped_quote(text, index):
+                in_double = not in_double
+            index += 1
+            continue
+        if not in_single  and  not in_double:
+            if ch == "[":
+                return index
+            if ch == "]":
+                return -1
+        index += 1
+    return -1
+
+def find_matching_square(text, open_index):
+    depth = 0
+    index = open_index
+    in_single = False
+    in_double = False
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "'":
+            if not in_double  and  not is_escaped_quote(text, index):
+                in_single = not in_single
+            index += 1
+            continue
+        if ch == "\"":
+            if not in_single  and  not is_escaped_quote(text, index):
+                in_double = not in_double
+            index += 1
+            continue
+        if not in_single  and  not in_double:
+            if ch == "[":
+                depth += 1
+            else:
+                if ch == "]":
+                    if depth <= 0:
+                        return -1
+                    depth -= 1
+                    if depth == 0:
+                        return index
         index += 1
     return -1
 

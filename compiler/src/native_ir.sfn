@@ -5,7 +5,7 @@
 // this module to understand the structure emitted by `emit_native.sfn`.
 
 import { NativeArtifact } from "./emit_native";
-import { substring } from "./string_utils";
+import { substring, char_code } from "./string_utils";
 
 enum NativeInstruction {
     Return { expression -> string },
@@ -70,10 +70,25 @@ struct NativeStructField {
     mutable -> boolean;
 }
 
+struct NativeStructLayoutField {
+    name -> string;
+    type_annotation -> string;
+    offset -> number;
+    size -> number;
+    align -> number;
+}
+
+struct NativeStructLayout {
+    size -> number;
+    align -> number;
+    fields -> NativeStructLayoutField[];
+}
+
 struct NativeStruct {
     name -> string;
     fields -> NativeStructField[];
     methods -> NativeFunction[];
+    layout -> NativeStructLayout?;
 }
 
 struct NativeEnumVariantField {
@@ -87,9 +102,28 @@ struct NativeEnumVariant {
     fields -> NativeEnumVariantField[];
 }
 
+struct NativeEnumVariantLayout {
+    name -> string;
+    tag -> number;
+    offset -> number;
+    size -> number;
+    align -> number;
+    fields -> NativeStructLayoutField[];
+}
+
+struct NativeEnumLayout {
+    size -> number;
+    align -> number;
+    tag_type -> string;
+    tag_size -> number;
+    tag_align -> number;
+    variants -> NativeEnumVariantLayout[];
+}
+
 struct NativeEnum {
     name -> string;
     variants -> NativeEnumVariant[];
+    layout -> NativeEnumLayout?;
 }
 
 struct NativeBinding {
@@ -116,6 +150,19 @@ struct StructParseResult {
     diagnostics -> string[];
 }
 
+struct StructLayoutHeaderParse {
+    success -> boolean;
+    size -> number;
+    align -> number;
+    diagnostics -> string[];
+}
+
+struct StructLayoutFieldParse {
+    success -> boolean;
+    field -> NativeStructLayoutField;
+    diagnostics -> string[];
+}
+
 struct ParseNativeResult {
     functions -> NativeFunction[];
     imports -> NativeImport[];
@@ -123,6 +170,34 @@ struct ParseNativeResult {
     enums -> NativeEnum[];
     bindings -> NativeBinding[];
     diagnostics -> string[];
+}
+
+struct EnumLayoutHeaderParse {
+    success -> boolean;
+    size -> number;
+    align -> number;
+    tag_type -> string;
+    tag_size -> number;
+    tag_align -> number;
+    diagnostics -> string[];
+}
+
+struct EnumLayoutVariantParse {
+    success -> boolean;
+    variant -> NativeEnumVariantLayout;
+    diagnostics -> string[];
+}
+
+struct EnumLayoutPayloadParse {
+    success -> boolean;
+    variant_name -> string;
+    field -> NativeStructLayoutField;
+    diagnostics -> string[];
+}
+
+struct NumberParseResult {
+    success -> boolean;
+    value -> number;
 }
 
 fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
@@ -242,12 +317,48 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         }
         if starts_with(line, ".param ") {
             if current != null {
-                let parameter = parse_parameter_entry(strip_prefix(line, ".param "));
-                if parameter == null {
+                let mut combined -> string = strip_prefix(line, ".param ");
+                let mut lookahead -> number = index + 1;
+                loop {
+                    if lookahead >= lines.length {
+                        break;
+                    }
+                    let continuation_raw = lines[lookahead];
+                    if continuation_raw.length == 0 {
+                        break;
+                    }
+                    let continuation_trimmed = trim_text(continuation_raw);
+                    if continuation_trimmed.length == 0 {
+                        lookahead += 1;
+                        continue;
+                    }
+                    if !line_looks_like_parameter_entry(continuation_trimmed) {
+                        break;
+                    }
+                    combined = combined + " " + continuation_trimmed;
+                    lookahead += 1;
+                }
+
+                let entries = split_parameter_entries(combined);
+                if entries.length == 0 {
                     diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
                 } else {
-                    current = append_parameter(current, parameter);
+                    let mut entry_index -> number = 0;
+                    loop {
+                        if entry_index >= entries.length {
+                            break;
+                        }
+                        let entry = entries[entry_index];
+                        let parameter = parse_parameter_entry(entry);
+                        if parameter == null {
+                            diagnostics = append_string(diagnostics, "unable to parse parameter entry: " + entry);
+                        } else {
+                            current = append_parameter(current, parameter);
+                        }
+                        entry_index += 1;
+                    }
                 }
+                index = lookahead - 1;
             } else {
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line);
             }
@@ -314,6 +425,54 @@ fn append_enum_variant_field(fields -> NativeEnumVariantField[], value -> Native
 
 fn append_struct_field(fields -> NativeStructField[], field -> NativeStructField) -> NativeStructField[] {
     return fields.concat([field]);
+}
+
+fn append_struct_layout_field(fields -> NativeStructLayoutField[], field -> NativeStructLayoutField) -> NativeStructLayoutField[] {
+    return fields.concat([field]);
+}
+
+fn append_enum_variant_layout(variants -> NativeEnumVariantLayout[], value -> NativeEnumVariantLayout) -> NativeEnumVariantLayout[] {
+    return variants.concat([value]);
+}
+
+fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= variants.length {
+            break;
+        }
+        if variants[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn update_enum_variant_fields(variants -> NativeEnumVariantLayout[], index -> number, field -> NativeStructLayoutField) -> NativeEnumVariantLayout[] {
+    let mut result -> NativeEnumVariantLayout[] = [];
+    let mut current_index -> number = 0;
+    loop {
+        if current_index >= variants.length {
+            break;
+        }
+        if current_index == index {
+            let variant = variants[current_index];
+            let updated = NativeEnumVariantLayout {
+                name: variant.name,
+                tag: variant.tag,
+                offset: variant.offset,
+                size: variant.size,
+                align: variant.align,
+                fields: append_struct_layout_field(variant.fields, field),
+            };
+            result = append_enum_variant_layout(result, updated);
+        } else {
+            result = append_enum_variant_layout(result, variants[current_index]);
+        }
+        current_index += 1;
+    }
+    return result;
 }
 
 fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) -> NativeFunction {
@@ -594,12 +753,21 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
     let mut fields -> NativeStructField[] = [];
     let mut methods -> NativeFunction[] = [];
     let mut current_method -> NativeFunction? = null;
+    let mut struct_layout_fields -> NativeStructLayoutField[] = [];
+    let mut struct_layout_size -> number = 0;
+    let mut struct_layout_align -> number = 0;
+    let mut struct_layout_header_success -> boolean = false;
+    let mut struct_layout_reported_missing_header -> boolean = false;
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
             diagnostics = append_string(diagnostics, "unterminated struct " + struct_name);
+            let mut struct_layout_value -> NativeStructLayout? = null;
+            if struct_layout_header_success {
+                struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
+            }
             return StructParseResult {
-                definition: NativeStruct { name: struct_name, fields: fields, methods: methods },
+                definition: NativeStruct { name: struct_name, fields: fields, methods: methods, layout: struct_layout_value },
                 next_index: index,
                 diagnostics: diagnostics,
             };
@@ -657,6 +825,42 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
             index += 1;
             continue;
         }
+        if starts_with(raw_line, ".layout ") {
+            let body = strip_prefix(raw_line, ".layout ");
+            if starts_with(body, "struct ") {
+                let header_result = parse_struct_layout_header(strip_prefix(body, "struct "));
+                diagnostics = diagnostics.concat(header_result.diagnostics);
+                if header_result.success {
+                    if struct_layout_header_success {
+                        diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
+                    } else {
+                        struct_layout_size = header_result.size;
+                        struct_layout_align = header_result.align;
+                        struct_layout_header_success = true;
+                    }
+                }
+                index += 1;
+                continue;
+            }
+            if starts_with(body, "field ") {
+                let field_result = parse_struct_layout_field(strip_prefix(body, "field "), struct_name);
+                diagnostics = diagnostics.concat(field_result.diagnostics);
+                if field_result.success {
+                    struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field);
+                    if !struct_layout_header_success {
+                        if !struct_layout_reported_missing_header {
+                            diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field encountered before layout header");
+                            struct_layout_reported_missing_header = true;
+                        }
+                    }
+                }
+                index += 1;
+                continue;
+            }
+            diagnostics = append_string(diagnostics, "unsupported struct layout directive: " + raw_line);
+            index += 1;
+            continue;
+        }
         if raw_line == "noop" {
             index += 1;
             continue;
@@ -690,8 +894,13 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
         index += 1;
     }
 
+    let mut struct_layout_value -> NativeStructLayout? = null;
+    if struct_layout_header_success {
+        struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
+    }
+
     return StructParseResult {
-        definition: NativeStruct { name: struct_name, fields: fields, methods: methods },
+        definition: NativeStruct { name: struct_name, fields: fields, methods: methods, layout: struct_layout_value },
         next_index: index,
         diagnostics: diagnostics,
     };
@@ -713,12 +922,31 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
     }
 
     let mut variants -> NativeEnumVariant[] = [];
+    let mut enum_layout_variants -> NativeEnumVariantLayout[] = [];
+    let mut enum_layout_size -> number = 0;
+    let mut enum_layout_align -> number = 0;
+    let mut enum_layout_tag_type -> string = "";
+    let mut enum_layout_tag_size -> number = 0;
+    let mut enum_layout_tag_align -> number = 0;
+    let mut enum_layout_header_success -> boolean = false;
+    let mut enum_layout_reported_missing_header -> boolean = false;
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
             diagnostics = append_string(diagnostics, "unterminated enum " + enum_name);
+            let mut enum_layout_value -> NativeEnumLayout? = null;
+            if enum_layout_header_success {
+                enum_layout_value = NativeEnumLayout {
+                    size: enum_layout_size,
+                    align: enum_layout_align,
+                    tag_type: enum_layout_tag_type,
+                    tag_size: enum_layout_tag_size,
+                    tag_align: enum_layout_tag_align,
+                    variants: enum_layout_variants,
+                };
+            }
             return EnumParseResult {
-                definition: NativeEnum { name: enum_name, variants: variants },
+                definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value },
                 next_index: index,
                 diagnostics: diagnostics,
             };
@@ -729,6 +957,70 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             continue;
         }
         if raw_line == "noop" {
+            index += 1;
+            continue;
+        }
+        if starts_with(raw_line, ".layout ") {
+            let body = strip_prefix(raw_line, ".layout ");
+            if starts_with(body, "enum ") {
+                let header_result = parse_enum_layout_header(strip_prefix(body, "enum "));
+                diagnostics = diagnostics.concat(header_result.diagnostics);
+                if header_result.success {
+                    if enum_layout_header_success {
+                        diagnostics = append_string(diagnostics, "duplicate enum layout header in " + enum_name);
+                    } else {
+                        enum_layout_size = header_result.size;
+                        enum_layout_align = header_result.align;
+                        enum_layout_tag_type = header_result.tag_type;
+                        enum_layout_tag_size = header_result.tag_size;
+                        enum_layout_tag_align = header_result.tag_align;
+                        enum_layout_header_success = true;
+                    }
+                }
+                index += 1;
+                continue;
+            }
+            if starts_with(body, "variant ") {
+                let variant_result = parse_enum_variant_layout(strip_prefix(body, "variant "), enum_name);
+                diagnostics = diagnostics.concat(variant_result.diagnostics);
+                if variant_result.success {
+                    let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
+                    if existing_index >= 0 {
+                        diagnostics = append_string(diagnostics, "duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name);
+                    } else {
+                        enum_layout_variants = append_enum_variant_layout(enum_layout_variants, variant_result.variant);
+                    }
+                    if !enum_layout_header_success {
+                        if !enum_layout_reported_missing_header {
+                            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant encountered before layout header");
+                            enum_layout_reported_missing_header = true;
+                        }
+                    }
+                }
+                index += 1;
+                continue;
+            }
+            if starts_with(body, "payload ") {
+                let payload_result = parse_enum_payload_layout(strip_prefix(body, "payload "), enum_name);
+                diagnostics = diagnostics.concat(payload_result.diagnostics);
+                if payload_result.success {
+                    let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name);
+                    if target_index < 0 {
+                        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`");
+                    } else {
+                        enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field);
+                    }
+                    if !enum_layout_header_success {
+                        if !enum_layout_reported_missing_header {
+                            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload encountered before layout header");
+                            enum_layout_reported_missing_header = true;
+                        }
+                    }
+                }
+                index += 1;
+                continue;
+            }
+            diagnostics = append_string(diagnostics, "unsupported enum layout directive: " + raw_line);
             index += 1;
             continue;
         }
@@ -750,8 +1042,20 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
         index += 1;
     }
 
+    let mut enum_layout_value -> NativeEnumLayout? = null;
+    if enum_layout_header_success {
+        enum_layout_value = NativeEnumLayout {
+            size: enum_layout_size,
+            align: enum_layout_align,
+            tag_type: enum_layout_tag_type,
+            tag_size: enum_layout_tag_size,
+            tag_align: enum_layout_tag_align,
+            variants: enum_layout_variants,
+        };
+    }
+
     return EnumParseResult {
-        definition: NativeEnum { name: enum_name, variants: variants },
+        definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value },
         next_index: index,
         diagnostics: diagnostics,
     };
@@ -897,6 +1201,405 @@ fn parse_struct_field_line(text -> string) -> NativeStructField? {
     }
     let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length));
     return NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable };
+}
+
+fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
+    let tokens = split_whitespace(trim_text(text));
+    let mut diagnostics -> string[] = [];
+    if tokens.length == 0 {
+        diagnostics = append_string(diagnostics, "struct layout header missing entries");
+        return StructLayoutHeaderParse { success: false, size: 0, align: 0, diagnostics: diagnostics };
+    }
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !size_found {
+        diagnostics = append_string(diagnostics, "struct layout header missing size entry");
+    }
+    if !align_found {
+        diagnostics = append_string(diagnostics, "struct layout header missing align entry");
+    }
+    let success = size_found && align_found && diagnostics.length == 0;
+    return StructLayoutHeaderParse { success: success, size: size_value, align: align_value, diagnostics: diagnostics };
+}
+
+fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing content");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing entries");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let field_name = tokens[0];
+    if field_name.length == 0 {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing name");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let mut type_text -> string = "";
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "type=") {
+            type_text = substring(token, 5, token.length);
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if type_text.length == 0 {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing type entry");
+    }
+    if !offset_found {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing align entry");
+    }
+    let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
+    let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
+    return StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics };
+}
+
+fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
+    let tokens = split_whitespace(trim_text(text));
+    let mut diagnostics -> string[] = [];
+    if tokens.length == 0 {
+        diagnostics = append_string(diagnostics, "enum layout header missing entries");
+        return EnumLayoutHeaderParse { success: false, size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
+    }
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut tag_type -> string = "";
+    let mut tag_size_found -> boolean = false;
+    let mut tag_align_found -> boolean = false;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut tag_size_value -> number = 0;
+    let mut tag_align_value -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`");
+            }
+        } else if starts_with(token, "tag_type=") {
+            tag_type = substring(token, 9, token.length);
+        } else if starts_with(token, "tag_size=") {
+            let value_text = substring(token, 9, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_size_found = true;
+                tag_size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`");
+            }
+        } else if starts_with(token, "tag_align=") {
+            let value_text = substring(token, 10, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_align_found = true;
+                tag_align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !size_found {
+        diagnostics = append_string(diagnostics, "enum layout header missing size entry");
+    }
+    if !align_found {
+        diagnostics = append_string(diagnostics, "enum layout header missing align entry");
+    }
+    if tag_type.length == 0 {
+        diagnostics = append_string(diagnostics, "enum layout header missing tag_type entry");
+    }
+    if !tag_size_found {
+        diagnostics = append_string(diagnostics, "enum layout header missing tag_size entry");
+    }
+    if !tag_align_found {
+        diagnostics = append_string(diagnostics, "enum layout header missing tag_align entry");
+    }
+    let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0;
+    return EnumLayoutHeaderParse {
+        success: success,
+        size: size_value,
+        align: align_value,
+        tag_type: tag_type,
+        tag_size: tag_size_value,
+        tag_align: tag_align_value,
+        diagnostics: diagnostics,
+    };
+}
+
+fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutVariantParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] };
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing content");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing entries");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let variant_name = tokens[0];
+    if variant_name.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing name");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let mut tag_found -> boolean = false;
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut tag_value -> number = 0;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "tag=") {
+            let value_text = substring(token, 4, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_found = true;
+                tag_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`");
+            }
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !tag_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry");
+    }
+    if !offset_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
+    }
+    let success = tag_found && offset_found && size_found && align_found && diagnostics.length == 0;
+    let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] };
+    return EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics };
+}
+
+fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutPayloadParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing content");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing entries");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let identifier = tokens[0];
+    let dot_index = index_of(identifier, ".");
+    if dot_index <= 0 || dot_index + 1 >= identifier.length {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let variant_name = substring(identifier, 0, dot_index);
+    let field_name = substring(identifier, dot_index + 1, identifier.length);
+    let mut type_text -> string = "";
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "type=") {
+            type_text = substring(token, 5, token.length);
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if type_text.length == 0 {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing type entry");
+    }
+    if !offset_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
+    }
+    let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
+    let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
+    return EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics };
 }
 
 fn parse_let_instruction(line -> string) -> NativeInstruction {
@@ -1053,12 +1756,196 @@ fn parse_parameter_entry(body -> string) -> NativeParameter? {
     };
 }
 
+fn line_looks_like_parameter_entry(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return false;
+    }
+    if starts_with(trimmed, ".") {
+        return false;
+    }
+    if starts_with(trimmed, ";") {
+        return false;
+    }
+    let arrow_index = index_of(trimmed, "->");
+    if arrow_index >= 0 {
+        let mut head = trim_text(substring(trimmed, 0, arrow_index));
+        if head.length == 0 {
+            return false;
+        }
+        if starts_with(head, "mut ") {
+            head = trim_text(strip_prefix(head, "mut "));
+        }
+        if head.length == 0 {
+            return false;
+        }
+        if index_of(head, " ") >= 0 {
+            return false;
+        }
+        if index_of(head, "\t") >= 0 {
+            return false;
+        }
+        return true;
+    }
+    let assign_index = index_of(trimmed, "=");
+    if assign_index >= 0 {
+        let mut head = trim_text(substring(trimmed, 0, assign_index));
+        if head.length == 0 {
+            return false;
+        }
+        if starts_with(head, "mut ") {
+            head = trim_text(strip_prefix(head, "mut "));
+        }
+        if head.length == 0 {
+            return false;
+        }
+        if index_of(head, " ") >= 0 {
+            return false;
+        }
+        if index_of(head, "\t") >= 0 {
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+fn split_parameter_entries(body -> string) -> string[] {
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    let mut depth -> number = 0;
+    let mut quote -> string = "";
+
+    loop {
+        if index >= body.length {
+            break;
+        }
+        let ch = body[index];
+
+        if quote.length > 0 {
+            current = current + ch;
+            if ch == "\\" {
+                if index + 1 < body.length {
+                    current = current + body[index + 1];
+                    index += 2;
+                    continue;
+                }
+            }
+            if ch == quote {
+                quote = "";
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == "\"" || ch == "'" {
+            quote = ch;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+
+        if ch == "(" || ch == "[" || ch == "{" {
+            depth += 1;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+
+        if ch == ")" || ch == "]" || ch == "}" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+
+        if ch == "," {
+            if depth == 0 {
+                let segment = trim_text(current);
+                if segment.length > 0 {
+                    entries = append_string(entries, segment);
+                }
+                current = "";
+                index += 1;
+                continue;
+            }
+        }
+
+        current = current + ch;
+        index += 1;
+    }
+
+    let segment = trim_text(current);
+    if segment.length > 0 {
+        entries = append_string(entries, segment);
+    }
+
+    return entries;
+}
+
 fn parse_effect_list(text -> string) -> string[] {
     let trimmed = trim_text(text);
     if trimmed == "none" {
         return [];
     }
     return split_comma_separated(trimmed);
+}
+
+fn split_whitespace(value -> string) -> string[] {
+    let mut parts -> string[] = [];
+    if value.length == 0 {
+        return parts;
+    }
+    let mut start -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+        if is_space {
+            if start >= 0 {
+                parts = append_string(parts, substring(value, start, index));
+                start = -1;
+            }
+        } else if start < 0 {
+            start = index;
+        }
+        index += 1;
+    }
+    if start >= 0 {
+        parts = append_string(parts, substring(value, start, value.length));
+    }
+    return parts;
+}
+
+fn parse_decimal_number(text -> string) -> NumberParseResult {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return NumberParseResult { success: false, value: 0 };
+    }
+    let zero = char_code("0");
+    let nine = char_code("9");
+    let mut index -> number = 0;
+    let mut value -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        let code = char_code(ch);
+        if code < zero || code > nine {
+            return NumberParseResult { success: false, value: 0 };
+        }
+        let digit = code - zero;
+        value = value * 10 + digit;
+        index += 1;
+    }
+    return NumberParseResult { success: true, value: value };
 }
 
 fn split_lines(value -> string) -> string[] {

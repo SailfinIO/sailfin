@@ -178,8 +178,8 @@ def lex(source):
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
-            if value == "True"  or  value == "False":
-                bool_value = value == "True"
+            if value == "true"  or  value == "false":
+                bool_value = value == "true"
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'BooleanLiteral', [runtime.enum_field('value', bool_value)]), lexeme=value, line=start_line, column=start_column))
             else:
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))

@@ -304,7 +304,7 @@ def build_effect_diagnostics(program):
                 break
             effect = violation.missing_effects[effect_index]
             requirement = select_requirement_for_effect(violation.requirements, effect)
-            diagnostics = (diagnostics) + ([ Diagnostic(code="effects.missing", message=format_effect_message(violation.routine_name, effect, requirement), primary=requirement_primary_token(requirement)) ])
+            diagnostics = (diagnostics) + ([Diagnostic(code="effects.missing", message=format_effect_message(violation.routine_name, effect, requirement), primary=requirement_primary_token(requirement))])
             effect_index += 1
         violation_index += 1
     return diagnostics

@@ -649,6 +649,47 @@ This specification will evolve with the implementation. Refer to `enbf.md` and
 
 Note (planned): Engines, adapters, tensors, and training are specified in a draft proposal under `docs/proposals/model-engines-and-training.md`. Until merged into the core spec, treat that document as design guidance rather than normative semantics.
 
+### Native Backend Layout Descriptors
+
+Stage2 emits a textual `.sfn-asm` artefact (`sailfin-native-text`) before LLVM
+lowering. Structs and enums now include `.layout` directives that describe the
+calculated byte layout so downstream passes can materialise storage without
+re-computing sizes or alignment.
+
+Struct declarations prepend their `.field` entries with:
+
+```
+.layout struct size=<bytes> align=<bytes>
+.layout field <name> type=<type> offset=<byteOffset> size=<bytes> align=<bytes>
+```
+
+- `size` and `align` capture the aggregate footprint after rounding up to the
+  strictest field alignment.
+- `offset` values are byte offsets from the start of the struct.
+- Primitive numbers (`number`, `int`, `i32`, `i64`) use their natural sizes.
+- Strings, arrays, and currently unsupported user-defined types fall back to a
+  pointer representation (`size=8`, `align=8`) and surface a diagnostic in the
+  compiler output.
+
+Enum declarations emit:
+
+```
+.layout enum size=<bytes> align=<bytes> tag_type=<repr> tag_size=<bytes> tag_align=<bytes>
+.layout variant <name> tag=<index> offset=<byteOffset> size=<payloadBytes> align=<payloadAlign>
+.layout payload <name>.<field> type=<type> offset=<absoluteByteOffset> size=<bytes> align=<bytes>
+```
+
+- `tag_type` records the discriminator representation (currently `i32`).
+- Variant `offset` values point to where the payload begins relative to the
+  enum base; `size` records just the payload footprint.
+- Payload lines provide absolute field offsets so lowering passes can access
+  nested members without recalculating struct layouts.
+- Variants without payloads omit `.layout payload` entries and report `size=0`.
+
+These descriptors are consumed by future LLVM/WASM backends and the interim
+Python lowering to guarantee struct field access, enum payload extraction, and
+aggregate literals share the same ABI.
+
 ### Bootstrap vs Self-Hosted Feature Matrix
 
 See `docs/status.md` for the canonical feature table and implementation notes.

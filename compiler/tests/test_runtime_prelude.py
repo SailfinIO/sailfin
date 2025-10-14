@@ -18,7 +18,15 @@ def _runtime_prelude_python_source() -> str:
 
     result = stage1_main.compile_project([str(runtime_prelude)])
     diagnostics = getattr(result, "diagnostics", [])
-    assert not diagnostics, f"Stage1 surfaced diagnostics compiling runtime prelude: {diagnostics}"
+    unexpected: list[str] = []
+    for entry in diagnostics:
+        if getattr(entry, "fatal", False):
+            unexpected.append(f"fatal: {entry}")
+            continue
+        for message in getattr(entry, "messages", []):
+            if "defaulting to pointer layout" not in message:
+                unexpected.append(message)
+    assert not unexpected, f"Stage1 surfaced diagnostics compiling runtime prelude: {unexpected}"
 
     modules = getattr(result, "modules", [])
     assert modules, "Stage1 returned no modules for runtime prelude"

@@ -56,6 +56,22 @@ fn make_booleans() -> boolean[] {
 }
 """
 
+LAYOUT_DESCRIPTOR_SOURCE = """
+struct Person {
+  name -> string;
+  age -> int;
+}
+
+enum Shape {
+  Circle { radius -> number; }
+  Unit;
+}
+
+fn main() -> number {
+  return 0;
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -63,7 +79,10 @@ def test_compile_to_native_python_produces_source() -> None:
     result = stage1_main.compile_to_native_python(HELLO_WORLD_SOURCE)
     assert result.source.strip(), "Stage1 native lowering returned an empty body"
     unexpected = [
-        message for message in result.diagnostics if "unsupported statement" not in message
+        message
+        for message in result.diagnostics
+        if "unsupported statement" not in message
+        and "defaulting to pointer layout" not in message
     ]
     assert not unexpected, "Stage1 native lowering surfaced unexpected diagnostics"
 
@@ -91,7 +110,8 @@ def test_import_export_alias_round_trip() -> None:
   stage1_main = importlib.import_module("compiler.build.main")
 
   result = stage1_main.compile_to_native_python(MODULE_REEXPORT_SOURCE)
-  assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+  unexpected = [diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+  assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
   python_source = result.source
   assert "from compiler.build.string_utils import substring as slice" in python_source
@@ -117,7 +137,8 @@ def test_struct_method_lowering() -> None:
     stage1_main = importlib.import_module("compiler.build.main")
 
     result = stage1_main.compile_to_native_python(STRUCT_METHOD_SOURCE)
-    assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+    unexpected = [diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
     python_source = result.source
     assert "class Pair" in python_source
@@ -139,7 +160,8 @@ def test_native_backend_tags_array_literals_with_metadata() -> None:
     stage1_main = importlib.import_module("compiler.build.main")
 
     result = stage1_main.compile_to_native(ARRAY_METADATA_SOURCE)
-    assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+    unexpected = [diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
     artifact = next((artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"), None)
     assert artifact is not None, "native artifact missing from emit_native output"
@@ -147,3 +169,59 @@ def test_native_backend_tags_array_literals_with_metadata() -> None:
     contents = artifact.contents
     assert "[#element:number, 1, 2, 3]" in contents
     assert "[#element:boolean, true, false]" in contents
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_emits_layout_descriptors() -> None:
+  stage1_main = importlib.import_module("compiler.build.main")
+  native_ir_module = importlib.import_module("compiler.build.native_ir")
+
+  result = stage1_main.compile_to_native(LAYOUT_DESCRIPTOR_SOURCE)
+  unexpected = [diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+  assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+  artifact = next((artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"), None)
+  assert artifact is not None, "native artifact missing from emit_native output"
+
+  contents = artifact.contents
+  assert ".layout struct size=16 align=8" in contents
+  assert ".layout field name type=string offset=0 size=8 align=8" in contents
+  assert ".layout field age type=int offset=8 size=8 align=8" in contents
+  assert ".layout enum size=16 align=8 tag_type=i32 tag_size=4 tag_align=4" in contents
+  assert ".layout variant Circle tag=0 offset=8 size=8 align=8" in contents
+  assert ".layout variant Unit tag=1 offset=4 size=0 align=1" in contents
+  assert ".layout payload Circle.radius type=number offset=8 size=8 align=8" in contents
+
+  parse_native_artifact = getattr(native_ir_module, "parse_native_artifact")
+  parse_result = parse_native_artifact(artifact.contents)
+
+  person_struct = next((definition for definition in parse_result.structs if definition.name == "Person"), None)
+  assert person_struct is not None, "parsed struct metadata missing"
+  assert person_struct.layout is not None, "struct layout metadata missing"
+  assert person_struct.layout.size == 16
+  assert person_struct.layout.align == 8
+  assert [field.name for field in person_struct.layout.fields] == ["name", "age"]
+  assert [field.offset for field in person_struct.layout.fields] == [0, 8]
+
+  shape_enum = next((definition for definition in parse_result.enums if definition.name == "Shape"), None)
+  assert shape_enum is not None, "parsed enum metadata missing"
+  assert shape_enum.layout is not None, "enum layout metadata missing"
+  assert shape_enum.layout.size == 16
+  assert shape_enum.layout.align == 8
+  assert shape_enum.layout.tag_type == "i32"
+  assert shape_enum.layout.tag_size == 4
+  assert shape_enum.layout.tag_align == 4
+
+  circle_layout = next((variant for variant in shape_enum.layout.variants if variant.name == "Circle"), None)
+  assert circle_layout is not None, "Circle layout metadata missing"
+  assert circle_layout.offset == 8
+  assert circle_layout.size == 8
+  assert circle_layout.align == 8
+  assert [field.name for field in circle_layout.fields] == ["radius"]
+  assert [field.offset for field in circle_layout.fields] == [8]
+
+  unit_layout = next((variant for variant in shape_enum.layout.variants if variant.name == "Unit"), None)
+  assert unit_layout is not None, "Unit layout metadata missing"
+  assert unit_layout.offset == 4
+  assert unit_layout.size == 0
+  assert unit_layout.align == 1

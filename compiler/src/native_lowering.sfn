@@ -548,7 +548,8 @@ fn lower_expression_with_depth(expression -> string, depth -> number) -> string 
         return array_literal;
     }
     let rewritten = rewrite_expression_intrinsics(trimmed);
-    return rewrite_struct_literals_inline(rewritten, depth);
+    let arrays_lowered = rewrite_array_literals_inline(rewritten, depth);
+    return rewrite_struct_literals_inline(arrays_lowered, depth);
 }
 
 fn rewrite_interpolated_string_literal(expression -> string) -> string? {
@@ -845,7 +846,11 @@ fn lower_array_literal_expression(expression -> string, depth -> number) -> stri
         }
         index += 1;
     }
-    return "[" + join_with_separator(lowered, ", ") + "]";
+    if lowered.length == 0 {
+        return "[]";
+    }
+    let body = join_with_separator(lowered, ", ");
+    return "[" + body + "]";
 }
 
 fn array_literal_start_index(entries -> string[]) -> number {
@@ -869,6 +874,38 @@ fn is_array_metadata_entry(entry -> string) -> boolean {
     }
     let annotation = trim_text(substring(trimmed, 9, trimmed.length));
     return annotation.length > 0;
+}
+
+fn rewrite_array_literals_inline(expression -> string, depth -> number) -> string {
+    if expression.length == 0 {
+        return expression;
+    }
+    let mut current -> string = expression;
+    let mut search_start -> number = 0;
+    loop {
+        if search_start >= current.length {
+            break;
+        }
+        let open_index = find_next_square_open(current, search_start);
+        if open_index < 0 {
+            break;
+        }
+        let closing_index = find_matching_square(current, open_index);
+        if closing_index < 0 {
+            break;
+        }
+        let array_text = substring(current, open_index, closing_index + 1);
+        let lowered = lower_array_literal_expression(array_text, depth + 1);
+        if lowered == null {
+            search_start = open_index + 1;
+            continue;
+        }
+        let prefix = substring(current, 0, open_index);
+        let suffix = substring(current, closing_index + 1, current.length);
+        current = prefix + lowered + suffix;
+        search_start = open_index + lowered.length;
+    }
+    return current;
 }
 
 fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> string {
@@ -1071,6 +1108,12 @@ fn rewrite_literal_tokens(expression -> string) -> string {
             break;
         }
         let ch = expression[index];
+        if ch == "'" || ch == "\"" {
+            let literal_end = skip_string_literal(expression, index);
+            result = result + substring(expression, index, literal_end);
+            index = literal_end;
+            continue;
+        }
         if is_identifier_char(ch) {
             let start = index;
             loop {
@@ -1417,15 +1460,37 @@ fn compute_symbol_balance(text -> string, open -> string, close -> string) -> nu
 }
 
 fn split_struct_field_entries(text -> string) -> string[] {
-    let mut entries -> string[] = [];
+    let entries -> string[] = [];
     let mut current -> string = "";
     let mut depth -> number = 0;
     let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut string_quote -> string = "";
     loop {
         if index >= text.length {
             break;
         }
         let ch = text[index];
+        if in_string {
+            current = current + ch;
+            if ch == "\\" {
+                index += 1;
+                if index < text.length {
+                    current = current + text[index];
+                }
+            } else if ch == string_quote {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" || ch == "'" {
+            in_string = true;
+            string_quote = ch;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
         if ch == "{" || ch == "[" || ch == "(" {
             depth += 1;
         } else if ch == "}" || ch == "]" || ch == ")" {
@@ -1448,15 +1513,37 @@ fn split_struct_field_entries(text -> string) -> string[] {
 }
 
 fn split_array_entries(text -> string) -> string[] {
-    let mut entries -> string[] = [];
+    let entries -> string[] = [];
     let mut current -> string = "";
     let mut depth -> number = 0;
     let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut string_quote -> string = "";
     loop {
         if index >= text.length {
             break;
         }
         let ch = text[index];
+        if in_string {
+            current = current + ch;
+            if ch == "\\" {
+                index += 1;
+                if index < text.length {
+                    current = current + text[index];
+                }
+            } else if ch == string_quote {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" || ch == "'" {
+            in_string = true;
+            string_quote = ch;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
         if ch == "{" || ch == "[" || ch == "(" {
             depth += 1;
         } else if ch == "}" || ch == "]" || ch == ")" {
@@ -1543,6 +1630,106 @@ fn find_matching_brace(text -> string, open_index -> number) -> number {
             depth -= 1;
             if depth == 0 {
                 return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn is_escaped_quote(text -> string, position -> number) -> boolean {
+    if position <= 0 {
+        return false;
+    }
+    let mut escapes -> number = 0;
+    let mut index -> number = position - 1;
+    loop {
+        if index < 0 {
+            break;
+        }
+        if text[index] != "\\" {
+            break;
+        }
+        escapes += 1;
+        index -= 1;
+    }
+    if escapes % 2 == 1 {
+        return true;
+    }
+    return false;
+}
+
+fn find_next_square_open(text -> string, start -> number) -> number {
+    let mut index -> number = start;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "'" {
+            if !in_double && !is_escaped_quote(text, index) {
+                in_single = !in_single;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            if !in_single && !is_escaped_quote(text, index) {
+                in_double = !in_double;
+            }
+            index += 1;
+            continue;
+        }
+        if !in_single && !in_double {
+            if ch == "[" {
+                return index;
+            }
+            if ch == "]" {
+                return -1;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_matching_square(text -> string, open_index -> number) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = open_index;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "'" {
+            if !in_double && !is_escaped_quote(text, index) {
+                in_single = !in_single;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            if !in_single && !is_escaped_quote(text, index) {
+                in_double = !in_double;
+            }
+            index += 1;
+            continue;
+        }
+        if !in_single && !in_double {
+            if ch == "[" {
+                depth += 1;
+            } else if ch == "]" {
+                if depth <= 0 {
+                    return -1;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
             }
         }
         index += 1;

@@ -533,10 +533,10 @@ def format_expression(expression):
         return expression.value
     if expression.variant == "BooleanLiteral":
         if expression.value:
-            return "True"
-        return "False"
+            return "true"
+        return "false"
     if expression.variant == "NullLiteral":
-        return "None"
+        return "null"
     if expression.variant == "StringLiteral":
         return quote_string(expression.value)
     if expression.variant == "Unary":

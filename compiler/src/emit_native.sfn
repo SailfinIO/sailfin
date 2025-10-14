@@ -55,6 +55,46 @@ struct NativeState {
     diagnostics -> string[];
 }
 
+struct LayoutEmitResult {
+    lines -> string[];
+    diagnostics -> string[];
+}
+
+struct StructFieldLayoutDescriptor {
+    name -> string;
+    type_annotation -> string;
+    offset -> number;
+    size -> number;
+    align -> number;
+}
+
+struct RecordLayoutResult {
+    size -> number;
+    align -> number;
+    fields -> StructFieldLayoutDescriptor[];
+    diagnostics -> string[];
+}
+
+struct EnumVariantLayoutDescriptor {
+    name -> string;
+    tag -> number;
+    offset -> number;
+    size -> number;
+    align -> number;
+    fields -> StructFieldLayoutDescriptor[];
+}
+
+struct TypeLayoutInfo {
+    size -> number;
+    align -> number;
+    diagnostics -> string[];
+}
+
+struct LayoutFieldInput {
+    name -> string;
+    type_annotation -> string;
+}
+
 fn emit_native(program -> Program) -> EmitNativeResult {
     let mut state -> NativeState = state_new();
     state = state_emit_line(state, "; Sailfin Native Prototype");
@@ -348,6 +388,9 @@ fn emit_enum(state -> NativeState, statement -> Statement) -> NativeState {
     header = header + format_type_parameters(statement.type_parameters);
     current = state_emit_line(current, header);
     current = state_push_indent(current);
+    let enum_layout = compute_enum_layout_lines(statement);
+    current = emit_layout_lines(current, enum_layout.lines);
+    current = state_merge_diagnostics(current, enum_layout.diagnostics);
     let mut index -> number = 0;
     loop {
         if index >= statement.variants.length {
@@ -372,6 +415,9 @@ fn emit_struct(state -> NativeState, statement -> Statement) -> NativeState {
     }
     current = state_emit_line(current, header);
     current = state_push_indent(current);
+    let struct_layout = compute_struct_layout_lines(statement.name, statement.fields);
+    current = emit_layout_lines(current, struct_layout.lines);
+    current = state_merge_diagnostics(current, struct_layout.diagnostics);
 
     let mut index -> number = 0;
     loop {
@@ -755,6 +801,311 @@ fn format_enum_variant(variant -> EnumVariant) -> string {
     return variant.name + " { " + join_with_separator(parts, "; ") + " }";
 }
 
+fn compute_struct_layout_lines(struct_name -> string, fields -> FieldDeclaration[]) -> LayoutEmitResult {
+    let inputs = convert_struct_fields(fields);
+    let layout = calculate_record_layout(inputs, "struct", struct_name);
+    let mut lines -> string[] = [];
+    lines = append_string(lines, ".layout struct size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
+    let mut index -> number = 0;
+    loop {
+        if index >= layout.fields.length {
+            break;
+        }
+        let field = layout.fields[index];
+        let mut line -> string = ".layout field " + field.name;
+        line = line + " type=" + field.type_annotation;
+        line = line + " offset=" + number_to_string(field.offset);
+        line = line + " size=" + number_to_string(field.size);
+        line = line + " align=" + number_to_string(field.align);
+        lines = append_string(lines, line);
+        index += 1;
+    }
+    return LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics };
+}
+
+fn compute_enum_layout_lines(statement -> Statement) -> LayoutEmitResult {
+    let tag_size -> number = 4;
+    let tag_align -> number = 4;
+    let mut union_align -> number = tag_align;
+    let mut union_size -> number = tag_size;
+    let mut diagnostics -> string[] = [];
+    let mut variants -> EnumVariantLayoutDescriptor[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= statement.variants.length {
+            break;
+        }
+        let variant = statement.variants[index];
+        let inputs = convert_variant_fields(variant);
+        let container_name = statement.name + "." + variant.name;
+        let record = calculate_record_layout(inputs, "variant", container_name);
+        diagnostics = diagnostics.concat(record.diagnostics);
+        let mut variant_align -> number = record.align;
+        if variant_align <= 0 {
+            variant_align = 1;
+        }
+        let payload_offset = align_to(tag_size, variant_align);
+        if variant_align > union_align {
+            union_align = variant_align;
+        }
+        let mut absolute_fields -> StructFieldLayoutDescriptor[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= record.fields.length {
+                break;
+            }
+            let field = record.fields[field_index];
+            let absolute = StructFieldLayoutDescriptor {
+                name: field.name,
+                type_annotation: field.type_annotation,
+                offset: payload_offset + field.offset,
+                size: field.size,
+                align: field.align,
+            };
+            absolute_fields = append_struct_field_layout(absolute_fields, absolute);
+            field_index += 1;
+        }
+        let variant_size = payload_offset + record.size;
+        if variant_size > union_size {
+            union_size = variant_size;
+        }
+        variants = append_enum_variant_layout(variants, EnumVariantLayoutDescriptor {
+            name: variant.name,
+            tag: index,
+            offset: payload_offset,
+            size: record.size,
+            align: variant_align,
+            fields: absolute_fields,
+        });
+        index += 1;
+    }
+    if statement.variants.length == 0 {
+        union_align = tag_align;
+        union_size = tag_size;
+    }
+    let mut final_align -> number = union_align;
+    if final_align <= 0 {
+        final_align = 1;
+    }
+    let mut aligned_size -> number = union_size;
+    if final_align > 1 {
+        aligned_size = align_to(union_size, final_align);
+    }
+    let mut lines -> string[] = [];
+    let mut header -> string = ".layout enum size=" + number_to_string(aligned_size) + " align=" + number_to_string(final_align);
+    header = header + " tag_type=i32 tag_size=" + number_to_string(tag_size) + " tag_align=" + number_to_string(tag_align);
+    lines = append_string(lines, header);
+    let mut variant_index -> number = 0;
+    loop {
+        if variant_index >= variants.length {
+            break;
+        }
+        let descriptor = variants[variant_index];
+        let mut line -> string = ".layout variant " + descriptor.name;
+        line = line + " tag=" + number_to_string(descriptor.tag);
+        line = line + " offset=" + number_to_string(descriptor.offset);
+        line = line + " size=" + number_to_string(descriptor.size);
+        line = line + " align=" + number_to_string(descriptor.align);
+        lines = append_string(lines, line);
+        let mut payload_index -> number = 0;
+        loop {
+            if payload_index >= descriptor.fields.length {
+                break;
+            }
+            let payload = descriptor.fields[payload_index];
+            let mut payload_line -> string = ".layout payload " + descriptor.name + "." + payload.name;
+            payload_line = payload_line + " type=" + payload.type_annotation;
+            payload_line = payload_line + " offset=" + number_to_string(payload.offset);
+            payload_line = payload_line + " size=" + number_to_string(payload.size);
+            payload_line = payload_line + " align=" + number_to_string(payload.align);
+            lines = append_string(lines, payload_line);
+            payload_index += 1;
+        }
+        variant_index += 1;
+    }
+    return LayoutEmitResult { lines: lines, diagnostics: diagnostics };
+}
+
+fn calculate_record_layout(inputs -> LayoutFieldInput[], container_kind -> string, container_name -> string) -> RecordLayoutResult {
+    let mut diagnostics -> string[] = [];
+    let mut fields -> StructFieldLayoutDescriptor[] = [];
+    let mut offset -> number = 0;
+    let mut max_align -> number = 1;
+    let mut index -> number = 0;
+    loop {
+        if index >= inputs.length {
+            break;
+        }
+        let input = inputs[index];
+        let layout = analyze_type_layout(input.type_annotation, container_kind, container_name, input.name);
+        diagnostics = diagnostics.concat(layout.diagnostics);
+        let mut field_align -> number = layout.align;
+        if field_align <= 0 {
+            field_align = 1;
+        }
+        offset = align_to(offset, field_align);
+        let descriptor = StructFieldLayoutDescriptor {
+            name: input.name,
+            type_annotation: trim_text(input.type_annotation),
+            offset: offset,
+            size: layout.size,
+            align: field_align,
+        };
+        fields = append_struct_field_layout(fields, descriptor);
+        offset += layout.size;
+        if field_align > max_align {
+            max_align = field_align;
+        }
+        index += 1;
+    }
+    let mut final_align -> number = max_align;
+    if inputs.length == 0 {
+        final_align = 1;
+    }
+    if final_align <= 0 {
+        final_align = 1;
+    }
+    let mut total_size -> number = offset;
+    if final_align > 1 {
+        total_size = align_to(offset, final_align);
+    }
+    return RecordLayoutResult { size: total_size, align: final_align, fields: fields, diagnostics: diagnostics };
+}
+
+fn analyze_type_layout(type_annotation -> string, container_kind -> string, container_name -> string, field_name -> string) -> TypeLayoutInfo {
+    let trimmed = trim_text(type_annotation);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout");
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "number" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "int" || trimmed == "i64" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "i32" {
+        return TypeLayoutInfo { size: 4, align: 4, diagnostics: diagnostics };
+    }
+    if trimmed == "boolean" || trimmed == "bool" || trimmed == "i1" {
+        return TypeLayoutInfo { size: 1, align: 1, diagnostics: diagnostics };
+    }
+    if is_array_type(trimmed) {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "string" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
+    return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+}
+
+fn convert_struct_fields(fields -> FieldDeclaration[]) -> LayoutFieldInput[] {
+    let mut inputs -> LayoutFieldInput[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        let mut type_text -> string = "";
+        if field.type_annotation != null {
+            type_text = field.type_annotation.text;
+        }
+        inputs = append_layout_field_input(inputs, LayoutFieldInput { name: field.name, type_annotation: type_text });
+        index += 1;
+    }
+    return inputs;
+}
+
+fn convert_variant_fields(variant -> EnumVariant) -> LayoutFieldInput[] {
+    return convert_struct_fields(variant.fields);
+}
+
+fn append_struct_field_layout(values -> StructFieldLayoutDescriptor[], value -> StructFieldLayoutDescriptor) -> StructFieldLayoutDescriptor[] {
+    return values.concat([value]);
+}
+
+fn append_enum_variant_layout(values -> EnumVariantLayoutDescriptor[], value -> EnumVariantLayoutDescriptor) -> EnumVariantLayoutDescriptor[] {
+    return values.concat([value]);
+}
+
+fn append_layout_field_input(values -> LayoutFieldInput[], value -> LayoutFieldInput) -> LayoutFieldInput[] {
+    return values.concat([value]);
+}
+
+fn align_to(value -> number, alignment -> number) -> number {
+    if alignment <= 1 {
+        return value;
+    }
+    let mut remainder -> number = value;
+    loop {
+        if remainder < alignment {
+            break;
+        }
+        remainder -= alignment;
+    }
+    if remainder == 0 {
+        return value;
+    }
+    return value + (alignment - remainder);
+}
+
+fn is_array_type(type_annotation -> string) -> boolean {
+    return ends_with(type_annotation, "[]");
+}
+
+fn ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let start = value.length - suffix.length;
+    let mut index -> number = 0;
+    loop {
+        if index >= suffix.length {
+            break;
+        }
+        if value[start + index] != suffix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn number_to_string(value -> number) -> string {
+    if value == 0 {
+        return "0";
+    }
+    let mut remaining -> number = value;
+    let mut output -> string = "";
+    let digits = "0123456789";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let digit = temp;
+        let ch = substring(digits, digit, digit + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
+}
+
+
 fn format_expression(expression -> Expression) -> string {
     if expression.variant == "Identifier" {
         return expression.name;
@@ -1087,6 +1438,38 @@ fn state_add_diagnostic(state -> NativeState, message -> string) -> NativeState 
         builder: builder_emit_line(state.builder, "; " + message),
         diagnostics: diagnostics,
     };
+}
+
+fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeState {
+    if entries.length == 0 {
+        return state;
+    }
+    let mut combined -> string[] = state.diagnostics;
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        combined = append_string(combined, entries[index]);
+        index += 1;
+    }
+    return NativeState { builder: state.builder, diagnostics: combined };
+}
+
+fn emit_layout_lines(state -> NativeState, lines -> string[]) -> NativeState {
+    if lines.length == 0 {
+        return state;
+    }
+    let mut current = state;
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        current = state_emit_line(current, lines[index]);
+        index += 1;
+    }
+    return current;
 }
 
 fn builder_new() -> TextBuilder {

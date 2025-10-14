@@ -8,6 +8,11 @@ from compiler.build.main import compile_to_native_llvm
 _LLVM_TARGET_INITIALIZED = False
 
 
+def _assert_only_pointer_layout_warnings(diagnostics):
+    unexpected = [diag for diag in diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+
 def _create_execution_engine():
     global _LLVM_TARGET_INITIALIZED
     if not _LLVM_TARGET_INITIALIZED:
@@ -187,7 +192,7 @@ fn main() -> number {
 )
 def test_native_llvm_execution_runs_program(source: str, expected: float) -> None:
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
     assert "define double @add" in lowered.ir
     assert "define double @main" in lowered.ir
 
@@ -250,7 +255,7 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define i1 @toggle" in ir
     assert "define double @choose" in ir
@@ -336,7 +341,7 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "{ double*, i64 }* %values" in ir
 
@@ -406,7 +411,7 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
 
     engine, module = _compile_ir(lowered.ir)
     buffers = []
@@ -479,7 +484,7 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define i1 @any_true" in ir
     assert "define i64 @count_true_literal" in ir
@@ -566,7 +571,7 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert lowered.diagnostics == []
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "0..limit..stride" not in ir  # ensure lowered IR not raw range text
 

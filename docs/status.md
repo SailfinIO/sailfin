@@ -29,8 +29,10 @@ roadmaps.
   dynamic stride support, element-wise `.for` loops over primitive arrays (`number[]`,
   `int[]`, `boolean[]`), and `match` dispatch alongside
   boolean and integer primitives for parameters, locals, and returns in the LLVM
-  prototype. Array literals now embed `#element:<type>` metadata so Stage2 can
-  skip per-element inference and prepare typed iteration over richer aggregates.
+  prototype. Struct and enum declarations now emit `.layout` descriptors that
+  record size, alignment, and per-field offsets for LLVM consumption. Array
+  literals embed `#element:<type>` metadata so Stage2 can skip per-element
+  inference and prepare typed iteration over richer aggregates.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.
@@ -164,6 +166,9 @@ roadmaps.
   integer, and primitive-array-iterating samples (including `boolean[]` and
   `int[]` literals) to LLVM IR and executes them through `llvmlite` so Stage2
   regressions surface as standard test failures.
+- `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_layout_descriptors`
+  locks the `.layout` directives in `.sfn-asm` and the parsed layout metadata
+  surfaced through the stage1 native IR parser.
 - CI packages the stage1 artifact, uploads it, and semantic-release tags a
   GitHub release. The installer smoke test verifies the archive can rebuild
   stage1 (`scripts/install_stage1.py`).
