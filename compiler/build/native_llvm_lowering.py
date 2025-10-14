@@ -229,6 +229,28 @@ class ComparisonEmission:
     def __repr__(self):
         return runtime.struct_repr('ComparisonEmission', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class CoercionResult:
+    def __init__(self, lines, temp_index, diagnostics, operand=None):
+        self.lines = lines
+        self.temp_index = temp_index
+        self.operand = operand
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('CoercionResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class BinaryAlignmentResult:
+    def __init__(self, lines, temp_index, diagnostics, result_type, left=None, right=None):
+        self.lines = lines
+        self.temp_index = temp_index
+        self.left = left
+        self.right = right
+        self.diagnostics = diagnostics
+        self.result_type = result_type
+
+    def __repr__(self):
+        return runtime.struct_repr('BinaryAlignmentResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('left', self.left), runtime.struct_field('right', self.right), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('result_type', self.result_type)])
+
 class BlockLoweringResult:
     def __init__(self, lines, allocas, locals, temp_index, block_counter, diagnostics, terminated, next_local_id, next_index):
         self.lines = lines
@@ -613,14 +635,22 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     if end_result.operand == null:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range end in `" + function.name + "`")
         return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=false, next_local_id=current_next_local, next_index=next_index)
-    start_operand = start_result.operand
-    end_operand = end_result.operand
-    if start_operand.llvm_type != "double":
+    start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines)
+    diagnostics = (diagnostics) + (start_coerced.diagnostics)
+    current_lines = start_coerced.lines
+    current_temp = start_coerced.temp_index
+    if start_coerced.operand == null:
         diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`")
-    if end_operand.llvm_type != "double":
-        diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`")
-    if start_operand.llvm_type != "double"  or  end_operand.llvm_type != "double":
         return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=false, next_local_id=current_next_local, next_index=next_index)
+    start_operand = start_coerced.operand
+    end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines)
+    diagnostics = (diagnostics) + (end_coerced.diagnostics)
+    current_lines = end_coerced.lines
+    current_temp = end_coerced.temp_index
+    if end_coerced.operand == null:
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`")
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=false, next_local_id=current_next_local, next_index=next_index)
+    end_operand = end_coerced.operand
     raw_target = trim_text(instruction.target)
     raw_target = strip_mut_prefix(raw_target)
     if len(raw_target) == 0:
@@ -861,11 +891,19 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
         current_lines = pattern_result.lines
         current_temp = pattern_result.temp_index
         if pattern_result.operand != null:
-            comparison = emit_comparison_instruction("==", subject_operand, pattern_result.operand, current_temp, current_lines)
-            diagnostics = (diagnostics) + (comparison.diagnostics)
-            current_lines = comparison.lines
-            current_temp = comparison.temp_index
-            condition_operand = comparison.operand
+            harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
+            diagnostics = (diagnostics) + (harmonised.diagnostics)
+            if harmonised.left != null  and  harmonised.right != null:
+                current_lines = harmonised.lines
+                current_temp = harmonised.temp_index
+                comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines)
+                diagnostics = (diagnostics) + (comparison.diagnostics)
+                current_lines = comparison.lines
+                current_temp = comparison.temp_index
+                condition_operand = comparison.operand
+            else:
+                current_lines = harmonised.lines
+                current_temp = harmonised.temp_index
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`")
     if case.guard != null:
@@ -1016,10 +1054,16 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     pointer = format_local_pointer_name(next_local_id)
     current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type)
     if operand != null:
-        stored = operand
-        if stored.llvm_type != llvm_type:
-            diagnostics = append_string(diagnostics, "llvm lowering: initializer type `" + stored.llvm_type + "` mismatches local type `" + llvm_type + "` for `" + instruction.name + "`")
-        current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer)
+        coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines)
+        diagnostics = (diagnostics) + (coerced.diagnostics)
+        current_lines = coerced.lines
+        current_temp = coerced.temp_index
+        if coerced.operand == null:
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`")
+            current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer)
+        else:
+            stored = coerced.operand
+            current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer)
     else:
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer)
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type))
@@ -1042,10 +1086,16 @@ def lower_expression_statement(expression, bindings, locals, temp_index, lines, 
             if lowered.operand == null:
                 diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment expression for `" + parsed_assignment.target + "`")
             else:
-                operand = lowered.operand
-                if operand.llvm_type != binding.llvm_type:
-                    diagnostics = append_string(diagnostics, "llvm lowering: assignment type `" + operand.llvm_type + "` mismatches local type `" + binding.llvm_type + "` for `" + parsed_assignment.target + "`")
-                current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer)
+                coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines)
+                diagnostics = (diagnostics) + (coerced.diagnostics)
+                current_lines = coerced.lines
+                current_temp = coerced.temp_index
+                if coerced.operand == null:
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce assignment value for `" + parsed_assignment.target + "`")
+                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer)
+                else:
+                    operand = coerced.operand
+                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer)
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics)
     lowered = lower_expression(expression, bindings, locals, current_temp, current_lines, functions)
     diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -1118,11 +1168,16 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value")
         current_lines = append_string(current_lines, "  ret void")
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics)
-    if operand.llvm_type != llvm_return:
-        diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches expression type `" + operand.llvm_type + "` in `" + function.name + "`")
+    coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines)
+    diagnostics = (diagnostics) + (coerced.diagnostics)
+    current_lines = coerced.lines
+    current_temp = coerced.temp_index
+    if coerced.operand == null:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`")
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics)
-    current_lines = append_string(current_lines, "  ret " + operand.llvm_type + " " + operand.value)
+    coerced_operand = coerced.operand
+    current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value)
     return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics)
 
 def prepare_parameters(function):
@@ -1153,6 +1208,10 @@ def map_return_type(return_type):
         return "void"
     if trimmed == "number":
         return "double"
+    if trimmed == "boolean"  or  trimmed == "bool":
+        return "i1"
+    if trimmed == "int"  or  trimmed == "i64":
+        return "i64"
     return ""
 
 def map_parameter_type(parameter_type):
@@ -1161,6 +1220,10 @@ def map_parameter_type(parameter_type):
         return "double"
     if trimmed == "number":
         return "double"
+    if trimmed == "boolean"  or  trimmed == "bool":
+        return "i1"
+    if trimmed == "int"  or  trimmed == "i64":
+        return "i64"
     return ""
 
 def map_local_type(type_annotation):
@@ -1169,6 +1232,10 @@ def map_local_type(type_annotation):
         return "double"
     if trimmed == "number":
         return "double"
+    if trimmed == "boolean"  or  trimmed == "bool":
+        return "i1"
+    if trimmed == "int"  or  trimmed == "i64":
+        return "i64"
     return ""
 
 def find_parameter_binding(bindings, name):
@@ -1215,11 +1282,21 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions)
         load_result = load_local_operand(local, temp_index, lines)
         diagnostics = (diagnostics) + (load_result.diagnostics)
         return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics)
-    if is_number_literal(stripped):
-        normalised = normalise_number_literal(stripped)
+    literal_candidate = trim_text(stripped)
+    if is_boolean_literal(literal_candidate):
+        value = "0"
+        if matches_case_insensitive(literal_candidate, "true"):
+            value = "1"
+        operand = LLVMOperand(llvm_type="i1", value=value)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if is_integer_literal(literal_candidate):
+        operand = LLVMOperand(llvm_type="i64", value=literal_candidate)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if is_number_literal(literal_candidate):
+        normalised = normalise_number_literal(literal_candidate)
         operand = LLVMOperand(llvm_type="double", value=normalised)
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + stripped + "`")
+    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=null, diagnostics=diagnostics)
 
 def lower_binary_operation(expression, match, bindings, locals, temp_index, lines, functions):
@@ -1237,16 +1314,18 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
     diagnostics = (diagnostics) + (right_result.diagnostics)
     if right_result.operand == null:
         return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=null, diagnostics=diagnostics)
-    left_operand = left_result.operand
-    right_operand = right_result.operand
-    if left_operand.llvm_type != right_operand.llvm_type:
-        diagnostics = append_string(diagnostics, "llvm lowering: type mismatch in binary expression `" + expression + "`")
-    operation = operation_name_for_symbol(match.symbol, left_operand.llvm_type)
-    temp_name = format_temp_name(right_result.temp_index)
-    line = "  " + temp_name + " = " + operation + " " + left_operand.llvm_type + " " + left_operand.value + ", " + right_operand.value
-    updated_lines = append_string(right_result.lines, line)
-    operand = LLVMOperand(llvm_type=left_operand.llvm_type, value=temp_name)
-    return ExpressionResult(lines=updated_lines, temp_index=right_result.temp_index + 1, operand=operand, diagnostics=diagnostics)
+    harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
+    diagnostics = (diagnostics) + (harmonised.diagnostics)
+    if harmonised.left == null  or  harmonised.right == null:
+        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=null, diagnostics=diagnostics)
+    left_aligned = harmonised.left
+    right_aligned = harmonised.right
+    operation = operation_name_for_symbol(match.symbol, harmonised.result_type)
+    temp_name = format_temp_name(harmonised.temp_index)
+    line = "  " + temp_name + " = " + operation + " " + harmonised.result_type + " " + left_aligned.value + ", " + right_aligned.value
+    updated_lines = append_string(harmonised.lines, line)
+    operand = LLVMOperand(llvm_type=harmonised.result_type, value=temp_name)
+    return ExpressionResult(lines=updated_lines, temp_index=harmonised.temp_index + 1, operand=operand, diagnostics=diagnostics)
 
 def lower_comparison_operation(expression, match, bindings, locals, temp_index, lines, functions):
     operator_length = len(match.symbol)
@@ -1264,7 +1343,11 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     diagnostics = (diagnostics) + (right_result.diagnostics)
     if right_result.operand == null:
         return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=null, diagnostics=diagnostics)
-    comparison = emit_comparison_instruction(match.symbol, left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
+    harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
+    diagnostics = (diagnostics) + (harmonised.diagnostics)
+    if harmonised.left == null  or  harmonised.right == null:
+        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=null, diagnostics=diagnostics)
+    comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines)
     diagnostics = (diagnostics) + (comparison.diagnostics)
     if comparison.operand == null:
         return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=null, diagnostics=diagnostics)
@@ -1307,18 +1390,35 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
             llvm_return = "double"
         expected_params = collect_parameter_types(function_entry.parameters)
-        if len(expected_params) != len(operands):
-            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(len(expected_params)) + " arguments but received " + number_to_string(len(operands)))
-        else:
-            type_index = 0
-            while True:
-                if type_index >= len(operands):
-                    break
-                if expected_params[type_index] != operands[type_index].llvm_type:
-                    diagnostics = append_string(diagnostics, "llvm lowering: argument " + number_to_string(type_index) + " for call to `" + trimmed_target + "` has type `" + operands[type_index].llvm_type + "` but expected `" + expected_params[type_index] + "`")
-                type_index += 1
     else:
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
+    coerced_operands = []
+    index = 0
+    while True:
+        if index >= len(operands):
+            break
+        operand = operands[index]
+        target_type = ""
+        if len(expected_params) > index:
+            target_type = expected_params[index]
+        if len(target_type) == 0:
+            coerced_operands = append_llvm_operand(coerced_operands, operand)
+        else:
+            coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines)
+            diagnostics = (diagnostics) + (coerced.diagnostics)
+            current_lines = coerced.lines
+            current_temp = coerced.temp_index
+            if coerced.operand == null:
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
+                placeholder = LLVMOperand(llvm_type=target_type, value=default_return_literal(target_type))
+                coerced_operands = append_llvm_operand(coerced_operands, placeholder)
+            else:
+                coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
+        index += 1
+    operands = coerced_operands
+    if function_entry != null:
+        if len(expected_params) != len(operands):
+            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(len(expected_params)) + " arguments but received " + number_to_string(len(operands)))
     rendered_args = []
     index = 0
     while True:
@@ -1394,6 +1494,12 @@ def comparison_predicate_for_symbol(symbol, llvm_type):
         if symbol == ">=":
             return "icmp sge"
         return ""
+    if llvm_type == "i1":
+        if symbol == "==":
+            return "icmp eq"
+        if symbol == "!=":
+            return "icmp ne"
+        return ""
     return ""
 
 def collect_parameter_types(parameters):
@@ -1417,6 +1523,91 @@ def load_local_operand(local, temp_index, lines):
     current_lines = append_string(current_lines, "  " + load_name + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer)
     operand = LLVMOperand(llvm_type=local.llvm_type, value=load_name)
     return LoadLocalResult(lines=current_lines, temp_index=temp_index + 1, operand=operand, diagnostics=diagnostics)
+
+def coerce_operand_to_type(operand, target_type, temp_index, lines):
+    diagnostics = []
+    current_lines = lines
+    if len(target_type) == 0:
+        return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if operand.llvm_type == target_type:
+        return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if target_type == "double":
+        if operand.llvm_type == "i64":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i64 " + operand.value + " to double")
+            coerced = LLVMOperand(llvm_type="double", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        if operand.llvm_type == "i1":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = uitofp i1 " + operand.value + " to double")
+            coerced = LLVMOperand(llvm_type="double", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i64":
+        if operand.llvm_type == "double":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = fptosi double " + operand.value + " to i64")
+            coerced = LLVMOperand(llvm_type="i64", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        if operand.llvm_type == "i1":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64")
+            coerced = LLVMOperand(llvm_type="i64", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i1":
+        if operand.llvm_type == "double":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0")
+            coerced = LLVMOperand(llvm_type="i1", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        if operand.llvm_type == "i64":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i64 " + operand.value + ", 0")
+            coerced = LLVMOperand(llvm_type="i1", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
+    return CoercionResult(lines=current_lines, temp_index=temp_index, operand=null, diagnostics=diagnostics)
+
+def dominant_type(first, second):
+    if len(first) == 0:
+        return second
+    if len(second) == 0:
+        return first
+    if first == second:
+        return first
+    if first == "double"  or  second == "double":
+        return "double"
+    if first == "i64"  or  second == "i64":
+        return "i64"
+    if first == "i1"  or  second == "i1":
+        return "i1"
+    return first
+
+def harmonise_operands(left, right, temp_index, lines):
+    diagnostics = []
+    current_lines = lines
+    current_temp = temp_index
+    left_operand = left
+    right_operand = right
+    if left_operand.llvm_type == right_operand.llvm_type:
+        return BinaryAlignmentResult(lines=current_lines, temp_index=current_temp, left=left_operand, right=right_operand, diagnostics=diagnostics, result_type=left_operand.llvm_type)
+    target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type)
+    left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines)
+    diagnostics = (diagnostics) + (left_coercion.diagnostics)
+    if left_coercion.operand == null:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to convert left operand from `" + left_operand.llvm_type + "` to `" + target_type + "`")
+        return BinaryAlignmentResult(lines=left_coercion.lines, temp_index=left_coercion.temp_index, left=null, right=null, diagnostics=diagnostics, result_type=target_type)
+    left_operand = left_coercion.operand
+    current_lines = left_coercion.lines
+    current_temp = left_coercion.temp_index
+    right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines)
+    diagnostics = (diagnostics) + (right_coercion.diagnostics)
+    if right_coercion.operand == null:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to convert right operand from `" + right_operand.llvm_type + "` to `" + target_type + "`")
+        return BinaryAlignmentResult(lines=right_coercion.lines, temp_index=right_coercion.temp_index, left=null, right=null, diagnostics=diagnostics, result_type=target_type)
+    right_operand = right_coercion.operand
+    current_lines = right_coercion.lines
+    current_temp = right_coercion.temp_index
+    return BinaryAlignmentResult(lines=current_lines, temp_index=current_temp, left=left_operand, right=right_operand, diagnostics=diagnostics, result_type=target_type)
 
 def strip_enclosing_parentheses(expression):
     trimmed = trim_text(expression)
@@ -1627,7 +1818,7 @@ def default_return_literal(llvm_type):
     if llvm_type == "i64":
         return "0"
     if llvm_type == "i1":
-        return "0"
+        return "false"
     return "zeroinitializer"
 
 def strip_mut_prefix(value):
@@ -1788,6 +1979,54 @@ def is_symbol_char(ch):
     if code >= char_code("0")  and  code <= char_code("9"):
         return true
     return false
+
+def lower_char_code(code):
+    if code >= char_code("A")  and  code <= char_code("Z"):
+        return code + char_code("a") - char_code("A")
+    return code
+
+def matches_case_insensitive(value, expected):
+    if len(value) != len(expected):
+        return false
+    index = 0
+    while True:
+        if index >= len(value):
+            break
+        value_code = lower_char_code(char_code(value[index]))
+        expected_code = lower_char_code(char_code(expected[index]))
+        if value_code != expected_code:
+            return false
+        index += 1
+    return true
+
+def is_boolean_literal(text):
+    trimmed = trim_text(text)
+    if matches_case_insensitive(trimmed, "true"):
+        return true
+    if matches_case_insensitive(trimmed, "false"):
+        return true
+    return false
+
+def is_integer_literal(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return false
+    index = 0
+    if trimmed[0] == "-":
+        if len(trimmed) == 1:
+            return false
+        index = 1
+    has_digit = false
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch >= "0"  and  ch <= "9":
+            has_digit = true
+            index += 1
+            continue
+        return false
+    return has_digit
 
 def is_number_literal(text):
     index = 0

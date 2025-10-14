@@ -150,6 +150,22 @@ struct ComparisonEmission {
     diagnostics -> string[];
 }
 
+struct CoercionResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+struct BinaryAlignmentResult {
+    lines -> string[];
+    temp_index -> number;
+    left -> LLVMOperand?;
+    right -> LLVMOperand?;
+    diagnostics -> string[];
+    result_type -> string;
+}
+
 struct BlockLoweringResult {
     lines -> string[];
     allocas -> string[];
@@ -817,28 +833,45 @@ fn lower_for_instruction(
         };
     }
 
-    let start_operand = start_result.operand;
-    let end_operand = end_result.operand;
-    if start_operand.llvm_type != "double" {
-        diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
-    }
-    if end_operand.llvm_type != "double" {
-        diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
-    }
-    if start_operand.llvm_type != "double" || end_operand.llvm_type != "double" {
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
+        let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
+        diagnostics = diagnostics.concat(start_coerced.diagnostics);
+        current_lines = start_coerced.lines;
+        current_temp = start_coerced.temp_index;
+        if start_coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+        let start_operand = start_coerced.operand;
 
+        let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
+        diagnostics = diagnostics.concat(end_coerced.diagnostics);
+        current_lines = end_coerced.lines;
+        current_temp = end_coerced.temp_index;
+        if end_coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+        let end_operand = end_coerced.operand;
     let mut raw_target = trim_text(instruction.target);
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
@@ -1326,11 +1359,20 @@ fn lower_match_case_condition(
         current_lines = pattern_result.lines;
         current_temp = pattern_result.temp_index;
         if pattern_result.operand != null {
-            let comparison = emit_comparison_instruction("==", subject_operand, pattern_result.operand, current_temp, current_lines);
-            diagnostics = diagnostics.concat(comparison.diagnostics);
-            current_lines = comparison.lines;
-            current_temp = comparison.temp_index;
-            condition_operand = comparison.operand;
+            let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
+            diagnostics = diagnostics.concat(harmonised.diagnostics);
+            if harmonised.left != null && harmonised.right != null {
+                current_lines = harmonised.lines;
+                current_temp = harmonised.temp_index;
+                let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
+                diagnostics = diagnostics.concat(comparison.diagnostics);
+                current_lines = comparison.lines;
+                current_temp = comparison.temp_index;
+                condition_operand = comparison.operand;
+            } else {
+                current_lines = harmonised.lines;
+                current_temp = harmonised.temp_index;
+            }
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`");
         }
@@ -1629,11 +1671,17 @@ fn lower_let_instruction(
     current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type);
 
     if operand != null {
-        let stored = operand;
-        if stored.llvm_type != llvm_type {
-            diagnostics = append_string(diagnostics, "llvm lowering: initializer type `" + stored.llvm_type + "` mismatches local type `" + llvm_type + "` for `" + instruction.name + "`");
+        let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
+        diagnostics = diagnostics.concat(coerced.diagnostics);
+        current_lines = coerced.lines;
+        current_temp = coerced.temp_index;
+        if coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
+            current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+        } else {
+            let stored = coerced.operand;
+            current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
         }
-        current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
     } else {
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
@@ -1675,11 +1723,17 @@ fn lower_expression_statement(
             if lowered.operand == null {
                 diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment expression for `" + parsed_assignment.target + "`");
             } else {
-                let operand = lowered.operand;
-                if operand.llvm_type != binding.llvm_type {
-                    diagnostics = append_string(diagnostics, "llvm lowering: assignment type `" + operand.llvm_type + "` mismatches local type `" + binding.llvm_type + "` for `" + parsed_assignment.target + "`");
+                let coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines);
+                diagnostics = diagnostics.concat(coerced.diagnostics);
+                current_lines = coerced.lines;
+                current_temp = coerced.temp_index;
+                if coerced.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce assignment value for `" + parsed_assignment.target + "`");
+                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
+                } else {
+                    let operand = coerced.operand;
+                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
                 }
-                current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
             }
         }
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
@@ -1788,13 +1842,18 @@ fn lower_return_instruction(
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
     }
 
-    if operand.llvm_type != llvm_return {
-        diagnostics = append_string(diagnostics, "llvm lowering: return type `" + llvm_return + "` mismatches expression type `" + operand.llvm_type + "` in `" + function.name + "`");
+    let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
+    diagnostics = diagnostics.concat(coerced.diagnostics);
+    current_lines = coerced.lines;
+    current_temp = coerced.temp_index;
+    if coerced.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
     }
 
-    current_lines = append_string(current_lines, "  ret " + operand.llvm_type + " " + operand.value);
+    let coerced_operand = coerced.operand;
+    current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
 }
 
@@ -1838,6 +1897,12 @@ fn map_return_type(return_type -> string) -> string {
     if trimmed == "number" {
         return "double";
     }
+    if trimmed == "boolean" || trimmed == "bool" {
+        return "i1";
+    }
+    if trimmed == "int" || trimmed == "i64" {
+        return "i64";
+    }
     return "";
 }
 
@@ -1849,6 +1914,12 @@ fn map_parameter_type(parameter_type -> string) -> string {
     if trimmed == "number" {
         return "double";
     }
+    if trimmed == "boolean" || trimmed == "bool" {
+        return "i1";
+    }
+    if trimmed == "int" || trimmed == "i64" {
+        return "i64";
+    }
     return "";
 }
 
@@ -1859,6 +1930,12 @@ fn map_local_type(type_annotation -> string) -> string {
     }
     if trimmed == "number" {
         return "double";
+    }
+    if trimmed == "boolean" || trimmed == "bool" {
+        return "i1";
+    }
+    if trimmed == "int" || trimmed == "i64" {
+        return "i64";
     }
     return "";
 }
@@ -1927,13 +2004,29 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics };
     }
 
-    if is_number_literal(stripped) {
-        let normalised = normalise_number_literal(stripped);
+    let literal_candidate = trim_text(stripped);
+
+    if is_boolean_literal(literal_candidate) {
+        let mut value -> string = "0";
+        if matches_case_insensitive(literal_candidate, "true") {
+            value = "1";
+        }
+        let operand = LLVMOperand { llvm_type: "i1", value: value };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    if is_integer_literal(literal_candidate) {
+        let operand = LLVMOperand { llvm_type: "i64", value: literal_candidate };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    if is_number_literal(literal_candidate) {
+        let normalised = normalise_number_literal(literal_candidate);
         let operand = LLVMOperand { llvm_type: "double", value: normalised };
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
     }
 
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + stripped + "`");
+    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`");
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
 }
 
@@ -1958,18 +2051,20 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let left_operand = left_result.operand;
-    let right_operand = right_result.operand;
-    if left_operand.llvm_type != right_operand.llvm_type {
-        diagnostics = append_string(diagnostics, "llvm lowering: type mismatch in binary expression `" + expression + "`");
+    let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    diagnostics = diagnostics.concat(harmonised.diagnostics);
+    if harmonised.left == null || harmonised.right == null {
+        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let operation = operation_name_for_symbol(match.symbol, left_operand.llvm_type);
-    let temp_name = format_temp_name(right_result.temp_index);
-    let line = "  " + temp_name + " = " + operation + " " + left_operand.llvm_type + " " + left_operand.value + ", " + right_operand.value;
-    let updated_lines = append_string(right_result.lines, line);
-    let operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: temp_name };
-    return ExpressionResult { lines: updated_lines, temp_index: right_result.temp_index + 1, operand: operand, diagnostics: diagnostics };
+    let left_aligned = harmonised.left;
+    let right_aligned = harmonised.right;
+    let operation = operation_name_for_symbol(match.symbol, harmonised.result_type);
+    let temp_name = format_temp_name(harmonised.temp_index);
+    let line = "  " + temp_name + " = " + operation + " " + harmonised.result_type + " " + left_aligned.value + ", " + right_aligned.value;
+    let updated_lines = append_string(harmonised.lines, line);
+    let operand = LLVMOperand { llvm_type: harmonised.result_type, value: temp_name };
+    return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics };
 }
 
 fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
@@ -1994,7 +2089,13 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let comparison = emit_comparison_instruction(match.symbol, left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    diagnostics = diagnostics.concat(harmonised.diagnostics);
+    if harmonised.left == null || harmonised.right == null {
+        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines);
     diagnostics = diagnostics.concat(comparison.diagnostics);
     if comparison.operand == null {
         return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: null, diagnostics: diagnostics };
@@ -2050,22 +2151,44 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             llvm_return = "double";
         }
         expected_params = collect_parameter_types(function_entry.parameters);
-        if expected_params.length != operands.length {
-            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
-        } else {
-            let mut type_index -> number = 0;
-            loop {
-                if type_index >= operands.length {
-                    break;
-                }
-                if expected_params[type_index] != operands[type_index].llvm_type {
-                    diagnostics = append_string(diagnostics, "llvm lowering: argument " + number_to_string(type_index) + " for call to `" + trimmed_target + "` has type `" + operands[type_index].llvm_type + "` but expected `" + expected_params[type_index] + "`");
-                }
-                type_index += 1;
-            }
-        }
     } else {
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+    }
+
+    let mut coerced_operands -> LLVMOperand[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        let operand = operands[index];
+        let mut target_type -> string = "";
+        if expected_params.length > index {
+            target_type = expected_params[index];
+        }
+        if target_type.length == 0 {
+            coerced_operands = append_llvm_operand(coerced_operands, operand);
+        } else {
+            let coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines);
+            diagnostics = diagnostics.concat(coerced.diagnostics);
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+                let placeholder = LLVMOperand { llvm_type: target_type, value: default_return_literal(target_type) };
+                coerced_operands = append_llvm_operand(coerced_operands, placeholder);
+            } else {
+                coerced_operands = append_llvm_operand(coerced_operands, coerced.operand);
+            }
+        }
+        index += 1;
+    }
+    operands = coerced_operands;
+
+    if function_entry != null {
+        if expected_params.length != operands.length {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
+        }
     }
 
     let mut rendered_args -> string[] = [];
@@ -2168,6 +2291,15 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         }
         return "";
     }
+    if llvm_type == "i1" {
+        if symbol == "==" {
+            return "icmp eq";
+        }
+        if symbol == "!=" {
+            return "icmp ne";
+        }
+        return "";
+    }
     return "";
 }
 
@@ -2203,6 +2335,144 @@ fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> stri
     current_lines = append_string(current_lines, "  " + load_name + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
     let operand = LLVMOperand { llvm_type: local.llvm_type, value: load_name };
     return LoadLocalResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
+}
+
+fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_index -> number, lines -> string[]) -> CoercionResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    if target_type.length == 0 {
+        return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+    if operand.llvm_type == target_type {
+        return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+    if target_type == "double" {
+        if operand.llvm_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i64 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+        if operand.llvm_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = uitofp i1 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    if target_type == "i64" {
+        if operand.llvm_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = fptosi double " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+        if operand.llvm_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    if target_type == "i1" {
+        if operand.llvm_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
+            let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+        if operand.llvm_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i64 " + operand.value + ", 0");
+            let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`");
+    return CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+}
+
+fn dominant_type(first -> string, second -> string) -> string {
+    if first.length == 0 {
+        return second;
+    }
+    if second.length == 0 {
+        return first;
+    }
+    if first == second {
+        return first;
+    }
+    if first == "double" || second == "double" {
+        return "double";
+    }
+    if first == "i64" || second == "i64" {
+        return "i64";
+    }
+    if first == "i1" || second == "i1" {
+        return "i1";
+    }
+    return first;
+}
+
+fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> BinaryAlignmentResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut left_operand = left;
+    let mut right_operand = right;
+    if left_operand.llvm_type == right_operand.llvm_type {
+        return BinaryAlignmentResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            left: left_operand,
+            right: right_operand,
+            diagnostics: diagnostics,
+            result_type: left_operand.llvm_type,
+        };
+    }
+    let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
+    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines);
+    diagnostics = diagnostics.concat(left_coercion.diagnostics);
+    if left_coercion.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to convert left operand from `" + left_operand.llvm_type + "` to `" + target_type + "`");
+        return BinaryAlignmentResult {
+            lines: left_coercion.lines,
+            temp_index: left_coercion.temp_index,
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: target_type,
+        };
+    }
+    left_operand = left_coercion.operand;
+    current_lines = left_coercion.lines;
+    current_temp = left_coercion.temp_index;
+
+    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines);
+    diagnostics = diagnostics.concat(right_coercion.diagnostics);
+    if right_coercion.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to convert right operand from `" + right_operand.llvm_type + "` to `" + target_type + "`");
+        return BinaryAlignmentResult {
+            lines: right_coercion.lines,
+            temp_index: right_coercion.temp_index,
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: target_type,
+        };
+    }
+    right_operand = right_coercion.operand;
+    current_lines = right_coercion.lines;
+    current_temp = right_coercion.temp_index;
+
+    return BinaryAlignmentResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        left: left_operand,
+        right: right_operand,
+        diagnostics: diagnostics,
+        result_type: target_type,
+    };
 }
 
 fn strip_enclosing_parentheses(expression -> string) -> string {
@@ -2483,7 +2753,7 @@ fn default_return_literal(llvm_type -> string) -> string {
         return "0";
     }
     if llvm_type == "i1" {
-        return "0";
+        return "false";
     }
     return "zeroinitializer";
 }
@@ -2699,6 +2969,71 @@ fn is_symbol_char(ch -> string) -> boolean {
         return true;
     }
     return false;
+}
+
+fn lower_char_code(code -> number) -> number {
+    if code >= char_code("A") && code <= char_code("Z") {
+        return code + (char_code("a") - char_code("A"));
+    }
+    return code;
+}
+
+fn matches_case_insensitive(value -> string, expected -> string) -> boolean {
+    if value.length != expected.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let value_code = lower_char_code(char_code(value[index]));
+        let expected_code = lower_char_code(char_code(expected[index]));
+        if value_code != expected_code {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn is_boolean_literal(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if matches_case_insensitive(trimmed, "true") {
+        return true;
+    }
+    if matches_case_insensitive(trimmed, "false") {
+        return true;
+    }
+    return false;
+}
+
+fn is_integer_literal(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    if trimmed[0] == "-" {
+        if trimmed.length == 1 {
+            return false;
+        }
+        index = 1;
+    }
+    let mut has_digit -> boolean = false;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch >= "0" && ch <= "9" {
+            has_digit = true;
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    return has_digit;
 }
 
 fn is_number_literal(text -> string) -> boolean {
