@@ -1145,10 +1145,47 @@ fn rewrite_literal_tokens(expression -> string) -> string {
 }
 
 fn rewrite_push_calls(expression -> string) -> string {
-if expression.length == 0 {
-return expression;
-}
-return replace_all(expression, ".push(", ".append(");
+    if expression.length == 0 {
+        return expression;
+    }
+    let target = ".push(";
+    let replacement = ".append(";
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "'" || ch == "\"" {
+            let literal_end = skip_string_literal(expression, index);
+            result = result + substring(expression, index, literal_end);
+            index = literal_end;
+            continue;
+        }
+        if index + target.length <= expression.length {
+            let mut matches -> boolean = true;
+            let mut offset -> number = 0;
+            loop {
+                if offset >= target.length {
+                    break;
+                }
+                if expression[index + offset] != target[offset] {
+                    matches = false;
+                    break;
+                }
+                offset += 1;
+            }
+            if matches {
+                result = result + replacement;
+                index += target.length;
+                continue;
+            }
+        }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
 }
 
 fn rewrite_concat_calls(expression -> string) -> string {

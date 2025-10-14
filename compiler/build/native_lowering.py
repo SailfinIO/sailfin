@@ -951,7 +951,36 @@ def rewrite_literal_tokens(expression):
 def rewrite_push_calls(expression):
     if len(expression) == 0:
         return expression
-    return replace_all(expression, ".push(", ".append(")
+    target = ".push("
+    replacement = ".append("
+    result = ""
+    index = 0
+    while True:
+        if index >= len(expression):
+            break
+        ch = expression[index]
+        if ch == "'"  or  ch == "\"":
+            literal_end = skip_string_literal(expression, index)
+            result = result + substring(expression, index, literal_end)
+            index = literal_end
+            continue
+        if index + len(target) <= len(expression):
+            matches = True
+            offset = 0
+            while True:
+                if offset >= len(target):
+                    break
+                if expression[index + offset] != target[offset]:
+                    matches = False
+                    break
+                offset += 1
+            if matches:
+                result = result + replacement
+                index += len(target)
+                continue
+        result = result + ch
+        index += 1
+    return result
 
 def rewrite_concat_calls(expression):
     current = expression
