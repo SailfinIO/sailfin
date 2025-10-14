@@ -25,8 +25,9 @@ roadmaps.
 - **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
   provide the initial scaffolding, now covering local assignments, structured
-  `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration,
-  element-wise `.for` loops over `number[]` arrays, and `match` dispatch alongside
+  `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration with
+  dynamic stride support, element-wise `.for` loops over `number[]` arrays, and `match`
+  dispatch alongside
   boolean and integer primitives for parameters, locals, and returns in the LLVM
   prototype.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
@@ -142,7 +143,8 @@ roadmaps.
   feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` now lifts
   arithmetic routines with local `let`s, assignments, `if`/`else` control
   flow, `loop` blocks (`break`/`continue`), `match` dispatch, and `.for` loops
-  over numeric ranges or inline `number[]` literals into runnable LLVM IR, with
+  over numeric ranges with dynamic stride expressions or inline `number[]`
+  literals into runnable LLVM IR, with
   `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
   `llvmlite` as a smoke guard.
 

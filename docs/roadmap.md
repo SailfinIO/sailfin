@@ -19,7 +19,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Bridge Sailfin runtime helpers (e.g., `print`, capability adapters) as callable LLVM symbols so stage2 programs can invoke the existing runtime prelude.
   - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
   - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end, and wire the LLVM smoke binary into CI for ongoing coverage.
-  - [ ] Support `.for` range strides (descending and custom step) so Stage2 matches Stage1 range semantics.
+  - [x] Support `.for` range strides (descending and custom step) so Stage2 matches Stage1 range semantics. (Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_supports_range_strides`.)
 
 2. **Runtime & FFI Foundations**
   - [ ] Capability adapter injection — Wire the new runtime capability bridges to host-provided adapters in the stage2 runner so filesystem, HTTP, and model calls no longer depend on `runtime_support.py`; ship adapter docs alongside samples.
@@ -64,6 +64,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 
 - [x] Stage2 loop & match lowering — Stage2 LLVM emission now handles `loop` (`break`/`continue`) and `match` dispatch. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` exercises loop control and case dispatch end-to-end.
 - [x] Stage2 range `.for` lowering — Numeric range-driven `for` loops (with `break`/`continue`) now lower to LLVM without Python fallbacks. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` includes the `sum_for` iteration case.
+- [x] Stage2 range stride lowering — Stage2 `.for` loops now honour explicit stride expressions (positive or negative) and flag zero literal steps. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_supports_range_strides`.
 - [x] Grapheme segmentation — Stage1 runtime prelude now embeds the Unicode extend tables so `grapheme_count` and `grapheme_at` execute without Python `unicodedata`. Validation: `compiler/tests/test_string_utils.py` covers combining-mark accents, regional-indicator flags, and the transgender flag sequence.
 - [x] Effect annotation hints — Stage1 missing-effect diagnostics now surface `![effect]` signature suggestions and reference the CLI fix prompt. Validation: `compiler/tests/test_stage1_typecheck_effects.py::test_typecheck_reports_missing_effects_with_spans` asserts the new guidance.
 - [x] Hierarchical effect propagation — Stage1 `effect_checker.sfn` now walks nested blocks, lambdas, and spawned thunks so capability requirements bubble up to the declaring routine. Validation: `compiler/tests/test_effect_checker.py::test_effect_checker_propagates_model_from_nested_lambda` and `compiler/tests/test_effect_checker.py::test_spawn_prompt_requires_io_and_model` lock the coverage.

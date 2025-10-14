@@ -1528,41 +1528,41 @@ fn find_matching_brace(text -> string, open_index -> number) -> number {
 }
 
 fn find_substring_from(value -> string, pattern -> string, start -> number) -> number {
-if pattern.length == 0 {
-if start < 0 {
-return 0;
-}
-if start > value.length {
-return value.length;
-}
-return start;
-}
-let mut index -> number = start;
-if index < 0 {
-index = 0;
-}
-loop {
-if index + pattern.length > value.length {
-break;
-}
-let mut matches -> boolean = true;
-let mut offset -> number = 0;
-loop {
-if offset >= pattern.length {
-break;
-}
-if value[index + offset] != pattern[offset] {
-matches = false;
-break;
-}
-offset += 1;
-}
-if matches {
-return index;
-}
-index += 1;
-}
-return -1;
+    if pattern.length == 0 {
+        if start < 0 {
+            return 0;
+        }
+        if start > value.length {
+            return value.length;
+        }
+        return start;
+    }
+    let mut index -> number = start;
+    if index < 0 {
+        index = 0;
+    }
+    loop {
+        if index + pattern.length > value.length {
+            break;
+        }
+        let mut matches -> boolean = true;
+        let mut offset -> number = 0;
+        loop {
+            if offset >= pattern.length {
+                break;
+            }
+            if value[index + offset] != pattern[offset] {
+                matches = false;
+                break;
+            }
+            offset += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
 }
 
 fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) -> PythonFunctionEmission {
@@ -1785,40 +1785,40 @@ return PythonFunctionEmission { builder: current, diagnostics: diagnostics };
 }
 
 fn append_match_context(values -> MatchContext[], value -> MatchContext) -> MatchContext[] {
-return values.concat([value]);
+    return values.concat([value]);
 }
 
 fn replace_match_context(values -> MatchContext[], index -> number, replacement -> MatchContext) -> MatchContext[] {
-let mut result -> MatchContext[] = [];
-let mut position -> number = 0;
-loop {
-if position >= values.length {
-break;
-}
-if position == index {
-result = append_match_context(result, replacement);
-} else {
-result = append_match_context(result, values[position]);
-}
-position += 1;
-}
-return result;
+    let mut result -> MatchContext[] = [];
+    let mut position -> number = 0;
+    loop {
+        if position >= values.length {
+            break;
+        }
+        if position == index {
+            result = append_match_context(result, replacement);
+        } else {
+            result = append_match_context(result, values[position]);
+        }
+        position += 1;
+    }
+    return result;
 }
 
 fn truncate_match_contexts(values -> MatchContext[], end_index -> number) -> MatchContext[] {
-if end_index <= 0 {
-return [];
-}
-let mut result -> MatchContext[] = [];
-let mut index -> number = 0;
-loop {
-if index >= end_index {
-break;
-}
-result = append_match_context(result, values[index]);
-index += 1;
-}
-return result;
+    if end_index <= 0 {
+        return [];
+    }
+    let mut result -> MatchContext[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= end_index {
+            break;
+        }
+        result = append_match_context(result, values[index]);
+        index += 1;
+    }
+    return result;
 }
 
 fn generate_match_subject_name(counter -> number) -> string {
@@ -1826,30 +1826,30 @@ fn generate_match_subject_name(counter -> number) -> string {
 }
 
 fn lower_match_case_condition(subject_name -> string, pattern -> string, guard -> string?) -> LoweredCaseCondition {
-let trimmed_pattern = trim_text(pattern);
-let mut normalized_guard -> string? = null;
-if guard != null {
-let trimmed_guard = trim_text(guard);
-if trimmed_guard.length > 0 {
-normalized_guard = trimmed_guard;
-}
-}
-if trimmed_pattern.length == 0 || trimmed_pattern == "_" {
-if normalized_guard == null {
-return LoweredCaseCondition { condition: "True", is_default: true, has_guard: false };
-}
-let lowered_guard = lower_expression(normalized_guard);
-return LoweredCaseCondition { condition: lowered_guard, is_default: false, has_guard: true };
-}
-let lowered_pattern = lower_expression(trimmed_pattern);
-let mut condition -> string = subject_name + " == " + lowered_pattern;
-let mut has_guard -> boolean = false;
-if normalized_guard != null {
-let lowered_guard = lower_expression(normalized_guard);
-condition = "(" + condition + ") and (" + lowered_guard + ")";
-has_guard = true;
-}
-return LoweredCaseCondition { condition: condition, is_default: false, has_guard: has_guard };
+    let trimmed_pattern = trim_text(pattern);
+    let mut normalized_guard -> string? = null;
+    if guard != null {
+        let trimmed_guard = trim_text(guard);
+        if trimmed_guard.length > 0 {
+            normalized_guard = trimmed_guard;
+        }
+    }
+    if trimmed_pattern.length == 0 || trimmed_pattern == "_" {
+        if normalized_guard == null {
+            return LoweredCaseCondition { condition: "True", is_default: true, has_guard: false };
+        }
+        let lowered_guard = lower_expression(normalized_guard);
+        return LoweredCaseCondition { condition: lowered_guard, is_default: false, has_guard: true };
+    }
+    let lowered_pattern = lower_expression(trimmed_pattern);
+    let mut condition -> string = subject_name + " == " + lowered_pattern;
+    let mut has_guard -> boolean = false;
+    if normalized_guard != null {
+        let lowered_guard = lower_expression(normalized_guard);
+        condition = "(" + condition + ") and (" + lowered_guard + ")";
+        has_guard = true;
+    }
+    return LoweredCaseCondition { condition: condition, is_default: false, has_guard: has_guard };
 }
 
 fn number_to_string(value -> number) -> string {

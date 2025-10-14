@@ -350,3 +350,73 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_supports_range_strides() -> None:
+    source = """
+fn sum_stride(limit -> number, stride -> number) -> number {
+    let mut total -> number = 0;
+    for value in 0..limit..stride {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_descending(start -> number, stride -> number) -> number {
+    let mut total -> number = 0;
+    for value in start..0..stride {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_literal() -> number {
+    let mut total -> number = 0;
+    for value in 0..5..2 {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_negative_literal() -> number {
+    let mut total -> number = 0;
+    for value in 5..0..-2 {
+        total = total + value;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    assert lowered.diagnostics == []
+    ir = lowered.ir
+    assert "0..limit..stride" not in ir  # ensure lowered IR not raw range text
+
+    engine, module = _compile_ir(ir)
+    try:
+        assert _invoke_double(engine, "sum_stride", 5.0, 2.0) == pytest.approx(6.0)
+        assert _invoke_double(engine, "sum_descending", 5.0, -2.0) == pytest.approx(9.0)
+        assert _invoke_double(engine, "sum_literal") == pytest.approx(6.0)
+        assert _invoke_double(engine, "sum_negative_literal") == pytest.approx(9.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_reports_zero_literal_stride() -> None:
+    source = """
+fn main() -> number {
+    let mut total -> number = 0;
+    for value in 0..4..0 {
+        total = total + value;
+    }
+    return total;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    assert any("stride must not be zero" in diagnostic for diagnostic in lowered.diagnostics)
