@@ -10,12 +10,15 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Stage2 Backend Delivery**
-  - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR / WASM modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
+  - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
   - [x] Lower loops and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend. (Regression: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` now covers loop + match execution.)
-  - [ ] Prototype WebAssembly emission from `.sfn-asm` so parity with the LLVM path can be validated via the same smoke harness.
-  - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
-  - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end.
   - [ ] Lower `.for` loops over sequence iterables (arrays, comprehensions) into LLVM index loops so collection iteration executes without Python fallbacks.
+  - [ ] Extend primitive coverage beyond `number` so boolean and integer values lower into native LLVM types and flow through conditions without double coercions.
+  - [ ] Lower struct and enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
+  - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
+  - [ ] Bridge Sailfin runtime helpers (e.g., `print`, capability adapters) as callable LLVM symbols so stage2 programs can invoke the existing runtime prelude.
+  - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
+  - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end, and wire the LLVM smoke binary into CI for ongoing coverage.
   - [ ] Support `.for` range strides (descending and custom step) so Stage2 matches Stage1 range semantics.
 
 2. **Runtime & FFI Foundations**
@@ -25,11 +28,11 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
   - [ ] Unicode normalization helpers — Expose NFC/NFD routines in the Sailfin runtime so locale-aware casing and future stage2 pipelines stay Python-free.
 
-  5. **Toolchain De-Pythonisation**
-    - [ ] Native emission milestone — Flip the default stage1 build to target the stage2 executable backend once minimal LLVM/WASM runners exist, keeping a Python fallback only for regression hunting.
-    - [ ] Sailfin-native CLI ("sfn") — Reimplement the `sailfin-stage1` launcher, installer, and packaging flow without invoking Python entrypoints; ship the CLI as a Sailfin binary that exercises the runtime prelude directly.
-    - [ ] Release pipeline guardrails — Update CI to build the compiler, runtime, and examples using only Sailfin-generated artifacts and fail if Python runtime shims (`runtime_support.py`, bootstrap scripts) are invoked.
-    - [ ] Test harness migration — Port the stage1 pytest coverage to an equivalent Sailfin-native smoke/integration suite so compiler regressions can be detected without Python tooling.
+5. **Toolchain De-Pythonisation**
+  - [ ] Native emission milestone — Flip the default stage1 build to target the stage2 executable backend once minimal LLVM/WASM runners exist, keeping a Python fallback only for regression hunting.
+  - [ ] Sailfin-native CLI ("sfn") — Reimplement the `sailfin-stage1` launcher, installer, and packaging flow without invoking Python entrypoints; ship the CLI as a Sailfin binary that exercises the runtime prelude directly.
+  - [ ] Release pipeline guardrails — Update CI to build the compiler, runtime, and examples using only Sailfin-generated artifacts and fail if Python runtime shims (`runtime_support.py`, bootstrap scripts) are invoked.
+  - [ ] Test harness migration — Port the stage1 pytest coverage to an equivalent Sailfin-native smoke/integration suite so compiler regressions can be detected without Python tooling.
 
 3. **Diagnostics Parity**
   - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
@@ -47,6 +50,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Stage1 release candidate — Criteria and staging plan for shipping the Sailfin compiler/runtime bundle as a supported release channel.
 - [ ] `sfn` package manager release plan — Define rollout steps once CLI integration lands.
 - [ ] Registry authentication & signing — Add capability manifests and signed provenance to registry flows.
+- [ ] Prototype WebAssembly emission from `.sfn-asm` once the LLVM backend is feature-complete, reusing the existing smoke harness for validation.
 
 ## Exploration Backlog (Research / Design)
 
