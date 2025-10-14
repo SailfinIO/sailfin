@@ -80,6 +80,15 @@ struct LetLoweringResult {
     next_local_id -> number;
 }
 
+struct InlineLetParseResult {
+    success -> boolean;
+    name -> string;
+    mutable -> boolean;
+    type_annotation -> string;
+    initializer -> string?;
+    diagnostics -> string[];
+}
+
 struct BlockLabelResult {
     label -> string;
     next_counter -> number;
@@ -338,10 +347,37 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_next_local = lowered.next_local_id;
         } else if instruction.variant == "Expression" {
-            let lowered = lower_expression_statement(instruction.expression, bindings, current_locals, current_temp, current_lines, functions);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
-            current_lines = lowered.lines;
-            current_temp = lowered.temp_index;
+            let trimmed_expression = trim_text(instruction.expression);
+            let mut handled_inline_let -> boolean = false;
+            if trimmed_expression.length >= 4 {
+                let prefix = substring(trimmed_expression, 0, 4);
+                if prefix == "let " {
+                    let inline_parse = parse_inline_let_expression(trimmed_expression);
+                    diagnostics = diagnostics.concat(inline_parse.diagnostics);
+                    if inline_parse.success {
+                        let inline_instruction = NativeInstruction.Let {
+                            name: inline_parse.name,
+                            mutable: inline_parse.mutable,
+                            type_annotation: inline_parse.type_annotation,
+                            value: inline_parse.initializer,
+                        };
+                        let lowered = lower_let_instruction(function, inline_instruction, bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
+                        diagnostics = diagnostics.concat(lowered.diagnostics);
+                        current_lines = lowered.lines;
+                        current_allocas = lowered.allocas;
+                        current_locals = lowered.locals;
+                        current_temp = lowered.temp_index;
+                        current_next_local = lowered.next_local_id;
+                        handled_inline_let = true;
+                    }
+                }
+            }
+            if !handled_inline_let {
+                let lowered = lower_expression_statement(trimmed_expression, bindings, current_locals, current_temp, current_lines, functions);
+                diagnostics = diagnostics.concat(lowered.diagnostics);
+                current_lines = lowered.lines;
+                current_temp = lowered.temp_index;
+            }
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, bindings, current_locals, current_temp, current_lines, functions);
             diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -1921,10 +1957,13 @@ fn lower_let_instruction(
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
 
-    let mut llvm_type = map_local_type(instruction.type_annotation);
-    if llvm_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
-        llvm_type = "double";
+    let trimmed_annotation = trim_text(instruction.type_annotation);
+    let mut llvm_type -> string = "";
+    if trimmed_annotation.length > 0 {
+        llvm_type = map_local_type(instruction.type_annotation);
+        if llvm_type.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
+        }
     }
 
     let mut operand -> LLVMOperand? = null;
@@ -1936,6 +1975,16 @@ fn lower_let_instruction(
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         operand = lowered.operand;
+    }
+
+    if llvm_type.length == 0 {
+        if operand != null {
+            llvm_type = operand.llvm_type;
+        }
+    }
+
+    if llvm_type.length == 0 {
+        llvm_type = "double";
     }
 
     let pointer = format_local_pointer_name(next_local_id);
@@ -2069,6 +2118,110 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
         index += 1;
     }
     return AssignmentParseResult { success: false, target: "", value: "" };
+}
+
+fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
+    let mut diagnostics -> string[] = [];
+    let trimmed = trim_text(expression);
+    if trimmed.length < 4 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed let expression `" + expression + "`");
+        return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
+    }
+    let prefix = substring(trimmed, 0, 4);
+    if prefix != "let " {
+        return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
+    }
+    let mut remainder -> string = trim_text(substring(trimmed, 4, trimmed.length));
+    let mut is_mutable -> boolean = false;
+    if remainder.length >= 4 {
+        let mut_prefix = substring(remainder, 0, 4);
+        if mut_prefix == "mut " {
+            is_mutable = true;
+            remainder = trim_text(substring(remainder, 4, remainder.length));
+        }
+    }
+    if remainder.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing binding name in `" + expression + "`");
+        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
+    }
+    let mut name -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= remainder.length {
+            break;
+        }
+        let ch = remainder[index];
+        if ch == " " || ch == ":" || ch == "-" || ch == "=" {
+            break;
+        }
+        name = name + ch;
+        index += 1;
+    }
+    name = trim_text(name);
+    if name.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing binding name in `" + expression + "`");
+        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
+    }
+    let mut tail -> string = trim_text(substring(remainder, index, remainder.length));
+    let mut type_annotation -> string = "";
+    let mut initializer -> string? = null;
+    if tail.length > 0 {
+        if tail.length >= 2 {
+            let annotation_prefix = substring(tail, 0, 2);
+            if annotation_prefix == "->" {
+                tail = trim_text(substring(tail, 2, tail.length));
+                let assign_index = index_of(tail, "=");
+                if assign_index >= 0 {
+                    type_annotation = trim_text(substring(tail, 0, assign_index));
+                    let value_text = trim_text(substring(tail, assign_index + 1, tail.length));
+                    if value_text.length > 0 {
+                        initializer = value_text;
+                    }
+                } else {
+                    type_annotation = trim_text(tail);
+                }
+            } else if tail[0] == ":" {
+                tail = trim_text(substring(tail, 1, tail.length));
+                let assign_index = index_of(tail, "=");
+                if assign_index >= 0 {
+                    type_annotation = trim_text(substring(tail, 0, assign_index));
+                    let value_text = trim_text(substring(tail, assign_index + 1, tail.length));
+                    if value_text.length > 0 {
+                        initializer = value_text;
+                    }
+                } else {
+                    type_annotation = trim_text(tail);
+                }
+            } else if tail[0] == "=" {
+                let value_text = trim_text(substring(tail, 1, tail.length));
+                if value_text.length > 0 {
+                    initializer = value_text;
+                }
+            } else {
+                let value_text = trim_text(tail);
+                if value_text.length > 0 {
+                    initializer = value_text;
+                }
+            }
+        } else {
+            if tail[0] == "=" {
+                let value_text = trim_text(substring(tail, 1, tail.length));
+                if value_text.length > 0 {
+                    initializer = value_text;
+                }
+            } else {
+                let value_text = trim_text(tail);
+                if value_text.length > 0 {
+                    initializer = value_text;
+                }
+            }
+        }
+    }
+    if initializer == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing initializer for `" + name + "`");
+        return InlineLetParseResult { success: false, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: null, diagnostics: diagnostics };
+    }
+    return InlineLetParseResult { success: true, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
 }
 
 fn lower_return_instruction(

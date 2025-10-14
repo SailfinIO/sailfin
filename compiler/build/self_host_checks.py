@@ -35,13 +35,13 @@ def run_self_host_check(sources):
     compilation = compile_project(sources)
     fatal_entries = collect_fatal_diagnostics(compilation.diagnostics)
     missing_sources = collect_missing_sources(sources, compilation)
-    success = true
+    success = True
     if len(fatal_entries) > 0:
-        success = false
+        success = False
     if len(missing_sources) > 0:
-        success = false
+        success = False
     if len(compilation.modules) != len(sources):
-        success = false
+        success = False
     return SelfHostCheckResult(success=success, compiled_count=len(compilation.modules), expected_count=len(sources), fatal_diagnostics=fatal_entries, missing_sources=missing_sources)
 
 def collect_fatal_diagnostics(entries):
@@ -74,6 +74,6 @@ def module_present(target, modules):
         if index >= len(modules):
             break
         if modules[index].source_path == target:
-            return true
+            return True
         index += 1
-    return false
+    return False

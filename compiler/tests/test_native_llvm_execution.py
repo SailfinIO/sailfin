@@ -352,6 +352,53 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_iterates_array_bindings_without_annotations() -> None:
+    source = """
+fn sum_alias(values -> number[]) -> number {
+    let alias = values;
+    let mut total -> number = 0;
+    for value in alias {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_literal_binding() -> number {
+    let values = [1, 2, 3, 4];
+    let mut total -> number = 0;
+    for value in values {
+        total = total + value;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    assert lowered.diagnostics == []
+
+    engine, module = _compile_ir(lowered.ir)
+    buffers = []
+    try:
+        buf_alias, arr_alias = _build_number_array([1.0, 2.0, 3.0])
+        buffers.append(buf_alias)
+        assert _invoke(
+            engine,
+            "sum_alias",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayNumber),),
+            ctypes.byref(arr_alias),
+        ) == pytest.approx(6.0)
+
+        assert _invoke_double(engine, "sum_literal_binding") == pytest.approx(10.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
 def test_native_llvm_execution_supports_range_strides() -> None:
     source = """
 fn sum_stride(limit -> number, stride -> number) -> number {
