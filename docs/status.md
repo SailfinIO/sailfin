@@ -29,7 +29,8 @@ roadmaps.
   dynamic stride support, element-wise `.for` loops over primitive arrays (`number[]`,
   `int[]`, `boolean[]`), and `match` dispatch alongside
   boolean and integer primitives for parameters, locals, and returns in the LLVM
-  prototype.
+  prototype. Array literals now embed `#element:<type>` metadata so Stage2 can
+  skip per-element inference and prepare typed iteration over richer aggregates.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.

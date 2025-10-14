@@ -834,7 +834,7 @@ fn lower_array_literal_expression(expression -> string, depth -> number) -> stri
     let inner = substring(trimmed, 1, trimmed.length - 1);
     let entries = split_array_entries(inner);
     let mut lowered -> string[] = [];
-    let mut index -> number = 0;
+    let mut index -> number = array_literal_start_index(entries);
     loop {
         if index >= entries.length {
             break;
@@ -846,6 +846,29 @@ fn lower_array_literal_expression(expression -> string, depth -> number) -> stri
         index += 1;
     }
     return "[" + join_with_separator(lowered, ", ") + "]";
+}
+
+fn array_literal_start_index(entries -> string[]) -> number {
+    if entries.length == 0 {
+        return 0;
+    }
+    let first = trim_trailing_delimiters(trim_text(entries[0]));
+    if is_array_metadata_entry(first) {
+        return 1;
+    }
+    return 0;
+}
+
+fn is_array_metadata_entry(entry -> string) -> boolean {
+    let trimmed = trim_text(entry);
+    if trimmed.length == 0 {
+        return false;
+    }
+    if !starts_with(trimmed, "#element:") {
+        return false;
+    }
+    let annotation = trim_text(substring(trimmed, 9, trimmed.length));
+    return annotation.length > 0;
 }
 
 fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> string {

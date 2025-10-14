@@ -47,6 +47,11 @@ struct ExpressionResult {
     diagnostics -> string[];
 }
 
+struct ArrayLiteralMetadata {
+    element_type -> string;
+    start_index -> number;
+}
+
 struct LocalBinding {
     name -> string;
     pointer -> string;
@@ -2686,10 +2691,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
 
     let inner = trim_text(substring(text, 1, text.length - 1));
     let elements = split_array_elements(inner);
+    let metadata = parse_array_literal_metadata(elements);
 
     let mut operands -> LLVMOperand[] = [];
-    let mut inferred_element_type -> string = "";
-    let mut index -> number = 0;
+    let mut inferred_element_type -> string = metadata.element_type;
+    let mut index -> number = metadata.start_index;
     loop {
         if index >= elements.length {
             break;
@@ -2714,7 +2720,9 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     }
 
     if operands.length == 0 {
-        inferred_element_type = "double";
+        if inferred_element_type.length == 0 {
+            inferred_element_type = "double";
+        }
     }
 
     if inferred_element_type.length == 0 {
@@ -3336,6 +3344,50 @@ fn split_array_elements(text -> string) -> string[] {
         index += 1;
     }
     return filtered;
+}
+
+fn parse_array_literal_metadata(entries -> string[]) -> ArrayLiteralMetadata {
+    if entries.length == 0 {
+        return ArrayLiteralMetadata { element_type: "", start_index: 0 };
+    }
+    let first = trim_text(entries[0]);
+    if first.length < 9 {
+        return ArrayLiteralMetadata { element_type: "", start_index: 0 };
+    }
+    let prefix = substring(first, 0, 9);
+    if prefix != "#element:" {
+        return ArrayLiteralMetadata { element_type: "", start_index: 0 };
+    }
+    let annotation = trim_text(substring(first, 9, first.length));
+    if annotation.length == 0 {
+        return ArrayLiteralMetadata { element_type: "", start_index: 1 };
+    }
+    let mapped = map_metadata_annotation(annotation);
+    return ArrayLiteralMetadata { element_type: mapped, start_index: 1 };
+}
+
+fn map_metadata_annotation(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let primitive = map_primitive_type(trimmed);
+    if primitive.length > 0 {
+        return primitive;
+    }
+    if trimmed.length > 2 {
+        let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
+        if suffix == "[]" {
+            let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
+            let inner_type = map_metadata_annotation(inner_annotation);
+            if inner_type.length == 0 {
+                return "";
+            }
+            let struct_type = array_struct_type_for_element(inner_type);
+            return struct_type + "*";
+        }
+    }
+    return "";
 }
 
 fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {

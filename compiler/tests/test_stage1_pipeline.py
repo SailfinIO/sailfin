@@ -46,6 +46,16 @@ fn main() ![io] {
 }
 """
 
+ARRAY_METADATA_SOURCE = """
+fn make_numbers() -> number[] {
+  return [1, 2, 3];
+}
+
+fn make_booleans() -> boolean[] {
+  return [true, false];
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -122,3 +132,18 @@ def test_struct_method_lowering() -> None:
     pair_instance = pair_class(1, 2)
     assert hasattr(pair_instance, "sum"), "sum method missing on struct facade"
     assert pair_instance.sum() == 3
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_tags_array_literals_with_metadata() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+
+    result = stage1_main.compile_to_native(ARRAY_METADATA_SOURCE)
+    assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+
+    artifact = next((artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"), None)
+    assert artifact is not None, "native artifact missing from emit_native output"
+
+    contents = artifact.contents
+    assert "[#element:number, 1, 2, 3]" in contents
+    assert "[#element:boolean, true, false]" in contents

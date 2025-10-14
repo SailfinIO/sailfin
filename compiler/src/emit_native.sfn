@@ -802,16 +802,7 @@ fn format_expression(expression -> Expression) -> string {
         return format_expression(expression.sequence) + "[" + format_expression(expression.index) + "]";
     }
     if expression.variant == "Array" {
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
-        loop {
-            if index >= expression.elements.length {
-                break;
-            }
-            rendered = append_string(rendered, format_expression(expression.elements[index]));
-            index += 1;
-        }
-        return "[" + join_with_separator(rendered, ", ") + "]";
+        return format_array_expression(expression.elements);
     }
     if expression.variant == "Object" {
         let mut rendered -> string[] = [];
@@ -850,6 +841,80 @@ fn format_expression(expression -> Expression) -> string {
         return trim_text(expression.text);
     }
     return "<" + expression.variant + ">";
+}
+
+fn format_array_expression(elements -> Expression[]) -> string {
+    let annotation = infer_array_element_type(elements);
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        rendered = append_string(rendered, format_expression(elements[index]));
+        index += 1;
+    }
+    if rendered.length == 0 {
+        if annotation.length == 0 {
+            return "[]";
+        }
+        return "[#element:" + annotation + "]";
+    }
+    let body = join_with_separator(rendered, ", ");
+    if annotation.length == 0 {
+        return "[" + body + "]";
+    }
+    return "[#element:" + annotation + ", " + body + "]";
+}
+
+fn infer_array_element_type(elements -> Expression[]) -> string {
+    if elements.length == 0 {
+        return "";
+    }
+    let mut candidate -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        let element_type = infer_expression_type(elements[index]);
+        if element_type.length == 0 {
+            return "";
+        }
+        if candidate.length == 0 {
+            candidate = element_type;
+        } else if candidate != element_type {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate;
+}
+
+fn infer_expression_type(expression -> Expression) -> string {
+    if expression.variant == "NumberLiteral" {
+        return "number";
+    }
+    if expression.variant == "BooleanLiteral" {
+        return "boolean";
+    }
+    if expression.variant == "StringLiteral" {
+        return "string";
+    }
+    if expression.variant == "Struct" {
+        if expression.type_name.length == 0 {
+            return "";
+        }
+        return join_with_separator(expression.type_name, ".");
+    }
+    if expression.variant == "Array" {
+        let nested = infer_array_element_type(expression.elements);
+        if nested.length == 0 {
+            return "";
+        }
+        return nested + "[]";
+    }
+    return "";
 }
 
 fn quote_string(value -> string) -> string {
