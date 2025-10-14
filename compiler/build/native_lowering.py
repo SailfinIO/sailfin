@@ -951,7 +951,7 @@ def rewrite_literal_tokens(expression):
 def rewrite_push_calls(expression):
     if len(expression) == 0:
         return expression
-    return replace_all(expression, ".append(", ".append(")
+    return replace_all(expression, ".push(", ".append(")
 
 def rewrite_concat_calls(expression):
     current = expression
