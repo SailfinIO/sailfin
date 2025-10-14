@@ -9,7 +9,7 @@ struct User implements Greeter {
   name -> string;
 
   fn greet(self) -> string {
-    return "Hello, {{self.name}}!";
+    return "Hello, {{ self.name }}!";
   }
 }
 
