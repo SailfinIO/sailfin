@@ -45,6 +45,34 @@ def _build_number_array(values):
     return buffer, struct
 
 
+class _ArrayInt(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.POINTER(ctypes.c_longlong)),
+        ("length", ctypes.c_longlong),
+    ]
+
+
+def _build_int_array(values):
+    array_type = ctypes.c_longlong * len(values)
+    buffer = array_type(*values)
+    struct = _ArrayInt(data=buffer, length=len(values))
+    return buffer, struct
+
+
+class _ArrayBool(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.POINTER(ctypes.c_bool)),
+        ("length", ctypes.c_longlong),
+    ]
+
+
+def _build_bool_array(values):
+    array_type = ctypes.c_bool * len(values)
+    buffer = array_type(*values)
+    struct = _ArrayBool(data=buffer, length=len(values))
+    return buffer, struct
+
+
 def _invoke(engine, name: str, restype, arg_types, *args):
     address = engine.get_function_address(name)
     assert address != 0, f"function {name} not found"
@@ -394,6 +422,105 @@ fn main() -> number {
         ) == pytest.approx(6.0)
 
         assert _invoke_double(engine, "sum_literal_binding") == pytest.approx(10.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_iterates_non_number_arrays() -> None:
+    source = """
+fn any_true(values -> boolean[]) -> boolean {
+    for value in values {
+        if value {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn all_true(values -> boolean[]) -> boolean {
+    for value in values {
+        if value == false {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn count_true_literal() -> int {
+    let mut total -> int = 0;
+    for value in [true, false, true, true] {
+        if value {
+            total = total + 1;
+        }
+    }
+    return total;
+}
+
+fn sum_ints(values -> int[]) -> int {
+    let mut total -> int = 0;
+    for value in values {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_int_literal() -> int {
+    let mut total -> int = 0;
+    for value in [1, 2, 3, 4] {
+        total = total + value;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    assert lowered.diagnostics == []
+    ir = lowered.ir
+    assert "define i1 @any_true" in ir
+    assert "define i64 @count_true_literal" in ir
+    assert "define i64 @sum_int_literal" in ir
+
+    engine, module = _compile_ir(ir)
+    buffers = []
+    try:
+        buf_bool_any, arr_bool_any = _build_bool_array([True, False, True])
+        buf_bool_all, arr_bool_all = _build_bool_array([True, True, True])
+        buffers.extend([buf_bool_any, buf_bool_all])
+        assert _invoke_bool(
+            engine,
+            "any_true",
+            (ctypes.POINTER(_ArrayBool),),
+            ctypes.byref(arr_bool_any),
+        ) is True
+        assert _invoke_bool(
+            engine,
+            "all_true",
+            (ctypes.POINTER(_ArrayBool),),
+            ctypes.byref(arr_bool_any),
+        ) is False
+        assert _invoke_bool(
+            engine,
+            "all_true",
+            (ctypes.POINTER(_ArrayBool),),
+            ctypes.byref(arr_bool_all),
+        ) is True
+        assert _invoke_int(engine, "count_true_literal") == 3
+
+        buf_int, arr_int = _build_int_array([-1, 2, 4, 5])
+        buffers.append(buf_int)
+        assert _invoke(
+            engine,
+            "sum_ints",
+            ctypes.c_longlong,
+            (ctypes.POINTER(_ArrayInt),),
+            ctypes.byref(arr_int),
+        ) == 10
+        assert _invoke_int(engine, "sum_int_literal") == 10
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)

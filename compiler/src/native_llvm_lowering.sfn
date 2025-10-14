@@ -2688,6 +2688,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let elements = split_array_elements(inner);
 
     let mut operands -> LLVMOperand[] = [];
+    let mut inferred_element_type -> string = "";
     let mut index -> number = 0;
     loop {
         if index >= elements.length {
@@ -2707,26 +2708,52 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
         }
-        let coerced = coerce_operand_to_type(lowered.operand, "double", current_temp, current_lines);
+        operands = append_llvm_operand(operands, lowered.operand);
+        inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
+        index += 1;
+    }
+
+    if operands.length == 0 {
+        inferred_element_type = "double";
+    }
+
+    if inferred_element_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported array literal element type");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    let element_type = inferred_element_type;
+
+    let mut coerced_operands -> LLVMOperand[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        let operand = operands[index];
+        let coerced = coerce_operand_to_type(operand, element_type, current_temp, current_lines);
         diagnostics = diagnostics.concat(coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         if coerced.operand == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `number`");
+            diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `" + element_type + "`");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
         }
-        operands = append_llvm_operand(operands, coerced.operand);
+        coerced_operands = append_llvm_operand(coerced_operands, coerced.operand);
         index += 1;
     }
+    operands = coerced_operands;
 
     let length_value = operands.length;
     let length_text = number_to_string(length_value);
+    let array_type = "[" + length_text + " x " + element_type + "]";
+
     let array_alloca = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + array_alloca + " = alloca [" + length_text + " x double]");
+    current_lines = append_string(current_lines, "  " + array_alloca + " = alloca " + array_type);
     current_temp += 1;
 
     let data_pointer = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + data_pointer + " = getelementptr [" + length_text + " x double], [" + length_text + " x double]* " + array_alloca + ", i32 0, i32 0");
+    current_lines = append_string(current_lines, "  " + data_pointer + " = getelementptr " + array_type + ", " + array_type + "* " + array_alloca + ", i32 0, i32 0");
     current_temp += 1;
 
     index = 0;
@@ -2735,13 +2762,13 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             break;
         }
         let element_pointer = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + element_pointer + " = getelementptr double, double* " + data_pointer + ", i64 " + number_to_string(index));
+        current_lines = append_string(current_lines, "  " + element_pointer + " = getelementptr " + element_type + ", " + element_type + "* " + data_pointer + ", i64 " + number_to_string(index));
         current_temp += 1;
-        current_lines = append_string(current_lines, "  store double " + operands[index].value + ", double* " + element_pointer);
+        current_lines = append_string(current_lines, "  store " + element_type + " " + operands[index].value + ", " + element_type + "* " + element_pointer);
         index += 1;
     }
 
-    let struct_type = array_struct_type_for_element("double");
+    let struct_type = array_struct_type_for_element(element_type);
     let struct_alloca = format_temp_name(current_temp);
     current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type);
     current_temp += 1;
@@ -2749,7 +2776,9 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let data_field_pointer = format_temp_name(current_temp);
     current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 0");
     current_temp += 1;
-    current_lines = append_string(current_lines, "  store double* " + data_pointer + ", double** " + data_field_pointer);
+    let data_pointer_type = element_type + "*";
+    let data_pointer_pointer_type = data_pointer_type + "*";
+    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + data_pointer + ", " + data_pointer_pointer_type + " " + data_field_pointer);
 
     let length_field_pointer = format_temp_name(current_temp);
     current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 1");

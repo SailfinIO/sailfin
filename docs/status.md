@@ -26,8 +26,8 @@ roadmaps.
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
   provide the initial scaffolding, now covering local assignments, structured
   `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration with
-  dynamic stride support, element-wise `.for` loops over `number[]` arrays, and `match`
-  dispatch alongside
+  dynamic stride support, element-wise `.for` loops over primitive arrays (`number[]`,
+  `int[]`, `boolean[]`), and `match` dispatch alongside
   boolean and integer primitives for parameters, locals, and returns in the LLVM
   prototype.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
@@ -143,7 +143,7 @@ roadmaps.
   feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` now lifts
   arithmetic routines with local `let`s, assignments, `if`/`else` control
   flow, `loop` blocks (`break`/`continue`), `match` dispatch, and `.for` loops
-  over numeric ranges with dynamic stride expressions, inline `number[]`
+  over numeric ranges with dynamic stride expressions, inline primitive array
   literals, and locals bound to array expressions (even without explicit type
   annotations) into runnable LLVM IR, with
   `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
@@ -160,8 +160,9 @@ roadmaps.
   the end-to-end self-host check (`test_stage1_artifact.py`) and native lowering
   validation.
 - `compiler/tests/test_native_llvm_execution.py` lowers numeric, boolean,
-  integer, and array-iterating samples to LLVM IR and executes them through
-  `llvmlite` so Stage2 regressions surface as standard test failures.
+  integer, and primitive-array-iterating samples (including `boolean[]` and
+  `int[]` literals) to LLVM IR and executes them through `llvmlite` so Stage2
+  regressions surface as standard test failures.
 - CI packages the stage1 artifact, uploads it, and semantic-release tags a
   GitHub release. The installer smoke test verifies the archive can rebuild
   stage1 (`scripts/install_stage1.py`).
