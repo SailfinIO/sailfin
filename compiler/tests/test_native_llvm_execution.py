@@ -31,6 +31,20 @@ def _compile_ir(ir: str):
     return engine, module
 
 
+class _ArrayNumber(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.POINTER(ctypes.c_double)),
+        ("length", ctypes.c_longlong),
+    ]
+
+
+def _build_number_array(values):
+    array_type = ctypes.c_double * len(values)
+    buffer = array_type(*values)
+    struct = _ArrayNumber(data=buffer, length=len(values))
+    return buffer, struct
+
+
 def _invoke(engine, name: str, restype, arg_types, *args):
     address = engine.get_function_address(name)
     assert address != 0, f"function {name} not found"
@@ -243,6 +257,86 @@ fn main() -> number {
         assert _invoke_bool(engine, "is_positive", (ctypes.c_longlong,), -3) is False
         assert _invoke_bool(engine, "is_positive", (ctypes.c_longlong,), 3) is True
         assert _invoke(engine, "spill_to_number", ctypes.c_double, (ctypes.c_longlong,), 7) == pytest.approx(7.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_iterates_number_arrays() -> None:
+    source = """
+fn sum(values -> number[]) -> number {
+    let mut total -> number = 0;
+    for value in values {
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_positive(values -> number[]) -> number {
+    let mut total -> number = 0;
+    for value in values {
+        if value < 0 {
+            continue;
+        }
+        total = total + value;
+    }
+    return total;
+}
+
+fn sum_until(values -> number[], limit -> number) -> number {
+    let mut total -> number = 0;
+    for value in values {
+        if value == limit {
+            break;
+        }
+        total = total + value;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    assert lowered.diagnostics == []
+    ir = lowered.ir
+    assert "{ double*, i64 }* %values" in ir
+
+    engine, module = _compile_ir(ir)
+    buffers = []
+    try:
+        buf_all, arr_all = _build_number_array([1.0, 2.0, 3.0, 4.0])
+        buffers.append(buf_all)
+        assert _invoke(
+            engine,
+            "sum",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayNumber),),
+            ctypes.byref(arr_all),
+        ) == pytest.approx(10.0)
+
+        buf_pos, arr_pos = _build_number_array([-5.0, 1.0, -2.0, 4.0])
+        buffers.append(buf_pos)
+        assert _invoke(
+            engine,
+            "sum_positive",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayNumber),),
+            ctypes.byref(arr_pos),
+        ) == pytest.approx(5.0)
+
+        buf_until, arr_until = _build_number_array([2.0, 3.0, 5.0, 11.0])
+        buffers.append(buf_until)
+        assert _invoke(
+            engine,
+            "sum_until",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayNumber), ctypes.c_double),
+            ctypes.byref(arr_until),
+            5.0,
+        ) == pytest.approx(5.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)

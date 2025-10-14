@@ -26,8 +26,9 @@ roadmaps.
   Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
   provide the initial scaffolding, now covering local assignments, structured
   `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration,
-  and `match` dispatch alongside boolean and integer primitives for parameters,
-  locals, and returns in the LLVM prototype.
+  element-wise `.for` loops over `number[]` arrays, and `match` dispatch alongside
+  boolean and integer primitives for parameters, locals, and returns in the LLVM
+  prototype.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.
@@ -155,9 +156,9 @@ roadmaps.
 - `make test` runs the stage1-focused pytest suite (`compiler/tests/`), covering
   the end-to-end self-host check (`test_stage1_artifact.py`) and native lowering
   validation.
-- `compiler/tests/test_native_llvm_execution.py` lowers numeric, boolean, and
-  integer samples to LLVM IR and executes them through `llvmlite` so Stage2
-  regressions surface as standard test failures.
+- `compiler/tests/test_native_llvm_execution.py` lowers numeric, boolean,
+  integer, and array-iterating samples to LLVM IR and executes them through
+  `llvmlite` so Stage2 regressions surface as standard test failures.
 - CI packages the stage1 artifact, uploads it, and semantic-release tags a
   GitHub release. The installer smoke test verifies the archive can rebuild
   stage1 (`scripts/install_stage1.py`).

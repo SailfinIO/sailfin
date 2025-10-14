@@ -53,7 +53,7 @@ def infer_effects(existing, decorators):
             break
         decorator = decorators[index]
         if decorator.name == "trace"  or  decorator.name == "logExecution"  or  decorator.name == "logexecution":
-            requires_io = true
+            requires_io = True
         index += 1
     if requires_io  and  not contains_effect(effects, "io"):
         effects = append_string(effects, "io")
@@ -99,10 +99,10 @@ def evaluate_expression(expr):
         if looks_like_quoted_string(text):
             literal = strip_surrounding_quotes(text)
             return runtime.enum_instantiate(LiteralValue, 'String', [runtime.enum_field('value', literal)])
-        if text == "true":
-            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', true)])
-        if text == "false":
-            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', false)])
+        if text == "True":
+            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', True)])
+        if text == "False":
+            return runtime.enum_instantiate(LiteralValue, 'Boolean', [runtime.enum_field('value', False)])
         if looks_like_number(text):
             return runtime.enum_instantiate(LiteralValue, 'Number', [runtime.enum_field('value', text)])
     return LiteralValue.Unsupported()
@@ -137,21 +137,21 @@ def trim_whitespace(value):
 
 def looks_like_quoted_string(text):
     if len(text) < 2:
-        return false
+        return False
     if text[0] != "\"":
-        return false
+        return False
     if text[len(text) - 1] != "\"":
-        return false
-    return true
+        return False
+    return True
 
 def looks_like_number(text):
     if len(text) == 0:
-        return false
-    has_decimal = false
+        return False
+    has_decimal = False
     index = 0
     if text[0] == "-":
         if len(text) == 1:
-            return false
+            return False
         index = 1
     while True:
         if index >= len(text):
@@ -159,14 +159,14 @@ def looks_like_number(text):
         ch = text[index]
         if ch == ".":
             if has_decimal:
-                return false
-            has_decimal = true
+                return False
+            has_decimal = True
             index += 1
             continue
         if not is_decimal_digit(ch):
-            return false
+            return False
         index += 1
-    return true
+    return True
 
 def is_decimal_digit(ch):
     return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
@@ -196,9 +196,9 @@ def contains_effect(effects, effect):
         if index >= len(effects):
             break
         if effects[index] == effect:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def is_whitespace_char(ch):
     return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"

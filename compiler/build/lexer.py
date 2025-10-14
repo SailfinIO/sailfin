@@ -107,7 +107,7 @@ def lex(source):
             state.index += 1
             state.column += 1
             literal = ""
-            escaped = false
+            escaped = False
             while True:
                 if state.index >= len(state.source):
                     break
@@ -117,13 +117,13 @@ def lex(source):
                     state.column += 1
                     break
                 if not escaped  and  is_backslash(current):
-                    escaped = true
+                    escaped = True
                     state.index += 1
                     state.column += 1
                     continue
                 if escaped:
                     literal = literal + interpret_escape(current)
-                    escaped = false
+                    escaped = False
                 else:
                     literal = literal + current
                 if current == "\n":
@@ -178,8 +178,8 @@ def lex(source):
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
-            if value == "true"  or  value == "false":
-                bool_value = value == "true"
+            if value == "True"  or  value == "False":
+                bool_value = value == "True"
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'BooleanLiteral', [runtime.enum_field('value', bool_value)]), lexeme=value, line=start_line, column=start_column))
             else:
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))

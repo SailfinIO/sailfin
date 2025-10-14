@@ -62,7 +62,7 @@ def analyze_statement(statement):
         qualified = "tool " + signature.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "TestDeclaration":
-        signature = FunctionSignature(name=statement.name, is_async=false, parameters=[], return_type=null, effects=statement.effects, type_parameters=[])
+        signature = FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[])
         qualified = "test " + statement.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "StructDeclaration":
@@ -87,14 +87,14 @@ def analyze_routine(signature, body, decorators, name):
             break
         declared = append_unique_effect(declared, signature.effects[declared_index])
         declared_index += 1
-    requires_io_from_decorators = false
+    requires_io_from_decorators = False
     decorator_index = 0
     while True:
         if decorator_index >= len(decorator_info):
             break
         decorator_entry = decorator_info[decorator_index]
         if decorator_entry.name == "trace"  or  decorator_entry.name == "logExecution"  or  decorator_entry.name == "logexecution":
-            requires_io_from_decorators = true
+            requires_io_from_decorators = True
             break
         decorator_index += 1
     if requires_io_from_decorators:
@@ -154,7 +154,7 @@ def collect_effects_from_statement(statement):
         return required
     if statement.variant == "ForStatement":
         required = collect_effects_from_block(statement.body)
-        if statement.clause.target != null:
+        if statement.clause.target != None:
             required = merge_requirements(required, collect_effects_from_expression(statement.clause.target))
         required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable))
         return required
@@ -172,7 +172,7 @@ def collect_effects_from_statement(statement):
     if statement.variant == "IfStatement":
         required = collect_effects_from_expression(statement.condition)
         required = merge_requirements(required, collect_effects_from_block(statement.then_block))
-        if statement.else_branch != null:
+        if statement.else_branch != None:
             required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch))
         return required
     if statement.variant == "ReturnStatement":
@@ -213,21 +213,21 @@ def collect_effects_from_statement(statement):
 
 def collect_effects_from_else_branch(branch):
     required = []
-    if branch.body != null:
+    if branch.body != None:
         required = merge_requirements(required, collect_effects_from_block(branch.body))
-    if branch.statement != null:
+    if branch.statement != None:
         required = merge_requirements(required, collect_effects_from_statement(branch.statement))
     return required
 
 def collect_effects_from_match_case(case):
     required = collect_effects_from_expression(case.pattern)
-    if case.guard != null:
+    if case.guard != None:
         required = merge_requirements(required, collect_effects_from_expression(case.guard))
     required = merge_requirements(required, collect_effects_from_block(case.body))
     return required
 
 def collect_effects_from_expression(expression):
-    if expression == null:
+    if expression == None:
         return []
     if expression.variant == "Call":
         required = collect_effects_from_expression(expression.callee)
@@ -423,9 +423,9 @@ def contains_effect(effects, effect):
         if index >= len(effects):
             break
         if effects[index] == effect:
-            return true
+            return True
         index += 1
-    return false
+    return False
 
 def append_requirement(collection, item):
     return (collection) + ([item])
@@ -446,6 +446,6 @@ def contains_requirement_for_effect(requirements, effect):
         if index >= len(requirements):
             break
         if requirements[index].effect == effect:
-            return true
+            return True
         index += 1
-    return false
+    return False

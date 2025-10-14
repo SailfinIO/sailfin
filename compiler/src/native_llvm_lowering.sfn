@@ -776,102 +776,7 @@ fn lower_for_instruction(
     let mut next_index -> number = structure.next_index + 1;
 
     let instruction = function.instructions[start_index];
-    let range_parse = parse_range_iterable(instruction.iterable);
-    diagnostics = diagnostics.concat(range_parse.diagnostics);
-    if !range_parse.success {
-        diagnostics = append_string(diagnostics, "llvm lowering: only numeric ranges (`start..end`) are supported for `.for` loops in `" + function.name + "`");
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
 
-    let start_result = lower_expression(range_parse.start, bindings, current_locals, current_temp, current_lines, functions);
-    diagnostics = diagnostics.concat(start_result.diagnostics);
-    current_lines = start_result.lines;
-    current_temp = start_result.temp_index;
-
-    if start_result.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
-
-    let end_result = lower_expression(range_parse.end, bindings, current_locals, current_temp, current_lines, functions);
-    diagnostics = diagnostics.concat(end_result.diagnostics);
-    current_lines = end_result.lines;
-    current_temp = end_result.temp_index;
-
-    if end_result.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
-
-        let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
-        diagnostics = diagnostics.concat(start_coerced.diagnostics);
-        current_lines = start_coerced.lines;
-        current_temp = start_coerced.temp_index;
-        if start_coerced.operand == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
-            return BlockLoweringResult {
-                lines: current_lines,
-                allocas: current_allocas,
-                locals: current_locals,
-                temp_index: current_temp,
-                block_counter: current_block_counter,
-                diagnostics: diagnostics,
-                terminated: false,
-                next_local_id: current_next_local,
-                next_index: next_index,
-            };
-        }
-        let start_operand = start_coerced.operand;
-
-        let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
-        diagnostics = diagnostics.concat(end_coerced.diagnostics);
-        current_lines = end_coerced.lines;
-        current_temp = end_coerced.temp_index;
-        if end_coerced.operand == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
-            return BlockLoweringResult {
-                lines: current_lines,
-                allocas: current_allocas,
-                locals: current_locals,
-                temp_index: current_temp,
-                block_counter: current_block_counter,
-                diagnostics: diagnostics,
-                terminated: false,
-                next_local_id: current_next_local,
-                next_index: next_index,
-            };
-        }
-        let end_operand = end_coerced.operand;
     let mut raw_target = trim_text(instruction.target);
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
@@ -919,6 +824,288 @@ fn lower_for_instruction(
         };
     }
 
+    let range_parse = parse_range_iterable(instruction.iterable);
+    if range_parse.success {
+        diagnostics = diagnostics.concat(range_parse.diagnostics);
+
+        let start_result = lower_expression(range_parse.start, bindings, current_locals, current_temp, current_lines, functions);
+        diagnostics = diagnostics.concat(start_result.diagnostics);
+        current_lines = start_result.lines;
+        current_temp = start_result.temp_index;
+
+        if start_result.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+
+        let end_result = lower_expression(range_parse.end, bindings, current_locals, current_temp, current_lines, functions);
+        diagnostics = diagnostics.concat(end_result.diagnostics);
+        current_lines = end_result.lines;
+        current_temp = end_result.temp_index;
+
+        if end_result.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+
+        let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
+        diagnostics = diagnostics.concat(start_coerced.diagnostics);
+        current_lines = start_coerced.lines;
+        current_temp = start_coerced.temp_index;
+        if start_coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+        let start_operand = start_coerced.operand;
+
+        let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
+        diagnostics = diagnostics.concat(end_coerced.diagnostics);
+        current_lines = end_coerced.lines;
+        current_temp = end_coerced.temp_index;
+        if end_coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+        let end_operand = end_coerced.operand;
+
+        let loop_header_alloc = allocate_block_label("for", current_block_counter);
+        let loop_header_label = loop_header_alloc.label;
+        current_block_counter = loop_header_alloc.next_counter;
+
+        let loop_body_alloc = allocate_block_label("forbody", current_block_counter);
+        let loop_body_label = loop_body_alloc.label;
+        current_block_counter = loop_body_alloc.next_counter;
+
+        let loop_increment_alloc = allocate_block_label("forinc", current_block_counter);
+        let loop_increment_label = loop_increment_alloc.label;
+        current_block_counter = loop_increment_alloc.next_counter;
+
+        let loop_exit_alloc = allocate_block_label("afterfor", current_block_counter);
+        let loop_exit_label = loop_exit_alloc.label;
+        current_block_counter = loop_exit_alloc.next_counter;
+
+        let iteration_pointer = format_local_pointer_name(current_next_local);
+        current_next_local += 1;
+        current_allocas = append_string(current_allocas, "  " + iteration_pointer + " = alloca double");
+        current_lines = append_string(current_lines, "  store double " + start_operand.value + ", double* " + iteration_pointer);
+
+        current_lines = append_string(current_lines, "  br label %" + loop_header_label);
+        current_lines = append_string(current_lines, loop_header_label + ":");
+
+        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double" };
+        let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
+        diagnostics = diagnostics.concat(header_load.diagnostics);
+        current_lines = header_load.lines;
+        current_temp = header_load.temp_index;
+
+        if header_load.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
+            current_lines = append_string(current_lines, "  br label %" + loop_exit_label);
+            current_lines = append_string(current_lines, loop_exit_label + ":");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+
+        let comparison = emit_comparison_instruction("<", header_load.operand, end_operand, current_temp, current_lines);
+        diagnostics = diagnostics.concat(comparison.diagnostics);
+        current_lines = comparison.lines;
+        current_temp = comparison.temp_index;
+
+        if comparison.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
+            current_lines = append_string(current_lines, "  br label %" + loop_exit_label);
+            current_lines = append_string(current_lines, loop_exit_label + ":");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                next_index: next_index,
+            };
+        }
+
+        current_lines = append_string(current_lines, "  br i1 " + comparison.operand.value + ", label %" + loop_body_label + ", label %" + loop_exit_label);
+        current_lines = append_string(current_lines, loop_body_label + ":");
+
+        let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+        let stacked = append_loop_context(loop_stack, context);
+
+        let body_locals = append_local_binding(current_locals, iteration_binding);
+        let body_result = lower_instruction_range(
+            function,
+            structure.body_start,
+            structure.body_end,
+            llvm_return,
+            bindings,
+            body_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            functions,
+            stacked
+        );
+
+        diagnostics = diagnostics.concat(body_result.diagnostics);
+        current_lines = current_lines.concat(body_result.lines);
+        current_allocas = body_result.allocas;
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+
+        if !body_result.terminated {
+            current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
+        }
+
+        current_lines = append_string(current_lines, loop_increment_label + ":");
+
+        let increment_load = load_local_operand(iteration_binding, current_temp, current_lines);
+        diagnostics = diagnostics.concat(increment_load.diagnostics);
+        current_lines = increment_load.lines;
+        current_temp = increment_load.temp_index;
+
+        if increment_load.operand != null {
+            let next_value_name = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + next_value_name + " = fadd double " + increment_load.operand.value + ", 1.0");
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  store double " + next_value_name + ", double* " + iteration_pointer);
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to increment `.for` iterator in `" + function.name + "`");
+        }
+
+        current_lines = append_string(current_lines, "  br label %" + loop_header_label);
+        current_lines = append_string(current_lines, loop_exit_label + ":");
+
+        current_locals = locals;
+
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            next_index: next_index,
+        };
+    }
+
+    let iterable_result = lower_expression(instruction.iterable, bindings, current_locals, current_temp, current_lines, functions);
+    diagnostics = diagnostics.concat(iterable_result.diagnostics);
+    current_lines = iterable_result.lines;
+    current_temp = iterable_result.temp_index;
+
+    if iterable_result.operand == null {
+        diagnostics = diagnostics.concat(range_parse.diagnostics);
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` iterable in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            next_index: next_index,
+        };
+    }
+
+    let iterable_operand = iterable_result.operand;
+    let element_type = array_pointer_element_type(iterable_operand.llvm_type);
+    if element_type.length == 0 {
+        diagnostics = diagnostics.concat(range_parse.diagnostics);
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            next_index: next_index,
+        };
+    }
+
+    let array_struct_type = array_struct_type_for_element(element_type);
+    let data_pointer_type = element_type + "*";
+    let data_pointer_pointer_type = data_pointer_type + "*";
+
+    let length_pointer_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + length_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 1");
+    current_temp += 1;
+
+    let length_load_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + length_load_name + " = load i64, i64* " + length_pointer_name);
+    current_temp += 1;
+    let length_operand = LLVMOperand { llvm_type: "i64", value: length_load_name };
+
+    let data_pointer_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + data_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 0");
+    current_temp += 1;
+
+    let data_load_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + data_load_name + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_pointer_name);
+    current_temp += 1;
+    let data_operand = LLVMOperand { llvm_type: data_pointer_type, value: data_load_name };
+
     let loop_header_alloc = allocate_block_label("for", current_block_counter);
     let loop_header_label = loop_header_alloc.label;
     current_block_counter = loop_header_alloc.next_counter;
@@ -935,65 +1122,47 @@ fn lower_for_instruction(
     let loop_exit_label = loop_exit_alloc.label;
     current_block_counter = loop_exit_alloc.next_counter;
 
+    let index_pointer = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    current_allocas = append_string(current_allocas, "  " + index_pointer + " = alloca i64");
+    current_lines = append_string(current_lines, "  store i64 0, i64* " + index_pointer);
+
     let iteration_pointer = format_local_pointer_name(current_next_local);
     current_next_local += 1;
-    current_allocas = append_string(current_allocas, "  " + iteration_pointer + " = alloca double");
-    current_lines = append_string(current_lines, "  store double " + start_operand.value + ", double* " + iteration_pointer);
+    current_allocas = append_string(current_allocas, "  " + iteration_pointer + " = alloca " + element_type);
+    current_lines = append_string(current_lines, "  store " + element_type + " " + default_return_literal(element_type) + ", " + element_type + "* " + iteration_pointer);
 
     current_lines = append_string(current_lines, "  br label %" + loop_header_label);
     current_lines = append_string(current_lines, loop_header_label + ":");
 
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double" };
-    let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    diagnostics = diagnostics.concat(header_load.diagnostics);
-    current_lines = header_load.lines;
-    current_temp = header_load.temp_index;
+    let header_index_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + header_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
 
-    if header_load.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
-        current_lines = append_string(current_lines, "  br label %" + loop_exit_label);
-        current_lines = append_string(current_lines, loop_exit_label + ":");
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
-
-    let comparison = emit_comparison_instruction("<", header_load.operand, end_operand, current_temp, current_lines);
-    diagnostics = diagnostics.concat(comparison.diagnostics);
-    current_lines = comparison.lines;
-    current_temp = comparison.temp_index;
-
-    if comparison.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
-        current_lines = append_string(current_lines, "  br label %" + loop_exit_label);
-        current_lines = append_string(current_lines, loop_exit_label + ":");
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            next_index: next_index,
-        };
-    }
-
-    current_lines = append_string(current_lines, "  br i1 " + comparison.operand.value + ", label %" + loop_body_label + ", label %" + loop_exit_label);
+    let comparison_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + comparison_name + " = icmp slt i64 " + header_index_name + ", " + length_operand.value);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  br i1 " + comparison_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
     current_lines = append_string(current_lines, loop_body_label + ":");
+
+    let body_index_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + body_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
+
+    let element_pointer_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + element_pointer_name + " = getelementptr " + element_type + ", " + element_type + "* " + data_operand.value + ", i64 " + body_index_name);
+    current_temp += 1;
+
+    let element_load_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + element_load_name + " = load " + element_type + ", " + element_type + "* " + element_pointer_name);
+    current_temp += 1;
+
+    current_lines = append_string(current_lines, "  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer);
 
     let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
     let stacked = append_loop_context(loop_stack, context);
 
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type };
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(
         function,
@@ -1024,20 +1193,15 @@ fn lower_for_instruction(
 
     current_lines = append_string(current_lines, loop_increment_label + ":");
 
-    let increment_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    diagnostics = diagnostics.concat(increment_load.diagnostics);
-    current_lines = increment_load.lines;
-    current_temp = increment_load.temp_index;
+    let increment_index_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + increment_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
 
-    if increment_load.operand != null {
-        let next_value_name = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + next_value_name + " = fadd double " + increment_load.operand.value + ", 1.0");
-        current_temp += 1;
-        current_lines = append_string(current_lines, "  store double " + next_value_name + ", double* " + iteration_pointer);
-    } else {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to increment `.for` iterator in `" + function.name + "`");
-    }
+    let next_index_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + next_index_name + " = add i64 " + increment_index_name + ", 1");
+    current_temp += 1;
 
+    current_lines = append_string(current_lines, "  store i64 " + next_index_name + ", i64* " + index_pointer);
     current_lines = append_string(current_lines, "  br label %" + loop_header_label);
     current_lines = append_string(current_lines, loop_exit_label + ":");
 
@@ -1889,21 +2053,63 @@ fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
 }
 
+fn map_primitive_type(annotation -> string) -> string {
+    if annotation == "number" {
+        return "double";
+    }
+    if annotation == "boolean" || annotation == "bool" {
+        return "i1";
+    }
+    if annotation == "int" || annotation == "i64" {
+        return "i64";
+    }
+    return "";
+}
+
+fn map_array_pointer_type(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length < 3 {
+        return "";
+    }
+    let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
+    if suffix != "[]" {
+        return "";
+    }
+    let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
+    let element_type = map_primitive_type(element_annotation);
+    if element_type.length == 0 {
+        return "";
+    }
+    return "{ " + element_type + "*, i64 }*";
+}
+
+fn array_struct_type_for_element(element_type -> string) -> string {
+    return "{ " + element_type + "*, i64 }";
+}
+
+fn array_pointer_element_type(llvm_type -> string) -> string {
+    if llvm_type == "{ double*, i64 }*" {
+        return "double";
+    }
+    if llvm_type == "{ i64*, i64 }*" {
+        return "i64";
+    }
+    if llvm_type == "{ i1*, i64 }*" {
+        return "i1";
+    }
+    return "";
+}
+
 fn map_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
     if trimmed.length == 0 || trimmed == "void" {
         return "void";
     }
-    if trimmed == "number" {
-        return "double";
+    let array_type = map_array_pointer_type(trimmed);
+    if array_type.length > 0 {
+        return array_type;
     }
-    if trimmed == "boolean" || trimmed == "bool" {
-        return "i1";
-    }
-    if trimmed == "int" || trimmed == "i64" {
-        return "i64";
-    }
-    return "";
+    return map_primitive_type(trimmed);
 }
 
 fn map_parameter_type(parameter_type -> string) -> string {
@@ -1911,16 +2117,11 @@ fn map_parameter_type(parameter_type -> string) -> string {
     if trimmed.length == 0 {
         return "double";
     }
-    if trimmed == "number" {
-        return "double";
+    let array_type = map_array_pointer_type(trimmed);
+    if array_type.length > 0 {
+        return array_type;
     }
-    if trimmed == "boolean" || trimmed == "bool" {
-        return "i1";
-    }
-    if trimmed == "int" || trimmed == "i64" {
-        return "i64";
-    }
-    return "";
+    return map_primitive_type(trimmed);
 }
 
 fn map_local_type(type_annotation -> string) -> string {
@@ -1928,16 +2129,11 @@ fn map_local_type(type_annotation -> string) -> string {
     if trimmed.length == 0 {
         return "double";
     }
-    if trimmed == "number" {
-        return "double";
+    let array_type = map_array_pointer_type(trimmed);
+    if array_type.length > 0 {
+        return array_type;
     }
-    if trimmed == "boolean" || trimmed == "bool" {
-        return "i1";
-    }
-    if trimmed == "int" || trimmed == "i64" {
-        return "i64";
-    }
-    return "";
+    return map_primitive_type(trimmed);
 }
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
@@ -2742,6 +2938,14 @@ fn format_typed_operand(operand -> LLVMOperand) -> string {
     return operand.llvm_type + " " + operand.value;
 }
 
+fn ends_with_pointer_suffix(value -> string) -> boolean {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 {
+        return false;
+    }
+    return trimmed[trimmed.length - 1] == "*";
+}
+
 fn default_return_literal(llvm_type -> string) -> string {
     if llvm_type == "double" {
         return "0.0";
@@ -2754,6 +2958,9 @@ fn default_return_literal(llvm_type -> string) -> string {
     }
     if llvm_type == "i1" {
         return "false";
+    }
+    if ends_with_pointer_suffix(llvm_type) {
+        return "null";
     }
     return "zeroinitializer";
 }
