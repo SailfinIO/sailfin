@@ -141,8 +141,8 @@ roadmaps.
   round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
   feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` now lifts
   arithmetic routines with local `let`s, assignments, `if`/`else` control
-  flow, `loop` blocks (`break`/`continue`), and `match` dispatch into runnable
-  LLVM IR, with
+  flow, `loop` blocks (`break`/`continue`), `match` dispatch, and `.for` loops
+  over numeric ranges or inline `number[]` literals into runnable LLVM IR, with
   `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
   `llvmlite` as a smoke guard.
 

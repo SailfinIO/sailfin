@@ -1392,6 +1392,11 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions)
         arguments_text = substring(stripped, call_index + 1, len(stripped) - 1)
         argument_entries = split_call_arguments(arguments_text)
         return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions)
+    if len(stripped) >= 2:
+        first = stripped[0]
+        last = stripped[len(stripped) - 1]
+        if first == "["  and  last == "]":
+            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions)
     parameter = find_parameter_binding(bindings, stripped)
     if parameter != None:
         operand = LLVMOperand(llvm_type=parameter.llvm_type, value=parameter.llvm_name)
@@ -1556,6 +1561,70 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     current_lines = append_string(current_lines, call_line)
     operand = LLVMOperand(llvm_type=llvm_return, value=temp_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=operand, diagnostics=diagnostics)
+
+def lower_array_literal(text, bindings, locals, temp_index, lines, functions):
+    diagnostics = []
+    current_lines = lines
+    current_temp = temp_index
+    inner = trim_text(substring(text, 1, len(text) - 1))
+    elements = split_array_elements(inner)
+    operands = []
+    index = 0
+    while True:
+        if index >= len(elements):
+            break
+        element_text = trim_text(elements[index])
+        if len(element_text) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: empty element in array literal")
+            index += 1
+            continue
+        lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions)
+        diagnostics = (diagnostics) + (lowered.diagnostics)
+        current_lines = lowered.lines
+        current_temp = lowered.temp_index
+        if lowered.operand == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        coerced = coerce_operand_to_type(lowered.operand, "double", current_temp, current_lines)
+        diagnostics = (diagnostics) + (coerced.diagnostics)
+        current_lines = coerced.lines
+        current_temp = coerced.temp_index
+        if coerced.operand == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `number`")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        operands = append_llvm_operand(operands, coerced.operand)
+        index += 1
+    length_value = len(operands)
+    length_text = number_to_string(length_value)
+    array_alloca = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + array_alloca + " = alloca [" + length_text + " x double]")
+    current_temp += 1
+    data_pointer = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + data_pointer + " = getelementptr [" + length_text + " x double], [" + length_text + " x double]* " + array_alloca + ", i32 0, i32 0")
+    current_temp += 1
+    index = 0
+    while True:
+        if index >= len(operands):
+            break
+        element_pointer = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + element_pointer + " = getelementptr double, double* " + data_pointer + ", i64 " + number_to_string(index))
+        current_temp += 1
+        current_lines = append_string(current_lines, "  store double " + operands[index].value + ", double* " + element_pointer)
+        index += 1
+    struct_type = array_struct_type_for_element("double")
+    struct_alloca = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type)
+    current_temp += 1
+    data_field_pointer = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 0")
+    current_temp += 1
+    current_lines = append_string(current_lines, "  store double* " + data_pointer + ", double** " + data_field_pointer)
+    length_field_pointer = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 1")
+    current_temp += 1
+    current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer)
+    operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_alloca)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
 
 def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index, lines):
     diagnostics = []
@@ -1899,6 +1968,59 @@ def split_call_arguments(text):
         index += 1
     entries = append_string(entries, trim_text(current))
     return entries
+
+def split_array_elements(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return []
+    entries = []
+    current = ""
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    index = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "(":
+            paren_depth += 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth -= 1
+            else:
+                if ch == "[":
+                    bracket_depth += 1
+                else:
+                    if ch == "]":
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                    else:
+                        if ch == "{":
+                            brace_depth += 1
+                        else:
+                            if ch == "}":
+                                if brace_depth > 0:
+                                    brace_depth -= 1
+        if ch == ","  and  paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
+            entries = append_string(entries, trim_text(current))
+            current = ""
+        else:
+            current = current + ch
+        index += 1
+    if len(current) > 0:
+        entries = append_string(entries, trim_text(current))
+    filtered = []
+    index = 0
+    while True:
+        if index >= len(entries):
+            break
+        entry = trim_text(entries[index])
+        if len(entry) > 0:
+            filtered = append_string(filtered, entry)
+        index += 1
+    return filtered
 
 def operation_name_for_symbol(symbol, llvm_type):
     if llvm_type == "double":

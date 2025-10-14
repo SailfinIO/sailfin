@@ -294,6 +294,14 @@ fn sum_until(values -> number[], limit -> number) -> number {
     return total;
 }
 
+fn sum_literal() -> number {
+    let mut total -> number = 0;
+    for value in [1, 2, 3, 4] {
+        total = total + value;
+    }
+    return total;
+}
+
 fn main() -> number {
     return 0;
 }
@@ -337,6 +345,8 @@ fn main() -> number {
             ctypes.byref(arr_until),
             5.0,
         ) == pytest.approx(5.0)
+
+        assert _invoke_double(engine, "sum_literal") == pytest.approx(10.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
