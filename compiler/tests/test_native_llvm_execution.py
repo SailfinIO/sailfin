@@ -1,4 +1,5 @@
 import ctypes
+import textwrap
 
 import llvmlite.binding as llvm
 import pytest
@@ -36,6 +37,15 @@ def _compile_ir(ir: str):
     engine.finalize_object()
     engine.run_static_constructors()
     return engine, module
+
+
+def _lower_native_text(artifact_text: str):
+    module = NativeModule(
+        artifacts=[NativeArtifact(name="test.sfn-asm", format="sailfin-native-text", contents=textwrap.dedent(artifact_text).strip())],
+        entry_points=[],
+        symbol_count=0,
+    )
+    return lower_to_llvm(module)
 
 
 class _ArrayNumber(ctypes.Structure):
@@ -703,6 +713,59 @@ fn main() -> number {
     non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
     assert all("shared borrow" in diag for diag in non_pointer)
+
+
+def test_native_llvm_rejects_mutable_borrow_across_await() -> None:
+    artifact_text = """
+    ; Sailfin Native Prototype
+    .module main
+
+    .fn borrow_then_await(value -> &mut number) -> number
+    .meta return number
+    .meta effects none
+        .param value -> &mut number
+        eval let alias = &mut *value
+        eval let result = await compute()
+        ret 0
+    .endfn
+
+    .fn compute() -> number
+    .meta return number
+    .meta effects none
+        ret 1
+    .endfn
+    """
+
+    lowered = _lower_native_text(artifact_text)
+    borrow_diags = [diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
+    assert borrow_diags, lowered.diagnostics
+    assert any("`alias`" in diag and "`value`" in diag for diag in borrow_diags)
+    assert any("parameter `value`" in diag for diag in borrow_diags)
+
+
+def test_native_llvm_allows_await_without_mutable_borrow() -> None:
+    artifact_text = """
+    ; Sailfin Native Prototype
+    .module main
+
+    .fn await_without_borrow(value -> number) -> number
+    .meta return number
+    .meta effects none
+        .param value -> number
+        eval let result = await compute()
+        ret value
+    .endfn
+
+    .fn compute() -> number
+    .meta return number
+    .meta effects none
+        ret 1
+    .endfn
+    """
+
+    lowered = _lower_native_text(artifact_text)
+    borrow_diags = [diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
+    assert not borrow_diags, lowered.diagnostics
 
 
 def test_native_llvm_execution_surfaces_function_borrow_effects() -> None:

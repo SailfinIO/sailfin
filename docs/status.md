@@ -64,9 +64,13 @@ roadmaps.
   capability manifest (`LoweredLLVMResult.capability_manifest`) so callers see
   composite requirements. `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_propagates_composite_effects`
   locks the manifest propagation behaviour, including borrow + capability
-  combinations. Future enforcement will block `!mut` across suspension points
-  and require manifests to authorise any routine that touches unsafe
-  capabilities. Raw pointer access remains gated behind `unsafe extern`
+  combinations. Stage2 lowering now rejects suspension points (`await`, `yield`)
+  that would keep a mutable borrow or mutable borrow parameter alive, enforcing
+  the lattice rule `!mut ⊄ !async` and warning on the specific borrow that
+  remains active; see
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_allows_await_without_mutable_borrow`
+  for the rejection/acceptance coverage. Raw pointer access remains gated behind `unsafe extern`
   declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM
   without exposing unchecked pointer mutation to safe code.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.

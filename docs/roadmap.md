@@ -11,7 +11,8 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 1. **Stage2 Backend Delivery**
   - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
-  - [ ] Enforce the lattice rule `!mut ⊄ !async` by rejecting suspension points that would extend a mutable borrow across `await`/routine yields; add coverage for both acceptance and rejection cases.
+  - [ ] Attach source spans to suspension-conflict diagnostics so the LLVM backend can point at both the active borrow and the offending suspension site.
+  - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
   - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
   - [ ] Lower struct and enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
   - [ ] Emit lifetime region metadata alongside borrow lowering so future diagnostics and optimisations can reason about borrow scopes without re-parsing source text.
@@ -68,6 +69,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 Move checked tasks here with links to PRs / status updates for traceability.
 
 - [x] Stage2 move diagnostics spans — `.sfn-asm` now carries source-span metadata through the native IR and LLVM lowering so use-after-move errors surface line/column ranges in diagnostics. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array` assert span strings.
+- [x] Stage2 suspension conflict diagnostics — LLVM lowering now enforces the `!mut ⊄ !async` lattice rule by rejecting `await`/`yield` sites that keep mutable borrows or parameters alive. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_allows_await_without_mutable_borrow`; behaviour documented in `docs/status.md` and `docs/spec.md`.
 - [x] Stage2 capability manifest aggregation — Stage2 lowering now merges borrow effects with declared capabilities and publishes the combined requirements via `LoweredLLVMResult.capability_manifest`. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_propagates_composite_effects`; behaviour documented in `docs/status.md`.
 - [x] Stage2 move-out diagnostics — Ownership metadata now ships use-after-move errors for locals and parameters, including non-copy aggregates; regression coverage lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`, with behaviour documented in `docs/status.md`.
 - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)

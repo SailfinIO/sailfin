@@ -1025,7 +1025,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             current_next_local = lowered.next_local_id
                             handled_inline_let = True
                 if not handled_inline_let:
-                    lowered = lower_expression_statement(instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions)
+                    lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions)
                     diagnostics = (diagnostics) + (lowered.diagnostics)
                     current_lines = lowered.lines
                     current_temp = lowered.temp_index
@@ -1757,8 +1757,9 @@ def allocate_block_label(prefix, counter):
     return BlockLabelResult(label=prefix + number_to_string(counter), next_counter=counter + 1)
 
 def lower_condition_to_i1(function_name, expression, bindings, locals, temp_index, lines, functions):
+    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name)
     lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions)
-    diagnostics = lowered.diagnostics
+    diagnostics = (diagnostics) + (lowered.diagnostics)
     current_lines = lowered.lines
     current_temp = lowered.temp_index
     if lowered.operand == None:
@@ -1870,6 +1871,8 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_temp = temp_index
     ownership = None
     consumption = None
+    suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name)
+    diagnostics = (diagnostics) + (suspension_diagnostics)
     trimmed_annotation = trim_text(instruction.type_annotation)
     llvm_type = ""
     if len(trimmed_annotation) > 0:
@@ -1924,8 +1927,8 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False))
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1)
 
-def lower_expression_statement(instruction, expression, bindings, locals, temp_index, lines, functions):
-    diagnostics = []
+def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, functions):
+    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name)
     current_lines = lines
     current_temp = temp_index
     current_locals = locals
@@ -2116,6 +2119,8 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics)
     current_locals = locals
     current_bindings = bindings
+    suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name)
+    diagnostics = (diagnostics) + (suspension_diagnostics)
     ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     consumption = ownership_analysis.consumption
@@ -2250,6 +2255,133 @@ def unwrap_move_wrapper(annotation):
                 inner = substring(trimmed, open_index + 1, len(trimmed) - 1)
                 return unwrap_move_wrapper(trim_text(inner))
     return trimmed
+
+def contains_keyword_outside_strings(value, keyword):
+    if len(value) == 0:
+        return False
+    index = 0
+    in_single = False
+    in_double = False
+    escape = False
+    while True:
+        if index >= len(value):
+            break
+        ch = value[index]
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == keyword[0]:
+            if index > 0:
+                previous = value[index - 1]
+                if is_identifier_part_char(previous):
+                    index += 1
+                    continue
+            if matches_keyword(value, index, keyword):
+                return True
+        index += 1
+    return False
+
+def find_suspension_keyword(expression):
+    if contains_keyword_outside_strings(expression, "await"):
+        return "await"
+    if contains_keyword_outside_strings(expression, "yield"):
+        return "yield"
+    return ""
+
+def is_mutable_borrow_annotation(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return False
+    normalized = unwrap_move_wrapper(trimmed)
+    if len(normalized) == 0:
+        return False
+    if normalized[0] != "&":
+        return False
+    remainder = trim_text(substring(normalized, 1, len(normalized)))
+    if len(remainder) == 0:
+        return False
+    if starts_with(remainder, "mut"):
+        return True
+    return False
+
+def collect_suspension_conflicts(keyword, locals, bindings, function_name):
+    diagnostics = []
+    index = 0
+    while True:
+        if index >= len(locals):
+            break
+        local = locals[index]
+        if not local.consumed  and  local.ownership != None:
+            details = local.ownership
+            if details.variant == "Borrow"  and  details.mutable:
+                base_name = normalise_borrow_base(details.base)
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`")
+        index += 1
+    parameter_index = 0
+    while True:
+        if parameter_index >= len(bindings):
+            break
+        binding = bindings[parameter_index]
+        if not binding.consumed:
+            if is_mutable_borrow_annotation(binding.type_annotation):
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`")
+        parameter_index += 1
+    return diagnostics
+
+def normalise_borrow_base(raw_base):
+    trimmed = trim_text(raw_base)
+    while True:
+        if len(trimmed) == 0:
+            break
+        if trimmed[0] == "*":
+            trimmed = trim_text(substring(trimmed, 1, len(trimmed)))
+            continue
+        break
+    if len(trimmed) >= 2:
+        if trimmed[0] == "(":
+            if trimmed[len(trimmed) - 1] == ")":
+                inner = trim_text(substring(trimmed, 1, len(trimmed) - 1))
+                if len(inner) > 0:
+                    return inner
+    return trimmed
+
+def detect_suspension_conflicts(expression, locals, bindings, function_name):
+    if expression == None:
+        return []
+    trimmed = trim_text(expression)
+    if len(trimmed) == 0:
+        return []
+    keyword = find_suspension_keyword(trimmed)
+    if len(keyword) == 0:
+        return []
+    return collect_suspension_conflicts(keyword, locals, bindings, function_name)
 
 def map_return_type(return_type):
     trimmed = trim_text(return_type)

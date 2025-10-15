@@ -1152,7 +1152,7 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
+                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -2558,8 +2558,9 @@ fn lower_condition_to_i1(
     lines -> string[],
     functions -> NativeFunction[]
 ) -> ConditionConversion {
+    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions);
-    let mut diagnostics -> string[] = lowered.diagnostics;
+    diagnostics = diagnostics.concat(lowered.diagnostics);
     let mut current_lines -> string[] = lowered.lines;
     let mut current_temp -> number = lowered.temp_index;
 
@@ -2791,6 +2792,9 @@ fn lower_let_instruction(
     let mut ownership -> OwnershipInfo? = null;
     let mut consumption -> OwnershipConsumption? = null;
 
+    let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name);
+    diagnostics = diagnostics.concat(suspension_diagnostics);
+
     let trimmed_annotation = trim_text(instruction.type_annotation);
     let mut llvm_type -> string = "";
     if trimmed_annotation.length > 0 {
@@ -2875,6 +2879,7 @@ fn lower_let_instruction(
 }
 
 fn lower_expression_statement(
+    function_name -> string,
     instruction -> NativeInstruction,
     expression -> string,
     bindings -> ParameterBinding[],
@@ -2883,7 +2888,7 @@ fn lower_expression_statement(
     lines -> string[],
     functions -> NativeFunction[]
 ) -> ExpressionStatementResult {
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name);
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut current_locals -> LocalBinding[] = locals;
@@ -3135,6 +3140,9 @@ fn lower_return_instruction(
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_bindings -> ParameterBinding[] = bindings;
 
+    let suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name);
+    diagnostics = diagnostics.concat(suspension_diagnostics);
+
     let ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
@@ -3320,6 +3328,173 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
         }
     }
     return trimmed;
+}
+
+fn contains_keyword_outside_strings(value -> string, keyword -> string) -> boolean {
+    if value.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == keyword[0] {
+            if index > 0 {
+                let previous = value[index - 1];
+                if is_identifier_part_char(previous) {
+                    index += 1;
+                    continue;
+                }
+            }
+            if matches_keyword(value, index, keyword) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn find_suspension_keyword(expression -> string) -> string {
+    if contains_keyword_outside_strings(expression, "await") {
+        return "await";
+    }
+    if contains_keyword_outside_strings(expression, "yield") {
+        return "yield";
+    }
+    return "";
+}
+
+fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 {
+        return false;
+    }
+    if normalized[0] != "&" {
+        return false;
+    }
+    let remainder = trim_text(substring(normalized, 1, normalized.length));
+    if remainder.length == 0 {
+        return false;
+    }
+    if starts_with(remainder, "mut") {
+        return true;
+    }
+    return false;
+}
+
+fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> string[] {
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let local = locals[index];
+        if !local.consumed && local.ownership != null {
+            let details = local.ownership;
+            if details.variant == "Borrow" && details.mutable {
+                let base_name = normalise_borrow_base(details.base);
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`");
+            }
+        }
+        index += 1;
+    }
+    let mut parameter_index -> number = 0;
+    loop {
+        if parameter_index >= bindings.length {
+            break;
+        }
+        let binding = bindings[parameter_index];
+        if !binding.consumed {
+            if is_mutable_borrow_annotation(binding.type_annotation) {
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`");
+            }
+        }
+        parameter_index += 1;
+    }
+    return diagnostics;
+}
+
+fn normalise_borrow_base(raw_base -> string) -> string {
+    let mut trimmed = trim_text(raw_base);
+    loop {
+        if trimmed.length == 0 {
+            break;
+        }
+        if trimmed[0] == "*" {
+            trimmed = trim_text(substring(trimmed, 1, trimmed.length));
+            continue;
+        }
+        break;
+    }
+    if trimmed.length >= 2 {
+        if trimmed[0] == "(" {
+            if trimmed[trimmed.length - 1] == ")" {
+                let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
+                if inner.length > 0 {
+                    return inner;
+                }
+            }
+        }
+    }
+    return trimmed;
+}
+
+fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> string[] {
+    if expression == null {
+        return [];
+    }
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let keyword = find_suspension_keyword(trimmed);
+    if keyword.length == 0 {
+        return [];
+    }
+    return collect_suspension_conflicts(keyword, locals, bindings, function_name);
 }
 
 fn map_return_type(return_type -> string) -> string {

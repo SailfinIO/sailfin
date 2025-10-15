@@ -541,7 +541,7 @@ fn update_cache!(cache -> &mut Map<string, string>) ![mut, io.fs.read, io.fs.wri
 
 Here the compiler derives the composite effect list `![mut, io.fs.read, io.fs.write]` by combining the borrow requirement with filesystem I/O.
 
-Async safety: borrow effects cannot cross suspension points unless the reference is proven `'static` or cloned into an owned value. Expressed as a lattice rule, `!mut` is not a subset of `!async`. The Stage2 checker will reject `await` and routine yields that would extend a borrow beyond its lifetime.
+Async safety: borrow effects cannot cross suspension points unless the reference is proven `'static` or cloned into an owned value. Expressed as a lattice rule, `!mut` is not a subset of `!async`. The Stage2 checker rejects `await` and routine yields that would extend a mutable borrow beyond its lifetime, emitting diagnostics that identify the active borrow and the offending suspension site.
 
 #### 6.1.5 Unsafe capability and extern interop
 
