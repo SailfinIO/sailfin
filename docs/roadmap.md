@@ -10,7 +10,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Stage2 Backend Delivery**
-  - [ ] Enforce move-out diagnostics in Stage2 by threading ownership metadata for moves through `.sfn-asm`, flagging use-after-move during lowering, and covering the behaviour with dedicated regressions.
+  - [ ] Enforce move-out diagnostics in Stage2 by threading ownership metadata for moves through `.sfn-asm`, flagging use-after-move during lowering, and covering the behaviour with dedicated regressions. *(In progress — ownership consumption now propagates through loops, `if`/`else`, and `match` merges, and lowering emits `use-after-move` diagnostics for locals and parameters; targeted regressions for non-copy aggregates are still outstanding.)*
   - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
   - [ ] Surface borrow effects (`!read`, `!mut`) in Stage2 lowering, propagating them through function signatures and capability manifests so composite effects (e.g., mutation + filesystem access) are reported to callers. *(In progress — per-function effect metadata now lands in `LoweredLLVMResult.function_effects`, and LLVM IR tags these effects via comment headers; capability manifest wiring remains.)*
   - [ ] Enforce the lattice rule `!mut ⊄ !async` by rejecting suspension points that would extend a mutable borrow across `await`/routine yields; add coverage for both acceptance and rejection cases.

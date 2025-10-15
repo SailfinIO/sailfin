@@ -50,6 +50,8 @@ struct ParameterBinding {
     name -> string;
     llvm_name -> string;
     llvm_type -> string;
+    type_annotation -> string;
+    consumed -> boolean;
 }
 
 struct ParameterPreparation {
@@ -81,15 +83,23 @@ struct OwnershipInfo {
     mutable -> boolean;
 }
 
+struct OwnershipConsumption {
+    kind -> string;
+    name -> string;
+}
+
 struct LocalBinding {
     name -> string;
     pointer -> string;
     llvm_type -> string;
+    type_annotation -> string;
     ownership -> OwnershipInfo?;
+    consumed -> boolean;
 }
 
 struct OwnershipAnalysis {
     ownership -> OwnershipInfo?;
+    consumption -> OwnershipConsumption?;
     diagnostics -> string[];
 }
 
@@ -122,6 +132,8 @@ struct BorrowArgumentParse {
 struct ExpressionStatementResult {
     lines -> string[];
     temp_index -> number;
+    locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
     diagnostics -> string[];
 }
 
@@ -129,6 +141,7 @@ struct LetLoweringResult {
     lines -> string[];
     allocas -> string[];
     locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
     temp_index -> number;
     diagnostics -> string[];
     next_local_id -> number;
@@ -234,6 +247,7 @@ struct BlockLoweringResult {
     lines -> string[];
     allocas -> string[];
     locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
     temp_index -> number;
     block_counter -> number;
     diagnostics -> string[];
@@ -756,6 +770,7 @@ fn lower_instruction_range(
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
@@ -770,11 +785,12 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_next_local = lowered.next_local_id;
         } else if instruction.variant == "Expression" {
@@ -792,11 +808,12 @@ fn lower_instruction_range(
                             type_annotation: inline_parse.type_annotation,
                             value: inline_parse.initializer,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
                         current_lines = lowered.lines;
                         current_allocas = lowered.allocas;
                         current_locals = lowered.locals;
+                        current_bindings = lowered.bindings;
                         current_temp = lowered.temp_index;
                         current_next_local = lowered.next_local_id;
                         handled_inline_let = true;
@@ -804,16 +821,20 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(trimmed_expression, bindings, current_locals, current_temp, current_lines, functions);
+                let lowered = lower_expression_statement(trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
             }
         } else if instruction.variant == "Return" {
-            let lowered = lower_return_instruction(function, instruction, llvm_return, bindings, current_locals, current_temp, current_lines, functions);
+            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
+            current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             terminated = true;
             index += 1;
             if index < end {
@@ -825,7 +846,7 @@ fn lower_instruction_range(
                 function,
                 index,
                 llvm_return,
-                bindings,
+                current_bindings,
                 current_locals,
                 current_allocas,
                 current_lines,
@@ -840,6 +861,7 @@ fn lower_instruction_range(
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
@@ -854,7 +876,7 @@ fn lower_instruction_range(
                 function,
                 index,
                 llvm_return,
-                bindings,
+                current_bindings,
                 current_locals,
                 current_allocas,
                 current_lines,
@@ -869,6 +891,7 @@ fn lower_instruction_range(
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
@@ -883,7 +906,7 @@ fn lower_instruction_range(
                 function,
                 index,
                 llvm_return,
-                bindings,
+                current_bindings,
                 current_locals,
                 current_allocas,
                 current_lines,
@@ -898,6 +921,7 @@ fn lower_instruction_range(
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
@@ -942,7 +966,7 @@ fn lower_instruction_range(
                 function,
                 index,
                 llvm_return,
-                bindings,
+                current_bindings,
                 current_locals,
                 current_allocas,
                 current_lines,
@@ -957,6 +981,7 @@ fn lower_instruction_range(
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
@@ -979,6 +1004,7 @@ fn lower_instruction_range(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
@@ -1148,6 +1174,7 @@ fn lower_loop_instruction(
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
@@ -1178,7 +1205,7 @@ fn lower_loop_instruction(
         structure.body_start,
         structure.body_end,
         llvm_return,
-        bindings,
+        current_bindings,
         base_locals,
         base_allocas,
         [],
@@ -1196,6 +1223,7 @@ fn lower_loop_instruction(
     current_temp = body_result.temp_index;
     current_block_counter = body_result.block_counter;
     current_next_local = body_result.next_local_id;
+    current_bindings = body_result.bindings;
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_label);
@@ -1207,6 +1235,7 @@ fn lower_loop_instruction(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
@@ -1235,6 +1264,7 @@ fn lower_for_instruction(
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
@@ -1253,6 +1283,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1268,6 +1299,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1283,6 +1315,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1296,7 +1329,7 @@ fn lower_for_instruction(
     if range_parse.success {
         diagnostics = diagnostics.concat(range_parse.diagnostics);
 
-        let start_result = lower_expression(range_parse.start, bindings, current_locals, current_temp, current_lines, functions);
+        let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions);
         diagnostics = diagnostics.concat(start_result.diagnostics);
         current_lines = start_result.lines;
         current_temp = start_result.temp_index;
@@ -1307,6 +1340,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1316,7 +1350,7 @@ fn lower_for_instruction(
             };
         }
 
-        let end_result = lower_expression(range_parse.end, bindings, current_locals, current_temp, current_lines, functions);
+        let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions);
         diagnostics = diagnostics.concat(end_result.diagnostics);
         current_lines = end_result.lines;
         current_temp = end_result.temp_index;
@@ -1327,6 +1361,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1346,6 +1381,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1366,6 +1402,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1379,7 +1416,7 @@ fn lower_for_instruction(
         let mut stride_operand = LLVMOperand { llvm_type: "double", value: "1.0" };
         let stride_text = trim_text(range_parse.stride);
         if stride_text.length > 0 {
-            let stride_result = lower_expression(stride_text, bindings, current_locals, current_temp, current_lines, functions);
+            let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions);
             diagnostics = diagnostics.concat(stride_result.diagnostics);
             current_lines = stride_result.lines;
             current_temp = stride_result.temp_index;
@@ -1390,6 +1427,7 @@ fn lower_for_instruction(
                     lines: current_lines,
                     allocas: current_allocas,
                     locals: current_locals,
+                    bindings: current_bindings,
                     temp_index: current_temp,
                     block_counter: current_block_counter,
                     diagnostics: diagnostics,
@@ -1409,6 +1447,7 @@ fn lower_for_instruction(
                     lines: current_lines,
                     allocas: current_allocas,
                     locals: current_locals,
+                    bindings: current_bindings,
                     temp_index: current_temp,
                     block_counter: current_block_counter,
                     diagnostics: diagnostics,
@@ -1456,7 +1495,7 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_header_label + ":");
 
-        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", ownership: null };
+        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false };
         let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
         diagnostics = diagnostics.concat(header_load.diagnostics);
         current_lines = header_load.lines;
@@ -1470,6 +1509,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1504,6 +1544,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1526,6 +1567,7 @@ fn lower_for_instruction(
                 lines: current_lines,
                 allocas: current_allocas,
                 locals: current_locals,
+                bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
@@ -1559,7 +1601,7 @@ fn lower_for_instruction(
             structure.body_start,
             structure.body_end,
             llvm_return,
-            bindings,
+            current_bindings,
             body_locals,
             current_allocas,
             [],
@@ -1576,6 +1618,7 @@ fn lower_for_instruction(
         current_temp = body_result.temp_index;
         current_block_counter = body_result.block_counter;
         current_next_local = body_result.next_local_id;
+        current_bindings = body_result.bindings;
 
         if !body_result.terminated {
             current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -1610,6 +1653,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1619,7 +1663,7 @@ fn lower_for_instruction(
         };
     }
 
-    let iterable_result = lower_expression(instruction.iterable, bindings, current_locals, current_temp, current_lines, functions);
+    let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions);
     diagnostics = diagnostics.concat(iterable_result.diagnostics);
     current_lines = iterable_result.lines;
     current_temp = iterable_result.temp_index;
@@ -1631,6 +1675,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1649,6 +1694,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1736,14 +1782,14 @@ fn lower_for_instruction(
     let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
     let stacked = append_loop_context(loop_stack, context);
 
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, ownership: null };
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false };
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
         structure.body_end,
         llvm_return,
-        bindings,
+        current_bindings,
         body_locals,
         current_allocas,
         [],
@@ -1760,6 +1806,7 @@ fn lower_for_instruction(
     current_temp = body_result.temp_index;
     current_block_counter = body_result.block_counter;
     current_next_local = body_result.next_local_id;
+    current_bindings = body_result.bindings;
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -1785,6 +1832,7 @@ fn lower_for_instruction(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
@@ -1912,6 +1960,8 @@ fn lower_match_instruction(
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
+    let base_bindings -> ParameterBinding[] = bindings;
+    let mut merged_bindings -> ParameterBinding[] = base_bindings;
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -1928,6 +1978,7 @@ fn lower_match_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -1949,6 +2000,7 @@ fn lower_match_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -2048,6 +2100,7 @@ fn lower_match_instruction(
         current_next_local = body_result.next_local_id;
 
         if !body_result.terminated {
+            merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
             current_lines = append_string(current_lines, "  br label %" + merge_label);
             all_terminated = false;
         } else {
@@ -2067,6 +2120,7 @@ fn lower_match_instruction(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: merged_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
@@ -2228,6 +2282,9 @@ fn lower_if_instruction(
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
     let mut diagnostics -> string[] = [];
+    let base_bindings -> ParameterBinding[] = bindings;
+    let mut then_bindings -> ParameterBinding[] = base_bindings;
+    let mut else_bindings -> ParameterBinding[] = base_bindings;
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2251,6 +2308,7 @@ fn lower_if_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
+            bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -2310,6 +2368,7 @@ fn lower_if_instruction(
     current_temp = then_result.temp_index;
     current_block_counter = then_result.block_counter;
     current_next_local = then_result.next_local_id;
+    then_bindings = then_result.bindings;
     current_lines = current_lines.concat(then_result.lines);
     let then_terminated = then_result.terminated;
     if !then_terminated {
@@ -2340,6 +2399,7 @@ fn lower_if_instruction(
         current_temp = else_result.temp_index;
         current_block_counter = else_result.block_counter;
         current_next_local = else_result.next_local_id;
+        else_bindings = else_result.bindings;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
         if !else_terminated {
@@ -2357,11 +2417,21 @@ fn lower_if_instruction(
     }
 
     current_locals = base_locals;
+    let mut merged_bindings -> ParameterBinding[] = base_bindings;
+    if !then_terminated {
+        merged_bindings = merge_parameter_bindings(merged_bindings, then_bindings);
+    }
+    if structure.has_else {
+        if !else_terminated {
+            merged_bindings = merge_parameter_bindings(merged_bindings, else_bindings);
+        }
+    }
 
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: merged_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
@@ -2388,6 +2458,7 @@ fn lower_let_instruction(
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
     let mut ownership -> OwnershipInfo? = null;
+    let mut consumption -> OwnershipConsumption? = null;
 
     let trimmed_annotation = trim_text(instruction.type_annotation);
     let mut llvm_type -> string = "";
@@ -2399,12 +2470,21 @@ fn lower_let_instruction(
     }
 
     let mut operand -> LLVMOperand? = null;
-    let ownership_analysis = analyze_let_ownership(instruction.value, current_locals);
+    let ownership_analysis = analyze_value_ownership(instruction.value, current_locals, bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     ownership = ownership_analysis.ownership;
+    consumption = ownership_analysis.consumption;
     if ownership != null {
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
         diagnostics = diagnostics.concat(conflict_diagnostics);
+    }
+
+    if consumption != null {
+        if consumption.kind == "local" {
+            current_locals = mark_local_consumed(current_locals, consumption.name);
+        } else if consumption.kind == "parameter" {
+            bindings = mark_parameter_consumed(bindings, consumption.name);
+        }
     }
 
     if instruction.value == null || instruction.value.length == 0 {
@@ -2446,12 +2526,13 @@ fn lower_let_instruction(
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
 
-    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, ownership: ownership });
+    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false });
 
     return LetLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
+        bindings: bindings,
         temp_index: current_temp,
         diagnostics: diagnostics,
         next_local_id: next_local_id + 1,
@@ -2469,14 +2550,20 @@ fn lower_expression_statement(
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
-        let binding = find_local_binding(locals, parsed_assignment.target);
+        let binding = find_local_binding(current_locals, parsed_assignment.target);
         if binding == null {
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`");
         } else {
-            let lowered = lower_expression(parsed_assignment.value, bindings, locals, current_temp, current_lines, functions);
+            let ownership_analysis = analyze_value_ownership(parsed_assignment.value, current_locals, current_bindings);
+            diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+            let consumption = ownership_analysis.consumption;
+
+            let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -2495,15 +2582,36 @@ fn lower_expression_statement(
                     current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
                 }
             }
+
+            if consumption != null {
+                if consumption.kind == "local" {
+                    current_locals = mark_local_consumed(current_locals, consumption.name);
+                } else if consumption.kind == "parameter" {
+                    current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
+                }
+            }
+
+            current_locals = reset_local_consumption(current_locals, parsed_assignment.target);
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
     }
 
-    let lowered = lower_expression(expression, bindings, locals, current_temp, current_lines, functions);
+    let ownership_analysis = analyze_value_ownership(expression, current_locals, current_bindings);
+    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    let consumption = ownership_analysis.consumption;
+
+    let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions);
     diagnostics = diagnostics.concat(lowered.diagnostics);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+    if consumption != null {
+        if consumption.kind == "local" {
+            current_locals = mark_local_consumed(current_locals, consumption.name);
+        } else if consumption.kind == "parameter" {
+            current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
+        }
+    }
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
 }
 
 fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
@@ -2685,10 +2793,17 @@ fn lower_return_instruction(
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics };
     }
 
-    let lowered = lower_expression(instruction.expression, bindings, locals, current_temp, current_lines, functions);
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
+
+    let ownership_analysis = analyze_value_ownership(instruction.expression, current_locals, current_bindings);
+    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    let consumption = ownership_analysis.consumption;
+
+    let lowered = lower_expression(instruction.expression, current_bindings, current_locals, current_temp, current_lines, functions);
     diagnostics = diagnostics.concat(lowered.diagnostics);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
@@ -2696,14 +2811,14 @@ fn lower_return_instruction(
     if lowered.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
     }
 
     let operand = lowered.operand;
     if llvm_return == "void" {
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
         current_lines = append_string(current_lines, "  ret void");
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
     }
 
     let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
@@ -2713,12 +2828,19 @@ fn lower_return_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
     }
 
     let coerced_operand = coerced.operand;
     current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics };
+    if consumption != null {
+        if consumption.kind == "local" {
+            current_locals = mark_local_consumed(current_locals, consumption.name);
+        } else if consumption.kind == "parameter" {
+            current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
+        }
+    }
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
 }
 
 
@@ -2747,6 +2869,8 @@ fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
             name: parameter.name,
             llvm_name: llvm_name,
             llvm_type: llvm_type,
+            type_annotation: parameter.type_annotation,
+            consumed: false,
         });
         index += 1;
     }
@@ -2845,20 +2969,38 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     return "";
 }
 
+fn unwrap_move_wrapper(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+        let open_index = index_of(trimmed, "<");
+        if open_index >= 0 {
+            if trimmed[trimmed.length - 1] == ">" {
+                let inner = substring(trimmed, open_index + 1, trimmed.length - 1);
+                return unwrap_move_wrapper(trim_text(inner));
+            }
+        }
+    }
+    return trimmed;
+}
+
 fn map_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
     if trimmed.length == 0 || trimmed == "void" {
         return "void";
     }
-    let reference_type = map_reference_type(trimmed);
+    let normalized = unwrap_move_wrapper(trimmed);
+    let reference_type = map_reference_type(normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(trimmed);
+    let array_type = map_array_pointer_type(normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(trimmed);
+    return map_primitive_type(normalized);
 }
 
 fn map_parameter_type(parameter_type -> string) -> string {
@@ -2866,15 +3008,16 @@ fn map_parameter_type(parameter_type -> string) -> string {
     if trimmed.length == 0 {
         return "double";
     }
-    let reference_type = map_reference_type(trimmed);
+    let normalized = unwrap_move_wrapper(trimmed);
+    let reference_type = map_reference_type(normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(trimmed);
+    let array_type = map_array_pointer_type(normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(trimmed);
+    return map_primitive_type(normalized);
 }
 
 fn map_local_type(type_annotation -> string) -> string {
@@ -2882,15 +3025,16 @@ fn map_local_type(type_annotation -> string) -> string {
     if trimmed.length == 0 {
         return "double";
     }
-    let reference_type = map_reference_type(trimmed);
+    let normalized = unwrap_move_wrapper(trimmed);
+    let reference_type = map_reference_type(normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(trimmed);
+    let array_type = map_array_pointer_type(normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(trimmed);
+    return map_primitive_type(normalized);
 }
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
@@ -2906,6 +3050,83 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
         index += 1;
     }
     return null;
+}
+
+fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
+    let mut result -> ParameterBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        if binding.name == name {
+            let updated = ParameterBinding {
+                name: binding.name,
+                llvm_name: binding.llvm_name,
+                llvm_type: binding.llvm_type,
+                type_annotation: binding.type_annotation,
+                consumed: true,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([binding]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: entry.ownership,
+                consumed: true,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: entry.ownership,
+                consumed: false,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
 }
 
 fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
@@ -3089,29 +3310,60 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
 }
 
-fn analyze_let_ownership(initializer -> string?, locals -> LocalBinding[]) -> OwnershipAnalysis {
+fn analyze_value_ownership(initializer -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
-        return OwnershipAnalysis { ownership: null, diagnostics: [] };
+        return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
     }
     let trimmed = trim_text(initializer);
     if trimmed.length == 0 {
-        return OwnershipAnalysis { ownership: null, diagnostics: [] };
+        return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
     }
+
     let parse = parse_borrow_expression(trimmed);
-    if !parse.recognized {
-        return OwnershipAnalysis { ownership: null, diagnostics: parse.diagnostics };
-    }
     let mut diagnostics -> string[] = parse.diagnostics;
-    if !parse.success {
-        return OwnershipAnalysis { ownership: null, diagnostics: diagnostics };
+    if parse.recognized {
+        if !parse.success {
+            return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+        }
+        let resolved_base = resolve_borrow_base(parse.target, locals);
+        if resolved_base.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+        }
+        let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable };
+        return OwnershipAnalysis { ownership: ownership, consumption: null, diagnostics: diagnostics };
     }
-    let resolved_base = resolve_borrow_base(parse.target, locals);
-    if resolved_base.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
-        return OwnershipAnalysis { ownership: null, diagnostics: diagnostics };
+
+    if is_simple_identifier(trimmed) {
+        let name = trimmed;
+        let local = find_local_binding(locals, name);
+        if local != null {
+            if local.consumed {
+                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`");
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            if is_copy_type(local.type_annotation, local.llvm_type) {
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            let consumption = OwnershipConsumption { kind: "local", name: name };
+            return OwnershipAnalysis { ownership: null, consumption: consumption, diagnostics: diagnostics };
+        }
+
+        let parameter = find_parameter_binding(bindings, name);
+        if parameter != null {
+            if parameter.consumed {
+                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`");
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            let consumption = OwnershipConsumption { kind: "parameter", name: name };
+            return OwnershipAnalysis { ownership: null, consumption: consumption, diagnostics: diagnostics };
+        }
     }
-    let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable };
-    return OwnershipAnalysis { ownership: ownership, diagnostics: diagnostics };
+
+    return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
 }
 
 fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
@@ -4148,6 +4400,46 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     return trimmed[trimmed.length - 1] == "*";
 }
 
+fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
+    let trimmed = trim_text(type_annotation);
+    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+        return false;
+    }
+    if trimmed == "Affine" || trimmed == "Linear" {
+        return false;
+    }
+    if llvm_type == "double" {
+        return true;
+    }
+    if llvm_type == "i32" {
+        return true;
+    }
+    if llvm_type == "i64" {
+        return true;
+    }
+    if llvm_type == "i1" {
+        return true;
+    }
+    if ends_with_pointer_suffix(llvm_type) {
+        return true;
+    }
+    if trimmed.length == 0 {
+        return true;
+    }
+    if trimmed[0] == "&" {
+        return true;
+    }
+    if starts_with(trimmed, "mut ") {
+        let stripped = strip_mut_prefix(trimmed);
+        if stripped.length > 0 {
+            if stripped[0] == "&" {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 fn default_return_literal(llvm_type -> string) -> string {
     if llvm_type == "double" {
         return "0.0";
@@ -4637,6 +4929,31 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
         index += 1;
     }
     return false;
+}
+
+fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {
+    let mut result -> ParameterBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= first.length {
+            break;
+        }
+        let primary = first[index];
+        let mut consumed_flag -> boolean = primary.consumed;
+        let counterpart = find_parameter_binding(second, primary.name);
+        if counterpart != null {
+            consumed_flag = consumed_flag || counterpart.consumed;
+        }
+        result = append_parameter_binding(result, ParameterBinding {
+            name: primary.name,
+            llvm_name: primary.llvm_name,
+            llvm_type: primary.llvm_type,
+            type_annotation: primary.type_annotation,
+            consumed: consumed_flag,
+        });
+        index += 1;
+    }
+    return result;
 }
 
 fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {

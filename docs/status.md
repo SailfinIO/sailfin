@@ -46,6 +46,11 @@ roadmaps.
   conflicting borrows (mutable-with-mutable or mutable-with-shared) during LLVM
   lowering (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_mut_borrows`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_shared_borrows`).
+  Ownership consumption now survives merges across loops, `if`/`else`, and `match`
+  blocks, so use-after-move checks on locals and parameters fire when those
+  values are reused after being consumed; the execution suite in
+  `compiler/tests/test_native_llvm_execution.py` exercises these control-flow
+  paths while ensuring legitimate reassignments clear the consumed state.
   Borrowed references still introduce internal effects (`!read`, `!mut`) that
   compose with capability-driven effects, and the lowering pipeline now records
   those requirements per function (`LoweredLLVMResult.function_effects`) while

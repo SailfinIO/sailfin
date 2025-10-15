@@ -636,6 +636,23 @@ fn main() -> number {
     non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
     assert all("conflicts with" in diag for diag in non_pointer)
+def test_native_llvm_execution_reports_use_after_move() -> None:
+    source = """
+    fn reuse(value -> Affine<number>) -> number {
+        let alias = value;
+        return value;
+    }
+
+    fn main() -> number {
+        return 0;
+    }
+    """
+
+    lowered = compile_to_native_llvm(source)
+    assert any("use-after-move" in diag for diag in lowered.diagnostics)
+    assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
+
+
 
 
 def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
