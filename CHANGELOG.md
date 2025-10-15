@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.11 (2025-10-15)
+
+### Bug Fixes
+
+- Fall back to instruction span
+  ([`7ed4465`](https://github.com/SailfinIO/sailfin/commit/7ed4465f65cebd8a4ccb08d0edb250c460639723))
+
+- Regrssions for diagnostics
+  ([`e1d084f`](https://github.com/SailfinIO/sailfin/commit/e1d084fceda9a80ead068a64ce52134ced4fa869))
+
+
 ## v0.1.1-alpha.10 (2025-10-15)
 
 ### Bug Fixes
