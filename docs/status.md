@@ -66,8 +66,9 @@ roadmaps.
   locks the manifest propagation behaviour, including borrow + capability
   combinations. Stage2 lowering now rejects suspension points (`await`, `yield`)
   that would keep a mutable borrow or mutable borrow parameter alive, enforcing
-  the lattice rule `!mut ⊄ !async` and warning on the specific borrow that
-  remains active; see
+  the lattice rule `!mut ⊄ !async`. Diagnostics now attach source spans for both
+  the active borrow and the suspension site so LLVM errors cross-link the borrow
+  declaration with the offending `await`/`yield`; see
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_allows_await_without_mutable_borrow`
   for the rejection/acceptance coverage. Raw pointer access remains gated behind `unsafe extern`

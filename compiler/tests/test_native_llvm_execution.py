@@ -724,7 +724,10 @@ def test_native_llvm_rejects_mutable_borrow_across_await() -> None:
     .meta return number
     .meta effects none
         .param value -> &mut number
+        .span 5 9 5 36
+        .init-span 5 21 5 38
         eval let alias = &mut *value
+        .span 6 9 6 37
         eval let result = await compute()
         ret 0
     .endfn
@@ -740,7 +743,8 @@ def test_native_llvm_rejects_mutable_borrow_across_await() -> None:
     borrow_diags = [diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
     assert borrow_diags, lowered.diagnostics
     assert any("`alias`" in diag and "`value`" in diag for diag in borrow_diags)
-    assert any("parameter `value`" in diag for diag in borrow_diags)
+    assert any("`alias`" in diag and "borrow at" in diag and "await at" in diag for diag in borrow_diags)
+    assert any("parameter `value`" in diag and "await at" in diag for diag in borrow_diags)
 
 
 def test_native_llvm_allows_await_without_mutable_borrow() -> None:

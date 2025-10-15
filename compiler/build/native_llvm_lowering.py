@@ -151,13 +151,14 @@ class ArrayLiteralMetadata:
         return runtime.struct_repr('ArrayLiteralMetadata', [runtime.struct_field('element_type', self.element_type), runtime.struct_field('start_index', self.start_index)])
 
 class OwnershipInfo:
-    def __init__(self, variant, base, mutable):
+    def __init__(self, variant, base, mutable, span=None):
         self.variant = variant
         self.base = base
         self.mutable = mutable
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('OwnershipInfo', [runtime.struct_field('variant', self.variant), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable)])
+        return runtime.struct_repr('OwnershipInfo', [runtime.struct_field('variant', self.variant), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable), runtime.struct_field('span', self.span)])
 
 class OwnershipConsumption:
     def __init__(self, kind, name):
@@ -1757,7 +1758,7 @@ def allocate_block_label(prefix, counter):
     return BlockLabelResult(label=prefix + number_to_string(counter), next_counter=counter + 1)
 
 def lower_condition_to_i1(function_name, expression, bindings, locals, temp_index, lines, functions):
-    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name)
+    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name, None)
     lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions)
     diagnostics = (diagnostics) + (lowered.diagnostics)
     current_lines = lowered.lines
@@ -1871,7 +1872,10 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_temp = temp_index
     ownership = None
     consumption = None
-    suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name)
+    initializer_span = instruction.value_span
+    if initializer_span == None:
+        initializer_span = instruction.span
+    suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name, initializer_span)
     diagnostics = (diagnostics) + (suspension_diagnostics)
     trimmed_annotation = trim_text(instruction.type_annotation)
     llvm_type = ""
@@ -1880,10 +1884,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`")
     operand = None
-    span_for_diagnostics = instruction.value_span
-    if span_for_diagnostics == None:
-        span_for_diagnostics = instruction.span
-    ownership_analysis = analyze_value_ownership(instruction.value, span_for_diagnostics, current_locals, bindings)
+    ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     ownership = ownership_analysis.ownership
     consumption = ownership_analysis.consumption
@@ -1928,7 +1929,10 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1)
 
 def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, functions):
-    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name)
+    suspension_span = None
+    if instruction.span != None:
+        suspension_span = instruction.span
+    diagnostics = detect_suspension_conflicts(expression, locals, bindings, function_name, suspension_span)
     current_lines = lines
     current_temp = temp_index
     current_locals = locals
@@ -2119,7 +2123,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics)
     current_locals = locals
     current_bindings = bindings
-    suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name)
+    suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name, instruction.span)
     diagnostics = (diagnostics) + (suspension_diagnostics)
     ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
@@ -2331,7 +2335,7 @@ def is_mutable_borrow_annotation(annotation):
         return True
     return False
 
-def collect_suspension_conflicts(keyword, locals, bindings, function_name):
+def collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span):
     diagnostics = []
     index = 0
     while True:
@@ -2342,7 +2346,8 @@ def collect_suspension_conflicts(keyword, locals, bindings, function_name):
             details = local.ownership
             if details.variant == "Borrow"  and  details.mutable:
                 base_name = normalise_borrow_base(details.base)
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`")
+                location = format_suspension_location(keyword, details.span, suspension_span)
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location)
         index += 1
     parameter_index = 0
     while True:
@@ -2351,7 +2356,8 @@ def collect_suspension_conflicts(keyword, locals, bindings, function_name):
         binding = bindings[parameter_index]
         if not binding.consumed:
             if is_mutable_borrow_annotation(binding.type_annotation):
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`")
+                location = format_suspension_location(keyword, None, suspension_span)
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location)
         parameter_index += 1
     return diagnostics
 
@@ -2372,7 +2378,7 @@ def normalise_borrow_base(raw_base):
                     return inner
     return trimmed
 
-def detect_suspension_conflicts(expression, locals, bindings, function_name):
+def detect_suspension_conflicts(expression, locals, bindings, function_name, suspension_span):
     if expression == None:
         return []
     trimmed = trim_text(expression)
@@ -2381,7 +2387,7 @@ def detect_suspension_conflicts(expression, locals, bindings, function_name):
     keyword = find_suspension_keyword(trimmed)
     if len(keyword) == 0:
         return []
-    return collect_suspension_conflicts(keyword, locals, bindings, function_name)
+    return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span)
 
 def map_return_type(return_type):
     trimmed = trim_text(return_type)
@@ -2622,7 +2628,7 @@ def analyze_value_ownership(initializer, span, locals, bindings):
         if len(resolved_base) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
             return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
-        ownership = OwnershipInfo(variant="Borrow", base=resolved_base, mutable=parse.mutable)
+        ownership = OwnershipInfo(variant="Borrow", base=resolved_base, mutable=parse.mutable, span=span)
         return OwnershipAnalysis(ownership=ownership, consumption=None, diagnostics=diagnostics)
     if is_simple_identifier(trimmed):
         name = trimmed
@@ -2655,6 +2661,16 @@ def format_span_location(span):
     start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column)
     end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column)
     return start + "-" + end
+
+def format_suspension_location(keyword, borrow_span, suspension_span):
+    parts = []
+    if borrow_span != None:
+        parts = append_string(parts, "borrow at " + format_span_location(borrow_span))
+    if suspension_span != None:
+        parts = append_string(parts, keyword + " at " + format_span_location(suspension_span))
+    if len(parts) == 0:
+        return ""
+    return " (" + join_with_separator(parts, ", ") + ")"
 
 def detect_borrow_conflicts(ownership, locals, binding_name, function_name):
     diagnostics = []
