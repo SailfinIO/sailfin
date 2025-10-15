@@ -21,13 +21,39 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-class LoweredLLVMResult:
-    def __init__(self, ir, diagnostics):
-        self.ir = ir
-        self.diagnostics = diagnostics
+class TraitImplementationDescriptor:
+    def __init__(self, struct_name, interfaces):
+        self.struct_name = struct_name
+        self.interfaces = interfaces
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('TraitImplementationDescriptor', [runtime.struct_field('struct_name', self.struct_name), runtime.struct_field('interfaces', self.interfaces)])
+
+class TraitDescriptor:
+    def __init__(self, name, type_parameters, signatures):
+        self.name = name
+        self.type_parameters = type_parameters
+        self.signatures = signatures
+
+    def __repr__(self):
+        return runtime.struct_repr('TraitDescriptor', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('signatures', self.signatures)])
+
+class TraitMetadata:
+    def __init__(self, interfaces, implementations):
+        self.interfaces = interfaces
+        self.implementations = implementations
+
+    def __repr__(self):
+        return runtime.struct_repr('TraitMetadata', [runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('implementations', self.implementations)])
+
+class LoweredLLVMResult:
+    def __init__(self, ir, diagnostics, trait_metadata):
+        self.ir = ir
+        self.diagnostics = diagnostics
+        self.trait_metadata = trait_metadata
+
+    def __repr__(self):
+        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata)])
 
 class LoweredLLVMFunction:
     def __init__(self, lines, diagnostics):
@@ -302,16 +328,17 @@ def lower_to_llvm(native_module):
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
-        return LoweredLLVMResult(ir="", diagnostics=diagnostics)
+        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata())
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
+    trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
     lines = []
     lines = append_string(lines, "; ModuleID = 'sailfin'")
     lines = append_string(lines, "source_filename = \"sailfin\"")
     lines = append_string(lines, "")
-    trait_metadata = render_trait_metadata(parse.interfaces, parse.structs)
-    if len(trait_metadata) > 0:
-        lines = (lines) + (trait_metadata)
+    trait_lines = render_trait_metadata_comments(trait_metadata)
+    if len(trait_lines) > 0:
+        lines = (lines) + (trait_lines)
         lines = append_string(lines, "")
     index = 0
     has_add_function = False
@@ -335,15 +362,38 @@ def lower_to_llvm(native_module):
     output = ir
     if len(output) > 0:
         output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics)
+    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata)
 
-def render_trait_metadata(interfaces, structs):
-    interface_lines = []
+def empty_trait_metadata():
+    return TraitMetadata(interfaces=[], implementations=[])
+
+def build_trait_metadata(interfaces, structs):
+    interface_descriptors = []
     index = 0
     while True:
         if index >= len(interfaces):
             break
         interface = interfaces[index]
+        interface_descriptors = (interface_descriptors) + ([TraitDescriptor(name=interface.name, type_parameters=interface.type_parameters, signatures=interface.signatures)])
+        index += 1
+    implementation_descriptors = []
+    index = 0
+    while True:
+        if index >= len(structs):
+            break
+        definition = structs[index]
+        if len(definition.implements) > 0:
+            implementation_descriptors = (implementation_descriptors) + ([TraitImplementationDescriptor(struct_name=definition.name, interfaces=definition.implements)])
+        index += 1
+    return TraitMetadata(interfaces=interface_descriptors, implementations=implementation_descriptors)
+
+def render_trait_metadata_comments(metadata):
+    interface_lines = []
+    index = 0
+    while True:
+        if index >= len(metadata.interfaces):
+            break
+        interface = metadata.interfaces[index]
         header = "; interface " + interface.name
         if len(interface.type_parameters) > 0:
             header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">"
@@ -362,12 +412,11 @@ def render_trait_metadata(interfaces, structs):
     struct_lines = []
     index = 0
     while True:
-        if index >= len(structs):
+        if index >= len(metadata.implementations):
             break
-        definition = structs[index]
-        if len(definition.implements) > 0:
-            line = "; struct " + definition.name + " implements " + join_with_separator(definition.implements, ", ")
-            struct_lines = append_string(struct_lines, line)
+        implementation = metadata.implementations[index]
+        line = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ")
+        struct_lines = append_string(struct_lines, line)
         index += 1
     if len(interface_lines) == 0  and  len(struct_lines) == 0:
         return []

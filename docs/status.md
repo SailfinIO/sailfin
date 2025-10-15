@@ -35,7 +35,10 @@ roadmaps.
   inference and prepare typed iteration over richer aggregates. Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
-  ASTs.
+  ASTs. The LLVM lowering pipeline surfaces this information via
+  `LoweredLLVMResult.trait_metadata`, providing structured descriptors for each
+  interface (name, generics, signatures) and every struct that implements them
+  ahead of trait-object plumbing.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.

@@ -8,9 +8,26 @@ import { NativeModule } from "./emit_native";
 import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct } from "./native_ir";
 import { substring, char_code } from "./string_utils";
 
+struct TraitImplementationDescriptor {
+    struct_name -> string;
+    interfaces -> string[];
+}
+
+struct TraitDescriptor {
+    name -> string;
+    type_parameters -> string[];
+    signatures -> NativeInterfaceSignature[];
+}
+
+struct TraitMetadata {
+    interfaces -> TraitDescriptor[];
+    implementations -> TraitImplementationDescriptor[];
+}
+
 struct LoweredLLVMResult {
     ir -> string;
     diagnostics -> string[];
+    trait_metadata -> TraitMetadata;
 }
 
 struct LoweredLLVMFunction {
@@ -198,20 +215,22 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
-        return LoweredLLVMResult { ir: "", diagnostics: diagnostics };
+        return LoweredLLVMResult { ir: "", diagnostics: diagnostics, trait_metadata: empty_trait_metadata() };
     }
 
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
+
+    let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
 
     let mut lines -> string[] = [];
     lines = append_string(lines, "; ModuleID = 'sailfin'");
     lines = append_string(lines, "source_filename = \"sailfin\"");
     lines = append_string(lines, "");
 
-    let trait_metadata = render_trait_metadata(parse.interfaces, parse.structs);
-    if trait_metadata.length > 0 {
-        lines = lines.concat(trait_metadata);
+    let trait_lines = render_trait_metadata_comments(trait_metadata);
+    if trait_lines.length > 0 {
+        lines = lines.concat(trait_lines);
         lines = append_string(lines, "");
     }
 
@@ -253,17 +272,57 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     if output.length > 0 {
         output = output + "\n";
     }
-    return LoweredLLVMResult { ir: output, diagnostics: diagnostics };
+    return LoweredLLVMResult { ir: output, diagnostics: diagnostics, trait_metadata: trait_metadata };
 }
 
-fn render_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> string[] {
-    let mut interface_lines -> string[] = [];
+fn empty_trait_metadata() -> TraitMetadata {
+    return TraitMetadata { interfaces: [], implementations: [] };
+}
+
+fn build_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> TraitMetadata {
+    let mut interface_descriptors -> TraitDescriptor[] = [];
     let mut index -> number = 0;
     loop {
         if index >= interfaces.length {
             break;
         }
         let interface = interfaces[index];
+        interface_descriptors = interface_descriptors.concat([
+            TraitDescriptor {
+                name: interface.name,
+                type_parameters: interface.type_parameters,
+                signatures: interface.signatures,
+            }
+        ]);
+        index += 1;
+    }
+
+    let mut implementation_descriptors -> TraitImplementationDescriptor[] = [];
+    index = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let definition = structs[index];
+        if definition.implements.length > 0 {
+            implementation_descriptors = implementation_descriptors.concat([
+                TraitImplementationDescriptor { struct_name: definition.name, interfaces: definition.implements }
+            ]);
+        }
+        index += 1;
+    }
+
+    return TraitMetadata { interfaces: interface_descriptors, implementations: implementation_descriptors };
+}
+
+fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
+    let mut interface_lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= metadata.interfaces.length {
+            break;
+        }
+        let interface = metadata.interfaces[index];
         let mut header -> string = "; interface " + interface.name;
         if interface.type_parameters.length > 0 {
             header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
@@ -289,14 +348,12 @@ fn render_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruc
     let mut struct_lines -> string[] = [];
     index = 0;
     loop {
-        if index >= structs.length {
+        if index >= metadata.implementations.length {
             break;
         }
-        let definition = structs[index];
-        if definition.implements.length > 0 {
-            let mut line -> string = "; struct " + definition.name + " implements " + join_with_separator(definition.implements, ", ");
-            struct_lines = append_string(struct_lines, line);
-        }
+        let implementation = metadata.implementations[index];
+        let mut line -> string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
+        struct_lines = append_string(struct_lines, line);
         index += 1;
     }
 

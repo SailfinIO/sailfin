@@ -433,7 +433,7 @@ fn main() -> number {
 
 
 def test_native_llvm_execution_reports_interface_metadata() -> None:
-        source = """
+    source = """
 interface Greeter {
     fn greet(self -> Greeter) -> string;
 }
@@ -459,15 +459,28 @@ fn main() -> number {
 }
 """
 
-        lowered = compile_to_native_llvm(source)
-        _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    lowered = compile_to_native_llvm(source)
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
 
-        ir = lowered.ir
-        assert "; -- Trait Metadata" in ir
-        assert "; interface Greeter" in ir
-        assert ";   fn greet(self -> Greeter) -> string" in ir
-        assert "; interface Formatter" in ir
-        assert "; struct FriendlyUser implements Greeter, Formatter" in ir
+    ir = lowered.ir
+    assert "; -- Trait Metadata" in ir
+    assert "; interface Greeter" in ir
+    assert ";   fn greet(self -> Greeter) -> string" in ir
+    assert "; interface Formatter" in ir
+    assert "; struct FriendlyUser implements Greeter, Formatter" in ir
+
+    trait_metadata = lowered.trait_metadata
+    interface_names = [descriptor.name for descriptor in trait_metadata.interfaces]
+    assert interface_names == ["Greeter", "Formatter"]
+    greeter_descriptor = trait_metadata.interfaces[0]
+    assert [signature.name for signature in greeter_descriptor.signatures] == ["greet"]
+    formatter_descriptor = trait_metadata.interfaces[1]
+    assert [signature.name for signature in formatter_descriptor.signatures] == ["format"]
+
+    assert len(trait_metadata.implementations) == 1
+    implementation = trait_metadata.implementations[0]
+    assert implementation.struct_name == "FriendlyUser"
+    assert implementation.interfaces == ["Greeter", "Formatter"]
 
 
 def test_native_llvm_execution_iterates_non_number_arrays() -> None:

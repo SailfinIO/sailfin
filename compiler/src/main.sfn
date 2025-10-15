@@ -93,6 +93,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     return LoweredLLVMResult {
         ir: lowered.ir,
         diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
     };
 }
 
