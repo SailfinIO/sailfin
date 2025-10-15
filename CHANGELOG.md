@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.14 (2025-10-15)
+
+### Bug Fixes
+
+- Source span attachment so suspension-conflict
+  ([`13e49c7`](https://github.com/SailfinIO/sailfin/commit/13e49c7c918ace807413f33075e8bff07bf7542c))
+
+
 ## v0.1.1-alpha.13 (2025-10-15)
 
 ### Bug Fixes
