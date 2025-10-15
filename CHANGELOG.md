@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.7 (2025-10-15)
+
+### Bug Fixes
+
+- Borrowing threaded ownership
+  ([`b3bfdcd`](https://github.com/SailfinIO/sailfin/commit/b3bfdcd93e2973ae2948038e38df2f670d31a109))
+
+### Documentation
+
+- Refreshed on borrowing
+  ([`cad1dab`](https://github.com/SailfinIO/sailfin/commit/cad1dab1dd3be2e98161a5a95b38654ac7bb750b))
+
+
 ## v0.1.1-alpha.6 (2025-10-15)
 
 ### Bug Fixes
