@@ -69,10 +69,22 @@ struct ArrayLiteralMetadata {
     start_index -> number;
 }
 
+struct OwnershipInfo {
+    variant -> string;
+    base -> string;
+    mutable -> boolean;
+}
+
 struct LocalBinding {
     name -> string;
     pointer -> string;
     llvm_type -> string;
+    ownership -> OwnershipInfo?;
+}
+
+struct OwnershipAnalysis {
+    ownership -> OwnershipInfo?;
+    diagnostics -> string[];
 }
 
 struct OperatorMatch {
@@ -92,6 +104,12 @@ struct BorrowParseResult {
     success -> boolean;
     target -> string;
     mutable -> boolean;
+    diagnostics -> string[];
+}
+
+struct BorrowArgumentParse {
+    success -> boolean;
+    argument -> string;
     diagnostics -> string[];
 }
 
@@ -1205,7 +1223,7 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_header_label + ":");
 
-        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double" };
+        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", ownership: null };
         let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
         diagnostics = diagnostics.concat(header_load.diagnostics);
         current_lines = header_load.lines;
@@ -1485,7 +1503,7 @@ fn lower_for_instruction(
     let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
     let stacked = append_loop_context(loop_stack, context);
 
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type };
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, ownership: null };
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(
         function,
@@ -2136,6 +2154,7 @@ fn lower_let_instruction(
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
+    let mut ownership -> OwnershipInfo? = null;
 
     let trimmed_annotation = trim_text(instruction.type_annotation);
     let mut llvm_type -> string = "";
@@ -2147,6 +2166,14 @@ fn lower_let_instruction(
     }
 
     let mut operand -> LLVMOperand? = null;
+    let ownership_analysis = analyze_let_ownership(instruction.value, current_locals);
+    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    ownership = ownership_analysis.ownership;
+    if ownership != null {
+        let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
+        diagnostics = diagnostics.concat(conflict_diagnostics);
+    }
+
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
@@ -2186,7 +2213,7 @@ fn lower_let_instruction(
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
 
-    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type });
+    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, ownership: ownership });
 
     return LetLoweringResult {
         lines: current_lines,
@@ -2742,6 +2769,29 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
     if trimmed.length == 0 {
         return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
     }
+
+    if starts_with(trimmed, "borrow") {
+        let mut remainder -> string = trim_text(substring(trimmed, 6, trimmed.length));
+        if remainder.length == 0 {
+            let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
+        }
+        if remainder[0] != "(" {
+            let issue = append_string(diagnostics, "llvm lowering: borrow expression missing `(`");
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
+        }
+        let argument_parse = extract_borrow_argument(remainder);
+        let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+        if !argument_parse.success {
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: messages };
+        }
+        if argument_parse.argument.length == 0 {
+            messages = append_string(messages, "llvm lowering: borrow expression missing target");
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: messages };
+        }
+        return BorrowParseResult { recognized: true, success: true, target: argument_parse.argument, mutable: false, diagnostics: messages };
+    }
+
     if !starts_with(trimmed, "&") {
         return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
     }
@@ -2759,8 +2809,146 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
         let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
         return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
     }
-    return BorrowParseResult { recognized: true, success: true, target: remainder, mutable: mutable_flag, diagnostics: diagnostics };
+    return BorrowParseResult { recognized: true, success: true, target: trim_text(remainder), mutable: mutable_flag, diagnostics: diagnostics };
 }
+
+fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
+    let mut diagnostics -> string[] = [];
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    let mut closing_index -> number = -1;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if depth == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing opening `(`");
+                return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+            }
+            depth -= 1;
+            let current_index = index;
+            index += 1;
+            if depth == 0 {
+                closing_index = current_index;
+                break;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    if closing_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing closing `)`");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let inner = substring(text, 1, closing_index);
+    let remainder = trim_text(substring(text, closing_index + 1, text.length));
+    if remainder.length > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
+}
+
+fn analyze_let_ownership(initializer -> string?, locals -> LocalBinding[]) -> OwnershipAnalysis {
+    if initializer == null {
+        return OwnershipAnalysis { ownership: null, diagnostics: [] };
+    }
+    let trimmed = trim_text(initializer);
+    if trimmed.length == 0 {
+        return OwnershipAnalysis { ownership: null, diagnostics: [] };
+    }
+    let parse = parse_borrow_expression(trimmed);
+    if !parse.recognized {
+        return OwnershipAnalysis { ownership: null, diagnostics: parse.diagnostics };
+    }
+    let mut diagnostics -> string[] = parse.diagnostics;
+    if !parse.success {
+        return OwnershipAnalysis { ownership: null, diagnostics: diagnostics };
+    }
+    let resolved_base = resolve_borrow_base(parse.target, locals);
+    if resolved_base.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return OwnershipAnalysis { ownership: null, diagnostics: diagnostics };
+    }
+    let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable };
+    return OwnershipAnalysis { ownership: ownership, diagnostics: diagnostics };
+}
+
+fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
+    let mut diagnostics -> string[] = [];
+    if ownership == null {
+        return diagnostics;
+    }
+    if ownership.variant != "Borrow" {
+        return diagnostics;
+    }
+    let base = trim_text(ownership.base);
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let existing = locals[index];
+        if existing.ownership != null {
+            let details = existing.ownership;
+            if details.variant == "Borrow" {
+                let existing_base = trim_text(details.base);
+                if existing_base == base {
+                    if ownership.mutable {
+                        if details.mutable {
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        } else {
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        }
+                    } else {
+                        if details.mutable {
+                            diagnostics = append_string(diagnostics, "llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
+fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
+    return resolve_borrow_base_inner(trim_text(target), locals, 0);
+}
+
+fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -> number) -> string {
+    let trimmed = trim_text(target);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    if depth >= 8 {
+        return trimmed;
+    }
+    if !is_simple_identifier(trimmed) {
+        return trimmed;
+    }
+    let binding = find_local_binding(locals, trimmed);
+    if binding == null {
+        return trimmed;
+    }
+    if binding.ownership == null {
+        return trimmed;
+    }
+    let details = binding.ownership;
+    if details.variant != "Borrow" {
+        return trimmed;
+    }
+    return resolve_borrow_base_inner(details.base, locals, depth + 1);
+}
+
 
 fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;

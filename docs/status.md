@@ -1,6 +1,6 @@
 # Sailfin Status
 
-Updated: October 2025
+Updated: October 15, 2025
 
 This document is the source of truth for what ships today in the Python
 bootstrap toolchain and what exists only in the Sailfin-native
@@ -42,6 +42,10 @@ roadmaps.
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_borrow_expressions`).
+  Ownership metadata now threads through `.sfn-asm`, and Stage2 flagging rejects
+  conflicting borrows (mutable-with-mutable or mutable-with-shared) during LLVM
+  lowering (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_mut_borrows`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_shared_borrows`).
   Borrowed references still introduce internal effects (`!read`, `!mut`) that
   compose with capability-driven effects; future enforcement will block `!mut`
   across suspension points and require manifests to authorise any routine that
@@ -141,7 +145,8 @@ roadmaps.
   the prelude compiles without spurious diagnostics.
 
 - Stage0 (legacy): Parses `Affine<T>` / `Linear<T>` without enforcement.
-- Stage1: Carries ownership metadata for future borrow checking.
+- Stage1: Carries ownership metadata for borrow checking and now emits the data
+  needed for Stage2 to diagnose conflicting borrows.
 
 - Stage0 (legacy): Lowers tests to Python functions executed in the `__main__`
   preamble, enforcing required effects.

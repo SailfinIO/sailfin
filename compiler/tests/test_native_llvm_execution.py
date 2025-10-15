@@ -618,6 +618,46 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_reports_conflicting_mut_borrows() -> None:
+    source = """
+fn conflict() -> number {
+    let mut slot -> number = 0;
+    let first -> &mut number = &mut slot;
+    let second -> &mut number = &mut slot;
+    return slot;
+}
+
+fn main() -> number {
+    return conflict();
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
+    assert non_pointer, "expected conflict diagnostics"
+    assert all("conflicts with" in diag for diag in non_pointer)
+
+
+def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
+    source = """
+fn conflict_shared() -> number {
+    let mut slot -> number = 0;
+    let guard -> &mut number = &mut slot;
+    let view -> &number = &slot;
+    return slot;
+}
+
+fn main() -> number {
+    return conflict_shared();
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
+    assert non_pointer, "expected conflict diagnostics"
+    assert all("shared borrow" in diag for diag in non_pointer)
+
+
 def test_native_llvm_execution_supports_range_strides() -> None:
     source = """
 fn sum_stride(limit -> number, stride -> number) -> number {

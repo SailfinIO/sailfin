@@ -115,14 +115,32 @@ class ArrayLiteralMetadata:
     def __repr__(self):
         return runtime.struct_repr('ArrayLiteralMetadata', [runtime.struct_field('element_type', self.element_type), runtime.struct_field('start_index', self.start_index)])
 
+class OwnershipInfo:
+    def __init__(self, variant, base, mutable):
+        self.variant = variant
+        self.base = base
+        self.mutable = mutable
+
+    def __repr__(self):
+        return runtime.struct_repr('OwnershipInfo', [runtime.struct_field('variant', self.variant), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable)])
+
 class LocalBinding:
-    def __init__(self, name, pointer, llvm_type):
+    def __init__(self, name, pointer, llvm_type, ownership=None):
         self.name = name
         self.pointer = pointer
         self.llvm_type = llvm_type
+        self.ownership = ownership
 
     def __repr__(self):
-        return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type)])
+        return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('ownership', self.ownership)])
+
+class OwnershipAnalysis:
+    def __init__(self, diagnostics, ownership=None):
+        self.ownership = ownership
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('OwnershipAnalysis', [runtime.struct_field('ownership', self.ownership), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class OperatorMatch:
     def __init__(self, index, symbol, success):
@@ -152,6 +170,15 @@ class BorrowParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('BorrowParseResult', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('mutable', self.mutable), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class BorrowArgumentParse:
+    def __init__(self, success, argument, diagnostics):
+        self.success = success
+        self.argument = argument
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('BorrowArgumentParse', [runtime.struct_field('success', self.success), runtime.struct_field('argument', self.argument), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class ExpressionStatementResult:
     def __init__(self, lines, temp_index, diagnostics):
@@ -883,7 +910,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_lines = append_string(current_lines, "  store double " + start_operand.value + ", double* " + iteration_pointer)
         current_lines = append_string(current_lines, "  br label %" + loop_header_label)
         current_lines = append_string(current_lines, loop_header_label + ":")
-        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double")
+        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double", ownership=None)
         header_load = load_local_operand(iteration_binding, current_temp, current_lines)
         diagnostics = (diagnostics) + (header_load.diagnostics)
         current_lines = header_load.lines
@@ -1035,7 +1062,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     current_lines = append_string(current_lines, "  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer)
     context = LoopContext(break_label=loop_exit_label, continue_label=loop_increment_label)
     stacked = append_loop_context(loop_stack, context)
-    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type)
+    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, ownership=None)
     body_locals = append_local_binding(current_locals, iteration_binding)
     body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, functions, stacked )
     diagnostics = (diagnostics) + (body_result.diagnostics)
@@ -1367,6 +1394,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_allocas = allocas
     current_locals = locals
     current_temp = temp_index
+    ownership = None
     trimmed_annotation = trim_text(instruction.type_annotation)
     llvm_type = ""
     if len(trimmed_annotation) > 0:
@@ -1374,6 +1402,12 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`")
     operand = None
+    ownership_analysis = analyze_let_ownership(instruction.value, current_locals)
+    diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
+    ownership = ownership_analysis.ownership
+    if ownership != None:
+        conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name)
+        diagnostics = (diagnostics) + (conflict_diagnostics)
     if instruction.value == None  or  len(instruction.value) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`")
     else:
@@ -1402,7 +1436,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
             current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer)
     else:
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer)
-    current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type))
+    current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, ownership=ownership))
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1)
 
 def lower_expression_statement(expression, bindings, locals, temp_index, lines, functions):
@@ -1798,6 +1832,22 @@ def parse_borrow_expression(text):
     diagnostics = []
     if len(trimmed) == 0:
         return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+    if starts_with(trimmed, "borrow"):
+        remainder = trim_text(substring(trimmed, 6, len(trimmed)))
+        if len(remainder) == 0:
+            issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=issue)
+        if remainder[0] != "(":
+            issue = append_string(diagnostics, "llvm lowering: borrow expression missing `(`")
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=issue)
+        argument_parse = extract_borrow_argument(remainder)
+        messages = (diagnostics) + (argument_parse.diagnostics)
+        if not argument_parse.success:
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=messages)
+        if len(argument_parse.argument) == 0:
+            messages = append_string(messages, "llvm lowering: borrow expression missing target")
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=messages)
+        return BorrowParseResult(recognized=True, success=True, target=argument_parse.argument, mutable=False, diagnostics=messages)
     if not starts_with(trimmed, "&"):
         return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
     if starts_with(trimmed, "&&"):
@@ -1811,7 +1861,110 @@ def parse_borrow_expression(text):
     if len(remainder) == 0:
         issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
         return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=issue)
-    return BorrowParseResult(recognized=True, success=True, target=remainder, mutable=mutable_flag, diagnostics=diagnostics)
+    return BorrowParseResult(recognized=True, success=True, target=trim_text(remainder), mutable=mutable_flag, diagnostics=diagnostics)
+
+def extract_borrow_argument(text):
+    diagnostics = []
+    depth = 0
+    index = 0
+    closing_index = -1
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "(":
+            depth += 1
+            index += 1
+            continue
+        if ch == ")":
+            if depth == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing opening `(`")
+                return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
+            depth -= 1
+            current_index = index
+            index += 1
+            if depth == 0:
+                closing_index = current_index
+                break
+            continue
+        index += 1
+    if closing_index < 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing closing `)`")
+        return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
+    inner = substring(text, 1, closing_index)
+    remainder = trim_text(substring(text, closing_index + 1, len(text)))
+    if len(remainder) > 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`")
+        return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
+    return BorrowArgumentParse(success=True, argument=trim_text(inner), diagnostics=diagnostics)
+
+def analyze_let_ownership(initializer, locals):
+    if initializer == None:
+        return OwnershipAnalysis(ownership=None, diagnostics=[])
+    trimmed = trim_text(initializer)
+    if len(trimmed) == 0:
+        return OwnershipAnalysis(ownership=None, diagnostics=[])
+    parse = parse_borrow_expression(trimmed)
+    if not parse.recognized:
+        return OwnershipAnalysis(ownership=None, diagnostics=parse.diagnostics)
+    diagnostics = parse.diagnostics
+    if not parse.success:
+        return OwnershipAnalysis(ownership=None, diagnostics=diagnostics)
+    resolved_base = resolve_borrow_base(parse.target, locals)
+    if len(resolved_base) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+        return OwnershipAnalysis(ownership=None, diagnostics=diagnostics)
+    ownership = OwnershipInfo(variant="Borrow", base=resolved_base, mutable=parse.mutable)
+    return OwnershipAnalysis(ownership=ownership, diagnostics=diagnostics)
+
+def detect_borrow_conflicts(ownership, locals, binding_name, function_name):
+    diagnostics = []
+    if ownership == None:
+        return diagnostics
+    if ownership.variant != "Borrow":
+        return diagnostics
+    base = trim_text(ownership.base)
+    index = 0
+    while True:
+        if index >= len(locals):
+            break
+        existing = locals[index]
+        if existing.ownership != None:
+            details = existing.ownership
+            if details.variant == "Borrow":
+                existing_base = trim_text(details.base)
+                if existing_base == base:
+                    if ownership.mutable:
+                        if details.mutable:
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`")
+                        else:
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`")
+                    else:
+                        if details.mutable:
+                            diagnostics = append_string(diagnostics, "llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`")
+        index += 1
+    return diagnostics
+
+def resolve_borrow_base(target, locals):
+    return resolve_borrow_base_inner(trim_text(target), locals, 0)
+
+def resolve_borrow_base_inner(target, locals, depth):
+    trimmed = trim_text(target)
+    if len(trimmed) == 0:
+        return trimmed
+    if depth >= 8:
+        return trimmed
+    if not is_simple_identifier(trimmed):
+        return trimmed
+    binding = find_local_binding(locals, trimmed)
+    if binding == None:
+        return trimmed
+    if binding.ownership == None:
+        return trimmed
+    details = binding.ownership
+    if details.variant != "Borrow":
+        return trimmed
+    return resolve_borrow_base_inner(details.base, locals, depth + 1)
 
 def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
     diagnostics = parse.diagnostics

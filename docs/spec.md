@@ -472,7 +472,7 @@ Reference types &T and &mut T are accepted syntactically (see below) but are tre
 
 The expression forms &x and borrow(x) are accepted. They construct a reference value but carry no static guarantees in bootstrap builds.
 
-Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values.
+Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values. The Stage2 LLVM lowering now threads ownership metadata through `.sfn-asm` and rejects conflicting borrows (multiple `&mut` aliases or mixing `&mut` with shared borrows) during code generation; full move and lifetime enforcement remains future work.
 
 #### 6.1.2 Planned (self-hosted) semantics
 
