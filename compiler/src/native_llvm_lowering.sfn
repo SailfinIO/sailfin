@@ -2472,7 +2472,11 @@ fn lower_let_instruction(
     }
 
     let mut operand -> LLVMOperand? = null;
-    let ownership_analysis = analyze_value_ownership(instruction.value, instruction.value_span, current_locals, bindings);
+    let span_for_diagnostics = instruction.value_span;
+    if span_for_diagnostics == null {
+        span_for_diagnostics = instruction.span;
+    }
+    let ownership_analysis = analyze_value_ownership(instruction.value, span_for_diagnostics, current_locals, bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     ownership = ownership_analysis.ownership;
     consumption = ownership_analysis.consumption;

@@ -1631,7 +1631,10 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`")
     operand = None
-    ownership_analysis = analyze_value_ownership(instruction.value, instruction.value_span, current_locals, bindings)
+    span_for_diagnostics = instruction.value_span
+    if span_for_diagnostics == None:
+        span_for_diagnostics = instruction.span
+    ownership_analysis = analyze_value_ownership(instruction.value, span_for_diagnostics, current_locals, bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     ownership = ownership_analysis.ownership
     consumption = ownership_analysis.consumption
