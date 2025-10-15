@@ -458,19 +458,108 @@ with linear semantics suitable for zero-copy AI workloads.
 **Wrapper types** – `PII<T>`, `Secret<T>`, `Policy<T, Rule>`, `Affine<T>`, and
 `Linear<T>` compose with all other types and participate in effect enforcement.
 
-### 6.1 Ownership & Linear Types (bootstrap reality)
+### 6.1 Ownership, Moves, and Borrowing
 
-- `Affine<T>` and `Linear<T>` are accepted syntactically as ordinary nominal
-  types. The bootstrap toolchain does not enforce move/consume rules; they are
-  carried as annotations for diagnostics and documentation only.
-- Borrowing is a planned feature in the self-hosted compiler. The tentative
-  surface syntax will include a function-style borrow `borrow(x)` and may also
-  explore a unary borrow operator `&x`. The latter is not parsed today (the `&`
-  token is currently used for type intersections, e.g. `A & B`).
+This section describes what the bootstrap enforces today and what the self-hosted compiler will enforce.
 
-> Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only.
-> The bootstrap backend will not prevent aliasing, duplication, or drops of
-> `Affine<T>`/`Linear<T>` values.
+> Design principle: Sailfin relies on ownership plus references—general-purpose raw pointers are intentionally absent from the safe core. Forthcoming lowering layers will provide reference-friendly representations that map cleanly onto LLVM and WASM without exposing unchecked pointer arithmetic.
+
+#### 6.1.1 Current (bootstrap) reality
+
+Affine<T> and Linear<T> type wrappers are accepted syntactically and carried through the pipeline for diagnostics and documentation. The bootstrap backend does not enforce move/consume rules; aliasing and duplication are possible.
+
+Reference types &T and &mut T are accepted syntactically (see below) but are treated as ordinary nominal types by the bootstrap. The bootstrap does not enforce exclusivity or lifetime checks.
+
+The expression forms &x and borrow(x) are accepted. They construct a reference value but carry no static guarantees in bootstrap builds.
+
+Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values.
+
+#### 6.1.2 Planned (self-hosted) semantics
+
+Sailfin uses a move-by-default model with explicit borrowing:
+
+Moves: let y = x moves x into y unless T is Copy. Using x after a move is a compile-time error. Use clone(x) for an explicit deep/semantic copy (if implemented by T).
+
+Shared borrows (&T): created with &expr (or borrow(expr)), allow read-only access. Many shared borrows to the same value may coexist.
+
+Mutable borrows (&mut T): created with &mut expr, grant exclusive, mutable access. While a &mut borrow is live, no other borrows (shared or mutable) to the same value may exist.
+
+Reborrows: A &mut T can be reborrowed as &T (read-only) for a narrower region when needed.
+
+Lifetimes: The compiler performs lifetime inference (lexical with non-lexical use-sites permitted). A borrow may not outlive its referent. In generic code, lifetime parameters are elided unless ambiguity requires annotation (annotation syntax will be introduced alongside generic region constraints).
+
+Auto-deref & field access: Field/method access through references is implicitly dereferenced. Explicit dereference operators are not required; a deref(x) intrinsic may be provided for clarity.
+
+Copy types: Primitive scalars and explicitly Copy types duplicate on assignment; all others move.
+
+Intersections vs address-of: The & token serves as both (1) the type intersection operator A & B in type position and (2) the borrow operator &x in expression position. The grammar is context-sensitive here but unambiguous: intersection appears only between type terms; unary & appears only before expressions. (See EBNF notes below.)
+
+Unsafe/raw memory: Raw pointers and pointer arithmetic are not part of the safe core. For FFI and low-level interop, `unsafe` + `extern` declarations expose raw pointer forms (e.g., `*u8`) behind explicit capability gates. Dereferencing a raw pointer (`*ptr`) is only legal inside an `unsafe` block.
+
+#### 6.1.3 Examples
+
+See `examples/basics/borrowing.sfn` for a runnable Stage2 design sample that illustrates the ownership rules described above. The sample shows how
+
+- bindings move by default (`let mut counter = Counter { ... };`),
+- shared borrows are constructed with `&counter` and `borrow(counter)`,
+- mutable borrows use `&mut counter` and can be reborrowed as shared references inside `snapshot`, and
+- ending the scope of a mutable borrow allows new borrows to be taken later in the program.
+
+The bootstrap pipeline currently accepts these forms without enforcing exclusivity; the example documents the semantics the Stage2 checker will apply.
+
+#### 6.1.4 Borrow-specific effects
+
+Borrowing integrates with the effect lattice so the compiler (and downstream agents) can reason about aliasing guarantees:
+
+- `&T` introduces a shared-borrow effect written `!read`. Callers must permit read-only access to the borrowed region.
+- `&mut T` introduces an exclusive-borrow effect written `!mut`. Callers must prove they hold the sole mutable reference during the call.
+- Owned values (moves) carry no borrow effect—they already own the data.
+
+Effects appear in function signatures even when inferred:
+
+```
+fn push!(values -> &mut Vec<T>, item -> T) ![mut] {
+  values.push(item);
+}
+
+fn peek(values -> &Vec<T>) ![read] -> T? {
+  if values.is_empty() {
+    return null;
+  }
+  return values[values.length - 1];
+}
+```
+
+Borrow effects compose with other capability requirements. For example:
+
+```
+fn update_cache!(cache -> &mut Map<string, string>) ![mut, io.fs.read, io.fs.write] {
+  let data = read_file!("data.txt");
+  cache.insert("data", data);
+}
+```
+
+Here the compiler derives the composite effect list `![mut, io.fs.read, io.fs.write]` by combining the borrow requirement with filesystem I/O.
+
+Async safety: borrow effects cannot cross suspension points unless the reference is proven `'static` or cloned into an owned value. Expressed as a lattice rule, `!mut` is not a subset of `!async`. The Stage2 checker will reject `await` and routine yields that would extend a borrow beyond its lifetime.
+
+#### 6.1.5 Unsafe capability and extern interop
+
+Low-level interop lives behind an explicit `unsafe` capability. Unsafe declarations surface the risk while keeping safe code pointer-free:
+
+```
+unsafe extern fn malloc(size -> usize) -> *u8;
+
+fn allocate_buffer(bytes -> usize) ![unsafe] -> *u8 {
+  unsafe {
+    let ptr = malloc(bytes);
+    // Dereferencing raw pointers is only legal inside this block.
+    return ptr;
+  }
+}
+```
+
+Inside an `unsafe` block you may dereference raw pointers (`*ptr`) or call other unsafe routines; outside, only reference-typed values (`&T`, `&mut T`) are available. Capability manifests must opt into `unsafe` before such code can run.
 
 ## 7. Capability-Based Security
 

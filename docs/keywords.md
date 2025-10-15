@@ -32,8 +32,10 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `fn`
 - `async`
 - `await`
+- `extern`
 - `let`
 - `mut`
+- `unsafe`
 - `struct`
 - `enum`
 - `interface`

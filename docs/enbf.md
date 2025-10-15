@@ -54,9 +54,12 @@ TypeAliasDeclaration = "type" Identifier [ TypeParameters ] "=" Type ";" ;
 TypeParameters     = "<" TypeParameter { "," TypeParameter } ">" ;
 TypeParameter      = Identifier [ ":" Type ] ;
 
-FunctionDeclaration = { Decorator } [ "async" ] "fn" Identifier
-                       [ TypeParameters ] "(" [ Parameters ] ")"
-                       [ TypeSep Type ] [ EffectList ] Block ;
+FunctionDeclaration = { Decorator } { FunctionModifier }
+                      "fn" Identifier [ TypeParameters ]
+                      "(" [ Parameters ] ")"
+                      [ TypeSep Type ] [ EffectList ] Block ;
+
+FunctionModifier    = "async" | "unsafe" | "extern" ;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
                       [ TypeSep Type ] [ EffectList ] Block ;
@@ -95,9 +98,11 @@ Statement          = VariableDeclaration
                    | WithStatement
                    | PromptStatement
                    | AssertStatement
+                   | UnsafeBlock
                    | Block
                    | AssignmentStatement
                    | ExpressionStatement ;
+UnsafeBlock        = "unsafe" Block ;
 
 AssertStatement    = "assert" Expression ";" ;  // Bootstrap: no parentheses required
 
@@ -154,7 +159,11 @@ Equality           = Comparison { (("==" | "!=") Comparison) | ("is" Type) } ;
 Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
 Term               = Factor { ("+" | "-") Factor } ;
 Factor             = Unary { ("*" | "/") Unary } ;
-Unary              = ("!" | "-" | "+" | "await") Unary | Postfix ;
+Unary              = ("!" | "-" | "+" | "await") Unary
+                   | "&" [ "mut" ] Unary
+                   | "borrow" "(" Expression ")"
+                   | "*" Unary   // raw pointer deref (only legal inside unsafe blocks)
+                   | Postfix ;
 
 Postfix            = Primary { PostfixOp } ;
 PostfixOp          = "(" [ Arguments ] ")"
@@ -186,7 +195,10 @@ StructField        = Identifier ":" Expression ;
 Type               = UnionType ;
 UnionType          = OptionalType { "|" OptionalType } ;
 OptionalType       = SimpleType [ "?" ] ;
-SimpleType         = QualifiedName [ "<" Type { "," Type } ">" ] ;
+SimpleType         = ReferencePrefix PointerType ;
+ReferencePrefix    = { "&" [ "mut" ] } ;
+PointerType        = { "*" } BaseType ;
+BaseType           = QualifiedName [ "<" Type { "," Type } ">" ] ;
 NominalType        = SimpleType ;
 QualifiedName      = Identifier { "." Identifier } ;
 

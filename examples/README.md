@@ -27,6 +27,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | Example | Effects | Notes |
 |---------|---------|-------|
 | `basic-enum.sfn` | `io` | Enum pattern matching with console logging. |
+| `borrowing.sfn` | `mut`, `read` | Stage2 borrowing design sample; shows moves, shared borrows, and reborrows without runtime enforcement yet. |
 | `conditionals.sfn` | `io` | Branching over values with `print.info`. |
 | `error-handling.sfn` | `io` | Struct-based error propagation matched with logging. |
 | `functions.sfn` | `io` | Function defaults and overloading with console output. |
