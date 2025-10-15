@@ -16,7 +16,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
   - [x] Tag `.sfn-asm` array literals with element-type metadata so Stage2 lowering can skip per-literal inference and extend typed iteration to struct and enum aggregates. (Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_tags_array_literals_with_metadata`.)
   - [x] Extend primitive coverage beyond `number` so boolean and integer values lower into native LLVM types and flow through conditions without double coercions. (Covered by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_supports_boolean_and_integer_primitives`.)
   - [x] Emit struct and enum layout descriptors in `.sfn-asm` (field order, sizes, and payload encoding) so Stage2 lowering can materialise aggregate storage without guessing. Document the format in `docs/spec.md` and cover it with a regression in `compiler/tests/test_stage1_pipeline.py`.
-  - [ ] Capture `.interface` declarations and struct `implements` metadata in `native_ir.sfn` so the LLVM backend can reason about trait membership.
+  - [ ] Thread parsed interface metadata into `native_llvm_lowering.sfn`, emitting placeholder descriptors so upcoming trait-object work has concrete data; exercise the plumbing with a focused regression in `compiler/tests/test_native_llvm_execution.py`.
   - [ ] Lower struct and enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
   - [ ] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Add focused coverage to `compiler/tests/test_native_llvm_execution.py`.)
   - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
@@ -70,6 +70,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Stage2 interface metadata — `native_ir.sfn` now records interface declarations and struct `implements` lists so trait membership is available to LLVM lowering. Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_records_interface_metadata`.
 - [x] Stage2 loop & match lowering — Stage2 LLVM emission now handles `loop` (`break`/`continue`) and `match` dispatch. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` exercises loop control and case dispatch end-to-end.
 - [x] Stage2 primitive array iteration — `.for` lowering now preserves element types for `boolean[]` and `int[]` literals and parameters, so non-number sequences execute without Python fallbacks. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_non_number_arrays`.
 - [x] Stage2 range `.for` lowering — Numeric range-driven `for` loops (with `break`/`continue`) now lower to LLVM without Python fallbacks. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` includes the `sum_for` iteration case.

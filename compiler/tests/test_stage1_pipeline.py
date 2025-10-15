@@ -72,6 +72,33 @@ fn main() -> number {
 }
 """
 
+INTERFACE_METADATA_SOURCE = """
+interface Greeter {
+  fn greet(self) -> string;
+}
+
+interface Formatter {
+  fn format(self) -> string;
+}
+
+struct FriendlyUser implements Greeter, Formatter {
+  name -> string;
+
+  fn greet(self -> FriendlyUser) -> string {
+    return "Hello, {{self.name}}!";
+  }
+
+  fn format(self -> FriendlyUser) -> string {
+    return self.name;
+  }
+}
+
+fn main() -> string {
+  let value = FriendlyUser { name: "Ada" };
+  return value.format();
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -225,3 +252,35 @@ def test_native_backend_emits_layout_descriptors() -> None:
   assert unit_layout.offset == 4
   assert unit_layout.size == 0
   assert unit_layout.align == 1
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_records_interface_metadata() -> None:
+  stage1_main = importlib.import_module("compiler.build.main")
+  native_ir_module = importlib.import_module("compiler.build.native_ir")
+
+  result = stage1_main.compile_to_native(INTERFACE_METADATA_SOURCE)
+  unexpected = [diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+  assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+  artifact = next((artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"), None)
+  assert artifact is not None, "native artifact missing from emit_native output"
+
+  parse_native_artifact = getattr(native_ir_module, "parse_native_artifact")
+  parse_result = parse_native_artifact(artifact.contents)
+
+  greeter = next((definition for definition in parse_result.interfaces if definition.name == "Greeter"), None)
+  assert greeter is not None, "Greeter interface metadata missing"
+  assert len(greeter.signatures) == 1, "Greeter signatures not captured"
+  greet_sig = greeter.signatures[0]
+  assert greet_sig.name == "greet"
+  assert greet_sig.return_type == "string"
+  assert [parameter.name for parameter in greet_sig.parameters] == ["self"], "Greeter signature parameters incorrect"
+
+  formatter = next((definition for definition in parse_result.interfaces if definition.name == "Formatter"), None)
+  assert formatter is not None, "Formatter interface metadata missing"
+  assert [signature.name for signature in formatter.signatures] == ["format"]
+
+  friendly_user = next((definition for definition in parse_result.structs if definition.name == "FriendlyUser"), None)
+  assert friendly_user is not None, "FriendlyUser struct metadata missing"
+  assert friendly_user.implements == ["Greeter", "Formatter"], "struct implements metadata incorrect"

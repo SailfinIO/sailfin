@@ -32,7 +32,10 @@ roadmaps.
   prototype. Struct and enum declarations now emit `.layout` descriptors that
   record size, alignment, and per-field offsets for LLVM consumption. Array
   literals embed `#element:<type>` metadata so Stage2 can skip per-element
-  inference and prepare typed iteration over richer aggregates.
+  inference and prepare typed iteration over richer aggregates. Interface
+  declarations and struct `implements` clauses now flow through the native IR so
+  the LLVM backend can reason about trait membership without inspecting source
+  ASTs.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.
