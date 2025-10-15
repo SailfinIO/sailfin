@@ -50,7 +50,9 @@ roadmaps.
   blocks, so use-after-move checks on locals and parameters fire when those
   values are reused after being consumed; the execution suite in
   `compiler/tests/test_native_llvm_execution.py` exercises these control-flow
-  paths while ensuring legitimate reassignments clear the consumed state.
+  paths while ensuring legitimate reassignments clear the consumed state, with
+  targeted coverage for non-copy aggregates such as `Affine<number[]>`
+  (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`).
   Borrowed references still introduce internal effects (`!read`, `!mut`) that
   compose with capability-driven effects, and the lowering pipeline now records
   those requirements per function (`LoweredLLVMResult.function_effects`) while

@@ -1,6 +1,6 @@
 # Sailfin Roadmap
 
-Updated: October 12, 2025  
+Updated: October 15, 2025  
 Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
@@ -10,7 +10,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Stage2 Backend Delivery**
-  - [ ] Enforce move-out diagnostics in Stage2 by threading ownership metadata for moves through `.sfn-asm`, flagging use-after-move during lowering, and covering the behaviour with dedicated regressions. *(In progress — ownership consumption now propagates through loops, `if`/`else`, and `match` merges, and lowering emits `use-after-move` diagnostics for locals and parameters; targeted regressions for non-copy aggregates are still outstanding.)*
+  - [ ] Surface source spans for Stage2 move-out diagnostics so LLVM errors map back to `.sfn` lines; wire the location data into lowering once ownership metadata exposes span offsets and add focused fixtures to `compiler/tests/test_native_llvm_execution.py`.
   - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
   - [ ] Surface borrow effects (`!read`, `!mut`) in Stage2 lowering, propagating them through function signatures and capability manifests so composite effects (e.g., mutation + filesystem access) are reported to callers. *(In progress — per-function effect metadata now lands in `LoweredLLVMResult.function_effects`, and LLVM IR tags these effects via comment headers; capability manifest wiring remains.)*
   - [ ] Enforce the lattice rule `!mut ⊄ !async` by rejecting suspension points that would extend a mutable borrow across `await`/routine yields; add coverage for both acceptance and rejection cases.
@@ -68,6 +68,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Stage2 move-out diagnostics — Ownership metadata now ships use-after-move errors for locals and parameters, including non-copy aggregates; regression coverage lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`, with behaviour documented in `docs/status.md`.
 - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
 - [x] Lower loops and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend. (Regression: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` now covers loop + match execution.)
 - [x] Lower `.for` loops over sequence iterables (arrays, comprehensions) into LLVM index loops so collection iteration executes without Python fallbacks. (Local bindings and inline literals without annotations now lower in `native_llvm_lowering.sfn`; validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_array_bindings_without_annotations`.)

@@ -655,6 +655,24 @@ def test_native_llvm_execution_reports_use_after_move() -> None:
 
 
 
+
+def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None:
+    source = """
+    fn reuse(values -> Affine<number[]>) -> number {
+        let alias = values;
+        let again = values;
+        return 0;
+    }
+
+    fn main() -> number {
+        return 0;
+    }
+    """
+
+    lowered = compile_to_native_llvm(source)
+    assert any("use-after-move" in diag for diag in lowered.diagnostics)
+    assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
+
 def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
     source = """
 fn conflict_shared() -> number {
