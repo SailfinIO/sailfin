@@ -142,6 +142,17 @@ class AssignmentParseResult:
     def __repr__(self):
         return runtime.struct_repr('AssignmentParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('value', self.value)])
 
+class BorrowParseResult:
+    def __init__(self, recognized, success, target, mutable, diagnostics):
+        self.recognized = recognized
+        self.success = success
+        self.target = target
+        self.mutable = mutable
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('BorrowParseResult', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('mutable', self.mutable), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class ExpressionStatementResult:
     def __init__(self, lines, temp_index, diagnostics):
         self.lines = lines
@@ -1619,6 +1630,39 @@ def map_primitive_type(annotation):
         return "i64"
     return ""
 
+def map_reference_inner_type(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    nested_reference = map_reference_type(trimmed)
+    if len(nested_reference) > 0:
+        return nested_reference
+    array_type = map_array_pointer_type(trimmed)
+    if len(array_type) > 0:
+        return array_type
+    return map_primitive_type(trimmed)
+
+def map_reference_type(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    if not starts_with(trimmed, "&"):
+        return ""
+    if starts_with(trimmed, "&&"):
+        return ""
+    remainder = trim_text(substring(trimmed, 1, len(trimmed)))
+    if starts_with(remainder, "mut"):
+        after_mut = substring(remainder, 3, len(remainder))
+        remainder = trim_text(after_mut)
+    if len(remainder) == 0:
+        return ""
+    if remainder[0] == "("  and  remainder[len(remainder) - 1] == ")":
+        remainder = trim_text(substring(remainder, 1, len(remainder) - 1))
+    inner_type = map_reference_inner_type(remainder)
+    if len(inner_type) == 0:
+        return ""
+    return inner_type + "*"
+
 def map_array_pointer_type(annotation):
     trimmed = trim_text(annotation)
     if len(trimmed) < 3:
@@ -1648,6 +1692,9 @@ def map_return_type(return_type):
     trimmed = trim_text(return_type)
     if len(trimmed) == 0  or  trimmed == "void":
         return "void"
+    reference_type = map_reference_type(trimmed)
+    if len(reference_type) > 0:
+        return reference_type
     array_type = map_array_pointer_type(trimmed)
     if len(array_type) > 0:
         return array_type
@@ -1657,6 +1704,9 @@ def map_parameter_type(parameter_type):
     trimmed = trim_text(parameter_type)
     if len(trimmed) == 0:
         return "double"
+    reference_type = map_reference_type(trimmed)
+    if len(reference_type) > 0:
+        return reference_type
     array_type = map_array_pointer_type(trimmed)
     if len(array_type) > 0:
         return array_type
@@ -1666,6 +1716,9 @@ def map_local_type(type_annotation):
     trimmed = trim_text(type_annotation)
     if len(trimmed) == 0:
         return "double"
+    reference_type = map_reference_type(trimmed)
+    if len(reference_type) > 0:
+        return reference_type
     array_type = map_array_pointer_type(trimmed)
     if len(array_type) > 0:
         return array_type
@@ -1691,6 +1744,9 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions)
     stripped = strip_enclosing_parentheses(trimmed)
     if stripped != trimmed:
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions)
+    borrow_parse = parse_borrow_expression(stripped)
+    if borrow_parse.recognized:
+        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines)
     comparison = find_comparison_operator(stripped)
     if comparison.success:
         return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions)
@@ -1736,6 +1792,43 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions)
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+
+def parse_borrow_expression(text):
+    trimmed = trim_text(text)
+    diagnostics = []
+    if len(trimmed) == 0:
+        return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+    if not starts_with(trimmed, "&"):
+        return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+    if starts_with(trimmed, "&&"):
+        return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+    remainder = trim_text(substring(trimmed, 1, len(trimmed)))
+    mutable_flag = False
+    if starts_with(remainder, "mut"):
+        mutable_flag = True
+        after_mut = substring(remainder, 3, len(remainder))
+        remainder = trim_text(after_mut)
+    if len(remainder) == 0:
+        issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+        return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=issue)
+    return BorrowParseResult(recognized=True, success=True, target=remainder, mutable=mutable_flag, diagnostics=diagnostics)
+
+def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
+    diagnostics = parse.diagnostics
+    if not parse.success:
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+    target = strip_enclosing_parentheses(parse.target)
+    target = trim_text(target)
+    if len(target) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+    local = find_local_binding(locals, target)
+    if local == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow requires local binding `" + target + "`")
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+    pointer_type = local.llvm_type + "*"
+    operand = LLVMOperand(llvm_type=pointer_type, value=local.pointer)
+    return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
 
 def lower_binary_operation(expression, match, bindings, locals, temp_index, lines, functions):
     left_text = trim_text(substring(expression, 0, match.index))
@@ -2438,6 +2531,14 @@ def default_return_literal(llvm_type):
     if ends_with_pointer_suffix(llvm_type):
         return "null"
     return "zeroinitializer"
+
+def starts_with(value, prefix):
+    if len(prefix) == 0:
+        return True
+    if len(value) < len(prefix):
+        return False
+    head = substring(value, 0, len(prefix))
+    return head == prefix
 
 def strip_mut_prefix(value):
     trimmed = trim_text(value)

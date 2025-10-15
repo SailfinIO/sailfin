@@ -38,13 +38,16 @@ roadmaps.
   ASTs. The LLVM lowering pipeline surfaces this information via
   `LoweredLLVMResult.trait_metadata`, providing structured descriptors for each
   interface (name, generics, signatures) and every struct that implements them
-  ahead of trait-object plumbing. Borrowed references (`&T`, `&mut T`) introduce
-  internal effects (`!read`, `!mut`) that compose with capability-driven effects;
-  future enforcement will block `!mut` across suspension points and require
-  manifests to authorise any routine that touches unsafe capabilities. Raw
-  pointer access remains gated behind `unsafe extern` declarations and lexical
-  `unsafe { ... }` blocks so Stage2 can target LLVM/WASM without exposing unchecked
-  pointer mutation to safe code.
+  ahead of trait-object plumbing. Borrow expressions now lower into explicit
+  LLVM pointer values so functions can accept and forward `&T` / `&mut T`
+  parameters without falling back to the Python bridge (guarded by
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_borrow_expressions`).
+  Borrowed references still introduce internal effects (`!read`, `!mut`) that
+  compose with capability-driven effects; future enforcement will block `!mut`
+  across suspension points and require manifests to authorise any routine that
+  touches unsafe capabilities. Raw pointer access remains gated behind `unsafe extern`
+  declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM
+  without exposing unchecked pointer mutation to safe code.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.

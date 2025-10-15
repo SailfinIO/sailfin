@@ -582,6 +582,42 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_lowers_borrow_expressions() -> None:
+    source = """
+fn project(view -> &number) -> number {
+    if 1 == 0 {
+        return 0;
+    }
+    return 1;
+}
+
+fn forward(value -> number) -> number {
+    let mut slot -> number = value;
+    let alias -> &mut number = &mut slot;
+    let shared -> &number = alias;
+    let extra -> number = project(shared);
+    return slot + extra;
+}
+
+fn main() -> number {
+    return forward(5);
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    ir = lowered.ir
+    assert "define double @project(double* %view)" in ir
+    assert "alloca double*" in ir
+
+    engine, module = _compile_ir(ir)
+    try:
+        assert _invoke_double(engine, "main") == pytest.approx(6.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
 def test_native_llvm_execution_supports_range_strides() -> None:
     source = """
 fn sum_stride(limit -> number, stride -> number) -> number {

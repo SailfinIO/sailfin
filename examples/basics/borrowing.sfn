@@ -1,8 +1,5 @@
 // examples/basics/borrowing.sfn
 
-// Stage2 borrowing design example. The bootstrap compiler parses these forms
-// but does not yet enforce move or borrow semantics.
-
 struct Counter {
     value -> number;
 }

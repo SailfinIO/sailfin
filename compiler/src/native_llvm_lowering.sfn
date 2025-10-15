@@ -87,6 +87,14 @@ struct AssignmentParseResult {
     value -> string;
 }
 
+struct BorrowParseResult {
+    recognized -> boolean;
+    success -> boolean;
+    target -> string;
+    mutable -> boolean;
+    diagnostics -> string[];
+}
+
 struct ExpressionStatementResult {
     lines -> string[];
     temp_index -> number;
@@ -2498,6 +2506,51 @@ fn map_primitive_type(annotation -> string) -> string {
     return "";
 }
 
+fn map_reference_inner_type(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let nested_reference = map_reference_type(trimmed);
+    if nested_reference.length > 0 {
+        return nested_reference;
+    }
+    let array_type = map_array_pointer_type(trimmed);
+    if array_type.length > 0 {
+        return array_type;
+    }
+    return map_primitive_type(trimmed);
+}
+
+fn map_reference_type(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    if !starts_with(trimmed, "&") {
+        return "";
+    }
+    if starts_with(trimmed, "&&") {
+        return "";
+    }
+    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
+    if starts_with(remainder, "mut") {
+        let after_mut = substring(remainder, 3, remainder.length);
+        remainder = trim_text(after_mut);
+    }
+    if remainder.length == 0 {
+        return "";
+    }
+    if remainder[0] == "(" && remainder[remainder.length - 1] == ")" {
+        remainder = trim_text(substring(remainder, 1, remainder.length - 1));
+    }
+    let inner_type = map_reference_inner_type(remainder);
+    if inner_type.length == 0 {
+        return "";
+    }
+    return inner_type + "*";
+}
+
 fn map_array_pointer_type(annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 {
@@ -2537,6 +2590,10 @@ fn map_return_type(return_type -> string) -> string {
     if trimmed.length == 0 || trimmed == "void" {
         return "void";
     }
+    let reference_type = map_reference_type(trimmed);
+    if reference_type.length > 0 {
+        return reference_type;
+    }
     let array_type = map_array_pointer_type(trimmed);
     if array_type.length > 0 {
         return array_type;
@@ -2549,6 +2606,10 @@ fn map_parameter_type(parameter_type -> string) -> string {
     if trimmed.length == 0 {
         return "double";
     }
+    let reference_type = map_reference_type(trimmed);
+    if reference_type.length > 0 {
+        return reference_type;
+    }
     let array_type = map_array_pointer_type(trimmed);
     if array_type.length > 0 {
         return array_type;
@@ -2560,6 +2621,10 @@ fn map_local_type(type_annotation -> string) -> string {
     let trimmed = trim_text(type_annotation);
     if trimmed.length == 0 {
         return "double";
+    }
+    let reference_type = map_reference_type(trimmed);
+    if reference_type.length > 0 {
+        return reference_type;
     }
     let array_type = map_array_pointer_type(trimmed);
     if array_type.length > 0 {
@@ -2594,6 +2659,11 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let stripped = strip_enclosing_parentheses(trimmed);
     if stripped != trimmed {
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions);
+    }
+
+    let borrow_parse = parse_borrow_expression(stripped);
+    if borrow_parse.recognized {
+        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
     let comparison = find_comparison_operator(stripped);
@@ -2664,6 +2734,56 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`");
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+}
+
+fn parse_borrow_expression(text -> string) -> BorrowParseResult {
+    let trimmed = trim_text(text);
+    let diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+    if !starts_with(trimmed, "&") {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+    if starts_with(trimmed, "&&") {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
+    let mut mutable_flag -> boolean = false;
+    if starts_with(remainder, "mut") {
+        mutable_flag = true;
+        let after_mut = substring(remainder, 3, remainder.length);
+        remainder = trim_text(after_mut);
+    }
+    if remainder.length == 0 {
+        let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
+    }
+    return BorrowParseResult { recognized: true, success: true, target: remainder, mutable: mutable_flag, diagnostics: diagnostics };
+}
+
+fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let mut diagnostics -> string[] = parse.diagnostics;
+    if !parse.success {
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let mut target = strip_enclosing_parentheses(parse.target);
+    target = trim_text(target);
+    if target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let local = find_local_binding(locals, target);
+    if local == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow requires local binding `" + target + "`");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let pointer_type = local.llvm_type + "*";
+    let operand = LLVMOperand { llvm_type: pointer_type, value: local.pointer };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
 }
 
 fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
@@ -3624,6 +3744,17 @@ fn default_return_literal(llvm_type -> string) -> string {
         return "null";
     }
     return "zeroinitializer";
+}
+
+fn starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length == 0 {
+        return true;
+    }
+    if value.length < prefix.length {
+        return false;
+    }
+    let head = substring(value, 0, prefix.length);
+    return head == prefix;
 }
 
 fn strip_mut_prefix(value -> string) -> string {
