@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.9 (2025-10-15)
+
+### Bug Fixes
+
+- Regressions for use after move
+  ([`b90156e`](https://github.com/SailfinIO/sailfin/commit/b90156ec8173ff236ea9f30b4d0416f360ec7468))
+
+
 ## v0.1.1-alpha.8 (2025-10-15)
 
 ### Bug Fixes
