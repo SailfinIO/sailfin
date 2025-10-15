@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.10 (2025-10-15)
+
+### Bug Fixes
+
+- Wire span metadata into stage2 lowering
+  ([`230e33c`](https://github.com/SailfinIO/sailfin/commit/230e33c776770836b23f64ad6c047ab8ea1f3f56))
+
+
 ## v0.1.1-alpha.9 (2025-10-15)
 
 ### Bug Fixes
