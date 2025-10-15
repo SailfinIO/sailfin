@@ -432,6 +432,44 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_reports_interface_metadata() -> None:
+        source = """
+interface Greeter {
+    fn greet(self -> Greeter) -> string;
+}
+
+interface Formatter {
+    fn format(self -> Formatter) -> string;
+}
+
+struct FriendlyUser implements Greeter, Formatter {
+    name -> string;
+
+    fn greet(self -> FriendlyUser) -> string {
+        return "Hello, {{self.name}}!";
+    }
+
+    fn format(self -> FriendlyUser) -> string {
+        return self.name;
+    }
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+        lowered = compile_to_native_llvm(source)
+        _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+        ir = lowered.ir
+        assert "; -- Trait Metadata" in ir
+        assert "; interface Greeter" in ir
+        assert ";   fn greet(self -> Greeter) -> string" in ir
+        assert "; interface Formatter" in ir
+        assert "; struct FriendlyUser implements Greeter, Formatter" in ir
+
+
 def test_native_llvm_execution_iterates_non_number_arrays() -> None:
     source = """
 fn any_true(values -> boolean[]) -> boolean {

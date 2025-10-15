@@ -5,7 +5,7 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct } from "./native_ir";
 import { substring, char_code } from "./string_utils";
 
 struct LoweredLLVMResult {
@@ -209,6 +209,12 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     lines = append_string(lines, "source_filename = \"sailfin\"");
     lines = append_string(lines, "");
 
+    let trait_metadata = render_trait_metadata(parse.interfaces, parse.structs);
+    if trait_metadata.length > 0 {
+        lines = lines.concat(trait_metadata);
+        lines = append_string(lines, "");
+    }
+
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     loop {
@@ -248,6 +254,110 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         output = output + "\n";
     }
     return LoweredLLVMResult { ir: output, diagnostics: diagnostics };
+}
+
+fn render_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> string[] {
+    let mut interface_lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= interfaces.length {
+            break;
+        }
+        let interface = interfaces[index];
+        let mut header -> string = "; interface " + interface.name;
+        if interface.type_parameters.length > 0 {
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
+        }
+        interface_lines = append_string(interface_lines, header);
+
+        let mut signature_index -> number = 0;
+        loop {
+            if signature_index >= interface.signatures.length {
+                break;
+            }
+            let signature = interface.signatures[signature_index];
+            let rendered = render_interface_signature(signature);
+            interface_lines = append_string(interface_lines, ";   " + rendered);
+            signature_index += 1;
+        }
+        if interface.signatures.length == 0 {
+            interface_lines = append_string(interface_lines, ";   ; no signatures recorded");
+        }
+        index += 1;
+    }
+
+    let mut struct_lines -> string[] = [];
+    index = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let definition = structs[index];
+        if definition.implements.length > 0 {
+            let mut line -> string = "; struct " + definition.name + " implements " + join_with_separator(definition.implements, ", ");
+            struct_lines = append_string(struct_lines, line);
+        }
+        index += 1;
+    }
+
+    if interface_lines.length == 0 && struct_lines.length == 0 {
+        return [];
+    }
+
+    let mut lines -> string[] = [];
+    lines = append_string(lines, "; -- Trait Metadata --------------------------------");
+    lines = lines.concat(interface_lines);
+    if interface_lines.length > 0 && struct_lines.length > 0 {
+        lines = append_string(lines, ";");
+    }
+    lines = lines.concat(struct_lines);
+    lines = append_string(lines, "; -----------------------------------------------");
+    return lines;
+}
+
+fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
+    let mut line -> string = "fn " + signature.name;
+    if signature.type_parameters.length > 0 {
+        line = line + "<" + join_with_separator(signature.type_parameters, ", ") + ">";
+    }
+    line = line + "(" + render_interface_parameters(signature.parameters) + ")";
+    if signature.return_type.length > 0 && signature.return_type != "void" {
+        line = line + " -> " + signature.return_type;
+    }
+    if signature.effects.length > 0 {
+        line = line + " ![" + join_with_separator(signature.effects, ", ") + "]";
+    }
+    if signature.is_async {
+        line = "async " + line;
+    }
+    return line;
+}
+
+fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
+    if parameters.length == 0 {
+        return "";
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = parameter.name;
+        if parameter.mutable {
+            entry = "mut " + entry;
+        }
+        if parameter.type_annotation.length > 0 {
+            entry = entry + " -> " + parameter.type_annotation;
+        }
+        if parameter.default_value != null {
+            entry = entry + " = " + parameter.default_value;
+        }
+        rendered = append_string(rendered, entry);
+        index += 1;
+    }
+    return join_with_separator(rendered, ", ");
 }
 
 fn emit_function(function -> NativeFunction, functions -> NativeFunction[]) -> LoweredLLVMFunction {

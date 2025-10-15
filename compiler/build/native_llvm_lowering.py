@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter
+from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct
 from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
@@ -309,6 +309,10 @@ def lower_to_llvm(native_module):
     lines = append_string(lines, "; ModuleID = 'sailfin'")
     lines = append_string(lines, "source_filename = \"sailfin\"")
     lines = append_string(lines, "")
+    trait_metadata = render_trait_metadata(parse.interfaces, parse.structs)
+    if len(trait_metadata) > 0:
+        lines = (lines) + (trait_metadata)
+        lines = append_string(lines, "")
     index = 0
     has_add_function = False
     while True:
@@ -332,6 +336,82 @@ def lower_to_llvm(native_module):
     if len(output) > 0:
         output = output + "\n"
     return LoweredLLVMResult(ir=output, diagnostics=diagnostics)
+
+def render_trait_metadata(interfaces, structs):
+    interface_lines = []
+    index = 0
+    while True:
+        if index >= len(interfaces):
+            break
+        interface = interfaces[index]
+        header = "; interface " + interface.name
+        if len(interface.type_parameters) > 0:
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">"
+        interface_lines = append_string(interface_lines, header)
+        signature_index = 0
+        while True:
+            if signature_index >= len(interface.signatures):
+                break
+            signature = interface.signatures[signature_index]
+            rendered = render_interface_signature(signature)
+            interface_lines = append_string(interface_lines, ";   " + rendered)
+            signature_index += 1
+        if len(interface.signatures) == 0:
+            interface_lines = append_string(interface_lines, ";   ; no signatures recorded")
+        index += 1
+    struct_lines = []
+    index = 0
+    while True:
+        if index >= len(structs):
+            break
+        definition = structs[index]
+        if len(definition.implements) > 0:
+            line = "; struct " + definition.name + " implements " + join_with_separator(definition.implements, ", ")
+            struct_lines = append_string(struct_lines, line)
+        index += 1
+    if len(interface_lines) == 0  and  len(struct_lines) == 0:
+        return []
+    lines = []
+    lines = append_string(lines, "; -- Trait Metadata --------------------------------")
+    lines = (lines) + (interface_lines)
+    if len(interface_lines) > 0  and  len(struct_lines) > 0:
+        lines = append_string(lines, ";")
+    lines = (lines) + (struct_lines)
+    lines = append_string(lines, "; -----------------------------------------------")
+    return lines
+
+def render_interface_signature(signature):
+    line = "fn " + signature.name
+    if len(signature.type_parameters) > 0:
+        line = line + "<" + join_with_separator(signature.type_parameters, ", ") + ">"
+    line = line + "(" + render_interface_parameters(signature.parameters) + ")"
+    if len(signature.return_type) > 0  and  signature.return_type != "void":
+        line = line + " -> " + signature.return_type
+    if len(signature.effects) > 0:
+        line = line + " ![" + join_with_separator(signature.effects, ", ") + "]"
+    if signature.is_async:
+        line = "async " + line
+    return line
+
+def render_interface_parameters(parameters):
+    if len(parameters) == 0:
+        return ""
+    rendered = []
+    index = 0
+    while True:
+        if index >= len(parameters):
+            break
+        parameter = parameters[index]
+        entry = parameter.name
+        if parameter.mutable:
+            entry = "mut " + entry
+        if len(parameter.type_annotation) > 0:
+            entry = entry + " -> " + parameter.type_annotation
+        if parameter.default_value != None:
+            entry = entry + " = " + parameter.default_value
+        rendered = append_string(rendered, entry)
+        index += 1
+    return join_with_separator(rendered, ", ")
 
 def emit_function(function, functions):
     diagnostics = []
