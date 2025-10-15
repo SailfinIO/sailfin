@@ -658,6 +658,30 @@ fn main() -> number {
     assert all("shared borrow" in diag for diag in non_pointer)
 
 
+def test_native_llvm_execution_surfaces_function_borrow_effects() -> None:
+    source = """
+fn borrow_mutable() -> number {
+    let mut slot -> number = 0;
+    let shared -> &number = &slot;
+    let alias -> &mut number = &mut slot;
+    return slot;
+}
+
+fn main() -> number {
+    return borrow_mutable();
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    effect_map = {entry.name: entry.effects for entry in lowered.function_effects}
+    assert "borrow_mutable" in effect_map
+    assert "mut" in effect_map["borrow_mutable"], effect_map
+    assert "read" in effect_map["borrow_mutable"], effect_map
+    comment_lines = [line for line in lowered.ir.splitlines() if line.startswith("; fn borrow_mutable effects:")]
+    assert comment_lines, lowered.ir
+    assert "mut" in comment_lines[0] and "read" in comment_lines[0]
+
+
 def test_native_llvm_execution_supports_range_strides() -> None:
     source = """
 fn sum_stride(limit -> number, stride -> number) -> number {

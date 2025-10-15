@@ -12,7 +12,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 1. **Stage2 Backend Delivery**
   - [ ] Enforce move-out diagnostics in Stage2 by threading ownership metadata for moves through `.sfn-asm`, flagging use-after-move during lowering, and covering the behaviour with dedicated regressions.
   - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
-  - [ ] Surface borrow effects (`!read`, `!mut`) in Stage2 lowering, propagating them through function signatures and capability manifests so composite effects (e.g., mutation + filesystem access) are reported to callers.
+  - [ ] Surface borrow effects (`!read`, `!mut`) in Stage2 lowering, propagating them through function signatures and capability manifests so composite effects (e.g., mutation + filesystem access) are reported to callers. *(In progress — per-function effect metadata now lands in `LoweredLLVMResult.function_effects`, and LLVM IR tags these effects via comment headers; capability manifest wiring remains.)*
   - [ ] Enforce the lattice rule `!mut ⊄ !async` by rejecting suspension points that would extend a mutable borrow across `await`/routine yields; add coverage for both acceptance and rejection cases.
   - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
   - [ ] Lower struct and enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.

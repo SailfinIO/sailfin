@@ -47,7 +47,10 @@ roadmaps.
   lowering (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_mut_borrows`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_shared_borrows`).
   Borrowed references still introduce internal effects (`!read`, `!mut`) that
-  compose with capability-driven effects; future enforcement will block `!mut`
+  compose with capability-driven effects, and the lowering pipeline now records
+  those requirements per function (`LoweredLLVMResult.function_effects`) while
+  annotating the emitted LLVM IR with effect comments so downstream capability
+  manifests can surface composite requirements. Future enforcement will block `!mut`
   across suspension points and require manifests to authorise any routine that
   touches unsafe capabilities. Raw pointer access remains gated behind `unsafe extern`
   declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM

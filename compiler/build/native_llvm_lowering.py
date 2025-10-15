@@ -46,14 +46,23 @@ class TraitMetadata:
     def __repr__(self):
         return runtime.struct_repr('TraitMetadata', [runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('implementations', self.implementations)])
 
+class FunctionEffectEntry:
+    def __init__(self, name, effects):
+        self.name = name
+        self.effects = effects
+
+    def __repr__(self):
+        return runtime.struct_repr('FunctionEffectEntry', [runtime.struct_field('name', self.name), runtime.struct_field('effects', self.effects)])
+
 class LoweredLLVMResult:
-    def __init__(self, ir, diagnostics, trait_metadata):
+    def __init__(self, ir, diagnostics, trait_metadata, function_effects):
         self.ir = ir
         self.diagnostics = diagnostics
         self.trait_metadata = trait_metadata
+        self.function_effects = function_effects
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata)])
+        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects)])
 
 class LoweredLLVMFunction:
     def __init__(self, lines, diagnostics):
@@ -370,6 +379,7 @@ def lower_to_llvm(native_module):
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
+    function_effects = []
     lines = []
     lines = append_string(lines, "; ModuleID = 'sailfin'")
     lines = append_string(lines, "source_filename = \"sailfin\"")
@@ -383,7 +393,9 @@ def lower_to_llvm(native_module):
     while True:
         if index >= len(parse.functions):
             break
-        lowered = emit_function(parse.functions[index], parse.functions)
+        effect_entry = collect_function_effect_entry(parse.functions[index])
+        function_effects = append_function_effect_entry(function_effects, effect_entry)
+        lowered = emit_function(parse.functions[index], parse.functions, effect_entry.effects)
         if sanitize_symbol(parse.functions[index].name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -400,7 +412,7 @@ def lower_to_llvm(native_module):
     output = ir
     if len(output) > 0:
         output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata)
+    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects)
 
 def empty_trait_metadata():
     return TraitMetadata(interfaces=[], implementations=[])
@@ -467,6 +479,173 @@ def render_trait_metadata_comments(metadata):
     lines = append_string(lines, "; -----------------------------------------------")
     return lines
 
+def collect_function_effect_entry(function):
+    combined = []
+    combined = merge_effect_lists(combined, function.effects)
+    borrow_effects = collect_function_borrow_effects(function)
+    combined = merge_effect_lists(combined, borrow_effects)
+    return FunctionEffectEntry(name=function.name, effects=combined)
+
+def append_function_effect_entry(values, entry):
+    return (values) + ([entry])
+
+def merge_effect_lists(base, extras):
+    result = base
+    index = 0
+    while True:
+        if index >= len(extras):
+            break
+        result = append_unique_effect(result, extras[index])
+        index += 1
+    return result
+
+def append_unique_effect(effects, effect):
+    if len(effect) == 0:
+        return effects
+    if string_array_contains(effects, effect):
+        return effects
+    return (effects) + ([effect])
+
+def collect_function_borrow_effects(function):
+    effects = []
+    index = 0
+    while True:
+        if index >= len(function.instructions):
+            break
+        instruction = function.instructions[index]
+        if instruction.variant == "Let":
+            if instruction.value != None:
+                effects = merge_effect_lists(effects, collect_expression_borrow_effects(instruction.value))
+        else:
+            if instruction.variant == "Expression":
+                effects = merge_effect_lists(effects, collect_expression_borrow_effects(instruction.expression))
+            else:
+                if instruction.variant == "Return":
+                    trimmed = trim_text(instruction.expression)
+                    if len(trimmed) > 0:
+                        effects = merge_effect_lists(effects, collect_expression_borrow_effects(trimmed))
+        index += 1
+    return effects
+
+def collect_expression_borrow_effects(expression):
+    trimmed = trim_text(expression)
+    if len(trimmed) == 0:
+        return []
+    effects = []
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "\"":
+            index = skip_string_literal(trimmed, index + 1)
+            continue
+        if ch == "&":
+            if index + 1 < len(trimmed)  and  trimmed[index + 1] == "&":
+                index += 2
+                continue
+            if index > 0:
+                prefix = trimmed[index - 1]
+                if is_identifier_part_char(prefix):
+                    index += 1
+                    continue
+            cursor = index + 1
+            mutable_flag = False
+            if cursor + 3 <= len(trimmed):
+                maybe_mut = substring(trimmed, cursor, cursor + 3)
+                if maybe_mut == "mut":
+                    after_mut_index = cursor + 3
+                    if after_mut_index >= len(trimmed)  or  is_effect_delimiter(trimmed[after_mut_index]):
+                        mutable_flag = True
+                        cursor = after_mut_index
+            while True:
+                if cursor >= len(trimmed):
+                    break
+                current = trimmed[cursor]
+                if not is_trim_char(current):
+                    break
+                cursor += 1
+            if cursor < len(trimmed):
+                target_start = trimmed[cursor]
+                if is_identifier_start_char(target_start):
+                    if mutable_flag:
+                        effects = append_unique_effect(effects, "mut")
+                    else:
+                        effects = append_unique_effect(effects, "read")
+            index += 1
+            continue
+        if ch == "b":
+            if matches_keyword(trimmed, index, "borrow"):
+                before_index = index - 1
+                if before_index < 0  or  is_effect_prefix_char(trimmed[before_index]):
+                    effects = append_unique_effect(effects, "read")
+                    index += 6
+                    continue
+        index += 1
+    return effects
+
+def skip_string_literal(text, start_index):
+    index = start_index
+    escaped = False
+    while True:
+        if index >= len(text):
+            break
+        current = text[index]
+        if escaped:
+            escaped = False
+        else:
+            if current == "\\":
+                escaped = True
+            else:
+                if current == "\"":
+                    index += 1
+                    break
+        if current == "\n":
+            index += 1
+            break
+        index += 1
+    return index
+
+def matches_keyword(value, start_index, keyword):
+    remaining = len(value) - start_index
+    if remaining < len(keyword):
+        return False
+    slice = substring(value, start_index, start_index + len(keyword))
+    if slice != keyword:
+        return False
+    if start_index + len(keyword) >= len(value):
+        return True
+    next = value[start_index + len(keyword)]
+    if is_identifier_part_char(next):
+        return False
+    return True
+
+def is_effect_prefix_char(ch):
+    if is_trim_char(ch):
+        return True
+    return ch == "("  or  ch == ","  or  ch == ";"  or  ch == "{"  or  ch == "}"  or  ch == "="
+
+def is_effect_delimiter(ch):
+    if is_trim_char(ch):
+        return True
+    return ch == "("  or  ch == ")"  or  ch == ","  or  ch == ";"  or  ch == "{"  or  ch == "}"  or  ch == "="
+
+def is_identifier_start_char(ch):
+    if ch == "_":
+        return True
+    if index_of("abcdefghijklmnopqrstuvwxyz", ch) != -1:
+        return True
+    if index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != -1:
+        return True
+    return False
+
+def is_identifier_part_char(ch):
+    if is_identifier_start_char(ch):
+        return True
+    if index_of("0123456789", ch) != -1:
+        return True
+    return False
+
 def render_interface_signature(signature):
     line = "fn " + signature.name
     if len(signature.type_parameters) > 0:
@@ -500,7 +679,7 @@ def render_interface_parameters(parameters):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def emit_function(function, functions):
+def emit_function(function, functions, effects):
     diagnostics = []
     sanitized = sanitize_symbol(function.name)
     llvm_return = map_return_type(function.return_type)
@@ -510,6 +689,8 @@ def emit_function(function, functions):
     preparation = prepare_parameters(function)
     diagnostics = (diagnostics) + (preparation.diagnostics)
     lines = []
+    if len(effects) > 0:
+        lines = append_string(lines, "; fn " + function.name + " effects: ![" + join_with_separator(effects, ", ") + "]")
     signature = join_with_separator(preparation.signature, ", ")
     if len(signature) == 0:
         signature = ""
@@ -3030,6 +3211,16 @@ def index_of(value, target):
 
 def append_string(values, value):
     return (values) + ([value])
+
+def string_array_contains(values, target):
+    index = 0
+    while True:
+        if index >= len(values):
+            break
+        if values[index] == target:
+            return True
+        index += 1
+    return False
 
 def append_parameter_binding(bindings, binding):
     return (bindings) + ([binding])

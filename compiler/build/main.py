@@ -105,7 +105,7 @@ def compile_to_native_llvm(source):
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata)
+    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects)
 
 def main():
     # effects: io

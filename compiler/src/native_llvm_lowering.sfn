@@ -24,10 +24,16 @@ struct TraitMetadata {
     implementations -> TraitImplementationDescriptor[];
 }
 
+struct FunctionEffectEntry {
+    name -> string;
+    effects -> string[];
+}
+
 struct LoweredLLVMResult {
     ir -> string;
     diagnostics -> string[];
     trait_metadata -> TraitMetadata;
+    function_effects -> FunctionEffectEntry[];
 }
 
 struct LoweredLLVMFunction {
@@ -248,6 +254,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     diagnostics = diagnostics.concat(parse.diagnostics);
 
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
+    let mut function_effects -> FunctionEffectEntry[] = [];
 
     let mut lines -> string[] = [];
     lines = append_string(lines, "; ModuleID = 'sailfin'");
@@ -266,7 +273,9 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         if index >= parse.functions.length {
             break;
         }
-        let lowered = emit_function(parse.functions[index], parse.functions);
+        let effect_entry = collect_function_effect_entry(parse.functions[index]);
+        function_effects = append_function_effect_entry(function_effects, effect_entry);
+        let lowered = emit_function(parse.functions[index], parse.functions, effect_entry.effects);
         if sanitize_symbol(parse.functions[index].name) == "add" {
             has_add_function = true;
         }
@@ -298,7 +307,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     if output.length > 0 {
         output = output + "\n";
     }
-    return LoweredLLVMResult { ir: output, diagnostics: diagnostics, trait_metadata: trait_metadata };
+    return LoweredLLVMResult { ir: output, diagnostics: diagnostics, trait_metadata: trait_metadata, function_effects: function_effects };
 }
 
 fn empty_trait_metadata() -> TraitMetadata {
@@ -398,6 +407,227 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
     return lines;
 }
 
+fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEntry {
+    let mut combined -> string[] = [];
+    combined = merge_effect_lists(combined, function.effects);
+    let borrow_effects = collect_function_borrow_effects(function);
+    combined = merge_effect_lists(combined, borrow_effects);
+    return FunctionEffectEntry { name: function.name, effects: combined };
+}
+
+fn append_function_effect_entry(values -> FunctionEffectEntry[], entry -> FunctionEffectEntry) -> FunctionEffectEntry[] {
+    return values.concat([entry]);
+}
+
+fn merge_effect_lists(base -> string[], extras -> string[]) -> string[] {
+    let mut result -> string[] = base;
+    let mut index -> number = 0;
+    loop {
+        if index >= extras.length {
+            break;
+        }
+        result = append_unique_effect(result, extras[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
+    if effect.length == 0 {
+        return effects;
+    }
+    if string_array_contains(effects, effect) {
+        return effects;
+    }
+    return effects.concat([effect]);
+}
+
+fn collect_function_borrow_effects(function -> NativeFunction) -> string[] {
+    let mut effects -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= function.instructions.length {
+            break;
+        }
+        let instruction = function.instructions[index];
+        if instruction.variant == "Let" {
+            if instruction.value != null {
+                effects = merge_effect_lists(effects, collect_expression_borrow_effects(instruction.value));
+            }
+        } else if instruction.variant == "Expression" {
+            effects = merge_effect_lists(effects, collect_expression_borrow_effects(instruction.expression));
+        } else if instruction.variant == "Return" {
+            let trimmed = trim_text(instruction.expression);
+            if trimmed.length > 0 {
+                effects = merge_effect_lists(effects, collect_expression_borrow_effects(trimmed));
+            }
+        }
+        index += 1;
+    }
+    return effects;
+}
+
+fn collect_expression_borrow_effects(expression -> string) -> string[] {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let mut effects -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "\"" {
+            index = skip_string_literal(trimmed, index + 1);
+            continue;
+        }
+        if ch == "&" {
+            if index + 1 < trimmed.length && trimmed[index + 1] == "&" {
+                index += 2;
+                continue;
+            }
+            if index > 0 {
+                let prefix = trimmed[index - 1];
+                if is_identifier_part_char(prefix) {
+                    index += 1;
+                    continue;
+                }
+            }
+            let mut cursor -> number = index + 1;
+            let mut mutable_flag -> boolean = false;
+            if cursor + 3 <= trimmed.length {
+                let maybe_mut = substring(trimmed, cursor, cursor + 3);
+                if maybe_mut == "mut" {
+                    let after_mut_index = cursor + 3;
+                    if after_mut_index >= trimmed.length || is_effect_delimiter(trimmed[after_mut_index]) {
+                        mutable_flag = true;
+                        cursor = after_mut_index;
+                    }
+                }
+            }
+            loop {
+                if cursor >= trimmed.length {
+                    break;
+                }
+                let current = trimmed[cursor];
+                if !is_trim_char(current) {
+                    break;
+                }
+                cursor += 1;
+            }
+            if cursor < trimmed.length {
+                let target_start = trimmed[cursor];
+                if is_identifier_start_char(target_start) {
+                    if mutable_flag {
+                        effects = append_unique_effect(effects, "mut");
+                    } else {
+                        effects = append_unique_effect(effects, "read");
+                    }
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "b" {
+            if matches_keyword(trimmed, index, "borrow") {
+                let before_index = index - 1;
+                if before_index < 0 || is_effect_prefix_char(trimmed[before_index]) {
+                    effects = append_unique_effect(effects, "read");
+                    index += 6;
+                    continue;
+                }
+            }
+        }
+        index += 1;
+    }
+    return effects;
+}
+
+fn skip_string_literal(text -> string, start_index -> number) -> number {
+    let mut index -> number = start_index;
+    let mut escaped -> boolean = false;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let current = text[index];
+        if escaped {
+            escaped = false;
+        } else {
+            if current == "\\" {
+                escaped = true;
+            } else if current == "\"" {
+                index += 1;
+                break;
+            }
+        }
+        if current == "\n" {
+            index += 1;
+            break;
+        }
+        index += 1;
+    }
+    return index;
+}
+
+fn matches_keyword(value -> string, start_index -> number, keyword -> string) -> boolean {
+    let remaining = value.length - start_index;
+    if remaining < keyword.length {
+        return false;
+    }
+    let slice = substring(value, start_index, start_index + keyword.length);
+    if slice != keyword {
+        return false;
+    }
+    if start_index + keyword.length >= value.length {
+        return true;
+    }
+    let next = value[start_index + keyword.length];
+    if is_identifier_part_char(next) {
+        return false;
+    }
+    return true;
+}
+
+fn is_effect_prefix_char(ch -> string) -> boolean {
+    if is_trim_char(ch) {
+        return true;
+    }
+    return ch == "(" || ch == "," || ch == ";" || ch == "{" || ch == "}" || ch == "=";
+}
+
+fn is_effect_delimiter(ch -> string) -> boolean {
+    if is_trim_char(ch) {
+        return true;
+    }
+    return ch == "(" || ch == ")" || ch == "," || ch == ";" || ch == "{" || ch == "}" || ch == "=";
+}
+
+fn is_identifier_start_char(ch -> string) -> boolean {
+    if ch == "_" {
+        return true;
+    }
+    if index_of("abcdefghijklmnopqrstuvwxyz", ch) != -1 {
+        return true;
+    }
+    if index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != -1 {
+        return true;
+    }
+    return false;
+}
+
+fn is_identifier_part_char(ch -> string) -> boolean {
+    if is_identifier_start_char(ch) {
+        return true;
+    }
+    if index_of("0123456789", ch) != -1 {
+        return true;
+    }
+    return false;
+}
+
 fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
     let mut line -> string = "fn " + signature.name;
     if signature.type_parameters.length > 0 {
@@ -443,7 +673,7 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn emit_function(function -> NativeFunction, functions -> NativeFunction[]) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[]) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
     let llvm_return = map_return_type(function.return_type);
@@ -456,6 +686,9 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[]) -> L
     diagnostics = diagnostics.concat(preparation.diagnostics);
 
     let mut lines -> string[] = [];
+    if effects.length > 0 {
+        lines = append_string(lines, "; fn " + function.name + " effects: ![" + join_with_separator(effects, ", ") + "]");
+    }
     let mut signature -> string = join_with_separator(preparation.signature, ", ");
     if signature.length == 0 {
         signature = "";
@@ -4390,6 +4623,20 @@ fn index_of(value -> string, target -> string) -> number {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
+}
+
+fn string_array_contains(values -> string[], target -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        if values[index] == target {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
 }
 
 fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {
