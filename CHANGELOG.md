@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.13 (2025-10-15)
+
+### Bug Fixes
+
+- Lattice rejecting enforcement
+  ([`f489772`](https://github.com/SailfinIO/sailfin/commit/f489772b106e13ae2d46a9cea9bc3f82af440903))
+
+
 ## v0.1.1-alpha.12 (2025-10-15)
 
 ### Bug Fixes
