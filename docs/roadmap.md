@@ -10,7 +10,6 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 ## Active Workstreams (Do Now)
 
 1. **Stage2 Backend Delivery**
-  - [ ] Surface source spans for Stage2 move-out diagnostics so LLVM errors map back to `.sfn` lines; wire the location data into lowering once ownership metadata exposes span offsets and add focused fixtures to `compiler/tests/test_native_llvm_execution.py`.
   - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
   - [ ] Surface borrow effects (`!read`, `!mut`) in Stage2 lowering, propagating them through function signatures and capability manifests so composite effects (e.g., mutation + filesystem access) are reported to callers. *(In progress — per-function effect metadata now lands in `LoweredLLVMResult.function_effects`, and LLVM IR tags these effects via comment headers; capability manifest wiring remains.)*
   - [ ] Enforce the lattice rule `!mut ⊄ !async` by rejecting suspension points that would extend a mutable borrow across `await`/routine yields; add coverage for both acceptance and rejection cases.
@@ -68,6 +67,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Stage2 move diagnostics spans — `.sfn-asm` now carries source-span metadata through the native IR and LLVM lowering so use-after-move errors surface line/column ranges in diagnostics. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array` assert span strings.
 - [x] Stage2 move-out diagnostics — Ownership metadata now ships use-after-move errors for locals and parameters, including non-copy aggregates; regression coverage lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`, with behaviour documented in `docs/status.md`.
 - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
 - [x] Lower loops and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend. (Regression: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` now covers loop + match execution.)

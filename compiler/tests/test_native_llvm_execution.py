@@ -649,7 +649,12 @@ def test_native_llvm_execution_reports_use_after_move() -> None:
     """
 
     lowered = compile_to_native_llvm(source)
-    assert any("use-after-move" in diag for diag in lowered.diagnostics)
+    use_after_move_diags = [diag for diag in lowered.diagnostics if "use-after-move" in diag]
+    assert use_after_move_diags, "expected use-after-move diagnostics"
+    assert any(" at " in diag and diag.split(" at ")[-1].count(":") >= 2 for diag in use_after_move_diags), (
+        "use-after-move diagnostics did not include span information",
+        use_after_move_diags,
+    )
     assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
 
 
@@ -670,7 +675,12 @@ def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None
     """
 
     lowered = compile_to_native_llvm(source)
-    assert any("use-after-move" in diag for diag in lowered.diagnostics)
+    use_after_move_diags = [diag for diag in lowered.diagnostics if "use-after-move" in diag]
+    assert use_after_move_diags, "expected use-after-move diagnostics"
+    assert any(" at " in diag and diag.split(" at ")[-1].count(":") >= 2 for diag in use_after_move_diags), (
+        "use-after-move diagnostics did not include span information",
+        use_after_move_diags,
+    )
     assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
 
 def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
