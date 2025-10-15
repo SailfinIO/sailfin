@@ -107,14 +107,36 @@ class NativeStructLayout:
         return runtime.struct_repr('NativeStructLayout', [runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('fields', self.fields)])
 
 class NativeStruct:
-    def __init__(self, name, fields, methods, layout=None):
+    def __init__(self, name, fields, methods, implements, layout=None):
         self.name = name
         self.fields = fields
         self.methods = methods
+        self.implements = implements
         self.layout = layout
 
     def __repr__(self):
-        return runtime.struct_repr('NativeStruct', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields), runtime.struct_field('methods', self.methods), runtime.struct_field('layout', self.layout)])
+        return runtime.struct_repr('NativeStruct', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields), runtime.struct_field('methods', self.methods), runtime.struct_field('implements', self.implements), runtime.struct_field('layout', self.layout)])
+
+class NativeInterfaceSignature:
+    def __init__(self, name, is_async, type_parameters, parameters, return_type, effects):
+        self.name = name
+        self.is_async = is_async
+        self.type_parameters = type_parameters
+        self.parameters = parameters
+        self.return_type = return_type
+        self.effects = effects
+
+    def __repr__(self):
+        return runtime.struct_repr('NativeInterfaceSignature', [runtime.struct_field('name', self.name), runtime.struct_field('is_async', self.is_async), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('parameters', self.parameters), runtime.struct_field('return_type', self.return_type), runtime.struct_field('effects', self.effects)])
+
+class NativeInterface:
+    def __init__(self, name, type_parameters, signatures):
+        self.name = name
+        self.type_parameters = type_parameters
+        self.signatures = signatures
+
+    def __repr__(self):
+        return runtime.struct_repr('NativeInterface', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('signatures', self.signatures)])
 
 class NativeEnumVariantField:
     def __init__(self, name, type_annotation, mutable):
@@ -202,6 +224,52 @@ class StructParseResult:
     def __repr__(self):
         return runtime.struct_repr('StructParseResult', [runtime.struct_field('definition', self.definition), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class InterfaceParseResult:
+    def __init__(self, next_index, diagnostics, definition=None):
+        self.definition = definition
+        self.next_index = next_index
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('InterfaceParseResult', [runtime.struct_field('definition', self.definition), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class InterfaceSignatureParse:
+    def __init__(self, success, signature, diagnostics):
+        self.success = success
+        self.signature = signature
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('InterfaceSignatureParse', [runtime.struct_field('success', self.success), runtime.struct_field('signature', self.signature), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class StructHeaderParse:
+    def __init__(self, name, implements, diagnostics):
+        self.name = name
+        self.implements = implements
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('StructHeaderParse', [runtime.struct_field('name', self.name), runtime.struct_field('implements', self.implements), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class InterfaceHeaderParse:
+    def __init__(self, name, type_parameters, diagnostics):
+        self.name = name
+        self.type_parameters = type_parameters
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('InterfaceHeaderParse', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class HeaderNameParse:
+    def __init__(self, name, type_parameters, remainder, diagnostics):
+        self.name = name
+        self.type_parameters = type_parameters
+        self.remainder = remainder
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('HeaderNameParse', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('remainder', self.remainder), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class StructLayoutHeaderParse:
     def __init__(self, success, size, align, diagnostics):
         self.success = success
@@ -222,16 +290,17 @@ class StructLayoutFieldParse:
         return runtime.struct_repr('StructLayoutFieldParse', [runtime.struct_field('success', self.success), runtime.struct_field('field', self.field), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class ParseNativeResult:
-    def __init__(self, functions, imports, structs, enums, bindings, diagnostics):
+    def __init__(self, functions, imports, structs, interfaces, enums, bindings, diagnostics):
         self.functions = functions
         self.imports = imports
         self.structs = structs
+        self.interfaces = interfaces
         self.enums = enums
         self.bindings = bindings
         self.diagnostics = diagnostics
 
     def __repr__(self):
-        return runtime.struct_repr('ParseNativeResult', [runtime.struct_field('functions', self.functions), runtime.struct_field('imports', self.imports), runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('ParseNativeResult', [runtime.struct_field('functions', self.functions), runtime.struct_field('imports', self.imports), runtime.struct_field('structs', self.structs), runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('enums', self.enums), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class EnumLayoutHeaderParse:
     def __init__(self, success, size, align, tag_type, tag_size, tag_align, diagnostics):
@@ -299,6 +368,7 @@ def parse_native_artifact(text):
     functions = []
     imports = []
     structs = []
+    interfaces = []
     enums = []
     bindings = []
     current = None
@@ -339,6 +409,13 @@ def parse_native_artifact(text):
             if struct_result.definition != None:
                 structs = append_struct(structs, struct_result.definition)
             index = struct_result.next_index
+            continue
+        if starts_with(line, ".interface "):
+            interface_result = parse_interface_definition(lines, index)
+            diagnostics = (diagnostics) + (interface_result.diagnostics)
+            if interface_result.definition != None:
+                interfaces = append_interface(interfaces, interface_result.definition)
+            index = interface_result.next_index
             continue
         if starts_with(line, ".enum "):
             enum_result = parse_enum_definition(lines, index)
@@ -425,7 +502,7 @@ def parse_native_artifact(text):
         index += 1
     if current != None:
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact")
-    return ParseNativeResult(functions=functions, imports=imports, structs=structs, enums=enums, bindings=bindings, diagnostics=diagnostics)
+    return ParseNativeResult(functions=functions, imports=imports, structs=structs, interfaces=interfaces, enums=enums, bindings=bindings, diagnostics=diagnostics)
 
 def append_function(functions, value):
     return (functions) + ([value])
@@ -438,6 +515,9 @@ def append_import(imports, value):
 
 def append_struct(structs, value):
     return (structs) + ([value])
+
+def append_interface(interfaces, value):
+    return (interfaces) + ([value])
 
 def append_enum(enums, value):
     return (enums) + ([value])
@@ -663,11 +743,10 @@ def parse_struct_definition(lines, start_index):
     diagnostics = []
     header = trim_text(lines[start_index])
     name_text = trim_text(strip_prefix(header, ".struct "))
-    struct_name = name_text
-    space_index = index_of(struct_name, " ")
-    if space_index >= 0:
-        struct_name = trim_text(substring(struct_name, 0, space_index))
-    struct_name = strip_generics(struct_name)
+    header_parse = parse_struct_header(name_text)
+    diagnostics = (diagnostics) + (header_parse.diagnostics)
+    struct_name = header_parse.name
+    implements = header_parse.implements
     if len(struct_name) == 0:
         diagnostics = append_string(diagnostics, "unable to parse struct header: " + header)
         return StructParseResult(definition=None, next_index=start_index + 1, diagnostics=diagnostics)
@@ -686,7 +765,7 @@ def parse_struct_definition(lines, start_index):
             struct_layout_value = None
             if struct_layout_header_success:
                 struct_layout_value = NativeStructLayout(size=struct_layout_size, align=struct_layout_align, fields=struct_layout_fields)
-            return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods, layout=struct_layout_value), next_index=index, diagnostics=diagnostics)
+            return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods, implements=implements, layout=struct_layout_value), next_index=index, diagnostics=diagnostics)
         raw_line = trim_text(lines[index])
         if len(raw_line) == 0  or  starts_with(raw_line, ";"):
             index += 1
@@ -780,7 +859,316 @@ def parse_struct_definition(lines, start_index):
     struct_layout_value = None
     if struct_layout_header_success:
         struct_layout_value = NativeStructLayout(size=struct_layout_size, align=struct_layout_align, fields=struct_layout_fields)
-    return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods, layout=struct_layout_value), next_index=index, diagnostics=diagnostics)
+    return StructParseResult(definition=NativeStruct(name=struct_name, fields=fields, methods=methods, implements=implements, layout=struct_layout_value), next_index=index, diagnostics=diagnostics)
+
+def parse_interface_definition(lines, start_index):
+    diagnostics = []
+    header = trim_text(lines[start_index])
+    name_text = trim_text(strip_prefix(header, ".interface "))
+    header_parse = parse_interface_header(name_text)
+    diagnostics = (diagnostics) + (header_parse.diagnostics)
+    interface_name = header_parse.name
+    if len(interface_name) == 0:
+        diagnostics = append_string(diagnostics, "unable to parse interface header: " + header)
+        return InterfaceParseResult(definition=None, next_index=start_index + 1, diagnostics=diagnostics)
+    signatures = []
+    index = start_index + 1
+    while True:
+        if index >= len(lines):
+            diagnostics = append_string(diagnostics, "unterminated interface " + interface_name)
+            return InterfaceParseResult(definition=NativeInterface(name=interface_name, type_parameters=header_parse.type_parameters, signatures=signatures), next_index=index, diagnostics=diagnostics)
+        raw_line = trim_text(lines[index])
+        if len(raw_line) == 0  or  starts_with(raw_line, ";"):
+            index += 1
+            continue
+        if raw_line == ".endinterface":
+            index += 1
+            break
+        if raw_line == "noop":
+            index += 1
+            continue
+        if starts_with(raw_line, ".sig "):
+            signature_parse = parse_interface_signature(strip_prefix(raw_line, ".sig "), interface_name)
+            diagnostics = (diagnostics) + (signature_parse.diagnostics)
+            if signature_parse.success:
+                signatures = (signatures) + ([signature_parse.signature])
+            index += 1
+            continue
+        diagnostics = append_string(diagnostics, "unsupported interface directive: " + raw_line)
+        index += 1
+    return InterfaceParseResult(definition=NativeInterface(name=interface_name, type_parameters=header_parse.type_parameters, signatures=signatures), next_index=index, diagnostics=diagnostics)
+
+def parse_struct_header(text):
+    base = parse_header_name_and_remainder(text)
+    diagnostics = base.diagnostics
+    implements = []
+    if len(base.remainder) > 0:
+        if starts_with(base.remainder, "implements "):
+            list_text = trim_text(strip_prefix(base.remainder, "implements "))
+            if len(list_text) == 0:
+                diagnostics = append_string(diagnostics, "struct " + base.name + " header missing implements list")
+            else:
+                implements = parse_implements_list(list_text)
+        else:
+            diagnostics = append_string(diagnostics, "struct " + base.name + " header has unsupported segment `" + base.remainder + "`")
+    return StructHeaderParse(name=base.name, implements=implements, diagnostics=diagnostics)
+
+def parse_interface_header(text):
+    base = parse_header_name_and_remainder(text)
+    diagnostics = base.diagnostics
+    if len(base.remainder) > 0:
+        diagnostics = append_string(diagnostics, "interface " + base.name + " header has unsupported segment `" + base.remainder + "`")
+    return InterfaceHeaderParse(name=base.name, type_parameters=base.type_parameters, diagnostics=diagnostics)
+
+def parse_interface_signature(text, interface_name):
+    diagnostics = []
+    default_signature = NativeInterfaceSignature(name="", is_async=False, type_parameters=[], parameters=[], return_type="void", effects=[])
+    trimmed = trim_trailing_delimiters(trim_text(text))
+    if len(trimmed) == 0:
+        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing content")
+        return InterfaceSignatureParse(success=False, signature=default_signature, diagnostics=diagnostics)
+    remainder = trimmed
+    is_async = False
+    if starts_with(remainder, "async "):
+        is_async = True
+        remainder = trim_text(strip_prefix(remainder, "async "))
+    paren_index = index_of(remainder, "(")
+    if paren_index < 0:
+        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing parameter list: " + trimmed)
+        return InterfaceSignatureParse(success=False, signature=default_signature, diagnostics=diagnostics)
+    close_index = find_matching_paren(remainder, paren_index)
+    if close_index < 0:
+        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature has unterminated parameter list: " + trimmed)
+        return InterfaceSignatureParse(success=False, signature=default_signature, diagnostics=diagnostics)
+    head = trim_text(substring(remainder, 0, paren_index))
+    name_parse = parse_header_name_and_remainder(head)
+    diagnostics = (diagnostics) + (name_parse.diagnostics)
+    if len(name_parse.remainder) > 0:
+        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`")
+    method_name = name_parse.name
+    if len(method_name) == 0:
+        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` missing name")
+    parameters_section = substring(remainder, paren_index + 1, close_index)
+    parameters = []
+    parameter_text = trim_text(parameters_section)
+    if len(parameter_text) > 0:
+        entries = split_parameter_entries(parameter_text)
+        entry_index = 0
+        while True:
+            if entry_index >= len(entries):
+                break
+            parsed = parse_parameter_entry(entries[entry_index])
+            if parsed == None:
+                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`")
+            else:
+                parameters = append_parameter_array(parameters, parsed)
+            entry_index += 1
+    return_type = "void"
+    effects = []
+    suffix = trim_text(substring(remainder, close_index + 1, len(remainder)))
+    if len(suffix) > 0:
+        effect_index = index_of(suffix, "![")
+        effect_segment = ""
+        if effect_index >= 0:
+            effect_segment = trim_text(substring(suffix, effect_index, len(suffix)))
+            suffix = trim_text(substring(suffix, 0, effect_index))
+        if len(suffix) > 0:
+            if starts_with(suffix, "->"):
+                type_text = trim_text(strip_prefix(suffix, "->"))
+                if len(type_text) > 0:
+                    return_type = type_text
+            else:
+                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`")
+        if len(effect_segment) > 0:
+            if starts_with(effect_segment, "![")  and  effect_segment[len(effect_segment) - 1] == "]":
+                body = substring(effect_segment, 2, len(effect_segment) - 1)
+                effects = parse_effect_list(body)
+            else:
+                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`")
+    signature = NativeInterfaceSignature(name=method_name, is_async=is_async, type_parameters=name_parse.type_parameters, parameters=parameters, return_type=return_type, effects=effects)
+    success = len(method_name) > 0  and  len(diagnostics) == 0
+    return InterfaceSignatureParse(success=success, signature=signature, diagnostics=diagnostics)
+
+def parse_header_name_and_remainder(text):
+    diagnostics = []
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return HeaderNameParse(name="", type_parameters=[], remainder="", diagnostics=diagnostics)
+    name = trimmed
+    remainder = ""
+    type_parameters = []
+    generics_index = index_of(trimmed, "<")
+    if generics_index >= 0:
+        close_index = find_matching_angle(trimmed, generics_index)
+        if close_index < 0:
+            diagnostics = append_string(diagnostics, "header `" + text + "` missing closing `>`")
+            name = strip_generics(trimmed)
+            return HeaderNameParse(name=name, type_parameters=type_parameters, remainder=remainder, diagnostics=diagnostics)
+        name = trim_text(substring(trimmed, 0, generics_index))
+        generics_text = substring(trimmed, generics_index + 1, close_index)
+        type_parameters = parse_type_parameter_entries(generics_text)
+        remainder = trim_text(substring(trimmed, close_index + 1, len(trimmed)))
+    else:
+        space_index = index_of(trimmed, " ")
+        if space_index >= 0:
+            name = trim_text(substring(trimmed, 0, space_index))
+            remainder = trim_text(substring(trimmed, space_index + 1, len(trimmed)))
+    name = strip_generics(name)
+    return HeaderNameParse(name=name, type_parameters=type_parameters, remainder=remainder, diagnostics=diagnostics)
+
+def parse_type_parameter_entries(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return []
+    return split_top_level_commas(trimmed)
+
+def parse_implements_list(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return []
+    return split_top_level_commas(trimmed)
+
+def split_top_level_commas(text):
+    entries = []
+    current = ""
+    index = 0
+    quote = ""
+    angle_depth = 0
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if len(quote) > 0:
+            current = current + ch
+            if ch == "\\":
+                if index + 1 < len(text):
+                    current = current + text[index + 1]
+                    index += 2
+                    continue
+            if ch == quote:
+                quote = ""
+            index += 1
+            continue
+        if ch == "\""  or  ch == "'":
+            quote = ch
+            current = current + ch
+            index += 1
+            continue
+        if ch == "<":
+            angle_depth += 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == ">":
+            if angle_depth > 0:
+                angle_depth -= 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == "{":
+            brace_depth += 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            current = current + ch
+            index += 1
+            continue
+        if ch == ",":
+            if angle_depth == 0  and  paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
+                segment = trim_text(current)
+                if len(segment) > 0:
+                    entries = append_string(entries, segment)
+                current = ""
+                index += 1
+                continue
+        current = current + ch
+        index += 1
+    segment = trim_text(current)
+    if len(segment) > 0:
+        entries = append_string(entries, segment)
+    return entries
+
+def find_matching_angle(text, start_index):
+    depth = 0
+    index = start_index
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "<":
+            depth += 1
+        else:
+            if ch == ">":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0:
+                        return index
+                else:
+                    return index
+        index += 1
+    return -1
+
+def find_matching_paren(text, start_index):
+    depth = 0
+    index = start_index
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "\""  or  ch == "'":
+            lookahead = index + 1
+            while True:
+                if lookahead >= len(text):
+                    return -1
+                current = text[lookahead]
+                if current == "\\":
+                    lookahead += 2
+                    continue
+                if current == ch:
+                    index = lookahead
+                    break
+                lookahead += 1
+        else:
+            if ch == "(":
+                depth += 1
+            else:
+                if ch == ")":
+                    if depth > 0:
+                        depth -= 1
+                        if depth == 0:
+                            return index
+                    else:
+                        return -1
+        index += 1
+    return -1
 
 def parse_enum_definition(lines, start_index):
     diagnostics = []
