@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.12 (2025-10-15)
+
+### Bug Fixes
+
+- Sythetic native artifact in test for now
+  ([`e26b034`](https://github.com/SailfinIO/sailfin/commit/e26b034b4800e38275dc9b2499ea07801405b792))
+
+
 ## v0.1.1-alpha.11 (2025-10-15)
 
 ### Bug Fixes
