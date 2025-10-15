@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.6 (2025-10-15)
+
+### Bug Fixes
+
+- Lowering importing interface/struct metadata
+  ([`644171b`](https://github.com/SailfinIO/sailfin/commit/644171bfee6c0237afeea430d5a0e62609382e54))
+
+- Parsed interface metta data plumbing
+  ([`75577ef`](https://github.com/SailfinIO/sailfin/commit/75577efb36627387b5e3c92bc73dd0fdca0120dd))
+
+
 ## v0.1.1-alpha.5 (2025-10-14)
 
 ### Bug Fixes
