@@ -40,7 +40,7 @@ Expression = runtime.enum_define_variant(Expression, 'Raw', ['text'])
 Statement = runtime.enum_type('Statement')
 Statement = runtime.enum_define_variant(Statement, 'ImportDeclaration', ['specifiers', 'source'])
 Statement = runtime.enum_define_variant(Statement, 'ExportDeclaration', ['specifiers', 'source'])
-Statement = runtime.enum_define_variant(Statement, 'VariableDeclaration', ['name', 'mutable', 'type_annotation', 'initializer'])
+Statement = runtime.enum_define_variant(Statement, 'VariableDeclaration', ['name', 'mutable', 'type_annotation', 'initializer', 'span', 'initializer_span'])
 Statement = runtime.enum_define_variant(Statement, 'ModelDeclaration', ['name', 'model_type', 'properties', 'effects', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'PipelineDeclaration', ['signature', 'body', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'ToolDeclaration', ['signature', 'body', 'decorators'])
@@ -58,8 +58,8 @@ Statement = runtime.enum_define_variant(Statement, 'BreakStatement', [])
 Statement = runtime.enum_define_variant(Statement, 'ContinueStatement', [])
 Statement = runtime.enum_define_variant(Statement, 'MatchStatement', ['expression', 'cases', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'IfStatement', ['condition', 'then_block', 'else_branch', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'ReturnStatement', ['expression'])
-Statement = runtime.enum_define_variant(Statement, 'ExpressionStatement', ['expression'])
+Statement = runtime.enum_define_variant(Statement, 'ReturnStatement', ['expression', 'span'])
+Statement = runtime.enum_define_variant(Statement, 'ExpressionStatement', ['expression', 'span'])
 Statement = runtime.enum_define_variant(Statement, 'Unknown', ['tokens', 'text'])
 
 class Program:
@@ -92,6 +92,16 @@ class Block:
 
     def __repr__(self):
         return runtime.struct_repr('Block', [runtime.struct_field('tokens', self.tokens), runtime.struct_field('text', self.text), runtime.struct_field('statements', self.statements)])
+
+class SourceSpan:
+    def __init__(self, start_line, start_column, end_line, end_column):
+        self.start_line = start_line
+        self.start_column = start_column
+        self.end_line = end_line
+        self.end_column = end_column
+
+    def __repr__(self):
+        return runtime.struct_repr('SourceSpan', [runtime.struct_field('start_line', self.start_line), runtime.struct_field('start_column', self.start_column), runtime.struct_field('end_line', self.end_line), runtime.struct_field('end_column', self.end_column)])
 
 class Parameter:
     def __init__(self, name, mutable, type_annotation=None, default_value=None):

@@ -21,9 +21,9 @@ globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 NativeInstruction = runtime.enum_type('NativeInstruction')
-NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Return', ['expression'])
-NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Expression', ['expression'])
-NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Let', ['name', 'mutable', 'type_annotation', 'value'])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Return', ['expression', 'span'])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Expression', ['expression', 'span'])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Let', ['name', 'mutable', 'type_annotation', 'value', 'span', 'value_span'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'If', ['condition'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Else', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndIf', [])
@@ -38,6 +38,16 @@ NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Case', ['pat
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndMatch', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Noop', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Unknown', ['text'])
+
+class NativeSourceSpan:
+    def __init__(self, start_line, start_column, end_line, end_column):
+        self.start_line = start_line
+        self.start_column = start_column
+        self.end_line = end_line
+        self.end_column = end_column
+
+    def __repr__(self):
+        return runtime.struct_repr('NativeSourceSpan', [runtime.struct_field('start_line', self.start_line), runtime.struct_field('start_column', self.start_column), runtime.struct_field('end_line', self.end_line), runtime.struct_field('end_column', self.end_column)])
 
 class NativeParameter:
     def __init__(self, name, type_annotation, mutable, default_value=None):
@@ -215,6 +225,15 @@ class CaseComponents:
     def __repr__(self):
         return runtime.struct_repr('CaseComponents', [runtime.struct_field('pattern', self.pattern), runtime.struct_field('guard', self.guard)])
 
+class InstructionParseResult:
+    def __init__(self, instructions, span_consumed, value_span_consumed):
+        self.instructions = instructions
+        self.span_consumed = span_consumed
+        self.value_span_consumed = value_span_consumed
+
+    def __repr__(self):
+        return runtime.struct_repr('InstructionParseResult', [runtime.struct_field('instructions', self.instructions), runtime.struct_field('span_consumed', self.span_consumed), runtime.struct_field('value_span_consumed', self.value_span_consumed)])
+
 class StructParseResult:
     def __init__(self, next_index, diagnostics, definition=None):
         self.definition = definition
@@ -372,6 +391,8 @@ def parse_native_artifact(text):
     enums = []
     bindings = []
     current = None
+    pending_span = None
+    pending_value_span = None
     index = 0
     while True:
         if index >= len(lines):
@@ -401,6 +422,22 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "unable to parse export: " + line)
             else:
                 imports = append_import(imports, parsed_export)
+            index += 1
+            continue
+        if starts_with(line, ".span "):
+            parsed_span = parse_source_span(strip_prefix(line, ".span "))
+            if parsed_span == None:
+                diagnostics = append_string(diagnostics, "unable to parse span metadata: " + line)
+            else:
+                pending_span = parsed_span
+            index += 1
+            continue
+        if starts_with(line, ".init-span "):
+            parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "))
+            if parsed_init_span == None:
+                diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + line)
+            else:
+                pending_value_span = parsed_init_span
             index += 1
             continue
         if starts_with(line, ".struct "):
@@ -483,16 +520,27 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
             index += 1
             continue
+        instruction_result = parse_instruction(line, pending_span, pending_value_span)
+        instructions = instruction_result.instructions
+        if instruction_result.span_consumed:
+            pending_span = None
+        else:
+            if pending_span != None:
+                diagnostics = append_string(diagnostics, "unused span metadata before: " + line)
+                pending_span = None
+        if instruction_result.value_span_consumed:
+            pending_value_span = None
+        else:
+            if pending_value_span != None:
+                diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line)
+                pending_value_span = None
         if current == None:
-            if starts_with(line, ".let "):
-                parsed_binding = parse_let_instruction(line)
-                bindings = append_binding(bindings, binding_from_instruction(parsed_binding))
-                index += 1
-                continue
-            diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
+            if len(instructions) == 1  and  instructions[0].variant == "Let":
+                bindings = append_binding(bindings, binding_from_instruction(instructions[0]))
+            else:
+                diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
             index += 1
             continue
-        instructions = parse_instruction(line)
         instruction_index = 0
         while True:
             if instruction_index >= len(instructions):
@@ -503,6 +551,27 @@ def parse_native_artifact(text):
     if current != None:
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact")
     return ParseNativeResult(functions=functions, imports=imports, structs=structs, interfaces=interfaces, enums=enums, bindings=bindings, diagnostics=diagnostics)
+
+def parse_source_span(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return None
+    parts = split_whitespace(trimmed)
+    if len(parts) != 4:
+        return None
+    start_line = parse_decimal_number(parts[0])
+    if not start_line.success:
+        return None
+    start_column = parse_decimal_number(parts[1])
+    if not start_column.success:
+        return None
+    end_line = parse_decimal_number(parts[2])
+    if not end_line.success:
+        return None
+    end_column = parse_decimal_number(parts[3])
+    if not end_column.success:
+        return None
+    return NativeSourceSpan(start_line=start_line.value, start_column=start_column.value, end_line=end_line.value, end_column=end_column.value)
 
 def append_function(functions, value):
     return (functions) + ([value])
@@ -587,16 +656,16 @@ def apply_meta(function, entry):
 def update_function_meta(function, return_type, effects):
     return NativeFunction(name=function.name, parameters=function.parameters, return_type=return_type, effects=effects, instructions=function.instructions)
 
-def parse_instruction(line):
+def parse_instruction(line, span, value_span):
     if line == "noop":
-        return [NativeInstruction.Noop()]
+        return InstructionParseResult(instructions=[NativeInstruction.Noop()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".if "):
         condition = trim_text(strip_prefix(line, ".if "))
-        return [runtime.enum_instantiate(NativeInstruction, 'If', [runtime.enum_field('condition', condition)])]
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'If', [runtime.enum_field('condition', condition)])], span_consumed=False, value_span_consumed=False)
     if line == ".else":
-        return [NativeInstruction.Else()]
+        return InstructionParseResult(instructions=[NativeInstruction.Else()], span_consumed=False, value_span_consumed=False)
     if line == ".endif":
-        return [NativeInstruction.EndIf()]
+        return InstructionParseResult(instructions=[NativeInstruction.EndIf()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".for "):
         body = trim_text(strip_prefix(line, ".for "))
         separator = " in "
@@ -604,35 +673,35 @@ def parse_instruction(line):
         if index >= 0:
             target = trim_text(substring(body, 0, index))
             iterable = trim_text(substring(body, index + len(separator), len(body)))
-            return [runtime.enum_instantiate(NativeInstruction, 'For', [runtime.enum_field('target', target), runtime.enum_field('iterable', iterable)])]
+            return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'For', [runtime.enum_field('target', target), runtime.enum_field('iterable', iterable)])], span_consumed=False, value_span_consumed=False)
     if line == ".endfor":
-        return [NativeInstruction.EndFor()]
+        return InstructionParseResult(instructions=[NativeInstruction.EndFor()], span_consumed=False, value_span_consumed=False)
     if line == ".loop":
-        return [NativeInstruction.Loop()]
+        return InstructionParseResult(instructions=[NativeInstruction.Loop()], span_consumed=False, value_span_consumed=False)
     if line == ".endloop":
-        return [NativeInstruction.EndLoop()]
+        return InstructionParseResult(instructions=[NativeInstruction.EndLoop()], span_consumed=False, value_span_consumed=False)
     if line == "break":
-        return [NativeInstruction.Break()]
+        return InstructionParseResult(instructions=[NativeInstruction.Break()], span_consumed=False, value_span_consumed=False)
     if line == "continue":
-        return [NativeInstruction.Continue()]
+        return InstructionParseResult(instructions=[NativeInstruction.Continue()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".match "):
         expression = trim_text(strip_prefix(line, ".match "))
-        return [runtime.enum_instantiate(NativeInstruction, 'Match', [runtime.enum_field('expression', expression)])]
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Match', [runtime.enum_field('expression', expression)])], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".case "):
-        return [parse_case_instruction(line)]
+        return InstructionParseResult(instructions=[parse_case_instruction(line)], span_consumed=False, value_span_consumed=False)
     if line == ".endmatch":
-        return [NativeInstruction.EndMatch()]
+        return InstructionParseResult(instructions=[NativeInstruction.EndMatch()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".let "):
-        return [parse_let_instruction(line)]
+        return InstructionParseResult(instructions=[parse_let_instruction(line, span, value_span)], span_consumed=True, value_span_consumed=True)
     if starts_with(line, "ret"):
         if len(line) == 3:
-            return [runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', "")])]
+            return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', ""), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
         separator = line[3]
         if separator == " "  or  separator == "\t":
             remainder = trim_text(substring(line, 3, len(line)))
             if len(remainder) == 0:
-                return [runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', "")])]
-            return [runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', trim_trailing_delimiters(remainder))])]
+                return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', ""), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
+            return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', trim_trailing_delimiters(remainder)), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
     if starts_with(line, "eval let "):
         body = trim_text(strip_prefix(line, "eval let "))
         is_mutable = False
@@ -640,12 +709,12 @@ def parse_instruction(line):
             is_mutable = True
             body = trim_text(strip_prefix(body, "mut "))
         parsed = parse_binding_components(body)
-        return [runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', parsed.name), runtime.enum_field('mutable', is_mutable), runtime.enum_field('type_annotation', parsed.type_annotation), runtime.enum_field('value', maybe_trim_trailing(parsed.value))])]
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', parsed.name), runtime.enum_field('mutable', is_mutable), runtime.enum_field('type_annotation', parsed.type_annotation), runtime.enum_field('value', maybe_trim_trailing(parsed.value)), runtime.enum_field('span', span), runtime.enum_field('value_span', value_span)])], span_consumed=True, value_span_consumed=True)
     if starts_with(line, "eval "):
-        return [runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))))])]
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', trim_trailing_delimiters(trim_text(strip_prefix(line, "eval ")))), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
     if index_of(line, "=>") >= 0:
-        return parse_inline_case_instruction(line)
-    return [runtime.enum_instantiate(NativeInstruction, 'Unknown', [runtime.enum_field('text', line)])]
+        return InstructionParseResult(instructions=parse_inline_case_instruction(line), span_consumed=False, value_span_consumed=False)
+    return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Unknown', [runtime.enum_field('text', line)])], span_consumed=False, value_span_consumed=False)
 
 def parse_case_instruction(line):
     body = trim_text(strip_prefix(line, ".case "))
@@ -673,10 +742,10 @@ def parse_inline_case_body_instruction(body):
     lowered = trim_trailing_delimiters(body)
     if starts_with(lowered, "return "):
         value = trim_trailing_delimiters(trim_text(strip_prefix(lowered, "return ")))
-        return runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', value)])
+        return runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', value), runtime.enum_field('span', None)])
     if starts_with(lowered, "eval "):
-        return runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))))])
-    return runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', lowered)])
+        return runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval ")))), runtime.enum_field('span', None)])
+    return runtime.enum_instantiate(NativeInstruction, 'Expression', [runtime.enum_field('expression', lowered), runtime.enum_field('span', None)])
 
 def split_case_components(text):
     trimmed = trim_text(text)
@@ -753,6 +822,8 @@ def parse_struct_definition(lines, start_index):
     fields = []
     methods = []
     current_method = None
+    method_pending_span = None
+    method_pending_value_span = None
     struct_layout_fields = []
     struct_layout_size = 0
     struct_layout_align = 0
@@ -775,12 +846,16 @@ def parse_struct_definition(lines, start_index):
                 diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name)
                 methods = append_function(methods, current_method)
                 current_method = None
+                method_pending_span = None
+                method_pending_value_span = None
             index += 1
             break
         if current_method != None:
             if raw_line == ".endmethod":
                 methods = append_function(methods, current_method)
                 current_method = None
+                method_pending_span = None
+                method_pending_value_span = None
                 index += 1
                 continue
             if starts_with(raw_line, ".meta "):
@@ -799,12 +874,40 @@ def parse_struct_definition(lines, start_index):
                 diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
                 index += 1
                 continue
-            instructions = parse_instruction(raw_line)
+            if starts_with(raw_line, ".span "):
+                parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "))
+                if parsed_method_span == None:
+                    diagnostics = append_string(diagnostics, "unable to parse span metadata: " + raw_line)
+                else:
+                    method_pending_span = parsed_method_span
+                index += 1
+                continue
+            if starts_with(raw_line, ".init-span "):
+                parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "))
+                if parsed_method_init_span == None:
+                    diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + raw_line)
+                else:
+                    method_pending_value_span = parsed_method_init_span
+                index += 1
+                continue
+            method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span)
+            if method_instruction_result.span_consumed:
+                method_pending_span = None
+            else:
+                if method_pending_span != None:
+                    diagnostics = append_string(diagnostics, "unused span metadata before: " + raw_line)
+                    method_pending_span = None
+            if method_instruction_result.value_span_consumed:
+                method_pending_value_span = None
+            else:
+                if method_pending_value_span != None:
+                    diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + raw_line)
+                    method_pending_value_span = None
             instruction_index = 0
             while True:
-                if instruction_index >= len(instructions):
+                if instruction_index >= len(method_instruction_result.instructions):
                     break
-                current_method = append_instruction(current_method, instructions[instruction_index])
+                current_method = append_instruction(current_method, method_instruction_result.instructions[instruction_index])
                 instruction_index += 1
             index += 1
             continue
@@ -852,6 +955,8 @@ def parse_struct_definition(lines, start_index):
                 diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
             method_name = parse_function_name(strip_prefix(raw_line, ".method "))
             current_method = NativeFunction(name=method_name, parameters=[], return_type="void", effects=[], instructions=[])
+            method_pending_span = None
+            method_pending_value_span = None
             index += 1
             continue
         diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line)
@@ -1723,7 +1828,7 @@ def parse_enum_payload_layout(text, enum_name):
     field = NativeStructLayoutField(name=field_name, type_annotation=type_text, offset=offset_value, size=size_value, align=align_value)
     return EnumLayoutPayloadParse(success=success, variant_name=variant_name, field=field, diagnostics=diagnostics)
 
-def parse_let_instruction(line):
+def parse_let_instruction(line, span, value_span):
     body = trim_text(strip_prefix(line, ".let "))
     is_mutable = False
     remainder = body
@@ -1731,7 +1836,7 @@ def parse_let_instruction(line):
         is_mutable = True
         remainder = trim_text(strip_prefix(remainder, "mut "))
     parsed = parse_binding_components(remainder)
-    return runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', parsed.name), runtime.enum_field('mutable', is_mutable), runtime.enum_field('type_annotation', parsed.type_annotation), runtime.enum_field('value', parsed.value)])
+    return runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', parsed.name), runtime.enum_field('mutable', is_mutable), runtime.enum_field('type_annotation', parsed.type_annotation), runtime.enum_field('value', parsed.value), runtime.enum_field('span', span), runtime.enum_field('value_span', value_span)])
 
 def parse_binding_components(text):
     name = ""

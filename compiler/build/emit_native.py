@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.ast import Block, Decorator, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch
+from compiler.build.ast import Block, Decorator, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch, SourceSpan
 from compiler.build.string_utils import substring
 
 print = runtime.console
@@ -188,9 +188,9 @@ def emit_statement(state, statement):
     if statement.variant == "IfStatement":
         return emit_if(state, statement)
     if statement.variant == "ReturnStatement":
-        return emit_return(state, statement.expression)
+        return emit_return(state, statement)
     if statement.variant == "ExpressionStatement":
-        return emit_expression_statement(state, statement.expression)
+        return emit_expression_statement(state, statement)
     message = "native backend: unsupported statement `" + statement.variant + "`"
     return state_add_diagnostic(state, message)
 
@@ -219,7 +219,22 @@ def format_native_specifier(name, alias):
         return name
     return name + " as " + alias
 
+def emit_span_if_present(state, span):
+    if span == None:
+        return state
+    return state_emit_line(state, ".span " + format_span(span))
+
+def emit_initializer_span_if_present(state, span):
+    if span == None:
+        return state
+    return state_emit_line(state, ".init-span " + format_span(span))
+
+def format_span(span):
+    return number_to_string(span.start_line) + " " + number_to_string(span.start_column) + " " + number_to_string(span.end_line) + " " + number_to_string(span.end_column)
+
 def emit_variable(state, statement):
+    current = emit_span_if_present(state, statement.span)
+    current = emit_initializer_span_if_present(current, statement.initializer_span)
     line = ".let "
     if statement.mutable:
         line = line + "mut "
@@ -228,7 +243,7 @@ def emit_variable(state, statement):
         line = line + " : " + statement.type_annotation.text
     if statement.initializer != None:
         line = line + " = " + format_expression(statement.initializer)
-    return state_emit_line(state, line)
+    return state_emit_line(current, line)
 
 def emit_function(state, signature, body, decorators):
     current = emit_decorators(state, decorators)
@@ -497,13 +512,15 @@ def emit_else_branch(state, branch):
     current = state_pop_indent(current)
     return current
 
-def emit_return(state, expression):
-    if expression == None:
-        return state_emit_line(state, "ret")
-    return state_emit_line(state, "ret " + format_expression(expression))
+def emit_return(state, statement):
+    current = emit_span_if_present(state, statement.span)
+    if statement.expression == None:
+        return state_emit_line(current, "ret")
+    return state_emit_line(current, "ret " + format_expression(statement.expression))
 
-def emit_expression_statement(state, expression):
-    return state_emit_line(state, "eval " + format_expression(expression))
+def emit_expression_statement(state, statement):
+    current = emit_span_if_present(state, statement.span)
+    return state_emit_line(current, "eval " + format_expression(statement.expression))
 
 def emit_block(state, block):
     if len(block.statements) == 0:

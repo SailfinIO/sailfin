@@ -8,13 +8,21 @@ import { NativeArtifact } from "./emit_native";
 import { substring, char_code } from "./string_utils";
 
 enum NativeInstruction {
-    Return { expression -> string },
-    Expression { expression -> string },
+    Return {
+        expression -> string;
+        span -> NativeSourceSpan?;
+    },
+    Expression {
+        expression -> string;
+        span -> NativeSourceSpan?;
+    },
     Let {
         name -> string;
         mutable -> boolean;
         type_annotation -> string;
         value -> string?;
+        span -> NativeSourceSpan?;
+        value_span -> NativeSourceSpan?;
     },
     If { condition -> string },
     Else,
@@ -36,6 +44,13 @@ enum NativeInstruction {
     EndMatch,
     Noop,
     Unknown { text -> string },
+}
+
+struct NativeSourceSpan {
+    start_line -> number;
+    start_column -> number;
+    end_line -> number;
+    end_column -> number;
 }
 
 struct NativeParameter {
@@ -160,6 +175,12 @@ struct CaseComponents {
     guard -> string?;
 }
 
+struct InstructionParseResult {
+    instructions -> NativeInstruction[];
+    span_consumed -> boolean;
+    value_span_consumed -> boolean;
+}
+
 struct StructParseResult {
     definition -> NativeStruct?;
     next_index -> number;
@@ -273,6 +294,8 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
     let mut enums -> NativeEnum[] = [];
     let mut bindings -> NativeBinding[] = [];
     let mut current -> NativeFunction? = null;
+    let mut pending_span -> NativeSourceSpan? = null;
+    let mut pending_value_span -> NativeSourceSpan? = null;
 
     let mut index -> number = 0;
     loop {
@@ -309,6 +332,26 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
                 diagnostics = append_string(diagnostics, "unable to parse export: " + line);
             } else {
                 imports = append_import(imports, parsed_export);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".span ") {
+            let parsed_span = parse_source_span(strip_prefix(line, ".span "));
+            if parsed_span == null {
+                diagnostics = append_string(diagnostics, "unable to parse span metadata: " + line);
+            } else {
+                pending_span = parsed_span;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".init-span ") {
+            let parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "));
+            if parsed_init_span == null {
+                diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + line);
+            } else {
+                pending_value_span = parsed_init_span;
             }
             index += 1;
             continue;
@@ -423,18 +466,30 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
+        let instruction_result = parse_instruction(line, pending_span, pending_value_span);
+        let instructions = instruction_result.instructions;
+        if instruction_result.span_consumed {
+            pending_span = null;
+        } else if pending_span != null {
+            diagnostics = append_string(diagnostics, "unused span metadata before: " + line);
+            pending_span = null;
+        }
+        if instruction_result.value_span_consumed {
+            pending_value_span = null;
+        } else if pending_value_span != null {
+            diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line);
+            pending_value_span = null;
+        }
+
         if current == null {
-            if starts_with(line, ".let ") {
-                let parsed_binding = parse_let_instruction(line);
-                bindings = append_binding(bindings, binding_from_instruction(parsed_binding));
-                index += 1;
-                continue;
+            if instructions.length == 1 && instructions[0].variant == "Let" {
+                bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
+            } else {
+                diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
             }
-            diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
             index += 1;
             continue;
         }
-        let instructions = parse_instruction(line);
         let mut instruction_index -> number = 0;
         loop {
             if instruction_index >= instructions.length {
@@ -451,6 +506,39 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
     }
 
     return ParseNativeResult { functions: functions, imports: imports, structs: structs, interfaces: interfaces, enums: enums, bindings: bindings, diagnostics: diagnostics };
+}
+
+fn parse_source_span(text -> string) -> NativeSourceSpan? {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return null;
+    }
+    let parts = split_whitespace(trimmed);
+    if parts.length != 4 {
+        return null;
+    }
+    let start_line = parse_decimal_number(parts[0]);
+    if !start_line.success {
+        return null;
+    }
+    let start_column = parse_decimal_number(parts[1]);
+    if !start_column.success {
+        return null;
+    }
+    let end_line = parse_decimal_number(parts[2]);
+    if !end_line.success {
+        return null;
+    }
+    let end_column = parse_decimal_number(parts[3]);
+    if !end_column.success {
+        return null;
+    }
+    return NativeSourceSpan {
+        start_line: start_line.value,
+        start_column: start_column.value,
+        end_line: end_line.value,
+        end_column: end_column.value,
+    };
 }
 
 fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
@@ -592,19 +680,19 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
     };
 }
 
-fn parse_instruction(line -> string) -> NativeInstruction[] {
+fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> InstructionParseResult {
     if line == "noop" {
-        return [NativeInstruction.Noop()];
+        return InstructionParseResult { instructions: [NativeInstruction.Noop()], span_consumed: false, value_span_consumed: false };
     }
     if starts_with(line, ".if ") {
         let condition = trim_text(strip_prefix(line, ".if "));
-        return [NativeInstruction.If { condition: condition }];
+        return InstructionParseResult { instructions: [NativeInstruction.If { condition: condition }], span_consumed: false, value_span_consumed: false };
     }
     if line == ".else" {
-        return [NativeInstruction.Else()];
+        return InstructionParseResult { instructions: [NativeInstruction.Else()], span_consumed: false, value_span_consumed: false };
     }
     if line == ".endif" {
-        return [NativeInstruction.EndIf()];
+        return InstructionParseResult { instructions: [NativeInstruction.EndIf()], span_consumed: false, value_span_consumed: false };
     }
     if starts_with(line, ".for ") {
         let body = trim_text(strip_prefix(line, ".for "));
@@ -613,48 +701,64 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
         if index >= 0 {
             let target = trim_text(substring(body, 0, index));
             let iterable = trim_text(substring(body, index + separator.length, body.length));
-            return [NativeInstruction.For { target: target, iterable: iterable }];
+            return InstructionParseResult { instructions: [NativeInstruction.For { target: target, iterable: iterable }], span_consumed: false, value_span_consumed: false };
         }
     }
     if line == ".endfor" {
-        return [NativeInstruction.EndFor()];
+        return InstructionParseResult { instructions: [NativeInstruction.EndFor()], span_consumed: false, value_span_consumed: false };
     }
     if line == ".loop" {
-        return [NativeInstruction.Loop()];
+        return InstructionParseResult { instructions: [NativeInstruction.Loop()], span_consumed: false, value_span_consumed: false };
     }
     if line == ".endloop" {
-        return [NativeInstruction.EndLoop()];
+        return InstructionParseResult { instructions: [NativeInstruction.EndLoop()], span_consumed: false, value_span_consumed: false };
     }
     if line == "break" {
-        return [NativeInstruction.Break()];
+        return InstructionParseResult { instructions: [NativeInstruction.Break()], span_consumed: false, value_span_consumed: false };
     }
     if line == "continue" {
-        return [NativeInstruction.Continue()];
+        return InstructionParseResult { instructions: [NativeInstruction.Continue()], span_consumed: false, value_span_consumed: false };
     }
     if starts_with(line, ".match ") {
         let expression = trim_text(strip_prefix(line, ".match "));
-        return [NativeInstruction.Match { expression: expression }];
+        return InstructionParseResult { instructions: [NativeInstruction.Match { expression: expression }], span_consumed: false, value_span_consumed: false };
     }
     if starts_with(line, ".case ") {
-        return [parse_case_instruction(line)];
+        return InstructionParseResult { instructions: [parse_case_instruction(line)], span_consumed: false, value_span_consumed: false };
     }
     if line == ".endmatch" {
-        return [NativeInstruction.EndMatch()];
+        return InstructionParseResult { instructions: [NativeInstruction.EndMatch()], span_consumed: false, value_span_consumed: false };
     }
     if starts_with(line, ".let ") {
-        return [parse_let_instruction(line)];
+        return InstructionParseResult {
+            instructions: [parse_let_instruction(line, span, value_span)],
+            span_consumed: true,
+            value_span_consumed: true,
+        };
     }
     if starts_with(line, "ret") {
         if line.length == 3 {
-            return [NativeInstruction.Return { expression: "" }];
+            return InstructionParseResult {
+                instructions: [NativeInstruction.Return { expression: "", span: span }],
+                span_consumed: true,
+                value_span_consumed: false,
+            };
         }
         let separator = line[3];
         if separator == " " || separator == "\t" {
             let remainder = trim_text(substring(line, 3, line.length));
             if remainder.length == 0 {
-                return [NativeInstruction.Return { expression: "" }];
+                return InstructionParseResult {
+                    instructions: [NativeInstruction.Return { expression: "", span: span }],
+                    span_consumed: true,
+                    value_span_consumed: false,
+                };
             }
-            return [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder) }];
+            return InstructionParseResult {
+                instructions: [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder), span: span }],
+                span_consumed: true,
+                value_span_consumed: false,
+            };
         }
     }
     if starts_with(line, "eval let ") {
@@ -665,20 +769,30 @@ fn parse_instruction(line -> string) -> NativeInstruction[] {
             body = trim_text(strip_prefix(body, "mut "));
         }
         let parsed = parse_binding_components(body);
-        return [NativeInstruction.Let {
-            name: parsed.name,
-            mutable: is_mutable,
-            type_annotation: parsed.type_annotation,
-            value: maybe_trim_trailing(parsed.value),
-        }];
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Let {
+                name: parsed.name,
+                mutable: is_mutable,
+                type_annotation: parsed.type_annotation,
+                value: maybe_trim_trailing(parsed.value),
+                span: span,
+                value_span: value_span,
+            }],
+            span_consumed: true,
+            value_span_consumed: true,
+        };
     }
     if starts_with(line, "eval ") {
-        return [NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))) }];
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))), span: span }],
+            span_consumed: true,
+            value_span_consumed: false,
+        };
     }
     if index_of(line, "=>") >= 0 {
-        return parse_inline_case_instruction(line);
+        return InstructionParseResult { instructions: parse_inline_case_instruction(line), span_consumed: false, value_span_consumed: false };
     }
-    return [NativeInstruction.Unknown { text: line }];
+    return InstructionParseResult { instructions: [NativeInstruction.Unknown { text: line }], span_consumed: false, value_span_consumed: false };
 }
 
 fn parse_case_instruction(line -> string) -> NativeInstruction {
@@ -711,12 +825,12 @@ fn parse_inline_case_body_instruction(body -> string) -> NativeInstruction {
     let lowered = trim_trailing_delimiters(body);
     if starts_with(lowered, "return ") {
         let value = trim_trailing_delimiters(trim_text(strip_prefix(lowered, "return ")));
-        return NativeInstruction.Return { expression: value };
+        return NativeInstruction.Return { expression: value, span: null };
     }
     if starts_with(lowered, "eval ") {
-        return NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))) };
+        return NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))), span: null };
     }
-    return NativeInstruction.Expression { expression: lowered };
+    return NativeInstruction.Expression { expression: lowered, span: null };
 }
 
 fn split_case_components(text -> string) -> CaseComponents {
@@ -813,6 +927,8 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
     let mut fields -> NativeStructField[] = [];
     let mut methods -> NativeFunction[] = [];
     let mut current_method -> NativeFunction? = null;
+    let mut method_pending_span -> NativeSourceSpan? = null;
+    let mut method_pending_value_span -> NativeSourceSpan? = null;
     let mut struct_layout_fields -> NativeStructLayoutField[] = [];
     let mut struct_layout_size -> number = 0;
     let mut struct_layout_align -> number = 0;
@@ -842,6 +958,8 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name);
                 methods = append_function(methods, current_method);
                 current_method = null;
+                method_pending_span = null;
+                method_pending_value_span = null;
             }
             index += 1;
             break;
@@ -850,6 +968,8 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
             if raw_line == ".endmethod" {
                 methods = append_function(methods, current_method);
                 current_method = null;
+                method_pending_span = null;
+                method_pending_value_span = null;
                 index += 1;
                 continue;
             }
@@ -873,13 +993,45 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 index += 1;
                 continue;
             }
-            let instructions = parse_instruction(raw_line);
+            if starts_with(raw_line, ".span ") {
+                let parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "));
+                if parsed_method_span == null {
+                    diagnostics = append_string(diagnostics, "unable to parse span metadata: " + raw_line);
+                } else {
+                    method_pending_span = parsed_method_span;
+                }
+                index += 1;
+                continue;
+            }
+            if starts_with(raw_line, ".init-span ") {
+                let parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "));
+                if parsed_method_init_span == null {
+                    diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + raw_line);
+                } else {
+                    method_pending_value_span = parsed_method_init_span;
+                }
+                index += 1;
+                continue;
+            }
+            let method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span);
+            if method_instruction_result.span_consumed {
+                method_pending_span = null;
+            } else if method_pending_span != null {
+                diagnostics = append_string(diagnostics, "unused span metadata before: " + raw_line);
+                method_pending_span = null;
+            }
+            if method_instruction_result.value_span_consumed {
+                method_pending_value_span = null;
+            } else if method_pending_value_span != null {
+                diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + raw_line);
+                method_pending_value_span = null;
+            }
             let mut instruction_index -> number = 0;
             loop {
-                if instruction_index >= instructions.length {
+                if instruction_index >= method_instruction_result.instructions.length {
                     break;
                 }
-                current_method = append_instruction(current_method, instructions[instruction_index]);
+                current_method = append_instruction(current_method, method_instruction_result.instructions[instruction_index]);
                 instruction_index += 1;
             }
             index += 1;
@@ -947,6 +1099,8 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 effects: [],
                 instructions: [],
             };
+            method_pending_span = null;
+            method_pending_value_span = null;
             index += 1;
             continue;
         }
@@ -2082,7 +2236,7 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     return EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics };
 }
 
-fn parse_let_instruction(line -> string) -> NativeInstruction {
+fn parse_let_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> NativeInstruction {
     let body = trim_text(strip_prefix(line, ".let "));
     let mut is_mutable -> boolean = false;
     let mut remainder -> string = body;
@@ -2096,6 +2250,8 @@ fn parse_let_instruction(line -> string) -> NativeInstruction {
         mutable: is_mutable,
         type_annotation: parsed.type_annotation,
         value: parsed.value,
+        span: span,
+        value_span: value_span,
     };
 }
 

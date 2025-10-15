@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct
+from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeSourceSpan
 from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
@@ -768,7 +768,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                         inline_parse = parse_inline_let_expression(trimmed_expression)
                         diagnostics = (diagnostics) + (inline_parse.diagnostics)
                         if inline_parse.success:
-                            inline_instruction = runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', inline_parse.name), runtime.enum_field('mutable', inline_parse.mutable), runtime.enum_field('type_annotation', inline_parse.type_annotation), runtime.enum_field('value', inline_parse.initializer)])
+                            inline_instruction = runtime.enum_instantiate(NativeInstruction, 'Let', [runtime.enum_field('name', inline_parse.name), runtime.enum_field('mutable', inline_parse.mutable), runtime.enum_field('type_annotation', inline_parse.type_annotation), runtime.enum_field('value', inline_parse.initializer), runtime.enum_field('span', instruction.span), runtime.enum_field('value_span', instruction.span)])
                             lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions)
                             diagnostics = (diagnostics) + (lowered.diagnostics)
                             current_lines = lowered.lines
@@ -779,7 +779,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             current_next_local = lowered.next_local_id
                             handled_inline_let = True
                 if not handled_inline_let:
-                    lowered = lower_expression_statement(trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions)
+                    lowered = lower_expression_statement(instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions)
                     diagnostics = (diagnostics) + (lowered.diagnostics)
                     current_lines = lowered.lines
                     current_temp = lowered.temp_index
@@ -1631,7 +1631,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`")
     operand = None
-    ownership_analysis = analyze_value_ownership(instruction.value, current_locals, bindings)
+    ownership_analysis = analyze_value_ownership(instruction.value, instruction.value_span, current_locals, bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     ownership = ownership_analysis.ownership
     consumption = ownership_analysis.consumption
@@ -1675,7 +1675,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False))
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1)
 
-def lower_expression_statement(expression, bindings, locals, temp_index, lines, functions):
+def lower_expression_statement(instruction, expression, bindings, locals, temp_index, lines, functions):
     diagnostics = []
     current_lines = lines
     current_temp = temp_index
@@ -1687,7 +1687,7 @@ def lower_expression_statement(expression, bindings, locals, temp_index, lines, 
         if binding == None:
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`")
         else:
-            ownership_analysis = analyze_value_ownership(parsed_assignment.value, current_locals, current_bindings)
+            ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings)
             diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
             consumption = ownership_analysis.consumption
             lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions)
@@ -1715,7 +1715,7 @@ def lower_expression_statement(expression, bindings, locals, temp_index, lines, 
                         current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
             current_locals = reset_local_consumption(current_locals, parsed_assignment.target)
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
-    ownership_analysis = analyze_value_ownership(expression, current_locals, current_bindings)
+    ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     consumption = ownership_analysis.consumption
     lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions)
@@ -1867,7 +1867,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics)
     current_locals = locals
     current_bindings = bindings
-    ownership_analysis = analyze_value_ownership(instruction.expression, current_locals, current_bindings)
+    ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     consumption = ownership_analysis.consumption
     lowered = lower_expression(instruction.expression, current_bindings, current_locals, current_temp, current_lines, functions)
@@ -2226,7 +2226,7 @@ def extract_borrow_argument(text):
         return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
     return BorrowArgumentParse(success=True, argument=trim_text(inner), diagnostics=diagnostics)
 
-def analyze_value_ownership(initializer, locals, bindings):
+def analyze_value_ownership(initializer, span, locals, bindings):
     if initializer == None:
         return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=[])
     trimmed = trim_text(initializer)
@@ -2248,7 +2248,7 @@ def analyze_value_ownership(initializer, locals, bindings):
         local = find_local_binding(locals, name)
         if local != None:
             if local.consumed:
-                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`")
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span))
                 return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
             if is_copy_type(local.type_annotation, local.llvm_type):
                 return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
@@ -2257,13 +2257,23 @@ def analyze_value_ownership(initializer, locals, bindings):
         parameter = find_parameter_binding(bindings, name)
         if parameter != None:
             if parameter.consumed:
-                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`")
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span))
                 return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
             if is_copy_type(parameter.type_annotation, parameter.llvm_type):
                 return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
             consumption = OwnershipConsumption(kind="parameter", name=name)
             return OwnershipAnalysis(ownership=None, consumption=consumption, diagnostics=diagnostics)
     return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=diagnostics)
+
+def format_use_after_move_message(name, span):
+    if span == None:
+        return "llvm lowering: use-after-move of `" + name + "`"
+    return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span)
+
+def format_span_location(span):
+    start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column)
+    end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column)
+    return start + "-" + end
 
 def detect_borrow_conflicts(ownership, locals, binding_name, function_name):
     diagnostics = []

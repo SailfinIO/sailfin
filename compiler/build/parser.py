@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.lexer import lex
 from compiler.build.token import Token, TokenKind
-from compiler.build.ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelDeclaration, ModelProperty, ObjectField, Parameter, PipelineDeclaration, ForClause, Program, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TestDeclaration, TypeAnnotation, ToolDeclaration, MatchCase, ElseBranch, WithClause
+from compiler.build.ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelDeclaration, ModelProperty, ObjectField, Parameter, PipelineDeclaration, ForClause, Program, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TestDeclaration, TypeAnnotation, ToolDeclaration, MatchCase, ElseBranch, WithClause, SourceSpan
 from compiler.build.decorator_semantics import evaluate_decorators, infer_effects
 from compiler.build.string_utils import substring, char_code
 
@@ -429,41 +429,64 @@ def parse_export(parser):
 
 def parse_variable(parser):
     parser = skip_trivia(parser)
+    statement_tokens = []
+    let_token = parser_peek_raw(parser)
+    statement_tokens = append_token(statement_tokens, let_token)
     parser = consume_keyword(parser, "let")
     mutable_flag = False
-    look = skip_trivia(parser)
-    token = parser_peek_raw(look)
-    if identifier_matches(token, "mut"):
-        parser = skip_trivia(parser)
+    parser = skip_trivia(parser)
+    mut_token = parser_peek_raw(parser)
+    if identifier_matches(mut_token, "mut"):
+        statement_tokens = append_token(statement_tokens, mut_token)
         parser = consume_keyword(parser, "mut")
         mutable_flag = True
     parser = skip_trivia(parser)
     name_token = parser_peek_raw(parser)
+    statement_tokens = append_token(statement_tokens, name_token)
     name = identifier_text(name_token)
     parser = parser_advance_raw(parser)
     type_annotation = None
     parser = skip_trivia(parser)
     separator = parser_peek_raw(parser)
     if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
+        statement_tokens = append_token(statement_tokens, separator)
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["=", ";"])
+        index = 0
+        while True:
+            if index >= len(capture.tokens):
+                break
+            statement_tokens = append_token(statement_tokens, capture.tokens[index])
+            index += 1
         parser = capture.parser
         text = trim_text(tokens_to_text(capture.tokens))
         if len(text) > 0:
             type_annotation = TypeAnnotation(text=text)
     initializer = None
+    initializer_span = None
     parser = skip_trivia(parser)
     assign = parser_peek_raw(parser)
     if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
+        statement_tokens = append_token(statement_tokens, assign)
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), [";"])
+        index = 0
+        while True:
+            if index >= len(capture.tokens):
+                break
+            statement_tokens = append_token(statement_tokens, capture.tokens[index])
+            index += 1
         parser = capture.parser
-        expression = expression_from_tokens(capture.tokens)
-        initializer = expression
+        if len(capture.tokens) > 0:
+            initializer_span = source_span_from_tokens(capture.tokens)
+            initializer = expression_from_tokens(capture.tokens)
     parser = skip_trivia(parser)
-    if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
+    terminator = parser_peek_raw(parser)
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
+        statement_tokens = append_token(statement_tokens, terminator)
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'VariableDeclaration', [runtime.enum_field('name', name), runtime.enum_field('mutable', mutable_flag), runtime.enum_field('type_annotation', type_annotation), runtime.enum_field('initializer', initializer)])
+    span = source_span_from_tokens(statement_tokens)
+    statement = runtime.enum_instantiate(Statement, 'VariableDeclaration', [runtime.enum_field('name', name), runtime.enum_field('mutable', mutable_flag), runtime.enum_field('type_annotation', type_annotation), runtime.enum_field('initializer', initializer), runtime.enum_field('span', span), runtime.enum_field('initializer_span', initializer_span)])
     return StatementParseResult(parser=parser, statement=statement)
 
 def parse_specifier_list(parser):
@@ -1646,8 +1669,9 @@ def parse_match_case(parser):
                 block_tokens = append_token(block_tokens, terminator)
                 current = parser_advance_raw(current)
             block_tokens = trim_token_edges(block_tokens)
+            statement_span = source_span_from_tokens(block_tokens)
             statements = []
-            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', return_expression)]))
+            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', return_expression), runtime.enum_field('span', statement_span)]))
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
         else:
@@ -1669,8 +1693,9 @@ def parse_match_case(parser):
                 block_tokens = append_token(block_tokens, terminator)
                 current = parser_advance_raw(current)
             block_tokens = trim_token_edges(block_tokens)
+            statement_span = source_span_from_tokens(block_tokens)
             statements = []
-            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression)]))
+            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', statement_span)]))
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
     if body == None:
@@ -1743,6 +1768,8 @@ def parse_return_statement(parser):
     current = skip_trivia(parser)
     if not identifier_matches(parser_peek_raw(current), "return"):
         return BlockStatementParseResult(parser=original, statement=None, success=False)
+    statement_tokens = []
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current))
     current = consume_keyword(current, "return")
     capture = collect_until(skip_trivia(current), [";", "}"])
     current = capture.parser
@@ -1750,11 +1777,19 @@ def parse_return_statement(parser):
     expression = None
     if len(trimmed) > 0:
         expression = expression_from_tokens(trimmed)
+    index = 0
+    while True:
+        if index >= len(capture.tokens):
+            break
+        statement_tokens = append_token(statement_tokens, capture.tokens[index])
+        index += 1
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
+        statement_tokens = append_token(statement_tokens, terminator)
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', expression)])
+    span = source_span_from_tokens(statement_tokens)
+    statement = runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_expression_statement(parser, decorators):
@@ -1771,6 +1806,13 @@ def parse_expression_statement(parser, decorators):
     capture = collect_until(current, [";"])
     if len(capture.tokens) == 0:
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
+    statement_tokens = []
+    token_index = 0
+    while True:
+        if token_index >= len(capture.tokens):
+            break
+        statement_tokens = append_token(statement_tokens, capture.tokens[token_index])
+        token_index += 1
     trimmed = trim_token_edges(capture.tokens)
     if len(trimmed) == 0:
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
@@ -1779,9 +1821,11 @@ def parse_expression_statement(parser, decorators):
     terminator = parser_peek_raw(current)
     if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
+    statement_tokens = append_token(statement_tokens, terminator)
     current = parser_advance_raw(current)
     expression = expression_from_tokens(trimmed)
-    statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression)])
+    span = source_span_from_tokens(statement_tokens)
+    statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_unknown(parser):
@@ -2083,6 +2127,28 @@ def token_slice(tokens, start, end):
         result = append_token(result, tokens[index])
         index += 1
     return result
+
+def source_span_from_tokens(tokens):
+    trimmed = trim_token_edges(tokens)
+    if len(trimmed) == 0:
+        return None
+    start = trimmed[0]
+    last = trimmed[len(trimmed) - 1]
+    end_line = last.line
+    end_column = last.column
+    lexeme = last.lexeme
+    index = 0
+    while True:
+        if index >= len(lexeme):
+            break
+        ch = lexeme[index]
+        if ch == "\n":
+            end_line += 1
+            end_column = 1
+        else:
+            end_column += 1
+        index += 1
+    return SourceSpan(start_line=start.line, start_column=start.column, end_line=end_line, end_column=end_column)
 
 def trim_block_tokens(tokens):
     depth = 0

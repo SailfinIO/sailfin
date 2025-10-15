@@ -25,6 +25,13 @@ struct Block {
     statements -> Statement[];
 }
 
+struct SourceSpan {
+    start_line -> number;
+    start_column -> number;
+    end_line -> number;
+    end_column -> number;
+}
+
 enum Expression {
     Identifier { name -> string },
     NumberLiteral { value -> string },
@@ -169,6 +176,8 @@ enum Statement {
         mutable -> boolean;
         type_annotation -> TypeAnnotation?;
         initializer -> Expression?;
+        span -> SourceSpan?;
+        initializer_span -> SourceSpan?;
     },
     ModelDeclaration {
         name -> string;
@@ -260,9 +269,11 @@ enum Statement {
     },
     ReturnStatement {
         expression -> Expression?;
+        span -> SourceSpan?;
     },
     ExpressionStatement {
         expression -> Expression;
+        span -> SourceSpan?;
     },
     Unknown {
         tokens -> Token[];

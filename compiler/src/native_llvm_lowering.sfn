@@ -5,7 +5,7 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeSourceSpan } from "./native_ir";
 import { substring, char_code } from "./string_utils";
 
 struct TraitImplementationDescriptor {
@@ -807,6 +807,8 @@ fn lower_instruction_range(
                             mutable: inline_parse.mutable,
                             type_annotation: inline_parse.type_annotation,
                             value: inline_parse.initializer,
+                            span: instruction.span,
+                            value_span: instruction.span,
                         };
                         let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -821,7 +823,7 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
+                let lowered = lower_expression_statement(instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -2470,7 +2472,7 @@ fn lower_let_instruction(
     }
 
     let mut operand -> LLVMOperand? = null;
-    let ownership_analysis = analyze_value_ownership(instruction.value, current_locals, bindings);
+    let ownership_analysis = analyze_value_ownership(instruction.value, instruction.value_span, current_locals, bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     ownership = ownership_analysis.ownership;
     consumption = ownership_analysis.consumption;
@@ -2540,6 +2542,7 @@ fn lower_let_instruction(
 }
 
 fn lower_expression_statement(
+    instruction -> NativeInstruction,
     expression -> string,
     bindings -> ParameterBinding[],
     locals -> LocalBinding[],
@@ -2559,7 +2562,7 @@ fn lower_expression_statement(
         if binding == null {
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`");
         } else {
-            let ownership_analysis = analyze_value_ownership(parsed_assignment.value, current_locals, current_bindings);
+            let ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings);
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
             let consumption = ownership_analysis.consumption;
 
@@ -2596,7 +2599,7 @@ fn lower_expression_statement(
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
     }
 
-    let ownership_analysis = analyze_value_ownership(expression, current_locals, current_bindings);
+    let ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
@@ -2799,7 +2802,7 @@ fn lower_return_instruction(
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_bindings -> ParameterBinding[] = bindings;
 
-    let ownership_analysis = analyze_value_ownership(instruction.expression, current_locals, current_bindings);
+    let ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
@@ -3310,7 +3313,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
 }
 
-fn analyze_value_ownership(initializer -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
         return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
     }
@@ -3339,7 +3342,7 @@ fn analyze_value_ownership(initializer -> string?, locals -> LocalBinding[], bin
         let local = find_local_binding(locals, name);
         if local != null {
             if local.consumed {
-                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`");
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(local.type_annotation, local.llvm_type) {
@@ -3352,7 +3355,7 @@ fn analyze_value_ownership(initializer -> string?, locals -> LocalBinding[], bin
         let parameter = find_parameter_binding(bindings, name);
         if parameter != null {
             if parameter.consumed {
-                diagnostics = append_string(diagnostics, "llvm lowering: use-after-move of `" + name + "`");
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
@@ -3364,6 +3367,19 @@ fn analyze_value_ownership(initializer -> string?, locals -> LocalBinding[], bin
     }
 
     return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+}
+
+fn format_use_after_move_message(name -> string, span -> NativeSourceSpan?) -> string {
+    if span == null {
+        return "llvm lowering: use-after-move of `" + name + "`";
+    }
+    return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
+}
+
+fn format_span_location(span -> NativeSourceSpan) -> string {
+    let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
+    let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
+    return start + "-" + end;
 }
 
 fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {

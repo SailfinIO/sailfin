@@ -25,6 +25,7 @@ import {
     TypeParameter,
     WithClause,
     ElseBranch,
+    SourceSpan,
 } from "./ast";
 import { substring } from "./string_utils";
 
@@ -205,10 +206,10 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
         return emit_if(state, statement);
     }
     if statement.variant == "ReturnStatement" {
-        return emit_return(state, statement.expression);
+        return emit_return(state, statement);
     }
     if statement.variant == "ExpressionStatement" {
-        return emit_expression_statement(state, statement.expression);
+        return emit_expression_statement(state, statement);
     }
     let message = "native backend: unsupported statement `" + statement.variant + "`";
     return state_add_diagnostic(state, message);
@@ -247,7 +248,34 @@ fn format_native_specifier(name -> string, alias -> string?) -> string {
     return name + " as " + alias;
 }
 
+fn emit_span_if_present(state -> NativeState, span -> SourceSpan?) -> NativeState {
+    if span == null {
+        return state;
+    }
+    return state_emit_line(state, ".span " + format_span(span));
+}
+
+fn emit_initializer_span_if_present(state -> NativeState, span -> SourceSpan?) -> NativeState {
+    if span == null {
+        return state;
+    }
+    return state_emit_line(state, ".init-span " + format_span(span));
+}
+
+fn format_span(span -> SourceSpan) -> string {
+    return number_to_string(span.start_line)
+        + " "
+        + number_to_string(span.start_column)
+        + " "
+        + number_to_string(span.end_line)
+        + " "
+        + number_to_string(span.end_column);
+}
+
 fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    current = emit_initializer_span_if_present(current, statement.initializer_span);
+
     let mut line -> string = ".let ";
     if statement.mutable {
         line = line + "mut ";
@@ -259,7 +287,7 @@ fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.initializer != null {
         line = line + " = " + format_expression(statement.initializer);
     }
-    return state_emit_line(state, line);
+    return state_emit_line(current, line);
 }
 
 fn emit_function(
@@ -603,15 +631,17 @@ fn emit_else_branch(state -> NativeState, branch -> ElseBranch) -> NativeState {
     return current;
 }
 
-fn emit_return(state -> NativeState, expression -> Expression?) -> NativeState {
-    if expression == null {
-        return state_emit_line(state, "ret");
+fn emit_return(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    if statement.expression == null {
+        return state_emit_line(current, "ret");
     }
-    return state_emit_line(state, "ret " + format_expression(expression));
+    return state_emit_line(current, "ret " + format_expression(statement.expression));
 }
 
-fn emit_expression_statement(state -> NativeState, expression -> Expression) -> NativeState {
-    return state_emit_line(state, "eval " + format_expression(expression));
+fn emit_expression_statement(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    return state_emit_line(current, "eval " + format_expression(statement.expression));
 }
 
 fn emit_block(state -> NativeState, block -> Block) -> NativeState {

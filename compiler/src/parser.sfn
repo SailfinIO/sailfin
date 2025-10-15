@@ -33,6 +33,7 @@ import {
     MatchCase,
     ElseBranch,
     WithClause,
+    SourceSpan,
 } from "./ast";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";
 import { substring, char_code } from "./string_utils";
@@ -395,19 +396,23 @@ fn parse_export(parser -> Parser) -> StatementParseResult {
 
 fn parse_variable(parser -> Parser) -> StatementParseResult {
     parser = skip_trivia(parser);
+    let mut statement_tokens -> Token[] = [];
+    let let_token = parser_peek_raw(parser);
+    statement_tokens = append_token(statement_tokens, let_token);
     parser = consume_keyword(parser, "let");
 
     let mut mutable_flag = false;
-    let look = skip_trivia(parser);
-    let token = parser_peek_raw(look);
-    if identifier_matches(token, "mut") {
-        parser = skip_trivia(parser);
+    parser = skip_trivia(parser);
+    let mut_token = parser_peek_raw(parser);
+    if identifier_matches(mut_token, "mut") {
+        statement_tokens = append_token(statement_tokens, mut_token);
         parser = consume_keyword(parser, "mut");
         mutable_flag = true;
     }
 
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
+    statement_tokens = append_token(statement_tokens, name_token);
     let name = identifier_text(name_token);
     parser = parser_advance_raw(parser);
 
@@ -415,8 +420,17 @@ fn parse_variable(parser -> Parser) -> StatementParseResult {
     parser = skip_trivia(parser);
     let separator = parser_peek_raw(parser);
     if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+        statement_tokens = append_token(statement_tokens, separator);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+            index += 1;
+        }
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
@@ -425,26 +439,44 @@ fn parse_variable(parser -> Parser) -> StatementParseResult {
     }
 
     let mut initializer -> Expression? = null;
+    let mut initializer_span -> SourceSpan? = null;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
     if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
+        statement_tokens = append_token(statement_tokens, assign);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), [";"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+            index += 1;
+        }
         parser = capture.parser;
-        let expression = expression_from_tokens(capture.tokens);
-        initializer = expression;
+        if capture.tokens.length > 0 {
+            initializer_span = source_span_from_tokens(capture.tokens);
+            initializer = expression_from_tokens(capture.tokens);
+        }
     }
 
     parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+    let terminator = parser_peek_raw(parser);
+    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        statement_tokens = append_token(statement_tokens, terminator);
         parser = parser_advance_raw(parser);
     }
+
+    let span = source_span_from_tokens(statement_tokens);
 
     let statement = Statement.VariableDeclaration {
         name: name,
         mutable: mutable_flag,
         type_annotation: type_annotation,
         initializer: initializer,
+        span: span,
+        initializer_span: initializer_span,
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -2232,10 +2264,12 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
             current = parser_advance_raw(current);
         }
 
-        block_tokens = trim_token_edges(block_tokens);
+    block_tokens = trim_token_edges(block_tokens);
 
-        let mut statements -> Statement[] = [];
-        statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression });
+    let statement_span = source_span_from_tokens(block_tokens);
+
+    let mut statements -> Statement[] = [];
+    statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression, span: statement_span });
         let text = trim_text(tokens_to_text(block_tokens));
         body = Block { tokens: block_tokens, text: text, statements: statements };
     } else {
@@ -2264,10 +2298,12 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
             current = parser_advance_raw(current);
         }
 
-        block_tokens = trim_token_edges(block_tokens);
+    block_tokens = trim_token_edges(block_tokens);
 
-        let mut statements -> Statement[] = [];
-        statements = append_statement(statements, Statement.ExpressionStatement { expression: expression });
+    let statement_span = source_span_from_tokens(block_tokens);
+
+    let mut statements -> Statement[] = [];
+    statements = append_statement(statements, Statement.ExpressionStatement { expression: expression, span: statement_span });
         let text = trim_text(tokens_to_text(block_tokens));
         body = Block { tokens: block_tokens, text: text, statements: statements };
     }
@@ -2389,6 +2425,8 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
     if !identifier_matches(parser_peek_raw(current), "return") {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
+    let mut statement_tokens -> Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
     current = consume_keyword(current, "return");
 
     let capture = collect_until(skip_trivia(current), [";", "}"]);
@@ -2400,13 +2438,25 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
         expression = expression_from_tokens(trimmed);
     }
 
+    let mut index -> number = 0;
+    loop {
+        if index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
     if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        statement_tokens = append_token(statement_tokens, terminator);
         current = parser_advance_raw(current);
     }
 
-    let statement = Statement.ReturnStatement { expression: expression };
+    let span = source_span_from_tokens(statement_tokens);
+
+    let statement = Statement.ReturnStatement { expression: expression, span: span };
     return BlockStatementParseResult {
         parser: current,
         statement: statement,
@@ -2436,6 +2486,16 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
 
+    let mut statement_tokens -> Token[] = [];
+    let mut token_index -> number = 0;
+    loop {
+        if token_index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[token_index]);
+        token_index += 1;
+    }
+
     let trimmed = trim_token_edges(capture.tokens);
     if trimmed.length == 0 {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
@@ -2447,10 +2507,12 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
+    statement_tokens = append_token(statement_tokens, terminator);
     current = parser_advance_raw(current);
 
     let expression = expression_from_tokens(trimmed);
-    let statement = Statement.ExpressionStatement { expression: expression };
+    let span = source_span_from_tokens(statement_tokens);
+    let statement = Statement.ExpressionStatement { expression: expression, span: span };
     return BlockStatementParseResult {
         parser: current,
         statement: statement,
@@ -2895,6 +2957,41 @@ fn token_slice(tokens -> Token[], start -> number, end -> number) -> Token[] {
         index += 1;
     }
     return result;
+}
+
+fn source_span_from_tokens(tokens -> Token[]) -> SourceSpan? {
+    let trimmed = trim_token_edges(tokens);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let start = trimmed[0];
+    let last = trimmed[trimmed.length - 1];
+    let mut end_line = last.line;
+    let mut end_column = last.column;
+
+    let lexeme = last.lexeme;
+    let mut index -> number = 0;
+    loop {
+        if index >= lexeme.length {
+            break;
+        }
+        let ch = lexeme[index];
+        if ch == "\n" {
+            end_line += 1;
+            end_column = 1;
+        } else {
+            end_column += 1;
+        }
+        index += 1;
+    }
+
+    return SourceSpan {
+        start_line: start.line,
+        start_column: start.column,
+        end_line: end_line,
+        end_column: end_column,
+    };
 }
 
 fn trim_block_tokens(tokens -> Token[]) -> Token[] {
