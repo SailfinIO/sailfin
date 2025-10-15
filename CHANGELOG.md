@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.8 (2025-10-15)
+
+### Bug Fixes
+
+- Borrow effect metadata
+  ([`4bafaa7`](https://github.com/SailfinIO/sailfin/commit/4bafaa78dc32025923e43515737ef8e55b534df9))
+
+
 ## v0.1.1-alpha.7 (2025-10-15)
 
 ### Bug Fixes
