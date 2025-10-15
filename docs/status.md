@@ -58,12 +58,15 @@ roadmaps.
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`).
   Borrowed references still introduce internal effects (`!read`, `!mut`) that
-  compose with capability-driven effects, and the lowering pipeline now records
-  those requirements per function (`LoweredLLVMResult.function_effects`) while
-  annotating the emitted LLVM IR with effect comments so downstream capability
-  manifests can surface composite requirements. Future enforcement will block `!mut`
-  across suspension points and require manifests to authorise any routine that
-  touches unsafe capabilities. Raw pointer access remains gated behind `unsafe extern`
+  compose with capability-driven effects. The lowering pipeline now records those
+  requirements per function (`LoweredLLVMResult.function_effects`), annotates the
+  emitted LLVM IR with effect comments, and wires them into the entry-point
+  capability manifest (`LoweredLLVMResult.capability_manifest`) so callers see
+  composite requirements. `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_propagates_composite_effects`
+  locks the manifest propagation behaviour, including borrow + capability
+  combinations. Future enforcement will block `!mut` across suspension points
+  and require manifests to authorise any routine that touches unsafe
+  capabilities. Raw pointer access remains gated behind `unsafe extern`
   declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM
   without exposing unchecked pointer mutation to safe code.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.

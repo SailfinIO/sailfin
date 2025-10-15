@@ -3,7 +3,9 @@ import ctypes
 import llvmlite.binding as llvm
 import pytest
 
+from compiler.build.emit_native import NativeArtifact, NativeModule
 from compiler.build.main import compile_to_native_llvm
+from compiler.build.native_llvm_lowering import lower_to_llvm
 
 _LLVM_TARGET_INITIALIZED = False
 
@@ -722,9 +724,61 @@ fn main() -> number {
     assert "borrow_mutable" in effect_map
     assert "mut" in effect_map["borrow_mutable"], effect_map
     assert "read" in effect_map["borrow_mutable"], effect_map
+    manifest_map = {entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
+    assert manifest_map.get("borrow_mutable"), manifest_map
+    assert "mut" in manifest_map["borrow_mutable"] and "read" in manifest_map["borrow_mutable"]
     comment_lines = [line for line in lowered.ir.splitlines() if line.startswith("; fn borrow_mutable effects:")]
     assert comment_lines, lowered.ir
     assert "mut" in comment_lines[0] and "read" in comment_lines[0]
+
+
+def test_native_llvm_execution_capability_manifest_propagates_composite_effects() -> None:
+    artifact_text = """
+; Sailfin Native Prototype
+.module main
+
+.fn borrow_mutable() ![io]
+.meta return number
+.meta effects io
+    .span 3 5 3 36
+    eval let mut slot -> number = 0
+    .span 4 5 4 38
+    eval let shared -> &number = &slot
+    .span 5 5 5 45
+    eval let alias -> &mut number = &mut slot
+    .span 6 5 6 17
+    ret slot
+.endfn
+
+.fn wrapper() -> number
+.meta return number
+.meta effects none
+    .span 10 5 10 29
+    ret borrow_mutable()
+.endfn
+
+.fn main() -> number
+.meta return number
+.meta effects none
+    .span 14 5 14 22
+    ret wrapper()
+.endfn
+""".strip()
+
+    module = NativeModule(
+        artifacts=[NativeArtifact(name="composite_effects.sfn-asm", format="sailfin-native-text", contents=artifact_text)],
+        entry_points=["borrow_mutable", "wrapper", "main"],
+        symbol_count=3,
+    )
+    lowered = lower_to_llvm(module)
+    effect_map = {entry.name: entry.effects for entry in lowered.function_effects}
+    assert set(effect_map.get("borrow_mutable", [])) == {"io", "mut", "read"}, effect_map
+    assert set(effect_map.get("wrapper", [])) == {"io", "mut", "read"}, effect_map
+    assert set(effect_map.get("main", [])) == {"io", "mut", "read"}, effect_map
+    manifest_map = {entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
+    assert set(manifest_map.get("borrow_mutable", [])) == {"io", "mut", "read"}, manifest_map
+    assert set(manifest_map.get("wrapper", [])) == {"io", "mut", "read"}, manifest_map
+    assert set(manifest_map.get("main", [])) == {"io", "mut", "read"}, manifest_map
 
 
 def test_native_llvm_execution_supports_range_strides() -> None:

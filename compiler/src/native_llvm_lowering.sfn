@@ -29,11 +29,26 @@ struct FunctionEffectEntry {
     effects -> string[];
 }
 
+struct CapabilityManifestEntry {
+    symbol -> string;
+    effects -> string[];
+}
+
+struct CapabilityManifest {
+    entries -> CapabilityManifestEntry[];
+}
+
+struct FunctionCallEntry {
+    name -> string;
+    callees -> string[];
+}
+
 struct LoweredLLVMResult {
     ir -> string;
     diagnostics -> string[];
     trait_metadata -> TraitMetadata;
     function_effects -> FunctionEffectEntry[];
+    capability_manifest -> CapabilityManifest;
 }
 
 struct LoweredLLVMFunction {
@@ -261,15 +276,24 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
-        return LoweredLLVMResult { ir: "", diagnostics: diagnostics, trait_metadata: empty_trait_metadata() };
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: diagnostics,
+            trait_metadata: empty_trait_metadata(),
+            function_effects: [],
+            capability_manifest: empty_capability_manifest(),
+        };
     }
 
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
 
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let mut function_effects -> FunctionEffectEntry[] = [];
+    let direct_effects = collect_direct_function_effects(parse.functions);
+    let call_graph = collect_function_call_graph(parse.functions);
+    let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
 
+    let mut function_effects -> FunctionEffectEntry[] = [];
     let mut lines -> string[] = [];
     lines = append_string(lines, "; ModuleID = 'sailfin'");
     lines = append_string(lines, "source_filename = \"sailfin\"");
@@ -287,9 +311,16 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         if index >= parse.functions.length {
             break;
         }
-        let effect_entry = collect_function_effect_entry(parse.functions[index]);
-        function_effects = append_function_effect_entry(function_effects, effect_entry);
-        let lowered = emit_function(parse.functions[index], parse.functions, effect_entry.effects);
+        let aggregated_entry = find_function_effect_entry(aggregated_effects, parse.functions[index].name);
+        let mut effective_effects -> string[] = [];
+        if aggregated_entry != null {
+            effective_effects = aggregated_entry.effects;
+        }
+        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry {
+            name: parse.functions[index].name,
+            effects: effective_effects,
+        });
+        let lowered = emit_function(parse.functions[index], parse.functions, effective_effects);
         if sanitize_symbol(parse.functions[index].name) == "add" {
             has_add_function = true;
         }
@@ -317,15 +348,26 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     }
 
     let ir = join_with_separator(lines, "\n");
+    let manifest = build_capability_manifest(native_module.entry_points, function_effects);
     let mut output -> string = ir;
     if output.length > 0 {
         output = output + "\n";
     }
-    return LoweredLLVMResult { ir: output, diagnostics: diagnostics, trait_metadata: trait_metadata, function_effects: function_effects };
+    return LoweredLLVMResult {
+        ir: output,
+        diagnostics: diagnostics,
+        trait_metadata: trait_metadata,
+        function_effects: function_effects,
+        capability_manifest: manifest,
+    };
 }
 
 fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
+}
+
+fn empty_capability_manifest() -> CapabilityManifest {
+    return CapabilityManifest { entries: [] };
 }
 
 fn build_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> TraitMetadata {
@@ -419,6 +461,263 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
     lines = lines.concat(struct_lines);
     lines = append_string(lines, "; -----------------------------------------------");
     return lines;
+}
+
+fn collect_direct_function_effects(functions -> NativeFunction[]) -> FunctionEffectEntry[] {
+    let mut entries -> FunctionEffectEntry[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        let entry = collect_function_effect_entry(functions[index]);
+        entries = append_function_effect_entry(entries, entry);
+        index += 1;
+    }
+    return entries;
+}
+
+fn collect_function_call_graph(functions -> NativeFunction[]) -> FunctionCallEntry[] {
+    let mut entries -> FunctionCallEntry[] = [];
+    let function_names = collect_function_names(functions);
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        let call_entry = collect_function_call_entry(functions[index], function_names);
+        entries = append_function_call_entry(entries, call_entry);
+        index += 1;
+    }
+    return entries;
+}
+
+fn collect_function_call_entry(function -> NativeFunction, function_names -> string[]) -> FunctionCallEntry {
+    let mut callees -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= function.instructions.length {
+            break;
+        }
+        let instruction = function.instructions[index];
+        callees = merge_effect_lists(callees, collect_instruction_calls(instruction, function_names));
+        index += 1;
+    }
+    return FunctionCallEntry { name: function.name, callees: callees };
+}
+
+fn collect_instruction_calls(instruction -> NativeInstruction, function_names -> string[]) -> string[] {
+    let mut callees -> string[] = [];
+    if instruction.variant == "Let" {
+        if instruction.value != null {
+            callees = merge_effect_lists(callees, extract_call_targets(instruction.value, function_names));
+        }
+        return callees;
+    }
+    if instruction.variant == "Expression" {
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.expression, function_names));
+        return callees;
+    }
+    if instruction.variant == "Return" {
+        let trimmed = trim_text(instruction.expression);
+        if trimmed.length > 0 {
+            callees = merge_effect_lists(callees, extract_call_targets(trimmed, function_names));
+        }
+        return callees;
+    }
+    if instruction.variant == "If" {
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.condition, function_names));
+        return callees;
+    }
+    if instruction.variant == "For" {
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.iterable, function_names));
+        return callees;
+    }
+    if instruction.variant == "Match" {
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.expression, function_names));
+        return callees;
+    }
+    if instruction.variant == "Case" {
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.pattern, function_names));
+        if instruction.guard != null {
+            callees = merge_effect_lists(callees, extract_call_targets(instruction.guard, function_names));
+        }
+        return callees;
+    }
+    return callees;
+}
+
+fn collect_function_names(functions -> NativeFunction[]) -> string[] {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        names = append_string(names, functions[index].name);
+        index += 1;
+    }
+    return names;
+}
+
+fn extract_call_targets(expression -> string, function_names -> string[]) -> string[] {
+    let mut results -> string[] = [];
+    if expression.length == 0 {
+        return results;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "\"" {
+            index = skip_string_literal(expression, index + 1);
+            continue;
+        }
+        if is_identifier_start_char(ch) {
+            let start_index = index;
+            index += 1;
+            loop {
+                if index >= expression.length {
+                    break;
+                }
+                let current = expression[index];
+                if is_identifier_part_char(current) {
+                    index += 1;
+                    continue;
+                }
+                if current == "." {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            let mut candidate = trim_text(substring(expression, start_index, index));
+            if candidate.length > 0 {
+                loop {
+                    let dot_index = index_of(candidate, ".");
+                    if dot_index == -1 {
+                        break;
+                    }
+                    candidate = trim_text(substring(candidate, dot_index + 1, candidate.length));
+                }
+                let mut cursor -> number = index;
+                loop {
+                    if cursor >= expression.length {
+                        break;
+                    }
+                    let next = expression[cursor];
+                    if is_trim_char(next) {
+                        cursor += 1;
+                        continue;
+                    }
+                    if next == "(" {
+                        if string_array_contains(function_names, candidate) {
+                            results = append_unique_effect(results, candidate);
+                        }
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+        index += 1;
+    }
+    return results;
+}
+
+fn append_function_call_entry(entries -> FunctionCallEntry[], entry -> FunctionCallEntry) -> FunctionCallEntry[] {
+    return entries.concat([entry]);
+}
+
+fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_graph -> FunctionCallEntry[]) -> FunctionEffectEntry[] {
+    let mut aggregated -> FunctionEffectEntry[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= direct_effects.length {
+            break;
+        }
+        aggregated = aggregated.concat([
+            FunctionEffectEntry { name: direct_effects[index].name, effects: copy_string_array(direct_effects[index].effects) }
+        ]);
+        index += 1;
+    }
+
+    let mut changed -> boolean = true;
+    loop {
+        if !changed {
+            break;
+        }
+        changed = false;
+        let mut call_index -> number = 0;
+        loop {
+            if call_index >= call_graph.length {
+                break;
+            }
+            let call_entry = call_graph[call_index];
+            let target_entry = find_function_effect_entry(aggregated, call_entry.name);
+            if target_entry != null {
+                let mut merged -> string[] = target_entry.effects;
+                let mut callee_index -> number = 0;
+                loop {
+                    if callee_index >= call_entry.callees.length {
+                        break;
+                    }
+                    let callee_name = call_entry.callees[callee_index];
+                    let callee_entry = find_function_effect_entry(aggregated, callee_name);
+                    if callee_entry != null {
+                        merged = merge_effect_lists(merged, callee_entry.effects);
+                    }
+                    callee_index += 1;
+                }
+                if !string_arrays_equal(merged, target_entry.effects) {
+                    target_entry.effects = merged;
+                    changed = true;
+                }
+            }
+            call_index += 1;
+        }
+    }
+
+    return aggregated;
+}
+
+fn find_function_effect_entry(entries -> FunctionEffectEntry[], name -> string) -> FunctionEffectEntry? {
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        if entries[index].name == name {
+            return entries[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn build_capability_manifest(entry_points -> string[], function_effects -> FunctionEffectEntry[]) -> CapabilityManifest {
+    let mut entries -> CapabilityManifestEntry[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entry_points.length {
+            break;
+        }
+        let symbol = entry_points[index];
+        let effect_entry = find_function_effect_entry(function_effects, symbol);
+        let mut effects -> string[] = [];
+        if effect_entry != null {
+            effects = effect_entry.effects;
+        }
+        entries = append_manifest_entry(entries, CapabilityManifestEntry { symbol: symbol, effects: effects });
+        index += 1;
+    }
+    return CapabilityManifest { entries: entries };
+}
+
+fn append_manifest_entry(entries -> CapabilityManifestEntry[], entry -> CapabilityManifestEntry) -> CapabilityManifestEntry[] {
+    return entries.concat([entry]);
 }
 
 fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEntry {
@@ -584,6 +883,36 @@ fn skip_string_literal(text -> string, start_index -> number) -> number {
         index += 1;
     }
     return index;
+}
+
+fn copy_string_array(values -> string[]) -> string[] {
+    let mut result -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result = append_string(result, values[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
+    if first.length != second.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= first.length {
+            break;
+        }
+        if first[index] != second[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
 }
 
 fn matches_keyword(value -> string, start_index -> number, keyword -> string) -> boolean {

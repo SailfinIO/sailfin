@@ -54,15 +54,39 @@ class FunctionEffectEntry:
     def __repr__(self):
         return runtime.struct_repr('FunctionEffectEntry', [runtime.struct_field('name', self.name), runtime.struct_field('effects', self.effects)])
 
+class CapabilityManifestEntry:
+    def __init__(self, symbol, effects):
+        self.symbol = symbol
+        self.effects = effects
+
+    def __repr__(self):
+        return runtime.struct_repr('CapabilityManifestEntry', [runtime.struct_field('symbol', self.symbol), runtime.struct_field('effects', self.effects)])
+
+class CapabilityManifest:
+    def __init__(self, entries):
+        self.entries = entries
+
+    def __repr__(self):
+        return runtime.struct_repr('CapabilityManifest', [runtime.struct_field('entries', self.entries)])
+
+class FunctionCallEntry:
+    def __init__(self, name, callees):
+        self.name = name
+        self.callees = callees
+
+    def __repr__(self):
+        return runtime.struct_repr('FunctionCallEntry', [runtime.struct_field('name', self.name), runtime.struct_field('callees', self.callees)])
+
 class LoweredLLVMResult:
-    def __init__(self, ir, diagnostics, trait_metadata, function_effects):
+    def __init__(self, ir, diagnostics, trait_metadata, function_effects, capability_manifest):
         self.ir = ir
         self.diagnostics = diagnostics
         self.trait_metadata = trait_metadata
         self.function_effects = function_effects
+        self.capability_manifest = capability_manifest
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects)])
+        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('capability_manifest', self.capability_manifest)])
 
 class LoweredLLVMFunction:
     def __init__(self, lines, diagnostics):
@@ -392,10 +416,13 @@ def lower_to_llvm(native_module):
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
-        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata())
+        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], capability_manifest=empty_capability_manifest())
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
+    direct_effects = collect_direct_function_effects(parse.functions)
+    call_graph = collect_function_call_graph(parse.functions)
+    aggregated_effects = propagate_function_effects(direct_effects, call_graph)
     function_effects = []
     lines = []
     lines = append_string(lines, "; ModuleID = 'sailfin'")
@@ -410,9 +437,12 @@ def lower_to_llvm(native_module):
     while True:
         if index >= len(parse.functions):
             break
-        effect_entry = collect_function_effect_entry(parse.functions[index])
-        function_effects = append_function_effect_entry(function_effects, effect_entry)
-        lowered = emit_function(parse.functions[index], parse.functions, effect_entry.effects)
+        aggregated_entry = find_function_effect_entry(aggregated_effects, parse.functions[index].name)
+        effective_effects = []
+        if aggregated_entry != None:
+            effective_effects = aggregated_entry.effects
+        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=parse.functions[index].name, effects=effective_effects))
+        lowered = emit_function(parse.functions[index], parse.functions, effective_effects)
         if sanitize_symbol(parse.functions[index].name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -426,13 +456,17 @@ def lower_to_llvm(native_module):
             lines = append_string(lines, "")
         lines = (lines) + (["define double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
     ir = join_with_separator(lines, "\n")
+    manifest = build_capability_manifest(native_module.entry_points, function_effects)
     output = ir
     if len(output) > 0:
         output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects)
+    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, capability_manifest=manifest)
 
 def empty_trait_metadata():
     return TraitMetadata(interfaces=[], implementations=[])
+
+def empty_capability_manifest():
+    return CapabilityManifest(entries=[])
 
 def build_trait_metadata(interfaces, structs):
     interface_descriptors = []
@@ -495,6 +529,196 @@ def render_trait_metadata_comments(metadata):
     lines = (lines) + (struct_lines)
     lines = append_string(lines, "; -----------------------------------------------")
     return lines
+
+def collect_direct_function_effects(functions):
+    entries = []
+    index = 0
+    while True:
+        if index >= len(functions):
+            break
+        entry = collect_function_effect_entry(functions[index])
+        entries = append_function_effect_entry(entries, entry)
+        index += 1
+    return entries
+
+def collect_function_call_graph(functions):
+    entries = []
+    function_names = collect_function_names(functions)
+    index = 0
+    while True:
+        if index >= len(functions):
+            break
+        call_entry = collect_function_call_entry(functions[index], function_names)
+        entries = append_function_call_entry(entries, call_entry)
+        index += 1
+    return entries
+
+def collect_function_call_entry(function, function_names):
+    callees = []
+    index = 0
+    while True:
+        if index >= len(function.instructions):
+            break
+        instruction = function.instructions[index]
+        callees = merge_effect_lists(callees, collect_instruction_calls(instruction, function_names))
+        index += 1
+    return FunctionCallEntry(name=function.name, callees=callees)
+
+def collect_instruction_calls(instruction, function_names):
+    callees = []
+    if instruction.variant == "Let":
+        if instruction.value != None:
+            callees = merge_effect_lists(callees, extract_call_targets(instruction.value, function_names))
+        return callees
+    if instruction.variant == "Expression":
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.expression, function_names))
+        return callees
+    if instruction.variant == "Return":
+        trimmed = trim_text(instruction.expression)
+        if len(trimmed) > 0:
+            callees = merge_effect_lists(callees, extract_call_targets(trimmed, function_names))
+        return callees
+    if instruction.variant == "If":
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.condition, function_names))
+        return callees
+    if instruction.variant == "For":
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.iterable, function_names))
+        return callees
+    if instruction.variant == "Match":
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.expression, function_names))
+        return callees
+    if instruction.variant == "Case":
+        callees = merge_effect_lists(callees, extract_call_targets(instruction.pattern, function_names))
+        if instruction.guard != None:
+            callees = merge_effect_lists(callees, extract_call_targets(instruction.guard, function_names))
+        return callees
+    return callees
+
+def collect_function_names(functions):
+    names = []
+    index = 0
+    while True:
+        if index >= len(functions):
+            break
+        names = append_string(names, functions[index].name)
+        index += 1
+    return names
+
+def extract_call_targets(expression, function_names):
+    results = []
+    if len(expression) == 0:
+        return results
+    index = 0
+    while True:
+        if index >= len(expression):
+            break
+        ch = expression[index]
+        if ch == "\"":
+            index = skip_string_literal(expression, index + 1)
+            continue
+        if is_identifier_start_char(ch):
+            start_index = index
+            index += 1
+            while True:
+                if index >= len(expression):
+                    break
+                current = expression[index]
+                if is_identifier_part_char(current):
+                    index += 1
+                    continue
+                if current == ".":
+                    index += 1
+                    continue
+                break
+            candidate = trim_text(substring(expression, start_index, index))
+            if len(candidate) > 0:
+                while True:
+                    dot_index = index_of(candidate, ".")
+                    if dot_index == -1:
+                        break
+                    candidate = trim_text(substring(candidate, dot_index + 1, len(candidate)))
+                cursor = index
+                while True:
+                    if cursor >= len(expression):
+                        break
+                    next = expression[cursor]
+                    if is_trim_char(next):
+                        cursor += 1
+                        continue
+                    if next == "(":
+                        if string_array_contains(function_names, candidate):
+                            results = append_unique_effect(results, candidate)
+                    break
+            continue
+        index += 1
+    return results
+
+def append_function_call_entry(entries, entry):
+    return (entries) + ([entry])
+
+def propagate_function_effects(direct_effects, call_graph):
+    aggregated = []
+    index = 0
+    while True:
+        if index >= len(direct_effects):
+            break
+        aggregated = (aggregated) + ([FunctionEffectEntry(name=direct_effects[index].name, effects=copy_string_array(direct_effects[index].effects))])
+        index += 1
+    changed = True
+    while True:
+        if not changed:
+            break
+        changed = False
+        call_index = 0
+        while True:
+            if call_index >= len(call_graph):
+                break
+            call_entry = call_graph[call_index]
+            target_entry = find_function_effect_entry(aggregated, call_entry.name)
+            if target_entry != None:
+                merged = target_entry.effects
+                callee_index = 0
+                while True:
+                    if callee_index >= len(call_entry.callees):
+                        break
+                    callee_name = call_entry.callees[callee_index]
+                    callee_entry = find_function_effect_entry(aggregated, callee_name)
+                    if callee_entry != None:
+                        merged = merge_effect_lists(merged, callee_entry.effects)
+                    callee_index += 1
+                if not string_arrays_equal(merged, target_entry.effects):
+                    target_entry.effects = merged
+                    changed = True
+            call_index += 1
+    return aggregated
+
+def find_function_effect_entry(entries, name):
+    index = 0
+    while True:
+        if index >= len(entries):
+            break
+        if entries[index].name == name:
+            return entries[index]
+        index += 1
+    return None
+
+def build_capability_manifest(entry_points, function_effects):
+    entries = []
+    index = 0
+    while True:
+        if index >= len(entry_points):
+            break
+        symbol = entry_points[index]
+        effect_entry = find_function_effect_entry(function_effects, symbol)
+        effects = []
+        if effect_entry != None:
+            effects = effect_entry.effects
+        entries = append_manifest_entry(entries, CapabilityManifestEntry(symbol=symbol, effects=effects))
+        index += 1
+    return CapabilityManifest(entries=entries)
+
+def append_manifest_entry(entries, entry):
+    return (entries) + ([entry])
 
 def collect_function_effect_entry(function):
     combined = []
@@ -622,6 +846,28 @@ def skip_string_literal(text, start_index):
             break
         index += 1
     return index
+
+def copy_string_array(values):
+    result = []
+    index = 0
+    while True:
+        if index >= len(values):
+            break
+        result = append_string(result, values[index])
+        index += 1
+    return result
+
+def string_arrays_equal(first, second):
+    if len(first) != len(second):
+        return False
+    index = 0
+    while True:
+        if index >= len(first):
+            break
+        if first[index] != second[index]:
+            return False
+        index += 1
+    return True
 
 def matches_keyword(value, start_index, keyword):
     remaining = len(value) - start_index

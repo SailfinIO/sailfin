@@ -95,6 +95,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
         diagnostics: combined,
         trait_metadata: lowered.trait_metadata,
         function_effects: lowered.function_effects,
+        capability_manifest: lowered.capability_manifest,
     };
 }
 
