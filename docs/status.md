@@ -1,6 +1,6 @@
 # Sailfin Status
 
-Updated: October 15, 2025
+Updated: October 16, 2025
 
 This document is the source of truth for what ships today in the Python
 bootstrap toolchain and what exists only in the Sailfin-native
@@ -127,11 +127,14 @@ roadmaps.
   declarations (including parameter and local name clashes). The pass also
   enforces unique struct fields, struct methods, enum variants, interface
   members, model properties, and type parameters so Sailfin sources surface the
-  same duplicate errors surfaced by the Python implementation. Regression
-  coverage now includes `compiler/tests/test_stage1_typecheck_duplicates.py`
-  to lock the duplicate-detection diagnostics. Diagnostics flow through
-  `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues during
-  round-trips.
+  same duplicate errors surfaced by the Python implementation. Struct
+  declarations now validate every interface listed in their `implements`
+  clause, emitting diagnostics when a required member is missing — including
+  generic interface instantiations. Regression coverage spans
+  `compiler/tests/test_stage1_typecheck_duplicates.py` for duplicate detection
+  and `compiler/tests/test_stage1_typecheck_interfaces.py` for interface
+  conformance. Diagnostics flow through `compiler/src/main.sfn` so the bootstrap
+  pipeline surfaces issues during round-trips.
 
 - Stage0 (legacy): Prompts require the `model` effect; interpolation is handled by the
   runtime helpers.

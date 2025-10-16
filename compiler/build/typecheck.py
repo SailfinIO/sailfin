@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.ast import Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter
+from compiler.build.ast import Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation
 from compiler.build.token import Token
 from compiler.build.effect_checker import validate_effects, EffectRequirement, EffectViolation
 
@@ -64,9 +64,17 @@ class ScopeResult:
 
 def typecheck_program(program):
     top_level = collect_top_level_symbols(program)
-    scoped_diagnostics = check_program_scopes(program)
+    interfaces = collect_interface_definitions(program)
+    scoped_diagnostics = check_program_scopes(program, interfaces)
     effect_diagnostics = build_effect_diagnostics(program)
     return TypecheckResult(diagnostics=(top_level.diagnostics) + ((scoped_diagnostics)) + (effect_diagnostics), symbols=top_level.symbols)
+
+def collect_interface_definitions(program):
+    interfaces = []
+    for statement in program.statements:
+        if statement.variant == "InterfaceDeclaration":
+            interfaces = (interfaces) + ([statement])
+    return interfaces
 
 def collect_top_level_symbols(program):
     symbols = []
@@ -100,23 +108,23 @@ def register_top_level_symbol(statement, existing):
         return register_symbol(statement.name, "variable", existing)
     return SymbolCollectionResult(symbols=existing, diagnostics=[])
 
-def check_program_scopes(program):
+def check_program_scopes(program, interfaces):
     bindings = []
     diagnostics = []
     for statement in program.statements:
-        result = check_statement(statement, bindings)
+        result = check_statement(statement, bindings, interfaces)
         bindings = result.bindings
         diagnostics = (diagnostics) + (result.diagnostics)
     return diagnostics
 
-def check_statement(statement, bindings):
+def check_statement(statement, bindings, interfaces):
     if statement.variant == "VariableDeclaration":
         return register_local_symbol(bindings, statement.name, "variable")
     if statement.variant == "FunctionDeclaration":
         registration = register_local_symbol(bindings, statement.signature.name, "function")
         diagnostics = registration.diagnostics
         diagnostics = (diagnostics) + (check_function_signature(statement.signature))
-        function_diagnostics = check_function_body(statement.signature, statement.body)
+        function_diagnostics = check_function_body(statement.signature, statement.body, interfaces)
         return ScopeResult(bindings=registration.bindings, diagnostics=(diagnostics) + (function_diagnostics))
     if statement.variant == "StructDeclaration":
         registration = register_local_symbol(bindings, statement.name, "struct")
@@ -124,12 +132,13 @@ def check_statement(statement, bindings):
         diagnostics = (diagnostics) + (check_type_parameters(statement.type_parameters))
         diagnostics = (diagnostics) + (check_struct_fields(statement.fields))
         diagnostics = (diagnostics) + (check_struct_methods(statement.methods))
+        diagnostics = (diagnostics) + (check_struct_implements_interfaces(statement, interfaces))
         index = 0
         while True:
             if index >= len(statement.methods):
                 break
             method = statement.methods[index]
-            diagnostics = (diagnostics) + (check_function_body(method.signature, method.body))
+            diagnostics = (diagnostics) + (check_function_body(method.signature, method.body, interfaces))
             index += 1
         return ScopeResult(bindings=registration.bindings, diagnostics=diagnostics)
     if statement.variant == "EnumDeclaration":
@@ -152,22 +161,22 @@ def check_statement(statement, bindings):
         registration = register_local_symbol(bindings, statement.signature.name, "pipeline")
         diagnostics = registration.diagnostics
         diagnostics = (diagnostics) + (check_function_signature(statement.signature))
-        diagnostics = (diagnostics) + (check_function_body(statement.signature, statement.body))
+        diagnostics = (diagnostics) + (check_function_body(statement.signature, statement.body, interfaces))
         return ScopeResult(bindings=registration.bindings, diagnostics=diagnostics)
     if statement.variant == "ToolDeclaration":
         registration = register_local_symbol(bindings, statement.signature.name, "tool")
         diagnostics = registration.diagnostics
         diagnostics = (diagnostics) + (check_function_signature(statement.signature))
-        diagnostics = (diagnostics) + (check_function_body(statement.signature, statement.body))
+        diagnostics = (diagnostics) + (check_function_body(statement.signature, statement.body, interfaces))
         return ScopeResult(bindings=registration.bindings, diagnostics=diagnostics)
     if statement.variant == "TestDeclaration":
         registration = register_local_symbol(bindings, statement.name, "test")
-        diagnostics = (registration.diagnostics) + (check_block(statement.body, []))
+        diagnostics = (registration.diagnostics) + (check_block(statement.body, [], interfaces))
         return ScopeResult(bindings=registration.bindings, diagnostics=diagnostics)
     if statement.variant == "WithStatement":
-        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings))
+        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings, interfaces))
     if statement.variant == "ForStatement":
-        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings))
+        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings, interfaces))
     if statement.variant == "MatchStatement":
         diagnostics = []
         index = 0
@@ -175,30 +184,30 @@ def check_statement(statement, bindings):
             if index >= len(statement.cases):
                 break
             case = statement.cases[index]
-            diagnostics = (diagnostics) + (check_block(case.body, bindings))
+            diagnostics = (diagnostics) + (check_block(case.body, bindings, interfaces))
             index += 1
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
     if statement.variant == "IfStatement":
-        diagnostics = check_block(statement.then_block, bindings)
+        diagnostics = check_block(statement.then_block, bindings, interfaces)
         if statement.else_branch != None:
             branch = statement.else_branch
             if branch.body != None:
-                diagnostics = (diagnostics) + (check_block(branch.body, bindings))
+                diagnostics = (diagnostics) + (check_block(branch.body, bindings, interfaces))
             if branch.statement != None:
-                result = check_statement(branch.statement, bindings)
+                result = check_statement(branch.statement, bindings, interfaces)
                 diagnostics = (diagnostics) + (result.diagnostics)
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
     if statement.variant == "PromptStatement":
-        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings))
+        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings, interfaces))
     if statement.variant == "TypeAliasDeclaration":
         registration = register_local_symbol(bindings, statement.name, "type")
         diagnostics = (registration.diagnostics) + (check_type_parameters(statement.type_parameters))
         return ScopeResult(bindings=registration.bindings, diagnostics=diagnostics)
     return ScopeResult(bindings=bindings, diagnostics=[])
 
-def check_function_body(signature, body):
+def check_function_body(signature, body, interfaces):
     parameter_scope = seed_parameter_scope(signature)
-    body_diagnostics = check_block(body, parameter_scope.bindings)
+    body_diagnostics = check_block(body, parameter_scope.bindings, interfaces)
     return (parameter_scope.diagnostics) + (body_diagnostics)
 
 def seed_parameter_scope(signature):
@@ -210,14 +219,42 @@ def seed_parameter_scope(signature):
         diagnostics = (diagnostics) + (registration.diagnostics)
     return ScopeResult(bindings=bindings, diagnostics=diagnostics)
 
-def check_block(block, parent_bindings):
+def check_block(block, parent_bindings, interfaces):
     bindings = clone_bindings(parent_bindings)
     diagnostics = []
     for statement in block.statements:
-        result = check_statement(statement, bindings)
+        result = check_statement(statement, bindings, interfaces)
         bindings = result.bindings
         diagnostics = (diagnostics) + (result.diagnostics)
     return diagnostics
+
+def check_struct_implements_interfaces(statement, interfaces):
+    if len(statement.implements_types) == 0:
+        return []
+    method_names = []
+    for method in statement.methods:
+        method_names = (method_names) + ([method.signature.name])
+    diagnostics = []
+    for annotation in statement.implements_types:
+        interface_definition = resolve_interface_annotation(annotation, interfaces)
+        if interface_definition == None:
+            continue
+        interface_name = interface_definition.name
+        for member in interface_definition.members:
+            if not contains_string(method_names, member.name):
+                diagnostics = (diagnostics) + ([make_missing_interface_member_diagnostic(statement.name, interface_name, member.name)])
+    return diagnostics
+
+def resolve_interface_annotation(annotation, interfaces):
+    text = annotation.text
+    for interface in interfaces:
+        name = interface.name
+        if text == name:
+            return interface
+        generic_prefix = name + "<"
+        if starts_with(text, generic_prefix):
+            return interface
+    return None
 
 def check_struct_fields(fields):
     seen = []
@@ -367,3 +404,18 @@ def has_symbol(symbols, name):
 
 def make_duplicate_symbol_diagnostic(name, kind):
     return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=None)
+
+def make_missing_interface_member_diagnostic(struct_name, interface_name, member_name):
+    return Diagnostic(code="E0301", message="struct " + struct_name + " implements " + interface_name + " but is missing member `" + member_name + "`", primary=None)
+
+def starts_with(value, prefix):
+    if len(prefix) > len(value):
+        return False
+    index = 0
+    while True:
+        if index >= len(prefix):
+            break
+        if value[index] != prefix[index]:
+            return False
+        index += 1
+    return True
