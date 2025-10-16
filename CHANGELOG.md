@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.19 (2025-10-16)
+
+### Bug Fixes
+
+- Docs referencing scratch dir
+  ([`7538204`](https://github.com/SailfinIO/sailfin/commit/753820433e03585045bccf967403d84d714ff203))
+
+- Struct literal lowering
+  ([`9ac5c4e`](https://github.com/SailfinIO/sailfin/commit/9ac5c4e1e3ffb308400dfa2c34ca2f1634201b59))
+
+
 ## v0.1.1-alpha.18 (2025-10-16)
 
 ### Bug Fixes
