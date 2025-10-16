@@ -48,17 +48,20 @@ struct LoweredLLVMResult {
     diagnostics -> string[];
     trait_metadata -> TraitMetadata;
     function_effects -> FunctionEffectEntry[];
+    lifetime_regions -> LifetimeRegionMetadata[];
     capability_manifest -> CapabilityManifest;
 }
 
 struct LoweredLLVMFunction {
     lines -> string[];
     diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
 }
 
 struct BodyResult {
     lines -> string[];
     diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
 }
 
 struct ParameterBinding {
@@ -103,6 +106,15 @@ struct OwnershipInfo {
 struct OwnershipConsumption {
     kind -> string;
     name -> string;
+}
+
+struct LifetimeRegionMetadata {
+    binding -> string;
+    base -> string;
+    mutable -> boolean;
+    start_span -> NativeSourceSpan?;
+    scope_id -> string;
+    scope_depth -> number;
 }
 
 struct StructFieldInfo {
@@ -203,6 +215,7 @@ struct LetLoweringResult {
     temp_index -> number;
     diagnostics -> string[];
     next_local_id -> number;
+    lifetime_regions -> LifetimeRegionMetadata[];
 }
 
 struct InlineLetParseResult {
@@ -311,6 +324,7 @@ struct BlockLoweringResult {
     diagnostics -> string[];
     terminated -> boolean;
     next_local_id -> number;
+    lifetime_regions -> LifetimeRegionMetadata[];
     next_index -> number;
 }
 
@@ -324,6 +338,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
             diagnostics: diagnostics,
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
+            lifetime_regions: [],
             capability_manifest: empty_capability_manifest(),
         };
     }
@@ -342,6 +357,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
 
     let mut function_effects -> FunctionEffectEntry[] = [];
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lines -> string[] = [];
     lines = append_string(lines, "; ModuleID = 'sailfin'");
     lines = append_string(lines, "source_filename = \"sailfin\"");
@@ -380,6 +396,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
             has_add_function = true;
         }
         diagnostics = diagnostics.concat(lowered.diagnostics);
+        lifetime_regions = lifetime_regions.concat(lowered.lifetime_regions);
         if lowered.lines.length > 0 {
             lines = lines.concat(lowered.lines);
             if index + 1 < all_functions.length {
@@ -413,6 +430,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         diagnostics: diagnostics,
         trait_metadata: trait_metadata,
         function_effects: function_effects,
+        lifetime_regions: lifetime_regions,
         capability_manifest: manifest,
     };
 }
@@ -1364,7 +1382,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     diagnostics = diagnostics.concat(body.diagnostics);
     lines = append_string(lines, "}");
 
-    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics };
+    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: body.lifetime_regions };
 }
 
 fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[], context -> TypeContext) -> BodyResult {
@@ -1382,7 +1400,9 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         0,
         functions,
         [],
-        context
+        context,
+        format_root_scope_id(function.name),
+        0
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
@@ -1398,7 +1418,7 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         }
     }
 
-    return BodyResult { lines: lines, diagnostics: diagnostics };
+    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: lowered.lifetime_regions };
 }
 
 fn lower_instruction_range(
@@ -1415,7 +1435,9 @@ fn lower_instruction_range(
     next_local_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1428,6 +1450,7 @@ fn lower_instruction_range(
     let mut terminated -> boolean = false;
     let mut current_loop_stack -> LoopContext[] = loop_stack;
     let mut index -> number = start_index;
+    let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     loop {
         if index >= end {
@@ -1436,8 +1459,9 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context, scope_id, scope_depth);
             diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
@@ -1461,8 +1485,9 @@ fn lower_instruction_range(
                             span: instruction.span,
                             value_span: instruction.span,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context, scope_id, scope_depth);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
+                        collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
                         current_lines = lowered.lines;
                         current_allocas = lowered.allocas;
                         current_locals = lowered.locals;
@@ -1509,9 +1534,12 @@ fn lower_instruction_range(
                 functions,
                 current_loop_stack,
                 end,
-                context
+                context,
+                scope_id,
+                scope_depth
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
@@ -1540,9 +1568,12 @@ fn lower_instruction_range(
                 functions,
                 current_loop_stack,
                 end,
-                context
+                context,
+                scope_id,
+                scope_depth
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
@@ -1571,9 +1602,12 @@ fn lower_instruction_range(
                 functions,
                 current_loop_stack,
                 end,
-                context
+                context,
+                scope_id,
+                scope_depth
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
@@ -1632,9 +1666,12 @@ fn lower_instruction_range(
                 functions,
                 current_loop_stack,
                 end,
-                context
+                context,
+                scope_id,
+                scope_depth
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
@@ -1667,6 +1704,7 @@ fn lower_instruction_range(
         diagnostics: diagnostics,
         terminated: terminated,
         next_local_id: current_next_local,
+        lifetime_regions: collected_lifetime_regions,
         next_index: index,
     };
 }
@@ -1826,7 +1864,9 @@ fn lower_loop_instruction(
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1836,6 +1876,7 @@ fn lower_loop_instruction(
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -1858,6 +1899,7 @@ fn lower_loop_instruction(
     let base_allocas = current_allocas;
     let base_local_id = current_next_local;
 
+    let body_scope_id = make_child_scope_id(scope_id, loop_label);
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
@@ -1872,10 +1914,13 @@ fn lower_loop_instruction(
         base_local_id,
         functions,
         stacked,
-        context
+        context,
+        body_scope_id,
+        scope_depth + 1
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
+    lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
     current_lines = current_lines.concat(body_result.lines);
     current_allocas = body_result.allocas;
     current_locals = base_locals;
@@ -1900,6 +1945,7 @@ fn lower_loop_instruction(
         diagnostics: diagnostics,
         terminated: false,
         next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
         next_index: structure.next_index + 1,
     };
 }
@@ -1918,7 +1964,9 @@ fn lower_for_instruction(
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1928,6 +1976,7 @@ fn lower_for_instruction(
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -1949,6 +1998,7 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: next_index,
         };
     }
@@ -1965,6 +2015,7 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: next_index,
         };
     }
@@ -1981,6 +2032,7 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: next_index,
         };
     }
@@ -2006,6 +2058,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2027,6 +2080,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2047,6 +2101,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2068,6 +2123,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2175,6 +2231,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2210,6 +2267,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2233,6 +2291,7 @@ fn lower_for_instruction(
                 diagnostics: diagnostics,
                 terminated: false,
                 next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
                 next_index: next_index,
             };
         }
@@ -2256,6 +2315,7 @@ fn lower_for_instruction(
     let stacked = append_loop_context(loop_stack, loop_context);
 
         let body_locals = append_local_binding(current_locals, iteration_binding);
+        let loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label);
         let body_result = lower_instruction_range(
             function,
             structure.body_start,
@@ -2270,10 +2330,13 @@ fn lower_for_instruction(
             current_next_local,
             functions,
             stacked,
-            context
+            context,
+            loop_body_scope_id,
+            scope_depth + 1
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
+        lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
         current_lines = current_lines.concat(body_result.lines);
         current_allocas = body_result.allocas;
         current_temp = body_result.temp_index;
@@ -2310,7 +2373,7 @@ fn lower_for_instruction(
 
         current_locals = locals;
 
-        return BlockLoweringResult {
+            return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
@@ -2320,6 +2383,7 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
             next_index: next_index,
         };
     }
@@ -2445,6 +2509,7 @@ fn lower_for_instruction(
 
     let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false };
     let body_locals = append_local_binding(current_locals, iteration_binding);
+    let element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label);
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
@@ -2459,10 +2524,13 @@ fn lower_for_instruction(
         current_next_local,
         functions,
         stacked,
-        context
+        context,
+        element_loop_scope_id,
+        scope_depth + 1
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
+    lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
     current_lines = current_lines.concat(body_result.lines);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
@@ -2500,6 +2568,7 @@ fn lower_for_instruction(
         diagnostics: diagnostics,
         terminated: false,
         next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
         next_index: next_index,
     };
 }
@@ -2614,7 +2683,9 @@ fn lower_match_instruction(
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2625,6 +2696,7 @@ fn lower_match_instruction(
     let mut current_next_local -> number = next_local_id;
     let base_bindings -> ParameterBinding[] = bindings;
     let mut merged_bindings -> ParameterBinding[] = base_bindings;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2647,6 +2719,7 @@ fn lower_match_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: structure.end_index + 1,
         };
     }
@@ -2669,6 +2742,7 @@ fn lower_match_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: structure.end_index + 1,
         };
     }
@@ -2753,10 +2827,13 @@ fn lower_match_instruction(
             base_local_id,
             functions,
             loop_stack,
-            context
+            context,
+            make_child_scope_id(scope_id, body_labels[index]),
+            scope_depth + 1
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
+        lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
         current_lines = current_lines.concat(body_result.lines);
         current_allocas = body_result.allocas;
         current_locals = base_locals;
@@ -2791,6 +2868,7 @@ fn lower_match_instruction(
         diagnostics: diagnostics,
         terminated: terminated,
         next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
         next_index: structure.end_index + 1,
     };
 }
@@ -2942,7 +3020,9 @@ fn lower_if_instruction(
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> BlockLoweringResult {
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -2954,6 +3034,7 @@ fn lower_if_instruction(
     let base_bindings -> ParameterBinding[] = bindings;
     let mut then_bindings -> ParameterBinding[] = base_bindings;
     let mut else_bindings -> ParameterBinding[] = base_bindings;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2984,6 +3065,7 @@ fn lower_if_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
             next_index: structure.next_index + 1,
         };
     }
@@ -3017,6 +3099,7 @@ fn lower_if_instruction(
     let base_block_counter = current_block_counter;
 
     current_lines = append_string(current_lines, then_label + ":");
+    let then_scope_id = make_child_scope_id(scope_id, then_label);
     let then_result = lower_instruction_range(
         function,
         structure.then_start,
@@ -3031,9 +3114,12 @@ fn lower_if_instruction(
         base_local_id,
         functions,
         loop_stack,
-        context
+        context,
+        then_scope_id,
+        scope_depth + 1
     );
     diagnostics = diagnostics.concat(then_result.diagnostics);
+    lifetime_regions = lifetime_regions.concat(then_result.lifetime_regions);
     current_allocas = then_result.allocas;
     current_locals = then_result.locals;
     current_temp = then_result.temp_index;
@@ -3049,6 +3135,7 @@ fn lower_if_instruction(
     let mut else_terminated -> boolean = false;
     if structure.has_else {
         current_lines = append_string(current_lines, else_label + ":");
+        let else_scope_id = make_child_scope_id(scope_id, else_label);
         let else_result = lower_instruction_range(
             function,
             structure.else_start,
@@ -3063,9 +3150,12 @@ fn lower_if_instruction(
             current_next_local,
             functions,
             loop_stack,
-            context
+            context,
+            else_scope_id,
+            scope_depth + 1
         );
         diagnostics = diagnostics.concat(else_result.diagnostics);
+        lifetime_regions = lifetime_regions.concat(else_result.lifetime_regions);
         current_allocas = else_result.allocas;
         current_locals = else_result.locals;
         current_temp = else_result.temp_index;
@@ -3109,6 +3199,7 @@ fn lower_if_instruction(
         diagnostics: diagnostics,
         terminated: terminated,
         next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
         next_index: structure.next_index + 1,
     };
 }
@@ -3123,7 +3214,9 @@ fn lower_let_instruction(
     temp_index -> number,
     next_local_id -> number,
     functions -> NativeFunction[],
-    context -> TypeContext
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number
 ) -> LetLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3133,6 +3226,7 @@ fn lower_let_instruction(
     let mut ownership -> OwnershipInfo? = null;
     let mut consumption -> OwnershipConsumption? = null;
     let mut initializer_span -> NativeSourceSpan? = instruction.value_span;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     if initializer_span == null {
         initializer_span = instruction.span;
     }
@@ -3157,6 +3251,10 @@ fn lower_let_instruction(
     if ownership != null {
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
         diagnostics = diagnostics.concat(conflict_diagnostics);
+        if ownership.variant == "Borrow" {
+            let region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth);
+            lifetime_regions = append_lifetime_region(lifetime_regions, region);
+        }
     }
 
     if consumption != null {
@@ -3216,6 +3314,7 @@ fn lower_let_instruction(
         temp_index: current_temp,
         diagnostics: diagnostics,
         next_local_id: next_local_id + 1,
+        lifetime_regions: lifetime_regions,
     };
 }
 
@@ -6193,6 +6292,40 @@ fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding?
         index += 1;
     }
     return null;
+}
+
+fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
+    return values.concat([value]);
+}
+
+fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata {
+    return LifetimeRegionMetadata {
+        binding: binding,
+        base: ownership.base,
+        mutable: ownership.mutable,
+        start_span: ownership.span,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+    };
+}
+
+fn format_root_scope_id(function_name -> string) -> string {
+    let mut sanitized -> string = sanitize_symbol(function_name);
+    if sanitized.length == 0 {
+        sanitized = "fn";
+    }
+    return "fn:" + sanitized;
+}
+
+fn make_child_scope_id(parent -> string, child -> string) -> string {
+    let mut sanitized_child -> string = sanitize_symbol(child);
+    if sanitized_child.length == 0 {
+        sanitized_child = "scope";
+    }
+    if parent.length == 0 {
+        return sanitized_child;
+    }
+    return parent + "::" + sanitized_child;
 }
 
 fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {

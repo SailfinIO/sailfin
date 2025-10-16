@@ -557,11 +557,40 @@ fn main() -> number {
     formatter_descriptor = trait_metadata.interfaces[1]
     assert [signature.name for signature in formatter_descriptor.signatures] == [
         "format"]
-
     assert len(trait_metadata.implementations) == 1
     implementation = trait_metadata.implementations[0]
     assert implementation.struct_name == "FriendlyUser"
     assert implementation.interfaces == ["Greeter", "Formatter"]
+
+
+def test_native_llvm_execution_emits_lifetime_regions() -> None:
+    source = """
+fn forward(value -> number) -> number {
+    let mut slot -> number = value;
+    let alias -> &mut number = &mut slot;
+    return slot;
+}
+
+fn main() -> number {
+    return forward(3);
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+    regions = lowered.lifetime_regions
+    assert len(regions) == 1
+
+    alias_region = regions[0]
+    assert alias_region.binding == "alias"
+    assert alias_region.base == "slot"
+    assert alias_region.mutable is True
+    assert alias_region.scope_id == "fn:forward"
+    assert alias_region.scope_depth == 0
+    assert alias_region.start_span is not None
+    assert alias_region.start_span.start_line > 0
+    assert alias_region.start_span.start_column > 0
 
 
 def test_native_llvm_execution_iterates_non_number_arrays() -> None:

@@ -15,7 +15,6 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
 - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
-- [ ] Emit lifetime region metadata alongside borrow lowering so future diagnostics and optimisations can reason about borrow scopes without re-parsing source text.
 - [ ] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Add focused coverage to `compiler/tests/test_native_llvm_execution.py`.)
 - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
 - [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
@@ -75,6 +74,12 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Stage2 lifetime region metadata — LLVM lowering now publishes borrow lifetime
+      scopes via `LoweredLLVMResult.lifetime_regions`, carrying binding names,
+      mutability, scope identifiers, and source spans so diagnostics and future
+      analyses can reason about scope exits without re-scanning `.sfn-asm`.
+      Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`;
+      behaviour documented in `docs/status.md`.
 - [x] Stage1 diagnostic snippets — Stage1 CLI output and native lowering diagnostics now render caret-highlighted source snippets alongside messages. Validation: `compiler/tests/test_stage1_diagnostics.py::test_missing_effect_diagnostic_includes_source_snippet`; behaviour documented in `docs/status.md`.
 - [x] Struct interface conformance — Stage1 type checking now verifies that
       structs implement every interface member they claim, including generic

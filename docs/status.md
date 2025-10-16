@@ -57,6 +57,12 @@ roadmaps.
   conflicting borrows (mutable-with-mutable or mutable-with-shared) during LLVM
   lowering (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_mut_borrows`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_conflicting_shared_borrows`).
+  Lifetime regions now surface alongside those borrow checks; the LLVM pipeline
+  records `LifetimeRegionMetadata` entries (binding, base, mutability, scope id,
+  scope depth, and start span) on `LoweredLLVMResult.lifetime_regions` so
+  diagnostics and follow-on tooling can reason about scope exits without
+  re-parsing `.sfn-asm`. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`.
   Ownership consumption now survives merges across loops, `if`/`else`, and `match`
   blocks, so use-after-move checks on locals and parameters fire when those
   values are reused after being consumed; the execution suite in
