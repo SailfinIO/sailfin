@@ -130,12 +130,14 @@ roadmaps.
   same duplicate errors surfaced by the Python implementation. Struct
   declarations now validate every interface listed in their `implements`
   clause, emitting diagnostics when a required member is missing — including
-  generic interface instantiations. Regression coverage spans
-  `compiler/tests/test_stage1_typecheck_duplicates.py` for duplicate detection
-  and `compiler/tests/test_stage1_typecheck_interfaces.py` for interface
-  conformance. Diagnostics flow through `compiler/src/main.sfn` so the bootstrap
-  pipeline surfaces issues during round-trips.
-
+  generic interface instantiations. Implements clauses now enforce generic
+  arity, rejecting missing or extra type arguments for interface instantiations.
+  Regression coverage spans `compiler/tests/test_stage1_typecheck_duplicates.py`
+  for duplicate detection and
+  `compiler/tests/test_stage1_typecheck_interfaces.py` for interface
+  conformance (including type argument enforcement). Diagnostics flow through
+  `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues during
+  round-trips.
 - Stage0 (legacy): Prompts require the `model` effect; interpolation is handled by the
   runtime helpers.
 - Stage1: Prompt statements are preserved in the AST and emitted

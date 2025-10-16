@@ -240,6 +240,7 @@ def check_struct_implements_interfaces(statement, interfaces):
         if interface_definition == None:
             continue
         interface_name = interface_definition.name
+        diagnostics = (diagnostics) + (validate_interface_annotation(statement.name, interface_definition, annotation))
         for member in interface_definition.members:
             if not contains_string(method_names, member.name):
                 diagnostics = (diagnostics) + ([make_missing_interface_member_diagnostic(statement.name, interface_name, member.name)])
@@ -266,6 +267,141 @@ def check_struct_fields(fields):
         else:
             seen = (seen) + ([name])
     return diagnostics
+
+def validate_interface_annotation(struct_name, interface_definition, annotation):
+    expected_count = len(interface_definition.type_parameters)
+    provided_arguments = parse_type_arguments(annotation.text)
+    if expected_count == 0:
+        if len(provided_arguments) > 0:
+            return [make_interface_no_type_arguments_diagnostic(struct_name, trim_text(annotation.text), interface_definition.name)]
+        return []
+    if len(provided_arguments) == 0:
+        return [make_interface_missing_type_arguments_diagnostic(struct_name, interface_definition.name, format_interface_signature(interface_definition))]
+    if len(provided_arguments) != expected_count:
+        return [make_interface_type_argument_mismatch_diagnostic(struct_name, trim_text(annotation.text), format_interface_signature(interface_definition))]
+    return []
+
+def format_interface_signature(interface_definition):
+    names = []
+    for parameter in interface_definition.type_parameters:
+        names = (names) + ([parameter.name])
+    if len(names) == 0:
+        return interface_definition.name
+    return interface_definition.name + "<" + join_with_separator(names, ", ") + ">"
+
+def join_with_separator(items, separator):
+    if len(items) == 0:
+        return ""
+    result = items[0]
+    index = 1
+    while True:
+        if index >= len(items):
+            break
+        result = result + separator + items[index]
+        index += 1
+    return result
+
+def parse_type_arguments(annotation_text):
+    block = extract_generic_argument_block(annotation_text)
+    if block == None:
+        return []
+    return split_generic_argument_list(block)
+
+def extract_generic_argument_block(annotation_text):
+    trimmed = trim_text(annotation_text)
+    index = 0
+    depth = 0
+    start_index = -1
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "<":
+            if depth == 0:
+                start_index = index + 1
+            depth += 1
+        else:
+            if ch == ">":
+                if depth == 0:
+                    return None
+                depth -= 1
+                if depth == 0:
+                    return slice_text(trimmed, start_index, index)
+        index += 1
+    return None
+
+def split_generic_argument_list(block):
+    arguments = []
+    current = ""
+    depth = 0
+    index = 0
+    while True:
+        if index >= len(block):
+            break
+        ch = block[index]
+        if ch == "<":
+            depth += 1
+            current = current + ch
+        else:
+            if ch == ">":
+                if depth > 0:
+                    depth -= 1
+                current = current + ch
+            else:
+                if ch == ",":
+                    if depth == 0:
+                        trimmed = trim_text(current)
+                        if len(trimmed) > 0:
+                            arguments = (arguments) + ([trimmed])
+                        current = ""
+                        index += 1
+                        continue
+                    current = current + ch
+                else:
+                    current = current + ch
+        index += 1
+    tail = trim_text(current)
+    if len(tail) > 0:
+        arguments = (arguments) + ([tail])
+    return arguments
+
+def trim_text(value):
+    start = 0
+    end = len(value)
+    while True:
+        if start >= end:
+            break
+        if is_whitespace(value[start]):
+            start += 1
+            continue
+        break
+    while True:
+        if end <= start:
+            break
+        if is_whitespace(value[end - 1]):
+            end -= 1
+            continue
+        break
+    return slice_text(value, start, end)
+
+def slice_text(value, start, end):
+    if start < 0:
+        start = 0
+    if end > len(value):
+        end = len(value)
+    if end <= start:
+        return ""
+    result = ""
+    index = start
+    while True:
+        if index >= end:
+            break
+        result = result + value[index]
+        index += 1
+    return result
+
+def is_whitespace(ch):
+    return ch == " "  or  ch == "\n"  or  ch == "\t"  or  ch == "\r"
 
 def check_struct_methods(methods):
     seen = []
@@ -401,6 +537,15 @@ def has_symbol(symbols, name):
         if entry.name == name:
             return True
     return False
+
+def make_interface_missing_type_arguments_diagnostic(struct_name, interface_name, interface_signature):
+    return Diagnostic(code="E0302", message="struct " + struct_name + " implements " + interface_name + " but must specify " + interface_signature + " type arguments", primary=None)
+
+def make_interface_type_argument_mismatch_diagnostic(struct_name, annotation_text, interface_signature):
+    return Diagnostic(code="E0302", message="struct " + struct_name + " implements " + annotation_text + " but must match " + interface_signature + " type arguments", primary=None)
+
+def make_interface_no_type_arguments_diagnostic(struct_name, annotation_text, interface_name):
+    return Diagnostic(code="E0302", message="struct " + struct_name + " implements " + annotation_text + " but " + interface_name + " does not take type arguments", primary=None)
 
 def make_duplicate_symbol_diagnostic(name, kind):
     return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=None)

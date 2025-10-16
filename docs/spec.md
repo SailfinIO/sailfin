@@ -201,6 +201,12 @@ struct User implements Greeter {
 }
 ```
 
+When a struct implements a generic interface, the `implements` clause must
+specify type arguments that match the interface declaration. For example,
+`struct Document implements Formatter<string>` is valid when `Formatter<T>` is
+declared, while omitting the `<string>` argument results in a type checker
+diagnostic.
+
 Struct literals use `Type { field: expression }` syntax. Method calls follow the
 `instance.method(args)` form.
 
@@ -253,17 +259,17 @@ input hashes, latency, cost).
 
 ### 3.6.1 Model Block Schema
 
-| Property     | Type                    | Required | Description |
-|--------------|-------------------------|----------|-------------|
-| `engine`     | string                  | Yes      | Provider + version tag (e.g. `gpt-foo@2.3.1`) |
-| `schema`     | Type                    | Yes      | Output validation / shaping type |
-| `max_tok`    | number                  | No       | Maximum output tokens (advisory; enforced per provider) |
-| `cost_cap`   | number (monetary; currency literal forthcoming) | No       | Maximum spend for a single call (enforced at runtime) |
-| `evaluators` | Array<Identifier|Call>  | No       | Quality/guardrail evaluators applied to generations |
-| `temperature`| number (0–2)            | No       | Stochastic sampling parameter |
-| `top_p`      | number (0–1)            | No       | Nucleus sampling parameter |
-| `seed`       | number                  | No       | Deterministic seed for reproducible generations |
-| `notes`      | string                  | No       | Free-form provenance / intent rationale |
+| Property      | Type                                            | Required | Description                                             |
+| ------------- | ----------------------------------------------- | -------- | ------------------------------------------------------- | --------------------------------------------------- |
+| `engine`      | string                                          | Yes      | Provider + version tag (e.g. `gpt-foo@2.3.1`)           |
+| `schema`      | Type                                            | Yes      | Output validation / shaping type                        |
+| `max_tok`     | number                                          | No       | Maximum output tokens (advisory; enforced per provider) |
+| `cost_cap`    | number (monetary; currency literal forthcoming) | No       | Maximum spend for a single call (enforced at runtime)   |
+| `evaluators`  | Array<Identifier                                | Call>    | No                                                      | Quality/guardrail evaluators applied to generations |
+| `temperature` | number (0–2)                                    | No       | Stochastic sampling parameter                           |
+| `top_p`       | number (0–1)                                    | No       | Nucleus sampling parameter                              |
+| `seed`        | number                                          | No       | Deterministic seed for reproducible generations         |
+| `notes`       | string                                          | No       | Free-form provenance / intent rationale                 |
 
 Bootstrap note: The parser accepts any identifier keys within a `model` block
 and the bootstrap code generator stores them verbatim in a plain object. Keys
@@ -428,24 +434,25 @@ if value is SomeType { ... }
 ```
 
 Semantics (bootstrap stage0):
+
 1. Evaluate the right-hand side as a nominal type name (no structural typing yet).
 2. Perform a runtime instance check analogous to `check_type` in the runtime.
 3. Return a boolean; future static versions will narrow the type of `value`
-  inside the guarded block (not yet enforced in bootstrap).
+   inside the guarded block (not yet enforced in bootstrap).
 
-*Planned evolution*: `is` will integrate with pattern matching and support
+_Planned evolution_: `is` will integrate with pattern matching and support
 structured destructuring (`if response is Error { ... }`). Until then its use
 is limited to ergonomic runtime type guards.
 
 ## 6. Type System Overview
 
-| Type        | Description                                          |
-|-------------|------------------------------------------------------|
-| `number`    | 64-bit floating point numbers                        |
-| `string`    | UTF-8 encoded strings                                |
-| `boolean`   | Truth values                                         |
-| `void`      | No return value                                      |
-| `null`      | Explicit absence of a value                          |
+| Type      | Description                   |
+| --------- | ----------------------------- |
+| `number`  | 64-bit floating point numbers |
+| `string`  | UTF-8 encoded strings         |
+| `boolean` | Truth values                  |
+| `void`    | No return value               |
+| `null`    | Explicit absence of a value   |
 
 Composite types include structs, enums, generics (e.g. `Vec<T>`, `Seq<T>`),
 optionals (`T?`), and unions (`A | B`). The array sugar `Type[]` is deprecated
@@ -647,6 +654,7 @@ The bootstrap compiler lowers Sailfin programs into Python code backed by
   to descriptive Python scaffolding in the bootstrap runtime today.
 
 Bootstrap stubs:
+
 - Model declarations (`model ... { ... }`) are parsed and emitted as plain data
   objects. There is no `Model.call(...)` in the bootstrap backend.
 - `prompt` blocks are parsed and annotated for effect checking but do not send
@@ -660,6 +668,7 @@ runtime until the capability workstream lands. Track the current state in
 `docs/runtime_audit.md`.
 
 Additional stubs:
+
 - Pipelines are emitted as plain functions; there is no special dataflow or
   operator support in stage0. The pipeline operator `|>` shown in examples is
   a self-hosted target and not accepted by the bootstrap parser.
@@ -676,11 +685,13 @@ The self-hosted runtime layers on:
 Source code should use `print.info(...)` for standard output and `print.error(...)` for errors. In the bootstrap backend, the code generator injects `print = runtime.console`, so these calls are implemented by `runtime.console.info` and `runtime.console.error` respectively. The identifier `console` is not automatically in scope for Sailfin source; using `console.info(...)` in Sailfin code will not compile correctly under the bootstrap backend.
 
 Supported today:
+
 - `print.info(value)` – prints a value or interpolated string.
 - `print.error(value)` – prints a value or interpolated string to error channel (same sink in bootstrap; may diverge later).
 - `print.warn(value)` – emits a warning-level message. The bootstrap runtime prefixes output with `[warn]`.
 
 Not supported yet:
+
 - `print.debug` or structured logging levels. These may be added in the self-hosted runtime.
 
 ### 10.2 String Utilities
@@ -708,13 +719,13 @@ The Sailfin runtime prelude (`runtime/prelude.sfn`) surfaces common string helpe
   - Serves as the runtime backstop when the compiler cannot prove match-expression exhaustiveness; once the Sailfin-native diagnostics improve this helper lets the stage1 runtime stay self-hosted.
 
 Struct support:
+
 - `struct_field(name: string, value: any) -> StructField`
   - Wraps a single field/value pair for consumption by struct formatting helpers.
 - `struct_repr(name: string, fields: StructField[]) -> string`
   - Produces `name(field=value, …)` strings without invoking the bootstrap runtime. Strings use plain concatenation for now; downstream call sites may format values for debugging needs.
 
 These helpers participate in the `runtime` module re-export surface, so stage1-compiled sources receive the same behaviour when targeting the Python backend today and the upcoming LLVM/WASM backends later.
-
 
 ## Part B — Design Preview
 
@@ -791,6 +802,7 @@ publish/resolve commands; integration work tracks on the roadmap.
 Canonical effects today: io, net, model, gpu, rand, clock.
 
 Bootstrap enforcement status (see `bootstrap/effect_checker.py`):
+
 - model: required when a routine includes any `prompt ... { ... }` block.
 - io: required when calling filesystem helpers via `fs.*`.
 - net: required when using network helpers (`http.*`, `websocket.*`, or `serve`).
@@ -800,6 +812,7 @@ names (e.g. `io.fs`, `net.http`). These are accepted by the parser and recorded
 on declarations but are not validated in the bootstrap checker.
 
 Planned (self-hosted target):
+
 - Hierarchical, composable effects with scoping (e.g. `io.fs.read`, `net.http`).
 - Cross-manifest capability gates (capsule/fleet manifests) for compilation and runtime.
 - Flow-sensitive effect inference and minimal annotations.

@@ -87,3 +87,59 @@ struct Person implements Greeter {
     assert (
         not messages
     ), f"expected no diagnostics when struct satisfies interface, saw: {messages}"
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_struct_missing_type_arguments_for_generic_interface_reports_diagnostic() -> None:
+    source = """
+interface Formatter<T> {
+    fn format(self) -> T;
+}
+
+struct Document implements Formatter {
+    title -> string;
+
+    fn format(self -> Document) -> string {
+        return self.title;
+    }
+}
+"""
+
+    parser_module = importlib.import_module("compiler.build.parser")
+    typecheck_module = importlib.import_module("compiler.build.typecheck")
+
+    program = getattr(parser_module, "parse_program")(source)
+    result = getattr(typecheck_module, "typecheck_program")(program)
+
+    messages = [diagnostic.message for diagnostic in result.diagnostics]
+    assert any(
+        "implements Formatter but must specify Formatter<T> type arguments" in message
+        for message in messages
+    ), f"missing generic interface arguments diagnostic not reported: {messages}"
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_struct_mismatched_type_argument_count_reports_diagnostic() -> None:
+    source = """
+interface Formatter<T> {
+    fn format(self) -> T;
+}
+
+struct Printer implements Formatter<string, number> {
+    fn format(self -> Printer) -> string {
+        return "ready";
+    }
+}
+"""
+
+    parser_module = importlib.import_module("compiler.build.parser")
+    typecheck_module = importlib.import_module("compiler.build.typecheck")
+
+    program = getattr(parser_module, "parse_program")(source)
+    result = getattr(typecheck_module, "typecheck_program")(program)
+
+    messages = [diagnostic.message for diagnostic in result.diagnostics]
+    assert any(
+        "implements Formatter<string, number> but must match Formatter<T> type arguments" in message
+        for message in messages
+    ), f"mismatched generic argument diagnostic not reported: {messages}"

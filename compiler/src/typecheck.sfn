@@ -331,6 +331,9 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
             continue;
         }
         let interface_name = interface_definition.name;
+        diagnostics = diagnostics.concat(
+            validate_interface_annotation(statement.name, interface_definition, annotation)
+        );
         for member in interface_definition.members {
             if !contains_string(method_names, member.name) {
                 diagnostics = diagnostics.concat([
@@ -372,6 +375,202 @@ fn check_struct_fields(fields -> FieldDeclaration[]) -> Diagnostic[] {
     }
 
     return diagnostics;
+}
+
+fn validate_interface_annotation(struct_name -> string, interface_definition -> Statement, annotation -> TypeAnnotation) -> Diagnostic[] {
+    let expected_count = interface_definition.type_parameters.length;
+    let provided_arguments = parse_type_arguments(annotation.text);
+    if expected_count == 0 {
+        if provided_arguments.length > 0 {
+            return [
+                make_interface_no_type_arguments_diagnostic(
+                    struct_name,
+                    trim_text(annotation.text),
+                    interface_definition.name
+                )
+            ];
+        }
+        return [];
+    }
+
+    if provided_arguments.length == 0 {
+        return [
+            make_interface_missing_type_arguments_diagnostic(
+                struct_name,
+                interface_definition.name,
+                format_interface_signature(interface_definition)
+            )
+        ];
+    }
+
+    if provided_arguments.length != expected_count {
+        return [
+            make_interface_type_argument_mismatch_diagnostic(
+                struct_name,
+                trim_text(annotation.text),
+                format_interface_signature(interface_definition)
+            )
+        ];
+    }
+
+    return [];
+}
+
+fn format_interface_signature(interface_definition -> Statement) -> string {
+    let mut names -> string[] = [];
+    for parameter in interface_definition.type_parameters {
+        names = names.concat([parameter.name]);
+    }
+    if names.length == 0 {
+        return interface_definition.name;
+    }
+    return interface_definition.name + "<" + join_with_separator(names, ", ") + ">";
+}
+
+fn join_with_separator(items -> string[], separator -> string) -> string {
+    if items.length == 0 {
+        return "";
+    }
+    let mut result = items[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= items.length {
+            break;
+        }
+        result = result + separator + items[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn parse_type_arguments(annotation_text -> string) -> string[] {
+    let block = extract_generic_argument_block(annotation_text);
+    if block == null {
+        return [];
+    }
+    return split_generic_argument_list(block);
+}
+
+fn extract_generic_argument_block(annotation_text -> string) -> string? {
+    let trimmed = trim_text(annotation_text);
+    let mut index -> number = 0;
+    let mut depth -> number = 0;
+    let mut start_index -> number = -1;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "<" {
+            if depth == 0 {
+                start_index = index + 1;
+            }
+            depth += 1;
+        } else if ch == ">" {
+            if depth == 0 {
+                return null;
+            }
+            depth -= 1;
+            if depth == 0 {
+                return slice_text(trimmed, start_index, index);
+            }
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn split_generic_argument_list(block -> string) -> string[] {
+    let mut arguments -> string[] = [];
+    let mut current -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= block.length {
+            break;
+        }
+        let ch = block[index];
+        if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 0 {
+                let trimmed = trim_text(current);
+                if trimmed.length > 0 {
+                    arguments = arguments.concat([trimmed]);
+                }
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    let tail = trim_text(current);
+    if tail.length > 0 {
+        arguments = arguments.concat([tail]);
+    }
+    return arguments;
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        if is_whitespace(value[start]) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        if is_whitespace(value[end - 1]) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    return slice_text(value, start, end);
+}
+
+fn slice_text(value -> string, start -> number, end -> number) -> string {
+    if start < 0 {
+        start = 0;
+    }
+    if end > value.length {
+        end = value.length;
+    }
+    if end <= start {
+        return "";
+    }
+    let mut result -> string = "";
+    let mut index = start;
+    loop {
+        if index >= end {
+            break;
+        }
+        result = result + value[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn is_whitespace(ch -> string) -> boolean {
+    return ch == " " || ch == "\n" || ch == "\t" || ch == "\r";
 }
 
 fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[] {
@@ -579,6 +778,30 @@ fn has_symbol(symbols -> SymbolEntry[], name -> string) -> boolean {
         }
     }
     return false;
+}
+
+fn make_interface_missing_type_arguments_diagnostic(struct_name -> string, interface_name -> string, interface_signature -> string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0302",
+        message: "struct " + struct_name + " implements " + interface_name + " but must specify " + interface_signature + " type arguments",
+        primary: null,
+    };
+}
+
+fn make_interface_type_argument_mismatch_diagnostic(struct_name -> string, annotation_text -> string, interface_signature -> string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0302",
+        message: "struct " + struct_name + " implements " + annotation_text + " but must match " + interface_signature + " type arguments",
+        primary: null,
+    };
+}
+
+fn make_interface_no_type_arguments_diagnostic(struct_name -> string, annotation_text -> string, interface_name -> string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0302",
+        message: "struct " + struct_name + " implements " + annotation_text + " but " + interface_name + " does not take type arguments",
+        primary: null,
+    };
 }
 
 fn make_duplicate_symbol_diagnostic(name -> string, kind -> string) -> Diagnostic {
