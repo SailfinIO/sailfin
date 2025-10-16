@@ -133,6 +133,7 @@ struct StructLiteralField {
 }
 
 struct StructLiteralParse {
+    recognized -> boolean;
     success -> boolean;
     type_name -> string;
     fields -> StructLiteralField[];
@@ -727,6 +728,58 @@ fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> Struc
         }
         index += 1;
     }
+    return null;
+}
+
+fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) -> StructTypeInfo? {
+    let trimmed = trim_text(type_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut candidates -> string[] = [trimmed];
+    let generic_index = index_of(trimmed, "<");
+    if generic_index >= 0 {
+        let base = trim_text(substring(trimmed, 0, generic_index));
+        if base.length > 0 {
+            if !string_array_contains(candidates, base) {
+                candidates = append_string(candidates, base);
+            }
+        }
+    }
+
+    let last_dot = find_last_index_of_char(trimmed, ".");
+    if last_dot >= 0 {
+        let tail_full = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
+        if tail_full.length > 0 {
+            if !string_array_contains(candidates, tail_full) {
+                candidates = append_string(candidates, tail_full);
+            }
+            let tail_generic_index = index_of(tail_full, "<");
+            if tail_generic_index >= 0 {
+                let tail_base = trim_text(substring(tail_full, 0, tail_generic_index));
+                if tail_base.length > 0 {
+                    if !string_array_contains(candidates, tail_base) {
+                        candidates = append_string(candidates, tail_base);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= candidates.length {
+            break;
+        }
+        let candidate = candidates[index];
+        let info = find_struct_info_by_name(context, candidate);
+        if info != null {
+            return info;
+        }
+        index += 1;
+    }
+
     return null;
 }
 
@@ -4005,6 +4058,17 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         }
     }
 
+    let struct_parse = parse_struct_literal(stripped);
+    if struct_parse.recognized {
+        if !struct_parse.success {
+            diagnostics = diagnostics.concat(struct_parse.diagnostics);
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+        }
+        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context);
+        let combined = diagnostics.concat(lowered_struct.diagnostics);
+        return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined };
+    }
+
     let member_parse = parse_member_access(stripped);
     if member_parse.success {
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context);
@@ -4674,6 +4738,391 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer);
 
     let operand = LLVMOperand { llvm_type: struct_type + "*", value: struct_alloca };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+}
+
+fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = open_index;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            depth += 1;
+        } else if ch == "}" {
+            if depth > 0 {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_top_level_colon(text -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == ":" {
+            if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn parse_struct_literal(text -> string) -> StructLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = 0;
+    let mut open_index -> number = -1;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    if open_index < 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing closing `}`");
+        fatal = true;
+    }
+
+    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    if type_name.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing type name");
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + entry + "` missing `:`");
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field missing name");
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` repeated");
+                continue;
+            }
+            if value_text.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` missing value");
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if !fatal && close_index >= 0 {
+        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+        if remainder.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal trailing content `" + remainder + "`");
+            fatal = true;
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
+}
+
+fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let mut diagnostics -> string[] = parse.diagnostics;
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+
+    let info = resolve_struct_info_for_literal(context, parse.type_name);
+    if info == null {
+        if parse.type_name.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct `" + parse.type_name + "`");
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct");
+        }
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    if info.fields.length == 0 {
+        let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+    }
+
+    let mut used_names -> string[] = [];
+    let mut previous_value -> string = "";
+    let mut field_index -> number = 0;
+    loop {
+        if field_index >= info.fields.length {
+            break;
+        }
+        let expected = info.fields[field_index];
+        let mut literal_index -> number = -1;
+        let mut literal_lookup_index -> number = 0;
+        loop {
+            if literal_lookup_index >= parse.fields.length {
+                break;
+            }
+            if parse.fields[literal_lookup_index].name == expected.name {
+                literal_index = literal_lookup_index;
+                break;
+            }
+            literal_lookup_index += 1;
+        }
+
+        let mut value_operand -> LLVMOperand? = null;
+        if literal_index >= 0 {
+            let literal_field = parse.fields[literal_index];
+            let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context);
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            current_lines = lowered.lines;
+            current_temp = lowered.temp_index;
+            if lowered.operand != null {
+                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
+                diagnostics = diagnostics.concat(coerced.diagnostics);
+                current_lines = coerced.lines;
+                current_temp = coerced.temp_index;
+                if coerced.operand != null {
+                    value_operand = coerced.operand;
+                }
+            }
+            if !string_array_contains(used_names, expected.name) {
+                used_names = append_string(used_names, expected.name);
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` missing field `" + expected.name + "`");
+        }
+
+        let mut value_text -> string = default_return_literal(expected.llvm_type);
+        if value_operand != null {
+            value_text = value_operand.value;
+        }
+
+        let mut aggregate_source -> string = "undef";
+        if field_index > 0 {
+            aggregate_source = previous_value;
+        }
+
+        let temp_name = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + temp_name + " = insertvalue " + info.llvm_name + " " + aggregate_source + ", " + expected.llvm_type + " " + value_text + ", " + number_to_string(field_index));
+        current_temp += 1;
+        previous_value = temp_name;
+
+        field_index += 1;
+    }
+
+    let mut extra_index -> number = 0;
+    loop {
+        if extra_index >= parse.fields.length {
+            break;
+        }
+        let literal_field = parse.fields[extra_index];
+        if !string_array_contains(used_names, literal_field.name) {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` provides unknown field `" + literal_field.name + "`");
+        }
+        extra_index += 1;
+    }
+
+    if previous_value.length == 0 {
+        let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+    }
+
+    let operand = LLVMOperand { llvm_type: info.llvm_name, value: previous_value };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
 }
 
@@ -5998,6 +6447,23 @@ fn index_of(value -> string, target -> string) -> number {
             return index;
         }
         index += 1;
+    }
+    return -1;
+}
+
+fn find_last_index_of_char(value -> string, target -> string) -> number {
+    if target.length != 1 {
+        return -1;
+    }
+    let mut index -> number = value.length;
+    loop {
+        if index <= 0 {
+            break;
+        }
+        index -= 1;
+        if value[index] == target {
+            return index;
+        }
     }
     return -1;
 }

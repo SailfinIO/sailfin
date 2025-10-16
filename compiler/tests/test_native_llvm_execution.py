@@ -402,6 +402,44 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_lowers_struct_literals() -> None:
+    source = """
+struct Pair {
+    left -> number;
+    right -> number;
+}
+
+fn make_pair(a -> number, b -> number) -> Pair {
+    return Pair { left: a, right: b };
+}
+
+fn sum_pair(value -> Pair) -> number {
+    return value.left + value.right;
+}
+
+fn use_literal() -> number {
+    let pair -> Pair = Pair { left: 1, right: 2 };
+    return pair.left + pair.right;
+}
+
+fn main() -> number {
+    let constructed -> Pair = make_pair(10, 5);
+    return sum_pair(constructed) + use_literal();
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    assert "%Pair = type { double, double }" in lowered.ir
+
+    engine, module = _compile_ir(lowered.ir)
+    try:
+        assert _invoke_double(engine, "main") == pytest.approx(18.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
 def test_native_llvm_execution_iterates_array_bindings_without_annotations() -> None:
     source = """
 fn sum_alias(values -> number[]) -> number {

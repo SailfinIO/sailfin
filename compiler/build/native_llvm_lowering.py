@@ -212,14 +212,15 @@ class StructLiteralField:
         return runtime.struct_repr('StructLiteralField', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
 
 class StructLiteralParse:
-    def __init__(self, success, type_name, fields, diagnostics):
+    def __init__(self, recognized, success, type_name, fields, diagnostics):
+        self.recognized = recognized
         self.success = success
         self.type_name = type_name
         self.fields = fields
         self.diagnostics = diagnostics
 
     def __repr__(self):
-        return runtime.struct_repr('StructLiteralParse', [runtime.struct_field('success', self.success), runtime.struct_field('type_name', self.type_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('StructLiteralParse', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('type_name', self.type_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class MemberAccessParse:
     def __init__(self, success, base, field):
@@ -759,6 +760,40 @@ def find_struct_field_info(info, field_name):
         field = info.fields[index]
         if field.name == field_name:
             return field
+        index += 1
+    return None
+
+def resolve_struct_info_for_literal(context, type_name):
+    trimmed = trim_text(type_name)
+    if len(trimmed) == 0:
+        return None
+    candidates = [trimmed]
+    generic_index = index_of(trimmed, "<")
+    if generic_index >= 0:
+        base = trim_text(substring(trimmed, 0, generic_index))
+        if len(base) > 0:
+            if not string_array_contains(candidates, base):
+                candidates = append_string(candidates, base)
+    last_dot = find_last_index_of_char(trimmed, ".")
+    if last_dot >= 0:
+        tail_full = trim_text(substring(trimmed, last_dot + 1, len(trimmed)))
+        if len(tail_full) > 0:
+            if not string_array_contains(candidates, tail_full):
+                candidates = append_string(candidates, tail_full)
+            tail_generic_index = index_of(tail_full, "<")
+            if tail_generic_index >= 0:
+                tail_base = trim_text(substring(tail_full, 0, tail_generic_index))
+                if len(tail_base) > 0:
+                    if not string_array_contains(candidates, tail_base):
+                        candidates = append_string(candidates, tail_base)
+    index = 0
+    while True:
+        if index >= len(candidates):
+            break
+        candidate = candidates[index]
+        info = find_struct_info_by_name(context, candidate)
+        if info != None:
+            return info
         index += 1
     return None
 
@@ -2760,6 +2795,14 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         last = stripped[len(stripped) - 1]
         if first == "["  and  last == "]":
             return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context)
+    struct_parse = parse_struct_literal(stripped)
+    if struct_parse.recognized:
+        if not struct_parse.success:
+            diagnostics = (diagnostics) + (struct_parse.diagnostics)
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context)
+        combined = (diagnostics) + (lowered_struct.diagnostics)
+        return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined)
     member_parse = parse_member_access(stripped)
     if member_parse.success:
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context)
@@ -3254,6 +3297,308 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     current_temp += 1
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer)
     operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_alloca)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+
+def find_matching_closing_brace(text, open_index):
+    depth = 0
+    index = open_index
+    in_single = False
+    in_double = False
+    escape = False
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if ch == "{":
+            depth += 1
+        else:
+            if ch == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0:
+                        return index
+        index += 1
+    return -1
+
+def find_top_level_colon(text):
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    angle_depth = 0
+    in_single = False
+    in_double = False
+    escape = False
+    index = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            index += 1
+            continue
+        if ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+            index += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if ch == "{":
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        if ch == "<":
+            angle_depth += 1
+            index += 1
+            continue
+        if ch == ">":
+            if angle_depth > 0:
+                angle_depth -= 1
+            index += 1
+            continue
+        if ch == ":":
+            if paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0  and  angle_depth == 0:
+                return index
+        index += 1
+    return -1
+
+def parse_struct_literal(text):
+    trimmed = trim_text(text)
+    diagnostics = []
+    if len(trimmed) == 0:
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    first = trimmed[0]
+    if not is_identifier_start_char(first):
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    paren_depth = 0
+    bracket_depth = 0
+    angle_depth = 0
+    index = 0
+    open_index = -1
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "(":
+            paren_depth += 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth -= 1
+            else:
+                if ch == "[":
+                    bracket_depth += 1
+                else:
+                    if ch == "]":
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                    else:
+                        if ch == "<":
+                            angle_depth += 1
+                        else:
+                            if ch == ">":
+                                if angle_depth > 0:
+                                    angle_depth -= 1
+                            else:
+                                if ch == "{":
+                                    if paren_depth == 0  and  bracket_depth == 0  and  angle_depth == 0:
+                                        open_index = index
+                                        break
+        index += 1
+    if open_index < 0:
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    fatal = False
+    close_index = find_matching_closing_brace(trimmed, open_index)
+    if close_index < 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing closing `}`")
+        fatal = True
+    type_name = trim_text(substring(trimmed, 0, open_index))
+    if len(type_name) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing type name")
+        fatal = True
+    fields = []
+    if not fatal  and  close_index >= 0:
+        body = substring(trimmed, open_index + 1, close_index)
+        entries = split_array_elements(body)
+        seen = []
+        entry_index = 0
+        while True:
+            if entry_index >= len(entries):
+                break
+            entry = trim_text(entries[entry_index])
+            entry_index += 1
+            if len(entry) == 0:
+                continue
+            colon_index = find_top_level_colon(entry)
+            if colon_index < 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + entry + "` missing `:`")
+                continue
+            field_name = trim_text(substring(entry, 0, colon_index))
+            value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
+            if len(field_name) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field missing name")
+                continue
+            if string_array_contains(seen, field_name):
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` repeated")
+                continue
+            if len(value_text) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` missing value")
+                continue
+            seen = append_string(seen, field_name)
+            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+    if not fatal  and  close_index >= 0:
+        remainder = trim_text(substring(trimmed, close_index + 1, len(trimmed)))
+        if len(remainder) > 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal trailing content `" + remainder + "`")
+            fatal = True
+    if fatal:
+        fields = []
+    return StructLiteralParse(recognized=True, success=not fatal, type_name=type_name, fields=fields, diagnostics=diagnostics)
+
+def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, context):
+    diagnostics = parse.diagnostics
+    current_lines = lines
+    current_temp = temp_index
+    info = resolve_struct_info_for_literal(context, parse.type_name)
+    if info == None:
+        if len(parse.type_name) > 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct `" + parse.type_name + "`")
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    if len(info.fields) == 0:
+        operand = LLVMOperand(llvm_type=info.llvm_name, value="zeroinitializer")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    used_names = []
+    previous_value = ""
+    field_index = 0
+    while True:
+        if field_index >= len(info.fields):
+            break
+        expected = info.fields[field_index]
+        literal_index = -1
+        literal_lookup_index = 0
+        while True:
+            if literal_lookup_index >= len(parse.fields):
+                break
+            if parse.fields[literal_lookup_index].name == expected.name:
+                literal_index = literal_lookup_index
+                break
+            literal_lookup_index += 1
+        value_operand = None
+        if literal_index >= 0:
+            literal_field = parse.fields[literal_index]
+            lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context)
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            if lowered.operand != None:
+                coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines)
+                diagnostics = (diagnostics) + (coerced.diagnostics)
+                current_lines = coerced.lines
+                current_temp = coerced.temp_index
+                if coerced.operand != None:
+                    value_operand = coerced.operand
+            if not string_array_contains(used_names, expected.name):
+                used_names = append_string(used_names, expected.name)
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` missing field `" + expected.name + "`")
+        value_text = default_return_literal(expected.llvm_type)
+        if value_operand != None:
+            value_text = value_operand.value
+        aggregate_source = "undef"
+        if field_index > 0:
+            aggregate_source = previous_value
+        temp_name = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + temp_name + " = insertvalue " + info.llvm_name + " " + aggregate_source + ", " + expected.llvm_type + " " + value_text + ", " + number_to_string(field_index))
+        current_temp += 1
+        previous_value = temp_name
+        field_index += 1
+    extra_index = 0
+    while True:
+        if extra_index >= len(parse.fields):
+            break
+        literal_field = parse.fields[extra_index]
+        if not string_array_contains(used_names, literal_field.name):
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` provides unknown field `" + literal_field.name + "`")
+        extra_index += 1
+    if len(previous_value) == 0:
+        operand = LLVMOperand(llvm_type=info.llvm_name, value="zeroinitializer")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    operand = LLVMOperand(llvm_type=info.llvm_name, value=previous_value)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
 
 def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index, lines):
@@ -4233,6 +4578,18 @@ def index_of(value, target):
         if matches:
             return index
         index += 1
+    return -1
+
+def find_last_index_of_char(value, target):
+    if len(target) != 1:
+        return -1
+    index = len(value)
+    while True:
+        if index <= 0:
+            break
+        index -= 1
+        if value[index] == target:
+            return index
     return -1
 
 def append_string(values, value):

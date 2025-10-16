@@ -33,7 +33,11 @@ roadmaps.
   record size, alignment, and per-field offsets for LLVM consumption. Member
   access expressions in the LLVM prototype now consult those layouts, so `self.field`
   lowers into `getelementptr`/`load` sequences instead of surfacing unsupported
-  expression diagnostics. Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
+  expression diagnostics. Struct literals now assemble aggregates directly in LLVM
+  (`insertvalue` sequences) so Stage2 functions can construct, return, and consume
+  user-defined structs without Python fallbacks; the behaviour is exercised by
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_struct_literals`.
+  Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
