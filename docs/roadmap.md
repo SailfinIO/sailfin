@@ -23,6 +23,9 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
 - [ ] Bridge Sailfin runtime helpers (e.g., `print`, capability adapters) as callable LLVM symbols so stage2 programs can invoke the existing runtime prelude.
 - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
+- [ ] Extend `.layout` inference to cover optional fields, nested enums, and recursive aggregates so Stage2 no longer defaults compiler AST structs to pointer layouts (silencing the `defaulting to pointer layout` warnings).
+- [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
+- [ ] Bootstrap stage2 self-hosting: compile the Sailfin compiler with stage2 artifacts, execute the stage2-built binary end-to-end, and gate CI on the self-hosted pipeline.
 - [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end, and wire the LLVM smoke binary into CI for ongoing coverage.
 - [ ] Enforce capability manifests at runtime by feeding `LoweredLLVMResult.capability_manifest` into the stage2 runner so entry points acquire capability grants before execution.
 
