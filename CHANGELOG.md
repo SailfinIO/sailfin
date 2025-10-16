@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.20 (2025-10-16)
+
+### Bug Fixes
+
+- Declaration spans from parser to typechecker
+  ([`587bb97`](https://github.com/SailfinIO/sailfin/commit/587bb977af2da2fd2141c85a40ec9baff176df66))
+
+- Diagnostics snippets
+  ([`1df0aca`](https://github.com/SailfinIO/sailfin/commit/1df0acaffc88bb06efe8480cdfe53c6ccd4560b1))
+
+
 ## v0.1.1-alpha.19 (2025-10-16)
 
 ### Bug Fixes
