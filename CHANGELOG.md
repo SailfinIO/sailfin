@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.15 (2025-10-16)
+
+### Bug Fixes
+
+- Struct metadata through member access
+  ([`77dbcfc`](https://github.com/SailfinIO/sailfin/commit/77dbcfc60c03e57dafe82b6f5f46d10f46901269))
+
+
 ## v0.1.1-alpha.14 (2025-10-15)
 
 ### Bug Fixes
