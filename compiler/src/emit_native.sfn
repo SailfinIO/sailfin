@@ -344,6 +344,7 @@ fn emit_test(state -> NativeState, statement -> Statement) -> NativeState {
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
+            name_span: null,
         }
     );
     current = state_push_indent(current);

@@ -17,6 +17,7 @@ struct TypeAnnotation {
 struct TypeParameter {
     name -> string;
     bound -> TypeAnnotation?;
+    span -> SourceSpan?;
 }
 
 struct Block {
@@ -88,12 +89,14 @@ struct MatchCase {
 struct ModelProperty {
     name -> string;
     value -> Expression;
+    span -> SourceSpan?;
 }
 
 struct FieldDeclaration {
     name -> string;
     type_annotation -> TypeAnnotation;
     mutable -> boolean;
+    name_span -> SourceSpan?;
 }
 
 struct MethodDeclaration {
@@ -105,6 +108,7 @@ struct MethodDeclaration {
 struct EnumVariant {
     name -> string;
     fields -> FieldDeclaration[];
+    name_span -> SourceSpan?;
 }
 
 struct FunctionSignature {
@@ -114,6 +118,7 @@ struct FunctionSignature {
     return_type -> TypeAnnotation?;
     effects -> string[];
     type_parameters -> TypeParameter[];
+    name_span -> SourceSpan?;
 }
 
 struct PipelineDeclaration {
@@ -182,6 +187,7 @@ enum Statement {
     },
     ModelDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         model_type -> TypeAnnotation;
         properties -> ModelProperty[];
         effects -> string[];
@@ -199,6 +205,7 @@ enum Statement {
     },
     TestDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         body -> Block;
         effects -> string[];
         decorators -> Decorator[];
@@ -210,6 +217,7 @@ enum Statement {
     },
     StructDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         implements_types -> TypeAnnotation[];
         fields -> FieldDeclaration[];
@@ -218,18 +226,21 @@ enum Statement {
     },
     TypeAliasDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         aliased_type -> TypeAnnotation;
         decorators -> Decorator[];
     },
     InterfaceDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         members -> FunctionSignature[];
         decorators -> Decorator[];
     },
     EnumDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         variants -> EnumVariant[];
         decorators -> Decorator[];

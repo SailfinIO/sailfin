@@ -41,15 +41,15 @@ Statement = runtime.enum_type('Statement')
 Statement = runtime.enum_define_variant(Statement, 'ImportDeclaration', ['specifiers', 'source'])
 Statement = runtime.enum_define_variant(Statement, 'ExportDeclaration', ['specifiers', 'source'])
 Statement = runtime.enum_define_variant(Statement, 'VariableDeclaration', ['name', 'mutable', 'type_annotation', 'initializer', 'span', 'initializer_span'])
-Statement = runtime.enum_define_variant(Statement, 'ModelDeclaration', ['name', 'model_type', 'properties', 'effects', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'ModelDeclaration', ['name', 'name_span', 'model_type', 'properties', 'effects', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'PipelineDeclaration', ['signature', 'body', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'ToolDeclaration', ['signature', 'body', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'TestDeclaration', ['name', 'body', 'effects', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'TestDeclaration', ['name', 'name_span', 'body', 'effects', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'FunctionDeclaration', ['signature', 'body', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'StructDeclaration', ['name', 'type_parameters', 'implements_types', 'fields', 'methods', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'TypeAliasDeclaration', ['name', 'type_parameters', 'aliased_type', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'InterfaceDeclaration', ['name', 'type_parameters', 'members', 'decorators'])
-Statement = runtime.enum_define_variant(Statement, 'EnumDeclaration', ['name', 'type_parameters', 'variants', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'StructDeclaration', ['name', 'name_span', 'type_parameters', 'implements_types', 'fields', 'methods', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'TypeAliasDeclaration', ['name', 'name_span', 'type_parameters', 'aliased_type', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'InterfaceDeclaration', ['name', 'name_span', 'type_parameters', 'members', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'EnumDeclaration', ['name', 'name_span', 'type_parameters', 'variants', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'PromptStatement', ['channel', 'keyword_token', 'channel_token', 'body', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'WithStatement', ['clauses', 'body', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'ForStatement', ['clause', 'body', 'decorators'])
@@ -77,12 +77,13 @@ class TypeAnnotation:
         return runtime.struct_repr('TypeAnnotation', [runtime.struct_field('text', self.text)])
 
 class TypeParameter:
-    def __init__(self, name, bound=None):
+    def __init__(self, name, bound=None, span=None):
         self.name = name
         self.bound = bound
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('TypeParameter', [runtime.struct_field('name', self.name), runtime.struct_field('bound', self.bound)])
+        return runtime.struct_repr('TypeParameter', [runtime.struct_field('name', self.name), runtime.struct_field('bound', self.bound), runtime.struct_field('span', self.span)])
 
 class Block:
     def __init__(self, tokens, text, statements):
@@ -156,21 +157,23 @@ class MatchCase:
         return runtime.struct_repr('MatchCase', [runtime.struct_field('pattern', self.pattern), runtime.struct_field('guard', self.guard), runtime.struct_field('body', self.body)])
 
 class ModelProperty:
-    def __init__(self, name, value):
+    def __init__(self, name, value, span=None):
         self.name = name
         self.value = value
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('ModelProperty', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
+        return runtime.struct_repr('ModelProperty', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value), runtime.struct_field('span', self.span)])
 
 class FieldDeclaration:
-    def __init__(self, name, type_annotation, mutable):
+    def __init__(self, name, type_annotation, mutable, name_span=None):
         self.name = name
         self.type_annotation = type_annotation
         self.mutable = mutable
+        self.name_span = name_span
 
     def __repr__(self):
-        return runtime.struct_repr('FieldDeclaration', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable)])
+        return runtime.struct_repr('FieldDeclaration', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable), runtime.struct_field('name_span', self.name_span)])
 
 class MethodDeclaration:
     def __init__(self, signature, body, decorators):
@@ -182,24 +185,26 @@ class MethodDeclaration:
         return runtime.struct_repr('MethodDeclaration', [runtime.struct_field('signature', self.signature), runtime.struct_field('body', self.body), runtime.struct_field('decorators', self.decorators)])
 
 class EnumVariant:
-    def __init__(self, name, fields):
+    def __init__(self, name, fields, name_span=None):
         self.name = name
         self.fields = fields
+        self.name_span = name_span
 
     def __repr__(self):
-        return runtime.struct_repr('EnumVariant', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields)])
+        return runtime.struct_repr('EnumVariant', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields), runtime.struct_field('name_span', self.name_span)])
 
 class FunctionSignature:
-    def __init__(self, name, is_async, parameters, effects, type_parameters, return_type=None):
+    def __init__(self, name, is_async, parameters, effects, type_parameters, return_type=None, name_span=None):
         self.name = name
         self.is_async = is_async
         self.parameters = parameters
         self.return_type = return_type
         self.effects = effects
         self.type_parameters = type_parameters
+        self.name_span = name_span
 
     def __repr__(self):
-        return runtime.struct_repr('FunctionSignature', [runtime.struct_field('name', self.name), runtime.struct_field('is_async', self.is_async), runtime.struct_field('parameters', self.parameters), runtime.struct_field('return_type', self.return_type), runtime.struct_field('effects', self.effects), runtime.struct_field('type_parameters', self.type_parameters)])
+        return runtime.struct_repr('FunctionSignature', [runtime.struct_field('name', self.name), runtime.struct_field('is_async', self.is_async), runtime.struct_field('parameters', self.parameters), runtime.struct_field('return_type', self.return_type), runtime.struct_field('effects', self.effects), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('name_span', self.name_span)])
 
 class PipelineDeclaration:
     def __init__(self, signature, body, decorators):

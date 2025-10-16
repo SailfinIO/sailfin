@@ -3,8 +3,8 @@
 // Duplicate symbol detection now covers top-level declarations, parameters,
 // and block-local bindings so future analyses can assume consistent scopes.
 
-import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation } from "./ast";
-import { Token } from "./token";
+import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation, SourceSpan } from "./ast";
+import { Token, TokenKind } from "./token";
 import { validate_effects, EffectRequirement, EffectViolation } from "./effect_checker";
 
 struct Diagnostic {
@@ -16,6 +16,7 @@ struct Diagnostic {
 struct SymbolEntry {
     name -> string;
     kind -> string;
+    span -> SourceSpan?;
 }
 
 struct TypecheckResult {
@@ -53,7 +54,6 @@ fn collect_interface_definitions(program -> Program) -> Statement[] {
             interfaces = interfaces.concat([statement]);
         }
     }
-
     return interfaces;
 }
 
@@ -75,34 +75,34 @@ fn collect_top_level_symbols(program -> Program) -> SymbolCollectionResult {
 
 fn register_top_level_symbol(statement -> Statement, existing -> SymbolEntry[]) -> SymbolCollectionResult {
     if statement.variant == "FunctionDeclaration" {
-        return register_symbol(statement.signature.name, "function", existing);
+        return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing);
     }
     if statement.variant == "StructDeclaration" {
-        return register_symbol(statement.name, "struct", existing);
+        return register_symbol(statement.name, "struct", statement.name_span, existing);
     }
     if statement.variant == "EnumDeclaration" {
-        return register_symbol(statement.name, "enum", existing);
+        return register_symbol(statement.name, "enum", statement.name_span, existing);
     }
     if statement.variant == "InterfaceDeclaration" {
-        return register_symbol(statement.name, "interface", existing);
+        return register_symbol(statement.name, "interface", statement.name_span, existing);
     }
     if statement.variant == "ModelDeclaration" {
-        return register_symbol(statement.name, "model", existing);
+        return register_symbol(statement.name, "model", statement.name_span, existing);
     }
     if statement.variant == "PipelineDeclaration" {
-        return register_symbol(statement.signature.name, "pipeline", existing);
+        return register_symbol(statement.signature.name, "pipeline", statement.signature.name_span, existing);
     }
     if statement.variant == "ToolDeclaration" {
-        return register_symbol(statement.signature.name, "tool", existing);
+        return register_symbol(statement.signature.name, "tool", statement.signature.name_span, existing);
     }
     if statement.variant == "TestDeclaration" {
-        return register_symbol(statement.name, "test", existing);
+        return register_symbol(statement.name, "test", statement.name_span, existing);
     }
     if statement.variant == "TypeAliasDeclaration" {
-        return register_symbol(statement.name, "type", existing);
+        return register_symbol(statement.name, "type", statement.name_span, existing);
     }
     if statement.variant == "VariableDeclaration" {
-        return register_symbol(statement.name, "variable", existing);
+        return register_symbol(statement.name, "variable", statement.span, existing);
     }
     return SymbolCollectionResult {
         symbols: existing,
@@ -125,10 +125,10 @@ fn check_program_scopes(program -> Program, interfaces -> Statement[]) -> Diagno
 
 fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces -> Statement[]) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
-        return register_local_symbol(bindings, statement.name, "variable");
+        return register_local_symbol(bindings, statement.name, "variable", statement.span);
     }
     if statement.variant == "FunctionDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "function");
+        let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_function_signature(statement.signature));
         let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces);
@@ -138,7 +138,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "StructDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "struct");
+        let registration = register_local_symbol(bindings, statement.name, "struct", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
         diagnostics = diagnostics.concat(check_struct_fields(statement.fields));
@@ -159,7 +159,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "EnumDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "enum");
+        let registration = register_local_symbol(bindings, statement.name, "enum", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
         diagnostics = diagnostics.concat(check_enum_variants(statement.variants));
@@ -169,7 +169,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "InterfaceDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "interface");
+        let registration = register_local_symbol(bindings, statement.name, "interface", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
         diagnostics = diagnostics.concat(check_interface_members(statement.members));
@@ -179,7 +179,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "ModelDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "model");
+        let registration = register_local_symbol(bindings, statement.name, "model", statement.name_span);
         let diagnostics = registration.diagnostics.concat(check_model_properties(statement.properties));
         return ScopeResult {
             bindings: registration.bindings,
@@ -187,7 +187,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "PipelineDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "pipeline");
+        let registration = register_local_symbol(bindings, statement.signature.name, "pipeline", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_function_signature(statement.signature));
         diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces));
@@ -197,7 +197,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "ToolDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "tool");
+        let registration = register_local_symbol(bindings, statement.signature.name, "tool", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         diagnostics = diagnostics.concat(check_function_signature(statement.signature));
         diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces));
@@ -207,7 +207,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "TestDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "test");
+        let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span);
         let diagnostics = registration.diagnostics.concat(check_block(statement.body, [], interfaces));
         return ScopeResult {
             bindings: registration.bindings,
@@ -266,7 +266,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "TypeAliasDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "type");
+        let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span);
         let diagnostics = registration.diagnostics.concat(check_type_parameters(statement.type_parameters));
         return ScopeResult {
             bindings: registration.bindings,
@@ -290,7 +290,7 @@ fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult {
     let mut diagnostics -> Diagnostic[] = [];
 
     for parameter in signature.parameters {
-        let registration = register_local_symbol(bindings, parameter.name, "parameter");
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span);
         bindings = registration.bindings;
         diagnostics = diagnostics.concat(registration.diagnostics);
     }
@@ -368,7 +368,9 @@ fn check_struct_fields(fields -> FieldDeclaration[]) -> Diagnostic[] {
     for field in fields {
         let name = field.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "struct field")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -581,7 +583,9 @@ fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[] {
         diagnostics = diagnostics.concat(check_function_signature(method.signature));
         let name = method.signature.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "method")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -597,7 +601,9 @@ fn check_enum_variants(variants -> EnumVariant[]) -> Diagnostic[] {
     for variant in variants {
         let name = variant.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "enum variant")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -614,7 +620,9 @@ fn check_interface_members(members -> FunctionSignature[]) -> Diagnostic[] {
         diagnostics = diagnostics.concat(check_function_signature(member));
         let name = member.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "interface member")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -630,7 +638,9 @@ fn check_model_properties(properties -> ModelProperty[]) -> Diagnostic[] {
     for property in properties {
         let name = property.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "model property")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -650,7 +660,9 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
     for type_parameter in type_parameters {
         let name = type_parameter.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "type parameter")]);
+            diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span))
+            ]);
         } else {
             seen = seen.concat([name]);
         }
@@ -729,38 +741,38 @@ fn contains_string(items -> string[], candidate -> string) -> boolean {
     return false;
 }
 
-fn register_local_symbol(bindings -> SymbolEntry[], name -> string, kind -> string) -> ScopeResult {
+fn register_local_symbol(bindings -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> ScopeResult {
     if has_symbol(bindings, name) {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: [make_duplicate_symbol_diagnostic(name, kind)],
+            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))],
         };
     }
 
-    let updated = append_symbol(bindings, name, kind);
+    let updated = append_symbol(bindings, name, kind, span);
     return ScopeResult {
         bindings: updated,
         diagnostics: [],
     };
 }
 
-fn register_symbol(name -> string, kind -> string, existing -> SymbolEntry[]) -> SymbolCollectionResult {
+fn register_symbol(name -> string, kind -> string, span -> SourceSpan?, existing -> SymbolEntry[]) -> SymbolCollectionResult {
     if has_symbol(existing, name) {
         return SymbolCollectionResult {
             symbols: existing,
-            diagnostics: [make_duplicate_symbol_diagnostic(name, kind)],
+            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))],
         };
     }
 
     return SymbolCollectionResult {
-        symbols: append_symbol(existing, name, kind),
+        symbols: append_symbol(existing, name, kind, span),
         diagnostics: [],
     };
 }
 
-fn append_symbol(symbols -> SymbolEntry[], name -> string, kind -> string) -> SymbolEntry[] {
+fn append_symbol(symbols -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> SymbolEntry[] {
     let mut updated -> SymbolEntry[] = clone_bindings(symbols);
-    return updated.concat([SymbolEntry { name: name, kind: kind }]);
+    return updated.concat([SymbolEntry { name: name, kind: kind, span: span }]);
 }
 
 fn clone_bindings(source -> SymbolEntry[]) -> SymbolEntry[] {
@@ -804,11 +816,23 @@ fn make_interface_no_type_arguments_diagnostic(struct_name -> string, annotation
     };
 }
 
-fn make_duplicate_symbol_diagnostic(name -> string, kind -> string) -> Diagnostic {
+fn token_from_name(name -> string, span -> SourceSpan?) -> Token? {
+    if span == null {
+        return null;
+    }
+    return Token {
+        kind: TokenKind.Identifier { value: name },
+        lexeme: name,
+        line: span.start_line,
+        column: span.start_column,
+    };
+}
+
+fn make_duplicate_symbol_diagnostic(name -> string, kind -> string, token -> Token?) -> Diagnostic {
     return Diagnostic {
         code: "E0001",
         message: "duplicate " + kind + " `" + name + "` declared",
-        primary: null,
+        primary: token,
     };
 }
 

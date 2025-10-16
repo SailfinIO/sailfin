@@ -563,6 +563,7 @@ fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseRe
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -621,6 +622,7 @@ fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseRe
 
     let statement = Statement.StructDeclaration {
         name: name,
+        name_span: name_span,
         type_parameters: type_parameters,
         implements_types: implements_types,
         fields: fields,
@@ -641,6 +643,7 @@ fn parse_type_alias(parser -> Parser, decorators -> Decorator[]) -> StatementPar
         return parse_unknown(original);
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -669,6 +672,7 @@ fn parse_type_alias(parser -> Parser, decorators -> Decorator[]) -> StatementPar
 
     let statement = Statement.TypeAliasDeclaration {
         name: name,
+        name_span: name_span,
         type_parameters: type_parameters,
         aliased_type: aliased_type,
         decorators: decorators,
@@ -687,6 +691,7 @@ fn parse_interface(parser -> Parser, decorators -> Decorator[]) -> StatementPars
         return parse_unknown(original);
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -729,6 +734,7 @@ fn parse_interface(parser -> Parser, decorators -> Decorator[]) -> StatementPars
 
     let statement = Statement.InterfaceDeclaration {
         name: name,
+        name_span: name_span,
         type_parameters: type_parameters,
         members: members,
         decorators: decorators,
@@ -747,6 +753,7 @@ fn parse_enum(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
         return parse_unknown(original);
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -769,7 +776,7 @@ fn parse_enum(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
             break;
         }
 
-    let variant_result = parse_enum_variant(parser);
+        let variant_result = parse_enum_variant(parser);
         if variant_result.success {
             parser = variant_result.parser;
             if variant_result.variant != null {
@@ -784,6 +791,7 @@ fn parse_enum(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
 
     let statement = Statement.EnumDeclaration {
         name: name,
+        name_span: name_span,
         type_parameters: type_parameters,
         variants: variants,
         decorators: decorators,
@@ -817,6 +825,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
         return InterfaceMemberParseResult { parser: original, signature: null, success: false };
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     current = parser_advance_raw(current);
 
     let type_param_result = parse_type_parameter_clause(current);
@@ -863,6 +872,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
+        name_span: name_span,
     };
 
     return InterfaceMemberParseResult {
@@ -880,6 +890,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
         return EnumVariantParseResult { parser: original, variant: null, success: false };
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     current = parser_advance_raw(current);
 
     let mut fields -> FieldDeclaration[] = [];
@@ -922,6 +933,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
     let variant = EnumVariant {
         name: name,
         fields: fields,
+        name_span: name_span,
     };
 
     return EnumVariantParseResult {
@@ -949,6 +961,7 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
     }
 
     let name = identifier_text(token_to_use);
+    let name_span = source_span_from_tokens([token_to_use]);
     current = parser_advance_raw(current);
 
     current = skip_trivia(current);
@@ -997,6 +1010,7 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
+        name_span: name_span,
     };
 
     return StructFieldParseResult {
@@ -1023,6 +1037,7 @@ fn parse_model(parser -> Parser, decorators -> Decorator[]) -> StatementParseRes
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     parser = skip_trivia(parser);
@@ -1079,6 +1094,7 @@ fn parse_model(parser -> Parser, decorators -> Decorator[]) -> StatementParseRes
 
     let statement = Statement.ModelDeclaration {
         name: name,
+        name_span: name_span,
         model_type: model_type,
         properties: properties,
         effects: effects,
@@ -1094,6 +1110,7 @@ fn parse_pipeline(parser -> Parser, decorators -> Decorator[]) -> StatementParse
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -1136,6 +1153,7 @@ fn parse_pipeline(parser -> Parser, decorators -> Decorator[]) -> StatementParse
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
+        name_span: name_span,
     };
 
     let statement = Statement.PipelineDeclaration {
@@ -1153,6 +1171,7 @@ fn parse_tool(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     parser = skip_trivia(parser);
@@ -1212,6 +1231,7 @@ fn parse_test(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
     if name_text.length == 0 {
         return parse_unknown(original);
     }
+    let name_span = source_span_from_tokens(name_capture.tokens);
     let name = normalize_test_name(name_text);
 
     let effect_result = parse_effect_list(parser);
@@ -1226,6 +1246,7 @@ fn parse_test(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
 
     let statement = Statement.TestDeclaration {
         name: name,
+        name_span: name_span,
         body: body,
         effects: inferred_effects,
         decorators: decorators,
@@ -1259,6 +1280,7 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> 
     parser = skip_trivia(parser);
     let name_token = parser_peek_raw(parser);
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     parser = parser_advance_raw(parser);
 
     let type_param_result = parse_type_parameter_clause(parser);
@@ -1301,6 +1323,7 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> 
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
+        name_span: name_span,
     };
 
     let statement = Statement.FunctionDeclaration {
@@ -1362,6 +1385,7 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
     }
 
     let name = identifier_text(token_to_use);
+    let name_span = source_span_from_tokens([token_to_use]);
     current = parser_advance_raw(current);
 
     current = skip_trivia(current);
@@ -1391,6 +1415,7 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
+        name_span: name_span,
     };
 
     return StructFieldParseResult {
@@ -1430,6 +1455,7 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
     let property = ModelProperty {
         name: name,
         value: value_expression,
+        span: source_span_from_tokens([name_token]),
     };
 
     return ModelPropertyParseResult { parser: current, property: property, success: true };
@@ -1460,6 +1486,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
         return MethodParseResult { parser: parser, method: null, success: false };
     }
     let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
     current = parser_advance_raw(current);
 
     let type_param_result = parse_type_parameter_clause(current);
@@ -1502,6 +1529,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
+        name_span: name_span,
     };
 
     let method = MethodDeclaration {
@@ -1669,7 +1697,11 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
                 if bound_tokens.length > 0 && bound_text.length > 0 {
                     bound = TypeAnnotation { text: bound_text };
                 }
-                parameters = append_type_parameter(parameters, TypeParameter { name: name_text, bound: bound });
+                let name_span = source_span_from_tokens(name_tokens);
+                parameters = append_type_parameter(
+                    parameters,
+                    TypeParameter { name: name_text, bound: bound, span: name_span },
+                );
             }
         }
         index += 1;

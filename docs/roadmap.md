@@ -46,8 +46,8 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
   - [x] Locked regression coverage for duplicate symbol diagnostics across structs, enums, interfaces, models, and type parameters via `compiler/tests/test_stage1_typecheck_duplicates.py`.
   - [x] Implements clauses now enforce interface type argument counts, rejecting missing or extra generics with coverage in `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_type_arguments_for_generic_interface_reports_diagnostic` and `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_mismatched_type_argument_count_reports_diagnostic`.
-- [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path.
-- [ ] CLI effect fixer — Teach the stage1 CLI to apply suggested `![effect]` annotations automatically when developers accept fix prompts.
+- [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path - if sfn stage2 cli has already landed, implement there instead.
+- [ ] CLI effect fixer — Teach the stage1 CLI to apply suggested `![effect]` annotations automatically when developers accept fix prompts if sfn stage2 cli has already landed, implement there instead.
 
 4. **Registry & Capsule Workflow**
 

@@ -62,7 +62,7 @@ def analyze_statement(statement):
         qualified = "tool " + signature.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "TestDeclaration":
-        signature = FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[])
+        signature = FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=None)
         qualified = "test " + statement.name
         return analyze_routine(signature, statement.body, statement.decorators, qualified)
     if statement.variant == "StructDeclaration":

@@ -66,6 +66,7 @@ fn analyze_statement(statement -> Statement) -> EffectViolation[] {
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
+            name_span: null,
         };
         let qualified = "test " + statement.name;
         return analyze_routine(signature, statement.body, statement.decorators, qualified);

@@ -99,6 +99,12 @@ def test_typechecker_reports_duplicate_symbols(_label: str) -> None:
         f"expected substring: {expected!r}, messages: {messages}"
     )
 
+    primaries = [
+        diagnostic.primary for diagnostic in result.diagnostics if expected in diagnostic.message]
+    assert any(primary is not None for primary in primaries), (
+        f"typechecker did not attach a primary token for duplicate diagnostic '{expected}'"
+    )
+
 
 def _select_case(label: str) -> tuple[str, str]:
     for case in DUPLICATE_CASES:

@@ -137,6 +137,12 @@ def test_typechecker_reports_duplicate_functions() -> None:
         "Stage1 typechecker did not surface duplicate function diagnostics"
     )
 
+    matching = [
+        diagnostic for diagnostic in result.diagnostics if "duplicate function `main`" in diagnostic.message]
+    assert any(diagnostic.primary is not None for diagnostic in matching), (
+        "duplicate function diagnostic did not include a primary token"
+    )
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_import_export_alias_round_trip() -> None:
