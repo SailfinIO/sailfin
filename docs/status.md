@@ -38,7 +38,12 @@ roadmaps.
   user-defined structs without Python fallbacks; the behaviour is exercised by
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_struct_literals`.
   Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
-  inference and prepare typed iteration over richer aggregates. Interface
+  inference and prepare typed iteration over richer aggregates. LLVM lowering
+  now interprets that metadata for struct element types, so `.for` loops can
+  walk `Pair[]` (and other user-defined aggregates) without defaulting to
+  pointer fallbacks; regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_struct_arrays`.
+  Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
   ASTs. The LLVM lowering pipeline surfaces this information via

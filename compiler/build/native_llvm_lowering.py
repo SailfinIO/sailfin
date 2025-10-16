@@ -2519,13 +2519,33 @@ def array_struct_type_for_element(element_type):
     return "{ " + element_type + "*, i64 }"
 
 def array_pointer_element_type(llvm_type):
-    if llvm_type == "{ double*, i64 }*":
-        return "double"
-    if llvm_type == "{ i64*, i64 }*":
-        return "i64"
-    if llvm_type == "{ i1*, i64 }*":
-        return "i1"
-    return ""
+    trimmed = trim_text(llvm_type)
+    if len(trimmed) == 0:
+        return ""
+    if trimmed[len(trimmed) - 1] != "*":
+        return ""
+    without_pointer = trim_text(substring(trimmed, 0, len(trimmed) - 1))
+    if len(without_pointer) < 2:
+        return ""
+    if without_pointer[0] != "{":
+        return ""
+    if without_pointer[len(without_pointer) - 1] != "}":
+        return ""
+    inner = trim_text(substring(without_pointer, 1, len(without_pointer) - 1))
+    if len(inner) == 0:
+        return ""
+    comma_index = index_of(inner, ",")
+    if comma_index < 0:
+        return ""
+    first_segment = trim_text(substring(inner, 0, comma_index))
+    if len(first_segment) == 0:
+        return ""
+    if first_segment[len(first_segment) - 1] != "*":
+        return ""
+    element = trim_text(substring(first_segment, 0, len(first_segment) - 1))
+    if len(element) == 0:
+        return ""
+    return element
 
 def unwrap_move_wrapper(annotation):
     trimmed = trim_text(annotation)

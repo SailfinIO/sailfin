@@ -23,7 +23,6 @@ array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
-
 class Parser:
     def __init__(self, tokens, index):
         self.tokens = tokens
@@ -31,7 +30,6 @@ class Parser:
 
     def __repr__(self):
         return runtime.struct_repr('Parser', [runtime.struct_field('tokens', self.tokens), runtime.struct_field('index', self.index)])
-
 
 class StatementParseResult:
     def __init__(self, parser, statement):
@@ -41,7 +39,6 @@ class StatementParseResult:
     def __repr__(self):
         return runtime.struct_repr('StatementParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('statement', self.statement)])
 
-
 class ParameterParseResult:
     def __init__(self, parser, parameter):
         self.parser = parser
@@ -50,7 +47,6 @@ class ParameterParseResult:
     def __repr__(self):
         return runtime.struct_repr('ParameterParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('parameter', self.parameter)])
 
-
 class ParameterListParseResult:
     def __init__(self, parser, parameters):
         self.parser = parser
@@ -58,7 +54,6 @@ class ParameterListParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('ParameterListParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('parameters', self.parameters)])
-
 
 class StructFieldParseResult:
     def __init__(self, parser, success, field=None):
@@ -69,7 +64,6 @@ class StructFieldParseResult:
     def __repr__(self):
         return runtime.struct_repr('StructFieldParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('field', self.field), runtime.struct_field('success', self.success)])
 
-
 class ModelPropertyParseResult:
     def __init__(self, parser, success, property=None):
         self.parser = parser
@@ -78,7 +72,6 @@ class ModelPropertyParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('ModelPropertyParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('property', self.property), runtime.struct_field('success', self.success)])
-
 
 class MethodParseResult:
     def __init__(self, parser, success, method=None):
@@ -89,7 +82,6 @@ class MethodParseResult:
     def __repr__(self):
         return runtime.struct_repr('MethodParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('method', self.method), runtime.struct_field('success', self.success)])
 
-
 class InterfaceMemberParseResult:
     def __init__(self, parser, success, signature=None):
         self.parser = parser
@@ -99,7 +91,6 @@ class InterfaceMemberParseResult:
     def __repr__(self):
         return runtime.struct_repr('InterfaceMemberParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('signature', self.signature), runtime.struct_field('success', self.success)])
 
-
 class SpecifierListParseResult:
     def __init__(self, parser, specifiers):
         self.parser = parser
@@ -108,7 +99,6 @@ class SpecifierListParseResult:
     def __repr__(self):
         return runtime.struct_repr('SpecifierListParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('specifiers', self.specifiers)])
 
-
 class NamedSpecifier:
     def __init__(self, name, alias=None):
         self.name = name
@@ -116,7 +106,6 @@ class NamedSpecifier:
 
     def __repr__(self):
         return runtime.struct_repr('NamedSpecifier', [runtime.struct_field('name', self.name), runtime.struct_field('alias', self.alias)])
-
 
 class EnumVariantParseResult:
     def __init__(self, parser, success, variant=None):
@@ -127,7 +116,6 @@ class EnumVariantParseResult:
     def __repr__(self):
         return runtime.struct_repr('EnumVariantParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('variant', self.variant), runtime.struct_field('success', self.success)])
 
-
 class TypeParameterParseResult:
     def __init__(self, parser, parameters):
         self.parser = parser
@@ -135,7 +123,6 @@ class TypeParameterParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('TypeParameterParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('parameters', self.parameters)])
-
 
 class ImplementsParseResult:
     def __init__(self, parser, types, found):
@@ -146,7 +133,6 @@ class ImplementsParseResult:
     def __repr__(self):
         return runtime.struct_repr('ImplementsParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('types', self.types), runtime.struct_field('found', self.found)])
 
-
 class DecoratorParseResult:
     def __init__(self, parser, decorators):
         self.parser = parser
@@ -154,7 +140,6 @@ class DecoratorParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('DecoratorParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('decorators', self.decorators)])
-
 
 class BlockStatementParseResult:
     def __init__(self, parser, success, statement=None):
@@ -165,7 +150,6 @@ class BlockStatementParseResult:
     def __repr__(self):
         return runtime.struct_repr('BlockStatementParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('statement', self.statement), runtime.struct_field('success', self.success)])
 
-
 class ParenthesizedParseResult:
     def __init__(self, parser, tokens, success):
         self.parser = parser
@@ -174,7 +158,6 @@ class ParenthesizedParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('ParenthesizedParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('tokens', self.tokens), runtime.struct_field('success', self.success)])
-
 
 class MatchCasesParseResult:
     def __init__(self, parser, cases, success):
@@ -185,7 +168,6 @@ class MatchCasesParseResult:
     def __repr__(self):
         return runtime.struct_repr('MatchCasesParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('cases', self.cases), runtime.struct_field('success', self.success)])
 
-
 class MatchCaseParseResult:
     def __init__(self, parser, success, case=None):
         self.parser = parser
@@ -194,7 +176,6 @@ class MatchCaseParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('MatchCaseParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('case', self.case), runtime.struct_field('success', self.success)])
-
 
 class MatchCaseTokenSplit:
     def __init__(self, pattern_tokens, guard_tokens, has_guard):
@@ -205,7 +186,6 @@ class MatchCaseTokenSplit:
     def __repr__(self):
         return runtime.struct_repr('MatchCaseTokenSplit', [runtime.struct_field('pattern_tokens', self.pattern_tokens), runtime.struct_field('guard_tokens', self.guard_tokens), runtime.struct_field('has_guard', self.has_guard)])
 
-
 class ExpressionTokens:
     def __init__(self, tokens, index):
         self.tokens = tokens
@@ -213,7 +193,6 @@ class ExpressionTokens:
 
     def __repr__(self):
         return runtime.struct_repr('ExpressionTokens', [runtime.struct_field('tokens', self.tokens), runtime.struct_field('index', self.index)])
-
 
 class ExpressionParseResult:
     def __init__(self, state, expression, success):
@@ -224,7 +203,6 @@ class ExpressionParseResult:
     def __repr__(self):
         return runtime.struct_repr('ExpressionParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('expression', self.expression), runtime.struct_field('success', self.success)])
 
-
 class LambdaParameterParseResult:
     def __init__(self, state, parameter, success):
         self.state = state
@@ -233,7 +211,6 @@ class LambdaParameterParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('LambdaParameterParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('parameter', self.parameter), runtime.struct_field('success', self.success)])
-
 
 class LambdaParameterListParseResult:
     def __init__(self, state, parameters, success):
@@ -244,7 +221,6 @@ class LambdaParameterListParseResult:
     def __repr__(self):
         return runtime.struct_repr('LambdaParameterListParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('parameters', self.parameters), runtime.struct_field('success', self.success)])
 
-
 class ExpressionCollectResult:
     def __init__(self, state, tokens, success):
         self.state = state
@@ -253,7 +229,6 @@ class ExpressionCollectResult:
 
     def __repr__(self):
         return runtime.struct_repr('ExpressionCollectResult', [runtime.struct_field('state', self.state), runtime.struct_field('tokens', self.tokens), runtime.struct_field('success', self.success)])
-
 
 class ExpressionBlockParseResult:
     def __init__(self, state, tokens, success):
@@ -264,7 +239,6 @@ class ExpressionBlockParseResult:
     def __repr__(self):
         return runtime.struct_repr('ExpressionBlockParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('tokens', self.tokens), runtime.struct_field('success', self.success)])
 
-
 class CallArgumentsParseResult:
     def __init__(self, state, arguments, success):
         self.state = state
@@ -273,7 +247,6 @@ class CallArgumentsParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('CallArgumentsParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('arguments', self.arguments), runtime.struct_field('success', self.success)])
-
 
 class ArrayLiteralParseResult:
     def __init__(self, state, elements, success):
@@ -284,7 +257,6 @@ class ArrayLiteralParseResult:
     def __repr__(self):
         return runtime.struct_repr('ArrayLiteralParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('elements', self.elements), runtime.struct_field('success', self.success)])
 
-
 class ObjectLiteralParseResult:
     def __init__(self, state, fields, success):
         self.state = state
@@ -294,7 +266,6 @@ class ObjectLiteralParseResult:
     def __repr__(self):
         return runtime.struct_repr('ObjectLiteralParseResult', [runtime.struct_field('state', self.state), runtime.struct_field('fields', self.fields), runtime.struct_field('success', self.success)])
 
-
 class StructTypeNameResult:
     def __init__(self, parts, success):
         self.parts = parts
@@ -302,7 +273,6 @@ class StructTypeNameResult:
 
     def __repr__(self):
         return runtime.struct_repr('StructTypeNameResult', [runtime.struct_field('parts', self.parts), runtime.struct_field('success', self.success)])
-
 
 class CaptureResult:
     def __init__(self, parser, tokens):
@@ -312,7 +282,6 @@ class CaptureResult:
     def __repr__(self):
         return runtime.struct_repr('CaptureResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('tokens', self.tokens)])
 
-
 class EffectParseResult:
     def __init__(self, parser, effects):
         self.parser = parser
@@ -321,7 +290,6 @@ class EffectParseResult:
     def __repr__(self):
         return runtime.struct_repr('EffectParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('effects', self.effects)])
 
-
 class BlockParseResult:
     def __init__(self, parser, block):
         self.parser = parser
@@ -329,7 +297,6 @@ class BlockParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('BlockParseResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('block', self.block)])
-
 
 class PatternCaptureResult:
     def __init__(self, parser, tokens, success):
@@ -340,11 +307,9 @@ class PatternCaptureResult:
     def __repr__(self):
         return runtime.struct_repr('PatternCaptureResult', [runtime.struct_field('parser', self.parser), runtime.struct_field('tokens', self.tokens), runtime.struct_field('success', self.success)])
 
-
 def parse_program(source):
     tokens = lex(source)
     return parse_tokens(tokens)
-
 
 def parse_tokens(tokens):
     parser = Parser(tokens=tokens, index=0)
@@ -359,7 +324,6 @@ def parse_tokens(tokens):
         statements = append_statement(statements, result.statement)
         parser = skip_trivia(parser)
     return Program(statements=statements)
-
 
 def parse_statement(parser):
     original = parser
@@ -425,7 +389,6 @@ def parse_statement(parser):
         return parse_unknown(original)
     return parse_unknown(parser)
 
-
 def parse_import(parser):
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "import")
@@ -440,12 +403,10 @@ def parse_import(parser):
     source = trim_text(tokens_to_text(capture.tokens))
     source = strip_surrounding_quotes(source)
     parser = skip_trivia(parser)
-    if parser_peek_raw(parser).kind.variant == "Symbol" and parser_peek_raw(parser).kind.value == ";":
+    if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'ImportDeclaration', [runtime.enum_field(
-        'specifiers', import_specifiers), runtime.enum_field('source', source)])
+    statement = runtime.enum_instantiate(Statement, 'ImportDeclaration', [runtime.enum_field('specifiers', import_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_export(parser):
     parser = skip_trivia(parser)
@@ -461,12 +422,10 @@ def parse_export(parser):
     source = trim_text(tokens_to_text(capture.tokens))
     source = strip_surrounding_quotes(source)
     parser = skip_trivia(parser)
-    if parser_peek_raw(parser).kind.variant == "Symbol" and parser_peek_raw(parser).kind.value == ";":
+    if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'ExportDeclaration', [runtime.enum_field(
-        'specifiers', export_specifiers), runtime.enum_field('source', source)])
+    statement = runtime.enum_instantiate(Statement, 'ExportDeclaration', [runtime.enum_field('specifiers', export_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_variable(parser):
     parser = skip_trivia(parser)
@@ -489,7 +448,7 @@ def parse_variable(parser):
     type_annotation = None
     parser = skip_trivia(parser)
     separator = parser_peek_raw(parser)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         statement_tokens = append_token(statement_tokens, separator)
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["=", ";"])
@@ -497,8 +456,7 @@ def parse_variable(parser):
         while True:
             if index >= len(capture.tokens):
                 break
-            statement_tokens = append_token(
-                statement_tokens, capture.tokens[index])
+            statement_tokens = append_token(statement_tokens, capture.tokens[index])
             index += 1
         parser = capture.parser
         text = trim_text(tokens_to_text(capture.tokens))
@@ -508,7 +466,7 @@ def parse_variable(parser):
     initializer_span = None
     parser = skip_trivia(parser)
     assign = parser_peek_raw(parser)
-    if assign.kind.variant == "Symbol" and assign.kind.value == "=":
+    if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
         statement_tokens = append_token(statement_tokens, assign)
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), [";"])
@@ -516,8 +474,7 @@ def parse_variable(parser):
         while True:
             if index >= len(capture.tokens):
                 break
-            statement_tokens = append_token(
-                statement_tokens, capture.tokens[index])
+            statement_tokens = append_token(statement_tokens, capture.tokens[index])
             index += 1
         parser = capture.parser
         if len(capture.tokens) > 0:
@@ -525,14 +482,12 @@ def parse_variable(parser):
             initializer = expression_from_tokens(capture.tokens)
     parser = skip_trivia(parser)
     terminator = parser_peek_raw(parser)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         statement_tokens = append_token(statement_tokens, terminator)
         parser = parser_advance_raw(parser)
     span = source_span_from_tokens(statement_tokens)
-    statement = runtime.enum_instantiate(Statement, 'VariableDeclaration', [runtime.enum_field('name', name), runtime.enum_field('mutable', mutable_flag), runtime.enum_field(
-        'type_annotation', type_annotation), runtime.enum_field('initializer', initializer), runtime.enum_field('span', span), runtime.enum_field('initializer_span', initializer_span)])
+    statement = runtime.enum_instantiate(Statement, 'VariableDeclaration', [runtime.enum_field('name', name), runtime.enum_field('mutable', mutable_flag), runtime.enum_field('type_annotation', type_annotation), runtime.enum_field('initializer', initializer), runtime.enum_field('span', span), runtime.enum_field('initializer_span', initializer_span)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_specifier_list(parser):
     parser = skip_trivia(parser)
@@ -541,7 +496,7 @@ def parse_specifier_list(parser):
     parser = skip_trivia(parser)
     while True:
         current = parser_peek_raw(parser)
-        if current.kind.variant == "Symbol" and current.kind.value == "}":
+        if current.kind.variant == "Symbol"  and  current.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if current.kind.variant != "Identifier":
@@ -561,15 +516,14 @@ def parse_specifier_list(parser):
                 parser = skip_trivia(parser)
         specifiers = (specifiers) + ([NamedSpecifier(name=name, alias=alias)])
         separator = parser_peek_raw(parser)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             parser = parser_advance_raw(parser)
             parser = skip_trivia(parser)
             continue
     parser = skip_trivia(parser)
-    if parser_peek_raw(parser).kind.variant == "Symbol" and parser_peek_raw(parser).kind.value == "}":
+    if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == "}":
         parser = parser_advance_raw(parser)
     return SpecifierListParseResult(parser=parser, specifiers=specifiers)
-
 
 def build_import_specifiers(values):
     result = []
@@ -578,11 +532,9 @@ def build_import_specifiers(values):
         if index >= len(values):
             break
         entry = values[index]
-        result = (result) + \
-            ([ImportSpecifier(name=entry.name, alias=entry.alias)])
+        result = (result) + ([ImportSpecifier(name=entry.name, alias=entry.alias)])
         index += 1
     return result
-
 
 def build_export_specifiers(values):
     result = []
@@ -591,11 +543,9 @@ def build_export_specifiers(values):
         if index >= len(values):
             break
         entry = values[index]
-        result = (result) + \
-            ([ExportSpecifier(name=entry.name, alias=entry.alias)])
+        result = (result) + ([ExportSpecifier(name=entry.name, alias=entry.alias)])
         index += 1
     return result
-
 
 def parse_struct(parser, decorators):
     parser = skip_trivia(parser)
@@ -624,13 +574,13 @@ def parse_struct(parser, decorators):
         member_decorators = decorator_result.decorators
         parser = skip_trivia(parser)
         token = parser_peek_raw(parser)
-        if token.kind.variant == "Symbol" and token.kind.value == "}":
+        if token.kind.variant == "Symbol"  and  token.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if token.kind.variant == "EndOfFile":
             break
         field_result = parse_struct_field(parser)
-        if field_result.success and len(member_decorators) == 0:
+        if field_result.success  and  len(member_decorators) == 0:
             if field_result.field != None:
                 fields = append_field(fields, field_result.field)
             parser = field_result.parser
@@ -642,10 +592,8 @@ def parse_struct(parser, decorators):
             parser = method_result.parser
             continue
         parser = skip_struct_member(member_start)
-    statement = runtime.enum_instantiate(Statement, 'StructDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field(
-        'type_parameters', type_parameters), runtime.enum_field('implements_types', implements_types), runtime.enum_field('fields', fields), runtime.enum_field('methods', methods), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'StructDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('implements_types', implements_types), runtime.enum_field('fields', fields), runtime.enum_field('methods', methods), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_type_alias(parser, decorators):
     original = parser
@@ -663,7 +611,7 @@ def parse_type_alias(parser, decorators):
     type_parameters = type_param_result.parameters
     parser = skip_trivia(parser)
     equals = parser_peek_raw(parser)
-    if equals.kind.variant != "Symbol" or equals.kind.value != "=":
+    if equals.kind.variant != "Symbol"  or  equals.kind.value != "=":
         return parse_unknown(original)
     parser = parser_advance_raw(parser)
     capture = collect_until(skip_trivia(parser), [";"])
@@ -673,12 +621,10 @@ def parse_type_alias(parser, decorators):
         return parse_unknown(original)
     aliased_type = TypeAnnotation(text=aliased_text)
     parser = skip_trivia(parser)
-    if parser_peek_raw(parser).kind.variant == "Symbol" and parser_peek_raw(parser).kind.value == ";":
+    if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'TypeAliasDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field(
-        'type_parameters', type_parameters), runtime.enum_field('aliased_type', aliased_type), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'TypeAliasDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('aliased_type', aliased_type), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_interface(parser, decorators):
     original = parser
@@ -701,7 +647,7 @@ def parse_interface(parser, decorators):
     while True:
         parser = skip_trivia(parser)
         token = parser_peek_raw(parser)
-        if token.kind.variant == "Symbol" and token.kind.value == "}":
+        if token.kind.variant == "Symbol"  and  token.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if token.kind.variant == "EndOfFile":
@@ -718,10 +664,8 @@ def parse_interface(parser, decorators):
                 members = append_signature(members, member_result.signature)
             continue
         parser = skip_struct_member(member_start)
-    statement = runtime.enum_instantiate(Statement, 'InterfaceDeclaration', [runtime.enum_field('name', name), runtime.enum_field(
-        'name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('members', members), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'InterfaceDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('members', members), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_enum(parser, decorators):
     original = parser
@@ -744,7 +688,7 @@ def parse_enum(parser, decorators):
     while True:
         parser = skip_trivia(parser)
         token = parser_peek_raw(parser)
-        if token.kind.variant == "Symbol" and token.kind.value == "}":
+        if token.kind.variant == "Symbol"  and  token.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if token.kind.variant == "EndOfFile":
@@ -753,15 +697,12 @@ def parse_enum(parser, decorators):
         if variant_result.success:
             parser = variant_result.parser
             if variant_result.variant != None:
-                variants = append_enum_variant(
-                    variants, variant_result.variant)
+                variants = append_enum_variant(variants, variant_result.variant)
             parser = skip_trailing_comma(parser)
             continue
         parser = skip_struct_member(parser)
-    statement = runtime.enum_instantiate(Statement, 'EnumDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field(
-        'type_parameters', type_parameters), runtime.enum_field('variants', variants), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'EnumDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('variants', variants), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_interface_member(parser, decorators):
     original = parser
@@ -795,7 +736,7 @@ def parse_interface_member(parser, decorators):
     current = skip_trivia(current)
     return_type = None
     separator = parser_peek_raw(current)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         current = parser_advance_raw(current)
         capture = collect_until(skip_trivia(current), ["!", ";", "{"])
         current = capture.parser
@@ -810,12 +751,10 @@ def parse_interface_member(parser, decorators):
     current = skip_trivia(current)
     if current.index < len(current.tokens):
         terminator = parser_peek_raw(current)
-        if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+        if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
-    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type,
-                                  effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
+    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
     return InterfaceMemberParseResult(parser=current, signature=signature, success=True)
-
 
 def parse_enum_variant(parser):
     original = parser
@@ -829,12 +768,12 @@ def parse_enum_variant(parser):
     fields = []
     current = skip_trivia(current)
     next = parser_peek_raw(current)
-    if next.kind.variant == "Symbol" and next.kind.value == "{":
+    if next.kind.variant == "Symbol"  and  next.kind.value == "{":
         current = parser_advance_raw(current)
         while True:
             current = skip_trivia(current)
             token = parser_peek_raw(current)
-            if token.kind.variant == "Symbol" and token.kind.value == "}":
+            if token.kind.variant == "Symbol"  and  token.kind.value == "}":
                 current = parser_advance_raw(current)
                 break
             if token.kind.variant == "EndOfFile":
@@ -848,13 +787,12 @@ def parse_enum_variant(parser):
             current = skip_enum_variant_entry(current)
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
         current = skip_trivia(current)
         terminator = parser_peek_raw(current)
     variant = EnumVariant(name=name, fields=fields, name_span=name_span)
     return EnumVariantParseResult(parser=current, variant=variant, success=True)
-
 
 def parse_enum_variant_field(parser):
     current = skip_trivia(parser)
@@ -873,8 +811,7 @@ def parse_enum_variant_field(parser):
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
-    is_type_sep = separator.kind.variant == "Symbol" and (
-        separator.kind.value == ":" or separator.kind.value == "->")
+    is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
     if not is_type_sep:
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
@@ -901,20 +838,17 @@ def parse_enum_variant_field(parser):
                 current = parser_advance_raw(current)
                 current = skip_trivia(current)
                 maybe_comma = parser_peek_raw(current)
-                if maybe_comma.kind.variant == "Symbol" and maybe_comma.kind.value == ",":
+                if maybe_comma.kind.variant == "Symbol"  and  maybe_comma.kind.value == ",":
                     current = parser_advance_raw(current)
-    field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(
-        text=type_text), mutable=is_mutable, name_span=name_span)
+    field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(text=type_text), mutable=is_mutable, name_span=name_span)
     return StructFieldParseResult(parser=current, field=field, success=True)
-
 
 def skip_trailing_comma(parser):
     current = skip_trivia(parser)
     token = parser_peek_raw(current)
-    if token.kind.variant == "Symbol" and token.kind.value == ",":
+    if token.kind.variant == "Symbol"  and  token.kind.value == ",":
         current = parser_advance_raw(current)
     return current
-
 
 def parse_model(parser, decorators):
     original = parser
@@ -944,30 +878,27 @@ def parse_model(parser, decorators):
     while True:
         parser = skip_trivia(parser)
         token = parser_peek_raw(parser)
-        if token.kind.variant == "Symbol" and token.kind.value == "}":
+        if token.kind.variant == "Symbol"  and  token.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if token.kind.variant == "EndOfFile":
             break
         entry_start = parser
         property_result = parse_model_property(parser)
-        if property_result.success and property_result.property != None:
+        if property_result.success  and  property_result.property != None:
             parser = property_result.parser
-            properties = append_model_property(
-                properties, property_result.property)
+            properties = append_model_property(properties, property_result.property)
             continue
         parser = skip_struct_member(entry_start)
         parser = skip_trivia(parser)
         maybe_close = parser_peek_raw(parser)
-        if maybe_close.kind.variant == "Symbol" and maybe_close.kind.value == "}":
+        if maybe_close.kind.variant == "Symbol"  and  maybe_close.kind.value == "}":
             parser = parser_advance_raw(parser)
             break
         if maybe_close.kind.variant == "EndOfFile":
             break
-    statement = runtime.enum_instantiate(Statement, 'ModelDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field(
-        'model_type', model_type), runtime.enum_field('properties', properties), runtime.enum_field('effects', effects), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'ModelDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('model_type', model_type), runtime.enum_field('properties', properties), runtime.enum_field('effects', effects), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_pipeline(parser, decorators):
     parser = skip_trivia(parser)
@@ -988,7 +919,7 @@ def parse_pipeline(parser, decorators):
     parser = skip_trivia(parser)
     return_type = None
     separator = parser_peek_raw(parser)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["!", "{"])
         parser = capture.parser
@@ -1003,12 +934,9 @@ def parse_pipeline(parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=False, parameters=parameters,
-                                  return_type=return_type, effects=inferred_effects, type_parameters=[], name_span=name_span)
-    statement = runtime.enum_instantiate(Statement, 'PipelineDeclaration', [runtime.enum_field(
-        'signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[], name_span=name_span)
+    statement = runtime.enum_instantiate(Statement, 'PipelineDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_tool(parser, decorators):
     parser = skip_trivia(parser)
@@ -1026,7 +954,7 @@ def parse_tool(parser, decorators):
     parser = skip_trivia(parser)
     return_type = None
     separator = parser_peek_raw(parser)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["!", "{"])
         parser = capture.parser
@@ -1041,12 +969,9 @@ def parse_tool(parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=False, parameters=parameters,
-                                  return_type=return_type, effects=inferred_effects, type_parameters=[])
-    statement = runtime.enum_instantiate(Statement, 'ToolDeclaration', [runtime.enum_field(
-        'signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
+    statement = runtime.enum_instantiate(Statement, 'ToolDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_test(parser, decorators):
     original = parser
@@ -1067,10 +992,8 @@ def parse_test(parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    statement = runtime.enum_instantiate(Statement, 'TestDeclaration', [runtime.enum_field('name', name), runtime.enum_field(
-        'name_span', name_span), runtime.enum_field('body', body), runtime.enum_field('effects', inferred_effects), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'TestDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('body', body), runtime.enum_field('effects', inferred_effects), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_function(parser, starts_with_async, decorators):
     parser = skip_trivia(parser)
@@ -1105,7 +1028,7 @@ def parse_function(parser, starts_with_async, decorators):
     parser = skip_trivia(parser)
     return_type = None
     separator = parser_peek_raw(parser)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["!", "{"])
         parser = capture.parser
@@ -1120,18 +1043,15 @@ def parse_function(parser, starts_with_async, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type,
-                                  effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
-    statement = runtime.enum_instantiate(Statement, 'FunctionDeclaration', [runtime.enum_field(
-        'signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
+    statement = runtime.enum_instantiate(Statement, 'FunctionDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
-
 
 def parse_parameter_list(parser):
     parser = skip_trivia(parser)
     parameters = []
     token = parser_peek_raw(parser)
-    if token.kind.variant == "Symbol" and token.kind.value == ")":
+    if token.kind.variant == "Symbol"  and  token.kind.value == ")":
         parser = parser_advance_raw(parser)
         return ParameterListParseResult(parser=parser, parameters=parameters)
     while True:
@@ -1140,17 +1060,16 @@ def parse_parameter_list(parser):
         parameters = append_parameter(parameters, param_result.parameter)
         parser = skip_trivia(parser)
         separator = parser_peek_raw(parser)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             parser = parser_advance_raw(parser)
             parser = skip_trivia(parser)
             continue
-        if separator.kind.variant == "Symbol" and separator.kind.value == ")":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ")":
             parser = parser_advance_raw(parser)
             break
         if separator.kind.variant == "EndOfFile":
             break
     return ParameterListParseResult(parser=parser, parameters=parameters)
-
 
 def parse_struct_field(parser):
     current = skip_trivia(parser)
@@ -1169,8 +1088,7 @@ def parse_struct_field(parser):
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
-    is_type_sep = separator.kind.variant == "Symbol" and (
-        separator.kind.value == ":" or separator.kind.value == "->")
+    is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
     if not is_type_sep:
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
@@ -1181,13 +1099,11 @@ def parse_struct_field(parser):
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant != "Symbol" or terminator.kind.value != ";":
+    if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
-    field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(
-        text=type_text), mutable=is_mutable, name_span=name_span)
+    field = FieldDeclaration(name=name, type_annotation=TypeAnnotation(text=type_text), mutable=is_mutable, name_span=name_span)
     return StructFieldParseResult(parser=current, field=field, success=True)
-
 
 def parse_model_property(parser):
     current = skip_trivia(parser)
@@ -1198,7 +1114,7 @@ def parse_model_property(parser):
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     equals = parser_peek_raw(current)
-    if equals.kind.variant != "Symbol" or equals.kind.value != "=":
+    if equals.kind.variant != "Symbol"  or  equals.kind.value != "=":
         return ModelPropertyParseResult(parser=parser, property=None, success=False)
     current = parser_advance_raw(current)
     capture = collect_until(skip_trivia(current), [";"])
@@ -1206,13 +1122,11 @@ def parse_model_property(parser):
     value_expression = expression_from_tokens(capture.tokens)
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant != "Symbol" or terminator.kind.value != ";":
+    if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
         return ModelPropertyParseResult(parser=parser, property=None, success=False)
     current = parser_advance_raw(current)
-    property = ModelProperty(
-        name=name, value=value_expression, span=source_span_from_tokens([name_token]))
+    property = ModelProperty(name=name, value=value_expression, span=source_span_from_tokens([name_token]))
     return ModelPropertyParseResult(parser=current, property=property, success=True)
-
 
 def parse_struct_method(parser, decorators):
     current = skip_trivia(parser)
@@ -1245,7 +1159,7 @@ def parse_struct_method(parser, decorators):
     current = skip_trivia(current)
     return_type = None
     separator = parser_peek_raw(current)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         current = parser_advance_raw(current)
         capture = collect_until(skip_trivia(current), ["!", "{"])
         current = capture.parser
@@ -1260,12 +1174,9 @@ def parse_struct_method(parser, decorators):
     block_result = parse_block(current)
     current = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type,
-                                  effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
-    method = MethodDeclaration(
-        signature=signature, body=body, decorators=decorators)
+    signature = FunctionSignature(name=name, is_async=is_async, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
+    method = MethodDeclaration(signature=signature, body=body, decorators=decorators)
     return MethodParseResult(parser=current, method=method, success=True)
-
 
 def parse_decorators(parser):
     current = parser
@@ -1273,7 +1184,7 @@ def parse_decorators(parser):
     while True:
         current = skip_trivia(current)
         token = parser_peek_raw(current)
-        if token.kind.variant != "Symbol" or token.kind.value != "@":
+        if token.kind.variant != "Symbol"  or  token.kind.value != "@":
             break
         decorator_start = current
         current = parser_advance_raw(current)
@@ -1287,7 +1198,7 @@ def parse_decorators(parser):
         current = skip_trivia(current)
         decorator_arguments = []
         after = parser_peek_raw(current)
-        if after.kind.variant == "Symbol" and after.kind.value == "(":
+        if after.kind.variant == "Symbol"  and  after.kind.value == "(":
             paren_result = collect_parenthesized(current)
             if paren_result.success:
                 segment_tokens = []
@@ -1305,33 +1216,32 @@ def parse_decorators(parser):
                         if sym == "<":
                             angle += 1
                         else:
-                            if sym == ">" and angle > 0:
+                            if sym == ">"  and  angle > 0:
                                 angle -= 1
                             else:
                                 if sym == "(":
                                     paren += 1
                                 else:
-                                    if sym == ")" and paren > 0:
+                                    if sym == ")"  and  paren > 0:
                                         paren -= 1
                                     else:
                                         if sym == "{":
                                             brace += 1
                                         else:
-                                            if sym == "}" and brace > 0:
+                                            if sym == "}"  and  brace > 0:
                                                 brace -= 1
                                             else:
                                                 if sym == "[":
                                                     bracket += 1
                                                 else:
-                                                    if sym == "]" and bracket > 0:
+                                                    if sym == "]"  and  bracket > 0:
                                                         bracket -= 1
-                        at_top_level = angle == 0 and paren == 0 and brace == 0 and bracket == 0
-                        if sym == "," and at_top_level:
+                        at_top_level = angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0
+                        if sym == ","  and  at_top_level:
                             trimmed_tokens = trim_token_edges(segment_tokens)
                             argument = parse_decorator_argument(trimmed_tokens)
                             if argument != None:
-                                decorator_arguments = append_decorator_argument(
-                                    decorator_arguments, argument)
+                                decorator_arguments = append_decorator_argument(decorator_arguments, argument)
                             segment_tokens = []
                             index += 1
                             continue
@@ -1340,21 +1250,18 @@ def parse_decorators(parser):
                 final_tokens = trim_token_edges(segment_tokens)
                 trailing_argument = parse_decorator_argument(final_tokens)
                 if trailing_argument != None:
-                    decorator_arguments = append_decorator_argument(
-                        decorator_arguments, trailing_argument)
+                    decorator_arguments = append_decorator_argument(decorator_arguments, trailing_argument)
                 current = paren_result.parser
             else:
                 current = decorator_start
                 break
-        decorators = append_decorator(decorators, Decorator(
-            name=name, arguments=decorator_arguments))
+        decorators = append_decorator(decorators, Decorator(name=name, arguments=decorator_arguments))
     return DecoratorParseResult(parser=current, decorators=decorators)
-
 
 def parse_type_parameter_clause(parser):
     current = skip_trivia(parser)
     token = parser_peek_raw(current)
-    if token.kind.variant != "Symbol" or token.kind.value != "<":
+    if token.kind.variant != "Symbol"  or  token.kind.value != "<":
         return TypeParameterParseResult(parser=parser, parameters=[])
     current = parser_advance_raw(current)
     collected = []
@@ -1388,20 +1295,17 @@ def parse_type_parameter_clause(parser):
             bound_tokens = []
             if colon_index != -1:
                 name_tokens = token_slice(slice_tokens, 0, colon_index)
-                bound_tokens = token_slice(
-                    slice_tokens, colon_index + 1, len(slice_tokens))
+                bound_tokens = token_slice(slice_tokens, colon_index + 1, len(slice_tokens))
             name_text = trim_text(tokens_to_text(name_tokens))
             if len(name_text) > 0:
                 bound = None
                 bound_text = trim_text(tokens_to_text(bound_tokens))
-                if len(bound_tokens) > 0 and len(bound_text) > 0:
+                if len(bound_tokens) > 0  and  len(bound_text) > 0:
                     bound = TypeAnnotation(text=bound_text)
                 name_span = source_span_from_tokens(name_tokens)
-                parameters = append_type_parameter(parameters, TypeParameter(
-                    name=name_text, bound=bound, span=name_span), )
+                parameters = append_type_parameter( parameters, TypeParameter(name=name_text, bound=bound, span=name_span), )
         index += 1
     return TypeParameterParseResult(parser=current, parameters=parameters)
-
 
 def parse_implements_clause(parser):
     current = skip_trivia(parser)
@@ -1419,11 +1323,9 @@ def parse_implements_clause(parser):
             break
         text = trim_text(entries[index])
         if len(text) > 0:
-            implements_types = append_type_annotation(
-                implements_types, TypeAnnotation(text=text))
+            implements_types = append_type_annotation(implements_types, TypeAnnotation(text=text))
         index += 1
     return ImplementsParseResult(parser=current, types=implements_types, found=True)
-
 
 def parse_single_parameter(parser):
     parser = skip_trivia(parser)
@@ -1441,7 +1343,7 @@ def parse_single_parameter(parser):
     type_annotation = None
     parser = skip_trivia(parser)
     separator = parser_peek_raw(parser)
-    if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+    if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), ["=", ",", ")"])
         parser = capture.parser
@@ -1451,7 +1353,7 @@ def parse_single_parameter(parser):
     default_value = None
     parser = skip_trivia(parser)
     assign = parser_peek_raw(parser)
-    if assign.kind.variant == "Symbol" and assign.kind.value == "=":
+    if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
         parser = parser_advance_raw(parser)
         capture = collect_until(skip_trivia(parser), [",", ")"])
         parser = capture.parser
@@ -1459,15 +1361,13 @@ def parse_single_parameter(parser):
     end_index = parser.index
     parameter_tokens = token_slice(tokens_ref, start_index, end_index)
     span = source_span_from_tokens(parameter_tokens)
-    parameter = Parameter(name=name, type_annotation=type_annotation,
-                          default_value=default_value, mutable=is_mutable, span=span)
+    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable, span=span)
     return ParameterParseResult(parser=parser, parameter=parameter)
-
 
 def parse_effect_list(parser):
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
-    if token.kind.variant != "Symbol" or token.kind.value != "!":
+    if token.kind.variant != "Symbol"  or  token.kind.value != "!":
         return EffectParseResult(parser=parser, effects=[])
     parser = parser_advance_raw(parser)
     parser = skip_trivia(parser)
@@ -1476,7 +1376,7 @@ def parse_effect_list(parser):
     parser = skip_trivia(parser)
     while True:
         current = parser_peek_raw(parser)
-        if current.kind.variant == "Symbol" and current.kind.value == "]":
+        if current.kind.variant == "Symbol"  and  current.kind.value == "]":
             parser = parser_advance_raw(parser)
             break
         if current.kind.variant == "Identifier":
@@ -1485,7 +1385,7 @@ def parse_effect_list(parser):
             parser = parser_advance_raw(parser)
             parser = skip_trivia(parser)
             separator = parser_peek_raw(parser)
-            if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+            if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
                 parser = parser_advance_raw(parser)
                 parser = skip_trivia(parser)
                 continue
@@ -1494,11 +1394,10 @@ def parse_effect_list(parser):
         parser = skip_trivia(parser)
     return EffectParseResult(parser=parser, effects=effects)
 
-
 def parse_block(parser):
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
-    if token.kind.variant != "Symbol" or token.kind.value != "{":
+    if token.kind.variant != "Symbol"  or  token.kind.value != "{":
         return BlockParseResult(parser=parser, block=Block(tokens=[], text="", statements=[]))
     start_index = parser.index
     current = parser_advance_raw(parser)
@@ -1507,7 +1406,7 @@ def parse_block(parser):
     while True:
         current = skip_trivia(current)
         tok = parser_peek_raw(current)
-        if tok.kind.variant == "Symbol" and tok.kind.value == "}":
+        if tok.kind.variant == "Symbol"  and  tok.kind.value == "}":
             block_end_index = current.index + 1
             current = parser_advance_raw(current)
             break
@@ -1517,8 +1416,7 @@ def parse_block(parser):
         if block_result.success:
             current = block_result.parser
             if block_result.statement != None:
-                statements = append_statement(
-                    statements, block_result.statement)
+                statements = append_statement(statements, block_result.statement)
             continue
         before_index = current.index
         unknown_result = parse_unknown(current)
@@ -1535,7 +1433,6 @@ def parse_block(parser):
     text = tokens_to_text(block_tokens)
     block = Block(tokens=block_tokens, text=text, statements=statements)
     return BlockParseResult(parser=skip_trivia(current), block=block)
-
 
 def parse_block_statement(parser):
     original = parser
@@ -1568,12 +1465,10 @@ def parse_block_statement(parser):
         if len(decorators) > 0:
             return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_return_statement(after_decorators)
-    expression_result = parse_expression_statement(
-        after_decorators, decorators)
+    expression_result = parse_expression_statement(after_decorators, decorators)
     if expression_result.success:
         return expression_result
     return BlockStatementParseResult(parser=original, statement=None, success=False)
-
 
 def parse_for_statement(parser, decorators):
     original = parser
@@ -1590,14 +1485,12 @@ def parse_for_statement(parser, decorators):
     if in_index == -1:
         return BlockStatementParseResult(parser=original, statement=None, success=False)
     target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index))
-    iterable_tokens = trim_token_edges(token_slice(
-        clause_tokens, in_index + 1, len(clause_tokens)))
-    if len(target_tokens) == 0 or len(iterable_tokens) == 0:
+    iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, len(clause_tokens)))
+    if len(target_tokens) == 0  or  len(iterable_tokens) == 0:
         return BlockStatementParseResult(parser=original, statement=None, success=False)
     target_expression = expression_from_tokens(target_tokens)
     iterable_expression = expression_from_tokens(iterable_tokens)
-    clause = ForClause(target=target_expression,
-                       iterable=iterable_expression, tokens=clause_tokens)
+    clause = ForClause(target=target_expression, iterable=iterable_expression, tokens=clause_tokens)
     body_result = parse_block(current)
     if len(body_result.block.tokens) == 0:
         return BlockStatementParseResult(parser=original, statement=None, success=False)
@@ -1605,12 +1498,10 @@ def parse_for_statement(parser, decorators):
     body = body_result.block
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'ForStatement', [runtime.enum_field(
-        'clause', clause), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'ForStatement', [runtime.enum_field('clause', clause), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_loop_statement(parser, decorators):
     original = parser
@@ -1624,12 +1515,10 @@ def parse_loop_statement(parser, decorators):
     current = body_result.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'LoopStatement', [runtime.enum_field(
-        'body', body_result.block), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'LoopStatement', [runtime.enum_field('body', body_result.block), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_break_statement(parser):
     original = parser
@@ -1639,10 +1528,9 @@ def parse_break_statement(parser):
     current = consume_keyword(current, "break")
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
     return BlockStatementParseResult(parser=current, statement=Statement.BreakStatement(), success=True)
-
 
 def parse_continue_statement(parser):
     original = parser
@@ -1652,10 +1540,9 @@ def parse_continue_statement(parser):
     current = consume_keyword(current, "continue")
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         current = parser_advance_raw(current)
     return BlockStatementParseResult(parser=current, statement=Statement.ContinueStatement(), success=True)
-
 
 def parse_if_statement(parser, decorators):
     original = parser
@@ -1687,8 +1574,7 @@ def parse_if_statement(parser, decorators):
             if nested_result.statement == None:
                 return BlockStatementParseResult(parser=original, statement=None, success=False)
             current = nested_result.parser
-            else_branch = ElseBranch(
-                statement=nested_result.statement, body=None)
+            else_branch = ElseBranch(statement=nested_result.statement, body=None)
         else:
             else_result = parse_block(current)
             if len(else_result.block.tokens) == 0:
@@ -1697,12 +1583,10 @@ def parse_if_statement(parser, decorators):
             else_branch = ElseBranch(statement=None, body=else_result.block)
         current = skip_trivia(current)
         terminator = parser_peek_raw(current)
-        if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+        if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'IfStatement', [runtime.enum_field('condition', condition_expression), runtime.enum_field(
-        'then_block', then_block), runtime.enum_field('else_branch', else_branch), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'IfStatement', [runtime.enum_field('condition', condition_expression), runtime.enum_field('then_block', then_block), runtime.enum_field('else_branch', else_branch), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_match_statement(parser, decorators):
     original = parser
@@ -1723,40 +1607,37 @@ def parse_match_statement(parser, decorators):
     current = skip_trivia(current)
     if current.index < len(current.tokens):
         terminator = parser_peek_raw(current)
-        if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+        if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
             current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'MatchStatement', [runtime.enum_field(
-        'expression', match_expression), runtime.enum_field('cases', body_result.cases), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'MatchStatement', [runtime.enum_field('expression', match_expression), runtime.enum_field('cases', body_result.cases), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_match_cases(parser):
     current = skip_trivia(parser)
     current = advance_to_symbol(current, "{")
     peek = parser_peek_raw(current)
-    if peek.kind.variant != "Symbol" or peek.kind.value != "{":
+    if peek.kind.variant != "Symbol"  or  peek.kind.value != "{":
         return MatchCasesParseResult(parser=parser, cases=[], success=False)
     current = parser_advance_raw(current)
     cases = []
     while True:
         current = skip_trivia(current)
         token = parser_peek_raw(current)
-        if token.kind.variant == "Symbol" and token.kind.value == "}":
+        if token.kind.variant == "Symbol"  and  token.kind.value == "}":
             current = parser_advance_raw(current)
             break
         if token.kind.variant == "EndOfFile":
             return MatchCasesParseResult(parser=parser, cases=[], success=False)
         case_result = parse_match_case(current)
-        if not case_result.success or case_result.case == None:
+        if not case_result.success  or  case_result.case == None:
             return MatchCasesParseResult(parser=parser, cases=[], success=False)
         current = case_result.parser
         cases = append_match_case(cases, case_result.case)
         current = skip_trivia(current)
         separator = parser_peek_raw(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = parser_advance_raw(current)
     return MatchCasesParseResult(parser=current, cases=cases, success=True)
-
 
 def parse_match_case(parser):
     original = parser
@@ -1780,7 +1661,7 @@ def parse_match_case(parser):
     current = skip_trivia(current)
     next = parser_peek_raw(current)
     body = None
-    if next.kind.variant == "Symbol" and next.kind.value == "{":
+    if next.kind.variant == "Symbol"  and  next.kind.value == "{":
         body_result = parse_block(current)
         if len(body_result.block.tokens) == 0:
             return MatchCaseParseResult(parser=original, case=None, success=False)
@@ -1796,24 +1677,21 @@ def parse_match_case(parser):
             while True:
                 if index >= len(capture.tokens):
                     break
-                block_tokens = append_token(
-                    block_tokens, capture.tokens[index])
+                block_tokens = append_token(block_tokens, capture.tokens[index])
                 index += 1
             trimmed_expression_tokens = trim_token_edges(capture.tokens)
             return_expression = None
             if len(trimmed_expression_tokens) > 0:
-                return_expression = expression_from_tokens(
-                    trimmed_expression_tokens)
+                return_expression = expression_from_tokens(trimmed_expression_tokens)
             current = skip_trivia(capture.parser)
             terminator = parser_peek_raw(current)
-            if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+            if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
                 block_tokens = append_token(block_tokens, terminator)
                 current = parser_advance_raw(current)
             block_tokens = trim_token_edges(block_tokens)
             statement_span = source_span_from_tokens(block_tokens)
             statements = []
-            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ReturnStatement', [
-                                          runtime.enum_field('expression', return_expression), runtime.enum_field('span', statement_span)]))
+            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', return_expression), runtime.enum_field('span', statement_span)]))
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
         else:
@@ -1827,27 +1705,23 @@ def parse_match_case(parser):
             while True:
                 if index >= len(capture.tokens):
                     break
-                block_tokens = append_token(
-                    block_tokens, capture.tokens[index])
+                block_tokens = append_token(block_tokens, capture.tokens[index])
                 index += 1
             current = skip_trivia(capture.parser)
             terminator = parser_peek_raw(current)
-            if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+            if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
                 block_tokens = append_token(block_tokens, terminator)
                 current = parser_advance_raw(current)
             block_tokens = trim_token_edges(block_tokens)
             statement_span = source_span_from_tokens(block_tokens)
             statements = []
-            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ExpressionStatement', [
-                                          runtime.enum_field('expression', expression), runtime.enum_field('span', statement_span)]))
+            statements = append_statement(statements, runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', statement_span)]))
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
     if body == None:
         return MatchCaseParseResult(parser=original, case=None, success=False)
-    case = MatchCase(pattern=pattern_expression,
-                     guard=guard_expression, body=body)
+    case = MatchCase(pattern=pattern_expression, guard=guard_expression, body=body)
     return MatchCaseParseResult(parser=current, case=case, success=True)
-
 
 def parse_prompt_statement(parser, decorators):
     original = parser
@@ -1874,12 +1748,10 @@ def parse_prompt_statement(parser, decorators):
     current = block_result.parser
     body = block_result.block
     current = skip_trivia(current)
-    if parser_peek_raw(current).kind.variant == "Symbol" and parser_peek_raw(current).kind.value == ";":
+    if parser_peek_raw(current).kind.variant == "Symbol"  and  parser_peek_raw(current).kind.value == ";":
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'PromptStatement', [runtime.enum_field('channel', channel), runtime.enum_field(
-        'keyword_token', prompt_token), runtime.enum_field('channel_token', channel_token), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'PromptStatement', [runtime.enum_field('channel', channel), runtime.enum_field('keyword_token', prompt_token), runtime.enum_field('channel_token', channel_token), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_with_statement(parser, decorators):
     original = parser
@@ -1898,8 +1770,7 @@ def parse_with_statement(parser, decorators):
         slice_tokens = trim_token_edges(clause_slices[index])
         if len(slice_tokens) > 0:
             expression = expression_from_tokens(slice_tokens)
-            clauses = append_with_clause(
-                clauses, WithClause(expression=expression))
+            clauses = append_with_clause(clauses, WithClause(expression=expression))
         index += 1
     block_result = parse_block(current)
     if len(block_result.block.tokens) == 0:
@@ -1907,12 +1778,10 @@ def parse_with_statement(parser, decorators):
     current = block_result.parser
     body = block_result.block
     current = skip_trivia(current)
-    if parser_peek_raw(current).kind.variant == "Symbol" and parser_peek_raw(current).kind.value == ";":
+    if parser_peek_raw(current).kind.variant == "Symbol"  and  parser_peek_raw(current).kind.value == ";":
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'WithStatement', [runtime.enum_field(
-        'clauses', clauses), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
+    statement = runtime.enum_instantiate(Statement, 'WithStatement', [runtime.enum_field('clauses', clauses), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_return_statement(parser):
     original = parser
@@ -1932,19 +1801,16 @@ def parse_return_statement(parser):
     while True:
         if index >= len(capture.tokens):
             break
-        statement_tokens = append_token(
-            statement_tokens, capture.tokens[index])
+        statement_tokens = append_token(statement_tokens, capture.tokens[index])
         index += 1
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant == "Symbol" and terminator.kind.value == ";":
+    if terminator.kind.variant == "Symbol"  and  terminator.kind.value == ";":
         statement_tokens = append_token(statement_tokens, terminator)
         current = parser_advance_raw(current)
     span = source_span_from_tokens(statement_tokens)
-    statement = runtime.enum_instantiate(Statement, 'ReturnStatement', [
-                                         runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
+    statement = runtime.enum_instantiate(Statement, 'ReturnStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_expression_statement(parser, decorators):
     if len(decorators) > 0:
@@ -1955,7 +1821,7 @@ def parse_expression_statement(parser, decorators):
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
     if start.kind.variant == "Symbol":
         sym = start.kind.value
-        if sym == "}" or sym == "{":
+        if sym == "}"  or  sym == "{":
             return BlockStatementParseResult(parser=parser, statement=None, success=False)
     capture = collect_until(current, [";"])
     if len(capture.tokens) == 0:
@@ -1965,8 +1831,7 @@ def parse_expression_statement(parser, decorators):
     while True:
         if token_index >= len(capture.tokens):
             break
-        statement_tokens = append_token(
-            statement_tokens, capture.tokens[token_index])
+        statement_tokens = append_token(statement_tokens, capture.tokens[token_index])
         token_index += 1
     trimmed = trim_token_edges(capture.tokens)
     if len(trimmed) == 0:
@@ -1974,16 +1839,14 @@ def parse_expression_statement(parser, decorators):
     current = capture.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if terminator.kind.variant != "Symbol" or terminator.kind.value != ";":
+    if terminator.kind.variant != "Symbol"  or  terminator.kind.value != ";":
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
     statement_tokens = append_token(statement_tokens, terminator)
     current = parser_advance_raw(current)
     expression = expression_from_tokens(trimmed)
     span = source_span_from_tokens(statement_tokens)
-    statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [
-                                         runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
+    statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
-
 
 def parse_unknown(parser):
     parser = skip_trivia(parser)
@@ -2001,11 +1864,11 @@ def parse_unknown(parser):
                 if sym == "}":
                     if depth > 0:
                         depth -= 1
-                    if depth == 0 and sym == "}":
+                    if depth == 0  and  sym == "}":
                         current = parser_advance_raw(current)
                         break
                 else:
-                    if sym == ";" and depth == 0:
+                    if sym == ";"  and  depth == 0:
                         current = parser_advance_raw(current)
                         break
         if tok.kind.variant == "EndOfFile":
@@ -2013,11 +1876,9 @@ def parse_unknown(parser):
             break
         current = parser_advance_raw(current)
     text = tokens_to_text(tokens)
-    block = runtime.enum_instantiate(Statement, 'Unknown', [runtime.enum_field(
-        'tokens', tokens), runtime.enum_field('text', text)])
+    block = runtime.enum_instantiate(Statement, 'Unknown', [runtime.enum_field('tokens', tokens), runtime.enum_field('text', text)])
     parser = skip_trivia(current)
     return StatementParseResult(parser=parser, statement=block)
-
 
 def identifier_matches(token, expected):
     if token.kind.variant != "Identifier":
@@ -2026,14 +1887,12 @@ def identifier_matches(token, expected):
         return True
     return token.lexeme == expected
 
-
 def identifier_text(token):
     if token.kind.variant == "Identifier":
         value = token.kind.value
         if len(value) > 0:
             return value
     return token.lexeme
-
 
 def string_literal_value(token):
     if token.kind.variant == "StringLiteral":
@@ -2042,7 +1901,6 @@ def string_literal_value(token):
             return value
     lexeme = token.lexeme
     return strip_surrounding_quotes(lexeme)
-
 
 def skip_trivia(parser):
     current = parser
@@ -2056,18 +1914,15 @@ def skip_trivia(parser):
         break
     return current
 
-
 def parser_peek_raw(parser):
     if parser.index >= len(parser.tokens):
         return parser.tokens[len(parser.tokens) - 1]
     return parser.tokens[parser.index]
 
-
 def parser_advance_raw(parser):
     if parser.index + 1 > len(parser.tokens):
         return parser
     return Parser(tokens=parser.tokens, index=parser.index + 1)
-
 
 def consume_keyword(parser, keyword):
     parser = skip_trivia(parser)
@@ -2076,14 +1931,12 @@ def consume_keyword(parser, keyword):
         return parser_advance_raw(parser)
     return parser
 
-
 def consume_symbol(parser, symbol):
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
-    if token.kind.variant == "Symbol" and token.kind.value == symbol:
+    if token.kind.variant == "Symbol"  and  token.kind.value == symbol:
         return parser_advance_raw(parser)
     return parser
-
 
 def collect_until(parser, terminators):
     current = parser
@@ -2095,8 +1948,7 @@ def collect_until(parser, terminators):
         token = parser_peek_raw(current)
         if token.kind.variant == "EndOfFile":
             break
-        should_stop = paren_depth == 0 and brace_depth == 0 and bracket_depth == 0 and token.kind.variant == "Symbol" and string_array_contains(
-            terminators, token.kind.value)
+        should_stop = paren_depth == 0  and  brace_depth == 0  and  bracket_depth == 0  and  token.kind.variant == "Symbol"  and  string_array_contains(terminators, token.kind.value)
         if should_stop:
             break
         captured = append_token(captured, token)
@@ -2105,19 +1957,19 @@ def collect_until(parser, terminators):
             if sym == "(":
                 paren_depth += 1
             else:
-                if sym == ")" and paren_depth > 0:
+                if sym == ")"  and  paren_depth > 0:
                     paren_depth -= 1
                 else:
                     if sym == "{":
                         brace_depth += 1
                     else:
-                        if sym == "}" and brace_depth > 0:
+                        if sym == "}"  and  brace_depth > 0:
                             brace_depth -= 1
                         else:
                             if sym == "[":
                                 bracket_depth += 1
                             else:
-                                if sym == "]" and bracket_depth > 0:
+                                if sym == "]"  and  bracket_depth > 0:
                                     bracket_depth -= 1
         advanced = parser_advance_raw(current)
         if advanced.index == current.index:
@@ -2125,11 +1977,10 @@ def collect_until(parser, terminators):
         current = advanced
     return CaptureResult(parser=current, tokens=captured)
 
-
 def collect_parenthesized(parser):
     current = skip_trivia(parser)
     start = parser_peek_raw(current)
-    if start.kind.variant != "Symbol" or start.kind.value != "(":
+    if start.kind.variant != "Symbol"  or  start.kind.value != "(":
         return ParenthesizedParseResult(parser=parser, tokens=[], success=False)
     current = parser_advance_raw(current)
     tokens = []
@@ -2152,7 +2003,6 @@ def collect_parenthesized(parser):
         current = parser_advance_raw(current)
     return ParenthesizedParseResult(parser=current, tokens=tokens, success=True)
 
-
 def collect_pattern_until_arrow(parser):
     current = skip_trivia(parser)
     tokens = []
@@ -2162,7 +2012,7 @@ def collect_pattern_until_arrow(parser):
             return PatternCaptureResult(parser=parser, tokens=[], success=False)
         if token.kind.variant == "Symbol":
             sym = token.kind.value
-            if sym == "=>" or sym == "->":
+            if sym == "=>"  or  sym == "->":
                 current = parser_advance_raw(current)
                 break
         tokens = append_token(tokens, token)
@@ -2172,7 +2022,6 @@ def collect_pattern_until_arrow(parser):
         current = advanced
     return PatternCaptureResult(parser=current, tokens=tokens, success=True)
 
-
 def split_match_case_tokens(tokens):
     trimmed = trim_token_edges(tokens)
     if len(trimmed) == 0:
@@ -2181,10 +2030,8 @@ def split_match_case_tokens(tokens):
     if guard_index == -1:
         return MatchCaseTokenSplit(pattern_tokens=trimmed, guard_tokens=[], has_guard=False)
     pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index))
-    guard_tokens = trim_token_edges(token_slice(
-        trimmed, guard_index + 1, len(trimmed)))
+    guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, len(trimmed)))
     return MatchCaseTokenSplit(pattern_tokens=pattern_tokens, guard_tokens=guard_tokens, has_guard=True)
-
 
 def parse_decorator_argument(tokens):
     if len(tokens) == 0:
@@ -2194,39 +2041,31 @@ def parse_decorator_argument(tokens):
         trimmed_tokens = trim_token_edges(tokens)
         if len(trimmed_tokens) == 0:
             return None
-        expr = normalize_expression(
-            trimmed_tokens, expression_from_tokens(trimmed_tokens))
+        expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens))
         return DecoratorArgument(name=None, expression=expr)
     name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index))
-    value_tokens = trim_token_edges(
-        token_slice(tokens, colon_index + 1, len(tokens)))
+    value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, len(tokens)))
     if len(value_tokens) == 0:
         return None
     name_text = trim_text(tokens_to_text(name_tokens))
     if len(name_text) == 0:
         return None
-    expr = normalize_expression(
-        value_tokens, expression_from_tokens(value_tokens))
+    expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens))
     if expr.variant == "Raw":
         raw_text = trim_text(tokens_to_text(value_tokens))
-        if len(raw_text) >= 2 and raw_text[0] == "\"" and raw_text[len(raw_text) - 1] == "\"":
+        if len(raw_text) >= 2  and  raw_text[0] == "\""  and  raw_text[len(raw_text) - 1] == "\"":
             literal = strip_surrounding_quotes(raw_text)
-            expr = runtime.enum_instantiate(Expression, 'StringLiteral', [
-                                            runtime.enum_field('value', literal)])
+            expr = runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         else:
             if raw_text == "true":
-                expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [
-                                                runtime.enum_field('value', True)])
+                expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', True)])
             else:
                 if raw_text == "false":
-                    expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [
-                                                    runtime.enum_field('value', False)])
+                    expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', False)])
                 else:
                     if looks_like_number(raw_text):
-                        expr = runtime.enum_instantiate(Expression, 'NumberLiteral', [
-                                                        runtime.enum_field('value', raw_text)])
+                        expr = runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', raw_text)])
     return DecoratorArgument(name=name_text, expression=expr)
-
 
 def normalize_expression(tokens, expr):
     if expr.variant == "Raw":
@@ -2240,7 +2079,7 @@ def normalize_expression(tokens, expr):
             if token.kind.variant == "NumberLiteral":
                 return runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', token.kind.value)])
         raw_text = trim_text(expr.text)
-        if len(raw_text) >= 2 and raw_text[0] == "\"" and raw_text[len(raw_text) - 1] == "\"":
+        if len(raw_text) >= 2  and  raw_text[0] == "\""  and  raw_text[len(raw_text) - 1] == "\"":
             literal = strip_surrounding_quotes(raw_text)
             return runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         if raw_text == "true":
@@ -2250,7 +2089,6 @@ def normalize_expression(tokens, expr):
         if looks_like_number(raw_text):
             return runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', raw_text)])
     return expr
-
 
 def looks_like_number(text):
     if len(text) == 0:
@@ -2276,10 +2114,8 @@ def looks_like_number(text):
         index += 1
     return True
 
-
 def is_decimal_digit(ch):
-    return ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9"
-
+    return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
 
 def trim_token_edges(tokens):
     start = 0
@@ -2302,7 +2138,6 @@ def trim_token_edges(tokens):
         break
     return token_slice(tokens, start, end)
 
-
 def token_slice(tokens, start, end):
     result = []
     index = start
@@ -2312,7 +2147,6 @@ def token_slice(tokens, start, end):
         result = append_token(result, tokens[index])
         index += 1
     return result
-
 
 def source_span_from_tokens(tokens):
     trimmed = trim_token_edges(tokens)
@@ -2336,7 +2170,6 @@ def source_span_from_tokens(tokens):
         index += 1
     return SourceSpan(start_line=start.line, start_column=start.column, end_line=end_line, end_column=end_column)
 
-
 def trim_block_tokens(tokens):
     depth = 0
     index = 0
@@ -2359,7 +2192,6 @@ def trim_block_tokens(tokens):
         index += 1
     return token_slice(tokens, 0, end)
 
-
 def find_top_level_colon(tokens):
     angle = 0
     paren = 0
@@ -2375,34 +2207,33 @@ def find_top_level_colon(tokens):
             if sym == "<":
                 angle += 1
             else:
-                if sym == ">" and angle > 0:
+                if sym == ">"  and  angle > 0:
                     angle -= 1
                 else:
                     if sym == "(":
                         paren += 1
                     else:
-                        if sym == ")" and paren > 0:
+                        if sym == ")"  and  paren > 0:
                             paren -= 1
                         else:
                             if sym == "{":
                                 brace += 1
                             else:
-                                if sym == "}" and brace > 0:
+                                if sym == "}"  and  brace > 0:
                                     brace -= 1
                                 else:
                                     if sym == "[":
                                         bracket += 1
                                     else:
-                                        if sym == "]" and bracket > 0:
+                                        if sym == "]"  and  bracket > 0:
                                             bracket -= 1
                                         else:
                                             if sym == ":":
-                                                at_top = angle == 0 and paren == 0 and brace == 0 and bracket == 0
+                                                at_top = angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0
                                                 if at_top:
                                                     return index
         index += 1
     return -1
-
 
 def expression_from_tokens(tokens):
     filtered = filter_trivia(tokens)
@@ -2419,7 +2250,6 @@ def expression_from_tokens(tokens):
     if result.state.index != len(result.state.tokens):
         return runtime.enum_instantiate(Expression, 'Raw', [runtime.enum_field('text', trim_text(tokens_to_text(tokens)))])
     return result.expression
-
 
 def expression_from_single_token(token):
     if token.kind.variant == "NumberLiteral":
@@ -2439,7 +2269,6 @@ def expression_from_single_token(token):
         return runtime.enum_instantiate(Expression, 'Identifier', [runtime.enum_field('name', value)])
     return None
 
-
 def expression_tokens_collect_until(state, terminators):
     current = state
     collected = []
@@ -2451,8 +2280,8 @@ def expression_tokens_collect_until(state, terminators):
         if expression_tokens_is_at_end(current):
             return ExpressionCollectResult(state=current, tokens=collected, success=False)
         token = expression_tokens_peek(current)
-        at_top = angle == 0 and paren == 0 and brace == 0 and bracket == 0
-        if at_top and token.kind.variant == "Symbol" and string_array_contains(terminators, token.kind.value):
+        at_top = angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0
+        if at_top  and  token.kind.variant == "Symbol"  and  string_array_contains(terminators, token.kind.value):
             break
         if token.kind.variant == "Symbol":
             sym = token.kind.value
@@ -2487,13 +2316,12 @@ def expression_tokens_collect_until(state, terminators):
         current = expression_tokens_advance(current)
     return ExpressionCollectResult(state=current, tokens=collected, success=True)
 
-
 def collect_expression_block(state):
     current = state
     if expression_tokens_is_at_end(current):
         return ExpressionBlockParseResult(state=current, tokens=[], success=False)
     first = expression_tokens_peek(current)
-    if first.kind.variant != "Symbol" or first.kind.value != "{":
+    if first.kind.variant != "Symbol"  or  first.kind.value != "{":
         return ExpressionBlockParseResult(state=current, tokens=[], success=False)
     tokens = []
     depth = 0
@@ -2515,7 +2343,6 @@ def collect_expression_block(state):
         current = expression_tokens_advance(current)
     return ExpressionBlockParseResult(state=current, tokens=tokens, success=True)
 
-
 def parse_lambda_parameter(state):
     current = state
     if expression_tokens_is_at_end(current):
@@ -2523,7 +2350,7 @@ def parse_lambda_parameter(state):
     start_index = current.index
     is_mutable = False
     token = expression_tokens_peek(current)
-    if token.kind.variant == "Identifier" and identifier_matches(token, "mut"):
+    if token.kind.variant == "Identifier"  and  identifier_matches(token, "mut"):
         is_mutable = True
         current = expression_tokens_advance(current)
         if expression_tokens_is_at_end(current):
@@ -2536,7 +2363,7 @@ def parse_lambda_parameter(state):
     type_annotation = None
     if not expression_tokens_is_at_end(current):
         separator = expression_tokens_peek(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, ["=", ",", ")"])
             if not capture.success:
@@ -2548,7 +2375,7 @@ def parse_lambda_parameter(state):
     default_value = None
     if not expression_tokens_is_at_end(current):
         assign = expression_tokens_peek(current)
-        if assign.kind.variant == "Symbol" and assign.kind.value == "=":
+        if assign.kind.variant == "Symbol"  and  assign.kind.value == "=":
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, [",", ")"])
             if not capture.success:
@@ -2557,10 +2384,8 @@ def parse_lambda_parameter(state):
             current = capture.state
     parameter_tokens = token_slice(state.tokens, start_index, current.index)
     span = source_span_from_tokens(parameter_tokens)
-    parameter = Parameter(name=name, type_annotation=type_annotation,
-                          default_value=default_value, mutable=is_mutable, span=span)
+    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable, span=span)
     return LambdaParameterParseResult(state=current, parameter=parameter, success=True)
-
 
 def parse_lambda_parameter_list(state):
     current = state
@@ -2568,7 +2393,7 @@ def parse_lambda_parameter_list(state):
     if expression_tokens_is_at_end(current):
         return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
     closing = expression_tokens_peek(current)
-    if closing.kind.variant == "Symbol" and closing.kind.value == ")":
+    if closing.kind.variant == "Symbol"  and  closing.kind.value == ")":
         current = expression_tokens_advance(current)
         return LambdaParameterListParseResult(state=current, parameters=parameters, success=True)
     while True:
@@ -2590,19 +2415,18 @@ def parse_lambda_parameter_list(state):
         return LambdaParameterListParseResult(state=current, parameters=parameters, success=False)
     return LambdaParameterListParseResult(state=current, parameters=parameters, success=True)
 
-
 def parse_lambda_expression(state):
     current = state
     if expression_tokens_is_at_end(current):
         return expression_parse_failure(state)
     token = expression_tokens_peek(current)
-    if token.kind.variant != "Identifier" or not identifier_matches(token, "fn"):
+    if token.kind.variant != "Identifier"  or  not identifier_matches(token, "fn"):
         return expression_parse_failure(state)
     current = expression_tokens_advance(current)
     if expression_tokens_is_at_end(current):
         return expression_parse_failure(state)
     open_paren = expression_tokens_peek(current)
-    if open_paren.kind.variant != "Symbol" or open_paren.kind.value != "(":
+    if open_paren.kind.variant != "Symbol"  or  open_paren.kind.value != "(":
         return expression_parse_failure(state)
     current = expression_tokens_advance(current)
     params_result = parse_lambda_parameter_list(current)
@@ -2613,7 +2437,7 @@ def parse_lambda_expression(state):
     return_type = None
     if not expression_tokens_is_at_end(current):
         separator = expression_tokens_peek(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ":" or separator.kind.value == "->":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ":"  or  separator.kind.value == "->":
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, ["{"])
             if not capture.success:
@@ -2629,13 +2453,11 @@ def parse_lambda_expression(state):
         return expression_parse_failure(state)
     current = block_result.state
     block_tokens = block_result.tokens
-    block_tokens = append_token(block_tokens, Token(
-        kind=TokenKind.EndOfFile(), lexeme="", line=0, column=0))
+    block_tokens = append_token(block_tokens, Token(kind=TokenKind.EndOfFile(), lexeme="", line=0, column=0))
     block_parser = Parser(tokens=block_tokens, index=0)
     parsed_block = parse_block(block_parser)
     body = parsed_block.block
     return ExpressionParseResult(state=current, expression=runtime.enum_instantiate(Expression, 'Lambda', [runtime.enum_field('parameters', parameters), runtime.enum_field('body', body), runtime.enum_field('return_type', return_type)]), success=True)
-
 
 def parse_expression_bp(state, min_precedence):
     prefix_result = parse_prefix_expression(state)
@@ -2661,13 +2483,10 @@ def parse_expression_bp(state, min_precedence):
             return expression_parse_failure(state)
         current_state = rhs_result.state
         if op == "..":
-            left_expression = runtime.enum_instantiate(Expression, 'Range', [runtime.enum_field(
-                'start', left_expression), runtime.enum_field('end', rhs_result.expression)])
+            left_expression = runtime.enum_instantiate(Expression, 'Range', [runtime.enum_field('start', left_expression), runtime.enum_field('end', rhs_result.expression)])
         else:
-            left_expression = runtime.enum_instantiate(Expression, 'Binary', [runtime.enum_field(
-                'operator', op), runtime.enum_field('left', left_expression), runtime.enum_field('right', rhs_result.expression)])
+            left_expression = runtime.enum_instantiate(Expression, 'Binary', [runtime.enum_field('operator', op), runtime.enum_field('left', left_expression), runtime.enum_field('right', rhs_result.expression)])
     return ExpressionParseResult(state=current_state, expression=left_expression, success=True)
-
 
 def parse_prefix_expression(state):
     if expression_tokens_is_at_end(state):
@@ -2675,13 +2494,13 @@ def parse_prefix_expression(state):
     token = expression_tokens_peek(state)
     if token.kind.variant == "Symbol":
         sym = token.kind.value
-        if sym == "-" or sym == "!":
+        if sym == "-"  or  sym == "!":
             advanced = expression_tokens_advance(state)
             operand_result = parse_expression_bp(advanced, unary_precedence())
             if not operand_result.success:
                 return operand_result
             return ExpressionParseResult(state=operand_result.state, expression=runtime.enum_instantiate(Expression, 'Unary', [runtime.enum_field('operator', sym), runtime.enum_field('operand', operand_result.expression)]), success=True)
-    if token.kind.variant == "Identifier" and identifier_matches(token, "fn"):
+    if token.kind.variant == "Identifier"  and  identifier_matches(token, "fn"):
         lambda_result = parse_lambda_expression(state)
         if lambda_result.success:
             return lambda_result
@@ -2689,7 +2508,6 @@ def parse_prefix_expression(state):
     if not primary_result.success:
         return primary_result
     return parse_postfix_chain(primary_result.state, primary_result.expression)
-
 
 def parse_primary_expression(state):
     if expression_tokens_is_at_end(state):
@@ -2710,7 +2528,7 @@ def parse_primary_expression(state):
         if name == "null":
             return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NullLiteral(), success=True)
         return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'Identifier', [runtime.enum_field('name', name)]), success=True)
-    if token.kind.variant == "Symbol" and token.kind.value == "(":
+    if token.kind.variant == "Symbol"  and  token.kind.value == "(":
         inner_state = expression_tokens_advance(state)
         inner_result = parse_expression_bp(inner_state, 0)
         if not inner_result.success:
@@ -2719,21 +2537,20 @@ def parse_primary_expression(state):
         if expression_tokens_is_at_end(after_inner):
             return expression_parse_failure(state)
         closing = expression_tokens_peek(after_inner)
-        if closing.kind.variant != "Symbol" or closing.kind.value != ")":
+        if closing.kind.variant != "Symbol"  or  closing.kind.value != ")":
             return expression_parse_failure(state)
         return ExpressionParseResult(state=expression_tokens_advance(after_inner), expression=inner_result.expression, success=True)
-    if token.kind.variant == "Symbol" and token.kind.value == "[":
+    if token.kind.variant == "Symbol"  and  token.kind.value == "[":
         array_result = parse_array_literal(expression_tokens_advance(state))
         if not array_result.success:
             return expression_parse_failure(state)
         return ExpressionParseResult(state=array_result.state, expression=runtime.enum_instantiate(Expression, 'Array', [runtime.enum_field('elements', array_result.elements)]), success=True)
-    if token.kind.variant == "Symbol" and token.kind.value == "{":
+    if token.kind.variant == "Symbol"  and  token.kind.value == "{":
         object_result = parse_object_literal(expression_tokens_advance(state))
         if not object_result.success:
             return expression_parse_failure(state)
         return ExpressionParseResult(state=object_result.state, expression=runtime.enum_instantiate(Expression, 'Object', [runtime.enum_field('fields', object_result.fields)]), success=True)
     return expression_parse_failure(state)
-
 
 def parse_postfix_chain(state, expression):
     current_state = state
@@ -2753,16 +2570,14 @@ def parse_postfix_chain(state, expression):
             if member_token.kind.variant != "Identifier":
                 return expression_parse_failure(state)
             current_state = expression_tokens_advance(after_dot)
-            current_expression = runtime.enum_instantiate(Expression, 'Member', [runtime.enum_field(
-                'object', current_expression), runtime.enum_field('member', identifier_text(member_token))])
+            current_expression = runtime.enum_instantiate(Expression, 'Member', [runtime.enum_field('object', current_expression), runtime.enum_field('member', identifier_text(member_token))])
             continue
         if sym == "(":
             call_result = parse_call_arguments(current_state)
             if not call_result.success:
                 return expression_parse_failure(state)
             current_state = call_result.state
-            current_expression = runtime.enum_instantiate(Expression, 'Call', [runtime.enum_field(
-                'callee', current_expression), runtime.enum_field('arguments', call_result.arguments)])
+            current_expression = runtime.enum_instantiate(Expression, 'Call', [runtime.enum_field('callee', current_expression), runtime.enum_field('arguments', call_result.arguments)])
             continue
         if sym == "[":
             index_state = expression_tokens_advance(current_state)
@@ -2773,17 +2588,15 @@ def parse_postfix_chain(state, expression):
             if expression_tokens_is_at_end(after_index):
                 return expression_parse_failure(state)
             closing = expression_tokens_peek(after_index)
-            if closing.kind.variant != "Symbol" or closing.kind.value != "]":
+            if closing.kind.variant != "Symbol"  or  closing.kind.value != "]":
                 return expression_parse_failure(state)
             current_state = expression_tokens_advance(after_index)
-            current_expression = runtime.enum_instantiate(Expression, 'Index', [runtime.enum_field(
-                'sequence', current_expression), runtime.enum_field('index', index_result.expression)])
+            current_expression = runtime.enum_instantiate(Expression, 'Index', [runtime.enum_field('sequence', current_expression), runtime.enum_field('index', index_result.expression)])
             continue
         if sym == "{":
             if not expression_is_struct_target(current_expression):
                 break
-            struct_result = parse_struct_literal(
-                expression_tokens_advance(current_state), current_expression)
+            struct_result = parse_struct_literal(expression_tokens_advance(current_state), current_expression)
             if not struct_result.success:
                 return expression_parse_failure(state)
             current_state = struct_result.state
@@ -2792,13 +2605,12 @@ def parse_postfix_chain(state, expression):
         break
     return ExpressionParseResult(state=current_state, expression=current_expression, success=True)
 
-
 def parse_call_arguments(state):
     current = expression_tokens_advance(state)
     arguments = []
     if expression_tokens_is_at_end(current):
         return CallArgumentsParseResult(state=state, arguments=[], success=False)
-    if expression_tokens_peek(current).kind.variant == "Symbol" and expression_tokens_peek(current).kind.value == ")":
+    if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == ")":
         current = expression_tokens_advance(current)
         return CallArgumentsParseResult(state=current, arguments=arguments, success=True)
     while True:
@@ -2810,22 +2622,21 @@ def parse_call_arguments(state):
         if expression_tokens_is_at_end(current):
             return CallArgumentsParseResult(state=state, arguments=[], success=False)
         separator = expression_tokens_peek(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
             continue
-        if separator.kind.variant == "Symbol" and separator.kind.value == ")":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ")":
             current = expression_tokens_advance(current)
             break
         return CallArgumentsParseResult(state=state, arguments=[], success=False)
     return CallArgumentsParseResult(state=current, arguments=arguments, success=True)
-
 
 def parse_array_literal(state):
     current = state
     elements = []
     if expression_tokens_is_at_end(current):
         return ArrayLiteralParseResult(state=state, elements=[], success=False)
-    if expression_tokens_peek(current).kind.variant == "Symbol" and expression_tokens_peek(current).kind.value == "]":
+    if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == "]":
         current = expression_tokens_advance(current)
         return ArrayLiteralParseResult(state=current, elements=elements, success=True)
     while True:
@@ -2837,28 +2648,27 @@ def parse_array_literal(state):
         if expression_tokens_is_at_end(current):
             return ArrayLiteralParseResult(state=state, elements=[], success=False)
         separator = expression_tokens_peek(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
             if expression_tokens_is_at_end(current):
                 return ArrayLiteralParseResult(state=state, elements=[], success=False)
             maybe_end = expression_tokens_peek(current)
-            if maybe_end.kind.variant == "Symbol" and maybe_end.kind.value == "]":
+            if maybe_end.kind.variant == "Symbol"  and  maybe_end.kind.value == "]":
                 current = expression_tokens_advance(current)
                 break
             continue
-        if separator.kind.variant == "Symbol" and separator.kind.value == "]":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == "]":
             current = expression_tokens_advance(current)
             break
         return ArrayLiteralParseResult(state=state, elements=[], success=False)
     return ArrayLiteralParseResult(state=current, elements=elements, success=True)
-
 
 def parse_object_literal(state):
     current = state
     fields = []
     if expression_tokens_is_at_end(current):
         return ObjectLiteralParseResult(state=state, fields=[], success=False)
-    if expression_tokens_peek(current).kind.variant == "Symbol" and expression_tokens_peek(current).kind.value == "}":
+    if expression_tokens_peek(current).kind.variant == "Symbol"  and  expression_tokens_peek(current).kind.value == "}":
         current = expression_tokens_advance(current)
         return ObjectLiteralParseResult(state=current, fields=fields, success=True)
     while True:
@@ -2872,33 +2682,31 @@ def parse_object_literal(state):
         if expression_tokens_is_at_end(current):
             return ObjectLiteralParseResult(state=state, fields=[], success=False)
         colon = expression_tokens_peek(current)
-        if colon.kind.variant != "Symbol" or colon.kind.value != ":":
+        if colon.kind.variant != "Symbol"  or  colon.kind.value != ":":
             return ObjectLiteralParseResult(state=state, fields=[], success=False)
         current = expression_tokens_advance(current)
         value_result = parse_expression_bp(current, 0)
         if not value_result.success:
             return ObjectLiteralParseResult(state=state, fields=[], success=False)
         current = value_result.state
-        fields = append_object_field(fields, ObjectField(
-            name=field_name, value=value_result.expression))
+        fields = append_object_field(fields, ObjectField(name=field_name, value=value_result.expression))
         if expression_tokens_is_at_end(current):
             return ObjectLiteralParseResult(state=state, fields=[], success=False)
         separator = expression_tokens_peek(current)
-        if separator.kind.variant == "Symbol" and separator.kind.value == ",":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == ",":
             current = expression_tokens_advance(current)
             if expression_tokens_is_at_end(current):
                 return ObjectLiteralParseResult(state=state, fields=[], success=False)
             maybe_end = expression_tokens_peek(current)
-            if maybe_end.kind.variant == "Symbol" and maybe_end.kind.value == "}":
+            if maybe_end.kind.variant == "Symbol"  and  maybe_end.kind.value == "}":
                 current = expression_tokens_advance(current)
                 break
             continue
-        if separator.kind.variant == "Symbol" and separator.kind.value == "}":
+        if separator.kind.variant == "Symbol"  and  separator.kind.value == "}":
             current = expression_tokens_advance(current)
             break
         return ObjectLiteralParseResult(state=state, fields=[], success=False)
     return ObjectLiteralParseResult(state=current, fields=fields, success=True)
-
 
 def parse_struct_literal(state, target):
     type_result = collect_struct_type_name(target)
@@ -2909,24 +2717,19 @@ def parse_struct_literal(state, target):
         return expression_parse_failure(state)
     return ExpressionParseResult(state=fields_result.state, expression=runtime.enum_instantiate(Expression, 'Struct', [runtime.enum_field('type_name', type_result.parts), runtime.enum_field('fields', fields_result.fields)]), success=True)
 
-
 def expression_parse_failure(state):
     return ExpressionParseResult(state=state, expression=runtime.enum_instantiate(Expression, 'Raw', [runtime.enum_field('text', "")]), success=False)
-
 
 def expression_tokens_is_at_end(state):
     return state.index >= len(state.tokens)
 
-
 def expression_tokens_peek(state):
     return state.tokens[state.index]
-
 
 def expression_tokens_advance(state):
     if state.index >= len(state.tokens):
         return state
     return ExpressionTokens(tokens=state.tokens, index=state.index + 1)
-
 
 def expression_is_struct_target(expression):
     if expression.variant == "Identifier":
@@ -2934,7 +2737,6 @@ def expression_is_struct_target(expression):
     if expression.variant == "Member":
         return expression_is_struct_target(expression.object)
     return False
-
 
 def collect_struct_type_name(expression):
     if expression.variant == "Identifier":
@@ -2946,7 +2748,6 @@ def collect_struct_type_name(expression):
         return StructTypeNameResult(parts=append_string(inner.parts, expression.member), success=True)
     return StructTypeNameResult(parts=[], success=False)
 
-
 def binary_precedence(op):
     if op == "..":
         return 0
@@ -2954,20 +2755,18 @@ def binary_precedence(op):
         return 1
     if op == "&&":
         return 2
-    if op == "==" or op == "!=":
+    if op == "=="  or  op == "!=":
         return 3
-    if op == "<" or op == "<=" or op == ">" or op == ">=":
+    if op == "<"  or  op == "<="  or  op == ">"  or  op == ">=":
         return 4
-    if op == "+" or op == "-":
+    if op == "+"  or  op == "-":
         return 5
-    if op == "*" or op == "/" or op == "%":
+    if op == "*"  or  op == "/"  or  op == "%":
         return 6
     return -1
 
-
 def unary_precedence():
     return 7
-
 
 def filter_trivia(tokens):
     index = 0
@@ -2976,11 +2775,10 @@ def filter_trivia(tokens):
         if index >= len(tokens):
             break
         token = tokens[index]
-        if token.kind.variant != "Whitespace" and token.kind.variant != "Comment" and token.kind.variant != "EndOfFile":
+        if token.kind.variant != "Whitespace"  and  token.kind.variant != "Comment"  and  token.kind.variant != "EndOfFile":
             filtered = append_token(filtered, token)
         index += 1
     return filtered
-
 
 def tokens_to_text(tokens):
     text = ""
@@ -2991,7 +2789,6 @@ def tokens_to_text(tokens):
         text = text + tokens[index].lexeme
         index += 1
     return text
-
 
 def trim_text(value):
     start = 0
@@ -3014,11 +2811,9 @@ def trim_text(value):
         break
     return substring(value, start, end)
 
-
 def is_trim_whitespace(ch):
     code = char_code(ch)
-    return code == 32 or code == 10 or code == 9 or code == 13
-
+    return code == 32  or  code == 10  or  code == 9  or  code == 13
 
 def string_array_contains(values, target):
     index = 0
@@ -3030,15 +2825,13 @@ def string_array_contains(values, target):
         index += 1
     return False
 
-
 def is_trivia_token(token):
-    if token.kind.variant == "Whitespace" or token.kind.variant == "Comment":
+    if token.kind.variant == "Whitespace"  or  token.kind.variant == "Comment":
         return True
     if token.kind.variant == "Symbol":
         if is_whitespace_lexeme(token.lexeme):
             return True
     return False
-
 
 def is_whitespace_lexeme(text):
     if len(text) == 0:
@@ -3053,13 +2846,12 @@ def is_whitespace_lexeme(text):
         index += 1
     return True
 
-
 def advance_to_symbol(parser, symbol):
     current = parser
     while True:
         current = skip_trivia(current)
         token = parser_peek_raw(current)
-        if token.kind.variant == "Symbol" and token.kind.value == symbol:
+        if token.kind.variant == "Symbol"  and  token.kind.value == symbol:
             return current
         if token.kind.variant == "EndOfFile":
             return current
@@ -3067,7 +2859,6 @@ def advance_to_symbol(parser, symbol):
         if next.index == current.index:
             return current
         current = next
-
 
 def skip_struct_member(parser):
     current = parser
@@ -3087,7 +2878,6 @@ def skip_struct_member(parser):
             if sym == "}":
                 return current
 
-
 def skip_enum_variant_entry(parser):
     current = parser
     while True:
@@ -3106,26 +2896,23 @@ def skip_enum_variant_entry(parser):
             if sym == "}":
                 return current
 
-
 def strip_surrounding_quotes(text):
     if len(text) < 2:
         return text
     first = char_code(text[0])
     last = char_code(text[len(text) - 1])
-    if first == 34 and last == 34:
+    if first == 34  and  last == 34:
         return substring(text, 1, len(text) - 1)
     return text
-
 
 def normalize_test_name(text):
     trimmed = trim_text(text)
     if len(trimmed) >= 2:
         first = char_code(trimmed[0])
         last = char_code(trimmed[len(trimmed) - 1])
-        if first == 34 and last == 34:
+        if first == 34  and  last == 34:
             return strip_surrounding_quotes(trimmed)
     return trimmed
-
 
 def split_tokens_by_comma(tokens):
     parts = []
@@ -3144,27 +2931,27 @@ def split_tokens_by_comma(tokens):
             if sym == "<":
                 angle += 1
             else:
-                if sym == ">" and angle > 0:
+                if sym == ">"  and  angle > 0:
                     angle -= 1
                 else:
                     if sym == "(":
                         paren += 1
                     else:
-                        if sym == ")" and paren > 0:
+                        if sym == ")"  and  paren > 0:
                             paren -= 1
                         else:
                             if sym == "{":
                                 brace += 1
                             else:
-                                if sym == "}" and brace > 0:
+                                if sym == "}"  and  brace > 0:
                                     brace -= 1
                                 else:
                                     if sym == "[":
                                         bracket += 1
                                     else:
-                                        if sym == "]" and bracket > 0:
+                                        if sym == "]"  and  bracket > 0:
                                             bracket -= 1
-            if sym == "," and angle == 0 and paren == 0 and brace == 0 and bracket == 0:
+            if sym == ","  and  angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0:
                 text = trim_text(segment)
                 if len(text) > 0:
                     parts = append_string(parts, text)
@@ -3177,7 +2964,6 @@ def split_tokens_by_comma(tokens):
     if len(tail) > 0:
         parts = append_string(parts, tail)
     return parts
-
 
 def split_token_slices_by_comma(tokens):
     parts = []
@@ -3196,27 +2982,27 @@ def split_token_slices_by_comma(tokens):
             if sym == "<":
                 angle += 1
             else:
-                if sym == ">" and angle > 0:
+                if sym == ">"  and  angle > 0:
                     angle -= 1
                 else:
                     if sym == "(":
                         paren += 1
                     else:
-                        if sym == ")" and paren > 0:
+                        if sym == ")"  and  paren > 0:
                             paren -= 1
                         else:
                             if sym == "{":
                                 brace += 1
                             else:
-                                if sym == "}" and brace > 0:
+                                if sym == "}"  and  brace > 0:
                                     brace -= 1
                                 else:
                                     if sym == "[":
                                         bracket += 1
                                     else:
-                                        if sym == "]" and bracket > 0:
+                                        if sym == "]"  and  bracket > 0:
                                             bracket -= 1
-            if sym == "," and angle == 0 and paren == 0 and brace == 0 and bracket == 0:
+            if sym == ","  and  angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0:
                 parts = append_token_array(parts, segment)
                 segment = []
                 index += 1
@@ -3226,7 +3012,6 @@ def split_token_slices_by_comma(tokens):
     if len(segment) > 0:
         parts = append_token_array(parts, segment)
     return parts
-
 
 def find_top_level_symbol(tokens, symbol):
     angle = 0
@@ -3243,31 +3028,30 @@ def find_top_level_symbol(tokens, symbol):
             if sym == "<":
                 angle += 1
             else:
-                if sym == ">" and angle > 0:
+                if sym == ">"  and  angle > 0:
                     angle -= 1
                 else:
                     if sym == "(":
                         paren += 1
                     else:
-                        if sym == ")" and paren > 0:
+                        if sym == ")"  and  paren > 0:
                             paren -= 1
                         else:
                             if sym == "{":
                                 brace += 1
                             else:
-                                if sym == "}" and brace > 0:
+                                if sym == "}"  and  brace > 0:
                                     brace -= 1
                                 else:
                                     if sym == "[":
                                         bracket += 1
                                     else:
-                                        if sym == "]" and bracket > 0:
+                                        if sym == "]"  and  bracket > 0:
                                             bracket -= 1
-            if sym == symbol and angle == 0 and paren == 0 and brace == 0 and bracket == 0:
+            if sym == symbol  and  angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0:
                 return index
         index += 1
     return -1
-
 
 def find_top_level_identifier(tokens, keyword):
     angle = 0
@@ -3284,101 +3068,83 @@ def find_top_level_identifier(tokens, keyword):
             if sym == "<":
                 angle += 1
             else:
-                if sym == ">" and angle > 0:
+                if sym == ">"  and  angle > 0:
                     angle -= 1
                 else:
                     if sym == "(":
                         paren += 1
                     else:
-                        if sym == ")" and paren > 0:
+                        if sym == ")"  and  paren > 0:
                             paren -= 1
                         else:
                             if sym == "{":
                                 brace += 1
                             else:
-                                if sym == "}" and brace > 0:
+                                if sym == "}"  and  brace > 0:
                                     brace -= 1
                                 else:
                                     if sym == "[":
                                         bracket += 1
                                     else:
-                                        if sym == "]" and bracket > 0:
+                                        if sym == "]"  and  bracket > 0:
                                             bracket -= 1
         if token.kind.variant == "Identifier":
             if identifier_matches(token, keyword):
-                if angle == 0 and paren == 0 and brace == 0 and bracket == 0:
+                if angle == 0  and  paren == 0  and  brace == 0  and  bracket == 0:
                     return index
         index += 1
     return -1
 
-
 def append_statement(statements, statement):
     return (statements) + ([statement])
-
 
 def append_string(values, value):
     return (values) + ([value])
 
-
 def append_parameter(parameters, parameter):
     return (parameters) + ([parameter])
-
 
 def append_model_property(properties, property):
     return (properties) + ([property])
 
-
 def append_field(fields, field):
     return (fields) + ([field])
-
 
 def append_method(methods, method):
     return (methods) + ([method])
 
-
 def append_signature(signatures, signature):
     return (signatures) + ([signature])
-
 
 def append_enum_variant(variants, variant):
     return (variants) + ([variant])
 
-
 def append_type_annotation(types, item):
     return (types) + ([item])
-
 
 def append_type_parameter(parameters, parameter):
     return (parameters) + ([parameter])
 
-
 def append_decorator(decorators, decorator):
     return (decorators) + ([decorator])
-
 
 def append_decorator_argument(arguments, argument):
     return (arguments) + ([argument])
 
-
 def append_with_clause(clauses, clause):
     return (clauses) + ([clause])
-
 
 def append_match_case(cases, case):
     return (cases) + ([case])
 
-
 def append_expression(expressions, expression):
     return (expressions) + ([expression])
-
 
 def append_object_field(fields, field):
     return (fields) + ([field])
 
-
 def append_token(tokens, token):
     return (tokens) + ([token])
-
 
 def append_token_array(collection, tokens):
     return (collection) + ([tokens])

@@ -3667,16 +3667,43 @@ fn array_struct_type_for_element(element_type -> string) -> string {
 }
 
 fn array_pointer_element_type(llvm_type -> string) -> string {
-    if llvm_type == "{ double*, i64 }*" {
-        return "double";
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length == 0 {
+        return "";
     }
-    if llvm_type == "{ i64*, i64 }*" {
-        return "i64";
+    if trimmed[trimmed.length - 1] != "*" {
+        return "";
     }
-    if llvm_type == "{ i1*, i64 }*" {
-        return "i1";
+    let without_pointer = trim_text(substring(trimmed, 0, trimmed.length - 1));
+    if without_pointer.length < 2 {
+        return "";
     }
-    return "";
+    if without_pointer[0] != "{" {
+        return "";
+    }
+    if without_pointer[without_pointer.length - 1] != "}" {
+        return "";
+    }
+    let inner = trim_text(substring(without_pointer, 1, without_pointer.length - 1));
+    if inner.length == 0 {
+        return "";
+    }
+    let comma_index = index_of(inner, ",");
+    if comma_index < 0 {
+        return "";
+    }
+    let first_segment = trim_text(substring(inner, 0, comma_index));
+    if first_segment.length == 0 {
+        return "";
+    }
+    if first_segment[first_segment.length - 1] != "*" {
+        return "";
+    }
+    let element = trim_text(substring(first_segment, 0, first_segment.length - 1));
+    if element.length == 0 {
+        return "";
+    }
+    return element;
 }
 
 fn unwrap_move_wrapper(annotation -> string) -> string {

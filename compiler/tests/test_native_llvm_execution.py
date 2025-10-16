@@ -92,6 +92,28 @@ def _build_bool_array(values):
     return buffer, struct
 
 
+class _Pair(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_double),
+        ("right", ctypes.c_double),
+    ]
+
+
+class _ArrayPair(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.POINTER(_Pair)),
+        ("length", ctypes.c_longlong),
+    ]
+
+
+def _build_pair_array(values):
+    pair_array_type = _Pair * len(values)
+    pairs = [_Pair(left, right) for left, right in values]
+    buffer = pair_array_type(*pairs)
+    struct = _ArrayPair(data=buffer, length=len(values))
+    return buffer, struct
+
+
 def _invoke(engine, name: str, restype, arg_types, *args):
     address = engine.get_function_address(name)
     assert address != 0, f"function {name} not found"
@@ -636,6 +658,70 @@ fn main() -> number {
             ctypes.byref(arr_int),
         ) == 10
         assert _invoke_int(engine, "sum_int_literal") == 10
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_iterates_struct_arrays() -> None:
+    source = """
+struct Pair {
+    left -> number;
+    right -> number;
+}
+
+fn sum_pairs(values -> Pair[]) -> number {
+    let mut total -> number = 0;
+    for value in values {
+        total = total + value.left + value.right;
+    }
+    return total;
+}
+
+fn sum_non_zero(values -> Pair[]) -> number {
+    let mut total -> number = 0;
+    for value in values {
+        if value.left == 0 {
+            continue;
+        }
+        total = total + value.left + value.right;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    ir = lowered.ir
+    assert "%Pair = type { double, double }" in ir
+    assert "{ %Pair*, i64 }*" in ir
+
+    engine, module = _compile_ir(ir)
+    buffers = []
+    try:
+        buf_pairs, arr_pairs = _build_pair_array([(1.0, 2.0), (3.0, 4.0)])
+        buffers.append(buf_pairs)
+        assert _invoke(
+            engine,
+            "sum_pairs",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayPair),),
+            ctypes.byref(arr_pairs),
+        ) == pytest.approx(10.0)
+
+        buf_skip, arr_skip = _build_pair_array([(0.0, 1.0), (5.5, -0.5)])
+        buffers.append(buf_skip)
+        assert _invoke(
+            engine,
+            "sum_non_zero",
+            ctypes.c_double,
+            (ctypes.POINTER(_ArrayPair),),
+            ctypes.byref(arr_skip),
+        ) == pytest.approx(5.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
