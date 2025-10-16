@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.18 (2025-10-16)
+
+### Bug Fixes
+
+- Imterface implements type enforcement
+  ([`b4efbcd`](https://github.com/SailfinIO/sailfin/commit/b4efbcd7e467ebef03ed3d99da9aa3f466903527))
+
+
 ## v0.1.1-alpha.17 (2025-10-16)
 
 ### Bug Fixes
