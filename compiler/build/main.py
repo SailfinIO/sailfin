@@ -62,7 +62,7 @@ def compile_to_sailfin(source):
     program = parse_program(source)
     analysis_result = typecheck_program(program)
     if len(analysis_result.diagnostics) > 0:
-        report_typecheck_errors(analysis_result.diagnostics)
+        report_typecheck_errors(analysis_result.diagnostics, source)
         return ""
     return emit_program(program)
 
@@ -71,8 +71,8 @@ def compile_to_native(source):
     program = parse_program(source)
     analysis_result = typecheck_program(program)
     if len(analysis_result.diagnostics) > 0:
-        report_typecheck_errors(analysis_result.diagnostics)
-        return EmitNativeResult(module=empty_native_module(), diagnostics=format_typecheck_diagnostics(analysis_result.diagnostics))
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        return EmitNativeResult(module=empty_native_module(), diagnostics=format_typecheck_diagnostics(analysis_result.diagnostics, source))
     return emit_native(program)
 
 def compile_to_native_python(source):
@@ -129,7 +129,7 @@ def compile_source_at_path(source_path):
     program = parse_program(source)
     analysis = typecheck_program(program)
     if len(analysis.diagnostics) > 0:
-        return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics), fatal=True)])
+        return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics, source), fatal=True)])
     native_result = emit_native(program)
     lowered = lower_to_python(native_result.module)
     messages = (native_result.diagnostics) + (lowered.diagnostics)
@@ -143,21 +143,181 @@ def compile_source_at_path(source_path):
         entry_list = [ModuleDiagnostics(source_path=source_path, messages=messages, fatal=False)]
     return ModuleCompilationResult(module=CompiledModule(source_path=source_path, python_source=python_source), diagnostics=entry_list)
 
-def format_typecheck_diagnostics(entries):
+def format_typecheck_diagnostics(entries, source):
+    lines = split_source_lines(source)
+    padding_width = len(number_to_string(len(lines)))
+    if padding_width < 1:
+        padding_width = 1
     messages = []
-    for entry in entries:
-        messages = (messages) + ([entry.message])
-    return messages
-
-def report_typecheck_errors(entries):
-    # effects: io
     index = 0
     while True:
         if index >= len(entries):
             break
-        diagnostic = entries[index]
-        print.error("[typecheck] " + diagnostic.message)
+        formatted = format_typecheck_diagnostic(entries[index], lines, padding_width)
+        messages = append_string(messages, formatted)
         index += 1
+    return messages
+
+def report_typecheck_errors(entries, source):
+    # effects: io
+    formatted = format_typecheck_diagnostics(entries, source)
+    prefix = "[typecheck] "
+    padding = repeat_character(" ", len(prefix))
+    index = 0
+    while True:
+        if index >= len(formatted):
+            break
+        message = formatted[index]
+        lines = split_source_lines(message)
+        if len(lines) == 0:
+            print.error(prefix)
+            index += 1
+            continue
+        line_index = 0
+        while True:
+            if line_index >= len(lines):
+                break
+            if line_index == 0:
+                print.error(prefix + lines[line_index])
+            else:
+                print.error(padding + lines[line_index])
+            line_index += 1
+        index += 1
+
+def format_typecheck_diagnostic(entry, source_lines, line_padding):
+    if entry.primary == None:
+        return entry.message
+    parts = []
+    parts = append_string(parts, entry.message)
+    token = entry.primary
+    line_number = token.line
+    column_number = token.column
+    location = "  --> line " + number_to_string(line_number) + ", column " + number_to_string(column_number)
+    parts = append_string(parts, location)
+    if line_number < 1  or  line_number > len(source_lines):
+        return join_lines(parts)
+    line_text = source_lines[line_number - 1]
+    gutter_spaces = repeat_character(" ", line_padding)
+    parts = append_string(parts, " " + gutter_spaces + " |")
+    line_number_text = number_to_string(line_number)
+    prefix_padding = ""
+    pad_count = line_padding - len(line_number_text)
+    if pad_count < 0:
+        pad_count = 0
+    if pad_count > 0:
+        prefix_padding = repeat_character(" ", pad_count)
+    parts = append_string(parts, " " + prefix_padding + line_number_text + " | " + line_text)
+    pointer = build_pointer_line(column_number, token.lexeme, line_text)
+    parts = append_string(parts, " " + gutter_spaces + " | " + pointer)
+    return join_lines(parts)
+
+def split_source_lines(source):
+    lines = []
+    current = ""
+    index = 0
+    while True:
+        if index >= len(source):
+            break
+        ch = source[index]
+        if ch == "\r":
+            lines = append_string(lines, current)
+            current = ""
+            if index + 1 < len(source):
+                if source[index + 1] == "\n":
+                    index += 2
+                    continue
+            index += 1
+            continue
+        if ch == "\n":
+            lines = append_string(lines, current)
+            current = ""
+            index += 1
+            continue
+        current = current + ch
+        index += 1
+    lines = append_string(lines, current)
+    return lines
+
+def build_pointer_line(column, lexeme, line_text):
+    if len(line_text) == 0:
+        return "^"
+    start_column = column
+    if start_column < 1:
+        start_column = 1
+    if start_column > len(line_text):
+        start_column = len(line_text)
+    pointer = ""
+    index = 1
+    while True:
+        if index >= start_column:
+            break
+        if index <= len(line_text):
+            current = line_text[index - 1]
+            if current == "\t":
+                pointer = pointer + "\t"
+            else:
+                pointer = pointer + " "
+        else:
+            pointer = pointer + " "
+        index += 1
+    highlight_length = len(lexeme)
+    if highlight_length <= 0:
+        highlight_length = 1
+    remaining = len(line_text) - (start_column - 1)
+    if remaining <= 0:
+        remaining = 1
+    if highlight_length > remaining:
+        highlight_length = remaining
+    highlight_index = 0
+    while True:
+        if highlight_index >= highlight_length:
+            break
+        pointer = pointer + "^"
+        highlight_index += 1
+    return pointer
+
+def join_lines(lines):
+    if len(lines) == 0:
+        return ""
+    result = lines[0]
+    index = 1
+    while True:
+        if index >= len(lines):
+            break
+        result = result + "\n" + lines[index]
+        index += 1
+    return result
+
+def append_string(values, value):
+    return (values) + ([value])
+
+def number_to_string(value):
+    if value == 0:
+        return "0"
+    working = value
+    negative = False
+    if working < 0:
+        negative = True
+        working = -working
+    digits = "0123456789"
+    remaining = working
+    output = ""
+    while True:
+        if remaining <= 0:
+            break
+        temp = remaining
+        quotient = 0
+        while True:
+            if temp < 10:
+                break
+            temp -= 10
+            quotient += 1
+        ch = slice_string(digits, temp, temp + 1)
+        output = ch + output
+        remaining = quotient
+    if negative:
+        output = "-" + output
+    return output
 
 def empty_native_module():
     return NativeModule(artifacts=[], entry_points=[], symbol_count=0)

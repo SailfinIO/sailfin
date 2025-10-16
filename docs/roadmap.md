@@ -72,6 +72,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
+- [x] Stage1 diagnostic snippets — Stage1 CLI output and native lowering diagnostics now render caret-highlighted source snippets alongside messages. Validation: `compiler/tests/test_stage1_diagnostics.py::test_missing_effect_diagnostic_includes_source_snippet`; behaviour documented in `docs/status.md`.
 - [x] Struct interface conformance — Stage1 type checking now verifies that
       structs implement every interface member they claim, including generic
       instantiations. Validation: `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_interface_member_reports_diagnostic`,
