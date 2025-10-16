@@ -104,6 +104,46 @@ struct OwnershipConsumption {
     name -> string;
 }
 
+struct StructFieldInfo {
+    name -> string;
+    llvm_type -> string;
+    index -> number;
+}
+
+struct StructTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    fields -> StructFieldInfo[];
+    align -> number;
+}
+
+struct TypeContext {
+    structs -> StructTypeInfo[];
+}
+
+struct TypeContextBuild {
+    context -> TypeContext;
+    diagnostics -> string[];
+}
+
+struct StructLiteralField {
+    name -> string;
+    value -> string;
+}
+
+struct StructLiteralParse {
+    success -> boolean;
+    type_name -> string;
+    fields -> StructLiteralField[];
+    diagnostics -> string[];
+}
+
+struct MemberAccessParse {
+    success -> boolean;
+    base -> string;
+    field -> string;
+}
+
 struct LocalBinding {
     name -> string;
     pointer -> string;
@@ -290,8 +330,13 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     diagnostics = diagnostics.concat(parse.diagnostics);
 
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let direct_effects = collect_direct_function_effects(parse.functions);
-    let call_graph = collect_function_call_graph(parse.functions);
+    let type_build = build_type_context(parse.structs);
+    diagnostics = diagnostics.concat(type_build.diagnostics);
+    let type_context = type_build.context;
+    let struct_methods = flatten_struct_methods(parse.structs);
+    let all_functions = concat_native_functions(parse.functions, struct_methods);
+    let direct_effects = collect_direct_function_effects(all_functions);
+    let call_graph = collect_function_call_graph(all_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
 
     let mut function_effects -> FunctionEffectEntry[] = [];
@@ -306,29 +351,36 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         lines = append_string(lines, "");
     }
 
+    let struct_type_lines = render_struct_type_definitions(type_context);
+    if struct_type_lines.length > 0 {
+        lines = lines.concat(struct_type_lines);
+        lines = append_string(lines, "");
+    }
+
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     loop {
-        if index >= parse.functions.length {
+        if index >= all_functions.length {
             break;
         }
-        let aggregated_entry = find_function_effect_entry(aggregated_effects, parse.functions[index].name);
+        let current_function = all_functions[index];
+        let aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name);
         let mut effective_effects -> string[] = [];
         if aggregated_entry != null {
             effective_effects = aggregated_entry.effects;
         }
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry {
-            name: parse.functions[index].name,
+            name: current_function.name,
             effects: effective_effects,
         });
-        let lowered = emit_function(parse.functions[index], parse.functions, effective_effects);
-        if sanitize_symbol(parse.functions[index].name) == "add" {
+        let lowered = emit_function(current_function, all_functions, effective_effects, type_context);
+        if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
         diagnostics = diagnostics.concat(lowered.diagnostics);
         if lowered.lines.length > 0 {
             lines = lines.concat(lowered.lines);
-            if index + 1 < parse.functions.length {
+            if index + 1 < all_functions.length {
                 lines = append_string(lines, "");
             }
         }
@@ -462,6 +514,219 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
     lines = lines.concat(struct_lines);
     lines = append_string(lines, "; -----------------------------------------------");
     return lines;
+}
+
+fn empty_type_context() -> TypeContext {
+    return TypeContext { structs: [] };
+}
+
+fn build_type_context(structs -> NativeStruct[]) -> TypeContextBuild {
+    let mut diagnostics -> string[] = [];
+    let mut entries -> StructTypeInfo[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let definition = structs[index];
+        if definition.layout == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
+            index += 1;
+            continue;
+        }
+        let layout = definition.layout;
+        let sanitized = sanitize_symbol(definition.name);
+        let llvm_name = "%" + sanitized;
+        let mut fields -> StructFieldInfo[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= layout.fields.length {
+                break;
+            }
+            let layout_field = layout.fields[field_index];
+            let mapped = map_struct_field_annotation(layout_field.type_annotation);
+            let mut llvm_field_type -> string = mapped;
+            if llvm_field_type.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
+                llvm_field_type = "i8*";
+            }
+            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, index: field_index });
+            field_index += 1;
+        }
+        let mut align_value -> number = layout.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        entries = append_struct_type_info(entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, align: align_value });
+        index += 1;
+    }
+    return TypeContextBuild { context: TypeContext { structs: entries }, diagnostics: diagnostics };
+}
+
+fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
+    return values.concat([value]);
+}
+
+fn append_native_function(values -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
+    return values.concat([value]);
+}
+
+fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]) -> NativeFunction[] {
+    let mut result -> NativeFunction[] = first;
+    let mut index -> number = 0;
+    loop {
+        if index >= second.length {
+            break;
+        }
+        result = append_native_function(result, second[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
+    let mut result -> NativeFunction[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let definition = structs[index];
+        let mut method_index -> number = 0;
+        loop {
+            if method_index >= definition.methods.length {
+                break;
+            }
+            let method = definition.methods[method_index];
+            let qualified_name = definition.name + "::" + method.name;
+            let qualified = NativeFunction {
+                name: qualified_name,
+                parameters: method.parameters,
+                return_type: method.return_type,
+                effects: method.effects,
+                instructions: method.instructions,
+            };
+            result = append_native_function(result, qualified);
+            method_index += 1;
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn render_struct_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        let mut field_types -> string[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= info.fields.length {
+                break;
+            }
+            field_types = append_string(field_types, info.fields[field_index].llvm_type);
+            field_index += 1;
+        }
+        let mut body -> string = "";
+        if field_types.length == 0 {
+            body = "{}";
+        } else {
+            body = "{ " + join_with_separator(field_types, ", ") + " }";
+        }
+        lines = append_string(lines, info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn map_struct_field_annotation(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "double";
+    }
+    if normalized == "boolean" || normalized == "bool" {
+        return "i1";
+    }
+    if normalized == "int" || normalized == "i64" {
+        return "i64";
+    }
+    if normalized == "i32" {
+        return "i32";
+    }
+    if normalized == "string" {
+        return "i8*";
+    }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" {
+            let element_annotation = trim_text(substring(normalized, 0, normalized.length - 2));
+            let element_type = map_struct_field_annotation(element_annotation);
+            if element_type.length == 0 {
+                return "";
+            }
+            let aggregate = array_struct_type_for_element(element_type);
+            return aggregate + "*";
+        }
+    }
+    return "";
+}
+
+fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        if info.name == name {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+    let trimmed = trim_text(llvm_type);
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        if info.llvm_name == trimmed {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> StructFieldInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= info.fields.length {
+            break;
+        }
+        let field = info.fields[index];
+        if field.name == field_name {
+            return field;
+        }
+        index += 1;
+    }
+    return null;
 }
 
 fn collect_direct_function_effects(functions -> NativeFunction[]) -> FunctionEffectEntry[] {
@@ -1017,16 +1282,16 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[]) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
-    let llvm_return = map_return_type(function.return_type);
+    let llvm_return = map_return_type(context, function.return_type);
     if llvm_return.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name);
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics };
     }
 
-    let preparation = prepare_parameters(function);
+    let preparation = prepare_parameters(function, context);
     diagnostics = diagnostics.concat(preparation.diagnostics);
 
     let mut lines -> string[] = [];
@@ -1040,7 +1305,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, "entry:");
 
-    let body = emit_body(function, llvm_return, preparation.bindings, functions);
+    let body = emit_body(function, llvm_return, preparation.bindings, functions, context);
     lines = lines.concat(body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
     lines = append_string(lines, "}");
@@ -1048,7 +1313,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics };
 }
 
-fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[]) -> BodyResult {
+fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[], context -> TypeContext) -> BodyResult {
     let lowered = lower_instruction_range(
         function,
         0,
@@ -1062,7 +1327,8 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         0,
         0,
         functions,
-        []
+        [],
+        context
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
@@ -1094,7 +1360,8 @@ fn lower_instruction_range(
     block_counter -> number,
     next_local_id -> number,
     functions -> NativeFunction[],
-    loop_stack -> LoopContext[]
+    loop_stack -> LoopContext[],
+    context -> TypeContext
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1115,7 +1382,7 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_allocas = lowered.allocas;
@@ -1140,7 +1407,7 @@ fn lower_instruction_range(
                             span: instruction.span,
                             value_span: instruction.span,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
                         current_lines = lowered.lines;
                         current_allocas = lowered.allocas;
@@ -1153,7 +1420,7 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions);
+                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions, context);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -1161,7 +1428,7 @@ fn lower_instruction_range(
                 current_bindings = lowered.bindings;
             }
         } else if instruction.variant == "Return" {
-            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions);
+            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -1187,7 +1454,8 @@ fn lower_instruction_range(
                 current_next_local,
                 functions,
                 current_loop_stack,
-                end
+                end,
+                context
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
@@ -1217,7 +1485,8 @@ fn lower_instruction_range(
                 current_next_local,
                 functions,
                 current_loop_stack,
-                end
+                end,
+                context
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
@@ -1247,7 +1516,8 @@ fn lower_instruction_range(
                 current_next_local,
                 functions,
                 current_loop_stack,
-                end
+                end,
+                context
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
@@ -1271,8 +1541,8 @@ fn lower_instruction_range(
             if current_loop_stack.length == 0 {
                 diagnostics = append_string(diagnostics, "llvm lowering: `break` outside loop in `" + function.name + "`");
             } else {
-                let context = last_loop_context(current_loop_stack);
-                current_lines = append_string(current_lines, "  br label %" + context.break_label);
+                let loop_context = last_loop_context(current_loop_stack);
+                current_lines = append_string(current_lines, "  br label %" + loop_context.break_label);
                 terminated = true;
             }
             index += 1;
@@ -1284,8 +1554,8 @@ fn lower_instruction_range(
             if current_loop_stack.length == 0 {
                 diagnostics = append_string(diagnostics, "llvm lowering: `continue` outside loop in `" + function.name + "`");
             } else {
-                let context = last_loop_context(current_loop_stack);
-                current_lines = append_string(current_lines, "  br label %" + context.continue_label);
+                let loop_context = last_loop_context(current_loop_stack);
+                current_lines = append_string(current_lines, "  br label %" + loop_context.continue_label);
                 terminated = true;
             }
             index += 1;
@@ -1307,7 +1577,8 @@ fn lower_instruction_range(
                 current_next_local,
                 functions,
                 current_loop_stack,
-                end
+                end,
+                context
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
@@ -1500,7 +1771,8 @@ fn lower_loop_instruction(
     next_local_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
-    end -> number
+    end -> number,
+    context -> TypeContext
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1525,8 +1797,8 @@ fn lower_loop_instruction(
     current_lines = append_string(current_lines, "  br label %" + loop_label);
     current_lines = append_string(current_lines, loop_label + ":");
 
-    let context = LoopContext { break_label: exit_label, continue_label: loop_label };
-    let stacked = append_loop_context(loop_stack, context);
+    let loop_context = LoopContext { break_label: exit_label, continue_label: loop_label };
+    let stacked = append_loop_context(loop_stack, loop_context);
 
     let base_locals = current_locals;
     let base_allocas = current_allocas;
@@ -1545,7 +1817,8 @@ fn lower_loop_instruction(
         current_block_counter,
         base_local_id,
         functions,
-        stacked
+        stacked,
+        context
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -1590,7 +1863,8 @@ fn lower_for_instruction(
     next_local_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
-    end -> number
+    end -> number,
+    context -> TypeContext
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1661,7 +1935,7 @@ fn lower_for_instruction(
     if range_parse.success {
         diagnostics = diagnostics.concat(range_parse.diagnostics);
 
-        let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions);
+    let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(start_result.diagnostics);
         current_lines = start_result.lines;
         current_temp = start_result.temp_index;
@@ -1682,7 +1956,7 @@ fn lower_for_instruction(
             };
         }
 
-        let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions);
+    let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(end_result.diagnostics);
         current_lines = end_result.lines;
         current_temp = end_result.temp_index;
@@ -1748,7 +2022,7 @@ fn lower_for_instruction(
         let mut stride_operand = LLVMOperand { llvm_type: "double", value: "1.0" };
         let stride_text = trim_text(range_parse.stride);
         if stride_text.length > 0 {
-            let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions);
+            let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(stride_result.diagnostics);
             current_lines = stride_result.lines;
             current_temp = stride_result.temp_index;
@@ -1924,8 +2198,8 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br i1 " + continue_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
         current_lines = append_string(current_lines, loop_body_label + ":");
 
-        let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
-        let stacked = append_loop_context(loop_stack, context);
+    let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+    let stacked = append_loop_context(loop_stack, loop_context);
 
         let body_locals = append_local_binding(current_locals, iteration_binding);
         let body_result = lower_instruction_range(
@@ -1941,7 +2215,8 @@ fn lower_for_instruction(
             current_block_counter,
             current_next_local,
             functions,
-            stacked
+            stacked,
+            context
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -1995,7 +2270,7 @@ fn lower_for_instruction(
         };
     }
 
-    let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions);
+    let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(iterable_result.diagnostics);
     current_lines = iterable_result.lines;
     current_temp = iterable_result.temp_index;
@@ -2111,8 +2386,8 @@ fn lower_for_instruction(
 
     current_lines = append_string(current_lines, "  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer);
 
-    let context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
-    let stacked = append_loop_context(loop_stack, context);
+    let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+    let stacked = append_loop_context(loop_stack, loop_context);
 
     let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false };
     let body_locals = append_local_binding(current_locals, iteration_binding);
@@ -2129,7 +2404,8 @@ fn lower_for_instruction(
         current_block_counter,
         current_next_local,
         functions,
-        stacked
+        stacked,
+        context
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -2283,7 +2559,8 @@ fn lower_match_instruction(
     next_local_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
-    end -> number
+    end -> number,
+    context -> TypeContext
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2299,7 +2576,7 @@ fn lower_match_instruction(
     diagnostics = diagnostics.concat(structure.diagnostics);
 
     let subject_instruction = function.instructions[start_index];
-    let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions);
+    let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(subject_result.diagnostics);
     current_lines = subject_result.lines;
     current_temp = subject_result.temp_index;
@@ -2386,7 +2663,8 @@ fn lower_match_instruction(
             current_locals,
             current_temp,
             current_lines,
-            functions
+            functions,
+            context
         );
         diagnostics = diagnostics.concat(lowered_condition.diagnostics);
         current_lines = lowered_condition.lines;
@@ -2420,7 +2698,8 @@ fn lower_match_instruction(
             current_block_counter,
             base_local_id,
             functions,
-            loop_stack
+            loop_stack,
+            context
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -2470,7 +2749,8 @@ fn lower_match_case_condition(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    context -> TypeContext
 ) -> MatchCaseCondition {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2478,7 +2758,7 @@ fn lower_match_case_condition(
     let mut condition_operand -> LLVMOperand? = null;
 
     if !case.is_default {
-        let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions);
+    let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(pattern_result.diagnostics);
         current_lines = pattern_result.lines;
         current_temp = pattern_result.temp_index;
@@ -2505,7 +2785,7 @@ fn lower_match_case_condition(
     if case.guard != null {
         let guard_text = trim_text(case.guard);
         if guard_text.length > 0 {
-            let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions);
+            let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(guard_condition.diagnostics);
             current_lines = guard_condition.lines;
             current_temp = guard_condition.temp_index;
@@ -2557,10 +2837,11 @@ fn lower_condition_to_i1(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    context -> TypeContext
 ) -> ConditionConversion {
     let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
-    let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions);
+    let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context);
     diagnostics = diagnostics.concat(lowered.diagnostics);
     let mut current_lines -> string[] = lowered.lines;
     let mut current_temp -> number = lowered.temp_index;
@@ -2606,7 +2887,8 @@ fn lower_if_instruction(
     next_local_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
-    end -> number
+    end -> number,
+    context -> TypeContext
 ) -> BlockLoweringResult {
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -2629,7 +2911,8 @@ fn lower_if_instruction(
         current_locals,
         current_temp,
         current_lines,
-        functions
+        functions,
+        context
     );
     diagnostics = diagnostics.concat(condition.diagnostics);
     current_lines = condition.lines;
@@ -2693,7 +2976,8 @@ fn lower_if_instruction(
         base_block_counter,
         base_local_id,
         functions,
-        loop_stack
+        loop_stack,
+        context
     );
     diagnostics = diagnostics.concat(then_result.diagnostics);
     current_allocas = then_result.allocas;
@@ -2724,7 +3008,8 @@ fn lower_if_instruction(
             current_block_counter,
             current_next_local,
             functions,
-            loop_stack
+            loop_stack,
+            context
         );
         diagnostics = diagnostics.concat(else_result.diagnostics);
         current_allocas = else_result.allocas;
@@ -2783,7 +3068,8 @@ fn lower_let_instruction(
     lines -> string[],
     temp_index -> number,
     next_local_id -> number,
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    context -> TypeContext
 ) -> LetLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2803,7 +3089,7 @@ fn lower_let_instruction(
     let trimmed_annotation = trim_text(instruction.type_annotation);
     let mut llvm_type -> string = "";
     if trimmed_annotation.length > 0 {
-        llvm_type = map_local_type(instruction.type_annotation);
+        llvm_type = map_local_type(context, instruction.type_annotation);
         if llvm_type.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
         }
@@ -2830,7 +3116,7 @@ fn lower_let_instruction(
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
-        let lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions);
+        let lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -2887,7 +3173,8 @@ fn lower_expression_statement(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    context -> TypeContext
 ) -> ExpressionStatementResult {
     let mut suspension_span -> NativeSourceSpan? = null;
     if instruction.span != null {
@@ -2909,7 +3196,7 @@ fn lower_expression_statement(
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
             let consumption = ownership_analysis.consumption;
 
-            let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions);
+            let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -2946,7 +3233,7 @@ fn lower_expression_statement(
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
-    let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions);
+    let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(lowered.diagnostics);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
@@ -3126,7 +3413,8 @@ fn lower_return_instruction(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
-    functions -> NativeFunction[]
+    functions -> NativeFunction[],
+    context -> TypeContext
 ) -> ExpressionStatementResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3152,7 +3440,7 @@ fn lower_return_instruction(
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
-    let lowered = lower_expression(instruction.expression, current_bindings, current_locals, current_temp, current_lines, functions);
+    let lowered = lower_expression(instruction.expression, current_bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(lowered.diagnostics);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
@@ -3193,7 +3481,7 @@ fn lower_return_instruction(
 }
 
 
-fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
+fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> ParameterPreparation {
     let mut signature -> string[] = [];
     let mut bindings -> ParameterBinding[] = [];
     let mut diagnostics -> string[] = [];
@@ -3203,7 +3491,7 @@ fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
             break;
         }
         let parameter = function.parameters[index];
-        let mut llvm_type = map_parameter_type(parameter.type_annotation);
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
         if llvm_type.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported parameter type `" + parameter.type_annotation + "` in function `" + function.name + "`");
             llvm_type = "double";
@@ -3226,7 +3514,15 @@ fn prepare_parameters(function -> NativeFunction) -> ParameterPreparation {
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
 }
 
-fn map_primitive_type(annotation -> string) -> string {
+fn map_struct_type_annotation(context -> TypeContext, annotation -> string) -> string {
+    let info = find_struct_info_by_name(context, annotation);
+    if info != null {
+        return info.llvm_name;
+    }
+    return "";
+}
+
+fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "number" {
         return "double";
     }
@@ -3236,26 +3532,36 @@ fn map_primitive_type(annotation -> string) -> string {
     if annotation == "int" || annotation == "i64" {
         return "i64";
     }
+    if annotation == "i32" {
+        return "i32";
+    }
+    let struct_type = map_struct_type_annotation(context, annotation);
+    if struct_type.length > 0 {
+        return struct_type;
+    }
+    if annotation == "string" {
+        return "i8*";
+    }
     return "";
 }
 
-fn map_reference_inner_type(annotation -> string) -> string {
+fn map_reference_inner_type(context -> TypeContext, annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
     }
-    let nested_reference = map_reference_type(trimmed);
+    let nested_reference = map_reference_type(context, trimmed);
     if nested_reference.length > 0 {
         return nested_reference;
     }
-    let array_type = map_array_pointer_type(trimmed);
+    let array_type = map_array_pointer_type(context, trimmed);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(trimmed);
+    return map_primitive_type(context, trimmed);
 }
 
-fn map_reference_type(annotation -> string) -> string {
+fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -3277,14 +3583,14 @@ fn map_reference_type(annotation -> string) -> string {
     if remainder[0] == "(" && remainder[remainder.length - 1] == ")" {
         remainder = trim_text(substring(remainder, 1, remainder.length - 1));
     }
-    let inner_type = map_reference_inner_type(remainder);
+    let inner_type = map_reference_inner_type(context, remainder);
     if inner_type.length == 0 {
         return "";
     }
     return inner_type + "*";
 }
 
-fn map_array_pointer_type(annotation -> string) -> string {
+fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 {
         return "";
@@ -3294,7 +3600,7 @@ fn map_array_pointer_type(annotation -> string) -> string {
         return "";
     }
     let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
-    let element_type = map_primitive_type(element_annotation);
+    let element_type = map_primitive_type(context, element_annotation);
     if element_type.length == 0 {
         return "";
     }
@@ -3504,55 +3810,55 @@ fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], 
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
 }
 
-fn map_return_type(return_type -> string) -> string {
+fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     let trimmed = trim_text(return_type);
     if trimmed.length == 0 || trimmed == "void" {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
-    let reference_type = map_reference_type(normalized);
+    let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(normalized);
+    let array_type = map_array_pointer_type(context, normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(normalized);
+    return map_primitive_type(context, normalized);
 }
 
-fn map_parameter_type(parameter_type -> string) -> string {
+fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
     let trimmed = trim_text(parameter_type);
     if trimmed.length == 0 {
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
-    let reference_type = map_reference_type(normalized);
+    let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(normalized);
+    let array_type = map_array_pointer_type(context, normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(normalized);
+    return map_primitive_type(context, normalized);
 }
 
-fn map_local_type(type_annotation -> string) -> string {
+fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
     let trimmed = trim_text(type_annotation);
     if trimmed.length == 0 {
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
-    let reference_type = map_reference_type(normalized);
+    let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
     }
-    let array_type = map_array_pointer_type(normalized);
+    let array_type = map_array_pointer_type(context, normalized);
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(normalized);
+    return map_primitive_type(context, normalized);
 }
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
@@ -3647,7 +3953,7 @@ fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBin
     return result;
 }
 
-fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics -> string[] = [];
     if trimmed.length == 0 {
@@ -3657,7 +3963,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
     let stripped = strip_enclosing_parentheses(trimmed);
     if stripped != trimmed {
-        return lower_expression(stripped, bindings, locals, temp_index, lines, functions);
+        return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     let borrow_parse = parse_borrow_expression(stripped);
@@ -3667,17 +3973,17 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
     let comparison = find_comparison_operator(stripped);
     if comparison.success {
-        return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions);
+        return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context);
     }
 
     let additive = find_top_level_operator(stripped, "+-");
     if additive.success {
-        return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions);
+        return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
     }
 
     let multiplicative = find_top_level_operator(stripped, "*/");
     if multiplicative.success {
-        return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions);
+        return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context);
     }
 
     let call_index = find_call_site(stripped);
@@ -3685,15 +3991,20 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         let target = trim_text(substring(stripped, 0, call_index));
         let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
         let argument_entries = split_call_arguments(arguments_text);
-        return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions);
+        return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context);
     }
 
     if stripped.length >= 2 {
         let first = stripped[0];
         let last = stripped[stripped.length - 1];
         if first == "[" && last == "]" {
-            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions);
+            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context);
         }
+    }
+
+    let member_parse = parse_member_access(stripped);
+    if member_parse.success {
+        return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context);
     }
 
     let parameter = find_parameter_binding(bindings, stripped);
@@ -3710,6 +4021,10 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     let literal_candidate = trim_text(stripped);
+
+    if is_string_literal(literal_candidate) {
+        return lower_string_literal(literal_candidate, temp_index, lines);
+    }
 
     if is_boolean_literal(literal_candidate) {
         let mut value -> string = "0";
@@ -4004,7 +4319,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
 }
 
-fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 1, expression.length));
     let mut diagnostics -> string[] = [];
@@ -4013,13 +4328,13 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions);
+    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context);
     diagnostics = diagnostics.concat(left_result.diagnostics);
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions);
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context);
     diagnostics = diagnostics.concat(right_result.diagnostics);
     if right_result.operand == null {
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
@@ -4041,7 +4356,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics };
 }
 
-fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let operator_length = match.symbol.length;
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + operator_length, expression.length));
@@ -4051,13 +4366,13 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions);
+    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context);
     diagnostics = diagnostics.concat(left_result.diagnostics);
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics };
     }
 
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions);
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context);
     diagnostics = diagnostics.concat(right_result.diagnostics);
     if right_result.operand == null {
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics };
@@ -4078,7 +4393,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: comparison.operand, diagnostics: diagnostics };
 }
 
-fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
     let trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
@@ -4098,7 +4413,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if argument_text.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
         }
-        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions);
+        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -4119,12 +4434,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut expected_params -> string[] = [];
     let function_entry = find_function_by_name(functions, trimmed_target);
     if function_entry != null {
-        llvm_return = map_return_type(function_entry.return_type);
+        llvm_return = map_return_type(context, function_entry.return_type);
         if llvm_return.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
             llvm_return = "double";
         }
-        expected_params = collect_parameter_types(function_entry.parameters);
+        expected_params = collect_parameter_types(context, function_entry.parameters);
     } else {
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
     }
@@ -4189,14 +4504,71 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics };
 }
 
-fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[]) -> ExpressionResult {
+fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context);
+    let mut diagnostics -> string[] = base_result.diagnostics;
+    if base_result.operand == null {
+        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics };
+    }
+
+    let mut current_lines -> string[] = base_result.lines;
+    let mut current_temp -> number = base_result.temp_index;
+    let base_operand = base_result.operand;
+
+    let mut struct_info -> StructTypeInfo? = null;
+    let mut pointer_available -> boolean = false;
+    let pointer_operand = base_operand;
+
+    if ends_with_pointer_suffix(base_operand.llvm_type) {
+        let candidate = strip_pointer_suffix(base_operand.llvm_type);
+        struct_info = find_struct_info_by_llvm_type(context, candidate);
+        if struct_info == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+        }
+        pointer_available = true;
+    } else {
+        struct_info = find_struct_info_by_llvm_type(context, base_operand.llvm_type);
+        if struct_info == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+        }
+    }
+
+    let info = struct_info;
+    let field_info = find_struct_field_info(info, parse.field);
+    if field_info == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    if pointer_available {
+        let struct_type = info.llvm_name;
+        let gep_name = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + gep_name + " = getelementptr " + struct_type + ", " + struct_type + "* " + pointer_operand.value + ", i32 0, i32 " + number_to_string(field_info.index));
+        current_temp += 1;
+        let load_name = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: load_name };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+    }
+
+    let extract_name = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index));
+    current_temp += 1;
+    let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: extract_name };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+}
+
+fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
 
     let inner = trim_text(substring(text, 1, text.length - 1));
     let elements = split_array_elements(inner);
-    let metadata = parse_array_literal_metadata(elements);
+    let metadata = parse_array_literal_metadata(elements, context);
 
     let mut operands -> LLVMOperand[] = [];
     let mut inferred_element_type -> string = metadata.element_type;
@@ -4211,7 +4583,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             index += 1;
             continue;
         }
-        let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions);
+        let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -4390,14 +4762,14 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
     return "";
 }
 
-fn collect_parameter_types(parameters -> NativeParameter[]) -> string[] {
+fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[]) -> string[] {
     let mut types -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= parameters.length {
             break;
         }
-        let llvm_type = map_parameter_type(parameters[index].type_annotation);
+        let llvm_type = map_parameter_type(context, parameters[index].type_annotation);
         if llvm_type.length == 0 {
             types = append_string(types, "double");
         } else {
@@ -4851,7 +5223,7 @@ fn split_array_elements(text -> string) -> string[] {
     return filtered;
 }
 
-fn parse_array_literal_metadata(entries -> string[]) -> ArrayLiteralMetadata {
+fn parse_array_literal_metadata(entries -> string[], context -> TypeContext) -> ArrayLiteralMetadata {
     if entries.length == 0 {
         return ArrayLiteralMetadata { element_type: "", start_index: 0 };
     }
@@ -4867,16 +5239,16 @@ fn parse_array_literal_metadata(entries -> string[]) -> ArrayLiteralMetadata {
     if annotation.length == 0 {
         return ArrayLiteralMetadata { element_type: "", start_index: 1 };
     }
-    let mapped = map_metadata_annotation(annotation);
+    let mapped = map_metadata_annotation(context, annotation);
     return ArrayLiteralMetadata { element_type: mapped, start_index: 1 };
 }
 
-fn map_metadata_annotation(annotation -> string) -> string {
+fn map_metadata_annotation(context -> TypeContext, annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
     }
-    let primitive = map_primitive_type(trimmed);
+    let primitive = map_primitive_type(context, trimmed);
     if primitive.length > 0 {
         return primitive;
     }
@@ -4884,7 +5256,7 @@ fn map_metadata_annotation(annotation -> string) -> string {
         let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
         if suffix == "[]" {
             let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
-            let inner_type = map_metadata_annotation(inner_annotation);
+            let inner_type = map_metadata_annotation(context, inner_annotation);
             if inner_type.length == 0 {
                 return "";
             }
@@ -4943,6 +5315,17 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
         return false;
     }
     return trimmed[trimmed.length - 1] == "*";
+}
+
+fn strip_pointer_suffix(value -> string) -> string {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    if trimmed[trimmed.length - 1] != "*" {
+        return trimmed;
+    }
+    return trim_text(substring(trimmed, 0, trimmed.length - 1));
 }
 
 fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
@@ -5148,6 +5531,141 @@ fn find_top_level_range_separator_from(value -> string, start_index -> number) -
     return -1;
 }
 
+fn find_member_access_separator(value -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    let mut last_index -> number = -1;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            if ch == "." {
+                if index > 0 {
+                    let previous = value[index - 1];
+                    if previous == "." {
+                        index += 1;
+                        continue;
+                    }
+                    if is_digit_char(previous) {
+                        if index + 1 < value.length {
+                            let next_digit = value[index + 1];
+                            if is_digit_char(next_digit) {
+                                index += 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if index + 1 < value.length {
+                    let next_char = value[index + 1];
+                    if next_char == "." {
+                        index += 1;
+                        continue;
+                    }
+                }
+                last_index = index;
+            }
+        }
+        index += 1;
+    }
+    return last_index;
+}
+
+fn parse_member_access(expression -> string) -> MemberAccessParse {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    let separator = find_member_access_separator(trimmed);
+    if separator < 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    let base = trim_text(substring(trimmed, 0, separator));
+    let field = trim_text(substring(trimmed, separator + 1, trimmed.length));
+    if base.length == 0 || field.length == 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    if !is_simple_identifier(field) {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    return MemberAccessParse { success: true, base: base, field: field };
+}
+
 fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
     let trimmed = trim_text(iterable);
     let mut diagnostics -> string[] = [];
@@ -5265,6 +5783,10 @@ fn sanitize_symbol(name -> string) -> string {
         return "anon";
     }
     return result;
+}
+
+fn is_digit_char(ch -> string) -> boolean {
+    return index_of("0123456789", ch) != -1;
 }
 
 fn is_symbol_char(ch -> string) -> boolean {
@@ -5392,6 +5914,25 @@ fn normalise_number_literal(text -> string) -> string {
         return trimmed;
     }
     return trimmed + ".0";
+}
+
+fn is_string_literal(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length < 2 {
+        return false;
+    }
+    if trimmed[0] != "\"" {
+        return false;
+    }
+    if trimmed[trimmed.length - 1] != "\"" {
+        return false;
+    }
+    return true;
+}
+
+fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let operand = LLVMOperand { llvm_type: "i8*", value: "null" };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: [] };
 }
 
 fn trim_text(value -> string) -> string {

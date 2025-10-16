@@ -30,8 +30,10 @@ roadmaps.
   `int[]`, `boolean[]`), and `match` dispatch alongside
   boolean and integer primitives for parameters, locals, and returns in the LLVM
   prototype. Struct and enum declarations now emit `.layout` descriptors that
-  record size, alignment, and per-field offsets for LLVM consumption. Array
-  literals embed `#element:<type>` metadata so Stage2 can skip per-element
+  record size, alignment, and per-field offsets for LLVM consumption. Member
+  access expressions in the LLVM prototype now consult those layouts, so `self.field`
+  lowers into `getelementptr`/`load` sequences instead of surfacing unsupported
+  expression diagnostics. Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
