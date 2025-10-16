@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.16 (2025-10-16)
+
+### Bug Fixes
+
+- Parameter spans flow insto stage2 diagnostics
+  ([`f40a610`](https://github.com/SailfinIO/sailfin/commit/f40a610f63bd8dffdda5559345bfb73352c9fcd7))
+
+
 ## v0.1.1-alpha.15 (2025-10-16)
 
 ### Bug Fixes
