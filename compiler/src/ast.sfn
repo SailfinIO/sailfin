@@ -56,6 +56,7 @@ struct Parameter {
     type_annotation -> TypeAnnotation?;
     default_value -> Expression?;
     mutable -> boolean;
+    span -> SourceSpan?;
 }
 
 struct WithClause {

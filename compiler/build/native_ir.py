@@ -50,14 +50,15 @@ class NativeSourceSpan:
         return runtime.struct_repr('NativeSourceSpan', [runtime.struct_field('start_line', self.start_line), runtime.struct_field('start_column', self.start_column), runtime.struct_field('end_line', self.end_line), runtime.struct_field('end_column', self.end_column)])
 
 class NativeParameter:
-    def __init__(self, name, type_annotation, mutable, default_value=None):
+    def __init__(self, name, type_annotation, mutable, default_value=None, span=None):
         self.name = name
         self.type_annotation = type_annotation
         self.mutable = mutable
         self.default_value = default_value
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('NativeParameter', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable), runtime.struct_field('default_value', self.default_value)])
+        return runtime.struct_repr('NativeParameter', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable), runtime.struct_field('default_value', self.default_value), runtime.struct_field('span', self.span)])
 
 class NativeFunction:
     def __init__(self, name, parameters, return_type, effects, instructions):
@@ -503,18 +504,26 @@ def parse_native_artifact(text):
                 entries = split_parameter_entries(combined)
                 if len(entries) == 0:
                     diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line)
+                    pending_span = None
                 else:
                     entry_index = 0
+                    span_consumed = False
                     while True:
                         if entry_index >= len(entries):
                             break
                         entry = entries[entry_index]
-                        parameter = parse_parameter_entry(entry)
+                        parameter_span = pending_span
+                        if span_consumed:
+                            parameter_span = None
+                        parameter = parse_parameter_entry(entry, parameter_span)
                         if parameter == None:
                             diagnostics = append_string(diagnostics, "unable to parse parameter entry: " + entry)
                         else:
                             current = append_parameter(current, parameter)
+                            if parameter.span != None:
+                                span_consumed = True
                         entry_index += 1
+                    pending_span = None
                 index = lookahead - 1
             else:
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
@@ -863,11 +872,12 @@ def parse_struct_definition(lines, start_index):
                 index += 1
                 continue
             if starts_with(raw_line, ".param "):
-                parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "))
+                parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span)
                 if parameter == None:
                     diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line)
                 else:
                     current_method = append_parameter(current_method, parameter)
+                method_pending_span = None
                 index += 1
                 continue
             if starts_with(raw_line, ".method "):
@@ -1062,7 +1072,7 @@ def parse_interface_signature(text, interface_name):
         while True:
             if entry_index >= len(entries):
                 break
-            parsed = parse_parameter_entry(entries[entry_index])
+            parsed = parse_parameter_entry(entries[entry_index], None)
             if parsed == None:
                 diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`")
             else:
@@ -1897,7 +1907,7 @@ def parse_function_name(header):
         name = trim_text(substring(name, separator_index + 1, len(name)))
     return strip_generics(name)
 
-def parse_parameter_entry(body):
+def parse_parameter_entry(body, span):
     trimmed = trim_text(body)
     if len(trimmed) == 0:
         return None
@@ -1937,7 +1947,7 @@ def parse_parameter_entry(body):
                 default_text = trim_text(strip_prefix(remainder, "="))
                 if len(default_text) > 0:
                     default_value = default_text
-    return NativeParameter(name=name, type_annotation=type_annotation, mutable=is_mutable, default_value=default_value)
+    return NativeParameter(name=name, type_annotation=type_annotation, mutable=is_mutable, default_value=default_value, span=span)
 
 def line_looks_like_parameter_entry(text):
     trimmed = trim_text(text)

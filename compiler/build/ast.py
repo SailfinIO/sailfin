@@ -104,14 +104,15 @@ class SourceSpan:
         return runtime.struct_repr('SourceSpan', [runtime.struct_field('start_line', self.start_line), runtime.struct_field('start_column', self.start_column), runtime.struct_field('end_line', self.end_line), runtime.struct_field('end_column', self.end_column)])
 
 class Parameter:
-    def __init__(self, name, mutable, type_annotation=None, default_value=None):
+    def __init__(self, name, mutable, type_annotation=None, default_value=None, span=None):
         self.name = name
         self.type_annotation = type_annotation
         self.default_value = default_value
         self.mutable = mutable
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('Parameter', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('default_value', self.default_value), runtime.struct_field('mutable', self.mutable)])
+        return runtime.struct_repr('Parameter', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('default_value', self.default_value), runtime.struct_field('mutable', self.mutable), runtime.struct_field('span', self.span)])
 
 class WithClause:
     def __init__(self, expression):

@@ -1314,6 +1314,8 @@ def parse_implements_clause(parser):
 
 def parse_single_parameter(parser):
     parser = skip_trivia(parser)
+    tokens_ref = parser.tokens
+    start_index = parser.index
     is_mutable = False
     token = parser_peek_raw(parser)
     if identifier_matches(token, "mut"):
@@ -1341,7 +1343,10 @@ def parse_single_parameter(parser):
         capture = collect_until(skip_trivia(parser), [",", ")"])
         parser = capture.parser
         default_value = expression_from_tokens(capture.tokens)
-    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable)
+    end_index = parser.index
+    parameter_tokens = token_slice(tokens_ref, start_index, end_index)
+    span = source_span_from_tokens(parameter_tokens)
+    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable, span=span)
     return ParameterParseResult(parser=parser, parameter=parameter)
 
 def parse_effect_list(parser):
@@ -2326,17 +2331,18 @@ def collect_expression_block(state):
 def parse_lambda_parameter(state):
     current = state
     if expression_tokens_is_at_end(current):
-        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
+        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False, span=None), success=False)
+    start_index = current.index
     is_mutable = False
     token = expression_tokens_peek(current)
     if token.kind.variant == "Identifier"  and  identifier_matches(token, "mut"):
         is_mutable = True
         current = expression_tokens_advance(current)
         if expression_tokens_is_at_end(current):
-            return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
+            return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False, span=None), success=False)
     name_token = expression_tokens_peek(current)
     if name_token.kind.variant != "Identifier":
-        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False), success=False)
+        return LambdaParameterParseResult(state=current, parameter=Parameter(name="", type_annotation=None, default_value=None, mutable=False, span=None), success=False)
     name = identifier_text(name_token)
     current = expression_tokens_advance(current)
     type_annotation = None
@@ -2346,7 +2352,7 @@ def parse_lambda_parameter(state):
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, ["=", ",", ")"])
             if not capture.success:
-                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=None, default_value=None, mutable=is_mutable), success=False)
+                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=None, default_value=None, mutable=is_mutable, span=None), success=False)
             type_text = trim_text(tokens_to_text(capture.tokens))
             if len(type_text) > 0:
                 type_annotation = TypeAnnotation(text=type_text)
@@ -2358,10 +2364,12 @@ def parse_lambda_parameter(state):
             current = expression_tokens_advance(current)
             capture = expression_tokens_collect_until(current, [",", ")"])
             if not capture.success:
-                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=type_annotation, default_value=None, mutable=is_mutable), success=False)
+                return LambdaParameterParseResult(state=current, parameter=Parameter(name=name, type_annotation=type_annotation, default_value=None, mutable=is_mutable, span=None), success=False)
             default_value = expression_from_tokens(capture.tokens)
             current = capture.state
-    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable)
+    parameter_tokens = token_slice(state.tokens, start_index, current.index)
+    span = source_span_from_tokens(parameter_tokens)
+    parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable, span=span)
     return LambdaParameterParseResult(state=current, parameter=parameter, success=True)
 
 def parse_lambda_parameter_list(state):

@@ -58,6 +58,7 @@ struct NativeParameter {
     type_annotation -> string;
     mutable -> boolean;
     default_value -> string?;
+    span -> NativeSourceSpan?;
 }
 
 struct NativeFunction {
@@ -443,21 +444,31 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
                 let entries = split_parameter_entries(combined);
                 if entries.length == 0 {
                     diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
+                    pending_span = null;
                 } else {
                     let mut entry_index -> number = 0;
+                    let mut span_consumed -> boolean = false;
                     loop {
                         if entry_index >= entries.length {
                             break;
                         }
                         let entry = entries[entry_index];
-                        let parameter = parse_parameter_entry(entry);
+                        let mut parameter_span -> NativeSourceSpan? = pending_span;
+                        if span_consumed {
+                            parameter_span = null;
+                        }
+                        let parameter = parse_parameter_entry(entry, parameter_span);
                         if parameter == null {
                             diagnostics = append_string(diagnostics, "unable to parse parameter entry: " + entry);
                         } else {
                             current = append_parameter(current, parameter);
+                            if parameter.span != null {
+                                span_consumed = true;
+                            }
                         }
                         entry_index += 1;
                     }
+                    pending_span = null;
                 }
                 index = lookahead - 1;
             } else {
@@ -979,12 +990,13 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 continue;
             }
             if starts_with(raw_line, ".param ") {
-                let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "));
+                let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span);
                 if parameter == null {
                     diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line);
                 } else {
                     current_method = append_parameter(current_method, parameter);
                 }
+                method_pending_span = null;
                 index += 1;
                 continue;
             }
@@ -1261,7 +1273,7 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
             if entry_index >= entries.length {
                 break;
             }
-            let parsed = parse_parameter_entry(entries[entry_index]);
+            let parsed = parse_parameter_entry(entries[entry_index], null);
             if parsed == null {
                 diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`");
             } else {
@@ -2334,7 +2346,7 @@ fn parse_function_name(header -> string) -> string {
     return strip_generics(name);
 }
 
-fn parse_parameter_entry(body -> string) -> NativeParameter? {
+fn parse_parameter_entry(body -> string, span -> NativeSourceSpan?) -> NativeParameter? {
     let mut trimmed = trim_text(body);
     if trimmed.length == 0 {
         return null;
@@ -2389,6 +2401,7 @@ fn parse_parameter_entry(body -> string) -> NativeParameter? {
         type_annotation: type_annotation,
         mutable: is_mutable,
         default_value: default_value,
+        span: span,
     };
 }
 

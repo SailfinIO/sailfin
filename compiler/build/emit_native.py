@@ -565,6 +565,7 @@ def emit_parameter_metadata(state, parameters):
         if index >= len(parameters):
             break
         parameter = parameters[index]
+        current = emit_span_if_present(current, parameter.span)
         line = ".param "
         if parameter.mutable:
             line = line + "mut "

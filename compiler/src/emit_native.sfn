@@ -699,6 +699,7 @@ fn emit_parameter_metadata(state -> NativeState, parameters -> Parameter[]) -> N
             break;
         }
         let parameter = parameters[index];
+        current = emit_span_if_present(current, parameter.span);
         let mut line -> string = ".param ";
         if parameter.mutable {
             line = line + "mut ";

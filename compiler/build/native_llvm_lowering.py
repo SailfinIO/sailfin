@@ -105,15 +105,16 @@ class BodyResult:
         return runtime.struct_repr('BodyResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class ParameterBinding:
-    def __init__(self, name, llvm_name, llvm_type, type_annotation, consumed):
+    def __init__(self, name, llvm_name, llvm_type, type_annotation, consumed, span=None):
         self.name = name
         self.llvm_name = llvm_name
         self.llvm_type = llvm_type
         self.type_annotation = type_annotation
         self.consumed = consumed
+        self.span = span
 
     def __repr__(self):
-        return runtime.struct_repr('ParameterBinding', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('consumed', self.consumed)])
+        return runtime.struct_repr('ParameterBinding', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('consumed', self.consumed), runtime.struct_field('span', self.span)])
 
 class ParameterPreparation:
     def __init__(self, signature, bindings, diagnostics):
@@ -2407,7 +2408,7 @@ def prepare_parameters(function, context):
         sanitized = sanitize_symbol(parameter.name)
         llvm_name = "%" + sanitized
         signature = append_string(signature, llvm_type + " " + llvm_name)
-        bindings = append_parameter_binding(bindings, ParameterBinding(name=parameter.name, llvm_name=llvm_name, llvm_type=llvm_type, type_annotation=parameter.type_annotation, consumed=False))
+        bindings = append_parameter_binding(bindings, ParameterBinding(name=parameter.name, llvm_name=llvm_name, llvm_type=llvm_type, type_annotation=parameter.type_annotation, consumed=False, span=parameter.span))
         index += 1
     return ParameterPreparation(signature=signature, bindings=bindings, diagnostics=diagnostics)
 
@@ -2599,7 +2600,7 @@ def collect_suspension_conflicts(keyword, locals, bindings, function_name, suspe
         binding = bindings[parameter_index]
         if not binding.consumed:
             if is_mutable_borrow_annotation(binding.type_annotation):
-                location = format_suspension_location(keyword, None, suspension_span)
+                location = format_suspension_location(keyword, binding.span, suspension_span)
                 diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location)
         parameter_index += 1
     return diagnostics
@@ -2690,7 +2691,7 @@ def mark_parameter_consumed(bindings, name):
             break
         binding = bindings[index]
         if binding.name == name:
-            updated = ParameterBinding(name=binding.name, llvm_name=binding.llvm_name, llvm_type=binding.llvm_type, type_annotation=binding.type_annotation, consumed=True)
+            updated = ParameterBinding(name=binding.name, llvm_name=binding.llvm_name, llvm_type=binding.llvm_type, type_annotation=binding.type_annotation, consumed=True, span=binding.span)
             result = (result) + ([updated])
         else:
             result = (result) + ([binding])
@@ -4258,7 +4259,7 @@ def merge_parameter_bindings(first, second):
         counterpart = find_parameter_binding(second, primary.name)
         if counterpart != None:
             consumed_flag = consumed_flag  or  counterpart.consumed
-        result = append_parameter_binding(result, ParameterBinding(name=primary.name, llvm_name=primary.llvm_name, llvm_type=primary.llvm_type, type_annotation=primary.type_annotation, consumed=consumed_flag))
+        result = append_parameter_binding(result, ParameterBinding(name=primary.name, llvm_name=primary.llvm_name, llvm_type=primary.llvm_type, type_annotation=primary.type_annotation, consumed=consumed_flag, span=primary.span))
         index += 1
     return result
 

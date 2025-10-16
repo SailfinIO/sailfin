@@ -67,6 +67,7 @@ struct ParameterBinding {
     llvm_type -> string;
     type_annotation -> string;
     consumed -> boolean;
+    span -> NativeSourceSpan?;
 }
 
 struct ParameterPreparation {
@@ -3508,6 +3509,7 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
             llvm_type: llvm_type,
             type_annotation: parameter.type_annotation,
             consumed: false,
+            span: parameter.span,
         });
         index += 1;
     }
@@ -3761,7 +3763,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
         let binding = bindings[parameter_index];
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
-                let location = format_suspension_location(keyword, null, suspension_span);
+                let location = format_suspension_location(keyword, binding.span, suspension_span);
                 diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
             }
         }
@@ -3891,6 +3893,7 @@ fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> Pa
                 llvm_type: binding.llvm_type,
                 type_annotation: binding.type_annotation,
                 consumed: true,
+                span: binding.span,
             };
             result = result.concat([updated]);
         } else {
@@ -6036,6 +6039,7 @@ fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBind
             llvm_type: primary.llvm_type,
             type_annotation: primary.type_annotation,
             consumed: consumed_flag,
+            span: primary.span,
         });
         index += 1;
     }

@@ -12,7 +12,8 @@ _LLVM_TARGET_INITIALIZED = False
 
 
 def _assert_only_pointer_layout_warnings(diagnostics):
-    unexpected = [diag for diag in diagnostics if "defaulting to pointer layout" not in diag]
+    unexpected = [
+        diag for diag in diagnostics if "defaulting to pointer layout" not in diag]
     assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
 
@@ -41,7 +42,8 @@ def _compile_ir(ir: str):
 
 def _lower_native_text(artifact_text: str):
     module = NativeModule(
-        artifacts=[NativeArtifact(name="test.sfn-asm", format="sailfin-native-text", contents=textwrap.dedent(artifact_text).strip())],
+        artifacts=[NativeArtifact(name="test.sfn-asm", format="sailfin-native-text",
+                                  contents=textwrap.dedent(artifact_text).strip())],
         entry_points=[],
         symbol_count=0,
     )
@@ -299,9 +301,12 @@ fn main() -> number {
         assert _invoke_int(engine, "add_ints", 3, 5) == 8
         assert _invoke_int(engine, "increment_if_positive", -2) == -2
         assert _invoke_int(engine, "increment_if_positive", 4) == 5
-        assert _invoke_bool(engine, "is_positive", (ctypes.c_longlong,), -3) is False
-        assert _invoke_bool(engine, "is_positive", (ctypes.c_longlong,), 3) is True
-        assert _invoke(engine, "spill_to_number", ctypes.c_double, (ctypes.c_longlong,), 7) == pytest.approx(7.0)
+        assert _invoke_bool(engine, "is_positive",
+                            (ctypes.c_longlong,), -3) is False
+        assert _invoke_bool(engine, "is_positive",
+                            (ctypes.c_longlong,), 3) is True
+        assert _invoke(engine, "spill_to_number", ctypes.c_double,
+                       (ctypes.c_longlong,), 7) == pytest.approx(7.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -438,7 +443,8 @@ fn main() -> number {
             ctypes.byref(arr_alias),
         ) == pytest.approx(6.0)
 
-        assert _invoke_double(engine, "sum_literal_binding") == pytest.approx(10.0)
+        assert _invoke_double(
+            engine, "sum_literal_binding") == pytest.approx(10.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -482,12 +488,15 @@ fn main() -> number {
     assert "; struct FriendlyUser implements Greeter, Formatter" in ir
 
     trait_metadata = lowered.trait_metadata
-    interface_names = [descriptor.name for descriptor in trait_metadata.interfaces]
+    interface_names = [
+        descriptor.name for descriptor in trait_metadata.interfaces]
     assert interface_names == ["Greeter", "Formatter"]
     greeter_descriptor = trait_metadata.interfaces[0]
-    assert [signature.name for signature in greeter_descriptor.signatures] == ["greet"]
+    assert [signature.name for signature in greeter_descriptor.signatures] == [
+        "greet"]
     formatter_descriptor = trait_metadata.interfaces[1]
-    assert [signature.name for signature in formatter_descriptor.signatures] == ["format"]
+    assert [signature.name for signature in formatter_descriptor.signatures] == [
+        "format"]
 
     assert len(trait_metadata.implementations) == 1
     implementation = trait_metadata.implementations[0]
@@ -645,9 +654,12 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
+    non_pointer = [
+        diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
     assert all("conflicts with" in diag for diag in non_pointer)
+
+
 def test_native_llvm_execution_reports_use_after_move() -> None:
     source = """
     fn reuse(value -> Affine<number>) -> number {
@@ -661,16 +673,15 @@ def test_native_llvm_execution_reports_use_after_move() -> None:
     """
 
     lowered = compile_to_native_llvm(source)
-    use_after_move_diags = [diag for diag in lowered.diagnostics if "use-after-move" in diag]
+    use_after_move_diags = [
+        diag for diag in lowered.diagnostics if "use-after-move" in diag]
     assert use_after_move_diags, "expected use-after-move diagnostics"
     assert any(" at " in diag and diag.split(" at ")[-1].count(":") >= 2 for diag in use_after_move_diags), (
         "use-after-move diagnostics did not include span information",
         use_after_move_diags,
     )
-    assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
-
-
-
+    assert not any(
+        "unsupported parameter type" in diag for diag in lowered.diagnostics)
 
 
 def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None:
@@ -687,13 +698,16 @@ def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None
     """
 
     lowered = compile_to_native_llvm(source)
-    use_after_move_diags = [diag for diag in lowered.diagnostics if "use-after-move" in diag]
+    use_after_move_diags = [
+        diag for diag in lowered.diagnostics if "use-after-move" in diag]
     assert use_after_move_diags, "expected use-after-move diagnostics"
     assert any(" at " in diag and diag.split(" at ")[-1].count(":") >= 2 for diag in use_after_move_diags), (
         "use-after-move diagnostics did not include span information",
         use_after_move_diags,
     )
-    assert not any("unsupported parameter type" in diag for diag in lowered.diagnostics)
+    assert not any(
+        "unsupported parameter type" in diag for diag in lowered.diagnostics)
+
 
 def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
     source = """
@@ -710,7 +724,8 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    non_pointer = [diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
+    non_pointer = [
+        diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
     assert all("shared borrow" in diag for diag in non_pointer)
 
@@ -723,6 +738,7 @@ def test_native_llvm_rejects_mutable_borrow_across_await() -> None:
     .fn borrow_then_await(value -> &mut number) -> number
     .meta return number
     .meta effects none
+        .span 4 9 4 38
         .param value -> &mut number
         .span 5 9 5 36
         .init-span 5 21 5 38
@@ -740,11 +756,14 @@ def test_native_llvm_rejects_mutable_borrow_across_await() -> None:
     """
 
     lowered = _lower_native_text(artifact_text)
-    borrow_diags = [diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
+    borrow_diags = [
+        diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
     assert borrow_diags, lowered.diagnostics
     assert any("`alias`" in diag and "`value`" in diag for diag in borrow_diags)
-    assert any("`alias`" in diag and "borrow at" in diag and "await at" in diag for diag in borrow_diags)
-    assert any("parameter `value`" in diag and "await at" in diag for diag in borrow_diags)
+    assert any(
+        "`alias`" in diag and "borrow at" in diag and "await at" in diag for diag in borrow_diags)
+    assert any(
+        "parameter `value`" in diag and "borrow at" in diag and "await at" in diag for diag in borrow_diags)
 
 
 def test_native_llvm_allows_await_without_mutable_borrow() -> None:
@@ -768,7 +787,8 @@ def test_native_llvm_allows_await_without_mutable_borrow() -> None:
     """
 
     lowered = _lower_native_text(artifact_text)
-    borrow_diags = [diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
+    borrow_diags = [
+        diag for diag in lowered.diagnostics if "await suspends while mutable borrow" in diag]
     assert not borrow_diags, lowered.diagnostics
 
 
@@ -787,14 +807,17 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    effect_map = {entry.name: entry.effects for entry in lowered.function_effects}
+    effect_map = {
+        entry.name: entry.effects for entry in lowered.function_effects}
     assert "borrow_mutable" in effect_map
     assert "mut" in effect_map["borrow_mutable"], effect_map
     assert "read" in effect_map["borrow_mutable"], effect_map
-    manifest_map = {entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
+    manifest_map = {
+        entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
     assert manifest_map.get("borrow_mutable"), manifest_map
     assert "mut" in manifest_map["borrow_mutable"] and "read" in manifest_map["borrow_mutable"]
-    comment_lines = [line for line in lowered.ir.splitlines() if line.startswith("; fn borrow_mutable effects:")]
+    comment_lines = [line for line in lowered.ir.splitlines(
+    ) if line.startswith("; fn borrow_mutable effects:")]
     assert comment_lines, lowered.ir
     assert "mut" in comment_lines[0] and "read" in comment_lines[0]
 
@@ -833,19 +856,27 @@ def test_native_llvm_execution_capability_manifest_propagates_composite_effects(
 """.strip()
 
     module = NativeModule(
-        artifacts=[NativeArtifact(name="composite_effects.sfn-asm", format="sailfin-native-text", contents=artifact_text)],
+        artifacts=[NativeArtifact(name="composite_effects.sfn-asm",
+                                  format="sailfin-native-text", contents=artifact_text)],
         entry_points=["borrow_mutable", "wrapper", "main"],
         symbol_count=3,
     )
     lowered = lower_to_llvm(module)
-    effect_map = {entry.name: entry.effects for entry in lowered.function_effects}
-    assert set(effect_map.get("borrow_mutable", [])) == {"io", "mut", "read"}, effect_map
-    assert set(effect_map.get("wrapper", [])) == {"io", "mut", "read"}, effect_map
+    effect_map = {
+        entry.name: entry.effects for entry in lowered.function_effects}
+    assert set(effect_map.get("borrow_mutable", [])) == {
+        "io", "mut", "read"}, effect_map
+    assert set(effect_map.get("wrapper", [])) == {
+        "io", "mut", "read"}, effect_map
     assert set(effect_map.get("main", [])) == {"io", "mut", "read"}, effect_map
-    manifest_map = {entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
-    assert set(manifest_map.get("borrow_mutable", [])) == {"io", "mut", "read"}, manifest_map
-    assert set(manifest_map.get("wrapper", [])) == {"io", "mut", "read"}, manifest_map
-    assert set(manifest_map.get("main", [])) == {"io", "mut", "read"}, manifest_map
+    manifest_map = {
+        entry.symbol: entry.effects for entry in lowered.capability_manifest.entries}
+    assert set(manifest_map.get("borrow_mutable", [])) == {
+        "io", "mut", "read"}, manifest_map
+    assert set(manifest_map.get("wrapper", [])) == {
+        "io", "mut", "read"}, manifest_map
+    assert set(manifest_map.get("main", [])) == {
+        "io", "mut", "read"}, manifest_map
 
 
 def test_native_llvm_execution_supports_range_strides() -> None:
@@ -894,10 +925,13 @@ fn main() -> number {
 
     engine, module = _compile_ir(ir)
     try:
-        assert _invoke_double(engine, "sum_stride", 5.0, 2.0) == pytest.approx(6.0)
-        assert _invoke_double(engine, "sum_descending", 5.0, -2.0) == pytest.approx(9.0)
+        assert _invoke_double(engine, "sum_stride", 5.0,
+                              2.0) == pytest.approx(6.0)
+        assert _invoke_double(engine, "sum_descending",
+                              5.0, -2.0) == pytest.approx(9.0)
         assert _invoke_double(engine, "sum_literal") == pytest.approx(6.0)
-        assert _invoke_double(engine, "sum_negative_literal") == pytest.approx(9.0)
+        assert _invoke_double(
+            engine, "sum_negative_literal") == pytest.approx(9.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -915,4 +949,5 @@ fn main() -> number {
 """
 
     lowered = compile_to_native_llvm(source)
-    assert any("stride must not be zero" in diagnostic for diagnostic in lowered.diagnostics)
+    assert any(
+        "stride must not be zero" in diagnostic for diagnostic in lowered.diagnostics)

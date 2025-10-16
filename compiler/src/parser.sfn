@@ -1713,6 +1713,8 @@ fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
 
 fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
     parser = skip_trivia(parser);
+    let tokens_ref = parser.tokens;
+    let start_index = parser.index;
 
     let mut is_mutable = false;
     let token = parser_peek_raw(parser);
@@ -1749,11 +1751,16 @@ fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
         default_value = expression_from_tokens(capture.tokens);
     }
 
+    let end_index = parser.index;
+    let parameter_tokens = token_slice(tokens_ref, start_index, end_index);
+    let span = source_span_from_tokens(parameter_tokens);
+
     let parameter = Parameter {
         name: name,
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
+        span: span,
     };
     return ParameterParseResult { parser: parser, parameter: parameter };
 }
@@ -3208,22 +3215,23 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
 fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResult {
     let mut current = state;
     if expression_tokens_is_at_end(current) {
-        return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false }, success: false };
+        return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
     }
 
+    let start_index = current.index;
     let mut is_mutable = false;
     let token = expression_tokens_peek(current);
     if token.kind.variant == "Identifier" && identifier_matches(token, "mut") {
         is_mutable = true;
         current = expression_tokens_advance(current);
         if expression_tokens_is_at_end(current) {
-            return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false }, success: false };
+            return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
         }
     }
 
     let name_token = expression_tokens_peek(current);
     if name_token.kind.variant != "Identifier" {
-        return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false }, success: false };
+        return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
     }
     let name = identifier_text(name_token);
     current = expression_tokens_advance(current);
@@ -3235,7 +3243,7 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
             current = expression_tokens_advance(current);
             let capture = expression_tokens_collect_until(current, ["=", ",", ")"]);
             if !capture.success {
-                return LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: null, default_value: null, mutable: is_mutable }, success: false };
+                return LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: null, default_value: null, mutable: is_mutable, span: null }, success: false };
             }
             let type_text = trim_text(tokens_to_text(capture.tokens));
             if type_text.length > 0 {
@@ -3252,18 +3260,22 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
             current = expression_tokens_advance(current);
             let capture = expression_tokens_collect_until(current, [",", ")"]);
             if !capture.success {
-                return LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: type_annotation, default_value: null, mutable: is_mutable }, success: false };
+                return LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: type_annotation, default_value: null, mutable: is_mutable, span: null }, success: false };
             }
             default_value = expression_from_tokens(capture.tokens);
             current = capture.state;
         }
     }
 
+    let parameter_tokens = token_slice(state.tokens, start_index, current.index);
+    let span = source_span_from_tokens(parameter_tokens);
+
     let parameter = Parameter {
         name: name,
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
+        span: span,
     };
 
     return LambdaParameterParseResult { state: current, parameter: parameter, success: true };

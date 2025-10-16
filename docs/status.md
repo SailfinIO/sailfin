@@ -76,6 +76,11 @@ roadmaps.
   for the rejection/acceptance coverage. Raw pointer access remains gated behind `unsafe extern`
   declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM
   without exposing unchecked pointer mutation to safe code.
+  Parameter declarations now emit `.param` span metadata inside `.sfn-asm`, so
+  suspension diagnostics also highlight the mutable borrow parameter location;
+  regression coverage lives in
+  `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_parameter_spans`
+  and still exercises `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await`.
 - **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
   Integration with the self-hosted toolchain remains roadmap work; manifests
   and CLI flows are tracked separately.
@@ -83,6 +88,7 @@ roadmaps.
 ## Feature Snapshot
 
 **Parsing & Declarations**
+
 - Stage0 (legacy): Parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
   `pipeline`, `test`, `type`, and `match` declarations.
 - Stage1: Mirrors the same surface and now recognises
@@ -177,6 +183,7 @@ roadmaps.
 - Stage1: Generates the same scaffolding.
 
 **Code Generation**
+
 - Bootstrap: Walks the full AST and emits runnable Python against
   `runtime_support.py`. Console helpers cover `print.info`, `print.error`, and
   `print.warn`, each flagged by the effect checker as `io`. (Frozen except for
@@ -197,6 +204,7 @@ roadmaps.
   `llvmlite` as a smoke guard.
 
 **Package Manager (`sfn`)**
+
 - Bootstrap: Not implemented yet.
 - Self-hosted prototype: Not implemented; behaviour lives in
   `docs/proposals/package-management.md`.
@@ -223,16 +231,16 @@ roadmaps.
 ## Active Workstreams
 
 1. **Stage2 backend** — Extend `.sfn-asm` lowering to emit runnable LLVM/WASM
-  modules, bridge capability shims, and execute smoke binaries end-to-end.
+   modules, bridge capability shims, and execute smoke binaries end-to-end.
 2. **Runtime & FFI lift** — Replace Python runtime helpers with Sailfin
-  implementations that surface the same effect guarantees and provide bridged
-  access to filesystem, HTTP, model execution, and concurrency primitives.
+   implementations that surface the same effect guarantees and provide bridged
+   access to filesystem, HTTP, model execution, and concurrency primitives.
 3. **Diagnostics deepening** — Continue parity work in `typecheck.sfn` and
-  `effect_checker.sfn` (hierarchical effects, richer messages) to match the
-  historical stage0 behaviour without regressing stage1 self-hosting.
+   `effect_checker.sfn` (hierarchical effects, richer messages) to match the
+   historical stage0 behaviour without regressing stage1 self-hosting.
 4. **Registry integration** — Wire manifest parsing and publish/resolve
-  commands against `registry.sailfin.dev` once the self-host loop remains
-  stable.
+   commands against `registry.sailfin.dev` once the self-host loop remains
+   stable.
 
 Track detailed milestones and sequencing in `docs/roadmap.md`. When a
 feature graduates from prototype into the shipping stage1 toolchain, update the
