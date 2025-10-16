@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.21 (2025-10-16)
+
+### Bug Fixes
+
+- Array descriptors ctype carriers
+  ([`9c59d61`](https://github.com/SailfinIO/sailfin/commit/9c59d6158f70693cbf4106f5c94f61cf98f07d91))
+
+### Documentation
+
+- Stage2 tasks
+  ([`5a1cc16`](https://github.com/SailfinIO/sailfin/commit/5a1cc16130b0c44fec4c8edb00d3987f739f8a4a))
+
+
 ## v0.1.1-alpha.20 (2025-10-16)
 
 ### Bug Fixes
