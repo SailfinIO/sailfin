@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.17 (2025-10-16)
+
+### Bug Fixes
+
+- Missing typeschecks
+  ([`e4a8f8c`](https://github.com/SailfinIO/sailfin/commit/e4a8f8ce43c8094a0aa05a953c4c676086d42d1f))
+
+
 ## v0.1.1-alpha.16 (2025-10-16)
 
 ### Bug Fixes
