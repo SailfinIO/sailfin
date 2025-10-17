@@ -31,6 +31,10 @@ roadmaps.
   boolean and integer primitives for parameters, locals, and returns in the LLVM
   prototype. Struct and enum declarations now emit `.layout` descriptors that
   record size, alignment, and per-field offsets for LLVM consumption. Member
+  layout inference now recognises optional fields, nested enums, and recursive
+  aggregates, so the compiler AST records concrete sizes without emitting the
+  `defaulting to pointer layout` fallbacks (`compiler/tests/test_stage1_pipeline.py::test_native_backend_infers_recursive_layouts`).
+  Member
   access expressions in the LLVM prototype now consult those layouts, so `self.field`
   lowers into `getelementptr`/`load` sequences instead of surfacing unsupported
   expression diagnostics. Struct literals now assemble aggregates directly in LLVM

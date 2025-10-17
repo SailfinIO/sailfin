@@ -107,6 +107,24 @@ PARAMETER_SPAN_SOURCE = (
     "}\n"
 )
 
+RECURSIVE_LAYOUT_SOURCE = """
+struct Node {
+  left -> Node?;
+  right -> Node?;
+  payload -> Value;
+}
+
+enum Value {
+  Number { value -> number; }
+  Ref { target -> Node; }
+  Empty;
+}
+
+fn main() -> number {
+  return 0;
+}
+"""
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_compile_to_native_python_produces_source() -> None:
@@ -277,6 +295,69 @@ def test_native_backend_emits_layout_descriptors() -> None:
     assert unit_layout.offset == 4
     assert unit_layout.size == 0
     assert unit_layout.align == 1
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_infers_recursive_layouts() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+    native_ir_module = importlib.import_module("compiler.build.native_ir")
+
+    result = stage1_main.compile_to_native(RECURSIVE_LAYOUT_SOURCE)
+    assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
+
+    artifact = next(
+        (artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"),
+        None,
+    )
+    assert artifact is not None, "native artifact missing from emit_native output"
+
+    contents = artifact.contents
+    assert ".layout struct size=32 align=8" in contents
+    assert ".layout field left type=Node? offset=0 size=8 align=8" in contents
+    assert ".layout field right type=Node? offset=8 size=8 align=8" in contents
+    assert ".layout field payload type=Value offset=16 size=16 align=8" in contents
+    assert ".layout enum size=" in contents
+    assert ".layout variant Ref tag=1" in contents
+    assert ".layout payload Ref.target type=Node offset=" in contents
+    assert ".layout payload Number.value type=number offset=" in contents
+
+    parse_native_artifact = getattr(native_ir_module, "parse_native_artifact")
+    parse_result = parse_native_artifact(artifact.contents)
+
+    node_struct = next(
+        (definition for definition in parse_result.structs if definition.name == "Node"), None
+    )
+    assert node_struct is not None, "Node struct metadata missing"
+    assert node_struct.layout is not None, "Node layout metadata missing"
+    assert node_struct.layout.size == 32
+    assert node_struct.layout.align == 8
+    assert [field.name for field in node_struct.layout.fields] == ["left", "right", "payload"]
+    assert [field.offset for field in node_struct.layout.fields] == [0, 8, 16]
+    assert [field.align for field in node_struct.layout.fields] == [8, 8, 8]
+    assert [field.size for field in node_struct.layout.fields[:2]] == [8, 8]
+
+    value_enum = next(
+        (definition for definition in parse_result.enums if definition.name == "Value"), None
+    )
+    assert value_enum is not None, "Value enum metadata missing"
+    assert value_enum.layout is not None, "Value layout metadata missing"
+    assert value_enum.layout.tag_type == "i32"
+    assert value_enum.layout.tag_size == 4
+    assert value_enum.layout.tag_align == 4
+    assert value_enum.layout.align >= 4
+
+    ref_variant = next(
+        (variant for variant in value_enum.layout.variants if variant.name == "Ref"), None
+    )
+    assert ref_variant is not None, "Ref variant metadata missing"
+    assert [field.name for field in ref_variant.fields] == ["target"]
+    assert ref_variant.fields[0].align == 8
+
+    number_variant = next(
+        (variant for variant in value_enum.layout.variants if variant.name == "Number"), None
+    )
+    assert number_variant is not None, "Number variant metadata missing"
+    assert number_variant.fields[0].name == "value"
 
 
 @pytest.mark.usefixtures("stage1_environment")

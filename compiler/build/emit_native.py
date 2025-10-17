@@ -55,12 +55,13 @@ class TextBuilder:
         return runtime.struct_repr('TextBuilder', [runtime.struct_field('lines', self.lines), runtime.struct_field('indent', self.indent)])
 
 class NativeState:
-    def __init__(self, builder, diagnostics):
+    def __init__(self, builder, diagnostics, layout_context):
         self.builder = builder
         self.diagnostics = diagnostics
+        self.layout_context = layout_context
 
     def __repr__(self):
-        return runtime.struct_repr('NativeState', [runtime.struct_field('builder', self.builder), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('NativeState', [runtime.struct_field('builder', self.builder), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('layout_context', self.layout_context)])
 
 class LayoutEmitResult:
     def __init__(self, lines, diagnostics):
@@ -103,6 +104,18 @@ class EnumVariantLayoutDescriptor:
     def __repr__(self):
         return runtime.struct_repr('EnumVariantLayoutDescriptor', [runtime.struct_field('name', self.name), runtime.struct_field('tag', self.tag), runtime.struct_field('offset', self.offset), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('fields', self.fields)])
 
+class EnumAggregateLayout:
+    def __init__(self, size, align, tag_size, tag_align, variants, diagnostics):
+        self.size = size
+        self.align = align
+        self.tag_size = tag_size
+        self.tag_align = tag_align
+        self.variants = variants
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('EnumAggregateLayout', [runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('variants', self.variants), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class TypeLayoutInfo:
     def __init__(self, size, align, diagnostics):
         self.size = size
@@ -120,8 +133,66 @@ class LayoutFieldInput:
     def __repr__(self):
         return runtime.struct_repr('LayoutFieldInput', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation)])
 
+class LayoutStructDefinition:
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutStructDefinition', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields)])
+
+class LayoutEnumVariantDefinition:
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutEnumVariantDefinition', [runtime.struct_field('name', self.name), runtime.struct_field('fields', self.fields)])
+
+class LayoutEnumDefinition:
+    def __init__(self, name, variants):
+        self.name = name
+        self.variants = variants
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutEnumDefinition', [runtime.struct_field('name', self.name), runtime.struct_field('variants', self.variants)])
+
+class LayoutContext:
+    def __init__(self, structs, enums):
+        self.structs = structs
+        self.enums = enums
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutContext', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums)])
+
+def build_layout_context(program):
+    structs = []
+    enums = []
+    index = 0
+    while True:
+        if index >= len(program.statements):
+            break
+        statement = program.statements[index]
+        if statement.variant == "StructDeclaration":
+            inputs = convert_struct_fields(statement.fields)
+            structs = append_layout_struct_definition(structs, LayoutStructDefinition(name=statement.name, fields=inputs))
+        if statement.variant == "EnumDeclaration":
+            variants = []
+            variant_index = 0
+            while True:
+                if variant_index >= len(statement.variants):
+                    break
+                variant = statement.variants[variant_index]
+                inputs = convert_variant_fields(variant)
+                variants = append_layout_enum_variant_definition(variants, LayoutEnumVariantDefinition(name=variant.name, fields=inputs))
+                variant_index += 1
+            enums = append_layout_enum_definition(enums, LayoutEnumDefinition(name=statement.name, variants=variants))
+        index += 1
+    return LayoutContext(structs=structs, enums=enums)
+
 def emit_native(program):
-    state = state_new()
+    layout_context = build_layout_context(program)
+    state = state_new(layout_context)
     state = state_emit_line(state, "; Sailfin Native Prototype")
     state = state_emit_line(state, ".module main")
     if len(program.statements) > 0:
@@ -340,7 +411,7 @@ def emit_enum(state, statement):
     header = header + format_type_parameters(statement.type_parameters)
     current = state_emit_line(current, header)
     current = state_push_indent(current)
-    enum_layout = compute_enum_layout_lines(statement)
+    enum_layout = compute_enum_layout_lines(state.layout_context, statement)
     current = emit_layout_lines(current, enum_layout.lines)
     current = state_merge_diagnostics(current, enum_layout.diagnostics)
     index = 0
@@ -362,7 +433,7 @@ def emit_struct(state, statement):
         header = header + " implements " + join_type_annotations(statement.implements_types)
     current = state_emit_line(current, header)
     current = state_push_indent(current)
-    struct_layout = compute_struct_layout_lines(statement.name, statement.fields)
+    struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields)
     current = emit_layout_lines(current, struct_layout.lines)
     current = state_merge_diagnostics(current, struct_layout.diagnostics)
     index = 0
@@ -666,9 +737,9 @@ def format_enum_variant(variant):
         index += 1
     return variant.name + " { " + join_with_separator(parts, "; ") + " }"
 
-def compute_struct_layout_lines(struct_name, fields):
+def compute_struct_layout_lines(context, struct_name, fields):
     inputs = convert_struct_fields(fields)
-    layout = calculate_record_layout(inputs, "struct", struct_name)
+    layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name))
     lines = []
     lines = append_string(lines, ".layout struct size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align))
     index = 0
@@ -685,60 +756,26 @@ def compute_struct_layout_lines(struct_name, fields):
         index += 1
     return LayoutEmitResult(lines=lines, diagnostics=layout.diagnostics)
 
-def compute_enum_layout_lines(statement):
-    tag_size = 4
-    tag_align = 4
-    union_align = tag_align
-    union_size = tag_size
-    diagnostics = []
-    variants = []
+def compute_enum_layout_lines(context, statement):
+    layout_variants = []
     index = 0
     while True:
         if index >= len(statement.variants):
             break
         variant = statement.variants[index]
         inputs = convert_variant_fields(variant)
-        container_name = statement.name + "." + variant.name
-        record = calculate_record_layout(inputs, "variant", container_name)
-        diagnostics = (diagnostics) + (record.diagnostics)
-        variant_align = record.align
-        if variant_align <= 0:
-            variant_align = 1
-        payload_offset = align_to(tag_size, variant_align)
-        if variant_align > union_align:
-            union_align = variant_align
-        absolute_fields = []
-        field_index = 0
-        while True:
-            if field_index >= len(record.fields):
-                break
-            field = record.fields[field_index]
-            absolute = StructFieldLayoutDescriptor(name=field.name, type_annotation=field.type_annotation, offset=payload_offset + field.offset, size=field.size, align=field.align)
-            absolute_fields = append_struct_field_layout(absolute_fields, absolute)
-            field_index += 1
-        variant_size = payload_offset + record.size
-        if variant_size > union_size:
-            union_size = variant_size
-        variants = append_enum_variant_layout(variants, EnumVariantLayoutDescriptor(name=variant.name, tag=index, offset=payload_offset, size=record.size, align=variant_align, fields=absolute_fields))
+        layout_variants = append_layout_enum_variant_definition(layout_variants, LayoutEnumVariantDefinition(name=variant.name, fields=inputs))
         index += 1
-    if len(statement.variants) == 0:
-        union_align = tag_align
-        union_size = tag_size
-    final_align = union_align
-    if final_align <= 0:
-        final_align = 1
-    aligned_size = union_size
-    if final_align > 1:
-        aligned_size = align_to(union_size, final_align)
+    layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name))
     lines = []
-    header = ".layout enum size=" + number_to_string(aligned_size) + " align=" + number_to_string(final_align)
-    header = header + " tag_type=i32 tag_size=" + number_to_string(tag_size) + " tag_align=" + number_to_string(tag_align)
+    header = ".layout enum size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align)
+    header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align)
     lines = append_string(lines, header)
     variant_index = 0
     while True:
-        if variant_index >= len(variants):
+        if variant_index >= len(layout.variants):
             break
-        descriptor = variants[variant_index]
+        descriptor = layout.variants[variant_index]
         line = ".layout variant " + descriptor.name
         line = line + " tag=" + number_to_string(descriptor.tag)
         line = line + " offset=" + number_to_string(descriptor.offset)
@@ -758,9 +795,55 @@ def compute_enum_layout_lines(statement):
             lines = append_string(lines, payload_line)
             payload_index += 1
         variant_index += 1
-    return LayoutEmitResult(lines=lines, diagnostics=diagnostics)
+    return LayoutEmitResult(lines=lines, diagnostics=layout.diagnostics)
 
-def calculate_record_layout(inputs, container_kind, container_name):
+def infer_enum_aggregate_layout(context, enum_name, variants, visiting):
+    tag_size = 4
+    tag_align = 4
+    union_align = tag_align
+    union_size = tag_size
+    diagnostics = []
+    descriptors = []
+    index = 0
+    while True:
+        if index >= len(variants):
+            break
+        variant = variants[index]
+        container_name = enum_name + "." + variant.name
+        record = calculate_record_layout(context, variant.fields, "variant", container_name, visiting)
+        diagnostics = (diagnostics) + (record.diagnostics)
+        variant_align = record.align
+        if variant_align <= 0:
+            variant_align = 1
+        payload_offset = align_to(tag_size, variant_align)
+        if variant_align > union_align:
+            union_align = variant_align
+        absolute_fields = []
+        field_index = 0
+        while True:
+            if field_index >= len(record.fields):
+                break
+            field = record.fields[field_index]
+            absolute = StructFieldLayoutDescriptor(name=field.name, type_annotation=field.type_annotation, offset=payload_offset + field.offset, size=field.size, align=field.align)
+            absolute_fields = append_struct_field_layout(absolute_fields, absolute)
+            field_index += 1
+        variant_size = payload_offset + record.size
+        if variant_size > union_size:
+            union_size = variant_size
+        descriptors = append_enum_variant_layout(descriptors, EnumVariantLayoutDescriptor(name=variant.name, tag=index, offset=payload_offset, size=record.size, align=variant_align, fields=absolute_fields))
+        index += 1
+    if len(variants) == 0:
+        union_align = tag_align
+        union_size = tag_size
+    final_align = union_align
+    if final_align <= 0:
+        final_align = 1
+    aligned_size = union_size
+    if final_align > 1:
+        aligned_size = align_to(union_size, final_align)
+    return EnumAggregateLayout(size=aligned_size, align=final_align, tag_size=tag_size, tag_align=tag_align, variants=descriptors, diagnostics=diagnostics)
+
+def calculate_record_layout(context, inputs, container_kind, container_name, visiting):
     diagnostics = []
     fields = []
     offset = 0
@@ -770,7 +853,7 @@ def calculate_record_layout(inputs, container_kind, container_name):
         if index >= len(inputs):
             break
         input = inputs[index]
-        layout = analyze_type_layout(input.type_annotation, container_kind, container_name, input.name)
+        layout = analyze_type_layout(context, visiting, input.type_annotation, container_kind, container_name, input.name)
         diagnostics = (diagnostics) + (layout.diagnostics)
         field_align = layout.align
         if field_align <= 0:
@@ -792,7 +875,7 @@ def calculate_record_layout(inputs, container_kind, container_name):
         total_size = align_to(offset, final_align)
     return RecordLayoutResult(size=total_size, align=final_align, fields=fields, diagnostics=diagnostics)
 
-def analyze_type_layout(type_annotation, container_kind, container_name, field_name):
+def analyze_type_layout(context, visiting, type_annotation, container_kind, container_name, field_name):
     trimmed = trim_text(type_annotation)
     diagnostics = []
     if len(trimmed) == 0:
@@ -810,6 +893,25 @@ def analyze_type_layout(type_annotation, container_kind, container_name, field_n
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
     if trimmed == "string":
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
+    if is_optional_annotation(trimmed):
+        inner = trim_text(strip_optional_suffix(trimmed))
+        if len(inner) == 0:
+            diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout")
+        return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
+    if contains_string(visiting, trimmed):
+        return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
+    struct_definition = find_layout_struct_definition(context, trimmed)
+    if struct_definition != None:
+        nested_visiting = append_string(visiting, trimmed)
+        record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting)
+        diagnostics = (diagnostics) + (record.diagnostics)
+        return TypeLayoutInfo(size=record.size, align=record.align, diagnostics=diagnostics)
+    enum_definition = find_layout_enum_definition(context, trimmed)
+    if enum_definition != None:
+        nested_visiting = append_string(visiting, trimmed)
+        aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting)
+        diagnostics = (diagnostics) + (aggregate.diagnostics)
+        return TypeLayoutInfo(size=aggregate.size, align=aggregate.align, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout")
     return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
 
@@ -839,6 +941,37 @@ def append_enum_variant_layout(values, value):
 def append_layout_field_input(values, value):
     return (values) + ([value])
 
+def append_layout_struct_definition(values, value):
+    return (values) + ([value])
+
+def append_layout_enum_definition(values, value):
+    return (values) + ([value])
+
+def append_layout_enum_variant_definition(values, value):
+    return (values) + ([value])
+
+def find_layout_struct_definition(context, name):
+    index = 0
+    while True:
+        if index >= len(context.structs):
+            break
+        definition = context.structs[index]
+        if definition.name == name:
+            return definition
+        index += 1
+    return None
+
+def find_layout_enum_definition(context, name):
+    index = 0
+    while True:
+        if index >= len(context.enums):
+            break
+        definition = context.enums[index]
+        if definition.name == name:
+            return definition
+        index += 1
+    return None
+
 def align_to(value, alignment):
     if alignment <= 1:
         return value
@@ -853,6 +986,14 @@ def align_to(value, alignment):
 
 def is_array_type(type_annotation):
     return ends_with(type_annotation, "[]")
+
+def is_optional_annotation(type_annotation):
+    return ends_with(type_annotation, "?")
+
+def strip_optional_suffix(type_annotation):
+    if len(type_annotation) == 0:
+        return type_annotation
+    return substring(type_annotation, 0, len(type_annotation) - 1)
 
 def ends_with(value, suffix):
     if len(suffix) == 0:
@@ -1101,24 +1242,24 @@ def contains_string(values, target):
         index += 1
     return False
 
-def state_new():
-    return NativeState(builder=builder_new(), diagnostics=[])
+def state_new(context):
+    return NativeState(builder=builder_new(), diagnostics=[], layout_context=context)
 
 def state_emit_line(state, line):
-    return NativeState(builder=builder_emit_line(state.builder, line), diagnostics=state.diagnostics)
+    return NativeState(builder=builder_emit_line(state.builder, line), diagnostics=state.diagnostics, layout_context=state.layout_context)
 
 def state_emit_blank(state):
-    return NativeState(builder=builder_emit_blank(state.builder), diagnostics=state.diagnostics)
+    return NativeState(builder=builder_emit_blank(state.builder), diagnostics=state.diagnostics, layout_context=state.layout_context)
 
 def state_push_indent(state):
-    return NativeState(builder=builder_push_indent(state.builder), diagnostics=state.diagnostics)
+    return NativeState(builder=builder_push_indent(state.builder), diagnostics=state.diagnostics, layout_context=state.layout_context)
 
 def state_pop_indent(state):
-    return NativeState(builder=builder_pop_indent(state.builder), diagnostics=state.diagnostics)
+    return NativeState(builder=builder_pop_indent(state.builder), diagnostics=state.diagnostics, layout_context=state.layout_context)
 
 def state_add_diagnostic(state, message):
     diagnostics = append_string(state.diagnostics, message)
-    return NativeState(builder=builder_emit_line(state.builder, "; " + message), diagnostics=diagnostics)
+    return NativeState(builder=builder_emit_line(state.builder, "; " + message), diagnostics=diagnostics, layout_context=state.layout_context)
 
 def state_merge_diagnostics(state, entries):
     if len(entries) == 0:
@@ -1130,7 +1271,7 @@ def state_merge_diagnostics(state, entries):
             break
         combined = append_string(combined, entries[index])
         index += 1
-    return NativeState(builder=state.builder, diagnostics=combined)
+    return NativeState(builder=state.builder, diagnostics=combined, layout_context=state.layout_context)
 
 def emit_layout_lines(state, lines):
     if len(lines) == 0:

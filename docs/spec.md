@@ -770,6 +770,10 @@ Struct declarations prepend their `.field` entries with:
 - Strings, arrays, and currently unsupported user-defined types fall back to a
   pointer representation (`size=8`, `align=8`) and surface a diagnostic in the
   compiler output.
+- Optional annotations (`Type?`), nested enums, and recursive aggregates now
+  resolve to explicit layouts when their definitions are available in the same
+  module, avoiding the historical `defaulting to pointer layout` warnings that
+  Stage2 surfaced for the compiler AST.
 
 Enum declarations emit:
 
