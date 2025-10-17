@@ -5,7 +5,7 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeSourceSpan } from "./native_ir";
+import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan } from "./native_ir";
 import { substring, char_code } from "./string_utils";
 
 struct TraitImplementationDescriptor {
@@ -155,8 +155,29 @@ struct StructTypeInfo {
     align -> number;
 }
 
+struct EnumVariantInfo {
+    name -> string;
+    tag -> number;
+    offset -> number;
+    size -> number;
+    align -> number;
+    fields -> StructFieldInfo[];
+}
+
+struct EnumTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    tag_type -> string;
+    tag_size -> number;
+    tag_align -> number;
+    size -> number;
+    align -> number;
+    variants -> EnumVariantInfo[];
+}
+
 struct TypeContext {
     structs -> StructTypeInfo[];
+    enums -> EnumTypeInfo[];
 }
 
 struct TypeContextBuild {
@@ -173,6 +194,15 @@ struct StructLiteralParse {
     recognized -> boolean;
     success -> boolean;
     type_name -> string;
+    fields -> StructLiteralField[];
+    diagnostics -> string[];
+}
+
+struct EnumLiteralParse {
+    recognized -> boolean;
+    success -> boolean;
+    enum_name -> string;
+    variant_name -> string;
     fields -> StructLiteralField[];
     diagnostics -> string[];
 }
@@ -390,7 +420,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     diagnostics = diagnostics.concat(parse.diagnostics);
 
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let type_build = build_type_context(parse.structs);
+    let type_build = build_type_context(parse.structs, parse.enums);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
     let struct_methods = flatten_struct_methods(parse.structs);
@@ -416,6 +446,12 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let struct_type_lines = render_struct_type_definitions(type_context);
     if struct_type_lines.length > 0 {
         lines = lines.concat(struct_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let enum_type_lines = render_enum_type_definitions(type_context);
+    if enum_type_lines.length > 0 {
+        lines = lines.concat(enum_type_lines);
         lines = append_string(lines, "");
     }
 
@@ -611,12 +647,12 @@ fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
 }
 
 fn empty_type_context() -> TypeContext {
-    return TypeContext { structs: [] };
+    return TypeContext { structs: [], enums: [] };
 }
 
-fn build_type_context(structs -> NativeStruct[]) -> TypeContextBuild {
+fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeContextBuild {
     let mut diagnostics -> string[] = [];
-    let mut entries -> StructTypeInfo[] = [];
+    let mut struct_entries -> StructTypeInfo[] = [];
     let mut index -> number = 0;
     loop {
         if index >= structs.length {
@@ -651,10 +687,76 @@ fn build_type_context(structs -> NativeStruct[]) -> TypeContextBuild {
         if align_value <= 0 {
             align_value = 1;
         }
-        entries = append_struct_type_info(entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, align: align_value });
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, align: align_value });
         index += 1;
     }
-    return TypeContextBuild { context: TypeContext { structs: entries }, diagnostics: diagnostics };
+
+    let mut enum_entries -> EnumTypeInfo[] = [];
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= enums.length {
+            break;
+        }
+        let enum_def = enums[enum_index];
+        if enum_def.layout == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
+            enum_index += 1;
+            continue;
+        }
+        let enum_layout = enum_def.layout;
+        let sanitized_enum = sanitize_symbol(enum_def.name);
+        let llvm_enum_name = "%" + sanitized_enum;
+        let mut variants -> EnumVariantInfo[] = [];
+        let mut variant_index -> number = 0;
+        loop {
+            if variant_index >= enum_layout.variants.length {
+                break;
+            }
+            let variant_layout = enum_layout.variants[variant_index];
+            let mut variant_fields -> StructFieldInfo[] = [];
+            let mut variant_field_index -> number = 0;
+            loop {
+                if variant_field_index >= variant_layout.fields.length {
+                    break;
+                }
+                let variant_field = variant_layout.fields[variant_field_index];
+                let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
+                let mut llvm_variant_field_type -> string = mapped_variant_type;
+                if llvm_variant_field_type.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
+                    llvm_variant_field_type = "i8*";
+                }
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, index: variant_field_index });
+                variant_field_index += 1;
+            }
+            variants = append_enum_variant_info(variants, EnumVariantInfo {
+                name: variant_layout.name,
+                tag: variant_layout.tag,
+                offset: variant_layout.offset,
+                size: variant_layout.size,
+                align: variant_layout.align,
+                fields: variant_fields,
+            });
+            variant_index += 1;
+        }
+        let mut enum_align_value -> number = enum_layout.align;
+        if enum_align_value <= 0 {
+            enum_align_value = 1;
+        }
+        enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
+            name: enum_def.name,
+            llvm_name: llvm_enum_name,
+            tag_type: enum_layout.tag_type,
+            tag_size: enum_layout.tag_size,
+            tag_align: enum_layout.tag_align,
+            size: enum_layout.size,
+            align: enum_align_value,
+            variants: variants,
+        });
+        enum_index += 1;
+    }
+
+    return TypeContextBuild { context: TypeContext { structs: struct_entries, enums: enum_entries }, diagnostics: diagnostics };
 }
 
 fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
@@ -662,6 +764,14 @@ fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) 
 }
 
 fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
+    return values.concat([value]);
+}
+
+fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInfo) -> EnumVariantInfo[] {
+    return values.concat([value]);
+}
+
+fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
     return values.concat([value]);
 }
 
@@ -736,6 +846,58 @@ fn render_struct_type_definitions(context -> TypeContext) -> string[] {
             body = "{ " + join_with_separator(field_types, ", ") + " }";
         }
         lines = append_string(lines, info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn render_enum_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[index];
+
+        // Map tag type to LLVM type
+        let mut llvm_tag_type -> string = "i32";
+        if enum_info.tag_type == "i8" {
+            llvm_tag_type = "i8";
+        }
+        if enum_info.tag_type == "i16" {
+            llvm_tag_type = "i16";
+        }
+        if enum_info.tag_type == "i32" {
+            llvm_tag_type = "i32";
+        }
+        if enum_info.tag_type == "i64" {
+            llvm_tag_type = "i64";
+        }
+
+        // Calculate the maximum payload size across all variants
+        let mut max_payload_size -> number = 0;
+        let mut variant_idx -> number = 0;
+        loop {
+            if variant_idx >= enum_info.variants.length {
+                break;
+            }
+            let variant = enum_info.variants[variant_idx];
+            if variant.size > max_payload_size {
+                max_payload_size = variant.size;
+            }
+            variant_idx += 1;
+        }
+
+        // Enum layout: { tag, [payload_bytes x payload_size] }
+        // We represent payload as a byte array for the largest variant
+        let mut payload_repr -> string = "";
+        if max_payload_size > 0 {
+            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]";
+        }
+
+        let body = "{ " + llvm_tag_type + payload_repr + " }";
+        lines = append_string(lines, enum_info.llvm_name + " = type " + body);
         index += 1;
     }
     return lines;
@@ -903,6 +1065,48 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         let info = find_struct_info_by_name(context, candidate);
         if info != null {
             return info;
+        }
+        index += 1;
+    }
+
+    return null;
+}
+
+fn resolve_enum_info_for_literal(context -> TypeContext, enum_name -> string) -> EnumTypeInfo? {
+    let trimmed = trim_text(enum_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[index];
+        if enum_info.name == trimmed {
+            return enum_info;
+        }
+        index += 1;
+    }
+
+    return null;
+}
+
+fn resolve_enum_variant_info(enum_info -> EnumTypeInfo, variant_name -> string) -> EnumVariantInfo? {
+    let trimmed = trim_text(variant_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_info.variants.length {
+            break;
+        }
+        let variant = enum_info.variants[index];
+        if variant.name == trimmed {
+            return variant;
         }
         index += 1;
     }
@@ -4865,6 +5069,25 @@ fn map_struct_type_annotation(context -> TypeContext, annotation -> string) -> s
     return "";
 }
 
+fn map_enum_type_annotation(context -> TypeContext, annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[index];
+        if enum_info.name == trimmed {
+            return enum_info.llvm_name;
+        }
+        index += 1;
+    }
+    return "";
+}
+
 fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "number" {
         return "double";
@@ -4881,6 +5104,10 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     let struct_type = map_struct_type_annotation(context, annotation);
     if struct_type.length > 0 {
         return struct_type;
+    }
+    let enum_type = map_enum_type_annotation(context, annotation);
+    if enum_type.length > 0 {
+        return enum_type;
     }
     if annotation == "string" {
         return "i8*";
@@ -5416,6 +5643,19 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined };
     }
 
+    // Try enum literal first - check if this looks like EnumName.VariantName
+    let enum_parse = parse_enum_literal(stripped);
+    if enum_parse.recognized && enum_parse.success {
+        // Verify this is actually an enum by checking context
+        let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
+        if enum_info != null {
+            let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context);
+            let combined = diagnostics.concat(lowered_enum.diagnostics);
+            return ExpressionResult { lines: lowered_enum.lines, temp_index: lowered_enum.temp_index, operand: lowered_enum.operand, diagnostics: combined };
+        }
+    }
+
+    // Not an enum, try member access
     let member_parse = parse_member_access(stripped);
     if member_parse.success {
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context);
@@ -6438,6 +6678,144 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
 }
 
+fn parse_enum_literal(text -> string) -> EnumLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    // Look for EnumName.VariantName pattern
+    let dot_index = index_of(trimmed, ".");
+    if dot_index < 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let enum_name_part = trim_text(substring(trimmed, 0, dot_index));
+    if enum_name_part.length == 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = dot_index + 1;
+    let mut open_index -> number = -1;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    // If no opening brace found, this might be a unit variant (no payload)
+    // like Color.Red instead of Shape.Circle { radius: 5.0 }
+    if open_index < 0 {
+        let variant_name_part = trim_text(substring(trimmed, dot_index + 1, trimmed.length));
+        if variant_name_part.length == 0 {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+        // This is a unit variant - no payload fields
+        return EnumLiteralParse { recognized: true, success: true, enum_name: enum_name_part, variant_name: variant_name_part, fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing closing `}`");
+        fatal = true;
+    }
+
+    let variant_name_part = trim_text(substring(trimmed, dot_index + 1, open_index));
+    if variant_name_part.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing variant name");
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + entry + "` missing `:`");
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name");
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated");
+                continue;
+            }
+            if value_text.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` missing value");
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if !fatal && close_index >= 0 {
+        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+        if remainder.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal trailing content `" + remainder + "`");
+            fatal = true;
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return EnumLiteralParse { recognized: true, success: !fatal, enum_name: enum_name_part, variant_name: variant_name_part, fields: fields, diagnostics: diagnostics };
+}
+
 fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
@@ -6538,6 +6916,119 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     }
 
     let operand = LLVMOperand { llvm_type: info.llvm_name, value: previous_value };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
+}
+
+fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let mut diagnostics -> string[] = parse.diagnostics;
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+
+    let enum_info = resolve_enum_info_for_literal(context, parse.enum_name);
+    if enum_info == null {
+        if parse.enum_name.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum `" + parse.enum_name + "`");
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum");
+        }
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    let variant_info = resolve_enum_variant_info(enum_info, parse.variant_name);
+    if variant_info == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    // Map tag type to LLVM integer type
+    let mut tag_llvm_type -> string = "i32";
+    if enum_info.tag_type == "i8" {
+        tag_llvm_type = "i8";
+    }
+    if enum_info.tag_type == "i16" {
+        tag_llvm_type = "i16";
+    }
+    if enum_info.tag_type == "i32" {
+        tag_llvm_type = "i32";
+    }
+    if enum_info.tag_type == "i64" {
+        tag_llvm_type = "i64";
+    }
+
+    // Start with undef enum value
+    let mut enum_value -> string = "undef";
+
+    // Insert tag value at index 0
+    let tag_temp = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0");
+    current_temp += 1;
+    enum_value = tag_temp;
+
+    // For variants with payload fields, we need to store them in the payload area
+    // The payload is at index 1 and is represented as a byte array
+    if variant_info.fields.length > 0 {
+        let mut used_names -> string[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= variant_info.fields.length {
+                break;
+            }
+            let expected = variant_info.fields[field_index];
+            let mut literal_index -> number = -1;
+            let mut literal_lookup_index -> number = 0;
+            loop {
+                if literal_lookup_index >= parse.fields.length {
+                    break;
+                }
+                if parse.fields[literal_lookup_index].name == expected.name {
+                    literal_index = literal_lookup_index;
+                    break;
+                }
+                literal_lookup_index += 1;
+            }
+
+            if literal_index >= 0 {
+                let literal_field = parse.fields[literal_index];
+                let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context);
+                diagnostics = diagnostics.concat(lowered.diagnostics);
+                current_lines = lowered.lines;
+                current_temp = lowered.temp_index;
+                if lowered.operand != null {
+                    let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
+                    diagnostics = diagnostics.concat(coerced.diagnostics);
+                    current_lines = coerced.lines;
+                    current_temp = coerced.temp_index;
+                    if coerced.operand != null {
+                        // For now, we'll emit a diagnostic that full enum payload storage is not yet implemented
+                        // The full implementation would use bitcast and store operations to place the field values
+                        // into the correct offset within the payload byte array
+                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload field storage not yet fully implemented for `" + parse.enum_name + "." + parse.variant_name + "." + expected.name + "`; runtime will use fallback");
+                    }
+                }
+                if !string_array_contains(used_names, expected.name) {
+                    used_names = append_string(used_names, expected.name);
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` missing field `" + expected.name + "`");
+            }
+
+            field_index += 1;
+        }
+
+        let mut extra_index -> number = 0;
+        loop {
+            if extra_index >= parse.fields.length {
+                break;
+            }
+            let literal_field = parse.fields[extra_index];
+            if !string_array_contains(used_names, literal_field.name) {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`");
+            }
+            extra_index += 1;
+        }
+    }
+
+    let operand = LLVMOperand { llvm_type: enum_info.llvm_name, value: enum_value };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
 }
 

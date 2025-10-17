@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeSourceSpan
+from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan
 from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
@@ -237,12 +237,39 @@ class StructTypeInfo:
     def __repr__(self):
         return runtime.struct_repr('StructTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('fields', self.fields), runtime.struct_field('align', self.align)])
 
-class TypeContext:
-    def __init__(self, structs):
-        self.structs = structs
+class EnumVariantInfo:
+    def __init__(self, name, tag, offset, size, align, fields):
+        self.name = name
+        self.tag = tag
+        self.offset = offset
+        self.size = size
+        self.align = align
+        self.fields = fields
 
     def __repr__(self):
-        return runtime.struct_repr('TypeContext', [runtime.struct_field('structs', self.structs)])
+        return runtime.struct_repr('EnumVariantInfo', [runtime.struct_field('name', self.name), runtime.struct_field('tag', self.tag), runtime.struct_field('offset', self.offset), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('fields', self.fields)])
+
+class EnumTypeInfo:
+    def __init__(self, name, llvm_name, tag_type, tag_size, tag_align, size, align, variants):
+        self.name = name
+        self.llvm_name = llvm_name
+        self.tag_type = tag_type
+        self.tag_size = tag_size
+        self.tag_align = tag_align
+        self.size = size
+        self.align = align
+        self.variants = variants
+
+    def __repr__(self):
+        return runtime.struct_repr('EnumTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('variants', self.variants)])
+
+class TypeContext:
+    def __init__(self, structs, enums):
+        self.structs = structs
+        self.enums = enums
+
+    def __repr__(self):
+        return runtime.struct_repr('TypeContext', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums)])
 
 class TypeContextBuild:
     def __init__(self, context, diagnostics):
@@ -270,6 +297,18 @@ class StructLiteralParse:
 
     def __repr__(self):
         return runtime.struct_repr('StructLiteralParse', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('type_name', self.type_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class EnumLiteralParse:
+    def __init__(self, recognized, success, enum_name, variant_name, fields, diagnostics):
+        self.recognized = recognized
+        self.success = success
+        self.enum_name = enum_name
+        self.variant_name = variant_name
+        self.fields = fields
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('EnumLiteralParse', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('enum_name', self.enum_name), runtime.struct_field('variant_name', self.variant_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class MemberAccessParse:
     def __init__(self, success, base, field):
@@ -589,7 +628,7 @@ def lower_to_llvm(native_module):
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
-    type_build = build_type_context(parse.structs)
+    type_build = build_type_context(parse.structs, parse.enums)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
     struct_methods = flatten_struct_methods(parse.structs)
@@ -611,6 +650,10 @@ def lower_to_llvm(native_module):
     struct_type_lines = render_struct_type_definitions(type_context)
     if len(struct_type_lines) > 0:
         lines = (lines) + (struct_type_lines)
+        lines = append_string(lines, "")
+    enum_type_lines = render_enum_type_definitions(type_context)
+    if len(enum_type_lines) > 0:
+        lines = (lines) + (enum_type_lines)
         lines = append_string(lines, "")
     helper_declarations = render_runtime_helper_declarations(runtime_helpers)
     if len(helper_declarations) > 0:
@@ -736,11 +779,11 @@ def render_runtime_helper_declarations(used_targets):
     return lines
 
 def empty_type_context():
-    return TypeContext(structs=[])
+    return TypeContext(structs=[], enums=[])
 
-def build_type_context(structs):
+def build_type_context(structs, enums):
     diagnostics = []
-    entries = []
+    struct_entries = []
     index = 0
     while True:
         if index >= len(structs):
@@ -769,14 +812,59 @@ def build_type_context(structs):
         align_value = layout.align
         if align_value <= 0:
             align_value = 1
-        entries = append_struct_type_info(entries, StructTypeInfo(name=definition.name, llvm_name=llvm_name, fields=fields, align=align_value))
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo(name=definition.name, llvm_name=llvm_name, fields=fields, align=align_value))
         index += 1
-    return TypeContextBuild(context=TypeContext(structs=entries), diagnostics=diagnostics)
+    enum_entries = []
+    enum_index = 0
+    while True:
+        if enum_index >= len(enums):
+            break
+        enum_def = enums[enum_index]
+        if enum_def.layout == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission")
+            enum_index += 1
+            continue
+        enum_layout = enum_def.layout
+        sanitized_enum = sanitize_symbol(enum_def.name)
+        llvm_enum_name = "%" + sanitized_enum
+        variants = []
+        variant_index = 0
+        while True:
+            if variant_index >= len(enum_layout.variants):
+                break
+            variant_layout = enum_layout.variants[variant_index]
+            variant_fields = []
+            variant_field_index = 0
+            while True:
+                if variant_field_index >= len(variant_layout.fields):
+                    break
+                variant_field = variant_layout.fields[variant_field_index]
+                mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation)
+                llvm_variant_field_type = mapped_variant_type
+                if len(llvm_variant_field_type) == 0:
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`")
+                    llvm_variant_field_type = "i8*"
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, index=variant_field_index))
+                variant_field_index += 1
+            variants = append_enum_variant_info(variants, EnumVariantInfo(name=variant_layout.name, tag=variant_layout.tag, offset=variant_layout.offset, size=variant_layout.size, align=variant_layout.align, fields=variant_fields))
+            variant_index += 1
+        enum_align_value = enum_layout.align
+        if enum_align_value <= 0:
+            enum_align_value = 1
+        enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo(name=enum_def.name, llvm_name=llvm_enum_name, tag_type=enum_layout.tag_type, tag_size=enum_layout.tag_size, tag_align=enum_layout.tag_align, size=enum_layout.size, align=enum_align_value, variants=variants))
+        enum_index += 1
+    return TypeContextBuild(context=TypeContext(structs=struct_entries, enums=enum_entries), diagnostics=diagnostics)
 
 def append_struct_type_info(values, value):
     return (values) + ([value])
 
 def append_struct_field_info(values, value):
+    return (values) + ([value])
+
+def append_enum_variant_info(values, value):
+    return (values) + ([value])
+
+def append_enum_type_info(values, value):
     return (values) + ([value])
 
 def append_native_function(values, value):
@@ -831,6 +919,39 @@ def render_struct_type_definitions(context):
         else:
             body = "{ " + join_with_separator(field_types, ", ") + " }"
         lines = append_string(lines, info.llvm_name + " = type " + body)
+        index += 1
+    return lines
+
+def render_enum_type_definitions(context):
+    lines = []
+    index = 0
+    while True:
+        if index >= len(context.enums):
+            break
+        enum_info = context.enums[index]
+        llvm_tag_type = "i32"
+        if enum_info.tag_type == "i8":
+            llvm_tag_type = "i8"
+        if enum_info.tag_type == "i16":
+            llvm_tag_type = "i16"
+        if enum_info.tag_type == "i32":
+            llvm_tag_type = "i32"
+        if enum_info.tag_type == "i64":
+            llvm_tag_type = "i64"
+        max_payload_size = 0
+        variant_idx = 0
+        while True:
+            if variant_idx >= len(enum_info.variants):
+                break
+            variant = enum_info.variants[variant_idx]
+            if variant.size > max_payload_size:
+                max_payload_size = variant.size
+            variant_idx += 1
+        payload_repr = ""
+        if max_payload_size > 0:
+            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]"
+        body = "{ " + llvm_tag_type + payload_repr + " }"
+        lines = append_string(lines, enum_info.llvm_name + " = type " + body)
         index += 1
     return lines
 
@@ -950,6 +1071,34 @@ def resolve_struct_info_for_literal(context, type_name):
         info = find_struct_info_by_name(context, candidate)
         if info != None:
             return info
+        index += 1
+    return None
+
+def resolve_enum_info_for_literal(context, enum_name):
+    trimmed = trim_text(enum_name)
+    if len(trimmed) == 0:
+        return None
+    index = 0
+    while True:
+        if index >= len(context.enums):
+            break
+        enum_info = context.enums[index]
+        if enum_info.name == trimmed:
+            return enum_info
+        index += 1
+    return None
+
+def resolve_enum_variant_info(enum_info, variant_name):
+    trimmed = trim_text(variant_name)
+    if len(trimmed) == 0:
+        return None
+    index = 0
+    while True:
+        if index >= len(enum_info.variants):
+            break
+        variant = enum_info.variants[index]
+        if variant.name == trimmed:
+            return variant
         index += 1
     return None
 
@@ -3231,6 +3380,20 @@ def map_struct_type_annotation(context, annotation):
         return info.llvm_name
     return ""
 
+def map_enum_type_annotation(context, annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    index = 0
+    while True:
+        if index >= len(context.enums):
+            break
+        enum_info = context.enums[index]
+        if enum_info.name == trimmed:
+            return enum_info.llvm_name
+        index += 1
+    return ""
+
 def map_primitive_type(context, annotation):
     if annotation == "number":
         return "double"
@@ -3243,6 +3406,9 @@ def map_primitive_type(context, annotation):
     struct_type = map_struct_type_annotation(context, annotation)
     if len(struct_type) > 0:
         return struct_type
+    enum_type = map_enum_type_annotation(context, annotation)
+    if len(enum_type) > 0:
+        return enum_type
     if annotation == "string":
         return "i8*"
     return ""
@@ -3616,6 +3782,13 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context)
         combined = (diagnostics) + (lowered_struct.diagnostics)
         return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined)
+    enum_parse = parse_enum_literal(stripped)
+    if enum_parse.recognized  and  enum_parse.success:
+        enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name)
+        if enum_info != None:
+            lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context)
+            combined = (diagnostics) + (lowered_enum.diagnostics)
+            return ExpressionResult(lines=lowered_enum.lines, temp_index=lowered_enum.temp_index, operand=lowered_enum.operand, diagnostics=combined)
     member_parse = parse_member_access(stripped)
     if member_parse.success:
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context)
@@ -4394,6 +4567,108 @@ def parse_struct_literal(text):
         fields = []
     return StructLiteralParse(recognized=True, success=not fatal, type_name=type_name, fields=fields, diagnostics=diagnostics)
 
+def parse_enum_literal(text):
+    trimmed = trim_text(text)
+    diagnostics = []
+    if len(trimmed) == 0:
+        return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+    first = trimmed[0]
+    if not is_identifier_start_char(first):
+        return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+    dot_index = index_of(trimmed, ".")
+    if dot_index < 0:
+        return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+    enum_name_part = trim_text(substring(trimmed, 0, dot_index))
+    if len(enum_name_part) == 0:
+        return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+    paren_depth = 0
+    bracket_depth = 0
+    angle_depth = 0
+    index = dot_index + 1
+    open_index = -1
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "(":
+            paren_depth += 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth -= 1
+            else:
+                if ch == "[":
+                    bracket_depth += 1
+                else:
+                    if ch == "]":
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                    else:
+                        if ch == "<":
+                            angle_depth += 1
+                        else:
+                            if ch == ">":
+                                if angle_depth > 0:
+                                    angle_depth -= 1
+                            else:
+                                if ch == "{":
+                                    if paren_depth == 0  and  bracket_depth == 0  and  angle_depth == 0:
+                                        open_index = index
+                                        break
+        index += 1
+    if open_index < 0:
+        variant_name_part = trim_text(substring(trimmed, dot_index + 1, len(trimmed)))
+        if len(variant_name_part) == 0:
+            return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+        return EnumLiteralParse(recognized=True, success=True, enum_name=enum_name_part, variant_name=variant_name_part, fields=[], diagnostics=diagnostics)
+    fatal = False
+    close_index = find_matching_closing_brace(trimmed, open_index)
+    if close_index < 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing closing `}`")
+        fatal = True
+    variant_name_part = trim_text(substring(trimmed, dot_index + 1, open_index))
+    if len(variant_name_part) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing variant name")
+        fatal = True
+    fields = []
+    if not fatal  and  close_index >= 0:
+        body = substring(trimmed, open_index + 1, close_index)
+        entries = split_array_elements(body)
+        seen = []
+        entry_index = 0
+        while True:
+            if entry_index >= len(entries):
+                break
+            entry = trim_text(entries[entry_index])
+            entry_index += 1
+            if len(entry) == 0:
+                continue
+            colon_index = find_top_level_colon(entry)
+            if colon_index < 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + entry + "` missing `:`")
+                continue
+            field_name = trim_text(substring(entry, 0, colon_index))
+            value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
+            if len(field_name) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name")
+                continue
+            if string_array_contains(seen, field_name):
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated")
+                continue
+            if len(value_text) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` missing value")
+                continue
+            seen = append_string(seen, field_name)
+            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+    if not fatal  and  close_index >= 0:
+        remainder = trim_text(substring(trimmed, close_index + 1, len(trimmed)))
+        if len(remainder) > 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal trailing content `" + remainder + "`")
+            fatal = True
+    if fatal:
+        fields = []
+    return EnumLiteralParse(recognized=True, success=not fatal, enum_name=enum_name_part, variant_name=variant_name_part, fields=fields, diagnostics=diagnostics)
+
 def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, context):
     diagnostics = parse.diagnostics
     current_lines = lines
@@ -4465,6 +4740,80 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
         operand = LLVMOperand(llvm_type=info.llvm_name, value="zeroinitializer")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
     operand = LLVMOperand(llvm_type=info.llvm_name, value=previous_value)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+
+def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, context):
+    diagnostics = parse.diagnostics
+    current_lines = lines
+    current_temp = temp_index
+    enum_info = resolve_enum_info_for_literal(context, parse.enum_name)
+    if enum_info == None:
+        if len(parse.enum_name) > 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum `" + parse.enum_name + "`")
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    variant_info = resolve_enum_variant_info(enum_info, parse.variant_name)
+    if variant_info == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    tag_llvm_type = "i32"
+    if enum_info.tag_type == "i8":
+        tag_llvm_type = "i8"
+    if enum_info.tag_type == "i16":
+        tag_llvm_type = "i16"
+    if enum_info.tag_type == "i32":
+        tag_llvm_type = "i32"
+    if enum_info.tag_type == "i64":
+        tag_llvm_type = "i64"
+    enum_value = "undef"
+    tag_temp = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0")
+    current_temp += 1
+    enum_value = tag_temp
+    if len(variant_info.fields) > 0:
+        used_names = []
+        field_index = 0
+        while True:
+            if field_index >= len(variant_info.fields):
+                break
+            expected = variant_info.fields[field_index]
+            literal_index = -1
+            literal_lookup_index = 0
+            while True:
+                if literal_lookup_index >= len(parse.fields):
+                    break
+                if parse.fields[literal_lookup_index].name == expected.name:
+                    literal_index = literal_lookup_index
+                    break
+                literal_lookup_index += 1
+            if literal_index >= 0:
+                literal_field = parse.fields[literal_index]
+                lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context)
+                diagnostics = (diagnostics) + (lowered.diagnostics)
+                current_lines = lowered.lines
+                current_temp = lowered.temp_index
+                if lowered.operand != None:
+                    coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (coerced.diagnostics)
+                    current_lines = coerced.lines
+                    current_temp = coerced.temp_index
+                    if coerced.operand != None:
+                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload field storage not yet fully implemented for `" + parse.enum_name + "." + parse.variant_name + "." + expected.name + "`; runtime will use fallback")
+                if not string_array_contains(used_names, expected.name):
+                    used_names = append_string(used_names, expected.name)
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` missing field `" + expected.name + "`")
+            field_index += 1
+        extra_index = 0
+        while True:
+            if extra_index >= len(parse.fields):
+                break
+            literal_field = parse.fields[extra_index]
+            if not string_array_contains(used_names, literal_field.name):
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`")
+            extra_index += 1
+    operand = LLVMOperand(llvm_type=enum_info.llvm_name, value=enum_value)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
 
 def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index, lines):

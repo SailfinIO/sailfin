@@ -10,7 +10,8 @@
       "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin python:*)",
       "Bash(cat:*)",
       "Bash(make test-stage2:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Read(//private/tmp/sailfin_enum_test/**)"
     ],
     "deny": [],
     "ask": []

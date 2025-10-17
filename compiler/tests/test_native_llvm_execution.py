@@ -1511,3 +1511,81 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_lowers_basic_enum_types(compile_stage2):
+    """Test that enum type definitions are lowered to LLVM IR."""
+    result = compile_stage2(
+        """
+enum Color {
+    Red;
+    Green;
+    Blue;
+}
+
+enum Shape {
+    Circle { radius -> number; }
+    Rectangle { width -> number, height -> number; }
+    Unit;
+}
+
+fn main() -> number {
+    return 42;
+}
+"""
+    )
+
+    # Should emit enum type definitions
+    assert "%Color = type" in result.ir, "Color enum type should be defined"
+    assert "%Shape = type" in result.ir, "Shape enum type should be defined"
+
+    # Enum types should have tag field (first field is the tag)
+    # Format should be: %EnumName = type { tag_type, [payload_bytes x payload_size] }
+
+    # Check that IR compiles and verifies
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(42.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_constructs_simple_enum_variant(compile_stage2):
+    """Test that simple enum variants (no payload) can be constructed."""
+    result = compile_stage2(
+        """
+enum Color {
+    Red;
+    Green;
+    Blue;
+}
+
+fn get_red() -> Color {
+    return Color.Red;
+}
+
+fn main() -> number {
+    let color = get_red();
+    return 1;
+}
+"""
+    )
+
+    # Check for enum type definition
+    assert "%Color = type" in result.ir
+
+    # Check for insertvalue instruction to set the tag
+    # The enum constructor should emit: insertvalue %Color undef, i32 <tag>, 0
+    assert "insertvalue %Color undef" in result.ir, "Enum constructor should use insertvalue"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(1.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

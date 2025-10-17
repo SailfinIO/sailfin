@@ -57,6 +57,19 @@ roadmaps.
   layouts), removing the lingering `value.method` diagnostics; regression coverage
   lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_struct_methods`.
+  Enum declarations now emit `.layout` descriptors that record tag type, size,
+  alignment, and per-variant payload layouts, flowing through the native IR into
+  LLVM type definitions. Enum types lower to tagged-union representations
+  (`{ tag_type, [payload_bytes x payload_size] }`) where the tag identifies the
+  active variant and the payload area stores variant-specific fields. Enum
+  constructor expressions (both unit variants like `Color.Red` and payload variants
+  like `Shape.Circle { radius: 5.0 }`) lower into LLVM `insertvalue` instructions
+  that populate the tag field; regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_basic_enum_types`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_constructs_simple_enum_variant`.
+  Full payload field storage for variants with data is partially implemented
+  (tag insertion works, but bitcast/store operations for payload fields emit
+  diagnostics indicating runtime fallback is used).
   Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
