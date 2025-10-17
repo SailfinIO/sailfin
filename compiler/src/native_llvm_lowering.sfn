@@ -177,9 +177,32 @@ struct EnumTypeInfo {
     variants -> EnumVariantInfo[];
 }
 
+struct VTableEntry {
+    method_name -> string;
+    interface_method_name -> string;
+    function_pointer_type -> string;
+}
+
+struct VTableInfo {
+    struct_name -> string;
+    interface_name -> string;
+    llvm_type_name -> string;
+    llvm_global_name -> string;
+    entries -> VTableEntry[];
+}
+
+struct InterfaceTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    type_parameters -> string[];
+    signatures -> NativeInterfaceSignature[];
+}
+
 struct TypeContext {
     structs -> StructTypeInfo[];
     enums -> EnumTypeInfo[];
+    interfaces -> InterfaceTypeInfo[];
+    vtables -> VTableInfo[];
 }
 
 struct TypeContextBuild {
@@ -444,7 +467,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     diagnostics = diagnostics.concat(parse.diagnostics);
 
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let type_build = build_type_context(parse.structs, parse.enums);
+    let type_build = build_type_context(parse.structs, parse.enums, parse.interfaces);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
     let struct_methods = flatten_struct_methods(parse.structs);
@@ -476,6 +499,24 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
         lines = lines.concat(enum_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let interface_type_lines = render_interface_type_definitions(type_context);
+    if interface_type_lines.length > 0 {
+        lines = lines.concat(interface_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let vtable_type_lines = render_vtable_type_definitions(type_context);
+    if vtable_type_lines.length > 0 {
+        lines = lines.concat(vtable_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let vtable_const_lines = render_vtable_constants(type_context);
+    if vtable_const_lines.length > 0 {
+        lines = lines.concat(vtable_const_lines);
         lines = append_string(lines, "");
     }
 
@@ -674,10 +715,10 @@ fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
 }
 
 fn empty_type_context() -> TypeContext {
-    return TypeContext { structs: [], enums: [] };
+    return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
 }
 
-fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeContextBuild {
+fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
     let mut diagnostics -> string[] = [];
     let mut struct_entries -> StructTypeInfo[] = [];
     let mut index -> number = 0;
@@ -783,7 +824,109 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeC
         enum_index += 1;
     }
 
-    return TypeContextBuild { context: TypeContext { structs: struct_entries, enums: enum_entries }, diagnostics: diagnostics };
+    // Build interface type information
+    let mut interface_entries -> InterfaceTypeInfo[] = [];
+    let mut interface_index -> number = 0;
+    loop {
+        if interface_index >= interfaces.length {
+            break;
+        }
+        let interface_def = interfaces[interface_index];
+        let sanitized_interface = sanitize_symbol(interface_def.name);
+        let llvm_interface_name = "%trait." + sanitized_interface;
+        interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo {
+            name: interface_def.name,
+            llvm_name: llvm_interface_name,
+            type_parameters: interface_def.type_parameters,
+            signatures: interface_def.signatures,
+        });
+        interface_index += 1;
+    }
+
+    // Build vtable information for each struct-interface pair
+    let mut vtable_entries -> VTableInfo[] = [];
+    let mut struct_vtable_index -> number = 0;
+    loop {
+        if struct_vtable_index >= structs.length {
+            break;
+        }
+        let struct_def = structs[struct_vtable_index];
+        let mut implements_index -> number = 0;
+        loop {
+            if implements_index >= struct_def.implements.length {
+                break;
+            }
+            let interface_name = struct_def.implements[implements_index];
+            // Find the interface definition
+            let mut interface_def_opt -> NativeInterface? = null;
+            let mut search_idx -> number = 0;
+            loop {
+                if search_idx >= interfaces.length {
+                    break;
+                }
+                if interfaces[search_idx].name == interface_name {
+                    interface_def_opt = interfaces[search_idx];
+                    break;
+                }
+                search_idx += 1;
+            }
+            
+            if interface_def_opt == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
+                implements_index += 1;
+                continue;
+            }
+            
+            let interface_def = interface_def_opt;
+            let sanitized_struct = sanitize_symbol(struct_def.name);
+            let sanitized_iface = sanitize_symbol(interface_name);
+            let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
+            let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
+            
+            // Build vtable entries for each method
+            let mut vtable_method_entries -> VTableEntry[] = [];
+            let mut sig_index -> number = 0;
+            loop {
+                if sig_index >= interface_def.signatures.length {
+                    break;
+                }
+                let signature = interface_def.signatures[sig_index];
+                // Build function pointer type: return_type (param_types...)*
+                let mut param_types -> string[] = ["i8*"];  // First param is always self as i8*
+                let mut param_idx -> number = 1;  // Skip self since we already added it
+                loop {
+                    if param_idx >= signature.parameters.length {
+                        break;
+                    }
+                    let param = signature.parameters[param_idx];
+                    let mapped_type = map_type_annotation(param.type_annotation);
+                    param_types = append_string(param_types, mapped_type);
+                    param_idx += 1;
+                }
+                let return_type = map_type_annotation(signature.return_type);
+                let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
+                
+                vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
+                    method_name: struct_def.name + "::" + signature.name,
+                    interface_method_name: signature.name,
+                    function_pointer_type: func_ptr_type,
+                });
+                sig_index += 1;
+            }
+            
+            vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
+                struct_name: struct_def.name,
+                interface_name: interface_name,
+                llvm_type_name: vtable_type_name,
+                llvm_global_name: vtable_global_name,
+                entries: vtable_method_entries,
+            });
+            implements_index += 1;
+        }
+        struct_vtable_index += 1;
+    }
+
+    return TypeContextBuild { context: TypeContext { structs: struct_entries, enums: enum_entries, interfaces: interface_entries, vtables: vtable_entries }, diagnostics: diagnostics };
 }
 
 fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
@@ -799,6 +942,18 @@ fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInf
 }
 
 fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_interface_type_info(values -> InterfaceTypeInfo[], value -> InterfaceTypeInfo) -> InterfaceTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_vtable_info(values -> VTableInfo[], value -> VTableInfo) -> VTableInfo[] {
+    return values.concat([value]);
+}
+
+fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableEntry[] {
     return values.concat([value]);
 }
 
@@ -930,10 +1085,89 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
     return lines;
 }
 
-fn map_struct_field_annotation(annotation -> string) -> string {
+fn render_interface_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.interfaces.length {
+            break;
+        }
+        let interface_info = context.interfaces[index];
+        // Trait object layout: { data_ptr, vtable_ptr }
+        let body = "{ i8*, i8* }";
+        lines = append_string(lines, interface_info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        let mut entry_types -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= vtable.entries.length {
+                break;
+            }
+            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type);
+            entry_index += 1;
+        }
+        let mut body -> string = "";
+        if entry_types.length == 0 {
+            body = "{}";
+        } else {
+            body = "{ " + join_with_separator(entry_types, ", ") + " }";
+        }
+        lines = append_string(lines, vtable.llvm_type_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn render_vtable_constants(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        let mut entry_values -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= vtable.entries.length {
+                break;
+            }
+            let entry = vtable.entries[entry_index];
+            let sanitized_method = sanitize_symbol(entry.method_name);
+            // Cast the method to i8* function pointer type
+            let cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")";
+            let typed_value = entry.function_pointer_type + " " + cast_value;
+            entry_values = append_string(entry_values, typed_value);
+            entry_index += 1;
+        }
+        let mut body -> string = "";
+        if entry_values.length == 0 {
+            body = "zeroinitializer";
+        } else {
+            body = "{ " + join_with_separator(entry_values, ", ") + " }";
+        }
+        lines = append_string(lines, vtable.llvm_global_name + " = global " + vtable.llvm_type_name + " " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn map_type_annotation(annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
-        return "";
+        return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
@@ -951,19 +1185,31 @@ fn map_struct_field_annotation(annotation -> string) -> string {
     if normalized == "string" {
         return "i8*";
     }
+    if normalized == "void" {
+        return "void";
+    }
     if normalized.length > 2 {
         let suffix = substring(normalized, normalized.length - 2, normalized.length);
         if suffix == "[]" {
             let element_annotation = trim_text(substring(normalized, 0, normalized.length - 2));
-            let element_type = map_struct_field_annotation(element_annotation);
+            let element_type = map_type_annotation(element_annotation);
             if element_type.length == 0 {
-                return "";
+                return "i8*";
             }
             let aggregate = array_struct_type_for_element(element_type);
             return aggregate + "*";
         }
     }
-    return "";
+    // Default to i8* for unknown types
+    return "i8*";
+}
+
+fn map_struct_field_annotation(annotation -> string) -> string {
+    let result = map_type_annotation(annotation);
+    if result == "void" {
+        return "";
+    }
+    return result;
 }
 
 fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {

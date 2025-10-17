@@ -8,7 +8,8 @@ from compiler.build.emit_native import NativeArtifact, NativeModule
 from compiler.build.native_llvm_lowering import lower_to_llvm
 from runtime.stage2_runner import Stage2Runner, current_capability_grant
 
-pytestmark = [pytest.mark.stage2, pytest.mark.usefixtures("stage1_environment")]
+pytestmark = [pytest.mark.stage2,
+              pytest.mark.usefixtures("stage1_environment")]
 
 _LLVM_TARGET_INITIALIZED = False
 
@@ -170,7 +171,8 @@ fn main() -> number {
     def _runtime_print_info(_message):
         call_count["value"] += 1
 
-    runtime_print_info_stub = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_runtime_print_info)
+    runtime_print_info_stub = ctypes.CFUNCTYPE(
+        None, ctypes.c_void_p)(_runtime_print_info)
     llvm.add_symbol(
         "sailfin_runtime_print_info",
         ctypes.cast(runtime_print_info_stub, ctypes.c_void_p).value,
@@ -731,7 +733,8 @@ fn main() -> number {
     ]
     assert not violation, f"unexpected lifetime diagnostics: {diagnostics}"
 
-    regions = [region for region in lowered.lifetime_regions if region.binding == "alias" and region.base == "inner"]
+    regions = [region for region in lowered.lifetime_regions if region.binding ==
+               "alias" and region.base == "inner"]
     assert regions, "expected alias borrow metadata for inner"
     for region in regions:
         assert region.released is True
@@ -1318,14 +1321,19 @@ fn main() -> number {
     ir = lowered.ir
     engine, module = _compile_ir(ir)
     try:
-        conditional_true = _invoke(engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), True, 5.0)
-        assert conditional_true == pytest.approx(15.0), "When condition is true, should return base + 10"
+        conditional_true = _invoke(
+            engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), True, 5.0)
+        assert conditional_true == pytest.approx(
+            15.0), "When condition is true, should return base + 10"
 
-        conditional_false = _invoke(engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), False, 5.0)
-        assert conditional_false == pytest.approx(5.0), "When condition is false, should return base unchanged"
+        conditional_false = _invoke(
+            engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), False, 5.0)
+        assert conditional_false == pytest.approx(
+            5.0), "When condition is false, should return base unchanged"
 
         main_result = _invoke_double(engine, "main")
-        assert main_result == pytest.approx(20.0), "Main should return 15 + 5 = 20"
+        assert main_result == pytest.approx(
+            20.0), "Main should return 15 + 5 = 20"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1383,22 +1391,31 @@ fn main() -> number {
     engine, module = _compile_ir(ir)
     try:
         # Test select_value with both branches
-        result_true = _invoke(engine, "select_value", ctypes.c_double, (ctypes.c_bool, ctypes.c_double, ctypes.c_double), True, 5.0, 10.0)
-        assert result_true == pytest.approx(20.0), "When condition is true, should return (5 + 10) + 5 = 20"
+        result_true = _invoke(engine, "select_value", ctypes.c_double,
+                              (ctypes.c_bool, ctypes.c_double, ctypes.c_double), True, 5.0, 10.0)
+        assert result_true == pytest.approx(
+            20.0), "When condition is true, should return (5 + 10) + 5 = 20"
 
-        result_false = _invoke(engine, "select_value", ctypes.c_double, (ctypes.c_bool, ctypes.c_double, ctypes.c_double), False, 5.0, 10.0)
-        assert result_false == pytest.approx(33.0), "When condition is false, should return (10 + 20) + 3 = 33"
+        result_false = _invoke(engine, "select_value", ctypes.c_double, (
+            ctypes.c_bool, ctypes.c_double, ctypes.c_double), False, 5.0, 10.0)
+        assert result_false == pytest.approx(
+            33.0), "When condition is false, should return (10 + 20) + 3 = 33"
 
         # Test partial_mutation where different locals are mutated in each branch
-        partial_true = _invoke(engine, "partial_mutation", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), True, 5.0)
-        assert partial_true == pytest.approx(115.0), "When condition is true, should return (5 + 10) + 100 + 0 = 115"
+        partial_true = _invoke(engine, "partial_mutation", ctypes.c_double,
+                               (ctypes.c_bool, ctypes.c_double), True, 5.0)
+        assert partial_true == pytest.approx(
+            115.0), "When condition is true, should return (5 + 10) + 100 + 0 = 115"
 
-        partial_false = _invoke(engine, "partial_mutation", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), False, 5.0)
-        assert partial_false == pytest.approx(225.0), "When condition is false, should return (5 + 20) + 0 + 200 = 225"
+        partial_false = _invoke(engine, "partial_mutation", ctypes.c_double,
+                                (ctypes.c_bool, ctypes.c_double), False, 5.0)
+        assert partial_false == pytest.approx(
+            225.0), "When condition is false, should return (5 + 20) + 0 + 200 = 225"
 
         # Test main to ensure all paths work together
         main_result = _invoke_double(engine, "main")
-        assert main_result == pytest.approx(393.0), "Main should return 20 + 33 + 115 + 225 = 393"
+        assert main_result == pytest.approx(
+            393.0), "Main should return 20 + 33 + 115 + 225 = 393"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1482,36 +1499,50 @@ fn main() -> number {
     engine, module = _compile_ir(ir)
     try:
         # Test classify_number with all match arms
-        c0 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 0.0)
+        c0 = _invoke(engine, "classify_number",
+                     ctypes.c_double, (ctypes.c_double,), 0.0)
         assert c0 == pytest.approx(11.0), "Value 0 should return 10 + 1 = 11"
 
-        c1 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 1.0)
+        c1 = _invoke(engine, "classify_number",
+                     ctypes.c_double, (ctypes.c_double,), 1.0)
         assert c1 == pytest.approx(22.0), "Value 1 should return 20 + 2 = 22"
 
-        c2 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 2.0)
+        c2 = _invoke(engine, "classify_number",
+                     ctypes.c_double, (ctypes.c_double,), 2.0)
         assert c2 == pytest.approx(33.0), "Value 2 should return 30 + 3 = 33"
 
-        c3 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 99.0)
-        assert c3 == pytest.approx(44.0), "Default case should return 40 + 4 = 44"
+        c3 = _invoke(engine, "classify_number",
+                     ctypes.c_double, (ctypes.c_double,), 99.0)
+        assert c3 == pytest.approx(
+            44.0), "Default case should return 40 + 4 = 44"
 
         # Test partial_match_mutations where different locals are mutated in each arm
-        p0 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 0.0)
-        assert p0 == pytest.approx(105.0), "Value 0 should return 100 + 5 + 0 + 0 = 105"
+        p0 = _invoke(engine, "partial_match_mutations",
+                     ctypes.c_double, (ctypes.c_double,), 0.0)
+        assert p0 == pytest.approx(
+            105.0), "Value 0 should return 100 + 5 + 0 + 0 = 105"
 
-        p1 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 1.0)
-        assert p1 == pytest.approx(210.0), "Value 1 should return 200 + 0 + 10 + 0 = 210"
+        p1 = _invoke(engine, "partial_match_mutations",
+                     ctypes.c_double, (ctypes.c_double,), 1.0)
+        assert p1 == pytest.approx(
+            210.0), "Value 1 should return 200 + 0 + 10 + 0 = 210"
 
-        p2 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 2.0)
-        assert p2 == pytest.approx(315.0), "Value 2 should return 300 + 0 + 0 + 15 = 315"
+        p2 = _invoke(engine, "partial_match_mutations",
+                     ctypes.c_double, (ctypes.c_double,), 2.0)
+        assert p2 == pytest.approx(
+            315.0), "Value 2 should return 300 + 0 + 0 + 15 = 315"
 
-        p3 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 99.0)
-        assert p3 == pytest.approx(400.0), "Default case should return 400 + 0 + 0 + 0 = 400"
+        p3 = _invoke(engine, "partial_match_mutations",
+                     ctypes.c_double, (ctypes.c_double,), 99.0)
+        assert p3 == pytest.approx(
+            400.0), "Default case should return 400 + 0 + 0 + 0 = 400"
 
         # Test main to ensure all paths work together
         main_result = _invoke_double(engine, "main")
         # c0=11, c1=22, c2=33, c3=44, p0=105, p1=210, p2=315, p3=400
         # 11 + 22 + 33 + 44 + 105 + 210 + 315 + 400 = 1140
-        assert main_result == pytest.approx(1140.0), "Main should return sum of all results = 1140"
+        assert main_result == pytest.approx(
+            1140.0), "Main should return sum of all results = 1140"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1647,7 +1678,8 @@ fn main() -> number {
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(6.0), "Match should correctly route to different branches based on enum variant"
+        assert output == pytest.approx(
+            6.0), "Match should correctly route to different branches based on enum variant"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1702,7 +1734,8 @@ fn main() -> number {
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(600.0), "Match should correctly identify enum variants"
+        assert output == pytest.approx(
+            600.0), "Match should correctly identify enum variants"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1744,7 +1777,8 @@ fn main() -> number {
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(42.0), "Should execute successfully with payload enum"
+        assert output == pytest.approx(
+            42.0), "Should execute successfully with payload enum"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1806,7 +1840,8 @@ fn main() -> number {
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(6.0), "Match should correctly identify variants by tag"
+        assert output == pytest.approx(
+            6.0), "Match should correctly identify variants by tag"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1856,14 +1891,16 @@ fn main() -> number {
     assert "load double" in result.ir, "Should load field values"
 
     # Check for alloca for bound variables
-    assert result.ir.count("alloca double") >= 3, "Should allocate locals for extracted fields (radius, width, height)"
+    assert result.ir.count(
+        "alloca double") >= 3, "Should allocate locals for extracted fields (radius, width, height)"
 
     _assert_only_pointer_layout_warnings(result.diagnostics)
 
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(24.56), "Match should extract and use field values correctly"
+        assert output == pytest.approx(
+            24.56), "Match should extract and use field values correctly"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
@@ -1891,7 +1928,8 @@ fn main() -> number {
 """
     )
 
-    malloc_lines = [line for line in result.ir.splitlines() if "call noalias i8* @malloc" in line]
+    malloc_lines = [line for line in result.ir.splitlines(
+    ) if "call noalias i8* @malloc" in line]
     assert malloc_lines, "Recursive enum payload should allocate using malloc"
 
     _assert_only_pointer_layout_warnings(result.diagnostics)
@@ -1903,3 +1941,166 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_emits_vtable_type_definitions(compile_stage2) -> None:
+    """Verify that interface trait object types and vtable types are emitted correctly."""
+    source = """
+interface Greeter {
+    fn greet(self) -> string;
+}
+
+struct User implements Greeter {
+    name -> string;
+    
+    fn greet(self) -> string {
+        return "Hello";
+    }
+}
+
+fn main() -> number {
+    return 42;
+}
+"""
+    lowered = compile_stage2(source, module_name="vtable_types")
+    # Allow missing `self` type annotation diagnostic (pre-existing interface parsing limitation)
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that interface type definition exists (trait object with data and vtable pointers)
+    assert "%trait.Greeter = type { i8*, i8* }" in ir, \
+        "Interface should define trait object type with data and vtable pointers"
+
+    # Check that vtable type definition exists
+    assert "%vtable.User.Greeter = type" in ir, \
+        "Vtable type definition should be emitted for User.Greeter"
+
+    # Check that vtable contains function pointer for greet method
+    # The vtable should have function pointer type for the greet method
+    vtable_lines = [line for line in ir.splitlines(
+    ) if "%vtable.User.Greeter = type" in line]
+    assert vtable_lines, "Vtable type definition not found"
+    vtable_def = vtable_lines[0]
+    assert "i8*" in vtable_def or "string" in vtable_def, \
+        "Vtable should contain function pointer type for greet method"
+
+
+def test_native_llvm_execution_emits_vtable_constants(compile_stage2) -> None:
+    """Verify that vtable constants are emitted correctly with method pointers."""
+    source = """
+interface Speaker {
+    fn speak(self) -> string;
+    fn shout(self) -> string;
+}
+
+struct Robot implements Speaker {
+    id -> number;
+    
+    fn speak(self) -> string {
+        return "beep";
+    }
+    
+    fn shout(self) -> string {
+        return "BEEP!";
+    }
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="vtable_constants")
+    # Allow missing `self` type annotation diagnostic (pre-existing interface parsing limitation)
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that vtable constant is emitted
+    assert "@vtable.Robot.Speaker.const = global" in ir, \
+        "Vtable constant should be emitted as a global"
+
+    # Check that vtable constant references the method implementations
+    # Should contain bitcast references to Robot::speak and Robot::shout
+    vtable_const_lines = [line for line in ir.splitlines()
+                          if "@vtable.Robot.Speaker.const" in line]
+    assert vtable_const_lines, "Vtable constant not found"
+
+    # Verify method references exist in vtable
+    # Note: sanitize_symbol removes :: so Robot::speak becomes @Robotspeak
+    assert "@Robotspeak" in ir, \
+        "Vtable should reference Robot::speak method"
+    assert "@Robotshout" in ir, \
+        "Vtable should reference Robot::shout method"
+
+
+def test_native_llvm_execution_emits_multiple_vtables(compile_stage2) -> None:
+    """Verify that multiple vtables are emitted when a struct implements multiple interfaces."""
+    source = """
+interface Greeter {
+    fn greet(self) -> string;
+}
+
+interface Formatter {
+    fn format(self) -> number;
+}
+
+struct Person implements Greeter, Formatter {
+    age -> number;
+    
+    fn greet(self) -> string {
+        return "Hi";
+    }
+    
+    fn format(self) -> number {
+        return self.age;
+    }
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="multiple_vtables")
+    # Allow missing `self` type annotation and related diagnostics (pre-existing interface parsing limitation)
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "member access base" in diag  # Related to missing self type
+        or "unhandled return expression" in diag  # Related to member access issues
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that both interface types are defined
+    assert "%trait.Greeter = type { i8*, i8* }" in ir
+    assert "%trait.Formatter = type { i8*, i8* }" in ir
+
+    # Check that both vtable types are defined
+    assert "%vtable.Person.Greeter = type" in ir
+    assert "%vtable.Person.Formatter = type" in ir
+
+    # Check that both vtable constants are emitted
+    assert "@vtable.Person.Greeter.const = global" in ir
+    assert "@vtable.Person.Formatter.const = global" in ir

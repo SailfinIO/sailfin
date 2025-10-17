@@ -10,6 +10,12 @@ source_filename = "sailfin"
 
 %Person = type { double }
 
+%trait.Meter = type { i8*, i8* }
+
+%vtable.Person.Meter = type { double (i8*)* }
+
+@vtable.Person.Meter.const = global %vtable.Person.Meter { double (i8*)* bitcast (double (i8*)* @Persontotal to double (i8*)*) }
+
 declare noalias i8* @malloc(i64)
 
 define { %Person*, i64 }* @make_people() {

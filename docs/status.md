@@ -95,8 +95,19 @@ roadmaps.
   the LLVM backend can reason about trait membership without inspecting source
   ASTs. The LLVM lowering pipeline surfaces this information via
   `LoweredLLVMResult.trait_metadata`, providing structured descriptors for each
-  interface (name, generics, signatures) and every struct that implements them
-  ahead of trait-object plumbing. Borrow expressions now lower into explicit
+  interface (name, generics, signatures) and every struct that implements them.
+  Stage2 now emits trait object types and vtable structures for interface support.
+  Each interface generates a trait object type definition (`%trait.InterfaceName`)
+  represented as `{ i8*, i8* }` (data pointer + vtable pointer). For every
+  struct-interface pair, the compiler emits a vtable type definition (e.g.,
+  `%vtable.StructName.InterfaceName`) containing function pointer types for each
+  interface method, and a corresponding global constant initialized with bitcast
+  references to the struct's method implementations. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_vtable_type_definitions`,
+  `test_native_llvm_execution_emits_vtable_constants`, and
+  `test_native_llvm_execution_emits_multiple_vtables`. Method dispatch through
+  trait objects (boxing concrete values and calling methods via vtable indirection)
+  is not yet implemented. Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_borrow_expressions`).

@@ -45,7 +45,7 @@ def test_lower_instruction_range_records_local_mutations() -> None:
         instructions=[let_instruction, assign_instruction],
     )
 
-    context = TypeContext(structs=[], enums=[])
+    context = TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
     prepared = prepare_parameters(function, context)
     assert prepared.diagnostics == []
 
@@ -123,7 +123,7 @@ def test_mutations_propagate_through_if_then() -> None:
         instructions=[if_instruction, let_in_then, endif_instruction],
     )
 
-    context = TypeContext(structs=[], enums=[])
+    context = TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
     prepared = prepare_parameters(function, context)
     assert prepared.diagnostics == []
 
@@ -220,7 +220,7 @@ def test_mutations_propagate_through_if_else() -> None:
         ],
     )
 
-    context = TypeContext(structs=[], enums=[])
+    context = TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
     prepared = prepare_parameters(function, context)
     assert prepared.diagnostics == []
 
@@ -303,7 +303,7 @@ def test_mutations_propagate_through_loop() -> None:
         ],
     )
 
-    context = TypeContext(structs=[], enums=[])
+    context = TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
     prepared = prepare_parameters(function, context)
     assert prepared.diagnostics == []
 
@@ -415,7 +415,7 @@ def test_mutations_propagate_through_match() -> None:
         ],
     )
 
-    context = TypeContext(structs=[], enums=[])
+    context = TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
     prepared = prepare_parameters(function, context)
     assert prepared.diagnostics == []
 

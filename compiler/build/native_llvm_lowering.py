@@ -265,13 +265,45 @@ class EnumTypeInfo:
     def __repr__(self):
         return runtime.struct_repr('EnumTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('variants', self.variants)])
 
-class TypeContext:
-    def __init__(self, structs, enums):
-        self.structs = structs
-        self.enums = enums
+class VTableEntry:
+    def __init__(self, method_name, interface_method_name, function_pointer_type):
+        self.method_name = method_name
+        self.interface_method_name = interface_method_name
+        self.function_pointer_type = function_pointer_type
 
     def __repr__(self):
-        return runtime.struct_repr('TypeContext', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums)])
+        return runtime.struct_repr('VTableEntry', [runtime.struct_field('method_name', self.method_name), runtime.struct_field('interface_method_name', self.interface_method_name), runtime.struct_field('function_pointer_type', self.function_pointer_type)])
+
+class VTableInfo:
+    def __init__(self, struct_name, interface_name, llvm_type_name, llvm_global_name, entries):
+        self.struct_name = struct_name
+        self.interface_name = interface_name
+        self.llvm_type_name = llvm_type_name
+        self.llvm_global_name = llvm_global_name
+        self.entries = entries
+
+    def __repr__(self):
+        return runtime.struct_repr('VTableInfo', [runtime.struct_field('struct_name', self.struct_name), runtime.struct_field('interface_name', self.interface_name), runtime.struct_field('llvm_type_name', self.llvm_type_name), runtime.struct_field('llvm_global_name', self.llvm_global_name), runtime.struct_field('entries', self.entries)])
+
+class InterfaceTypeInfo:
+    def __init__(self, name, llvm_name, type_parameters, signatures):
+        self.name = name
+        self.llvm_name = llvm_name
+        self.type_parameters = type_parameters
+        self.signatures = signatures
+
+    def __repr__(self):
+        return runtime.struct_repr('InterfaceTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('signatures', self.signatures)])
+
+class TypeContext:
+    def __init__(self, structs, enums, interfaces, vtables):
+        self.structs = structs
+        self.enums = enums
+        self.interfaces = interfaces
+        self.vtables = vtables
+
+    def __repr__(self):
+        return runtime.struct_repr('TypeContext', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('vtables', self.vtables)])
 
 class TypeContextBuild:
     def __init__(self, context, diagnostics):
@@ -661,7 +693,7 @@ def lower_to_llvm(native_module):
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
-    type_build = build_type_context(parse.structs, parse.enums)
+    type_build = build_type_context(parse.structs, parse.enums, parse.interfaces)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
     struct_methods = flatten_struct_methods(parse.structs)
@@ -687,6 +719,18 @@ def lower_to_llvm(native_module):
     enum_type_lines = render_enum_type_definitions(type_context)
     if len(enum_type_lines) > 0:
         lines = (lines) + (enum_type_lines)
+        lines = append_string(lines, "")
+    interface_type_lines = render_interface_type_definitions(type_context)
+    if len(interface_type_lines) > 0:
+        lines = (lines) + (interface_type_lines)
+        lines = append_string(lines, "")
+    vtable_type_lines = render_vtable_type_definitions(type_context)
+    if len(vtable_type_lines) > 0:
+        lines = (lines) + (vtable_type_lines)
+        lines = append_string(lines, "")
+    vtable_const_lines = render_vtable_constants(type_context)
+    if len(vtable_const_lines) > 0:
+        lines = (lines) + (vtable_const_lines)
         lines = append_string(lines, "")
     helper_declarations = render_runtime_helper_declarations(runtime_helpers)
     if len(helper_declarations) > 0:
@@ -814,9 +858,9 @@ def render_runtime_helper_declarations(used_targets):
     return lines
 
 def empty_type_context():
-    return TypeContext(structs=[], enums=[])
+    return TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
 
-def build_type_context(structs, enums):
+def build_type_context(structs, enums, interfaces):
     diagnostics = []
     struct_entries = []
     index = 0
@@ -888,7 +932,68 @@ def build_type_context(structs, enums):
             enum_align_value = 1
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo(name=enum_def.name, llvm_name=llvm_enum_name, tag_type=enum_layout.tag_type, tag_size=enum_layout.tag_size, tag_align=enum_layout.tag_align, size=enum_layout.size, align=enum_align_value, variants=variants))
         enum_index += 1
-    return TypeContextBuild(context=TypeContext(structs=struct_entries, enums=enum_entries), diagnostics=diagnostics)
+    interface_entries = []
+    interface_index = 0
+    while True:
+        if interface_index >= len(interfaces):
+            break
+        interface_def = interfaces[interface_index]
+        sanitized_interface = sanitize_symbol(interface_def.name)
+        llvm_interface_name = "%trait." + sanitized_interface
+        interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo(name=interface_def.name, llvm_name=llvm_interface_name, type_parameters=interface_def.type_parameters, signatures=interface_def.signatures))
+        interface_index += 1
+    vtable_entries = []
+    struct_vtable_index = 0
+    while True:
+        if struct_vtable_index >= len(structs):
+            break
+        struct_def = structs[struct_vtable_index]
+        implements_index = 0
+        while True:
+            if implements_index >= len(struct_def.implements):
+                break
+            interface_name = struct_def.implements[implements_index]
+            interface_def_opt = None
+            search_idx = 0
+            while True:
+                if search_idx >= len(interfaces):
+                    break
+                if interfaces[search_idx].name == interface_name:
+                    interface_def_opt = interfaces[search_idx]
+                    break
+                search_idx += 1
+            if interface_def_opt == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`")
+                implements_index += 1
+                continue
+            interface_def = interface_def_opt
+            sanitized_struct = sanitize_symbol(struct_def.name)
+            sanitized_iface = sanitize_symbol(interface_name)
+            vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface
+            vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const"
+            vtable_method_entries = []
+            sig_index = 0
+            while True:
+                if sig_index >= len(interface_def.signatures):
+                    break
+                signature = interface_def.signatures[sig_index]
+                param_types = ["i8*"]
+                param_idx = 1
+                while True:
+                    if param_idx >= len(signature.parameters):
+                        break
+                    param = signature.parameters[param_idx]
+                    mapped_type = map_type_annotation(param.type_annotation)
+                    param_types = append_string(param_types, mapped_type)
+                    param_idx += 1
+                return_type = map_type_annotation(signature.return_type)
+                func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*"
+                vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry(method_name=struct_def.name + "::" + signature.name, interface_method_name=signature.name, function_pointer_type=func_ptr_type))
+                sig_index += 1
+            vtable_entries = append_vtable_info(vtable_entries, VTableInfo(struct_name=struct_def.name, interface_name=interface_name, llvm_type_name=vtable_type_name, llvm_global_name=vtable_global_name, entries=vtable_method_entries))
+            implements_index += 1
+        struct_vtable_index += 1
+    return TypeContextBuild(context=TypeContext(structs=struct_entries, enums=enum_entries, interfaces=interface_entries, vtables=vtable_entries), diagnostics=diagnostics)
 
 def append_struct_type_info(values, value):
     return (values) + ([value])
@@ -900,6 +1005,15 @@ def append_enum_variant_info(values, value):
     return (values) + ([value])
 
 def append_enum_type_info(values, value):
+    return (values) + ([value])
+
+def append_interface_type_info(values, value):
+    return (values) + ([value])
+
+def append_vtable_info(values, value):
+    return (values) + ([value])
+
+def append_vtable_entry(values, value):
     return (values) + ([value])
 
 def append_native_function(values, value):
@@ -990,10 +1104,72 @@ def render_enum_type_definitions(context):
         index += 1
     return lines
 
-def map_struct_field_annotation(annotation):
+def render_interface_type_definitions(context):
+    lines = []
+    index = 0
+    while True:
+        if index >= len(context.interfaces):
+            break
+        interface_info = context.interfaces[index]
+        body = "{ i8*, i8* }"
+        lines = append_string(lines, interface_info.llvm_name + " = type " + body)
+        index += 1
+    return lines
+
+def render_vtable_type_definitions(context):
+    lines = []
+    index = 0
+    while True:
+        if index >= len(context.vtables):
+            break
+        vtable = context.vtables[index]
+        entry_types = []
+        entry_index = 0
+        while True:
+            if entry_index >= len(vtable.entries):
+                break
+            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type)
+            entry_index += 1
+        body = ""
+        if len(entry_types) == 0:
+            body = "{}"
+        else:
+            body = "{ " + join_with_separator(entry_types, ", ") + " }"
+        lines = append_string(lines, vtable.llvm_type_name + " = type " + body)
+        index += 1
+    return lines
+
+def render_vtable_constants(context):
+    lines = []
+    index = 0
+    while True:
+        if index >= len(context.vtables):
+            break
+        vtable = context.vtables[index]
+        entry_values = []
+        entry_index = 0
+        while True:
+            if entry_index >= len(vtable.entries):
+                break
+            entry = vtable.entries[entry_index]
+            sanitized_method = sanitize_symbol(entry.method_name)
+            cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")"
+            typed_value = entry.function_pointer_type + " " + cast_value
+            entry_values = append_string(entry_values, typed_value)
+            entry_index += 1
+        body = ""
+        if len(entry_values) == 0:
+            body = "zeroinitializer"
+        else:
+            body = "{ " + join_with_separator(entry_values, ", ") + " }"
+        lines = append_string(lines, vtable.llvm_global_name + " = global " + vtable.llvm_type_name + " " + body)
+        index += 1
+    return lines
+
+def map_type_annotation(annotation):
     trimmed = trim_text(annotation)
     if len(trimmed) == 0:
-        return ""
+        return "void"
     normalized = unwrap_move_wrapper(trimmed)
     if normalized == "number":
         return "double"
@@ -1005,16 +1181,24 @@ def map_struct_field_annotation(annotation):
         return "i32"
     if normalized == "string":
         return "i8*"
+    if normalized == "void":
+        return "void"
     if len(normalized) > 2:
         suffix = substring(normalized, len(normalized) - 2, len(normalized))
         if suffix == "[]":
             element_annotation = trim_text(substring(normalized, 0, len(normalized) - 2))
-            element_type = map_struct_field_annotation(element_annotation)
+            element_type = map_type_annotation(element_annotation)
             if len(element_type) == 0:
-                return ""
+                return "i8*"
             aggregate = array_struct_type_for_element(element_type)
             return aggregate + "*"
-    return ""
+    return "i8*"
+
+def map_struct_field_annotation(annotation):
+    result = map_type_annotation(annotation)
+    if result == "void":
+        return ""
+    return result
 
 def find_struct_info_by_name(context, name):
     index = 0
