@@ -145,6 +145,38 @@ def _invoke_bool(engine, name: str, arg_types, *args) -> bool:
     return bool(_invoke(engine, name, ctypes.c_bool, arg_types, *args))
 
 
+def test_native_llvm_execution_invokes_runtime_console(compile_stage2):
+    result = compile_stage2(
+        """
+fn emit() ![io] {
+    print.info("Stage2 runtime bridge!");
+}
+
+fn main() -> number {
+    emit();
+    return 7;
+}
+"""
+    )
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+
+    call_count = {"value": 0}
+
+    def _runtime_print_info(_message):
+        call_count["value"] += 1
+
+    runtime_print_info_stub = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_runtime_print_info)
+    llvm.add_symbol(
+        "sailfin_runtime_print_info",
+        ctypes.cast(runtime_print_info_stub, ctypes.c_void_p).value,
+    )
+
+    engine, _ = _compile_ir(result.ir)
+    output = _invoke_double(engine, "main")
+    assert output == pytest.approx(7.0)
+    assert call_count["value"] == 1
+
+
 @pytest.mark.parametrize(
     "source, expected",
     [

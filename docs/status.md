@@ -242,7 +242,10 @@ roadmaps.
   literals, and locals bound to array expressions (even without explicit type
   annotations) into runnable LLVM IR, with
   `compiler/tests/test_native_llvm_execution.py` executing the emitted IR via
-  `llvmlite` as a smoke guard.
+  `llvmlite` as a smoke guard. Runtime console helpers are surfaced as external
+  LLVM calls so stage2 lowers `print.info` against the existing Python prelude,
+  covered by
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_invokes_runtime_console`.
 
 **Package Manager (`sfn`)**
 

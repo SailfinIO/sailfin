@@ -69,6 +69,16 @@ class CapabilityManifest:
     def __repr__(self):
         return runtime.struct_repr('CapabilityManifest', [runtime.struct_field('entries', self.entries)])
 
+class RuntimeHelperDescriptor:
+    def __init__(self, target, symbol, return_type, parameter_types):
+        self.target = target
+        self.symbol = symbol
+        self.return_type = return_type
+        self.parameter_types = parameter_types
+
+    def __repr__(self):
+        return runtime.struct_repr('RuntimeHelperDescriptor', [runtime.struct_field('target', self.target), runtime.struct_field('symbol', self.symbol), runtime.struct_field('return_type', self.return_type), runtime.struct_field('parameter_types', self.parameter_types)])
+
 class FunctionCallEntry:
     def __init__(self, name, callees):
         self.name = name
@@ -519,6 +529,7 @@ def lower_to_llvm(native_module):
     type_context = type_build.context
     struct_methods = flatten_struct_methods(parse.structs)
     all_functions = concat_native_functions(parse.functions, struct_methods)
+    runtime_helpers = collect_runtime_helper_targets(all_functions)
     direct_effects = collect_direct_function_effects(all_functions)
     call_graph = collect_function_call_graph(all_functions)
     aggregated_effects = propagate_function_effects(direct_effects, call_graph)
@@ -535,6 +546,10 @@ def lower_to_llvm(native_module):
     struct_type_lines = render_struct_type_definitions(type_context)
     if len(struct_type_lines) > 0:
         lines = (lines) + (struct_type_lines)
+        lines = append_string(lines, "")
+    helper_declarations = render_runtime_helper_declarations(runtime_helpers)
+    if len(helper_declarations) > 0:
+        lines = (lines) + (helper_declarations)
         lines = append_string(lines, "")
     index = 0
     has_add_function = False
@@ -634,6 +649,25 @@ def render_trait_metadata_comments(metadata):
         lines = append_string(lines, ";")
     lines = (lines) + (struct_lines)
     lines = append_string(lines, "; -----------------------------------------------")
+    return lines
+
+def render_runtime_helper_declarations(used_targets):
+    if len(used_targets) == 0:
+        return []
+    lines = []
+    descriptors = runtime_helper_descriptors()
+    index = 0
+    while True:
+        if index >= len(descriptors):
+            break
+        descriptor = descriptors[index]
+        if string_array_contains(used_targets, descriptor.target):
+            parameter_text = ""
+            if len(descriptor.parameter_types) > 0:
+                parameter_text = join_with_separator(descriptor.parameter_types, ", ")
+            line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")"
+            lines = append_string(lines, line)
+        index += 1
     return lines
 
 def empty_type_context():
@@ -888,6 +922,54 @@ def collect_function_call_entry(function, function_names):
         index += 1
     return FunctionCallEntry(name=function.name, callees=callees)
 
+def collect_runtime_helper_targets(functions):
+    used = []
+    index = 0
+    while True:
+        if index >= len(functions):
+            break
+        helpers = collect_function_runtime_helper_targets(functions[index])
+        used = merge_effect_lists(used, helpers)
+        index += 1
+    return used
+
+def collect_function_runtime_helper_targets(function):
+    used = []
+    index = 0
+    while True:
+        if index >= len(function.instructions):
+            break
+        instruction = function.instructions[index]
+        instruction_helpers = collect_instruction_runtime_helper_targets(instruction)
+        used = merge_effect_lists(used, instruction_helpers)
+        index += 1
+    return used
+
+def collect_instruction_runtime_helper_targets(instruction):
+    if instruction.variant == "Let":
+        if instruction.value != None:
+            return filter_runtime_helper_targets(extract_all_call_targets(instruction.value))
+        return []
+    if instruction.variant == "Expression":
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+    if instruction.variant == "Return":
+        trimmed = trim_text(instruction.expression)
+        if len(trimmed) > 0:
+            return filter_runtime_helper_targets(extract_all_call_targets(trimmed))
+        return []
+    if instruction.variant == "If":
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.condition))
+    if instruction.variant == "For":
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable))
+    if instruction.variant == "Match":
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+    if instruction.variant == "Case":
+        helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.pattern))
+        if instruction.guard != None:
+            helpers = merge_effect_lists(helpers, filter_runtime_helper_targets(extract_all_call_targets(instruction.guard)))
+        return helpers
+    return []
+
 def collect_instruction_calls(instruction, function_names):
     callees = []
     if instruction.variant == "Let":
@@ -977,6 +1059,62 @@ def extract_call_targets(expression, function_names):
         index += 1
     return results
 
+def extract_all_call_targets(expression):
+    results = []
+    if len(expression) == 0:
+        return results
+    index = 0
+    while True:
+        if index >= len(expression):
+            break
+        ch = expression[index]
+        if ch == "\"":
+            index = skip_string_literal(expression, index + 1)
+            continue
+        if is_identifier_start_char(ch):
+            start_index = index
+            index += 1
+            while True:
+                if index >= len(expression):
+                    break
+                current = expression[index]
+                if is_identifier_part_char(current):
+                    index += 1
+                    continue
+                if current == "."  or  current == ":":
+                    index += 1
+                    continue
+                break
+            candidate = trim_text(substring(expression, start_index, index))
+            if len(candidate) > 0:
+                cursor = index
+                while True:
+                    if cursor >= len(expression):
+                        break
+                    next = expression[cursor]
+                    if is_trim_char(next):
+                        cursor += 1
+                        continue
+                    if next == "(":
+                        results = append_unique_effect(results, candidate)
+                    break
+            continue
+        index += 1
+    return results
+
+def filter_runtime_helper_targets(targets):
+    results = []
+    index = 0
+    while True:
+        if index >= len(targets):
+            break
+        trimmed = trim_text(targets[index])
+        helper = find_runtime_helper(trimmed)
+        if helper != None:
+            results = append_unique_effect(results, helper.target)
+        index += 1
+    return results
+
 def append_function_call_entry(entries, entry):
     return (entries) + ([entry])
 
@@ -1043,6 +1181,29 @@ def build_capability_manifest(entry_points, function_effects):
 
 def append_manifest_entry(entries, entry):
     return (entries) + ([entry])
+
+def runtime_helper_descriptors():
+    descriptors = []
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.info", symbol="sailfin_runtime_print_info", return_type="void", parameter_types=["i8*"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.error", symbol="sailfin_runtime_print_error", return_type="void", parameter_types=["i8*"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.warn", symbol="sailfin_runtime_print_warn", return_type="void", parameter_types=["i8*"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"]))
+    return descriptors
+
+def append_runtime_helper(values, value):
+    return (values) + ([value])
+
+def find_runtime_helper(target):
+    descriptors = runtime_helper_descriptors()
+    trimmed = trim_text(target)
+    index = 0
+    while True:
+        if index >= len(descriptors):
+            break
+        if descriptors[index].target == trimmed:
+            return descriptors[index]
+        index += 1
+    return None
 
 def collect_function_effect_entry(function):
     combined = []
@@ -3303,6 +3464,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     llvm_return = "double"
     expected_params = []
     function_entry = find_function_by_name(functions, trimmed_target)
+    helper_descriptor = find_runtime_helper(trimmed_target)
     if function_entry != None:
         llvm_return = map_return_type(context, function_entry.return_type)
         if len(llvm_return) == 0:
@@ -3310,7 +3472,11 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             llvm_return = "double"
         expected_params = collect_parameter_types(context, function_entry.parameters)
     else:
-        diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
+        if helper_descriptor != None:
+            llvm_return = helper_descriptor.return_type
+            expected_params = helper_descriptor.parameter_types
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
     if function_entry != None  and  injected_argument_count == 1:
         if len(operands) > 0  and  len(expected_params) > 0:
             expected_self_type = expected_params[0]
@@ -3352,7 +3518,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
         index += 1
     operands = coerced_operands
-    if function_entry != None:
+    if function_entry != None  or  helper_descriptor != None:
         if len(expected_params) != len(operands):
             diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(len(expected_params)) + " arguments but received " + number_to_string(len(operands)))
     rendered_args = []
@@ -3363,13 +3529,15 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         rendered_args = append_string(rendered_args, format_typed_operand(operands[index]))
         index += 1
     argument_text = join_with_separator(rendered_args, ", ")
-    sanitized_name = sanitize_symbol(trimmed_target)
+    call_symbol = sanitize_symbol(trimmed_target)
+    if helper_descriptor != None:
+        call_symbol = helper_descriptor.symbol
     if llvm_return == "void":
-        call_line = "  call void @" + sanitized_name + "(" + argument_text + ")"
+        call_line = "  call void @" + call_symbol + "(" + argument_text + ")"
         current_lines = append_string(current_lines, call_line)
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
     temp_name = format_temp_name(current_temp)
-    call_line = "  " + temp_name + " = call " + llvm_return + " @" + sanitized_name + "(" + argument_text + ")"
+    call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")"
     current_lines = append_string(current_lines, call_line)
     operand = LLVMOperand(llvm_type=llvm_return, value=temp_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=operand, diagnostics=diagnostics)

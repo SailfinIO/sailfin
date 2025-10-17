@@ -38,6 +38,13 @@ struct CapabilityManifest {
     entries -> CapabilityManifestEntry[];
 }
 
+struct RuntimeHelperDescriptor {
+    target -> string;
+    symbol -> string;
+    return_type -> string;
+    parameter_types -> string[];
+}
+
 struct FunctionCallEntry {
     name -> string;
     callees -> string[];
@@ -362,6 +369,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let type_context = type_build.context;
     let struct_methods = flatten_struct_methods(parse.structs);
     let all_functions = concat_native_functions(parse.functions, struct_methods);
+    let runtime_helpers = collect_runtime_helper_targets(all_functions);
     let direct_effects = collect_direct_function_effects(all_functions);
     let call_graph = collect_function_call_graph(all_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
@@ -382,6 +390,12 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let struct_type_lines = render_struct_type_definitions(type_context);
     if struct_type_lines.length > 0 {
         lines = lines.concat(struct_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let helper_declarations = render_runtime_helper_declarations(runtime_helpers);
+    if helper_declarations.length > 0 {
+        lines = lines.concat(helper_declarations);
         lines = append_string(lines, "");
     }
 
@@ -543,6 +557,31 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
     }
     lines = lines.concat(struct_lines);
     lines = append_string(lines, "; -----------------------------------------------");
+    return lines;
+}
+
+fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
+    if used_targets.length == 0 {
+        return [];
+    }
+    let mut lines -> string[] = [];
+    let descriptors = runtime_helper_descriptors();
+    let mut index -> number = 0;
+    loop {
+        if index >= descriptors.length {
+            break;
+        }
+        let descriptor = descriptors[index];
+        if string_array_contains(used_targets, descriptor.target) {
+            let mut parameter_text -> string = "";
+            if descriptor.parameter_types.length > 0 {
+                parameter_text = join_with_separator(descriptor.parameter_types, ", ");
+            }
+            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
+            lines = append_string(lines, line);
+        }
+        index += 1;
+    }
     return lines;
 }
 
@@ -889,6 +928,71 @@ fn collect_function_call_entry(function -> NativeFunction, function_names -> str
     return FunctionCallEntry { name: function.name, callees: callees };
 }
 
+fn collect_runtime_helper_targets(functions -> NativeFunction[]) -> string[] {
+    let mut used -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        let helpers = collect_function_runtime_helper_targets(functions[index]);
+        used = merge_effect_lists(used, helpers);
+        index += 1;
+    }
+    return used;
+}
+
+fn collect_function_runtime_helper_targets(function -> NativeFunction) -> string[] {
+    let mut used -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= function.instructions.length {
+            break;
+        }
+        let instruction = function.instructions[index];
+        let instruction_helpers = collect_instruction_runtime_helper_targets(instruction);
+        used = merge_effect_lists(used, instruction_helpers);
+        index += 1;
+    }
+    return used;
+}
+
+fn collect_instruction_runtime_helper_targets(instruction -> NativeInstruction) -> string[] {
+    if instruction.variant == "Let" {
+        if instruction.value != null {
+            return filter_runtime_helper_targets(extract_all_call_targets(instruction.value));
+        }
+        return [];
+    }
+    if instruction.variant == "Expression" {
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+    }
+    if instruction.variant == "Return" {
+        let trimmed = trim_text(instruction.expression);
+        if trimmed.length > 0 {
+            return filter_runtime_helper_targets(extract_all_call_targets(trimmed));
+        }
+        return [];
+    }
+    if instruction.variant == "If" {
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.condition));
+    }
+    if instruction.variant == "For" {
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable));
+    }
+    if instruction.variant == "Match" {
+        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+    }
+    if instruction.variant == "Case" {
+        let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.pattern));
+        if instruction.guard != null {
+            helpers = merge_effect_lists(helpers, filter_runtime_helper_targets(extract_all_call_targets(instruction.guard)));
+        }
+        return helpers;
+    }
+    return [];
+}
+
 fn collect_instruction_calls(instruction -> NativeInstruction, function_names -> string[]) -> string[] {
     let mut callees -> string[] = [];
     if instruction.variant == "Let" {
@@ -1010,6 +1114,81 @@ fn extract_call_targets(expression -> string, function_names -> string[]) -> str
     return results;
 }
 
+fn extract_all_call_targets(expression -> string) -> string[] {
+    let mut results -> string[] = [];
+    if expression.length == 0 {
+        return results;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if ch == "\"" {
+            index = skip_string_literal(expression, index + 1);
+            continue;
+        }
+        if is_identifier_start_char(ch) {
+            let start_index = index;
+            index += 1;
+            loop {
+                if index >= expression.length {
+                    break;
+                }
+                let current = expression[index];
+                if is_identifier_part_char(current) {
+                    index += 1;
+                    continue;
+                }
+                if current == "." || current == ":" {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            let candidate = trim_text(substring(expression, start_index, index));
+            if candidate.length > 0 {
+                let mut cursor -> number = index;
+                loop {
+                    if cursor >= expression.length {
+                        break;
+                    }
+                    let next = expression[cursor];
+                    if is_trim_char(next) {
+                        cursor += 1;
+                        continue;
+                    }
+                    if next == "(" {
+                        results = append_unique_effect(results, candidate);
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+        index += 1;
+    }
+    return results;
+}
+
+fn filter_runtime_helper_targets(targets -> string[]) -> string[] {
+    let mut results -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= targets.length {
+            break;
+        }
+        let trimmed = trim_text(targets[index]);
+        let helper = find_runtime_helper(trimmed);
+        if helper != null {
+            results = append_unique_effect(results, helper.target);
+        }
+        index += 1;
+    }
+    return results;
+}
+
 fn append_function_call_entry(entries -> FunctionCallEntry[], entry -> FunctionCallEntry) -> FunctionCallEntry[] {
     return entries.concat([entry]);
 }
@@ -1101,6 +1280,55 @@ fn build_capability_manifest(entry_points -> string[], function_effects -> Funct
 
 fn append_manifest_entry(entries -> CapabilityManifestEntry[], entry -> CapabilityManifestEntry) -> CapabilityManifestEntry[] {
     return entries.concat([entry]);
+}
+
+fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
+    let mut descriptors -> RuntimeHelperDescriptor[] = [];
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "print.info",
+        symbol: "sailfin_runtime_print_info",
+        return_type: "void",
+        parameter_types: ["i8*"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "print.error",
+        symbol: "sailfin_runtime_print_error",
+        return_type: "void",
+        parameter_types: ["i8*"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "print.warn",
+        symbol: "sailfin_runtime_print_warn",
+        return_type: "void",
+        parameter_types: ["i8*"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sleep",
+        symbol: "sailfin_runtime_sleep",
+        return_type: "void",
+        parameter_types: ["double"],
+    });
+    return descriptors;
+}
+
+fn append_runtime_helper(values -> RuntimeHelperDescriptor[], value -> RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
+    return values.concat([value]);
+}
+
+fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {
+    let descriptors = runtime_helper_descriptors();
+    let trimmed = trim_text(target);
+    let mut index -> number = 0;
+    loop {
+        if index >= descriptors.length {
+            break;
+        }
+        if descriptors[index].target == trimmed {
+            return descriptors[index];
+        }
+        index += 1;
+    }
+    return null;
 }
 
 fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEntry {
@@ -4790,6 +5018,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut llvm_return -> string = "double";
     let mut expected_params -> string[] = [];
     let function_entry = find_function_by_name(functions, trimmed_target);
+    let helper_descriptor = find_runtime_helper(trimmed_target);
     if function_entry != null {
         llvm_return = map_return_type(context, function_entry.return_type);
         if llvm_return.length == 0 {
@@ -4797,6 +5026,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             llvm_return = "double";
         }
         expected_params = collect_parameter_types(context, function_entry.parameters);
+    } else if helper_descriptor != null {
+        llvm_return = helper_descriptor.return_type;
+        expected_params = helper_descriptor.parameter_types;
     } else {
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
     }
@@ -4854,7 +5086,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
     operands = coerced_operands;
 
-    if function_entry != null {
+    if function_entry != null || helper_descriptor != null {
         if expected_params.length != operands.length {
             diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
         }
@@ -4870,15 +5102,18 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         index += 1;
     }
     let argument_text = join_with_separator(rendered_args, ", ");
-    let sanitized_name = sanitize_symbol(trimmed_target);
+    let mut call_symbol = sanitize_symbol(trimmed_target);
+    if helper_descriptor != null {
+        call_symbol = helper_descriptor.symbol;
+    }
     if llvm_return == "void" {
-        let call_line = "  call void @" + sanitized_name + "(" + argument_text + ")";
+        let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
         current_lines = append_string(current_lines, call_line);
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
     }
 
     let temp_name = format_temp_name(current_temp);
-    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + sanitized_name + "(" + argument_text + ")";
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
     current_lines = append_string(current_lines, call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics };

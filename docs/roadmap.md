@@ -15,14 +15,12 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
 - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
-- [x] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Regression coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_struct_methods`.)
 - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
 - [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
 - [ ] Surface enum array metadata in LLVM lowering once layout descriptors exist, enabling typed iteration over tagged aggregates.
 - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
-- [ ] Bridge Sailfin runtime helpers (e.g., `print`, capability adapters) as callable LLVM symbols so stage2 programs can invoke the existing runtime prelude.
+- [ ] Bridge capability adapters (`fs`, `http`, `serve`, `spawn`, channel primitives) into stage2 lowering with symbol declarations and smoke coverage in `compiler/tests/test_native_llvm_execution.py`.
 - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
-- [x] Extend `.layout` inference to cover optional fields, nested enums, and recursive aggregates so Stage2 no longer defaults compiler AST structs to pointer layouts (silencing the `defaulting to pointer layout` warnings). Regression coverage: `compiler/tests/test_stage1_pipeline.py::test_native_backend_infers_recursive_layouts`.
 - [ ] Share layout descriptors across modules by emitting/importing per-unit layout manifests so stage2 can resolve referenced structs/enums defined in dependencies without pointer fallbacks.
 - [ ] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings.
 - [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
@@ -77,24 +75,13 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 Move checked tasks here with links to PRs / status updates for traceability.
 
-- [x] Stage2 lifetime region metadata — LLVM lowering now publishes borrow lifetime
-      scopes via `LoweredLLVMResult.lifetime_regions`, carrying binding names,
-      mutability, scope identifiers, and source spans so diagnostics and future
-      analyses can reason about scope exits without re-scanning `.sfn-asm`.
-      Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`;
-      behaviour documented in `docs/status.md`.
-- [x] Stage2 borrow lifetime enforcement — LLVM lowering now cross-checks recorded
-      lifetime regions against their base scopes and emits
-      `llvm lowering: borrow ... escapes lifetime ...` diagnostics when borrows
-      would outlive their owners. Validation:
-      `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`;
-      behaviour documented in `docs/status.md`.
+- [x] Extend `.layout` inference to cover optional fields, nested enums, and recursive aggregates so Stage2 no longer defaults compiler AST structs to pointer layouts (silencing the `defaulting to pointer layout` warnings). Regression coverage: `compiler/tests/test_stage1_pipeline.py::test_native_backend_infers_recursive_layouts`.
+- [x] Bridge Sailfin runtime helpers (console + `sleep`) as callable LLVM symbols so stage2 programs can invoke the existing runtime prelude. (Regression coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_invokes_runtime_console`.)
+- [x] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Regression coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_struct_methods`.)
+- [x] Stage2 lifetime region metadata — LLVM lowering now publishes borrow lifetime scopes via `LoweredLLVMResult.lifetime_regions`, carrying binding names, mutability, scope identifiers, and source spans so diagnostics and future analyses can reason about scope exits without re-scanning `.sfn-asm`. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`; behaviour documented in `docs/status.md`.
+- [x] Stage2 borrow lifetime enforcement — LLVM lowering now cross-checks recorded lifetime regions against their base scopes and emits `llvm lowering: borrow ... escapes lifetime ...` diagnostics when borrows would outlive their owners. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`; behaviour documented in `docs/status.md`.
 - [x] Stage1 diagnostic snippets — Stage1 CLI output and native lowering diagnostics now render caret-highlighted source snippets alongside messages. Validation: `compiler/tests/test_stage1_diagnostics.py::test_missing_effect_diagnostic_includes_source_snippet`; behaviour documented in `docs/status.md`.
-- [x] Struct interface conformance — Stage1 type checking now verifies that
-      structs implement every interface member they claim, including generic
-      instantiations. Validation: `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_interface_member_reports_diagnostic`,
-      `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_generic_interface_member_reports_diagnostic`;
-      behaviour documented in `docs/status.md`.
+- [x] Struct interface conformance — Stage1 type checking now verifies that structs implement every interface member they claim, including generic instantiations. Validation: `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_interface_member_reports_diagnostic`, `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_generic_interface_member_reports_diagnostic`; behaviour documented in `docs/status.md`.
 - [x] Stage2 move diagnostics spans — `.sfn-asm` now carries source-span metadata through the native IR and LLVM lowering so use-after-move errors surface line/column ranges in diagnostics. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array` assert span strings.
 - [x] Stage2 parameter span metadata — `.param` entries now emit source spans so suspension diagnostics cite mutable borrow parameters alongside suspension sites. Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_parameter_spans` locks emission, while `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await` asserts the diagnostics. Behaviour documented in `docs/status.md`.
 - [x] Stage2 suspension-conflict spans — LLVM lowering threads borrow initializer spans and suspension instruction spans into mutable-borrow suspension diagnostics so both sites show up in error messages. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await`; behaviour documented in `docs/status.md`.
