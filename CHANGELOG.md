@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.46 (2025-10-17)
+
+### Bug Fixes
+
+- Surface enum arrays
+  ([`ac48400`](https://github.com/SailfinIO/sailfin/commit/ac48400222d77ba26fa9aaceb96f9ac120c35e71))
+
+
 ## v0.1.1-alpha.45 (2025-10-17)
 
 ### Bug Fixes
