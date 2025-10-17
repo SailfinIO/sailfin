@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda run -n sailfin pytest:*)",
+      "Bash(source ~/.bash_profile)",
+      "Bash(source ~/.bashrc)",
+      "Bash(make test:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
