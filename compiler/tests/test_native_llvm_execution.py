@@ -702,6 +702,39 @@ fn main() -> number {
     assert violation, f"expected lifetime violation diagnostic, saw: {diagnostics}"
 
 
+def test_native_llvm_execution_allows_scoped_reborrow(compile_stage2) -> None:
+    source = """
+fn reborrow(flag -> number) -> number {
+    let mut outer -> number = 1;
+    let mut alias -> &number = &outer;
+    if flag {
+        let mut inner -> number = 2;
+        alias = &inner;
+        alias = &outer;
+    }
+    return outer;
+}
+
+fn main() -> number {
+    return reborrow(1);
+}
+"""
+
+    lowered = compile_stage2(source, module_name="scoped_reborrow")
+    diagnostics = lowered.diagnostics
+    violation = [
+        diag for diag in diagnostics if "escapes lifetime" in diag
+    ]
+    assert not violation, f"unexpected lifetime diagnostics: {diagnostics}"
+
+    regions = [region for region in lowered.lifetime_regions if region.binding == "alias" and region.base == "inner"]
+    assert regions, "expected alias borrow metadata for inner"
+    for region in regions:
+        assert region.released is True
+        assert region.end_scope_id
+        assert "then" in region.end_scope_id
+
+
 def test_native_llvm_execution_iterates_non_number_arrays(compile_stage2) -> None:
     source = """
 fn any_true(values -> boolean[]) -> boolean {

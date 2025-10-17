@@ -13,7 +13,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 _Near-term (unlock compiler parity & safety checks)_
 
-- [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners. (In progress: Stage2 now rejects borrow assignments whose base scope outlives the borrowing local; regression coverage in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`.)
+- [x] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners. Covered by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_allows_scoped_reborrow` and `...::test_native_llvm_execution_reports_borrow_lifetime_violation`.
 - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
 - [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
@@ -29,7 +29,6 @@ _Mid-term (runtime capabilities & effect enforcement)_
 - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
 - [ ] Bridge capability adapters (`fs`, `http`, `serve`, `spawn`, channel primitives) into stage2 lowering with symbol declarations and smoke coverage in `compiler/tests/test_native_llvm_execution.py`.
 - [ ] Extend the stage2 runner to register capability adapters (filesystem, HTTP, model, serve, spawn, channel primitives), enforcing capability manifests when delegates execute and adding runtime smoke tests that exercise each adapter via native LLVM binaries.
-- [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
 
 _Final delivery (self-hosting, automation, distribution)_
@@ -76,6 +75,7 @@ _Final delivery (self-hosting, automation, distribution)_
 
 ## Exploration Backlog (Research / Design)
 
+- [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - Model engines & training — Continue design in `docs/proposals/model-engines-and-training.md`; merge into Active once registry workflows exist.
 - Tensor and GPU effects — Define `Tensor<T>` primitives and effect propagation for GPU workloads.
 - Notebook & LSP tooling — Prototype interactive editing, effect-aware debugging, provenance overlays.

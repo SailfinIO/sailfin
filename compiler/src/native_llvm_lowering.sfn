@@ -108,6 +108,7 @@ struct OwnershipInfo {
     base -> string;
     mutable -> boolean;
     span -> NativeSourceSpan?;
+    region_id -> number;
 }
 
 struct OwnershipConsumption {
@@ -116,6 +117,7 @@ struct OwnershipConsumption {
 }
 
 struct LifetimeRegionMetadata {
+    id -> number;
     binding -> string;
     base -> string;
     mutable -> boolean;
@@ -124,6 +126,15 @@ struct LifetimeRegionMetadata {
     scope_depth -> number;
     base_scope_id -> string;
     base_scope_depth -> number;
+    end_scope_id -> string;
+    end_scope_depth -> number;
+    released -> boolean;
+}
+
+struct LifetimeReleaseEvent {
+    region_id -> number;
+    scope_id -> string;
+    scope_depth -> number;
 }
 
 struct ScopeMetadata {
@@ -222,6 +233,8 @@ struct ExpressionStatementResult {
     bindings -> ParameterBinding[];
     diagnostics -> string[];
     lifetime_regions -> LifetimeRegionMetadata[];
+    lifetime_releases -> LifetimeReleaseEvent[];
+    next_region_id -> number;
 }
 
 struct LetLoweringResult {
@@ -233,6 +246,7 @@ struct LetLoweringResult {
     diagnostics -> string[];
     next_local_id -> number;
     lifetime_regions -> LifetimeRegionMetadata[];
+    next_region_id -> number;
 }
 
 struct InlineLetParseResult {
@@ -342,6 +356,7 @@ struct BlockLoweringResult {
     terminated -> boolean;
     next_local_id -> number;
     lifetime_regions -> LifetimeRegionMetadata[];
+    next_lifetime_region_id -> number;
     next_index -> number;
 }
 
@@ -1673,6 +1688,7 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         0,
         0,
         0,
+        0,
         functions,
         [],
         context,
@@ -1712,10 +1728,18 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
             base_scope_depth = 0;
         }
         let mut violation -> boolean = false;
-        if region.scope_depth < base_scope_depth {
-            violation = true;
-        } else if !is_scope_descendant(base_scope_id, region.scope_id) {
-            violation = true;
+        if region.released {
+            if region.end_scope_id.length == 0 {
+                violation = true;
+            } else if !is_scope_descendant(base_scope_id, region.end_scope_id) {
+                violation = true;
+            }
+        } else {
+            if region.scope_depth < base_scope_depth {
+                violation = true;
+            } else if !is_scope_descendant(base_scope_id, region.scope_id) {
+                violation = true;
+            }
         }
         if violation {
             let mut location -> string = "";
@@ -1741,6 +1765,7 @@ fn lower_instruction_range(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     context -> TypeContext,
@@ -1755,6 +1780,7 @@ fn lower_instruction_range(
     let mut current_temp -> number = temp_index;
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
+    let mut current_next_region -> number = next_region_id;
     let mut terminated -> boolean = false;
     let mut current_loop_stack -> LoopContext[] = loop_stack;
     let mut index -> number = start_index;
@@ -1767,7 +1793,7 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context, scope_id, scope_depth);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
@@ -1776,6 +1802,7 @@ fn lower_instruction_range(
             current_bindings = lowered.bindings;
             current_temp = lowered.temp_index;
             current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_region_id;
         } else if instruction.variant == "Expression" {
             let trimmed_expression = trim_text(instruction.expression);
             let mut handled_inline_let -> boolean = false;
@@ -1793,7 +1820,7 @@ fn lower_instruction_range(
                             span: instruction.span,
                             value_span: instruction.span,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, functions, context, scope_id, scope_depth);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
                         collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
                         current_lines = lowered.lines;
@@ -1802,27 +1829,32 @@ fn lower_instruction_range(
                         current_bindings = lowered.bindings;
                         current_temp = lowered.temp_index;
                         current_next_local = lowered.next_local_id;
+                        current_next_region = lowered.next_region_id;
                         handled_inline_let = true;
                     }
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, functions, context);
+                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
                 collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
+                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                current_next_region = lowered.next_region_id;
             }
         } else if instruction.variant == "Return" {
-            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
+            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
+            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+            current_next_region = lowered.next_region_id;
             terminated = true;
             index += 1;
             if index < end {
@@ -1841,6 +1873,7 @@ fn lower_instruction_range(
                 current_temp,
                 current_block_counter,
                 current_next_local,
+                current_next_region,
                 functions,
                 current_loop_stack,
                 end,
@@ -1857,6 +1890,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_lifetime_region_id;
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -1875,6 +1909,7 @@ fn lower_instruction_range(
                 current_temp,
                 current_block_counter,
                 current_next_local,
+                current_next_region,
                 functions,
                 current_loop_stack,
                 end,
@@ -1891,6 +1926,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_lifetime_region_id;
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -1909,6 +1945,7 @@ fn lower_instruction_range(
                 current_temp,
                 current_block_counter,
                 current_next_local,
+                current_next_region,
                 functions,
                 current_loop_stack,
                 end,
@@ -1925,6 +1962,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_lifetime_region_id;
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -1973,6 +2011,7 @@ fn lower_instruction_range(
                 current_temp,
                 current_block_counter,
                 current_next_local,
+                current_next_region,
                 functions,
                 current_loop_stack,
                 end,
@@ -1989,6 +2028,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_lifetime_region_id;
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -2015,6 +2055,7 @@ fn lower_instruction_range(
         terminated: terminated,
         next_local_id: current_next_local,
         lifetime_regions: collected_lifetime_regions,
+        next_lifetime_region_id: current_next_region,
         next_index: index,
     };
 }
@@ -2171,6 +2212,7 @@ fn lower_loop_instruction(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
@@ -2187,6 +2229,8 @@ fn lower_loop_instruction(
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
+    let mut current_next_region -> number = next_region_id;
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2222,6 +2266,7 @@ fn lower_loop_instruction(
         current_temp,
         current_block_counter,
         base_local_id,
+        current_next_region,
         functions,
         stacked,
         context,
@@ -2238,6 +2283,7 @@ fn lower_loop_instruction(
     current_block_counter = body_result.block_counter;
     current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
+    current_next_region = body_result.next_lifetime_region_id;
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_label);
@@ -2256,6 +2302,7 @@ fn lower_loop_instruction(
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
     };
 }
@@ -2271,6 +2318,7 @@ fn lower_for_instruction(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
@@ -2287,6 +2335,7 @@ fn lower_for_instruction(
     let mut current_block_counter -> number = block_counter;
     let mut current_next_local -> number = next_local_id;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2309,6 +2358,7 @@ fn lower_for_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: next_index,
         };
     }
@@ -2326,6 +2376,7 @@ fn lower_for_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: next_index,
         };
     }
@@ -2343,6 +2394,7 @@ fn lower_for_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: next_index,
         };
     }
@@ -2369,6 +2421,7 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
             };
         }
@@ -2391,6 +2444,7 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
             };
         }
@@ -2412,6 +2466,7 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
             };
         }
@@ -2434,6 +2489,7 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
             };
         }
@@ -2542,6 +2598,7 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
             };
         }
@@ -2637,6 +2694,7 @@ fn lower_for_instruction(
             current_temp,
             current_block_counter,
             current_next_local,
+            current_next_region,
             functions,
             stacked,
             context,
@@ -2652,6 +2710,7 @@ fn lower_for_instruction(
         current_block_counter = body_result.block_counter;
         current_next_local = body_result.next_local_id;
         current_bindings = body_result.bindings;
+        current_next_region = body_result.next_lifetime_region_id;
 
         if !body_result.terminated {
             current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -2680,22 +2739,23 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_exit_label + ":");
 
-        current_locals = locals;
+    current_locals = locals;
 
-            return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            bindings: current_bindings,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-                lifetime_regions: lifetime_regions,
-            next_index: next_index,
-        };
-    }
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: next_index,
+    };
+}
 
     let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(iterable_result.diagnostics);
@@ -2831,6 +2891,7 @@ fn lower_for_instruction(
         current_temp,
         current_block_counter,
         current_next_local,
+        current_next_region,
         functions,
         stacked,
         context,
@@ -2846,6 +2907,7 @@ fn lower_for_instruction(
     current_block_counter = body_result.block_counter;
     current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
+    current_next_region = body_result.next_lifetime_region_id;
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -2878,6 +2940,7 @@ fn lower_for_instruction(
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
         next_index: next_index,
     };
 }
@@ -2989,6 +3052,7 @@ fn lower_match_instruction(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
@@ -3006,6 +3070,7 @@ fn lower_match_instruction(
     let base_bindings -> ParameterBinding[] = bindings;
     let mut merged_bindings -> ParameterBinding[] = base_bindings;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -3029,6 +3094,7 @@ fn lower_match_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
         };
     }
@@ -3052,6 +3118,7 @@ fn lower_match_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
         };
     }
@@ -3134,6 +3201,7 @@ fn lower_match_instruction(
             current_temp,
             current_block_counter,
             base_local_id,
+            current_next_region,
             functions,
             loop_stack,
             context,
@@ -3149,6 +3217,7 @@ fn lower_match_instruction(
         current_temp = body_result.temp_index;
         current_block_counter = body_result.block_counter;
         current_next_local = body_result.next_local_id;
+        current_next_region = body_result.next_lifetime_region_id;
 
         if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
@@ -3178,6 +3247,7 @@ fn lower_match_instruction(
         terminated: terminated,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
         next_index: structure.end_index + 1,
     };
 }
@@ -3326,6 +3396,7 @@ fn lower_if_instruction(
     temp_index -> number,
     block_counter -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     loop_stack -> LoopContext[],
     end -> number,
@@ -3344,6 +3415,7 @@ fn lower_if_instruction(
     let mut then_bindings -> ParameterBinding[] = base_bindings;
     let mut else_bindings -> ParameterBinding[] = base_bindings;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -3421,6 +3493,7 @@ fn lower_if_instruction(
         base_temp,
         base_block_counter,
         base_local_id,
+        current_next_region,
         functions,
         loop_stack,
         context,
@@ -3435,6 +3508,7 @@ fn lower_if_instruction(
     current_block_counter = then_result.block_counter;
     current_next_local = then_result.next_local_id;
     then_bindings = then_result.bindings;
+    current_next_region = then_result.next_lifetime_region_id;
     current_lines = current_lines.concat(then_result.lines);
     let then_terminated = then_result.terminated;
     if !then_terminated {
@@ -3457,6 +3531,7 @@ fn lower_if_instruction(
             current_temp,
             current_block_counter,
             current_next_local,
+            current_next_region,
             functions,
             loop_stack,
             context,
@@ -3471,6 +3546,7 @@ fn lower_if_instruction(
         current_block_counter = else_result.block_counter;
         current_next_local = else_result.next_local_id;
         else_bindings = else_result.bindings;
+        current_next_region = else_result.next_lifetime_region_id;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
         if !else_terminated {
@@ -3509,6 +3585,7 @@ fn lower_if_instruction(
         terminated: terminated,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
     };
 }
@@ -3522,6 +3599,7 @@ fn lower_let_instruction(
     lines -> string[],
     temp_index -> number,
     next_local_id -> number,
+    next_region_id -> number,
     functions -> NativeFunction[],
     context -> TypeContext,
     scope_id -> string,
@@ -3536,6 +3614,8 @@ fn lower_let_instruction(
     let mut consumption -> OwnershipConsumption? = null;
     let mut initializer_span -> NativeSourceSpan? = instruction.value_span;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
+    let mut current_next_region -> number = next_region_id;
     if initializer_span == null {
         initializer_span = instruction.span;
     }
@@ -3562,8 +3642,25 @@ fn lower_let_instruction(
         diagnostics = diagnostics.concat(conflict_diagnostics);
         if ownership.variant == "Borrow" {
             let base_scope = infer_borrow_base_scope(ownership.base, current_locals, bindings, function.name);
-            let region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth);
+            let region_id = current_next_region;
+            current_next_region += 1;
+            ownership = OwnershipInfo {
+                variant: ownership.variant,
+                base: ownership.base,
+                mutable: ownership.mutable,
+                span: ownership.span,
+                region_id: region_id,
+            };
+            let region = make_lifetime_region_metadata(region_id, instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth);
             lifetime_regions = append_lifetime_region(lifetime_regions, region);
+        } else {
+            ownership = OwnershipInfo {
+                variant: ownership.variant,
+                base: ownership.base,
+                mutable: ownership.mutable,
+                span: ownership.span,
+                region_id: -1,
+            };
         }
     }
 
@@ -3625,6 +3722,7 @@ fn lower_let_instruction(
         diagnostics: diagnostics,
         next_local_id: next_local_id + 1,
         lifetime_regions: lifetime_regions,
+        next_region_id: current_next_region,
     };
 }
 
@@ -3636,6 +3734,9 @@ fn lower_expression_statement(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
+    next_region_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
     functions -> NativeFunction[],
     context -> TypeContext
 ) -> ExpressionStatementResult {
@@ -3649,6 +3750,8 @@ fn lower_expression_statement(
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_bindings -> ParameterBinding[] = bindings;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
+    let mut current_next_region -> number = next_region_id;
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -3656,9 +3759,10 @@ fn lower_expression_statement(
         if binding == null {
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`");
         } else {
+            let previous_ownership -> OwnershipInfo? = binding.ownership;
             let ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings);
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
-            let assignment_ownership = ownership_analysis.ownership;
+            let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
 
             let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
@@ -3689,18 +3793,49 @@ fn lower_expression_statement(
                 }
             }
 
+            if previous_ownership != null {
+                if previous_ownership.variant == "Borrow" {
+                    if previous_ownership.region_id >= 0 {
+                        let release_event = LifetimeReleaseEvent { region_id: previous_ownership.region_id, scope_id: scope_id, scope_depth: scope_depth };
+                        lifetime_releases = append_lifetime_release_event(lifetime_releases, release_event);
+                    }
+                }
+            }
+
+            if assignment_ownership != null {
+                if assignment_ownership.variant == "Borrow" {
+                    let region_id = current_next_region;
+                    current_next_region += 1;
+                    assignment_ownership = OwnershipInfo {
+                        variant: assignment_ownership.variant,
+                        base: assignment_ownership.base,
+                        mutable: assignment_ownership.mutable,
+                        span: assignment_ownership.span,
+                        region_id: region_id,
+                    };
+                } else {
+                    assignment_ownership = OwnershipInfo {
+                        variant: assignment_ownership.variant,
+                        base: assignment_ownership.base,
+                        mutable: assignment_ownership.mutable,
+                        span: assignment_ownership.span,
+                        region_id: -1,
+                    };
+                }
+            }
+
             current_locals = reset_local_consumption(current_locals, parsed_assignment.target);
             current_locals = update_local_ownership(current_locals, parsed_assignment.target, assignment_ownership);
 
             if assignment_ownership != null {
                 if assignment_ownership.variant == "Borrow" {
                     let base_scope = infer_borrow_base_scope(assignment_ownership.base, current_locals, current_bindings, function_name);
-                    let region = make_lifetime_region_metadata(parsed_assignment.target, assignment_ownership, binding.scope_id, binding.scope_depth, base_scope.scope_id, base_scope.scope_depth);
+                    let region = make_lifetime_region_metadata(assignment_ownership.region_id, parsed_assignment.target, assignment_ownership, binding.scope_id, binding.scope_depth, base_scope.scope_id, base_scope.scope_depth);
                     lifetime_regions = append_lifetime_region(lifetime_regions, region);
                 }
             }
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
     }
 
     let ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings);
@@ -3718,7 +3853,7 @@ fn lower_expression_statement(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
 }
 
 fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
@@ -3887,6 +4022,9 @@ fn lower_return_instruction(
     locals -> LocalBinding[],
     temp_index -> number,
     lines -> string[],
+    next_region_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
     functions -> NativeFunction[],
     context -> TypeContext
 ) -> ExpressionStatementResult {
@@ -3894,6 +4032,8 @@ fn lower_return_instruction(
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
+    let mut current_next_region -> number = next_region_id;
 
     if instruction.expression == null || instruction.expression.length == 0 {
         if llvm_return == "void" {
@@ -3902,7 +4042,7 @@ fn lower_return_instruction(
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
     }
 
     let mut current_locals -> LocalBinding[] = locals;
@@ -3923,14 +4063,14 @@ fn lower_return_instruction(
     if lowered.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
     }
 
     let operand = lowered.operand;
     if llvm_return == "void" {
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
         current_lines = append_string(current_lines, "  ret void");
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
     }
 
     let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
@@ -3940,7 +4080,7 @@ fn lower_return_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
     }
 
     let coerced_operand = coerced.operand;
@@ -3952,7 +4092,7 @@ fn lower_return_instruction(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
 }
 
 
@@ -4710,7 +4850,7 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
             diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
             return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
         }
-    let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable, span: span };
+    let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable, span: span, region_id: -1 };
         return OwnershipAnalysis { ownership: ownership, consumption: null, diagnostics: diagnostics };
     }
 
@@ -6732,8 +6872,62 @@ fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeR
     return values.concat([value]);
 }
 
-fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
+fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
+    return events.concat([event]);
+}
+
+fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
+    let mut result -> LifetimeRegionMetadata[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= regions.length {
+            break;
+        }
+        let entry = regions[index];
+        if entry.id == region_id {
+            let updated = LifetimeRegionMetadata {
+                id: entry.id,
+                binding: entry.binding,
+                base: entry.base,
+                mutable: entry.mutable,
+                start_span: entry.start_span,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+                base_scope_id: entry.base_scope_id,
+                base_scope_depth: entry.base_scope_depth,
+                end_scope_id: scope_id,
+                end_scope_depth: scope_depth,
+                released: true,
+            };
+            result = append_lifetime_region(result, updated);
+        } else {
+            result = append_lifetime_region(result, entry);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -> LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
+    if releases.length == 0 {
+        return regions;
+    }
+    let mut current_regions -> LifetimeRegionMetadata[] = regions;
+    let mut index -> number = 0;
+    loop {
+        if index >= releases.length {
+            break;
+        }
+        let release = releases[index];
+        current_regions = mark_lifetime_region_released(current_regions, release.region_id, release.scope_id, release.scope_depth);
+        index += 1;
+    }
+    return current_regions;
+}
+
+fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
     return LifetimeRegionMetadata {
+        id: id,
         binding: binding,
         base: ownership.base,
         mutable: ownership.mutable,
@@ -6742,6 +6936,9 @@ fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, 
         scope_depth: scope_depth,
         base_scope_id: base_scope_id,
         base_scope_depth: base_scope_depth,
+        end_scope_id: "",
+        end_scope_depth: 0,
+        released: false,
     };
 }
 

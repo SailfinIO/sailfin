@@ -70,8 +70,11 @@ roadmaps.
   records `LifetimeRegionMetadata` entries (binding, base, mutability, scope id,
   scope depth, and start span) on `LoweredLLVMResult.lifetime_regions` so
   diagnostics and follow-on tooling can reason about scope exits without
-  re-parsing `.sfn-asm`. Regression coverage lives in
-  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`.
+  re-parsing `.sfn-asm`. Regions now track release scopes when locals are
+  reassigned in nested control flow, so reborrows that end before leaving a
+  branch or loop no longer trigger false positives; regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_allows_scoped_reborrow`.
   The recorded scope metadata now feeds borrow-release validation: assignments
   that bind a borrow whose base lives in a deeper scope emit
   `llvm lowering: borrow ... escapes lifetime ...` diagnostics, preventing
