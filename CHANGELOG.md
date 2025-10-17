@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.33 (2025-10-17)
+
+### Bug Fixes
+
+- Metadata threading
+  ([`51649e5`](https://github.com/SailfinIO/sailfin/commit/51649e536380475c9f0b622b5f3f0bf1db79214e))
+
+### Documentation
+
+- Add claude
+  ([`547d438`](https://github.com/SailfinIO/sailfin/commit/547d438298a728bcdd1ff4256a5a9d7afe12390c))
+
+- Add gemini guide
+  ([`2d49027`](https://github.com/SailfinIO/sailfin/commit/2d49027b10e8f39257fe776bf9bf47e8724a6fd5))
+
+
 ## v0.1.1-alpha.32 (2025-10-17)
 
 ### Bug Fixes
