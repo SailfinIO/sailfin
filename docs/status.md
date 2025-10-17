@@ -70,6 +70,14 @@ roadmaps.
   Full payload field storage for variants with data is partially implemented
   (tag insertion works, but bitcast/store operations for payload fields emit
   diagnostics indicating runtime fallback is used).
+  Match expressions now destructure enum operands natively by extracting the tag
+  field via `extractvalue` and comparing it against variant tag values, enabling
+  Stage2 programs to dispatch on enum variants without Python fallbacks. Unit
+  variants (e.g., `Color.Red`, `Status.Pending`) fully work in match arms;
+  payload variants emit a diagnostic that field destructuring is not yet implemented.
+  Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_enum_variants`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_mixed_enum_variants`.
   Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source

@@ -2608,26 +2608,58 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
     current_temp = temp_index
     condition_operand = None
     if not case.is_default:
-        pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context)
-        diagnostics = (diagnostics) + (pattern_result.diagnostics)
-        current_lines = pattern_result.lines
-        current_temp = pattern_result.temp_index
-        if pattern_result.operand != None:
-            harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
-            diagnostics = (diagnostics) + (harmonised.diagnostics)
-            if harmonised.left != None  and  harmonised.right != None:
-                current_lines = harmonised.lines
-                current_temp = harmonised.temp_index
-                comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines)
-                diagnostics = (diagnostics) + (comparison.diagnostics)
-                current_lines = comparison.lines
-                current_temp = comparison.temp_index
-                condition_operand = comparison.operand
+        enum_parse = parse_enum_literal(case.pattern)
+        if enum_parse.recognized  and  enum_parse.success:
+            enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name)
+            if enum_info == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: match pattern references unknown enum `" + enum_parse.enum_name + "`")
             else:
-                current_lines = harmonised.lines
-                current_temp = harmonised.temp_index
+                variant_info = resolve_enum_variant_info(enum_info, enum_parse.variant_name)
+                if variant_info == None:
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_parse.enum_name + "` has no variant `" + enum_parse.variant_name + "`")
+                else:
+                    tag_llvm_type = "i32"
+                    if enum_info.tag_type == "i8":
+                        tag_llvm_type = "i8"
+                    if enum_info.tag_type == "i16":
+                        tag_llvm_type = "i16"
+                    if enum_info.tag_type == "i32":
+                        tag_llvm_type = "i32"
+                    if enum_info.tag_type == "i64":
+                        tag_llvm_type = "i64"
+                    tag_temp = format_temp_name(current_temp)
+                    current_temp += 1
+                    current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0")
+                    tag_operand = LLVMOperand(llvm_type=tag_llvm_type, value=tag_temp)
+                    variant_tag_operand = LLVMOperand(llvm_type=tag_llvm_type, value=number_to_string(variant_info.tag))
+                    comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (comparison.diagnostics)
+                    current_lines = comparison.lines
+                    current_temp = comparison.temp_index
+                    condition_operand = comparison.operand
+                    if len(variant_info.fields) > 0:
+                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload destructuring in match patterns not yet implemented for `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`")
         else:
-            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`")
+            pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context)
+            diagnostics = (diagnostics) + (pattern_result.diagnostics)
+            current_lines = pattern_result.lines
+            current_temp = pattern_result.temp_index
+            if pattern_result.operand != None:
+                harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
+                diagnostics = (diagnostics) + (harmonised.diagnostics)
+                if harmonised.left != None  and  harmonised.right != None:
+                    current_lines = harmonised.lines
+                    current_temp = harmonised.temp_index
+                    comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (comparison.diagnostics)
+                    current_lines = comparison.lines
+                    current_temp = comparison.temp_index
+                    condition_operand = comparison.operand
+                else:
+                    current_lines = harmonised.lines
+                    current_temp = harmonised.temp_index
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`")
     if case.guard != None:
         guard_text = trim_text(case.guard)
         if len(guard_text) > 0:

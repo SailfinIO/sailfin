@@ -11,7 +11,8 @@
       "Bash(cat:*)",
       "Bash(make test-stage2:*)",
       "Bash(tee:*)",
-      "Read(//private/tmp/sailfin_enum_test/**)"
+      "Read(//private/tmp/sailfin_enum_test/**)",
+      "Read(//private/tmp/**)"
     ],
     "deny": [],
     "ask": []

@@ -25,7 +25,7 @@ _Near-term (unlock compiler parity & safety checks)_
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
   - [x] Define the tagged-union LLVM layout (tag + payload pointer/inline storage) and thread it through the type context.
   - [x] Emit enum constructors that populate the tag field; unit variants (no payload) fully work, payload variants insert tags but full field storage needs bitcast/store operations (deferred to follow-on work).
-  - [ ] Extend match lowering to destructure enum operands without falling back to Python, with execution coverage in `compiler/tests/test_native_llvm_execution.py`.
+  - [x] Extend match lowering to destructure enum operands without falling back to Python, with execution coverage in `compiler/tests/test_native_llvm_execution.py`. Match expressions now extract enum tags via `extractvalue` and compare against variant tag values, enabling native enum dispatch in Stage2. Unit variants fully work; payload field destructuring emits diagnostics indicating follow-on work is needed. Validated by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_enum_variants` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_mixed_enum_variants`.
 - [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
   - [ ] Support inline payload emission for primitives/struct references and validate via struct-enum fixtures.
   - [ ] Implement heap-indirected payload support for recursive/self-referential variants, reusing runtime allocators.

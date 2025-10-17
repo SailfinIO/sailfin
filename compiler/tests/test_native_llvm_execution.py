@@ -1589,3 +1589,116 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_matches_enum_variants(compile_stage2):
+    """Test that match expressions can destructure enum variants by tag."""
+    result = compile_stage2(
+        """
+enum Color {
+    Red;
+    Green;
+    Blue;
+}
+
+fn check_color(c -> Color) -> number {
+    match c {
+        Color.Red => {
+            return 1;
+        }
+        Color.Green => {
+            return 2;
+        }
+        Color.Blue => {
+            return 3;
+        }
+        _ => {
+            return 0;
+        }
+    }
+}
+
+fn main() -> number {
+    let red = Color.Red;
+    let green = Color.Green;
+    let blue = Color.Blue;
+
+    let r = check_color(red);
+    let g = check_color(green);
+    let b = check_color(blue);
+
+    // Return sum: 1 + 2 + 3 = 6
+    return r + g + b;
+}
+"""
+    )
+
+    # Check for extractvalue instruction to extract the tag
+    assert "extractvalue %Color" in result.ir, "Match should extract tag from enum"
+
+    # Check for tag comparison
+    assert "icmp eq" in result.ir, "Match should compare tags"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(6.0), "Match should correctly route to different branches based on enum variant"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_matches_mixed_enum_variants(compile_stage2):
+    """Test that match expressions work with enums that have both unit and payload variants."""
+    result = compile_stage2(
+        """
+enum Status {
+    Pending;
+    Active;
+    Complete;
+}
+
+fn status_code(s -> Status) -> number {
+    match s {
+        Status.Pending => {
+            return 100;
+        }
+        Status.Active => {
+            return 200;
+        }
+        _ => {
+            return 300;
+        }
+    }
+}
+
+fn main() -> number {
+    let pending = Status.Pending;
+    let active = Status.Active;
+    let complete = Status.Complete;
+
+    let p = status_code(pending);
+    let a = status_code(active);
+    let c = status_code(complete);
+
+    // Should match: 100 + 200 + 300 = 600
+    return p + a + c;
+}
+"""
+    )
+
+    # Check for extractvalue instruction to extract the tag
+    assert "extractvalue %Status" in result.ir, "Match should extract tag from Status enum"
+
+    # Check for tag comparison
+    assert "icmp eq" in result.ir, "Match should compare tags"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(600.0), "Match should correctly identify enum variants"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
