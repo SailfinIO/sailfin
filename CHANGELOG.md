@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.44 (2025-10-17)
+
+### Bug Fixes
+
+- Interface trait objects and vtables
+  ([`fb40ec4`](https://github.com/SailfinIO/sailfin/commit/fb40ec48d9e4ecb7fb22f82c5e99d3f7b28d7d1e))
+
+
 ## v0.1.1-alpha.43 (2025-10-17)
 
 ### Bug Fixes
