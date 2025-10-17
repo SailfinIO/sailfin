@@ -146,6 +146,7 @@ struct StructFieldInfo {
     name -> string;
     llvm_type -> string;
     index -> number;
+    offset -> number;
 }
 
 struct StructTypeInfo {
@@ -347,12 +348,21 @@ struct MatchStructure {
     diagnostics -> string[];
 }
 
+struct MatchFieldBinding {
+    field_name -> string;
+    field_type -> string;
+    field_offset -> number;
+}
+
 struct MatchCaseCondition {
     lines -> string[];
     temp_index -> number;
     operand -> LLVMOperand?;
     diagnostics -> string[];
     is_default -> boolean;
+    field_bindings -> MatchFieldBinding[];
+    enum_info -> EnumTypeInfo?;
+    variant_info -> EnumVariantInfo?;
 }
 
 struct ConditionConversion {
@@ -680,7 +690,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeC
                 diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
             }
-            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, index: field_index });
+            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, index: field_index, offset: layout_field.offset });
             field_index += 1;
         }
         let mut align_value -> number = layout.align;
@@ -726,7 +736,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeC
                     diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
                 }
-                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, index: variant_field_index });
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, index: variant_field_index, offset: variant_field.offset });
                 variant_field_index += 1;
             }
             variants = append_enum_variant_info(variants, EnumVariantInfo {
@@ -3531,6 +3541,7 @@ fn lower_match_instruction(
     }
 
     let subject_operand = subject_result.operand;
+
     if structure.cases.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`");
         let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
@@ -3634,9 +3645,87 @@ fn lower_match_instruction(
 
         current_lines = append_string(current_lines, body_labels[index] + ":");
 
-        let base_locals = current_locals;
-        let base_allocas = current_allocas;
-        let base_local_id = current_next_local;
+        let mut base_locals -> LocalBinding[] = current_locals;
+        let mut base_allocas -> string[] = current_allocas;
+        let mut base_local_id -> number = current_next_local;
+
+        // Extract and bind payload fields if this is an enum pattern with bindings
+        if lowered_condition.field_bindings.length > 0 && lowered_condition.enum_info != null && lowered_condition.variant_info != null && subject_operand != null {
+            let enum_info_val = lowered_condition.enum_info;
+            let variant_info_val = lowered_condition.variant_info;
+
+            // Allocate subject on stack for field extraction
+            let subject_alloca_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
+            current_lines = append_string(current_lines, "  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
+            // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
+
+            let mut binding_idx -> number = 0;
+            loop {
+                if binding_idx >= lowered_condition.field_bindings.length {
+                    break;
+                }
+                let field_binding = lowered_condition.field_bindings[binding_idx];
+
+                // Extract the field from the payload
+                // 1. Get pointer to payload byte array (field 1 of enum)
+                let payload_ptr_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 1");
+
+                // 2. Cast to i8*
+                let byte_ptr_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info_val.size) + " x i8]* " + payload_ptr_temp + " to i8*");
+
+                // 3. Offset to field position
+                // Field offset is relative to the enum start, but payload starts at variant offset
+                // So we need to subtract the variant offset to get the offset within the payload
+                let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
+                let mut field_ptr_temp -> string = byte_ptr_temp;
+                if field_offset_in_payload > 0 {
+                    let offset_ptr_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                    field_ptr_temp = offset_ptr_temp;
+                }
+
+                // 4. Cast to field type pointer
+                let typed_ptr_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + field_binding.field_type + "*");
+
+                // 5. Load the field value
+                let value_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", " + field_binding.field_type + "* " + typed_ptr_temp);
+
+                // 6. Allocate a local for this binding
+                let local_alloca_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + field_binding.field_type);
+                // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
+
+                // 7. Store the value into the local
+                current_lines = append_string(current_lines, "  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
+
+                // 8. Add to locals so the match arm body can reference it
+                base_locals = base_locals.concat([LocalBinding {
+                    name: field_binding.field_name,
+                    pointer: local_alloca_temp,
+                    llvm_type: field_binding.field_type,
+                    type_annotation: "",
+                    ownership: null,
+                    consumed: false,
+                    scope_id: make_child_scope_id(scope_id, body_labels[index]),
+                    scope_depth: scope_depth + 1,
+                }]);
+
+                base_local_id += 1;
+                binding_idx += 1;
+            }
+        }
 
         let body_result = lower_instruction_range(
             function,
@@ -3740,6 +3829,9 @@ fn lower_match_case_condition(
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut condition_operand -> LLVMOperand? = null;
+    let mut field_bindings -> MatchFieldBinding[] = [];
+    let mut matched_enum_info -> EnumTypeInfo? = null;
+    let mut matched_variant_info -> EnumVariantInfo? = null;
 
     if !case.is_default {
         // Try to parse the pattern as an enum literal pattern
@@ -3785,10 +3877,47 @@ fn lower_match_case_condition(
                     current_temp = comparison.temp_index;
                     condition_operand = comparison.operand;
 
-                    // TODO: For variants with payload fields, extract and bind those fields to locals
-                    // This will be implemented in follow-on work
+                    // For variants with payload fields, collect binding information
+                    // The actual extraction will happen in lower_match_instruction after we branch to the body label
                     if variant_info.fields.length > 0 {
-                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload destructuring in match patterns not yet implemented for `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`");
+                        // Parse field names from the pattern
+                        // enum_parse.fields contains the field specifications from the pattern
+                        let mut field_idx -> number = 0;
+                        loop {
+                            if field_idx >= enum_parse.fields.length {
+                                break;
+                            }
+                            let pattern_field = enum_parse.fields[field_idx];
+                            // Find matching field in variant info
+                            let mut variant_field_idx -> number = 0;
+                            let mut found_field -> StructFieldInfo? = null;
+                            loop {
+                                if variant_field_idx >= variant_info.fields.length {
+                                    break;
+                                }
+                                if variant_info.fields[variant_field_idx].name == pattern_field.name {
+                                    found_field = variant_info.fields[variant_field_idx];
+                                    break;
+                                }
+                                variant_field_idx += 1;
+                            }
+
+                            if found_field != null {
+                                field_bindings = field_bindings.concat([MatchFieldBinding {
+                                    field_name: pattern_field.name,
+                                    field_type: found_field.llvm_type,
+                                    field_offset: found_field.offset,
+                                }]);
+                            } else {
+                                diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`");
+                            }
+
+                            field_idx += 1;
+                        }
+
+                        // Store enum/variant info for field extraction later
+                        matched_enum_info = enum_info;
+                        matched_variant_info = variant_info;
                     }
                 }
             }
@@ -3860,6 +3989,9 @@ fn lower_match_case_condition(
         operand: condition_operand,
         diagnostics: diagnostics,
         is_default: is_unconditional_default,
+        field_bindings: field_bindings,
+        enum_info: matched_enum_info,
+        variant_info: matched_variant_info,
     };
 }
 
@@ -6833,7 +6965,20 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
             }
             let colon_index = find_top_level_colon(entry);
             if colon_index < 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + entry + "` missing `:`");
+                // No colon - this might be shorthand syntax for match patterns like { radius }
+                // which means bind the field value to a local variable with the same name
+                let field_name = trim_text(entry);
+                if field_name.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name");
+                    continue;
+                }
+                if string_array_contains(seen, field_name) {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated");
+                    continue;
+                }
+                seen = append_string(seen, field_name);
+                // Use empty string as value to indicate this is a binding pattern (not a literal value)
+                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
                 continue;
             }
             let field_name = trim_text(substring(entry, 0, colon_index));
@@ -7080,13 +7225,15 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                         current_temp += 1;
                         current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*");
 
-                        // Use field offset from variant layout metadata
-                        let field_offset = variant_info.fields[field_index].index;  // This should be the byte offset
+                        // Use field offset from variant layout metadata, relative to the variant start
+                        // Since the payload byte array starts at variant_info.offset, subtract that to get payload-relative offset
+                        let field_absolute_offset = variant_info.fields[field_index].offset;
+                        let field_offset_in_payload = field_absolute_offset - variant_info.offset;
                         let mut field_byte_ptr_temp -> string = byte_array_ptr_temp;
-                        if field_offset > 0 {
+                        if field_offset_in_payload > 0 {
                             let offset_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset));
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
                             field_byte_ptr_temp = offset_ptr_temp;
                         }
 

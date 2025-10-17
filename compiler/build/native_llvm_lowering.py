@@ -219,13 +219,14 @@ class ScopeMetadata:
         return runtime.struct_repr('ScopeMetadata', [runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
 
 class StructFieldInfo:
-    def __init__(self, name, llvm_type, index):
+    def __init__(self, name, llvm_type, index, offset):
         self.name = name
         self.llvm_type = llvm_type
         self.index = index
+        self.offset = offset
 
     def __repr__(self):
-        return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('index', self.index)])
+        return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('index', self.index), runtime.struct_field('offset', self.offset)])
 
 class StructTypeInfo:
     def __init__(self, name, llvm_name, fields, align):
@@ -504,16 +505,28 @@ class MatchStructure:
     def __repr__(self):
         return runtime.struct_repr('MatchStructure', [runtime.struct_field('cases', self.cases), runtime.struct_field('end_index', self.end_index), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class MatchFieldBinding:
+    def __init__(self, field_name, field_type, field_offset):
+        self.field_name = field_name
+        self.field_type = field_type
+        self.field_offset = field_offset
+
+    def __repr__(self):
+        return runtime.struct_repr('MatchFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_offset', self.field_offset)])
+
 class MatchCaseCondition:
-    def __init__(self, lines, temp_index, diagnostics, is_default, operand=None):
+    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, operand=None, enum_info=None, variant_info=None):
         self.lines = lines
         self.temp_index = temp_index
         self.operand = operand
         self.diagnostics = diagnostics
         self.is_default = is_default
+        self.field_bindings = field_bindings
+        self.enum_info = enum_info
+        self.variant_info = variant_info
 
     def __repr__(self):
-        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default)])
+        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info)])
 
 class ConditionConversion:
     def __init__(self, lines, temp_index, diagnostics, operand=None):
@@ -807,7 +820,7 @@ def build_type_context(structs, enums):
             if len(llvm_field_type) == 0:
                 diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`")
                 llvm_field_type = "i8*"
-            fields = append_struct_field_info(fields, StructFieldInfo(name=layout_field.name, llvm_type=llvm_field_type, index=field_index))
+            fields = append_struct_field_info(fields, StructFieldInfo(name=layout_field.name, llvm_type=llvm_field_type, index=field_index, offset=layout_field.offset))
             field_index += 1
         align_value = layout.align
         if align_value <= 0:
@@ -844,7 +857,7 @@ def build_type_context(structs, enums):
                 if len(llvm_variant_field_type) == 0:
                     diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`")
                     llvm_variant_field_type = "i8*"
-                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, index=variant_field_index))
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, index=variant_field_index, offset=variant_field.offset))
                 variant_field_index += 1
             variants = append_enum_variant_info(variants, EnumVariantInfo(name=variant_layout.name, tag=variant_layout.tag, offset=variant_layout.offset, size=variant_layout.size, align=variant_layout.align, fields=variant_fields))
             variant_index += 1
@@ -2575,6 +2588,44 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         base_locals = current_locals
         base_allocas = current_allocas
         base_local_id = current_next_local
+        if len(lowered_condition.field_bindings) > 0  and  lowered_condition.enum_info != None  and  lowered_condition.variant_info != None  and  subject_operand != None:
+            enum_info_val = lowered_condition.enum_info
+            variant_info_val = lowered_condition.variant_info
+            subject_alloca_temp = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type)
+            current_lines = append_string(current_lines, "  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp)
+            binding_idx = 0
+            while True:
+                if binding_idx >= len(lowered_condition.field_bindings):
+                    break
+                field_binding = lowered_condition.field_bindings[binding_idx]
+                payload_ptr_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 1")
+                byte_ptr_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info_val.size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                field_offset_in_payload = field_binding.field_offset - variant_info_val.offset
+                field_ptr_temp = byte_ptr_temp
+                if field_offset_in_payload > 0:
+                    offset_ptr_temp = format_temp_name(current_temp)
+                    current_temp += 1
+                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
+                    field_ptr_temp = offset_ptr_temp
+                typed_ptr_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + field_binding.field_type + "*")
+                value_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", " + field_binding.field_type + "* " + typed_ptr_temp)
+                local_alloca_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + field_binding.field_type)
+                current_lines = append_string(current_lines, "  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp)
+                base_locals = (base_locals) + ([LocalBinding(name=field_binding.field_name, pointer=local_alloca_temp, llvm_type=field_binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_local_id += 1
+                binding_idx += 1
         body_result = lower_instruction_range( function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1, body_labels[index] )
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
@@ -2607,6 +2658,9 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
     current_lines = lines
     current_temp = temp_index
     condition_operand = None
+    field_bindings = []
+    matched_enum_info = None
+    matched_variant_info = None
     if not case.is_default:
         enum_parse = parse_enum_literal(case.pattern)
         if enum_parse.recognized  and  enum_parse.success:
@@ -2638,7 +2692,27 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
                     current_temp = comparison.temp_index
                     condition_operand = comparison.operand
                     if len(variant_info.fields) > 0:
-                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload destructuring in match patterns not yet implemented for `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`")
+                        field_idx = 0
+                        while True:
+                            if field_idx >= len(enum_parse.fields):
+                                break
+                            pattern_field = enum_parse.fields[field_idx]
+                            variant_field_idx = 0
+                            found_field = None
+                            while True:
+                                if variant_field_idx >= len(variant_info.fields):
+                                    break
+                                if variant_info.fields[variant_field_idx].name == pattern_field.name:
+                                    found_field = variant_info.fields[variant_field_idx]
+                                    break
+                                variant_field_idx += 1
+                            if found_field != None:
+                                field_bindings = (field_bindings) + ([MatchFieldBinding(field_name=pattern_field.name, field_type=found_field.llvm_type, field_offset=found_field.offset)])
+                            else:
+                                diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`")
+                            field_idx += 1
+                        matched_enum_info = enum_info
+                        matched_variant_info = variant_info
         else:
             pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (pattern_result.diagnostics)
@@ -2686,7 +2760,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
             guard_trimmed = trim_text(case.guard)
             if len(guard_trimmed) == 0:
                 is_unconditional_default = True
-    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default)
+    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default, field_bindings=field_bindings, enum_info=matched_enum_info, variant_info=matched_variant_info)
 
 def allocate_block_label(prefix, counter):
     return BlockLabelResult(label=prefix + number_to_string(counter), next_counter=counter + 1)
@@ -4677,7 +4751,15 @@ def parse_enum_literal(text):
                 continue
             colon_index = find_top_level_colon(entry)
             if colon_index < 0:
-                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + entry + "` missing `:`")
+                field_name = trim_text(entry)
+                if len(field_name) == 0:
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name")
+                    continue
+                if string_array_contains(seen, field_name):
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated")
+                    continue
+                seen = append_string(seen, field_name)
+                fields = (fields) + ([StructLiteralField(name=field_name, value="")])
                 continue
             field_name = trim_text(substring(entry, 0, colon_index))
             value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
@@ -4849,12 +4931,13 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                         byte_array_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1
                         current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
-                        field_offset = variant_info.fields[field_index].index
+                        field_absolute_offset = variant_info.fields[field_index].offset
+                        field_offset_in_payload = field_absolute_offset - variant_info.offset
                         field_byte_ptr_temp = byte_array_ptr_temp
-                        if field_offset > 0:
+                        if field_offset_in_payload > 0:
                             offset_ptr_temp = format_temp_name(current_temp)
                             current_temp += 1
-                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset))
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
                             field_byte_ptr_temp = offset_ptr_temp
                         field_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1

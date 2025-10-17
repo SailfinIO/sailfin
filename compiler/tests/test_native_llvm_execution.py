@@ -1794,20 +1794,72 @@ fn main() -> number {
     # Check for tag comparisons
     assert "icmp eq" in result.ir, "Should compare tags"
 
-    # Should have diagnostic about payload field destructuring not being implemented
-    payload_diags = [d for d in result.diagnostics if "enum payload destructuring in match patterns not yet implemented" in d]
-    assert len(payload_diags) == 2, f"Should warn about payload destructuring for Circle and Rectangle, got: {payload_diags}"
+    # Check for field extraction (getelementptr, bitcast, load for payload fields)
+    assert "getelementptr inbounds %Shape" in result.ir, "Should extract payload fields"
 
-    # Check that we only have expected diagnostics (payload destructuring warnings and pointer layout warnings)
-    unexpected = [d for d in result.diagnostics
-                  if "enum payload destructuring in match patterns not yet implemented" not in d
-                  and "defaulting to pointer layout" not in d]
-    assert not unexpected, f"Unexpected diagnostics: {unexpected}"
+    _assert_only_pointer_layout_warnings(result.diagnostics)
 
     engine, module = _compile_ir(result.ir)
     try:
         output = _invoke_double(engine, "main")
-        assert output == pytest.approx(6.0), "Match should correctly identify variants by tag even without field binding"
+        assert output == pytest.approx(6.0), "Match should correctly identify variants by tag"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_extracts_enum_payload_fields_in_match(compile_stage2):
+    """Test that match expressions can extract and use payload field values."""
+    result = compile_stage2(
+        """
+enum Shape {
+    Circle { radius -> number; }
+    Rectangle { width -> number, height -> number; }
+}
+
+fn compute_area(s -> Shape) -> number {
+    match s {
+        Shape.Circle { radius } => {
+            return 3.14 * radius * radius;
+        }
+        Shape.Rectangle { width, height } => {
+            return width * height;
+        }
+        _ => {
+            return 0;
+        }
+    }
+}
+
+fn main() -> number {
+    let circle = Shape.Circle { radius: 2.0 };
+    let rect = Shape.Rectangle { width: 3.0, height: 4.0 };
+
+    let area1 = compute_area(circle);
+    let area2 = compute_area(rect);
+
+    // Circle: 3.14 * 2 * 2 = 12.56
+    // Rectangle: 3 * 4 = 12
+    // Total: 24.56
+    return area1 + area2;
+}
+"""
+    )
+
+    # Check for field extraction instructions
+    assert "getelementptr inbounds %Shape" in result.ir, "Should extract payload fields"
+    assert "bitcast" in result.ir, "Should cast byte array to field type"
+    assert "load double" in result.ir, "Should load field values"
+
+    # Check for alloca for bound variables
+    assert result.ir.count("alloca double") >= 3, "Should allocate locals for extracted fields (radius, width, height)"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(24.56), "Match should extract and use field values correctly"
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)

@@ -73,17 +73,19 @@ roadmaps.
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_stores_enum_payload_fields`.
   Match expressions now destructure enum operands natively by extracting the tag
   field via `extractvalue` and comparing it against variant tag values, enabling
-  Stage2 programs to dispatch on enum variants without Python fallbacks. Unit
-  variants (e.g., `Color.Red`, `Status.Pending`) fully work in match arms.
-  Payload variants (e.g., `Shape.Circle { radius }`) can be matched by their tag
-  to discriminate between variants, but field binding (extracting the `radius` value
-  into a local variable) is not yet implemented and emits a diagnostic. This allows
-  match expressions to route control flow based on payload variant tags while
-  deferring field extraction to follow-on work.
+  Stage2 programs to dispatch on enum variants without Python fallbacks. Both unit
+  variants (e.g., `Color.Red`, `Status.Pending`) and payload variants (e.g.,
+  `Shape.Circle { radius }`) fully work in match arms. Field binding using shorthand
+  syntax (e.g., `Shape.Circle { radius }` extracts the `radius` field into a local
+  variable named `radius`) is now implemented, allowing match arms to access and
+  compute with payload field values. The implementation uses GEP instructions to
+  extract fields from the payload byte array at their correct byte offsets, accounting
+  for variant layout metadata.
   Regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_enum_variants`,
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_mixed_enum_variants`,
-  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_payload_enum_by_tag`.
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_payload_enum_by_tag`,
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_extracts_enum_payload_fields_in_match`.
   Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
