@@ -11,23 +11,32 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 1. **Stage2 Backend Delivery**
 
+_Near-term (unlock compiler parity & safety checks)_
+
 - [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners. (In progress: Stage2 now rejects borrow assignments whose base scope outlives the borrowing local; regression coverage in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`.)
-- [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
-- [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
+- [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
+- [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
 - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
 - [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
 - [ ] Surface enum array metadata in LLVM lowering once layout descriptors exist, enabling typed iteration over tagged aggregates.
+- [ ] Share layout descriptors across modules by emitting/importing per-unit layout manifests so Stage2 can resolve referenced structs/enums defined in dependencies without pointer fallbacks.
+- [ ] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings.
+- [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
+
+_Mid-term (runtime capabilities & effect enforcement)_
+
 - [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
 - [ ] Bridge capability adapters (`fs`, `http`, `serve`, `spawn`, channel primitives) into stage2 lowering with symbol declarations and smoke coverage in `compiler/tests/test_native_llvm_execution.py`.
 - [ ] Extend the stage2 runner to register capability adapters (filesystem, HTTP, model, serve, spawn, channel primitives), enforcing capability manifests when delegates execute and adding runtime smoke tests that exercise each adapter via native LLVM binaries.
-- [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
-- [ ] Share layout descriptors across modules by emitting/importing per-unit layout manifests so stage2 can resolve referenced structs/enums defined in dependencies without pointer fallbacks.
-- [ ] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings.
-- [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
-- [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
-- [ ] Bootstrap stage2 self-hosting: compile the Sailfin compiler with stage2 artifacts, execute the stage2-built binary end-to-end, and gate CI on the self-hosted pipeline.
-- [ ] Package stage2 artifacts alongside stage1 in releases once basic programs execute end-to-end, and wire the LLVM smoke binary into CI for ongoing coverage.
+- [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
+- [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
+
+_Final delivery (self-hosting, automation, distribution)_
+
+- [ ] Bootstrap stage2 self-hosting: compile the Sailfin compiler with stage2 artifacts, execute the stage2-built binary end-to-end, and gate CI on the self-hosted pipeline as soon as the mid-term runtime work is passing.
+- [ ] Wire CI to run the stage2 smoke binary and self-hosted compiler on every PR once the self-hosting milestone is green, promoting stage2 to the default gate while retaining stage1 as a fallback job.
+- [ ] Package stage2 artifacts alongside stage1 in releases after CI is enforcing the self-hosted pipeline, ensuring downstream projects can install the native toolchain.
 
 2. **Runtime & FFI Foundations**
 
