@@ -194,6 +194,14 @@ struct LocalBinding {
     scope_depth -> number;
 }
 
+struct LocalMutation {
+    name -> string;
+    llvm_type -> string;
+    value_name -> string;
+    span -> NativeSourceSpan?;
+    originating_label -> string;
+}
+
 struct OwnershipAnalysis {
     ownership -> OwnershipInfo?;
     consumption -> OwnershipConsumption?;
@@ -235,6 +243,7 @@ struct ExpressionStatementResult {
     lifetime_regions -> LifetimeRegionMetadata[];
     lifetime_releases -> LifetimeReleaseEvent[];
     next_region_id -> number;
+    mutations -> LocalMutation[];
 }
 
 struct LetLoweringResult {
@@ -247,6 +256,7 @@ struct LetLoweringResult {
     next_local_id -> number;
     lifetime_regions -> LifetimeRegionMetadata[];
     next_region_id -> number;
+    mutations -> LocalMutation[];
 }
 
 struct InlineLetParseResult {
@@ -358,6 +368,7 @@ struct BlockLoweringResult {
     lifetime_regions -> LifetimeRegionMetadata[];
     next_lifetime_region_id -> number;
     next_index -> number;
+    mutations -> LocalMutation[];
 }
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
@@ -473,7 +484,6 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         capability_manifest: manifest,
     };
 }
-
 fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
 }
@@ -1693,7 +1703,8 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         [],
         context,
         format_root_scope_id(function.name),
-        0
+        0,
+        "entry"
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
@@ -1770,7 +1781,8 @@ fn lower_instruction_range(
     loop_stack -> LoopContext[],
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -1785,6 +1797,7 @@ fn lower_instruction_range(
     let mut current_loop_stack -> LoopContext[] = loop_stack;
     let mut index -> number = start_index;
     let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_mutations -> LocalMutation[] = [];
 
     loop {
         if index >= end {
@@ -1793,7 +1806,7 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, current_label);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
@@ -1803,6 +1816,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
         } else if instruction.variant == "Expression" {
             let trimmed_expression = trim_text(instruction.expression);
             let mut handled_inline_let -> boolean = false;
@@ -1820,7 +1834,7 @@ fn lower_instruction_range(
                             span: instruction.span,
                             value_span: instruction.span,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, current_label);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
                         collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
                         current_lines = lowered.lines;
@@ -1830,12 +1844,13 @@ fn lower_instruction_range(
                         current_temp = lowered.temp_index;
                         current_next_local = lowered.next_local_id;
                         current_next_region = lowered.next_region_id;
+                        current_mutations = current_mutations.concat(lowered.mutations);
                         handled_inline_let = true;
                     }
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
+                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -1844,6 +1859,7 @@ fn lower_instruction_range(
                 collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
                 collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
                 current_next_region = lowered.next_region_id;
+                current_mutations = current_mutations.concat(lowered.mutations);
             }
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
@@ -1855,6 +1871,7 @@ fn lower_instruction_range(
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
             current_next_region = lowered.next_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
             terminated = true;
             index += 1;
             if index < end {
@@ -1879,7 +1896,8 @@ fn lower_instruction_range(
                 end,
                 context,
                 scope_id,
-                scope_depth
+                scope_depth,
+                current_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -1891,6 +1909,7 @@ fn lower_instruction_range(
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -1915,7 +1934,8 @@ fn lower_instruction_range(
                 end,
                 context,
                 scope_id,
-                scope_depth
+                scope_depth,
+                current_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -1927,6 +1947,7 @@ fn lower_instruction_range(
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -1951,7 +1972,8 @@ fn lower_instruction_range(
                 end,
                 context,
                 scope_id,
-                scope_depth
+                scope_depth,
+                current_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -1963,6 +1985,7 @@ fn lower_instruction_range(
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -2017,7 +2040,8 @@ fn lower_instruction_range(
                 end,
                 context,
                 scope_id,
-                scope_depth
+                scope_depth,
+                current_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -2029,6 +2053,7 @@ fn lower_instruction_range(
             current_block_counter = lowered.block_counter;
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
             if terminated {
@@ -2057,6 +2082,7 @@ fn lower_instruction_range(
         lifetime_regions: collected_lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: index,
+        mutations: current_mutations,
     };
 }
 fn collect_if_structure(
@@ -2218,7 +2244,8 @@ fn lower_loop_instruction(
     end -> number,
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2230,7 +2257,7 @@ fn lower_loop_instruction(
     let mut current_next_local -> number = next_local_id;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
-    let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2271,7 +2298,8 @@ fn lower_loop_instruction(
         stacked,
         context,
         body_scope_id,
-        scope_depth + 1
+        scope_depth + 1,
+        loop_label
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -2284,6 +2312,7 @@ fn lower_loop_instruction(
     current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
     current_next_region = body_result.next_lifetime_region_id;
+    collected_mutations = collected_mutations.concat(body_result.mutations);
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_label);
@@ -2304,6 +2333,7 @@ fn lower_loop_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
+        mutations: collected_mutations,
     };
 }
 
@@ -2324,7 +2354,8 @@ fn lower_for_instruction(
     end -> number,
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -2336,6 +2367,7 @@ fn lower_for_instruction(
     let mut current_next_local -> number = next_local_id;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -2351,7 +2383,7 @@ fn lower_for_instruction(
             lines: current_lines,
             allocas: current_allocas,
             locals: current_locals,
-            bindings: base_bindings,
+            bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
@@ -2360,6 +2392,7 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
+            mutations: collected_mutations,
         };
     }
 
@@ -2378,6 +2411,7 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
+            mutations: collected_mutations,
         };
     }
 
@@ -2396,6 +2430,7 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
+            mutations: collected_mutations,
         };
     }
 
@@ -2423,6 +2458,7 @@ fn lower_for_instruction(
                 lifetime_regions: lifetime_regions,
                 next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
 
@@ -2446,6 +2482,7 @@ fn lower_for_instruction(
                 lifetime_regions: lifetime_regions,
                 next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
 
@@ -2468,6 +2505,7 @@ fn lower_for_instruction(
                 lifetime_regions: lifetime_regions,
                 next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
         let start_operand = start_coerced.operand;
@@ -2491,6 +2529,7 @@ fn lower_for_instruction(
                 lifetime_regions: lifetime_regions,
                 next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
         let end_operand = end_coerced.operand;
@@ -2515,7 +2554,10 @@ fn lower_for_instruction(
                     diagnostics: diagnostics,
                     terminated: false,
                     next_local_id: current_next_local,
+                    lifetime_regions: lifetime_regions,
+                    next_lifetime_region_id: current_next_region,
                     next_index: next_index,
+                    mutations: collected_mutations,
                 };
             }
 
@@ -2535,7 +2577,10 @@ fn lower_for_instruction(
                     diagnostics: diagnostics,
                     terminated: false,
                     next_local_id: current_next_local,
+                    lifetime_regions: lifetime_regions,
+                    next_lifetime_region_id: current_next_region,
                     next_index: next_index,
+                    mutations: collected_mutations,
                 };
             }
             stride_operand = stride_coerced.operand;
@@ -2600,6 +2645,7 @@ fn lower_for_instruction(
                 lifetime_regions: lifetime_regions,
                 next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
 
@@ -2635,7 +2681,9 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
 
@@ -2659,7 +2707,9 @@ fn lower_for_instruction(
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
                 next_index: next_index,
+                mutations: collected_mutations,
             };
         }
 
@@ -2699,7 +2749,8 @@ fn lower_for_instruction(
             stacked,
             context,
             loop_body_scope_id,
-            scope_depth + 1
+            scope_depth + 1,
+            loop_body_label
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -2711,6 +2762,7 @@ fn lower_for_instruction(
         current_next_local = body_result.next_local_id;
         current_bindings = body_result.bindings;
         current_next_region = body_result.next_lifetime_region_id;
+        collected_mutations = collected_mutations.concat(body_result.mutations);
 
         if !body_result.terminated {
             current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -2739,23 +2791,24 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_exit_label + ":");
 
-    current_locals = locals;
+        current_locals = locals;
 
-    return BlockLoweringResult {
-        lines: current_lines,
-        allocas: current_allocas,
-        locals: current_locals,
-        bindings: current_bindings,
-        temp_index: current_temp,
-        block_counter: current_block_counter,
-        diagnostics: diagnostics,
-        terminated: false,
-        next_local_id: current_next_local,
-        lifetime_regions: lifetime_regions,
-        next_lifetime_region_id: current_next_region,
-        next_index: next_index,
-    };
-}
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations,
+        };
+    }
 
     let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context);
     diagnostics = diagnostics.concat(iterable_result.diagnostics);
@@ -2775,7 +2828,10 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: next_index,
+            mutations: collected_mutations,
         };
     }
 
@@ -2794,7 +2850,10 @@ fn lower_for_instruction(
             diagnostics: diagnostics,
             terminated: false,
             next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: next_index,
+            mutations: collected_mutations,
         };
     }
 
@@ -2896,7 +2955,8 @@ fn lower_for_instruction(
         stacked,
         context,
         element_loop_scope_id,
-        scope_depth + 1
+        scope_depth + 1,
+        loop_body_label
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -2908,6 +2968,7 @@ fn lower_for_instruction(
     current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
     current_next_region = body_result.next_lifetime_region_id;
+    collected_mutations = collected_mutations.concat(body_result.mutations);
 
     if !body_result.terminated {
         current_lines = append_string(current_lines, "  br label %" + loop_increment_label);
@@ -2942,6 +3003,7 @@ fn lower_for_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: next_index,
+        mutations: collected_mutations,
     };
 }
 
@@ -3058,7 +3120,8 @@ fn lower_match_instruction(
     end -> number,
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3071,6 +3134,7 @@ fn lower_match_instruction(
     let mut merged_bindings -> ParameterBinding[] = base_bindings;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -3096,6 +3160,7 @@ fn lower_match_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
+            mutations: collected_mutations,
         };
     }
 
@@ -3120,6 +3185,7 @@ fn lower_match_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
+            mutations: collected_mutations,
         };
     }
 
@@ -3206,7 +3272,8 @@ fn lower_match_instruction(
             loop_stack,
             context,
             make_child_scope_id(scope_id, body_labels[index]),
-            scope_depth + 1
+            scope_depth + 1,
+            body_labels[index]
         );
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
@@ -3218,6 +3285,7 @@ fn lower_match_instruction(
         current_block_counter = body_result.block_counter;
         current_next_local = body_result.next_local_id;
         current_next_region = body_result.next_lifetime_region_id;
+        collected_mutations = collected_mutations.concat(body_result.mutations);
 
         if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
@@ -3249,6 +3317,7 @@ fn lower_match_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.end_index + 1,
+        mutations: collected_mutations,
     };
 }
 
@@ -3402,7 +3471,8 @@ fn lower_if_instruction(
     end -> number,
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -3416,6 +3486,7 @@ fn lower_if_instruction(
     let mut else_bindings -> ParameterBinding[] = base_bindings;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -3448,6 +3519,7 @@ fn lower_if_instruction(
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
             next_index: structure.next_index + 1,
+            mutations: [],
         };
     }
 
@@ -3498,7 +3570,8 @@ fn lower_if_instruction(
         loop_stack,
         context,
         then_scope_id,
-        scope_depth + 1
+        scope_depth + 1,
+        then_label
     );
     diagnostics = diagnostics.concat(then_result.diagnostics);
     lifetime_regions = lifetime_regions.concat(then_result.lifetime_regions);
@@ -3510,6 +3583,7 @@ fn lower_if_instruction(
     then_bindings = then_result.bindings;
     current_next_region = then_result.next_lifetime_region_id;
     current_lines = current_lines.concat(then_result.lines);
+    collected_mutations = collected_mutations.concat(then_result.mutations);
     let then_terminated = then_result.terminated;
     if !then_terminated {
         current_lines = append_string(current_lines, "  br label %" + merge_label);
@@ -3536,7 +3610,8 @@ fn lower_if_instruction(
             loop_stack,
             context,
             else_scope_id,
-            scope_depth + 1
+            scope_depth + 1,
+            else_label
         );
         diagnostics = diagnostics.concat(else_result.diagnostics);
         lifetime_regions = lifetime_regions.concat(else_result.lifetime_regions);
@@ -3549,6 +3624,7 @@ fn lower_if_instruction(
         current_next_region = else_result.next_lifetime_region_id;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
+    collected_mutations = collected_mutations.concat(else_result.mutations);
         if !else_terminated {
             current_lines = append_string(current_lines, "  br label %" + merge_label);
         }
@@ -3587,6 +3663,7 @@ fn lower_if_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
+        mutations: collected_mutations,
     };
 }
 
@@ -3603,7 +3680,8 @@ fn lower_let_instruction(
     functions -> NativeFunction[],
     context -> TypeContext,
     scope_id -> string,
-    scope_depth -> number
+    scope_depth -> number,
+    current_label -> string
 ) -> LetLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3616,6 +3694,7 @@ fn lower_let_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
+    let mut mutations -> LocalMutation[] = [];
     if initializer_span == null {
         initializer_span = instruction.span;
     }
@@ -3695,6 +3774,7 @@ fn lower_let_instruction(
     let pointer = format_local_pointer_name(next_local_id);
     current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type);
 
+    let mut stored_value -> string = default_return_literal(llvm_type);
     if operand != null {
         let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
         diagnostics = diagnostics.concat(coerced.diagnostics);
@@ -3705,6 +3785,7 @@ fn lower_let_instruction(
             current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
         } else {
             let stored = coerced.operand;
+            stored_value = stored.value;
             current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
         }
     } else {
@@ -3712,6 +3793,15 @@ fn lower_let_instruction(
     }
 
     current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
+
+    let mutation = LocalMutation {
+        name: instruction.name,
+        llvm_type: llvm_type,
+        value_name: stored_value,
+        span: initializer_span,
+        originating_label: current_label,
+    };
+    mutations = mutations.concat([mutation]);
 
     return LetLoweringResult {
         lines: current_lines,
@@ -3723,6 +3813,7 @@ fn lower_let_instruction(
         next_local_id: next_local_id + 1,
         lifetime_regions: lifetime_regions,
         next_region_id: current_next_region,
+        mutations: mutations,
     };
 }
 
@@ -3738,7 +3829,8 @@ fn lower_expression_statement(
     scope_id -> string,
     scope_depth -> number,
     functions -> NativeFunction[],
-    context -> TypeContext
+    context -> TypeContext,
+    current_label -> string
 ) -> ExpressionStatementResult {
     let mut suspension_span -> NativeSourceSpan? = null;
     if instruction.span != null {
@@ -3752,6 +3844,7 @@ fn lower_expression_statement(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
+    let mut mutations -> LocalMutation[] = [];
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -3764,6 +3857,7 @@ fn lower_expression_statement(
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
             let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
+            let mut stored_value -> string = default_return_literal(binding.llvm_type);
 
             let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -3781,6 +3875,7 @@ fn lower_expression_statement(
                     current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
                 } else {
                     let operand = coerced.operand;
+                    stored_value = operand.value;
                     current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
                 }
             }
@@ -3834,8 +3929,17 @@ fn lower_expression_statement(
                     lifetime_regions = append_lifetime_region(lifetime_regions, region);
                 }
             }
+
+            let mutation = LocalMutation {
+                name: parsed_assignment.target,
+                llvm_type: binding.llvm_type,
+                value_name: stored_value,
+                span: instruction.span,
+                originating_label: current_label,
+            };
+            mutations = mutations.concat([mutation]);
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations };
     }
 
     let ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings);
@@ -3853,7 +3957,7 @@ fn lower_expression_statement(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations };
 }
 
 fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
@@ -4042,7 +4146,7 @@ fn lower_return_instruction(
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] };
     }
 
     let mut current_locals -> LocalBinding[] = locals;
@@ -4063,14 +4167,14 @@ fn lower_return_instruction(
     if lowered.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] };
     }
 
     let operand = lowered.operand;
     if llvm_return == "void" {
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
         current_lines = append_string(current_lines, "  ret void");
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] };
     }
 
     let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
@@ -4080,7 +4184,7 @@ fn lower_return_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] };
     }
 
     let coerced_operand = coerced.operand;
@@ -4092,7 +4196,7 @@ fn lower_return_instruction(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] };
 }
 
 

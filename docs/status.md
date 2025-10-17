@@ -93,6 +93,12 @@ roadmaps.
   paths while ensuring legitimate reassignments clear the consumed state, with
   targeted coverage for non-copy aggregates such as `Affine<number[]>`
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`).
+  Block lowering now records `LocalMutation` metadata for every `let` binding or
+  reassignment lowered through `lower_instruction_range`, preserving the LLVM
+  type, stored SSA value, span, and defining label so upcoming SSA merge work can
+  stitch `phi` nodes accurately. Regression coverage lives in
+  `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`,
+  which synthesises a block and verifies the recorded mutation list.
   Move diagnostics now thread source spans from `.sfn-asm` through the native IR,
   so LLVM lowering reports use-after-move errors with line and column ranges
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move`
