@@ -215,7 +215,8 @@ def emit_native(program):
             state = state_emit_blank(state)
         index += 1
     artifact = NativeArtifact(name="module.sfn-asm", format="sailfin-native-text", contents=builder_to_string(state.builder))
-    module = NativeModule(artifacts=[artifact], entry_points=collect_entry_points(program), symbol_count=count_exported_symbols(program))
+    manifest_artifact = generate_layout_manifest(program, layout_context)
+    module = NativeModule(artifacts=[artifact, manifest_artifact], entry_points=collect_entry_points(program), symbol_count=count_exported_symbols(program))
     return EmitNativeResult(module=module, diagnostics=state.diagnostics)
 
 def emit_statement(state, statement):
@@ -750,7 +751,7 @@ def compute_struct_layout_lines(context, struct_name, fields):
     inputs = convert_struct_fields(fields)
     layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name))
     lines = []
-    lines = append_string(lines, ".layout struct size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align))
+    lines = append_string(lines, ".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align))
     index = 0
     while True:
         if index >= len(layout.fields):
@@ -777,7 +778,7 @@ def compute_enum_layout_lines(context, statement):
         index += 1
     layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name))
     lines = []
-    header = ".layout enum size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align)
+    header = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align)
     header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align)
     lines = append_string(lines, header)
     variant_index = 0
@@ -1346,6 +1347,43 @@ def state_merge_diagnostics(state, entries):
         combined = append_string(combined, entries[index])
         index += 1
     return NativeState(builder=state.builder, diagnostics=combined, layout_context=state.layout_context)
+
+def generate_layout_manifest(program, context):
+    builder = builder_new()
+    builder = builder_emit_line(builder, "; Sailfin Layout Manifest")
+    builder = builder_emit_line(builder, ".manifest version=1")
+    builder = builder_emit_blank(builder)
+    index = 0
+    while True:
+        if index >= len(program.statements):
+            break
+        statement = program.statements[index]
+        if statement.variant == "StructDeclaration":
+            result = compute_struct_layout_lines(context, statement.name, statement.fields)
+            line_index = 0
+            while True:
+                if line_index >= len(result.lines):
+                    break
+                builder = builder_emit_line(builder, result.lines[line_index])
+                line_index += 1
+            builder = builder_emit_blank(builder)
+        index += 1
+    index = 0
+    while True:
+        if index >= len(program.statements):
+            break
+        statement = program.statements[index]
+        if statement.variant == "EnumDeclaration":
+            result = compute_enum_layout_lines(context, statement)
+            line_index = 0
+            while True:
+                if line_index >= len(result.lines):
+                    break
+                builder = builder_emit_line(builder, result.lines[line_index])
+                line_index += 1
+            builder = builder_emit_blank(builder)
+        index += 1
+    return NativeArtifact(name="module.layout-manifest", format="sailfin-layout-manifest", contents=builder_to_string(builder))
 
 def emit_layout_lines(state, lines):
     if len(lines) == 0:

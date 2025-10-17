@@ -221,6 +221,7 @@ struct HeaderNameParse {
 
 struct StructLayoutHeaderParse {
     success -> boolean;
+    name -> string;
     size -> number;
     align -> number;
     diagnostics -> string[];
@@ -244,6 +245,7 @@ struct ParseNativeResult {
 
 struct EnumLayoutHeaderParse {
     success -> boolean;
+    name -> string;
     size -> number;
     align -> number;
     tag_type -> string;
@@ -268,6 +270,12 @@ struct EnumLayoutPayloadParse {
 struct NumberParseResult {
     success -> boolean;
     value -> number;
+}
+
+struct LayoutManifest {
+    structs -> NativeStruct[];
+    enums -> NativeEnum[];
+    diagnostics -> string[];
 }
 
 fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
@@ -1854,10 +1862,12 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
     let mut diagnostics -> string[] = [];
     if tokens.length == 0 {
         diagnostics = append_string(diagnostics, "struct layout header missing entries");
-        return StructLayoutHeaderParse { success: false, size: 0, align: 0, diagnostics: diagnostics };
+        return StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics };
     }
+    let mut name_found -> boolean = false;
     let mut size_found -> boolean = false;
     let mut align_found -> boolean = false;
+    let mut name_value -> string = "";
     let mut size_value -> number = 0;
     let mut align_value -> number = 0;
     let mut index -> number = 0;
@@ -1866,7 +1876,10 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
             break;
         }
         let token = tokens[index];
-        if starts_with(token, "size=") {
+        if starts_with(token, "name=") {
+            name_value = substring(token, 5, token.length);
+            name_found = true;
+        } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
@@ -1896,7 +1909,7 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
         diagnostics = append_string(diagnostics, "struct layout header missing align entry");
     }
     let success = size_found && align_found && diagnostics.length == 0;
-    return StructLayoutHeaderParse { success: success, size: size_value, align: align_value, diagnostics: diagnostics };
+    return StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics };
 }
 
 fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse {
@@ -1986,10 +1999,12 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     let mut diagnostics -> string[] = [];
     if tokens.length == 0 {
         diagnostics = append_string(diagnostics, "enum layout header missing entries");
-        return EnumLayoutHeaderParse { success: false, size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
+        return EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
     }
+    let mut name_found -> boolean = false;
     let mut size_found -> boolean = false;
     let mut align_found -> boolean = false;
+    let mut name_value -> string = "";
     let mut tag_type -> string = "";
     let mut tag_size_found -> boolean = false;
     let mut tag_align_found -> boolean = false;
@@ -2003,7 +2018,10 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
             break;
         }
         let token = tokens[index];
-        if starts_with(token, "size=") {
+        if starts_with(token, "name=") {
+            name_value = substring(token, 5, token.length);
+            name_found = true;
+        } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
@@ -2064,6 +2082,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0;
     return EnumLayoutHeaderParse {
         success: success,
+        name: name_value,
         size: size_value,
         align: align_value,
         tag_type: tag_type,
@@ -2713,6 +2732,178 @@ fn trim_text(value -> string) -> string {
     return substring(value, start, end);
 }
 
+fn parse_layout_manifest(text -> string) -> LayoutManifest {
+    let lines = split_lines(text);
+    let mut diagnostics -> string[] = [];
+    let mut structs -> NativeStruct[] = [];
+    let mut enums -> NativeEnum[] = [];
+    let mut index -> number = 0;
+    
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let raw_line = lines[index];
+        let line = trim_text(raw_line);
+        if line.length == 0 {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ";") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".manifest ") {
+            index += 1;
+            continue;
+        }
+        
+        // Parse struct layouts
+        if starts_with(line, ".layout struct ") {
+            let body = strip_prefix(line, ".layout ");
+            let struct_header = strip_prefix(body, "struct ");
+            let header_result = parse_struct_layout_header(struct_header);
+            diagnostics = diagnostics.concat(header_result.diagnostics);
+            
+            if header_result.success {
+                let mut fields -> NativeStructLayoutField[] = [];
+                let struct_name = header_result.name;
+                
+                // Advance to next line and collect field layout lines
+                index += 1;
+                loop {
+                    if index >= lines.length {
+                        break;
+                    }
+                    let field_line = trim_text(lines[index]);
+                    
+                    // Stop if we hit a blank line or non-field line
+                    if field_line.length == 0 {
+                        break;
+                    }
+                    if !starts_with(field_line, ".layout field ") {
+                        break;
+                    }
+                    
+                    // Parse field - strip both ".layout " and "field "
+                    let body = strip_prefix(field_line, ".layout ");
+                    let field_text = strip_prefix(body, "field ");
+                    let field_result = parse_struct_layout_field(field_text, struct_name);
+                    diagnostics = diagnostics.concat(field_result.diagnostics);
+                    
+                    if field_result.success {
+                        fields = append_struct_layout_field(fields, field_result.field);
+                    }
+                    index += 1;
+                }
+                
+                // Create minimal struct with layout info
+                let struct_def = NativeStruct {
+                    name: struct_name,
+                    fields: [],
+                    methods: [],
+                    implements: [],
+                    layout: NativeStructLayout {
+                        size: header_result.size,
+                        align: header_result.align,
+                        fields: fields,
+                    },
+                };
+                structs = append_struct(structs, struct_def);
+            }
+            index += 1;
+            continue;
+        }
+        
+        // Parse enum layouts
+        if starts_with(line, ".layout enum ") {
+            let body = strip_prefix(line, ".layout ");
+            let enum_header = strip_prefix(body, "enum ");
+            let header_result = parse_enum_layout_header(enum_header);
+            diagnostics = diagnostics.concat(header_result.diagnostics);
+            
+            if header_result.success {
+                let mut variants -> NativeEnumVariantLayout[] = [];
+                let enum_name = header_result.name;
+                index += 1;
+                
+                // Collect variant and payload layouts
+                loop {
+                    if index >= lines.length {
+                        break;
+                    }
+                    let variant_line = trim_text(lines[index]);
+                    if variant_line.length == 0 {
+                        index += 1;
+                        break;
+                    }
+                    if !starts_with(variant_line, ".layout variant ") && !starts_with(variant_line, ".layout payload ") {
+                        break;
+                    }
+                    
+                    if starts_with(variant_line, ".layout variant ") {
+                        let body = strip_prefix(variant_line, ".layout ");
+                        let variant_text = strip_prefix(body, "variant ");
+                        let variant_result = parse_enum_variant_layout(variant_text, enum_name);
+                        diagnostics = diagnostics.concat(variant_result.diagnostics);
+                        
+                        if variant_result.success {
+                            variants = append_enum_variant_layout(variants, variant_result.variant);
+                        }
+                    } else if starts_with(variant_line, ".layout payload ") {
+                        let body = strip_prefix(variant_line, ".layout ");
+                        let payload_text = strip_prefix(body, "payload ");
+                        let payload_result = parse_enum_payload_layout(payload_text, enum_name);
+                        diagnostics = diagnostics.concat(payload_result.diagnostics);
+                        
+                        if payload_result.success && variants.length > 0 {
+                            // Add payload field to last variant
+                            let last_index = variants.length - 1;
+                            let last_variant = variants[last_index];
+                            let updated_fields = append_struct_layout_field(last_variant.fields, payload_result.field);
+                            variants[last_index] = NativeEnumVariantLayout {
+                                name: last_variant.name,
+                                tag: last_variant.tag,
+                                offset: last_variant.offset,
+                                size: last_variant.size,
+                                align: last_variant.align,
+                                fields: updated_fields,
+                            };
+                        }
+                    }
+                    index += 1;
+                }
+                
+                // Create minimal enum with layout info
+                let enum_def = NativeEnum {
+                    name: enum_name,
+                    variants: [],
+                    layout: NativeEnumLayout {
+                        size: header_result.size,
+                        align: header_result.align,
+                        tag_type: header_result.tag_type,
+                        tag_size: header_result.tag_size,
+                        tag_align: header_result.tag_align,
+                        variants: variants,
+                    },
+                };
+                enums = append_enum(enums, enum_def);
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        
+        index += 1;
+    }
+    
+    return LayoutManifest {
+        structs: structs,
+        enums: enums,
+        diagnostics: diagnostics,
+    };
+}
+
 fn is_trim_char(ch -> string) -> boolean {
     return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
 }
@@ -2817,6 +3008,37 @@ fn strip_quotes(value -> string) -> string {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
+}
+
+fn split_text(value -> string, delimiter -> string) -> string[] {
+    if delimiter.length == 0 {
+        return [value];
+    }
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    let mut index -> number = 0;
+    
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let pos = index_of(substring(value, index, value.length), delimiter);
+        if pos < 0 {
+            break;
+        }
+        let actual_pos = index + pos;
+        parts = append_string(parts, substring(value, start, actual_pos));
+        start = actual_pos + delimiter.length;
+        index = start;
+    }
+    
+    if start < value.length {
+        parts = append_string(parts, substring(value, start, value.length));
+    } else if start == value.length {
+        parts = append_string(parts, "");
+    }
+    
+    return parts;
 }
 
 fn append_parameter_array(values -> NativeParameter[], parameter -> NativeParameter) -> NativeParameter[] {

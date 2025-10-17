@@ -46,6 +46,27 @@ roadmaps.
   surfacing `defaulting to pointer layout` warnings when compiling dependent modules. Regression
   coverage: `compiler/tests/test_stage1_pipeline.py::test_stage1_builtin_ast_layouts_do_not_warn`
   and `compiler/tests/test_runtime_prelude.py::test_runtime_prelude_collection_helpers`.
+  Layout manifests now ship alongside each compiled module artifact as
+  `module.layout-manifest` files containing all struct and enum layout descriptors in the
+  same textual format as the `.sfn-asm` `.layout` directives (e.g., `.layout struct name=Person
+size=16 align=8` followed by `.layout field` entries). The manifest emission function
+  (`generate_layout_manifest` in `compiler/src/emit_native.sfn`) walks the program's struct
+  and enum declarations, invoking the same `compute_struct_layout_lines` and
+  `compute_enum_layout_lines` helpers used for inline `.sfn-asm` layout metadata, then packages
+  the result as a second artifact in the `NativeModule.artifacts` array. The native IR parser
+  (`compiler/src/native_ir.sfn`) provides a `parse_layout_manifest` function that reconstructs
+  minimal `NativeStruct` and `NativeEnum` definitions (with empty field/variant lists but populated
+  `layout` metadata) from the manifest text, enabling cross-module layout resolution. The LLVM
+  lowering pipeline (`compiler/src/native_llvm_lowering.sfn`) can consume these manifests via
+  the existing `build_type_context` function, which accepts struct and enum arrays with layout
+  metadata regardless of whether they originated from the current module or were loaded from an
+  imported manifest. This infrastructure enables Stage2 to resolve referenced structs/enums defined
+  in dependencies without pointer fallbacks, though full cross-module dependency resolution (loading
+  manifests for imported modules and merging them into the type context) remains roadmap work.
+  Regression coverage: `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_layout_manifest`
+  validates manifest generation and content, while
+  `compiler/tests/test_stage1_pipeline.py::test_native_backend_parses_layout_manifest` verifies
+  that the parser can reconstruct struct and enum layout metadata from the manifest format.
   Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. LLVM lowering
   now interprets that metadata for struct element types, so `.for` loops can

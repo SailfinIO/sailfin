@@ -191,8 +191,10 @@ fn emit_native(program -> Program) -> EmitNativeResult {
         contents: builder_to_string(state.builder),
     };
 
+    let manifest_artifact = generate_layout_manifest(program, layout_context);
+
     let module = NativeModule {
-        artifacts: [artifact],
+        artifacts: [artifact, manifest_artifact],
         entry_points: collect_entry_points(program),
         symbol_count: count_exported_symbols(program),
     };
@@ -906,7 +908,7 @@ fn compute_struct_layout_lines(context -> LayoutContext, struct_name -> string, 
     let inputs = convert_struct_fields(fields);
     let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name));
     let mut lines -> string[] = [];
-    lines = append_string(lines, ".layout struct size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
+    lines = append_string(lines, ".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
     let mut index -> number = 0;
     loop {
         if index >= layout.fields.length {
@@ -938,7 +940,7 @@ fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -
     }
     let layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name));
     let mut lines -> string[] = [];
-    let mut header -> string = ".layout enum size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align);
+    let mut header -> string = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align);
     header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align);
     lines = append_string(lines, header);
     let mut variant_index -> number = 0;
@@ -1747,6 +1749,63 @@ fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeS
         index += 1;
     }
     return NativeState { builder: state.builder, diagnostics: combined, layout_context: state.layout_context };
+}
+
+fn generate_layout_manifest(program -> Program, context -> LayoutContext) -> NativeArtifact {
+    let mut builder = builder_new();
+    builder = builder_emit_line(builder, "; Sailfin Layout Manifest");
+    builder = builder_emit_line(builder, ".manifest version=1");
+    builder = builder_emit_blank(builder);
+
+    // Emit struct layouts
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        if statement.variant == "StructDeclaration" {
+            let result = compute_struct_layout_lines(context, statement.name, statement.fields);
+            let mut line_index -> number = 0;
+            loop {
+                if line_index >= result.lines.length {
+                    break;
+                }
+                builder = builder_emit_line(builder, result.lines[line_index]);
+                line_index += 1;
+            }
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    // Emit enum layouts
+    index = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        if statement.variant == "EnumDeclaration" {
+            let result = compute_enum_layout_lines(context, statement);
+            let mut line_index -> number = 0;
+            loop {
+                if line_index >= result.lines.length {
+                    break;
+                }
+                builder = builder_emit_line(builder, result.lines[line_index]);
+                line_index += 1;
+            }
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    return NativeArtifact {
+        name: "module.layout-manifest",
+        format: "sailfin-layout-manifest",
+        contents: builder_to_string(builder),
+    };
 }
 
 fn emit_layout_lines(state -> NativeState, lines -> string[]) -> NativeState {

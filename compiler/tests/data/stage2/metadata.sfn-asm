@@ -6,7 +6,7 @@
 .endinterface
 
 .struct Person implements Meter
-    .layout struct size=8 align=8
+    .layout struct name=Person size=8 align=8
     .layout field years type=number offset=0 size=8 align=8
     .field years -> number
     .method total(self -> Person) -> number

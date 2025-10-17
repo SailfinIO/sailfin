@@ -291,14 +291,15 @@ class HeaderNameParse:
         return runtime.struct_repr('HeaderNameParse', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('remainder', self.remainder), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class StructLayoutHeaderParse:
-    def __init__(self, success, size, align, diagnostics):
+    def __init__(self, success, name, size, align, diagnostics):
         self.success = success
+        self.name = name
         self.size = size
         self.align = align
         self.diagnostics = diagnostics
 
     def __repr__(self):
-        return runtime.struct_repr('StructLayoutHeaderParse', [runtime.struct_field('success', self.success), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('StructLayoutHeaderParse', [runtime.struct_field('success', self.success), runtime.struct_field('name', self.name), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class StructLayoutFieldParse:
     def __init__(self, success, field, diagnostics):
@@ -323,8 +324,9 @@ class ParseNativeResult:
         return runtime.struct_repr('ParseNativeResult', [runtime.struct_field('functions', self.functions), runtime.struct_field('imports', self.imports), runtime.struct_field('structs', self.structs), runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('enums', self.enums), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class EnumLayoutHeaderParse:
-    def __init__(self, success, size, align, tag_type, tag_size, tag_align, diagnostics):
+    def __init__(self, success, name, size, align, tag_type, tag_size, tag_align, diagnostics):
         self.success = success
+        self.name = name
         self.size = size
         self.align = align
         self.tag_type = tag_type
@@ -333,7 +335,7 @@ class EnumLayoutHeaderParse:
         self.diagnostics = diagnostics
 
     def __repr__(self):
-        return runtime.struct_repr('EnumLayoutHeaderParse', [runtime.struct_field('success', self.success), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('EnumLayoutHeaderParse', [runtime.struct_field('success', self.success), runtime.struct_field('name', self.name), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class EnumLayoutVariantParse:
     def __init__(self, success, variant, diagnostics):
@@ -361,6 +363,15 @@ class NumberParseResult:
 
     def __repr__(self):
         return runtime.struct_repr('NumberParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('value', self.value)])
+
+class LayoutManifest:
+    def __init__(self, structs, enums, diagnostics):
+        self.structs = structs
+        self.enums = enums
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutManifest', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class BindingComponents:
     def __init__(self, name, type_annotation, value=None):
@@ -1504,9 +1515,11 @@ def parse_struct_layout_header(text):
     diagnostics = []
     if len(tokens) == 0:
         diagnostics = append_string(diagnostics, "struct layout header missing entries")
-        return StructLayoutHeaderParse(success=False, size=0, align=0, diagnostics=diagnostics)
+        return StructLayoutHeaderParse(success=False, name="", size=0, align=0, diagnostics=diagnostics)
+    name_found = False
     size_found = False
     align_found = False
+    name_value = ""
     size_value = 0
     align_value = 0
     index = 0
@@ -1514,32 +1527,36 @@ def parse_struct_layout_header(text):
         if index >= len(tokens):
             break
         token = tokens[index]
-        if starts_with(token, "size="):
-            value_text = substring(token, 5, len(token))
-            parsed = parse_decimal_number(value_text)
-            if parsed.success:
-                size_found = True
-                size_value = parsed.value
-            else:
-                diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`")
+        if starts_with(token, "name="):
+            name_value = substring(token, 5, len(token))
+            name_found = True
         else:
-            if starts_with(token, "align="):
-                value_text = substring(token, 6, len(token))
+            if starts_with(token, "size="):
+                value_text = substring(token, 5, len(token))
                 parsed = parse_decimal_number(value_text)
                 if parsed.success:
-                    align_found = True
-                    align_value = parsed.value
+                    size_found = True
+                    size_value = parsed.value
                 else:
-                    diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`")
+                    diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`")
             else:
-                diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`")
+                if starts_with(token, "align="):
+                    value_text = substring(token, 6, len(token))
+                    parsed = parse_decimal_number(value_text)
+                    if parsed.success:
+                        align_found = True
+                        align_value = parsed.value
+                    else:
+                        diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`")
+                else:
+                    diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`")
         index += 1
     if not size_found:
         diagnostics = append_string(diagnostics, "struct layout header missing size entry")
     if not align_found:
         diagnostics = append_string(diagnostics, "struct layout header missing align entry")
     success = size_found  and  align_found  and  len(diagnostics) == 0
-    return StructLayoutHeaderParse(success=success, size=size_value, align=align_value, diagnostics=diagnostics)
+    return StructLayoutHeaderParse(success=success, name=name_value, size=size_value, align=align_value, diagnostics=diagnostics)
 
 def parse_struct_layout_field(text, struct_name):
     trimmed = trim_text(text)
@@ -1617,9 +1634,11 @@ def parse_enum_layout_header(text):
     diagnostics = []
     if len(tokens) == 0:
         diagnostics = append_string(diagnostics, "enum layout header missing entries")
-        return EnumLayoutHeaderParse(success=False, size=0, align=0, tag_type="", tag_size=0, tag_align=0, diagnostics=diagnostics)
+        return EnumLayoutHeaderParse(success=False, name="", size=0, align=0, tag_type="", tag_size=0, tag_align=0, diagnostics=diagnostics)
+    name_found = False
     size_found = False
     align_found = False
+    name_value = ""
     tag_type = ""
     tag_size_found = False
     tag_align_found = False
@@ -1632,46 +1651,50 @@ def parse_enum_layout_header(text):
         if index >= len(tokens):
             break
         token = tokens[index]
-        if starts_with(token, "size="):
-            value_text = substring(token, 5, len(token))
-            parsed = parse_decimal_number(value_text)
-            if parsed.success:
-                size_found = True
-                size_value = parsed.value
-            else:
-                diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`")
+        if starts_with(token, "name="):
+            name_value = substring(token, 5, len(token))
+            name_found = True
         else:
-            if starts_with(token, "align="):
-                value_text = substring(token, 6, len(token))
+            if starts_with(token, "size="):
+                value_text = substring(token, 5, len(token))
                 parsed = parse_decimal_number(value_text)
                 if parsed.success:
-                    align_found = True
-                    align_value = parsed.value
+                    size_found = True
+                    size_value = parsed.value
                 else:
-                    diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`")
+                    diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`")
             else:
-                if starts_with(token, "tag_type="):
-                    tag_type = substring(token, 9, len(token))
-                else:
-                    if starts_with(token, "tag_size="):
-                        value_text = substring(token, 9, len(token))
-                        parsed = parse_decimal_number(value_text)
-                        if parsed.success:
-                            tag_size_found = True
-                            tag_size_value = parsed.value
-                        else:
-                            diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`")
+                if starts_with(token, "align="):
+                    value_text = substring(token, 6, len(token))
+                    parsed = parse_decimal_number(value_text)
+                    if parsed.success:
+                        align_found = True
+                        align_value = parsed.value
                     else:
-                        if starts_with(token, "tag_align="):
-                            value_text = substring(token, 10, len(token))
+                        diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`")
+                else:
+                    if starts_with(token, "tag_type="):
+                        tag_type = substring(token, 9, len(token))
+                    else:
+                        if starts_with(token, "tag_size="):
+                            value_text = substring(token, 9, len(token))
                             parsed = parse_decimal_number(value_text)
                             if parsed.success:
-                                tag_align_found = True
-                                tag_align_value = parsed.value
+                                tag_size_found = True
+                                tag_size_value = parsed.value
                             else:
-                                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`")
+                                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`")
                         else:
-                            diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`")
+                            if starts_with(token, "tag_align="):
+                                value_text = substring(token, 10, len(token))
+                                parsed = parse_decimal_number(value_text)
+                                if parsed.success:
+                                    tag_align_found = True
+                                    tag_align_value = parsed.value
+                                else:
+                                    diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`")
+                            else:
+                                diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`")
         index += 1
     if not size_found:
         diagnostics = append_string(diagnostics, "enum layout header missing size entry")
@@ -1684,7 +1707,7 @@ def parse_enum_layout_header(text):
     if not tag_align_found:
         diagnostics = append_string(diagnostics, "enum layout header missing tag_align entry")
     success = size_found  and  align_found  and  len(tag_type) > 0  and  tag_size_found  and  tag_align_found  and  len(diagnostics) == 0
-    return EnumLayoutHeaderParse(success=success, size=size_value, align=align_value, tag_type=tag_type, tag_size=tag_size_value, tag_align=tag_align_value, diagnostics=diagnostics)
+    return EnumLayoutHeaderParse(success=success, name=name_value, size=size_value, align=align_value, tag_type=tag_type, tag_size=tag_size_value, tag_align=tag_align_value, diagnostics=diagnostics)
 
 def parse_enum_variant_layout(text, enum_name):
     trimmed = trim_text(text)
@@ -2177,6 +2200,99 @@ def trim_text(value):
         return value
     return substring(value, start, end)
 
+def parse_layout_manifest(text):
+    lines = split_lines(text)
+    diagnostics = []
+    structs = []
+    enums = []
+    index = 0
+    while True:
+        if index >= len(lines):
+            break
+        raw_line = lines[index]
+        line = trim_text(raw_line)
+        if len(line) == 0:
+            index += 1
+            continue
+        if starts_with(line, ";"):
+            index += 1
+            continue
+        if starts_with(line, ".manifest "):
+            index += 1
+            continue
+        if starts_with(line, ".layout struct "):
+            body = strip_prefix(line, ".layout ")
+            struct_header = strip_prefix(body, "struct ")
+            header_result = parse_struct_layout_header(struct_header)
+            diagnostics = (diagnostics) + (header_result.diagnostics)
+            if header_result.success:
+                fields = []
+                struct_name = header_result.name
+                index += 1
+                while True:
+                    if index >= len(lines):
+                        break
+                    field_line = trim_text(lines[index])
+                    if len(field_line) == 0:
+                        break
+                    if not starts_with(field_line, ".layout field "):
+                        break
+                    body = strip_prefix(field_line, ".layout ")
+                    field_text = strip_prefix(body, "field ")
+                    field_result = parse_struct_layout_field(field_text, struct_name)
+                    diagnostics = (diagnostics) + (field_result.diagnostics)
+                    if field_result.success:
+                        fields = append_struct_layout_field(fields, field_result.field)
+                    index += 1
+                struct_def = NativeStruct(name=struct_name, fields=[], methods=[], implements=[], layout=NativeStructLayout(size=header_result.size, align=header_result.align, fields=fields))
+                structs = append_struct(structs, struct_def)
+            index += 1
+            continue
+        if starts_with(line, ".layout enum "):
+            body = strip_prefix(line, ".layout ")
+            enum_header = strip_prefix(body, "enum ")
+            header_result = parse_enum_layout_header(enum_header)
+            diagnostics = (diagnostics) + (header_result.diagnostics)
+            if header_result.success:
+                variants = []
+                enum_name = header_result.name
+                index += 1
+                while True:
+                    if index >= len(lines):
+                        break
+                    variant_line = trim_text(lines[index])
+                    if len(variant_line) == 0:
+                        index += 1
+                        break
+                    if not starts_with(variant_line, ".layout variant ")  and  not starts_with(variant_line, ".layout payload "):
+                        break
+                    if starts_with(variant_line, ".layout variant "):
+                        body = strip_prefix(variant_line, ".layout ")
+                        variant_text = strip_prefix(body, "variant ")
+                        variant_result = parse_enum_variant_layout(variant_text, enum_name)
+                        diagnostics = (diagnostics) + (variant_result.diagnostics)
+                        if variant_result.success:
+                            variants = append_enum_variant_layout(variants, variant_result.variant)
+                    else:
+                        if starts_with(variant_line, ".layout payload "):
+                            body = strip_prefix(variant_line, ".layout ")
+                            payload_text = strip_prefix(body, "payload ")
+                            payload_result = parse_enum_payload_layout(payload_text, enum_name)
+                            diagnostics = (diagnostics) + (payload_result.diagnostics)
+                            if payload_result.success  and  len(variants) > 0:
+                                last_index = len(variants) - 1
+                                last_variant = variants[last_index]
+                                updated_fields = append_struct_layout_field(last_variant.fields, payload_result.field)
+                                variants[last_index] = NativeEnumVariantLayout(name=last_variant.name, tag=last_variant.tag, offset=last_variant.offset, size=last_variant.size, align=last_variant.align, fields=updated_fields)
+                    index += 1
+                enum_def = NativeEnum(name=enum_name, variants=[], layout=NativeEnumLayout(size=header_result.size, align=header_result.align, tag_type=header_result.tag_type, tag_size=header_result.tag_size, tag_align=header_result.tag_align, variants=variants))
+                enums = append_enum(enums, enum_def)
+            else:
+                index += 1
+            continue
+        index += 1
+    return LayoutManifest(structs=structs, enums=enums, diagnostics=diagnostics)
+
 def is_trim_char(ch):
     return ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t"
 
@@ -2253,6 +2369,29 @@ def strip_quotes(value):
 
 def append_string(values, value):
     return (values) + ([value])
+
+def split_text(value, delimiter):
+    if len(delimiter) == 0:
+        return [value]
+    parts = []
+    start = 0
+    index = 0
+    while True:
+        if index >= len(value):
+            break
+        pos = index_of(substring(value, index, len(value)), delimiter)
+        if pos < 0:
+            break
+        actual_pos = index + pos
+        parts = append_string(parts, substring(value, start, actual_pos))
+        start = actual_pos + len(delimiter)
+        index = start
+    if start < len(value):
+        parts = append_string(parts, substring(value, start, len(value)))
+    else:
+        if start == len(value):
+            parts = append_string(parts, "")
+    return parts
 
 def append_parameter_array(values, parameter):
     return (values) + ([parameter])

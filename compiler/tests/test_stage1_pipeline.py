@@ -314,10 +314,10 @@ def test_native_backend_emits_layout_descriptors() -> None:
     assert artifact is not None, "native artifact missing from emit_native output"
 
     contents = artifact.contents
-    assert ".layout struct size=16 align=8" in contents
+    assert ".layout struct name=Person size=16 align=8" in contents
     assert ".layout field name type=string offset=0 size=8 align=8" in contents
     assert ".layout field age type=int offset=8 size=8 align=8" in contents
-    assert ".layout enum size=16 align=8 tag_type=i32 tag_size=4 tag_align=4" in contents
+    assert ".layout enum name=Shape size=16 align=8 tag_type=i32 tag_size=4 tag_align=4" in contents
     assert ".layout variant Circle tag=0 offset=8 size=8 align=8" in contents
     assert ".layout variant Unit tag=1 offset=4 size=0 align=1" in contents
     assert ".layout payload Circle.radius type=number offset=8 size=8 align=8" in contents
@@ -378,11 +378,11 @@ def test_native_backend_infers_recursive_layouts() -> None:
     assert artifact is not None, "native artifact missing from emit_native output"
 
     contents = artifact.contents
-    assert ".layout struct size=32 align=8" in contents
+    assert ".layout struct name=Node size=32 align=8" in contents
     assert ".layout field left type=Node? offset=0 size=8 align=8" in contents
     assert ".layout field right type=Node? offset=8 size=8 align=8" in contents
     assert ".layout field payload type=Value offset=16 size=16 align=8" in contents
-    assert ".layout enum size=" in contents
+    assert ".layout enum name=Value size=" in contents
     assert ".layout variant Ref tag=1" in contents
     assert ".layout payload Ref.target type=Node offset=" in contents
     assert ".layout payload Number.value type=number offset=" in contents
@@ -504,3 +504,69 @@ def test_native_backend_emits_parameter_spans() -> None:
 
     first_span = annotate.parameters[0].span
     assert first_span is not None and first_span.start_line == 1 and first_span.start_column < first_span.end_column
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_emits_layout_manifest() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+
+    result = stage1_main.compile_to_native(LAYOUT_DESCRIPTOR_SOURCE)
+    unexpected = [
+        diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    manifest_artifact = next(
+        (artifact for artifact in result.module.artifacts if artifact.name == "module.layout-manifest"), None)
+    assert manifest_artifact is not None, "layout manifest artifact missing from emit_native output"
+    assert manifest_artifact.format == "sailfin-layout-manifest", "layout manifest format incorrect"
+
+    contents = manifest_artifact.contents
+    assert "; Sailfin Layout Manifest" in contents, "layout manifest header missing"
+    assert ".manifest version=1" in contents, "layout manifest version missing"
+
+    # Verify struct layout is present
+    assert ".layout struct name=Person size=" in contents, "struct layout descriptor missing"
+    assert ".layout field name" in contents, "struct field layout missing"
+    assert ".layout field age" in contents, "struct field layout missing"
+
+    # Verify enum layout is present
+    assert ".layout enum name=Shape size=" in contents, "enum layout descriptor missing"
+    assert ".layout variant Circle" in contents, "enum variant layout missing"
+    assert ".layout variant Unit" in contents, "enum variant layout missing"
+    assert ".layout payload Circle.radius" in contents, "enum payload layout missing"
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_parses_layout_manifest() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+    native_ir_module = importlib.import_module("compiler.build.native_ir")
+
+    result = stage1_main.compile_to_native(LAYOUT_DESCRIPTOR_SOURCE)
+    unexpected = [
+        diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    manifest_artifact = next(
+        (artifact for artifact in result.module.artifacts if artifact.name == "module.layout-manifest"), None)
+    assert manifest_artifact is not None, "layout manifest artifact missing"
+
+    parse_layout_manifest = getattr(native_ir_module, "parse_layout_manifest")
+    manifest = parse_layout_manifest(manifest_artifact.contents)
+
+    assert manifest is not None, "failed to parse layout manifest"
+    assert len(manifest.structs) > 0, "manifest should contain struct layouts"
+    assert len(manifest.enums) > 0, "manifest should contain enum layouts"
+
+    person_struct = next(
+        (s for s in manifest.structs if s.name == "Person"), None)
+    assert person_struct is not None, "Person struct missing from manifest"
+    assert person_struct.layout is not None, "Person layout metadata missing"
+    assert person_struct.layout.size > 0, "Person layout size should be positive"
+    assert len(person_struct.layout.fields) == 2, "Person should have 2 fields"
+
+    shape_enum = next(
+        (e for e in manifest.enums if e.name == "Shape"), None)
+    assert shape_enum is not None, "Shape enum missing from manifest"
+    assert shape_enum.layout is not None, "Shape layout metadata missing"
+    assert shape_enum.layout.tag_type == "i32", "Shape tag type should be i32"
+    assert len(shape_enum.layout.variants) == 2, "Shape should have 2 variants"
