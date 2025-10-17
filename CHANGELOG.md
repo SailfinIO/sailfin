@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.41 (2025-10-17)
+
+### Bug Fixes
+
+- Inline payload emission
+  ([`6cc6088`](https://github.com/SailfinIO/sailfin/commit/6cc6088ce686fb3b26d9f589d58f4aa196706374))
+
+
 ## v0.1.1-alpha.40 (2025-10-17)
 
 ### Bug Fixes
