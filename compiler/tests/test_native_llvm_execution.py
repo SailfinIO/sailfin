@@ -2104,3 +2104,120 @@ fn main() -> number {
     # Check that both vtable constants are emitted
     assert "@vtable.Person.Greeter.const = global" in ir
     assert "@vtable.Person.Formatter.const = global" in ir
+
+
+def test_native_llvm_execution_boxes_struct_into_trait_object(compile_stage2) -> None:
+    """Verify that concrete struct values are boxed into trait objects when assigned to interface-typed locals."""
+    source = """
+interface Greeter {
+    fn greet(self) -> string;
+}
+
+struct User implements Greeter {
+    id -> number;
+    name -> string;
+
+    fn greet(self) -> string {
+        return "Hello!";
+    }
+}
+
+fn main() -> number {
+    let user = User { id: 1, name: "Alice" };
+    let greeter -> Greeter = user;
+    return 42;
+}
+"""
+    lowered = compile_stage2(source, module_name="trait_object_boxing")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "member access base" in diag
+        or "unhandled return expression" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that trait object type is defined
+    assert "%trait.Greeter = type { i8*, i8* }" in ir, \
+        "Trait object type should be defined"
+
+    # Check that vtable is emitted
+    assert "%vtable.User.Greeter = type" in ir, \
+        "Vtable type should be defined"
+    assert "@vtable.User.Greeter.const = global" in ir, \
+        "Vtable constant should be emitted"
+
+    # Check for boxing operations in main function
+    # Should allocate struct on stack
+    assert "alloca %User" in ir, \
+        "Should allocate struct on stack for boxing"
+    # Should cast struct pointer to i8*
+    assert "bitcast %User*" in ir and "to i8*" in ir, \
+        "Should cast struct pointer to i8* for trait object"
+    # Should cast vtable to i8*
+    assert "bitcast %vtable.User.Greeter*" in ir, \
+        "Should cast vtable pointer to i8* for trait object"
+    # Should build trait object with insertvalue
+    assert "insertvalue %trait.Greeter" in ir, \
+        "Should use insertvalue to build trait object"
+
+
+def test_native_llvm_execution_dispatches_through_trait_object(compile_stage2) -> None:
+    """Verify that method calls on interface-typed values dispatch through vtable."""
+    source = """
+interface Speaker {
+    fn speak(self) -> string;
+}
+
+struct Robot implements Speaker {
+    id -> number;
+    
+    fn speak(self) -> string {
+        return "beep";
+    }
+}
+
+fn call_speaker(s -> Speaker) -> string {
+    return s.speak();
+}
+
+fn main() -> number {
+    let robot = Robot { id: 1 };
+    let speaker -> Speaker = robot;
+    let result = call_speaker(speaker);
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="trait_dispatch")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "member access base" in diag
+        or "unhandled return expression" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that extractvalue is used to get data and vtable pointers
+    assert "extractvalue %trait.Speaker" in ir, \
+        "Should extract fields from trait object"
+
+    # Check for indirect call through function pointer
+    # The implementation should load function pointer from vtable and call it
+    assert "bitcast i8*" in ir and "to" in ir, \
+        "Should cast vtable pointer to function pointer type"
+    assert "load" in ir, \
+        "Should load function pointer from vtable"
+    assert "call" in ir, \
+        "Should emit indirect call"

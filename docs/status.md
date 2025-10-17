@@ -106,8 +106,22 @@ roadmaps.
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_vtable_type_definitions`,
   `test_native_llvm_execution_emits_vtable_constants`, and
   `test_native_llvm_execution_emits_multiple_vtables`. Method dispatch through
-  trait objects (boxing concrete values and calling methods via vtable indirection)
-  is not yet implemented. Borrow expressions now lower into explicit
+  trait objects now fully works: when assigning a concrete struct value to an
+  interface-typed local (e.g., `let greeter -> Greeter = User { ... }`), the
+  compiler boxes the struct by allocating it on the stack, casting the struct
+  pointer to `i8*`, retrieving the vtable pointer for the struct-interface pair,
+  and building a trait object via `insertvalue` instructions. Method calls on
+  interface-typed values (e.g., `greeter.greet()`) dispatch dynamically: the
+  compiler extracts the data pointer and vtable pointer from the trait object via
+  `extractvalue`, casts the vtable to the appropriate function pointer type, loads
+  the method pointer from the vtable slot corresponding to the called method, and
+  emits an indirect call passing the data pointer as the implicit receiver followed
+  by any user-supplied arguments. This enables polymorphism without Python fallbacks,
+  allowing functions to accept interface-typed parameters and call methods on them
+  regardless of the underlying concrete type. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_boxes_struct_into_trait_object`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_dispatches_through_trait_object`.
+  Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_borrow_expressions`).

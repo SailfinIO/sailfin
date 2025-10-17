@@ -1211,6 +1211,28 @@ def find_struct_info_by_name(context, name):
         index += 1
     return None
 
+def find_interface_info_by_name(context, name):
+    index = 0
+    while True:
+        if index >= len(context.interfaces):
+            break
+        info = context.interfaces[index]
+        if info.name == name:
+            return info
+        index += 1
+    return None
+
+def find_vtable_for_struct_interface(context, struct_name, interface_name):
+    index = 0
+    while True:
+        if index >= len(context.vtables):
+            break
+        vtable = context.vtables[index]
+        if vtable.struct_name == struct_name  and  vtable.interface_name == interface_name:
+            return vtable
+        index += 1
+    return None
+
 def find_struct_info_by_llvm_type(context, llvm_type):
     trimmed = trim_text(llvm_type)
     index = 0
@@ -1286,6 +1308,35 @@ def resolve_struct_info_for_method_target(base, bindings, locals, context):
         local = find_local_binding(locals, trimmed)
         if local != None:
             info = resolve_struct_info_from_llvm_type(context, local.llvm_type)
+            if info != None:
+                return info
+    return None
+
+def resolve_interface_info_for_method_target(base, bindings, locals, context):
+    trimmed = trim_text(base)
+    if len(trimmed) == 0:
+        return None
+    if is_simple_identifier(trimmed):
+        parameter = find_parameter_binding(bindings, trimmed)
+        if parameter != None:
+            type_name = parameter.llvm_type
+            if substring(type_name, 0, 7) == "%trait.":
+                interface_name = substring(type_name, 7, len(type_name))
+                info = find_interface_info_by_name(context, interface_name)
+                if info != None:
+                    return info
+            info = find_interface_info_by_name(context, type_name)
+            if info != None:
+                return info
+        local = find_local_binding(locals, trimmed)
+        if local != None:
+            type_name = local.llvm_type
+            if substring(type_name, 0, 7) == "%trait.":
+                interface_name = substring(type_name, 7, len(type_name))
+                info = find_interface_info_by_name(context, interface_name)
+                if info != None:
+                    return info
+            info = find_interface_info_by_name(context, type_name)
             if info != None:
                 return info
     return None
@@ -3422,6 +3473,32 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
             llvm_type = operand.llvm_type
     if len(llvm_type) == 0:
         llvm_type = "double"
+    interface_info = find_interface_info_by_name(context, instruction.type_annotation)
+    if interface_info != None  and  operand != None:
+        struct_info = find_struct_info_by_llvm_type(context, operand.llvm_type)
+        if struct_info != None:
+            vtable = find_vtable_for_struct_interface(context, struct_info.name, interface_info.name)
+            if vtable != None:
+                struct_ptr_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                vtable_ptr_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                data_ptr_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                with_data_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                with_vtable_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + struct_ptr_temp + " = alloca " + struct_info.llvm_name)
+                current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + struct_ptr_temp)
+                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = bitcast " + struct_info.llvm_name + "* " + struct_ptr_temp + " to i8*")
+                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = bitcast " + vtable.llvm_type_name + "* " + vtable.llvm_global_name + " to i8*")
+                current_lines = append_string(current_lines, "  " + with_data_temp + " = insertvalue " + interface_info.llvm_name + " undef, i8* " + data_ptr_temp + ", 0")
+                current_lines = append_string(current_lines, "  " + with_vtable_temp + " = insertvalue " + interface_info.llvm_name + " " + with_data_temp + ", i8* " + vtable_ptr_temp + ", 1")
+                operand = LLVMOperand(llvm_type=interface_info.llvm_name, value=with_vtable_temp)
+                llvm_type = interface_info.llvm_name
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_info.name + "` does not implement interface `" + interface_info.name + "`")
     pointer = format_local_pointer_name(next_local_id)
     current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type)
     stored_value = default_return_literal(llvm_type)
@@ -3748,6 +3825,15 @@ def map_enum_type_annotation(context, annotation):
         index += 1
     return ""
 
+def map_interface_type_annotation(context, annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    interface_info = find_interface_info_by_name(context, trimmed)
+    if interface_info != None:
+        return interface_info.llvm_name
+    return ""
+
 def map_primitive_type(context, annotation):
     if annotation == "number":
         return "double"
@@ -3763,6 +3849,9 @@ def map_primitive_type(context, annotation):
     enum_type = map_enum_type_annotation(context, annotation)
     if len(enum_type) > 0:
         return enum_type
+    interface_type = map_interface_type_annotation(context, annotation)
+    if len(interface_type) > 0:
+        return interface_type
     if annotation == "string":
         return "i8*"
     return ""
@@ -4438,6 +4527,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     method_parse = parse_member_access(trimmed_target)
     if method_parse.success:
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
+        interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context)
         if method_info != None:
             lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (lowered_self.diagnostics)
@@ -4450,6 +4540,19 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                 return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        else:
+            if interface_info != None:
+                lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context)
+                diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                current_lines = lowered_self.lines
+                current_temp = lowered_self.temp_index
+                if lowered_self.operand != None:
+                    method_operand = lowered_self.operand
+                    trimmed_target = "trait_dispatch::" + interface_info.name + "::" + method_parse.field
+                    injected_argument_count = 1
+                else:
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
     index = 0
     while True:
         if index >= len(arguments):
@@ -4483,20 +4586,43 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
     llvm_return = "double"
     expected_params = []
+    is_trait_dispatch = False
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::":
+        is_trait_dispatch = True
+        after_prefix = substring(trimmed_target, 16, len(trimmed_target))
+        double_colon_pos = find_last_index_of_char(after_prefix, ":")
+        if double_colon_pos > 0  and  substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::":
+            interface_name = substring(after_prefix, 0, double_colon_pos - 1)
+            method_name = substring(after_prefix, double_colon_pos + 1, len(after_prefix))
+            interface_info = find_interface_info_by_name(context, interface_name)
+            if interface_info != None:
+                sig_idx = 0
+                while True:
+                    if sig_idx >= len(interface_info.signatures):
+                        break
+                    sig = interface_info.signatures[sig_idx]
+                    if sig.name == method_name:
+                        llvm_return = map_return_type(context, sig.return_type)
+                        if len(llvm_return) == 0:
+                            llvm_return = "double"
+                        expected_params = ["i8*"]
+                        break
+                    sig_idx += 1
     function_entry = find_function_by_name(functions, trimmed_target)
     helper_descriptor = find_runtime_helper(trimmed_target)
-    if function_entry != None:
-        llvm_return = map_return_type(context, function_entry.return_type)
-        if len(llvm_return) == 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
-            llvm_return = "double"
-        expected_params = collect_parameter_types(context, function_entry.parameters)
-    else:
-        if helper_descriptor != None:
-            llvm_return = helper_descriptor.return_type
-            expected_params = helper_descriptor.parameter_types
+    if not is_trait_dispatch:
+        if function_entry != None:
+            llvm_return = map_return_type(context, function_entry.return_type)
+            if len(llvm_return) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
+                llvm_return = "double"
+            expected_params = collect_parameter_types(context, function_entry.parameters)
         else:
-            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
+            if helper_descriptor != None:
+                llvm_return = helper_descriptor.return_type
+                expected_params = helper_descriptor.parameter_types
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
     if function_entry != None  and  injected_argument_count == 1:
         if len(operands) > 0  and  len(expected_params) > 0:
             expected_self_type = expected_params[0]
@@ -4523,19 +4649,22 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         target_type = ""
         if len(expected_params) > index:
             target_type = expected_params[index]
-        if len(target_type) == 0:
+        if is_trait_dispatch  and  index == 0:
             coerced_operands = append_llvm_operand(coerced_operands, operand)
         else:
-            coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines)
-            diagnostics = (diagnostics) + (coerced.diagnostics)
-            current_lines = coerced.lines
-            current_temp = coerced.temp_index
-            if coerced.operand == None:
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
-                placeholder = LLVMOperand(llvm_type=target_type, value=default_return_literal(target_type))
-                coerced_operands = append_llvm_operand(coerced_operands, placeholder)
+            if len(target_type) == 0:
+                coerced_operands = append_llvm_operand(coerced_operands, operand)
             else:
-                coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
+                coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines)
+                diagnostics = (diagnostics) + (coerced.diagnostics)
+                current_lines = coerced.lines
+                current_temp = coerced.temp_index
+                if coerced.operand == None:
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
+                    placeholder = LLVMOperand(llvm_type=target_type, value=default_return_literal(target_type))
+                    coerced_operands = append_llvm_operand(coerced_operands, placeholder)
+                else:
+                    coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
         index += 1
     operands = coerced_operands
     if function_entry != None  or  helper_descriptor != None:
@@ -4549,6 +4678,71 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         rendered_args = append_string(rendered_args, format_typed_operand(operands[index]))
         index += 1
     argument_text = join_with_separator(rendered_args, ", ")
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::":
+        after_prefix = substring(trimmed_target, 16, len(trimmed_target))
+        double_colon_pos = find_last_index_of_char(after_prefix, ":")
+        if double_colon_pos > 0  and  substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::":
+            interface_name = substring(after_prefix, 0, double_colon_pos - 1)
+            method_name = substring(after_prefix, double_colon_pos + 1, len(after_prefix))
+            if len(operands) > 0:
+                trait_object = operands[0]
+                data_ptr_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0")
+                vtable_ptr_temp = "%t" + number_to_string(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1")
+                interface_info = find_interface_info_by_name(context, interface_name)
+                if interface_info != None:
+                    method_index = -1
+                    sig_idx = 0
+                    while True:
+                        if sig_idx >= len(interface_info.signatures):
+                            break
+                        if interface_info.signatures[sig_idx].name == method_name:
+                            method_index = sig_idx
+                            break
+                        sig_idx += 1
+                    if method_index >= 0:
+                        fp_param_types = ["i8*"]
+                        arg_idx = 1
+                        while True:
+                            if arg_idx >= len(operands):
+                                break
+                            fp_param_types = append_string(fp_param_types, operands[arg_idx].llvm_type)
+                            arg_idx += 1
+                        fp_params = join_with_separator(fp_param_types, ", ")
+                        function_type = llvm_return + " (" + fp_params + ")*"
+                        vtable_cast_temp = "%t" + number_to_string(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + vtable_cast_temp + " = bitcast i8* " + vtable_ptr_temp + " to " + function_type + "*")
+                        method_ptr_temp = "%t" + number_to_string(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = load " + function_type + ", " + function_type + "* " + vtable_cast_temp)
+                        call_args = ["i8* " + data_ptr_temp]
+                        arg_idx = 1
+                        while True:
+                            if arg_idx >= len(rendered_args):
+                                break
+                            call_args = append_string(call_args, rendered_args[arg_idx])
+                            arg_idx += 1
+                        call_arg_text = join_with_separator(call_args, ", ")
+                        if llvm_return == "void":
+                            current_lines = append_string(current_lines, "  call void " + method_ptr_temp + "(" + call_arg_text + ")")
+                            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+                        else:
+                            result_temp = format_temp_name(current_temp)
+                            current_lines = append_string(current_lines, "  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")")
+                            result_operand = LLVMOperand(llvm_type=llvm_return, value=result_temp)
+                            return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=result_operand, diagnostics=diagnostics)
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`")
+                else:
+                    diagnostics = append_string(diagnostics, "llvm lowering: interface `" + interface_name + "` not found for trait dispatch")
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: trait dispatch requires at least one argument (the trait object)")
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: malformed trait dispatch target `" + trimmed_target + "`")
     call_symbol = sanitize_symbol(trimmed_target)
     if helper_descriptor != None:
         call_symbol = helper_descriptor.symbol

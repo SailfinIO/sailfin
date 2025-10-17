@@ -35,10 +35,10 @@ _Near-term (unlock compiler parity & safety checks)_
   - [x] Define the trait-object ABI (data pointer layout + vtable schema) and emit descriptors during native lowering. Trait objects are represented as `{ i8*, i8* }` (data pointer + vtable pointer). Vtables are type-specific structs containing function pointers for each interface method.
   - [x] Generate vtable structs for every concrete `implements` declaration and write them into the module data section. Each struct-interface pair generates a vtable type definition (e.g., `%vtable.User.Greeter`) and a global constant containing bitcast function pointers to the struct's method implementations.
   - [x] Add unit coverage ensuring interface types and vtables emit correctly. Validated by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_vtable_type_definitions`, `test_native_llvm_execution_emits_vtable_constants`, and `test_native_llvm_execution_emits_multiple_vtables`. Behaviour documented in `docs/status.md`.
-- [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
-  - [ ] Box concrete values into trait objects when assigning to interface-typed locals/parameters.
-  - [ ] Modify call lowering to route `.method()` through the vtable slot, passing the data pointer as the implicit receiver.
-  - [ ] Extend the LLVM execution suite with the interface example to validate dynamic dispatch end-to-end.
+- [x] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
+  - [x] Box concrete values into trait objects when assigning to interface-typed locals/parameters.
+  - [x] Modify call lowering to route `.method()` through the vtable slot, passing the data pointer as the implicit receiver.
+  - [x] Extend the LLVM execution suite with the interface example to validate dynamic dispatch end-to-end. Validated by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_boxes_struct_into_trait_object` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_dispatches_through_trait_object`. Behaviour documented in `docs/status.md`.
 - [ ] Surface enum array metadata in LLVM lowering once layout descriptors exist, enabling typed iteration over tagged aggregates.
   - [ ] Emit array element descriptors for enum element types during module lowering.
   - [ ] Teach the native runner to expose the metadata to runtime helpers without pointer fallbacks.

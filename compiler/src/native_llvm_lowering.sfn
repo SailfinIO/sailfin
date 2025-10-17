@@ -1227,6 +1227,36 @@ fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTyp
     return null;
 }
 
+fn find_interface_info_by_name(context -> TypeContext, name -> string) -> InterfaceTypeInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.interfaces.length {
+            break;
+        }
+        let info = context.interfaces[index];
+        if info.name == name {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> string, interface_name -> string) -> VTableInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        if vtable.struct_name == struct_name && vtable.interface_name == interface_name {
+            return vtable;
+        }
+        index += 1;
+    }
+    return null;
+}
+
 fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
     let trimmed = trim_text(llvm_type);
     let mut index -> number = 0;
@@ -1328,6 +1358,48 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
         let local = find_local_binding(locals, trimmed);
         if local != null {
             let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
+            if info != null {
+                return info;
+            }
+        }
+    }
+    return null;
+}
+
+fn resolve_interface_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> InterfaceTypeInfo? {
+    let trimmed = trim_text(base);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if is_simple_identifier(trimmed) {
+        let parameter = find_parameter_binding(bindings, trimmed);
+        if parameter != null {
+            let mut type_name = parameter.llvm_type;
+            if substring(type_name, 0, 7) == "%trait." {
+                let interface_name = substring(type_name, 7, type_name.length);
+                let info = find_interface_info_by_name(context, interface_name);
+                if info != null {
+                    return info;
+                }
+            }
+            // Try direct lookup
+            let info = find_interface_info_by_name(context, type_name);
+            if info != null {
+                return info;
+            }
+        }
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let mut type_name = local.llvm_type;
+            if substring(type_name, 0, 7) == "%trait." {
+                let interface_name = substring(type_name, 7, type_name.length);
+                let info = find_interface_info_by_name(context, interface_name);
+                if info != null {
+                    return info;
+                }
+            }
+            // Try direct lookup
+            let info = find_interface_info_by_name(context, type_name);
             if info != null {
                 return info;
             }
@@ -5104,6 +5176,48 @@ fn lower_let_instruction(
         llvm_type = "double";
     }
 
+    // Check if we need to box a concrete struct into a trait object
+    let interface_info = find_interface_info_by_name(context, instruction.type_annotation);
+    if interface_info != null && operand != null {
+        // Target type is an interface; check if operand is a concrete struct
+        let struct_info = find_struct_info_by_llvm_type(context, operand.llvm_type);
+        if struct_info != null {
+            // Find the vtable for this struct-interface pair
+            let vtable = find_vtable_for_struct_interface(context, struct_info.name, interface_info.name);
+            if vtable != null {
+                // Box the struct into a trait object
+                let struct_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                let vtable_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                let data_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                let with_data_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                let with_vtable_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+
+                // Allocate space for the struct on the stack
+                current_lines = append_string(current_lines, "  " + struct_ptr_temp + " = alloca " + struct_info.llvm_name);
+                // Store the struct value
+                current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + struct_ptr_temp);
+                // Cast struct pointer to i8*
+                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = bitcast " + struct_info.llvm_name + "* " + struct_ptr_temp + " to i8*");
+                // Get vtable pointer (bitcast global vtable constant to i8*)
+                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = bitcast " + vtable.llvm_type_name + "* " + vtable.llvm_global_name + " to i8*");
+                // Build trait object: insert data pointer
+                current_lines = append_string(current_lines, "  " + with_data_temp + " = insertvalue " + interface_info.llvm_name + " undef, i8* " + data_ptr_temp + ", 0");
+                // Insert vtable pointer
+                current_lines = append_string(current_lines, "  " + with_vtable_temp + " = insertvalue " + interface_info.llvm_name + " " + with_data_temp + ", i8* " + vtable_ptr_temp + ", 1");
+                // Update operand to the boxed trait object
+                operand = LLVMOperand { llvm_type: interface_info.llvm_name, value: with_vtable_temp };
+                llvm_type = interface_info.llvm_name;
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_info.name + "` does not implement interface `" + interface_info.name + "`");
+            }
+        }
+    }
+
     let pointer = format_local_pointer_name(next_local_id);
     current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type);
 
@@ -5594,6 +5708,18 @@ fn map_enum_type_annotation(context -> TypeContext, annotation -> string) -> str
     return "";
 }
 
+fn map_interface_type_annotation(context -> TypeContext, annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let interface_info = find_interface_info_by_name(context, trimmed);
+    if interface_info != null {
+        return interface_info.llvm_name;
+    }
+    return "";
+}
+
 fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "number" {
         return "double";
@@ -5614,6 +5740,10 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     let enum_type = map_enum_type_annotation(context, annotation);
     if enum_type.length > 0 {
         return enum_type;
+    }
+    let interface_type = map_interface_type_annotation(context, annotation);
+    if interface_type.length > 0 {
+        return interface_type;
     }
     if annotation == "string" {
         return "i8*";
@@ -6571,6 +6701,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let method_parse = parse_member_access(trimmed_target);
     if method_parse.success {
         let method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context);
+        let interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context);
+        
         if method_info != null {
             let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered_self.diagnostics);
@@ -6579,6 +6711,20 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             if lowered_self.operand != null {
                 method_operand = lowered_self.operand;
                 trimmed_target = method_info.name + "::" + method_parse.field;
+                injected_argument_count = 1;
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+            }
+        } else if interface_info != null {
+            // This is a dynamic dispatch through a trait object
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context);
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand != null {
+                method_operand = lowered_self.operand;
+                trimmed_target = "trait_dispatch::" + interface_info.name + "::" + method_parse.field;
                 injected_argument_count = 1;
             } else {
                 diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
@@ -6631,20 +6777,57 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
     let mut llvm_return -> string = "double";
     let mut expected_params -> string[] = [];
+    let mut is_trait_dispatch -> boolean = false;
+    
+    // Check if this is a trait dispatch before looking up function/helper
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        is_trait_dispatch = true;
+        // Extract interface name and method name
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+            let interface_info = find_interface_info_by_name(context, interface_name);
+            if interface_info != null {
+                // Find the method signature to get return type
+                let mut sig_idx -> number = 0;
+                loop {
+                    if sig_idx >= interface_info.signatures.length {
+                        break;
+                    }
+                    let sig = interface_info.signatures[sig_idx];
+                    if sig.name == method_name {
+                        llvm_return = map_return_type(context, sig.return_type);
+                        if llvm_return.length == 0 {
+                            llvm_return = "double";
+                        }
+                        // First param is i8* (data pointer from trait object)
+                        expected_params = ["i8*"];
+                        break;
+                    }
+                    sig_idx += 1;
+                }
+            }
+        }
+    }
+    
     let function_entry = find_function_by_name(functions, trimmed_target);
     let helper_descriptor = find_runtime_helper(trimmed_target);
-    if function_entry != null {
-        llvm_return = map_return_type(context, function_entry.return_type);
-        if llvm_return.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-            llvm_return = "double";
+    if !is_trait_dispatch {
+        if function_entry != null {
+            llvm_return = map_return_type(context, function_entry.return_type);
+            if llvm_return.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                llvm_return = "double";
+            }
+            expected_params = collect_parameter_types(context, function_entry.parameters);
+        } else if helper_descriptor != null {
+            llvm_return = helper_descriptor.return_type;
+            expected_params = helper_descriptor.parameter_types;
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
         }
-        expected_params = collect_parameter_types(context, function_entry.parameters);
-    } else if helper_descriptor != null {
-        llvm_return = helper_descriptor.return_type;
-        expected_params = helper_descriptor.parameter_types;
-    } else {
-        diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
     }
 
     if function_entry != null && injected_argument_count == 1 {
@@ -6681,7 +6864,10 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if expected_params.length > index {
             target_type = expected_params[index];
         }
-        if target_type.length == 0 {
+        // For trait dispatch, skip coercion of the first argument (trait object)
+        if is_trait_dispatch && index == 0 {
+            coerced_operands = append_llvm_operand(coerced_operands, operand);
+        } else if target_type.length == 0 {
             coerced_operands = append_llvm_operand(coerced_operands, operand);
         } else {
             let coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines);
@@ -6716,6 +6902,111 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         index += 1;
     }
     let argument_text = join_with_separator(rendered_args, ", ");
+    
+    // Check if this is a trait dispatch call
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        // Extract interface name and method name from "trait_dispatch::InterfaceName::method"
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+            
+            // The first operand should be the trait object
+            if operands.length > 0 {
+                let trait_object = operands[0];
+                
+                // Extract data pointer (field 0)
+                let data_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+                
+                // Extract vtable pointer (field 1)
+                let vtable_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+                
+                // Find the method index in the interface
+                let interface_info = find_interface_info_by_name(context, interface_name);
+                if interface_info != null {
+                    let mut method_index -> number = -1;
+                    let mut sig_idx -> number = 0;
+                    loop {
+                        if sig_idx >= interface_info.signatures.length {
+                            break;
+                        }
+                        if interface_info.signatures[sig_idx].name == method_name {
+                            method_index = sig_idx;
+                            break;
+                        }
+                        sig_idx += 1;
+                    }
+                    
+                    if method_index >= 0 {
+                        // Cast vtable pointer to the correct vtable type (we need to infer which struct's vtable)
+                        // For now, emit a generic i8* -> i8* (...) function pointer extraction
+                        // This is a simplification; proper implementation needs type info
+                        
+                        // Build function pointer type: return_type (i8*, other_params...)
+                        let mut fp_param_types -> string[] = ["i8*"];
+                        let mut arg_idx -> number = 1;
+                        loop {
+                            if arg_idx >= operands.length {
+                                break;
+                            }
+                            fp_param_types = append_string(fp_param_types, operands[arg_idx].llvm_type);
+                            arg_idx += 1;
+                        }
+                        let fp_params = join_with_separator(fp_param_types, ", ");
+                        let function_type = llvm_return + " (" + fp_params + ")*";
+                        
+                        // Cast vtable pointer to vtable type pointer, then extract method pointer
+                        // Assume vtable is an array/struct of function pointers
+                        let vtable_cast_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        // We need a generic vtable type; use i8* for now as we don't know the concrete struct
+                        current_lines = append_string(current_lines, "  " + vtable_cast_temp + " = bitcast i8* " + vtable_ptr_temp + " to " + function_type + "*");
+                        
+                        let method_ptr_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = load " + function_type + ", " + function_type + "* " + vtable_cast_temp);
+                        
+                        // Build argument list with data pointer as first arg
+                        let mut call_args -> string[] = ["i8* " + data_ptr_temp];
+                        arg_idx = 1;
+                        loop {
+                            if arg_idx >= rendered_args.length {
+                                break;
+                            }
+                            call_args = append_string(call_args, rendered_args[arg_idx]);
+                            arg_idx += 1;
+                        }
+                        let call_arg_text = join_with_separator(call_args, ", ");
+                        
+                        // Emit indirect call
+                        if llvm_return == "void" {
+                            current_lines = append_string(current_lines, "  call void " + method_ptr_temp + "(" + call_arg_text + ")");
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+                        } else {
+                            let result_temp = format_temp_name(current_temp);
+                            current_lines = append_string(current_lines, "  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
+                            let result_operand = LLVMOperand { llvm_type: llvm_return, value: result_temp };
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: result_operand, diagnostics: diagnostics };
+                        }
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: trait dispatch requires at least one argument (the trait object)");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+        }
+    }
+    
     let mut call_symbol = sanitize_symbol(trimmed_target);
     if helper_descriptor != null {
         call_symbol = helper_descriptor.symbol;
