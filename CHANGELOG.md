@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.24 (2025-10-17)
+
+### Bug Fixes
+
+- Base scoped metadata and testing proposal
+  ([`96137ef`](https://github.com/SailfinIO/sailfin/commit/96137efedaec42a51a220fa73e3bf707575dd14f))
+
+- Reduce test duration
+  ([`3bc8abb`](https://github.com/SailfinIO/sailfin/commit/3bc8abbe1e6567ba6a2cea25dd49684a2c1c8471))
+
+
 ## v0.1.1-alpha.23 (2025-10-17)
 
 ### Bug Fixes
