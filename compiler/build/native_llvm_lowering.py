@@ -1833,35 +1833,134 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     collected_mutations = []
     structure = collect_loop_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
-    loop_alloc = allocate_block_label("loop", current_block_counter)
-    loop_label = loop_alloc.label
-    current_block_counter = loop_alloc.next_counter
+    preloaded_locals = []
+    preload_index = 0
+    while True:
+        if preload_index >= len(current_locals):
+            break
+        local = current_locals[preload_index]
+        preload_temp = format_temp_name(current_temp)
+        current_temp += 1
+        preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+        current_lines = append_string(current_lines, preload_line)
+        preloaded_locals = append_string(preloaded_locals, preload_temp)
+        preload_index += 1
+    header_alloc = allocate_block_label("loop.header", current_block_counter)
+    header_label = header_alloc.label
+    current_block_counter = header_alloc.next_counter
+    body_alloc = allocate_block_label("loop.body", current_block_counter)
+    body_label = body_alloc.label
+    current_block_counter = body_alloc.next_counter
+    latch_alloc = allocate_block_label("loop.latch", current_block_counter)
+    latch_label = latch_alloc.label
+    current_block_counter = latch_alloc.next_counter
     exit_alloc = allocate_block_label("afterloop", current_block_counter)
     exit_label = exit_alloc.label
     current_block_counter = exit_alloc.next_counter
-    current_lines = append_string(current_lines, "  br label %" + loop_label)
-    current_lines = append_string(current_lines, loop_label + ":")
-    loop_context = LoopContext(break_label=exit_label, continue_label=loop_label)
+    current_lines = append_string(current_lines, "  br label %" + header_label)
+    current_lines = append_string(current_lines, header_label + ":")
+    loop_context = LoopContext(break_label=exit_label, continue_label=latch_label)
     stacked = append_loop_context(loop_stack, loop_context)
     base_locals = current_locals
     base_allocas = current_allocas
     base_local_id = current_next_local
-    body_scope_id = make_child_scope_id(scope_id, loop_label)
-    body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, stacked, context, body_scope_id, scope_depth + 1, loop_label )
+    body_scope_id = make_child_scope_id(scope_id, body_label)
+    body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, stacked, context, body_scope_id, scope_depth + 1, body_label )
     diagnostics = (diagnostics) + (body_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
-    current_lines = (current_lines) + (body_result.lines)
     current_allocas = body_result.allocas
-    current_locals = base_locals
     current_temp = body_result.temp_index
     current_block_counter = body_result.block_counter
     current_next_local = body_result.next_local_id
     current_bindings = body_result.bindings
     current_next_region = body_result.next_lifetime_region_id
     collected_mutations = (collected_mutations) + (body_result.mutations)
+    header_phis = []
+    phi_stores = []
+    phi_index = 0
+    mutated_names = []
+    mut_idx = 0
+    while True:
+        if mut_idx >= len(body_result.mutations):
+            break
+        mutation = body_result.mutations[mut_idx]
+        already_added = False
+        check_idx = 0
+        while True:
+            if check_idx >= len(mutated_names):
+                break
+            if mutated_names[check_idx] == mutation.name:
+                already_added = True
+                break
+            check_idx += 1
+        if not already_added:
+            mutated_names = append_string(mutated_names, mutation.name)
+        mut_idx += 1
+    current_lines = append_string(current_lines, "  br label %" + body_label)
+    current_lines = append_string(current_lines, body_label + ":")
+    current_lines = (current_lines) + (body_result.lines)
     if not body_result.terminated:
-        current_lines = append_string(current_lines, "  br label %" + loop_label)
+        current_lines = append_string(current_lines, "  br label %" + latch_label)
+    current_lines = append_string(current_lines, latch_label + ":")
+    latch_loads = []
+    load_idx = 0
+    while True:
+        if load_idx >= len(mutated_names):
+            break
+        name = mutated_names[load_idx]
+        local = find_local_binding(base_locals, name)
+        if local != None:
+            load_temp = format_temp_name(current_temp)
+            current_temp += 1
+            load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+            current_lines = append_string(current_lines, load_line)
+            latch_loads = append_string(latch_loads, load_temp)
+        else:
+            latch_loads = append_string(latch_loads, "")
+        load_idx += 1
+    current_lines = append_string(current_lines, "  br label %" + header_label)
+    name_idx = 0
+    while True:
+        if name_idx >= len(mutated_names):
+            break
+        name = mutated_names[name_idx]
+        local = find_local_binding(base_locals, name)
+        if local != None  and  name_idx < len(latch_loads):
+            latch_value = latch_loads[name_idx]
+            if len(latch_value) > 0:
+                preload_value = ""
+                local_idx = 0
+                while True:
+                    if local_idx >= len(base_locals):
+                        break
+                    if base_locals[local_idx].name == name  and  local_idx < len(preloaded_locals):
+                        preload_value = preloaded_locals[local_idx]
+                        break
+                    local_idx += 1
+                if len(preload_value) > 0:
+                    phi_temp = format_temp_name(current_temp)
+                    current_temp += 1
+                    phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]"
+                    header_phis = append_string(header_phis, phi_line)
+                    store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer
+                    phi_stores = append_string(phi_stores, store_line)
+        name_idx += 1
+    final_lines = []
+    line_idx = 0
+    found_header = False
+    while True:
+        if line_idx >= len(current_lines):
+            break
+        line = current_lines[line_idx]
+        final_lines = append_string(final_lines, line)
+        if not found_header  and  line == header_label + ":":
+            found_header = True
+            final_lines = (final_lines) + (header_phis)
+            final_lines = (final_lines) + (phi_stores)
+        line_idx += 1
+    current_lines = final_lines
     current_lines = append_string(current_lines, exit_label + ":")
+    current_locals = base_locals
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations)
 
 def lower_for_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):

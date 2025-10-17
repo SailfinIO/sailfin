@@ -5,7 +5,10 @@
       "Bash(source ~/.bash_profile)",
       "Bash(source ~/.bashrc)",
       "Bash(make test:*)",
-      "Bash(make compile:*)"
+      "Bash(make compile:*)",
+      "Bash(conda run:*)",
+      "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin python:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

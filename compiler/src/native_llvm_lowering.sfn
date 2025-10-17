@@ -2262,25 +2262,53 @@ fn lower_loop_instruction(
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
 
-    let loop_alloc = allocate_block_label("loop", current_block_counter);
-    let loop_label = loop_alloc.label;
-    current_block_counter = loop_alloc.next_counter;
+    // Preload all locals before entering the loop for phi node merging
+    let mut preloaded_locals -> string[] = [];
+    let mut preload_index -> number = 0;
+    loop {
+        if preload_index >= current_locals.length {
+            break;
+        }
+        let local = current_locals[preload_index];
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        current_lines = append_string(current_lines, preload_line);
+        preloaded_locals = append_string(preloaded_locals, preload_temp);
+        preload_index += 1;
+    }
+
+    // Allocate labels: preheader (current), header, body, latch, exit
+    let header_alloc = allocate_block_label("loop.header", current_block_counter);
+    let header_label = header_alloc.label;
+    current_block_counter = header_alloc.next_counter;
+
+    let body_alloc = allocate_block_label("loop.body", current_block_counter);
+    let body_label = body_alloc.label;
+    current_block_counter = body_alloc.next_counter;
+
+    let latch_alloc = allocate_block_label("loop.latch", current_block_counter);
+    let latch_label = latch_alloc.label;
+    current_block_counter = latch_alloc.next_counter;
 
     let exit_alloc = allocate_block_label("afterloop", current_block_counter);
     let exit_label = exit_alloc.label;
     current_block_counter = exit_alloc.next_counter;
 
-    current_lines = append_string(current_lines, "  br label %" + loop_label);
-    current_lines = append_string(current_lines, loop_label + ":");
+    // Preheader: branch to header
+    current_lines = append_string(current_lines, "  br label %" + header_label);
+    current_lines = append_string(current_lines, header_label + ":");
 
-    let loop_context = LoopContext { break_label: exit_label, continue_label: loop_label };
+    // Update loop context: break goes to exit, continue goes to latch
+    let loop_context = LoopContext { break_label: exit_label, continue_label: latch_label };
     let stacked = append_loop_context(loop_stack, loop_context);
 
     let base_locals = current_locals;
     let base_allocas = current_allocas;
     let base_local_id = current_next_local;
 
-    let body_scope_id = make_child_scope_id(scope_id, loop_label);
+    // Lower the body to discover mutations
+    let body_scope_id = make_child_scope_id(scope_id, body_label);
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
@@ -2299,14 +2327,12 @@ fn lower_loop_instruction(
         context,
         body_scope_id,
         scope_depth + 1,
-        loop_label
+        body_label
     );
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
     lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
-    current_lines = current_lines.concat(body_result.lines);
     current_allocas = body_result.allocas;
-    current_locals = base_locals;
     current_temp = body_result.temp_index;
     current_block_counter = body_result.block_counter;
     current_next_local = body_result.next_local_id;
@@ -2314,11 +2340,148 @@ fn lower_loop_instruction(
     current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = collected_mutations.concat(body_result.mutations);
 
-    if !body_result.terminated {
-        current_lines = append_string(current_lines, "  br label %" + loop_label);
+    // Now emit phi nodes in the header for mutated locals
+    let mut header_phis -> string[] = [];
+    let mut phi_stores -> string[] = [];
+    let mut phi_index -> number = 0;
+
+    // Build a unique set of mutated local names
+    let mut mutated_names -> string[] = [];
+    let mut mut_idx -> number = 0;
+    loop {
+        if mut_idx >= body_result.mutations.length {
+            break;
+        }
+        let mutation = body_result.mutations[mut_idx];
+        let mut already_added -> boolean = false;
+        let mut check_idx -> number = 0;
+        loop {
+            if check_idx >= mutated_names.length {
+                break;
+            }
+            if mutated_names[check_idx] == mutation.name {
+                already_added = true;
+                break;
+            }
+            check_idx += 1;
+        }
+        if !already_added {
+            mutated_names = append_string(mutated_names, mutation.name);
+        }
+        mut_idx += 1;
     }
 
+    // Note: We'll generate phi nodes after we know the latch load values
+
+    // For a simple loop, always branch to body (no condition check)
+    current_lines = append_string(current_lines, "  br label %" + body_label);
+    current_lines = append_string(current_lines, body_label + ":");
+
+    // Append body lines
+    current_lines = current_lines.concat(body_result.lines);
+
+    // If body doesn't terminate, branch to latch
+    if !body_result.terminated {
+        current_lines = append_string(current_lines, "  br label %" + latch_label);
+    }
+
+    // Latch: load mutated locals, then branch back to header
+    current_lines = append_string(current_lines, latch_label + ":");
+
+    // Load the values of mutated locals in the latch for the phi nodes
+    let mut latch_loads -> string[] = [];
+    let mut load_idx -> number = 0;
+    loop {
+        if load_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[load_idx];
+        let local = find_local_binding(base_locals, name);
+
+        if local != null {
+            let load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+            current_lines = append_string(current_lines, load_line);
+            latch_loads = append_string(latch_loads, load_temp);
+        } else {
+            latch_loads = append_string(latch_loads, "");
+        }
+
+        load_idx += 1;
+    }
+
+    current_lines = append_string(current_lines, "  br label %" + header_label);
+
+    // Now generate phi nodes using the latch load values
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+        let local = find_local_binding(base_locals, name);
+
+        if local != null && name_idx < latch_loads.length {
+            let latch_value = latch_loads[name_idx];
+
+            if latch_value.length > 0 {
+                // Find preloaded value for this local
+                let mut preload_value -> string = "";
+                let mut local_idx -> number = 0;
+                loop {
+                    if local_idx >= base_locals.length {
+                        break;
+                    }
+                    if base_locals[local_idx].name == name && local_idx < preloaded_locals.length {
+                        preload_value = preloaded_locals[local_idx];
+                        break;
+                    }
+                    local_idx += 1;
+                }
+
+                if preload_value.length > 0 {
+                    let phi_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+
+                    let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
+                    header_phis = append_string(header_phis, phi_line);
+
+                    let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
+                    phi_stores = append_string(phi_stores, store_line);
+                }
+            }
+        }
+
+        name_idx += 1;
+    }
+
+    // Now reconstruct the header with phi nodes after we know the structure
+    // We need to insert the phi nodes after the header label but before the branch to body
+    let mut final_lines -> string[] = [];
+    let mut line_idx -> number = 0;
+    let mut found_header -> boolean = false;
+    loop {
+        if line_idx >= current_lines.length {
+            break;
+        }
+        let line = current_lines[line_idx];
+        final_lines = append_string(final_lines, line);
+
+        // Insert phi nodes right after header label
+        if !found_header && line == header_label + ":" {
+            found_header = true;
+            final_lines = final_lines.concat(header_phis);
+            final_lines = final_lines.concat(phi_stores);
+        }
+        line_idx += 1;
+    }
+    current_lines = final_lines;
+
+    // Exit label
     current_lines = append_string(current_lines, exit_label + ":");
+
+    current_locals = base_locals;
 
     return BlockLoweringResult {
         lines: current_lines,

@@ -105,14 +105,22 @@ roadmaps.
   local pointer. For full `if`/`else` statements, the compiler emits phi nodes that
   union mutations from both branches, correctly handling cases where both arms mutate
   shared locals and cases where each arm mutates unique locals. Terminated branches are
-  skipped during phi generation. This enables LLVM's optimization passes to work more
+  skipped during phi generation. For `loop` constructs, the lowering now creates explicit
+  preheader, header, body, latch, and exit labels, emitting phi nodes in the header for
+  locals mutated in the body (merging values from the preheader and latch), and ensuring
+  `continue` targets the latch instead of jumping directly back to the header. For `for`
+  loops (both range-based and array iteration), the proper structure (header with condition
+  check, body, increment/latch, exit) was already in place with `continue` correctly
+  targeting the increment label. This enables LLVM's optimization passes to work more
   effectively with the generated IR. Regression coverage lives in
   `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`
   plus propagation tests (`test_mutations_propagate_through_if_then`,
   `test_mutations_propagate_through_if_else`, `test_mutations_propagate_through_loop`,
   `test_mutations_propagate_through_match`) and execution validation via
-  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`
-  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_if_else`.
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_if_else`,
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program`
+  (which includes `loop_and_match` with loop accumulators and `sum_for` with for-loop accumulators).
   Move diagnostics now thread source spans from `.sfn-asm` through the native IR,
   so LLVM lowering reports use-after-move errors with line and column ranges
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move`
