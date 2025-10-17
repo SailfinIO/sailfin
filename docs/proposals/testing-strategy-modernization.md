@@ -14,7 +14,8 @@ tiered strategy for Python- and Sailfin-native validation.
 ## 1. Context
 
 - `make test` invokes `pytest` inside the Conda `sailfin` environment (`Makefile`
-  target `test`). The last full run on a developer laptop took **14m23s**.
+  target `test`). The last full run before caching improvements took **14m23s**,
+  while the latest cached run (October 2025) completes in **~82s** on an M3 Air.
 - Stage1-focused tests depend on the function-scoped `stage1_environment`
   fixture, which recompiles the compiler into a temporary directory on every
   test invocation (`compiler/tests/conftest.py:15`). The suite currently touches
@@ -71,27 +72,29 @@ tiered strategy for Python- and Sailfin-native validation.
 
 ### 4.1 Phase 0 — Baseline Instrumentation
 
-- Add `pytest --durations=20` and Stage1 rebuild counters to CI logs to track
-  hotspots.
-- Extend the test fixture to emit debug logging when cache misses occur (guarded
-  behind `PYTEST_STAGE1_DEBUG=1`) so developers can diagnose cold-starts.
-- Document the current timings in `docs/status.md` as the starting baseline.
+- [x] Add `pytest --durations=20` and Stage1 rebuild counters to CI logs to
+      track hotspots.
+- [x] Extend the test fixture to emit debug logging when cache misses occur
+      (guarded behind `PYTEST_STAGE1_DEBUG=1`) so developers can diagnose
+      cold-starts.
+- [x] Document the current timings in `docs/status.md` as the starting baseline.
 
 ### 4.2 Phase 1 — Deterministic Stage1 Build Cache
 
-- Introduce a content-addressed cache (e.g., `.pytest-stage1/<hash>/compiler`) in
-  `tools/compile_with_stage1.py`. Hash `compiler/src/**/*.sfn`, `runtime/**/*.sfn`,
-  and the lowering pipeline version to derive the cache key.
-- Refactor `stage1_environment` into a session-scoped fixture that reuses the
-  cached build, invalidating only when the hash changes. Maintain an opt-out via
-  `PYTEST_STAGE1_NO_CACHE=1` for debugging.
-- Move module invalidation from "per test" to "per build" by clearing
-  `compiler.build*` modules only when swapping cache entries. Keep the existing
-  `importlib.invalidate_caches()` safeguard.
-- Teach `make test` to pre-warm the Stage1 cache (optional `make test CACHE=warm`)
-  so CI and local loops avoid first-test compilation spikes.
-- Update `docs/status.md` with the new behaviour and troubleshooting steps for
-  cache busting (e.g., `rm -rf .pytest-stage1`).
+- [x] Introduce a content-addressed cache (e.g., `.pytest-stage1/<hash>/compiler`)
+      in `tools/compile_with_stage1.py`. Hash `compiler/src/**/*.sfn`,
+      `runtime/**/*.sfn`, and the lowering pipeline version to derive the cache
+      key.
+- [x] Refactor `stage1_environment` into a session-scoped fixture that reuses the
+      cached build, invalidating only when the hash changes. Maintain an opt-out
+      via `PYTEST_STAGE1_NO_CACHE=1` for debugging.
+- [x] Move module invalidation from "per test" to "per build" by clearing
+      `compiler.build*` modules only when swapping cache entries. Keep the
+      existing `importlib.invalidate_caches()` safeguard.
+- [x] Provide a CLI/`make warm-stage1-cache` path to pre-warm the Stage1 cache so
+      CI and local loops avoid first-test compilation spikes.
+- [x] Update `docs/status.md` with the new behaviour and troubleshooting steps
+      for cache busting (e.g., `rm -rf .pytest-stage1`).
 
 ### 4.3 Phase 2 — Tiered Suites & Developer Ergonomics
 

@@ -1,6 +1,6 @@
 # Sailfin project automation
 
-.PHONY: help install test compile clean clean-stage1 package
+.PHONY: help install test warm-stage1-cache compile clean clean-stage1 package
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -17,6 +17,7 @@ help:
 	@echo "Common Sailfin tasks"
 	@echo "  make install      # Create or update the Conda env used for the compiler"
 	@echo "  make test         # Run the full pytest suite (pass PYTEST_ARGS=... to filter)"
+	@echo "  make warm-stage1-cache # Pre-populate the pytest stage1 build cache"
 	@echo "  make compile      # Emit Python modules from compiler/src via the stage1 pipeline"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
@@ -26,6 +27,9 @@ install:
 
 test:
 	$(CONDA) run -n $(CONDA_ENV) pytest $(PYTEST_ARGS)
+
+warm-stage1-cache:
+	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py --warm-cache
 
 clean:
 	rm -rf dist

@@ -274,3 +274,19 @@ roadmaps.
 Track detailed milestones and sequencing in `docs/roadmap.md`. When a
 feature graduates from prototype into the shipping stage1 toolchain, update the
 table above and trim related “planned” callouts from the spec and examples.
+
+## Test Harness
+
+- Stage1 tests run via `make test` (pytest inside the `sailfin` Conda env). With
+  the content-addressed Stage1 cache introduced in October 2025 the full suite
+  now completes in **~82 seconds** on an M2 Mac Pro (previously ~11 minutes).
+- Cached builds live under `.pytest-stage1/<hash>/compiler` and are derived from
+  the contents of `compiler/src/**/*.sfn`, `runtime/**/*.sfn`, generated
+  `compiler/build/**/*.py`, and the Python pipeline version. Cache hits and
+  misses are logged when `PYTEST_STAGE1_DEBUG=1`.
+- Developers can disable the cache with `PYTEST_STAGE1_NO_CACHE=1` or relocate it
+  via `PYTEST_STAGE1_CACHE_DIR`. Remove the `.pytest-stage1/` directory to force
+  recompilation if stale artefacts are suspected.
+- `make warm-stage1-cache` pre-populates the cache (respects
+  `PYTEST_STAGE1_CACHE_DIR`) so CI or fresh clones can avoid the first-run
+  compile spike.

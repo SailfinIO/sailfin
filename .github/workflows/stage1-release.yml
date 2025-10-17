@@ -28,6 +28,9 @@ jobs:
 
       - name: Run tests
         shell: bash -l {0}
+        env:
+          PYTEST_ARGS: "--durations=20"
+          PYTEST_STAGE1_DEBUG: "1"
         run: |
           CONDA=$(which conda) make test
 
