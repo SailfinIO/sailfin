@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.45 (2025-10-17)
+
+### Bug Fixes
+
+- Lower method dispatch through interface values
+  ([`1cbb374`](https://github.com/SailfinIO/sailfin/commit/1cbb37497fd69df1eed6998807b5aac7588e5580))
+
+
 ## v0.1.1-alpha.44 (2025-10-17)
 
 ### Bug Fixes
