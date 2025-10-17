@@ -4,6 +4,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 NESTED_PROMPT_SOURCE = """
 fn outer() {
   let worker = fn() {

@@ -243,6 +243,9 @@ roadmaps.
 - `make test` runs the stage1-focused pytest suite (`compiler/tests/`), covering
   the end-to-end self-host check (`test_stage1_artifact.py`) and native lowering
   validation.
+- `make test-unit` targets fast Sailfin-specific checks (`pytest -m "unit and not stage2"`), while
+  `make test-integration` isolates artifact packaging and self-hosting flows, and
+  `make test-stage2` exercises the LLVM/native backend smoke suite.
 - `compiler/tests/test_native_llvm_execution.py` lowers numeric, boolean,
   integer, and primitive-array-iterating samples (including `boolean[]` and
   `int[]` literals) to LLVM IR and executes them through `llvmlite` so Stage2

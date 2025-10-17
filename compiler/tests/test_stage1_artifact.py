@@ -13,6 +13,8 @@ from tools import package_stage1
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.integration
 def test_stage1_artifact_can_compile_stage1(tmp_path: pathlib.Path) -> None:

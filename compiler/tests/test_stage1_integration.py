@@ -6,6 +6,8 @@ from typing import Iterable
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPILER_SRC_ROOT = REPO_ROOT / "compiler" / "src"
 

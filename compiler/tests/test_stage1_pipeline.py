@@ -4,6 +4,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 HELLO_WORLD_SOURCE = """
 fn main() ![io] {
   print.info("Hello, Sailfin!");

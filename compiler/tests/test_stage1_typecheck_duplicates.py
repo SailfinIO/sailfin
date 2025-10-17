@@ -5,6 +5,8 @@ from typing import Iterable
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 DUPLICATE_CASES = (
     (
         "struct fields",

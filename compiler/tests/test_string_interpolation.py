@@ -4,6 +4,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_interpolated_string_lowering() -> None:

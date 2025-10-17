@@ -4,6 +4,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 MISSING_EFFECT_SOURCE = """
 fn launch() {
   let worker = fn() {

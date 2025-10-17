@@ -6,6 +6,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_struct_missing_interface_member_reports_diagnostic() -> None:

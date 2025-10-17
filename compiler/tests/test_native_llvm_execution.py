@@ -8,6 +8,8 @@ from compiler.build.emit_native import NativeArtifact, NativeModule
 from compiler.build.main import compile_to_native_llvm
 from compiler.build.native_llvm_lowering import lower_to_llvm
 
+pytestmark = pytest.mark.stage2
+
 _LLVM_TARGET_INITIALIZED = False
 
 

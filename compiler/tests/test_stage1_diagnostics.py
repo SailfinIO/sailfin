@@ -5,6 +5,8 @@ import textwrap
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.usefixtures("stage1_environment")
 def test_missing_effect_diagnostic_includes_source_snippet() -> None:

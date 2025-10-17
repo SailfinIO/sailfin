@@ -6,6 +6,8 @@ from typing import Any, Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 

@@ -8,6 +8,8 @@ from typing import Any, Callable, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
