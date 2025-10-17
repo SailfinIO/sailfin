@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.31 (2025-10-17)
+
+### Bug Fixes
+
+- Warnings for pointer layouts
+  ([`84f1d29`](https://github.com/SailfinIO/sailfin/commit/84f1d29fc781877ad7d52b46c19e0c9dfcc2d865))
+
+### Documentation
+
+- Roadmap task enhancement
+  ([`6d080f0`](https://github.com/SailfinIO/sailfin/commit/6d080f090621cd75977d6b3a0bf49c326c37b5d4))
+
+
 ## v0.1.1-alpha.30 (2025-10-17)
 
 ### Bug Fixes
