@@ -6,7 +6,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Iterator
+from typing import Dict, Iterator, Tuple
 
 import pytest
 
@@ -72,6 +72,42 @@ def stage1_environment(_session_stage1_environment: pathlib.Path) -> Iterator[pa
         _clear_stage1_modules()
 
 
+class Stage2Harness:
+    """Compile Sailfin sources through the native and LLVM backends with caching."""
+
+    def __init__(self) -> None:
+        self._native_cache: Dict[Tuple[str, str], object] = {}
+        self._llvm_cache: Dict[Tuple[str, str], object] = {}
+
+    def compile_to_native(self, source: str, *, module_name: str = "<memory>") -> object:
+        key = (module_name, source)
+        cached = self._native_cache.get(key)
+        if cached is not None:
+            return cached
+        stage1_main = importlib.import_module("compiler.build.main")
+        result = stage1_main.compile_to_native(source)
+        self._native_cache[key] = result
+        return result
+
+    def compile_to_native_from_path(self, path: pathlib.Path) -> object:
+        source = path.read_text(encoding="utf-8")
+        return self.compile_to_native(source, module_name=str(path))
+
+    def compile_to_native_llvm(self, source: str, *, module_name: str = "<memory>") -> object:
+        key = (module_name, source)
+        cached = self._llvm_cache.get(key)
+        if cached is not None:
+            return cached
+        stage1_main = importlib.import_module("compiler.build.main")
+        result = stage1_main.compile_to_native_llvm(source)
+        self._llvm_cache[key] = result
+        return result
+
+    def compile_to_native_llvm_from_path(self, path: pathlib.Path) -> object:
+        source = path.read_text(encoding="utf-8")
+        return self.compile_to_native_llvm(source, module_name=str(path))
+
+
 def _clear_stage1_modules() -> None:
     for name in list(sys.modules):
         if name == "compiler.build" or name.startswith("compiler.build."):
@@ -90,3 +126,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # p
     misses = stats.get("misses", 0)
     builds = stats.get("builds", 0)
     print(f"[stage1-cache] summary hits={hits} misses={misses} builds={builds}")
+
+
+@pytest.fixture(scope="session")
+def _stage2_harness() -> Stage2Harness:
+    return Stage2Harness()
+
+
+@pytest.fixture()
+def stage2_environment(stage1_environment: pathlib.Path, _stage2_harness: Stage2Harness) -> Stage2Harness:
+    """Provide cached helpers for compiling Sailfin sources to Stage2 outputs."""
+
+    return _stage2_harness

@@ -98,33 +98,33 @@ tiered strategy for Python- and Sailfin-native validation.
 
 ### 4.3 Phase 2 — Tiered Suites & Developer Ergonomics
 
-- Adopt explicit `@pytest.mark.unit`, `@pytest.mark.integration`,
-  `@pytest.mark.e2e`, and introduce `@pytest.mark.stage2` for native backend
-  checks. Retrofit existing tests accordingly (e.g., mark
-  `compiler/tests/test_stage1_artifact.py:17` as `integration`, Stage2 exec
-  tests as `stage2`).
-- Split Make targets: `make test-unit` (default `-m "unit and not stage2"`),
-  `make test-integration`, `make test-stage2`, preserving `make test` as the
-  union for CI.
-- Guard slow flows (`package_stage1`, LLVM execution) behind integration/stage2
-  markers so ad-hoc runs can skip them unless requested.
-- Update contributor docs to explain when to run each target and how the suite
-  maps to roadmap items.
+- [x] Adopt explicit `@pytest.mark.unit`, `@pytest.mark.integration`,
+      `@pytest.mark.e2e`, and introduce `@pytest.mark.stage2` for native backend
+      checks. Retrofit existing tests accordingly (e.g.,
+      `compiler/tests/test_stage1_artifact.py` marked `integration`, Stage2 exec
+      tests marked `stage2`).
+- [x] Split Make targets: `make test-unit` (default `-m "unit and not stage2"`),
+      `make test-integration`, `make test-stage2`, preserving `make test` as the
+      union for CI.
+- [x] Guard slow flows (`package_stage1`, LLVM execution) behind integration/stage2
+      markers so ad-hoc runs can skip them unless requested.
+- [x] Update contributor docs (`docs/status.md`) to explain when to run each
+      target and how the suite maps to roadmap items.
 
 ### 4.4 Phase 3 — Stage2 Validation Harness
 
-- Create a `stage2_environment` fixture that compiles Sailfin→LLVM once per run,
-  mirroring the Stage1 cache contract.
-- Add golden Sailfin-native IR snapshots (e.g., `.sfn-asm`, LLVM textual IR)
-  for representative programs: capability manifests, interface dispatch, enum
-  layouts, coroutine lowering. Validate them with diff-friendly assertions.
-- Introduce differential tests that compile selected programs through Stage1
-  Python and Stage2 LLVM backends, then compare observable behaviour (e.g.,
-  diagnostics, struct metadata, effect manifests).
-- Add runtime smoke binaries that execute Stage2 outputs via `llvmlite` or a
-  lightweight runner, covering capability enforcement and runtime prelude calls.
-- Wire Stage2 coverage expectations into `docs/status.md` so behaviour changes
-  flag documentation updates.
+- [x] Create a `stage2_environment` fixture that compiles Sailfin→LLVM once per
+      run, mirroring the Stage1 cache contract.
+- [x] Add golden Sailfin-native IR snapshots (e.g., `.sfn-asm`, LLVM textual
+      IR) for representative programs: `compiler/tests/test_stage2_golden.py`
+      locks the self-host metadata sample.
+- [x] Introduce differential tests that compile selected programs through
+      Stage1 Python and Stage2 LLVM backends, then compare observable
+      behaviour (e.g., diagnostics, struct metadata, effect manifests).
+- [x] Add runtime smoke binaries that execute Stage2 outputs via `llvmlite` or a
+      lightweight runner (`compiler/tests/test_native_llvm_execution.py`).
+- [x] Wire Stage2 coverage expectations into `docs/status.md` so behaviour
+      changes flag documentation updates.
 
 ### 4.5 Phase 4 — Toward Sailfin-Native Harness
 
@@ -146,6 +146,7 @@ tiered strategy for Python- and Sailfin-native validation.
   tests declare markers and avoid accidental fixture misuse.
 - Ensure `docs/README.md` and `docs/roadmap.md` reference the new targets so the
   navigation guide remains accurate.
+- Nightly runs that force cache busts to ensure the Stage2 harness continues to rebuild cleanly.
 
 ## 6. Risks & Mitigations
 

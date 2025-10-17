@@ -97,6 +97,9 @@ roadmaps.
   for the rejection/acceptance coverage. Raw pointer access remains gated behind `unsafe extern`
   declarations and lexical `unsafe { ... }` blocks so Stage2 can target LLVM/WASM
   without exposing unchecked pointer mutation to safe code.
+  Snapshot coverage now locks representative `.sfn-asm` and LLVM IR output via
+  `compiler/tests/test_stage2_golden.py`, and the `stage2_environment` fixture
+  caches Sailfin→LLVM compilations for the entire suite.
   Parameter declarations now emit `.param` span metadata inside `.sfn-asm`, so
   suspension diagnostics also highlight the mutable borrow parameter location;
   regression coverage lives in

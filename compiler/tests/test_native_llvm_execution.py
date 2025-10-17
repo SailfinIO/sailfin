@@ -5,12 +5,19 @@ import llvmlite.binding as llvm
 import pytest
 
 from compiler.build.emit_native import NativeArtifact, NativeModule
-from compiler.build.main import compile_to_native_llvm
 from compiler.build.native_llvm_lowering import lower_to_llvm
 
-pytestmark = pytest.mark.stage2
+pytestmark = [pytest.mark.stage2, pytest.mark.usefixtures("stage1_environment")]
 
 _LLVM_TARGET_INITIALIZED = False
+
+
+@pytest.fixture()
+def compile_stage2(stage2_environment):
+    def _compile(source: str, *, module_name: str = "<memory>"):
+        return stage2_environment.compile_to_native_llvm(source, module_name=module_name)
+
+    return _compile
 
 
 def _assert_only_pointer_layout_warnings(diagnostics):
@@ -228,8 +235,8 @@ fn main() -> number {
         ),
     ],
 )
-def test_native_llvm_execution_runs_program(source: str, expected: float) -> None:
-    lowered = compile_to_native_llvm(source)
+def test_native_llvm_execution_runs_program(source: str, expected: float, compile_stage2) -> None:
+    lowered = compile_stage2(source)
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     assert "define double @add" in lowered.ir
     assert "define double @main" in lowered.ir
@@ -250,7 +257,7 @@ def test_native_llvm_execution_runs_program(source: str, expected: float) -> Non
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_supports_boolean_and_integer_primitives() -> None:
+def test_native_llvm_execution_supports_boolean_and_integer_primitives(compile_stage2) -> None:
     source = """
 fn toggle(value -> boolean) -> boolean {
     if value {
@@ -292,7 +299,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source)
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define i1 @toggle" in ir
@@ -336,7 +343,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_iterates_number_arrays() -> None:
+def test_native_llvm_execution_iterates_number_arrays(compile_stage2) -> None:
     source = """
 fn sum(values -> number[]) -> number {
     let mut total -> number = 0;
@@ -381,7 +388,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source)
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "{ double*, i64 }* %values" in ir
@@ -426,7 +433,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_lowers_struct_literals() -> None:
+def test_native_llvm_execution_lowers_struct_literals(compile_stage2) -> None:
     source = """
 struct Pair {
     left -> number;
@@ -452,7 +459,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="struct_literals")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     assert "%Pair = type { double, double }" in lowered.ir
 
@@ -464,7 +471,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_iterates_array_bindings_without_annotations() -> None:
+def test_native_llvm_execution_iterates_array_bindings_without_annotations(compile_stage2) -> None:
     source = """
 fn sum_alias(values -> number[]) -> number {
     let alias = values;
@@ -489,7 +496,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="array_bindings")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
 
     engine, module = _compile_ir(lowered.ir)
@@ -512,7 +519,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_reports_interface_metadata() -> None:
+def test_native_llvm_execution_reports_interface_metadata(compile_stage2) -> None:
     source = """
 interface Greeter {
     fn greet(self -> Greeter) -> string;
@@ -539,7 +546,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="interface_metadata")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
 
     ir = lowered.ir
@@ -565,7 +572,7 @@ fn main() -> number {
     assert implementation.interfaces == ["Greeter", "Formatter"]
 
 
-def test_native_llvm_execution_emits_lifetime_regions() -> None:
+def test_native_llvm_execution_emits_lifetime_regions(compile_stage2) -> None:
     source = """
 fn forward(value -> number) -> number {
     let mut slot -> number = value;
@@ -578,7 +585,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="lifetime_regions")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
 
     regions = lowered.lifetime_regions
@@ -595,7 +602,7 @@ fn main() -> number {
     assert alias_region.start_span.start_column > 0
 
 
-def test_native_llvm_execution_reports_borrow_lifetime_violation() -> None:
+def test_native_llvm_execution_reports_borrow_lifetime_violation(compile_stage2) -> None:
     source = """
 fn leak(flag -> number) -> number {
     let mut outer -> number = 1;
@@ -612,7 +619,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="borrow_violation")
     diagnostics = lowered.diagnostics
     violation = [
         diag for diag in diagnostics if "borrow `alias` of `inner` escapes lifetime" in diag
@@ -620,7 +627,7 @@ fn main() -> number {
     assert violation, f"expected lifetime violation diagnostic, saw: {diagnostics}"
 
 
-def test_native_llvm_execution_iterates_non_number_arrays() -> None:
+def test_native_llvm_execution_iterates_non_number_arrays(compile_stage2) -> None:
     source = """
 fn any_true(values -> boolean[]) -> boolean {
     for value in values {
@@ -671,7 +678,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="non_number_arrays")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define i1 @any_true" in ir
@@ -719,7 +726,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_iterates_struct_arrays() -> None:
+def test_native_llvm_execution_iterates_struct_arrays(compile_stage2) -> None:
     source = """
 struct Pair {
     left -> number;
@@ -750,7 +757,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="struct_arrays")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "%Pair = type { double, double }" in ir
@@ -783,7 +790,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_lowers_borrow_expressions() -> None:
+def test_native_llvm_execution_lowers_borrow_expressions(compile_stage2) -> None:
     source = """
 fn project(view -> &number) -> number {
     if 1 == 0 {
@@ -805,7 +812,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="borrow_expressions")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define double @project(double* %view)" in ir
@@ -819,7 +826,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_reports_conflicting_mut_borrows() -> None:
+def test_native_llvm_execution_reports_conflicting_mut_borrows(compile_stage2) -> None:
     source = """
 fn conflict() -> number {
     let mut slot -> number = 0;
@@ -833,14 +840,14 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="conflicting_mut_borrows")
     non_pointer = [
         diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
     assert all("conflicts with" in diag for diag in non_pointer)
 
 
-def test_native_llvm_execution_reports_use_after_move() -> None:
+def test_native_llvm_execution_reports_use_after_move(compile_stage2) -> None:
     source = """
     fn reuse(value -> Affine<number>) -> number {
         let alias = value;
@@ -852,7 +859,7 @@ def test_native_llvm_execution_reports_use_after_move() -> None:
     }
     """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="use_after_move")
     use_after_move_diags = [
         diag for diag in lowered.diagnostics if "use-after-move" in diag]
     assert use_after_move_diags, "expected use-after-move diagnostics"
@@ -864,7 +871,7 @@ def test_native_llvm_execution_reports_use_after_move() -> None:
         "unsupported parameter type" in diag for diag in lowered.diagnostics)
 
 
-def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None:
+def test_native_llvm_execution_reports_use_after_move_for_affine_array(compile_stage2) -> None:
     source = """
     fn reuse(values -> Affine<number[]>) -> number {
         let alias = values;
@@ -877,7 +884,7 @@ def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None
     }
     """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="use_after_move_affine")
     use_after_move_diags = [
         diag for diag in lowered.diagnostics if "use-after-move" in diag]
     assert use_after_move_diags, "expected use-after-move diagnostics"
@@ -889,7 +896,7 @@ def test_native_llvm_execution_reports_use_after_move_for_affine_array() -> None
         "unsupported parameter type" in diag for diag in lowered.diagnostics)
 
 
-def test_native_llvm_execution_reports_conflicting_shared_borrows() -> None:
+def test_native_llvm_execution_reports_conflicting_shared_borrows(compile_stage2) -> None:
     source = """
 fn conflict_shared() -> number {
     let mut slot -> number = 0;
@@ -903,7 +910,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="conflicting_shared_borrows")
     non_pointer = [
         diag for diag in lowered.diagnostics if "defaulting to pointer layout" not in diag]
     assert non_pointer, "expected conflict diagnostics"
@@ -972,7 +979,7 @@ def test_native_llvm_allows_await_without_mutable_borrow() -> None:
     assert not borrow_diags, lowered.diagnostics
 
 
-def test_native_llvm_execution_surfaces_function_borrow_effects() -> None:
+def test_native_llvm_execution_surfaces_function_borrow_effects(compile_stage2) -> None:
     source = """
 fn borrow_mutable() -> number {
     let mut slot -> number = 0;
@@ -986,7 +993,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="borrow_effects")
     effect_map = {
         entry.name: entry.effects for entry in lowered.function_effects}
     assert "borrow_mutable" in effect_map
@@ -1059,7 +1066,7 @@ def test_native_llvm_execution_capability_manifest_propagates_composite_effects(
         "io", "mut", "read"}, manifest_map
 
 
-def test_native_llvm_execution_supports_range_strides() -> None:
+def test_native_llvm_execution_supports_range_strides(compile_stage2) -> None:
     source = """
 fn sum_stride(limit -> number, stride -> number) -> number {
     let mut total -> number = 0;
@@ -1098,7 +1105,7 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="range_strides")
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "0..limit..stride" not in ir  # ensure lowered IR not raw range text
@@ -1117,7 +1124,7 @@ fn main() -> number {
         engine.remove_module(module)
 
 
-def test_native_llvm_execution_reports_zero_literal_stride() -> None:
+def test_native_llvm_execution_reports_zero_literal_stride(compile_stage2) -> None:
     source = """
 fn main() -> number {
     let mut total -> number = 0;
@@ -1128,6 +1135,6 @@ fn main() -> number {
 }
 """
 
-    lowered = compile_to_native_llvm(source)
+    lowered = compile_stage2(source, module_name="zero_stride")
     assert any(
         "stride must not be zero" in diagnostic for diagnostic in lowered.diagnostics)
