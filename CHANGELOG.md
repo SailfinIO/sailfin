@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.29 (2025-10-17)
+
+### Bug Fixes
+
+- Stage2 runner needed
+  ([`b5aebc1`](https://github.com/SailfinIO/sailfin/commit/b5aebc12684e00726dadacf98c0cc2151dd6bb09))
+
+### Documentation
+
+- Stage2 prioritization
+  ([`d3a26ba`](https://github.com/SailfinIO/sailfin/commit/d3a26ba984665f5ef77b937cd96afabe9cfd660e))
+
+
 ## v0.1.1-alpha.28 (2025-10-17)
 
 ### Bug Fixes
