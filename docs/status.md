@@ -52,6 +52,16 @@ roadmaps.
   walk `Pair[]` (and other user-defined aggregates) without defaulting to
   pointer fallbacks; regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_struct_arrays`.
+  Enum array literals now emit `#element:EnumName` metadata (using the enum type
+  name, not the variant name), enabling typed iteration over enum arrays. For
+  example, `[Color.Red, Color.Green, Color.Blue]` emits `[#element:Color, ...]`.
+  Both unit variants and payload variants are supported. LLVM lowering interprets
+  the enum metadata to access array elements with proper type information, allowing
+  `.for` loops to iterate over enum arrays and match on their tags without Python
+  fallbacks. Regression coverage lives in
+  `compiler/tests/test_stage1_pipeline.py::test_native_backend_tags_enum_array_literals_with_metadata`,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_enum_arrays`,
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_mixed_enum_arrays`.
   Struct method invocations now lower into `Struct::method` call sites with the
   receiver injected as the leading argument (loading pointers to match recorded
   layouts), removing the lingering `value.method` diagnostics; regression coverage

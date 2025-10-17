@@ -1209,7 +1209,15 @@ def infer_expression_type(expression):
     if expression.variant == "Struct":
         if len(expression.type_name) == 0:
             return ""
+        if len(expression.type_name) == 2:
+            return expression.type_name[0]
         return join_with_separator(expression.type_name, ".")
+    if expression.variant == "Member":
+        if expression.object.variant == "Identifier":
+            return expression.object.name
+        if expression.object.variant == "Member":
+            return infer_expression_type(expression.object)
+        return ""
     if expression.variant == "Array":
         nested = infer_array_element_type(expression.elements)
         if len(nested) == 0:

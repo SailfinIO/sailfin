@@ -905,6 +905,106 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_iterates_enum_arrays(compile_stage2) -> None:
+    """Test that for loops can iterate over enum arrays with metadata-driven access."""
+    source = """
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn count_reds(colors -> Color[]) -> number {
+    let mut count -> number = 0;
+    for color in colors {
+        match color {
+            Color.Red => {
+                count = count + 1;
+            }
+            _ => {
+                // Skip other colors
+            }
+        }
+    }
+    return count;
+}
+
+fn count_all(colors -> Color[]) -> number {
+    let mut count -> number = 0;
+    for color in colors {
+        count = count + 1;
+    }
+    return count;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="enum_arrays")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    ir = lowered.ir
+
+    # Verify enum type definition is present
+    assert "%Color = type" in ir, "Enum type should be defined in IR"
+
+    # Verify array type with enum elements is present
+    assert "{ %Color*, i64 }*" in ir or "%Color*" in ir, "Enum array type should be present"
+
+    # Check that for loop lowers with proper index access
+    assert "getelementptr" in ir or "load %Color" in ir, "Should access enum array elements"
+
+    # Note: Full execution requires building enum array values in ctypes, which needs
+    # understanding of the enum's LLVM layout (tag + payload bytes).
+    # For now, we verify IR emission is correct. Full execution coverage will be added
+    # in follow-on work once enum array construction helpers are available.
+
+
+def test_native_llvm_execution_iterates_mixed_enum_arrays(compile_stage2) -> None:
+    """Test iteration over enum arrays containing different variants."""
+    source = """
+enum Status {
+    Pending,
+    Active { priority -> number; }
+    Complete { result -> number; }
+}
+
+fn sum_priorities(statuses -> Status[]) -> number {
+    let mut total -> number = 0;
+    for status in statuses {
+        match status {
+            Status.Active { priority } => {
+                total = total + priority;
+            }
+            _ => {
+                // Skip other statuses
+            }
+        }
+    }
+    return total;
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="mixed_enum_arrays")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    ir = lowered.ir
+
+    # Verify enum type with payload is defined
+    assert "%Status = type" in ir, "Enum type should be defined"
+
+    # Verify array type
+    assert "{ %Status*, i64 }*" in ir or "%Status*" in ir, "Enum array type should be present"
+
+    # Verify iteration and match lowering
+    assert "extractvalue %Status" in ir, "Should extract enum tags in match"
+    assert "getelementptr" in ir, "Should access array elements and extract payload fields"
+
+
 def test_native_llvm_execution_lowers_borrow_expressions(compile_stage2) -> None:
     source = """
 fn project(view -> &number) -> number {

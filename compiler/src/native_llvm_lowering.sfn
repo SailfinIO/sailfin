@@ -8518,6 +8518,7 @@ fn map_metadata_annotation(context -> TypeContext, annotation -> string) -> stri
     if primitive.length > 0 {
         return primitive;
     }
+    // Check if this is an array type annotation (e.g., "Color[]")
     if trimmed.length > 2 {
         let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
         if suffix == "[]" {

@@ -1521,7 +1521,30 @@ fn infer_expression_type(expression -> Expression) -> string {
         if expression.type_name.length == 0 {
             return "";
         }
+        // For enum variants (e.g., Color.Red), type_name is ["Color", "Red"].
+        // For struct literals (e.g., Person { ... }), type_name is ["Person"].
+        // When inferring array element types, we want just the enum name (first component)
+        // so that Color.Red[] becomes [#element:Color, ...], not [#element:Color.Red, ...].
+        if expression.type_name.length == 2 {
+            // Likely an enum variant; return just the enum name.
+            return expression.type_name[0];
+        }
         return join_with_separator(expression.type_name, ".");
+    }
+    if expression.variant == "Member" {
+        // Member expressions can represent enum variants without fields (e.g., Color.Red).
+        // We need to extract the type name from the member chain.
+        // For Color.Red, this is Member { object: Identifier("Color"), member: "Red" }.
+        // We want to return "Color" as the type.
+        if expression.object.variant == "Identifier" {
+            // Simple case: Color.Red where Color is an identifier
+            return expression.object.name;
+        }
+        if expression.object.variant == "Member" {
+            // Nested case: Namespace.Color.Red - recurse on the object
+            return infer_expression_type(expression.object);
+        }
+        return "";
     }
     if expression.variant == "Array" {
         let nested = infer_array_element_type(expression.elements);

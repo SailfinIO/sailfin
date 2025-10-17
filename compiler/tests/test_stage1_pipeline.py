@@ -59,6 +59,27 @@ fn make_booleans() -> boolean[] {
 }
 """
 
+ENUM_ARRAY_METADATA_SOURCE = """
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+enum Status {
+  Pending,
+  Active { priority -> number; }
+}
+
+fn make_colors() -> Color[] {
+  return [Color.Red, Color.Green, Color.Blue];
+}
+
+fn make_statuses() -> Status[] {
+  return [Status.Pending, Status.Active { priority: 5.0 }];
+}
+"""
+
 LAYOUT_DESCRIPTOR_SOURCE = """
 struct Person {
   name -> string;
@@ -256,6 +277,29 @@ def test_native_backend_tags_array_literals_with_metadata() -> None:
 
 
 @pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_tags_enum_array_literals_with_metadata() -> None:
+    """Test that enum array literals are tagged with #element:EnumName metadata."""
+    stage1_main = importlib.import_module("compiler.build.main")
+
+    result = stage1_main.compile_to_native(ENUM_ARRAY_METADATA_SOURCE)
+    unexpected = [
+        diag for diag in result.diagnostics if "defaulting to pointer layout" not in diag]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    artifact = next(
+        (artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"), None)
+    assert artifact is not None, "native artifact missing from emit_native output"
+
+    contents = artifact.contents
+    # Verify that enum array literals are tagged with the enum type name (not variant)
+    assert "[#element:Color," in contents, "Color array should have #element:Color metadata"
+    assert "[#element:Status," in contents, "Status array should have #element:Status metadata"
+    # Ensure variant names are NOT in the metadata tag
+    assert "[#element:Color.Red" not in contents, "Metadata should not include variant name"
+    assert "[#element:Status.Pending" not in contents, "Metadata should not include variant name"
+
+
+@pytest.mark.usefixtures("stage1_environment")
 def test_native_backend_emits_layout_descriptors() -> None:
     stage1_main = importlib.import_module("compiler.build.main")
     native_ir_module = importlib.import_module("compiler.build.native_ir")
@@ -327,7 +371,8 @@ def test_native_backend_infers_recursive_layouts() -> None:
     assert not result.diagnostics, f"unexpected diagnostics: {result.diagnostics}"
 
     artifact = next(
-        (artifact for artifact in result.module.artifacts if artifact.name == "module.sfn-asm"),
+        (artifact for artifact in result.module.artifacts if artifact.name ==
+         "module.sfn-asm"),
         None,
     )
     assert artifact is not None, "native artifact missing from emit_native output"
@@ -352,7 +397,8 @@ def test_native_backend_infers_recursive_layouts() -> None:
     assert node_struct.layout is not None, "Node layout metadata missing"
     assert node_struct.layout.size == 32
     assert node_struct.layout.align == 8
-    assert [field.name for field in node_struct.layout.fields] == ["left", "right", "payload"]
+    assert [field.name for field in node_struct.layout.fields] == [
+        "left", "right", "payload"]
     assert [field.offset for field in node_struct.layout.fields] == [0, 8, 16]
     assert [field.align for field in node_struct.layout.fields] == [8, 8, 8]
     assert [field.size for field in node_struct.layout.fields[:2]] == [8, 8]
