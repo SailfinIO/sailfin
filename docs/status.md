@@ -96,7 +96,12 @@ roadmaps.
   capability manifest (`LoweredLLVMResult.capability_manifest`) so callers see
   composite requirements. `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_propagates_composite_effects`
   locks the manifest propagation behaviour, including borrow + capability
-  combinations. Stage2 lowering now rejects suspension points (`await`, `yield`)
+  combinations. The Stage2 runner now consumes those manifests: `runtime.stage2_runner.Stage2Runner`
+  acquires a capability grant for each entry point before invoking native
+  helpers and rejects runtime calls whose effects are absent from the grant
+  (`compiler/tests/test_native_llvm_execution.py::test_stage2_runner_applies_capability_manifest`
+  and `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_denies_missing_capabilities`).
+  Stage2 lowering now rejects suspension points (`await`, `yield`)
   that would keep a mutable borrow or mutable borrow parameter alive, enforcing
   the lattice rule `!mut ⊄ !async`. Diagnostics now attach source spans for both
   the active borrow and the suspension site so LLVM errors cross-link the borrow

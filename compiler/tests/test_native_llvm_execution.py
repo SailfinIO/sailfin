@@ -6,6 +6,7 @@ import pytest
 
 from compiler.build.emit_native import NativeArtifact, NativeModule
 from compiler.build.native_llvm_lowering import lower_to_llvm
+from runtime.stage2_runner import Stage2Runner, current_capability_grant
 
 pytestmark = [pytest.mark.stage2, pytest.mark.usefixtures("stage1_environment")]
 
@@ -1138,6 +1139,45 @@ def test_native_llvm_execution_capability_manifest_propagates_composite_effects(
         "io", "mut", "read"}, manifest_map
     assert set(manifest_map.get("main", [])) == {
         "io", "mut", "read"}, manifest_map
+
+
+def test_stage2_runner_applies_capability_manifest(compile_stage2) -> None:
+    source = """
+fn main() -> number ![io] {
+    print.info("grant check");
+    return 3;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="stage2_runner_manifest")
+    observed: list[bool] = []
+
+    def _on_print(_ptr):
+        grant = current_capability_grant()
+        assert grant is not None
+        observed.append(grant.allow("io"))
+
+    runner = Stage2Runner(lowered, runtime_hooks={"print.info": _on_print})
+    result = runner.invoke("main")
+    assert result == pytest.approx(3.0)
+    assert observed == [True]
+    assert current_capability_grant() is None
+
+
+def test_stage2_runner_denies_missing_capabilities(compile_stage2) -> None:
+    source = """
+fn main() -> number ![io] {
+    print.info("denied");
+    return 1;
+}
+    """
+
+    lowered = compile_stage2(source, module_name="stage2_runner_denied")
+    runner = Stage2Runner(lowered)
+    assert "io" in runner.manifest.get("main", [])
+    runner.set_manifest_effects("main", [])
+    with pytest.raises(PermissionError):
+        runner.invoke("main")
 
 
 def test_native_llvm_execution_supports_range_strides(compile_stage2) -> None:
