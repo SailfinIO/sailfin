@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.48 (2025-10-17)
+
+### Bug Fixes
+
+- Cross module testing:
+  ([`7441a57`](https://github.com/SailfinIO/sailfin/commit/7441a57aafebf4c080e3a9301a18197f1b46cdc4))
+
+
 ## v0.1.1-alpha.47 (2025-10-17)
 
 ### Bug Fixes
