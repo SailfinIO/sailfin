@@ -111,7 +111,10 @@ roadmaps.
   `continue` targets the latch instead of jumping directly back to the header. For `for`
   loops (both range-based and array iteration), the proper structure (header with condition
   check, body, increment/latch, exit) was already in place with `continue` correctly
-  targeting the increment label. This enables LLVM's optimization passes to work more
+  targeting the increment label. For `match` statements, the compiler now emits multi-input
+  phi nodes at the shared merge label for each local mutated in any arm, accumulating
+  mutations per arm (including guards) with their terminating labels and skipping terminated
+  arms during phi generation. This enables LLVM's optimization passes to work more
   effectively with the generated IR. Regression coverage lives in
   `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`
   plus propagation tests (`test_mutations_propagate_through_if_then`,
@@ -119,6 +122,7 @@ roadmaps.
   `test_mutations_propagate_through_match`) and execution validation via
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`,
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_if_else`,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_match`,
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program`
   (which includes `loop_and_match` with loop accumulators and `sum_for` with for-loop accumulators).
   Move diagnostics now thread source spans from `.sfn-asm` through the native IR,

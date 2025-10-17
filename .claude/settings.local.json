@@ -8,7 +8,9 @@
       "Bash(make compile:*)",
       "Bash(conda run:*)",
       "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin python:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(make test-stage2:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

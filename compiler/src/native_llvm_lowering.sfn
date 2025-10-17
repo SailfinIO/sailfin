@@ -3371,10 +3371,27 @@ fn lower_match_instruction(
     let merge_label = merge_alloc.label;
     current_block_counter = merge_alloc.next_counter;
 
+    // Preload all locals before the match (needed for phi nodes at merge)
+    let mut preloaded_locals -> string[] = [];
+    let mut preload_index -> number = 0;
+    loop {
+        if preload_index >= current_locals.length {
+            break;
+        }
+        let local = current_locals[preload_index];
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        current_lines = append_string(current_lines, preload_line);
+        preloaded_locals = append_string(preloaded_locals, preload_temp);
+        preload_index += 1;
+    }
+
     current_lines = append_string(current_lines, "  br label %" + test_labels[0]);
 
     let mut all_terminated -> boolean = true;
     let mut has_unconditional_default -> boolean = false;
+    let mut arm_mutations_list -> MatchArmMutations[] = [];
 
     index = 0;
     loop {
@@ -3450,6 +3467,16 @@ fn lower_match_instruction(
         current_next_region = body_result.next_lifetime_region_id;
         collected_mutations = collected_mutations.concat(body_result.mutations);
 
+        // Track mutations per arm for phi node emission
+        arm_mutations_list = append_match_arm_mutations(
+            arm_mutations_list,
+            MatchArmMutations {
+                mutations: body_result.mutations,
+                label: body_labels[index],
+                terminated: body_result.terminated,
+            }
+        );
+
         if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
             current_lines = append_string(current_lines, "  br label %" + merge_label);
@@ -3465,6 +3492,17 @@ fn lower_match_instruction(
 
     if !terminated {
         current_lines = append_string(current_lines, merge_label + ":");
+
+        // Emit phi nodes for all mutated locals across all arms
+        let phi_result = emit_phi_merges_for_match(
+            arm_mutations_list,
+            current_locals,
+            preloaded_locals,
+            current_lines,
+            current_temp
+        );
+        current_lines = phi_result.lines;
+        current_temp = phi_result.temp_index;
     }
 
     return BlockLoweringResult {
@@ -3840,6 +3878,171 @@ fn emit_phi_merges_for_if_else(
                 } else if found_preload {
                     phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]");
                 }
+            }
+
+            // Only emit phi if we have at least 2 inputs
+            if phi_inputs.length >= 2 {
+                let phi_temp = format_temp_name(current_temp);
+                current_temp += 1;
+
+                // Join phi inputs with ", "
+                let mut phi_input_str -> string = "";
+                let mut input_idx -> number = 0;
+                loop {
+                    if input_idx >= phi_inputs.length {
+                        break;
+                    }
+                    if input_idx > 0 {
+                        phi_input_str = phi_input_str + ", ";
+                    }
+                    phi_input_str = phi_input_str + phi_inputs[input_idx];
+                    input_idx += 1;
+                }
+
+                let phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str;
+                phi_lines = append_string(phi_lines, phi_line);
+
+                let store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer;
+                store_lines = append_string(store_lines, store_line);
+            }
+        }
+
+        name_idx += 1;
+    }
+
+    let combined_lines = lines.concat(phi_lines).concat(store_lines);
+    return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
+}
+
+struct MatchArmMutations {
+    mutations -> LocalMutation[];
+    label -> string;
+    terminated -> boolean;
+}
+
+fn emit_phi_merges_for_match(
+    arm_mutations_list -> MatchArmMutations[],
+    locals -> LocalBinding[],
+    preloaded_values -> string[],
+    lines -> string[],
+    temp_index -> number
+) -> PhiMergeResult {
+    let mut phi_lines -> string[] = [];
+    let mut store_lines -> string[] = [];
+    let mut current_temp -> number = temp_index;
+
+    // Build a union of mutated local names from all arms
+    let mut mutated_names -> string[] = [];
+    let mut arm_idx -> number = 0;
+
+    loop {
+        if arm_idx >= arm_mutations_list.length {
+            break;
+        }
+        let arm = arm_mutations_list[arm_idx];
+        let mut name_index -> number = 0;
+
+        loop {
+            if name_index >= arm.mutations.length {
+                break;
+            }
+            let mutation = arm.mutations[name_index];
+            let mut already_added -> boolean = false;
+            let mut check_index -> number = 0;
+
+            loop {
+                if check_index >= mutated_names.length {
+                    break;
+                }
+                if mutated_names[check_index] == mutation.name {
+                    already_added = true;
+                    break;
+                }
+                check_index += 1;
+            }
+
+            if !already_added {
+                mutated_names = append_string(mutated_names, mutation.name);
+            }
+            name_index += 1;
+        }
+        arm_idx += 1;
+    }
+
+    // For each mutated name, emit a phi node
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+
+        // Find the local binding
+        let local = find_local_binding(locals, name);
+        if local != null {
+            // Find preloaded value for this local (fallback if not mutated in an arm)
+            let mut preloaded_value -> string = "";
+            let mut found_preload -> boolean = false;
+            let mut local_index -> number = 0;
+            loop {
+                if local_index >= locals.length {
+                    break;
+                }
+                let check_local = locals[local_index];
+                if check_local.name == name && local_index < preloaded_values.length {
+                    preloaded_value = preloaded_values[local_index];
+                    found_preload = true;
+                    break;
+                }
+                local_index += 1;
+            }
+
+            // Determine the LLVM type from mutations or fallback to local
+            let mut llvm_type -> string = local.llvm_type;
+
+            // Build phi inputs from all non-terminated arms
+            let mut phi_inputs -> string[] = [];
+            let mut arm_scan_idx -> number = 0;
+
+            loop {
+                if arm_scan_idx >= arm_mutations_list.length {
+                    break;
+                }
+                let arm = arm_mutations_list[arm_scan_idx];
+
+                if !arm.terminated {
+                    // Find mutation for this local in this arm
+                    let mut found_mutation -> boolean = false;
+                    let mut mut_value -> string = "";
+                    let mut mut_type -> string = "";
+                    let mut mut_idx -> number = 0;
+
+                    loop {
+                        if mut_idx >= arm.mutations.length {
+                            break;
+                        }
+                        if arm.mutations[mut_idx].name == name {
+                            mut_value = arm.mutations[mut_idx].value_name;
+                            mut_type = arm.mutations[mut_idx].llvm_type;
+                            found_mutation = true;
+                            // Update llvm_type if we found a concrete mutation
+                            if mut_type.length > 0 {
+                                llvm_type = mut_type;
+                            }
+                            break;
+                        }
+                        mut_idx += 1;
+                    }
+
+                    // Add phi input from this arm
+                    if found_mutation {
+                        phi_inputs = append_string(phi_inputs, "[ " + mut_value + ", %" + arm.label + " ]");
+                    } else if found_preload {
+                        phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + arm.label + " ]");
+                    }
+                }
+
+                arm_scan_idx += 1;
             }
 
             // Only emit phi if we have at least 2 inputs
@@ -7878,6 +8081,10 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
+}
+
+fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
+    return list.concat([arm]);
 }
 
 fn string_array_contains(values -> string[], target -> string) -> boolean {

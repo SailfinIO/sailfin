@@ -1398,3 +1398,116 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_emits_phi_for_match(compile_stage2) -> None:
+    """Verify phi nodes are emitted for locals mutated across match arms."""
+    source = """
+fn classify_number(value -> number) -> number {
+    let mut category -> number = 0;
+    let mut bonus -> number = 0;
+    match value {
+        0 => {
+            category = 10;
+            bonus = 1;
+        },
+        1 => {
+            category = 20;
+            bonus = 2;
+        },
+        2 => {
+            category = 30;
+            bonus = 3;
+        },
+        _ => {
+            category = 40;
+            bonus = 4;
+        },
+    }
+    return category + bonus;
+}
+
+fn partial_match_mutations(value -> number) -> number {
+    let mut shared -> number = 0;
+    let mut arm0_only -> number = 0;
+    let mut arm1_only -> number = 0;
+    let mut arm2_only -> number = 0;
+    match value {
+        0 => {
+            shared = 100;
+            arm0_only = 5;
+        },
+        1 => {
+            shared = 200;
+            arm1_only = 10;
+        },
+        2 => {
+            shared = 300;
+            arm2_only = 15;
+        },
+        _ => {
+            shared = 400;
+        },
+    }
+    return shared + arm0_only + arm1_only + arm2_only;
+}
+
+fn main() -> number {
+    let c0 = classify_number(0);
+    let c1 = classify_number(1);
+    let c2 = classify_number(2);
+    let c3 = classify_number(99);
+    let p0 = partial_match_mutations(0);
+    let p1 = partial_match_mutations(1);
+    let p2 = partial_match_mutations(2);
+    let p3 = partial_match_mutations(99);
+    return c0 + c1 + c2 + c3 + p0 + p1 + p2 + p3;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="phi_match_test")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+    # Verify phi nodes are present in the generated IR for match merges
+    assert "phi double" in lowered.ir, "Expected phi nodes for double values in generated IR"
+    assert "define double @classify_number" in lowered.ir
+    assert "define double @partial_match_mutations" in lowered.ir
+
+    ir = lowered.ir
+    engine, module = _compile_ir(ir)
+    try:
+        # Test classify_number with all match arms
+        c0 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 0.0)
+        assert c0 == pytest.approx(11.0), "Value 0 should return 10 + 1 = 11"
+
+        c1 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 1.0)
+        assert c1 == pytest.approx(22.0), "Value 1 should return 20 + 2 = 22"
+
+        c2 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 2.0)
+        assert c2 == pytest.approx(33.0), "Value 2 should return 30 + 3 = 33"
+
+        c3 = _invoke(engine, "classify_number", ctypes.c_double, (ctypes.c_double,), 99.0)
+        assert c3 == pytest.approx(44.0), "Default case should return 40 + 4 = 44"
+
+        # Test partial_match_mutations where different locals are mutated in each arm
+        p0 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 0.0)
+        assert p0 == pytest.approx(105.0), "Value 0 should return 100 + 5 + 0 + 0 = 105"
+
+        p1 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 1.0)
+        assert p1 == pytest.approx(210.0), "Value 1 should return 200 + 0 + 10 + 0 = 210"
+
+        p2 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 2.0)
+        assert p2 == pytest.approx(315.0), "Value 2 should return 300 + 0 + 0 + 15 = 315"
+
+        p3 = _invoke(engine, "partial_match_mutations", ctypes.c_double, (ctypes.c_double,), 99.0)
+        assert p3 == pytest.approx(400.0), "Default case should return 400 + 0 + 0 + 0 = 400"
+
+        # Test main to ensure all paths work together
+        main_result = _invoke_double(engine, "main")
+        # c0=11, c1=22, c2=33, c3=44, p0=105, p1=210, p2=315, p3=400
+        # 11 + 22 + 33 + 44 + 105 + 210 + 315 + 400 = 1140
+        assert main_result == pytest.approx(1140.0), "Main should return sum of all results = 1140"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

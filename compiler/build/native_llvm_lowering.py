@@ -545,6 +545,15 @@ class PhiMergeResult:
     def __repr__(self):
         return runtime.struct_repr('PhiMergeResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
 
+class MatchArmMutations:
+    def __init__(self, mutations, label, terminated):
+        self.mutations = mutations
+        self.label = label
+        self.terminated = terminated
+
+    def __repr__(self):
+        return runtime.struct_repr('MatchArmMutations', [runtime.struct_field('mutations', self.mutations), runtime.struct_field('label', self.label), runtime.struct_field('terminated', self.terminated)])
+
 class LoadLocalResult:
     def __init__(self, lines, temp_index, diagnostics, operand=None):
         self.lines = lines
@@ -2361,9 +2370,22 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     merge_alloc = allocate_block_label("matchmerge", current_block_counter)
     merge_label = merge_alloc.label
     current_block_counter = merge_alloc.next_counter
+    preloaded_locals = []
+    preload_index = 0
+    while True:
+        if preload_index >= len(current_locals):
+            break
+        local = current_locals[preload_index]
+        preload_temp = format_temp_name(current_temp)
+        current_temp += 1
+        preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+        current_lines = append_string(current_lines, preload_line)
+        preloaded_locals = append_string(preloaded_locals, preload_temp)
+        preload_index += 1
     current_lines = append_string(current_lines, "  br label %" + test_labels[0])
     all_terminated = True
     has_unconditional_default = False
+    arm_mutations_list = []
     index = 0
     while True:
         if index >= len(structure.cases):
@@ -2400,6 +2422,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         current_next_local = body_result.next_local_id
         current_next_region = body_result.next_lifetime_region_id
         collected_mutations = (collected_mutations) + (body_result.mutations)
+        arm_mutations_list = append_match_arm_mutations( arm_mutations_list, MatchArmMutations(mutations=body_result.mutations, label=body_labels[index], terminated=body_result.terminated) )
         if not body_result.terminated:
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings)
             current_lines = append_string(current_lines, "  br label %" + merge_label)
@@ -2410,6 +2433,9 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     terminated = all_terminated  and  has_unconditional_default
     if not terminated:
         current_lines = append_string(current_lines, merge_label + ":")
+        phi_result = emit_phi_merges_for_match( arm_mutations_list, current_locals, preloaded_locals, current_lines, current_temp )
+        current_lines = phi_result.lines
+        current_temp = phi_result.temp_index
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations)
 
 def lower_match_case_condition(function_name, subject_operand, case, bindings, locals, temp_index, lines, functions, context):
@@ -2630,6 +2656,102 @@ def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloade
                 else:
                     if found_preload:
                         phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]")
+            if len(phi_inputs) >= 2:
+                phi_temp = format_temp_name(current_temp)
+                current_temp += 1
+                phi_input_str = ""
+                input_idx = 0
+                while True:
+                    if input_idx >= len(phi_inputs):
+                        break
+                    if input_idx > 0:
+                        phi_input_str = phi_input_str + ", "
+                    phi_input_str = phi_input_str + phi_inputs[input_idx]
+                    input_idx += 1
+                phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str
+                phi_lines = append_string(phi_lines, phi_line)
+                store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
+                store_lines = append_string(store_lines, store_line)
+        name_idx += 1
+    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
+
+def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, lines, temp_index):
+    phi_lines = []
+    store_lines = []
+    current_temp = temp_index
+    mutated_names = []
+    arm_idx = 0
+    while True:
+        if arm_idx >= len(arm_mutations_list):
+            break
+        arm = arm_mutations_list[arm_idx]
+        name_index = 0
+        while True:
+            if name_index >= len(arm.mutations):
+                break
+            mutation = arm.mutations[name_index]
+            already_added = False
+            check_index = 0
+            while True:
+                if check_index >= len(mutated_names):
+                    break
+                if mutated_names[check_index] == mutation.name:
+                    already_added = True
+                    break
+                check_index += 1
+            if not already_added:
+                mutated_names = append_string(mutated_names, mutation.name)
+            name_index += 1
+        arm_idx += 1
+    name_idx = 0
+    while True:
+        if name_idx >= len(mutated_names):
+            break
+        name = mutated_names[name_idx]
+        local = find_local_binding(locals, name)
+        if local != None:
+            preloaded_value = ""
+            found_preload = False
+            local_index = 0
+            while True:
+                if local_index >= len(locals):
+                    break
+                check_local = locals[local_index]
+                if check_local.name == name  and  local_index < len(preloaded_values):
+                    preloaded_value = preloaded_values[local_index]
+                    found_preload = True
+                    break
+                local_index += 1
+            llvm_type = local.llvm_type
+            phi_inputs = []
+            arm_scan_idx = 0
+            while True:
+                if arm_scan_idx >= len(arm_mutations_list):
+                    break
+                arm = arm_mutations_list[arm_scan_idx]
+                if not arm.terminated:
+                    found_mutation = False
+                    mut_value = ""
+                    mut_type = ""
+                    mut_idx = 0
+                    while True:
+                        if mut_idx >= len(arm.mutations):
+                            break
+                        if arm.mutations[mut_idx].name == name:
+                            mut_value = arm.mutations[mut_idx].value_name
+                            mut_type = arm.mutations[mut_idx].llvm_type
+                            found_mutation = True
+                            if len(mut_type) > 0:
+                                llvm_type = mut_type
+                            break
+                        mut_idx += 1
+                    if found_mutation:
+                        phi_inputs = append_string(phi_inputs, "[ " + mut_value + ", %" + arm.label + " ]")
+                    else:
+                        if found_preload:
+                            phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + arm.label + " ]")
+                arm_scan_idx += 1
             if len(phi_inputs) >= 2:
                 phi_temp = format_temp_name(current_temp)
                 current_temp += 1
@@ -5453,6 +5575,9 @@ def find_last_index_of_char(value, target):
 
 def append_string(values, value):
     return (values) + ([value])
+
+def append_match_arm_mutations(list, arm):
+    return (list) + ([arm])
 
 def string_array_contains(values, target):
     index = 0
