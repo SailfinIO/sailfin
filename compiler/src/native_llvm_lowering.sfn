@@ -165,6 +165,8 @@ struct LocalBinding {
     type_annotation -> string;
     ownership -> OwnershipInfo?;
     consumed -> boolean;
+    scope_id -> string;
+    scope_depth -> number;
 }
 
 struct OwnershipAnalysis {
@@ -2211,7 +2213,7 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_header_label + ":");
 
-        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false };
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth };
         let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
         diagnostics = diagnostics.concat(header_load.diagnostics);
         current_lines = header_load.lines;
@@ -2507,7 +2509,7 @@ fn lower_for_instruction(
     let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
     let stacked = append_loop_context(loop_stack, loop_context);
 
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false };
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth };
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label);
     let body_result = lower_instruction_range(
@@ -3304,7 +3306,7 @@ fn lower_let_instruction(
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
 
-    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false });
+    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
 
     return LetLoweringResult {
         lines: current_lines,
@@ -4099,6 +4101,8 @@ fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding
                 type_annotation: entry.type_annotation,
                 ownership: entry.ownership,
                 consumed: true,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
             };
             result = result.concat([updated]);
         } else {
@@ -4125,6 +4129,8 @@ fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBin
                 type_annotation: entry.type_annotation,
                 ownership: entry.ownership,
                 consumed: false,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
             };
             result = result.concat([updated]);
         } else {

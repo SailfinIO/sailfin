@@ -247,16 +247,18 @@ class MemberAccessParse:
         return runtime.struct_repr('MemberAccessParse', [runtime.struct_field('success', self.success), runtime.struct_field('base', self.base), runtime.struct_field('field', self.field)])
 
 class LocalBinding:
-    def __init__(self, name, pointer, llvm_type, type_annotation, consumed, ownership=None):
+    def __init__(self, name, pointer, llvm_type, type_annotation, consumed, scope_id, scope_depth, ownership=None):
         self.name = name
         self.pointer = pointer
         self.llvm_type = llvm_type
         self.type_annotation = type_annotation
         self.ownership = ownership
         self.consumed = consumed
+        self.scope_id = scope_id
+        self.scope_depth = scope_depth
 
     def __repr__(self):
-        return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('ownership', self.ownership), runtime.struct_field('consumed', self.consumed)])
+        return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('ownership', self.ownership), runtime.struct_field('consumed', self.consumed), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
 
 class OwnershipAnalysis:
     def __init__(self, diagnostics, ownership=None, consumption=None):
@@ -1665,7 +1667,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_lines = append_string(current_lines, "  store double " + start_operand.value + ", double* " + iteration_pointer)
         current_lines = append_string(current_lines, "  br label %" + loop_header_label)
         current_lines = append_string(current_lines, loop_header_label + ":")
-        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double", type_annotation="number", ownership=None, consumed=False)
+        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double", type_annotation="number", ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth)
         header_load = load_local_operand(iteration_binding, current_temp, current_lines)
         diagnostics = (diagnostics) + (header_load.diagnostics)
         current_lines = header_load.lines
@@ -1820,7 +1822,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     current_lines = append_string(current_lines, "  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer)
     loop_context = LoopContext(break_label=loop_exit_label, continue_label=loop_increment_label)
     stacked = append_loop_context(loop_stack, loop_context)
-    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, type_annotation="", ownership=None, consumed=False)
+    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, type_annotation="", ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth)
     body_locals = append_local_binding(current_locals, iteration_binding)
     element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label)
     body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, functions, stacked, context, element_loop_scope_id, scope_depth + 1 )
@@ -2236,7 +2238,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
             current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer)
     else:
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer)
-    current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False))
+    current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions)
 
 def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, functions, context):
@@ -2806,7 +2808,7 @@ def mark_local_consumed(locals, name):
             break
         entry = locals[index]
         if entry.name == name:
-            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=True)
+            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=True, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
             result = (result) + ([updated])
         else:
             result = (result) + ([entry])
@@ -2821,7 +2823,7 @@ def reset_local_consumption(locals, name):
             break
         entry = locals[index]
         if entry.name == name:
-            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=False)
+            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=False, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
             result = (result) + ([updated])
         else:
             result = (result) + ([entry])
