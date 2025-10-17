@@ -537,6 +537,14 @@ class BlockLoweringResult:
     def __repr__(self):
         return runtime.struct_repr('BlockLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('block_counter', self.block_counter), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('terminated', self.terminated), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_lifetime_region_id', self.next_lifetime_region_id), runtime.struct_field('next_index', self.next_index), runtime.struct_field('mutations', self.mutations)])
 
+class PhiMergeResult:
+    def __init__(self, lines, temp_index):
+        self.lines = lines
+        self.temp_index = temp_index
+
+    def __repr__(self):
+        return runtime.struct_repr('PhiMergeResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
+
 class LoadLocalResult:
     def __init__(self, lines, temp_index, diagnostics, operand=None):
         self.lines = lines
@@ -2387,6 +2395,40 @@ def lower_condition_to_i1(function_name, expression, bindings, locals, temp_inde
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`")
     return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
 
+def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_label, then_label, lines, temp_index):
+    phi_lines = []
+    store_lines = []
+    current_temp = temp_index
+    index = 0
+    while True:
+        if index >= len(mutations):
+            break
+        mutation = mutations[index]
+        local = find_local_binding(locals, mutation.name)
+        if local != None:
+            local_index = 0
+            preloaded_value = ""
+            found_preload = False
+            while True:
+                if local_index >= len(locals):
+                    break
+                check_local = locals[local_index]
+                if check_local.name == mutation.name  and  local_index < len(preloaded_values):
+                    preloaded_value = preloaded_values[local_index]
+                    found_preload = True
+                    break
+                local_index += 1
+            if found_preload  and  len(preloaded_value) > 0:
+                phi_temp = format_temp_name(current_temp)
+                current_temp += 1
+                phi_line = "  " + phi_temp + " = phi " + mutation.llvm_type + " [ " + mutation.value_name + ", %" + then_label + " ], [ " + preloaded_value + ", %" + base_label + " ]"
+                phi_lines = append_string(phi_lines, phi_line)
+                store_line = "  store " + mutation.llvm_type + " " + phi_temp + ", " + mutation.llvm_type + "* " + local.pointer
+                store_lines = append_string(store_lines, store_line)
+        index += 1
+    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
+
 def lower_if_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
     current_lines = lines
     current_allocas = allocas
@@ -2424,6 +2466,19 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     false_target = merge_label
     if structure.has_else:
         false_target = else_label
+    preloaded_locals = []
+    if not structure.has_else:
+        preload_index = 0
+        while True:
+            if preload_index >= len(current_locals):
+                break
+            local = current_locals[preload_index]
+            preload_temp = format_temp_name(current_temp)
+            current_temp += 1
+            preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+            current_lines = append_string(current_lines, preload_line)
+            preloaded_locals = append_string(preloaded_locals, preload_temp)
+            preload_index += 1
     current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target)
     base_locals = current_locals
     base_allocas = current_allocas
@@ -2471,6 +2526,10 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
         terminated = then_terminated  and  else_terminated
     if not terminated  or  not structure.has_else:
         current_lines = append_string(current_lines, merge_label + ":")
+        if not structure.has_else  and  not then_terminated  and  len(collected_mutations) > 0:
+            phi_result = emit_phi_merges_for_straight_if( collected_mutations, base_locals, preloaded_locals, current_label, then_label, current_lines, current_temp )
+            current_lines = phi_result.lines
+            current_temp = phi_result.temp_index
     current_locals = base_locals
     merged_bindings = base_bindings
     if not then_terminated:

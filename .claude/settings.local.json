@@ -4,7 +4,8 @@
       "Bash(conda run -n sailfin pytest:*)",
       "Bash(source ~/.bash_profile)",
       "Bash(source ~/.bashrc)",
-      "Bash(make test:*)"
+      "Bash(make test:*)",
+      "Bash(make compile:*)"
     ],
     "deny": [],
     "ask": []

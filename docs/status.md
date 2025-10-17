@@ -95,15 +95,20 @@ roadmaps.
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`).
   Block lowering now records `LocalMutation` metadata for every `let` binding or
   reassignment lowered through `lower_instruction_range`, preserving the LLVM
-  type, stored SSA value, span, and defining label so upcoming SSA merge work can
-  stitch `phi` nodes accurately. Mutation metadata threads through all control-flow
-  structures (`lower_if_instruction`, `lower_loop_instruction`, `lower_for_instruction`,
-  and `lower_match_instruction`), accumulating mutations from nested blocks while
-  preserving originating labels. Regression coverage lives in
+  type, stored SSA value, span, and defining label for SSA phi node generation.
+  Mutation metadata threads through all control-flow structures (`lower_if_instruction`,
+  `lower_loop_instruction`, `lower_for_instruction`, and `lower_match_instruction`),
+  accumulating mutations from nested blocks while preserving originating labels.
+  For straight-line `if` statements (without `else`), the compiler now emits SSA
+  phi nodes at merge points to select between the mutated value (from the `then` branch)
+  and the original value (from the base block), storing the result back through the
+  local pointer. This enables LLVM's optimization passes to work more effectively
+  with the generated IR. Regression coverage lives in
   `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`
   plus propagation tests (`test_mutations_propagate_through_if_then`,
   `test_mutations_propagate_through_if_else`, `test_mutations_propagate_through_loop`,
-  `test_mutations_propagate_through_match`).
+  `test_mutations_propagate_through_match`) and execution validation via
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`.
   Move diagnostics now thread source spans from `.sfn-asm` through the native IR,
   so LLVM lowering reports use-after-move errors with line and column ranges
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move`

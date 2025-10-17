@@ -1285,3 +1285,43 @@ fn main() -> number {
     lowered = compile_stage2(source, module_name="zero_stride")
     assert any(
         "stride must not be zero" in diagnostic for diagnostic in lowered.diagnostics)
+
+
+def test_native_llvm_execution_emits_phi_for_straight_line_if(compile_stage2) -> None:
+    """Verify phi nodes are emitted for conditionally mutated locals in if without else."""
+    source = """
+fn conditional_update(condition -> boolean, base -> number) -> number {
+    let mut value -> number = base;
+    if condition {
+        value = base + 10;
+    }
+    return value;
+}
+
+fn main() -> number {
+    let result_true = conditional_update(true, 5);
+    let result_false = conditional_update(false, 5);
+    return result_true + result_false;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="phi_test")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+    assert "phi double" in lowered.ir, "Expected phi node in generated IR"
+    assert "define double @conditional_update" in lowered.ir
+
+    ir = lowered.ir
+    engine, module = _compile_ir(ir)
+    try:
+        conditional_true = _invoke(engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), True, 5.0)
+        assert conditional_true == pytest.approx(15.0), "When condition is true, should return base + 10"
+
+        conditional_false = _invoke(engine, "conditional_update", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), False, 5.0)
+        assert conditional_false == pytest.approx(5.0), "When condition is false, should return base unchanged"
+
+        main_result = _invoke_double(engine, "main")
+        assert main_result == pytest.approx(20.0), "Main should return 15 + 5 = 20"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
