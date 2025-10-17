@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.23 (2025-10-17)
+
+### Bug Fixes
+
+- Scope metadata through local consumption
+  ([`511fadf`](https://github.com/SailfinIO/sailfin/commit/511fadfb1ecac70b694e54979f8627a3bd17569d))
+
+
 ## v0.1.1-alpha.22 (2025-10-17)
 
 ### Bug Fixes
