@@ -15,14 +15,42 @@ _Near-term (unlock compiler parity & safety checks)_
 
 - [x] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners. Covered by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_allows_scoped_reborrow` and `...::test_native_llvm_execution_reports_borrow_lifetime_violation`.
 - [ ] Insert SSA merges / `phi` nodes for locals that span `if`/`match` merges and loop bodies to keep generated IR valid under aggressive optimisation.
+  - [ ] Capture per-instruction local mutation info through `lower_instruction_range` so branch/loop exits know which locals need merge handling.
+  - [ ] Emit `phi` nodes at `if`/`else` merge blocks, reloading the winning definition back into the local slot and covering straight-line joins first.
+  - [ ] Extend `phi` insertion to loops, generating header `phi` nodes fed by the preheader and latch blocks, with tests covering `loop` and `for` constructs.
+  - [ ] Handle multi-branch `match` merges by building `phi` sets across all reachable bodies and asserting verifier-clean IR with new regression coverage.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
+  - [ ] Define the tagged-union LLVM layout (tag + payload pointer/inline storage) and thread it through the type context.
+  - [ ] Emit enum constructors/destructors that populate the canonical layout and surface helpers to native lowering.
+  - [ ] Extend match lowering to destructure enum operands without falling back to Python, with execution coverage in `compiler/tests/test_native_llvm_execution.py`.
 - [ ] Lower enum payload storage (including recursive variants) into LLVM so Stage2 can materialise compiler AST enums without Python fallbacks.
+  - [ ] Support inline payload emission for primitives/struct references and validate via struct-enum fixtures.
+  - [ ] Implement heap-indirected payload support for recursive/self-referential variants, reusing runtime allocators.
+  - [ ] Add regression tests covering mixed recursive/non-recursive variants and ensure borrow tracking tolerates the new storage paths.
 - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
+  - [ ] Define the trait-object ABI (data pointer layout + vtable schema) and emit descriptors during native lowering.
+  - [ ] Generate vtable structs for every concrete `implements` declaration and write them into the module data section.
+  - [ ] Add unit coverage ensuring interface locals round-trip through the runner and expose diagnostics for missing vtable entries.
 - [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
+  - [ ] Box concrete values into trait objects when assigning to interface-typed locals/parameters.
+  - [ ] Modify call lowering to route `.method()` through the vtable slot, passing the data pointer as the implicit receiver.
+  - [ ] Extend the LLVM execution suite with the interface example to validate dynamic dispatch end-to-end.
 - [ ] Surface enum array metadata in LLVM lowering once layout descriptors exist, enabling typed iteration over tagged aggregates.
+  - [ ] Emit array element descriptors for enum element types during module lowering.
+  - [ ] Teach the native runner to expose the metadata to runtime helpers without pointer fallbacks.
+  - [ ] Add smoke tests iterating over enum arrays to verify metadata-driven access.
 - [ ] Share layout descriptors across modules by emitting/importing per-unit layout manifests so Stage2 can resolve referenced structs/enums defined in dependencies without pointer fallbacks.
+  - [ ] Emit layout manifests alongside each module artifact and persist them in the build output.
+  - [ ] Load and merge dependency manifests during lowering so cross-module references have concrete layouts.
+  - [ ] Cover cross-module struct/enum usage with a stage1 + stage2 regression harness.
 - [ ] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings.
+  - [ ] Inventory builtin/runtime types used by the compiler and define canonical ABI descriptors.
+  - [ ] Teach the native emitter to consume the canonical descriptors before defaulting to pointer layouts.
+  - [ ] Update diagnostics/tests to assert the absence of pointer-layout fallbacks for the covered types.
 - [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
+  - [ ] Build a minimal multi-module fixture that exercises shared structs/enums through both pipelines.
+  - [ ] Wire the fixture into `make test` (stage1) and the native LLVM execution suite.
+  - [ ] Document the coverage expectations in `docs/status.md` once the suite lands.
 
 _Mid-term (runtime capabilities & effect enforcement)_
 
