@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.36 (2025-10-17)
+
+### Bug Fixes
+
+- Loop header phis
+  ([`b741dc3`](https://github.com/SailfinIO/sailfin/commit/b741dc3bbb79f4e18b6efaeed26bd21406418362))
+
+
 ## v0.1.1-alpha.35 (2025-10-17)
 
 ### Bug Fixes
