@@ -10,6 +10,8 @@ source_filename = "sailfin"
 
 %Person = type { double }
 
+declare noalias i8* @malloc(i64)
+
 define { %Person*, i64 }* @make_people() {
 entry:
   %t0 = sitofp i64 36 to double
@@ -90,4 +92,3 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-

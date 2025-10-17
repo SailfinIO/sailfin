@@ -153,6 +153,7 @@ struct StructTypeInfo {
     name -> string;
     llvm_name -> string;
     fields -> StructFieldInfo[];
+    size -> number;
     align -> number;
 }
 
@@ -183,6 +184,19 @@ struct TypeContext {
 
 struct TypeContextBuild {
     context -> TypeContext;
+    diagnostics -> string[];
+}
+
+struct TypeAllocationInfo {
+    llvm_type -> string;
+    size -> number;
+    align -> number;
+}
+
+struct HeapBoxResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
     diagnostics -> string[];
 }
 
@@ -471,6 +485,9 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
         lines = append_string(lines, "");
     }
 
+    lines = append_string(lines, "declare noalias i8* @malloc(i64)");
+    lines = append_string(lines, "");
+
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     loop {
@@ -697,7 +714,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[]) -> TypeC
         if align_value <= 0 {
             align_value = 1;
         }
-        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, align: align_value });
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value });
         index += 1;
     }
 
@@ -980,6 +997,22 @@ fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) ->
     return null;
 }
 
+fn find_enum_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> EnumTypeInfo? {
+    let trimmed = trim_text(llvm_type);
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let info = context.enums[index];
+        if info.llvm_name == trimmed {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
 fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
     let mut candidate = trim_text(llvm_type);
     if candidate.length == 0 {
@@ -989,6 +1022,48 @@ fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> strin
         candidate = strip_pointer_suffix(candidate);
     }
     return find_struct_info_by_llvm_type(context, candidate);
+}
+
+fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAllocationInfo? {
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if ends_with_pointer_suffix(trimmed) {
+        return null;
+    }
+    if trimmed == "double" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
+    }
+    if trimmed == "i64" || trimmed == "int" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
+    }
+    if trimmed == "i32" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 4, align: 4 };
+    }
+    if trimmed == "i1" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
+    }
+    if trimmed == "i8" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
+    }
+    let struct_info = find_struct_info_by_llvm_type(context, trimmed);
+    if struct_info != null {
+        let mut align_value = struct_info.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        return TypeAllocationInfo { llvm_type: struct_info.llvm_name, size: struct_info.size, align: align_value };
+    }
+    let enum_info = find_enum_info_by_llvm_type(context, trimmed);
+    if enum_info != null {
+        let mut align_value = enum_info.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        return TypeAllocationInfo { llvm_type: enum_info.llvm_name, size: enum_info.size, align: align_value };
+    }
+    return null;
 }
 
 fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? {
@@ -7118,6 +7193,43 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics };
 }
 
+fn box_aggregate_operand(operand -> LLVMOperand, expected_pointer_type -> string, temp_index -> number, lines -> string[], context -> TypeContext) -> HeapBoxResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+
+    let allocation = lookup_allocation_info(context, operand.llvm_type);
+    if allocation == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to allocate heap storage for `" + operand.llvm_type + "` when assigning to `" + expected_pointer_type + "`");
+        return HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+    if allocation.size <= 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: computed heap allocation size for `" + operand.llvm_type + "` is zero");
+        return HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+    }
+
+    let malloc_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + number_to_string(allocation.size) + ")");
+
+    let typed_ptr_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
+
+    current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
+
+    let mut pointer_operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+    let trimmed_expected = trim_text(expected_pointer_type);
+    if trimmed_expected.length > 0 && trimmed_expected != "i8*" {
+        let cast_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + trimmed_expected);
+        pointer_operand = LLVMOperand { llvm_type: trimmed_expected, value: cast_temp };
+    }
+
+    return HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: pointer_operand, diagnostics: diagnostics };
+}
+
 fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
@@ -7210,7 +7322,17 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 if lowered.operand != null {
-                    let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
+                    let mut field_operand = lowered.operand;
+                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) {
+                        let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
+                        diagnostics = diagnostics.concat(boxed.diagnostics);
+                        current_lines = boxed.lines;
+                        current_temp = boxed.temp_index;
+                        if boxed.operand != null {
+                            field_operand = boxed.operand;
+                        }
+                    }
+                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines);
                     diagnostics = diagnostics.concat(coerced.diagnostics);
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;

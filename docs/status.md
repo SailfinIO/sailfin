@@ -71,6 +71,10 @@ roadmaps.
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_basic_enum_types`,
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_constructs_simple_enum_variant`,
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_stores_enum_payload_fields`.
+  Recursive enum payloads now heap-box aggregate values when variant metadata
+  describes pointer-shaped storage, so self-referential variants (e.g.,
+  `Value.Pair { left -> Value, right -> Value }`) lower without Python fallbacks
+  or coercion diagnostics. Coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_allocates_recursive_enum_payloads`.
   Match expressions now destructure enum operands natively by extracting the tag
   field via `extractvalue` and comparing it against variant tag values, enabling
   Stage2 programs to dispatch on enum variants without Python fallbacks. Both unit

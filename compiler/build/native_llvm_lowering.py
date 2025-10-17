@@ -229,14 +229,15 @@ class StructFieldInfo:
         return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('index', self.index), runtime.struct_field('offset', self.offset)])
 
 class StructTypeInfo:
-    def __init__(self, name, llvm_name, fields, align):
+    def __init__(self, name, llvm_name, fields, size, align):
         self.name = name
         self.llvm_name = llvm_name
         self.fields = fields
+        self.size = size
         self.align = align
 
     def __repr__(self):
-        return runtime.struct_repr('StructTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('fields', self.fields), runtime.struct_field('align', self.align)])
+        return runtime.struct_repr('StructTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('fields', self.fields), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align)])
 
 class EnumVariantInfo:
     def __init__(self, name, tag, offset, size, align, fields):
@@ -279,6 +280,25 @@ class TypeContextBuild:
 
     def __repr__(self):
         return runtime.struct_repr('TypeContextBuild', [runtime.struct_field('context', self.context), runtime.struct_field('diagnostics', self.diagnostics)])
+
+class TypeAllocationInfo:
+    def __init__(self, llvm_type, size, align):
+        self.llvm_type = llvm_type
+        self.size = size
+        self.align = align
+
+    def __repr__(self):
+        return runtime.struct_repr('TypeAllocationInfo', [runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align)])
+
+class HeapBoxResult:
+    def __init__(self, lines, temp_index, diagnostics, operand=None):
+        self.lines = lines
+        self.temp_index = temp_index
+        self.operand = operand
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('HeapBoxResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class StructLiteralField:
     def __init__(self, name, value):
@@ -672,6 +692,8 @@ def lower_to_llvm(native_module):
     if len(helper_declarations) > 0:
         lines = (lines) + (helper_declarations)
         lines = append_string(lines, "")
+    lines = append_string(lines, "declare noalias i8* @malloc(i64)")
+    lines = append_string(lines, "")
     index = 0
     has_add_function = False
     while True:
@@ -825,7 +847,7 @@ def build_type_context(structs, enums):
         align_value = layout.align
         if align_value <= 0:
             align_value = 1
-        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo(name=definition.name, llvm_name=llvm_name, fields=fields, align=align_value))
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo(name=definition.name, llvm_name=llvm_name, fields=fields, size=layout.size, align=align_value))
         index += 1
     enum_entries = []
     enum_index = 0
@@ -1017,6 +1039,18 @@ def find_struct_info_by_llvm_type(context, llvm_type):
         index += 1
     return None
 
+def find_enum_info_by_llvm_type(context, llvm_type):
+    trimmed = trim_text(llvm_type)
+    index = 0
+    while True:
+        if index >= len(context.enums):
+            break
+        info = context.enums[index]
+        if info.llvm_name == trimmed:
+            return info
+        index += 1
+    return None
+
 def resolve_struct_info_from_llvm_type(context, llvm_type):
     candidate = trim_text(llvm_type)
     if len(candidate) == 0:
@@ -1024,6 +1058,36 @@ def resolve_struct_info_from_llvm_type(context, llvm_type):
     if ends_with_pointer_suffix(candidate):
         candidate = strip_pointer_suffix(candidate)
     return find_struct_info_by_llvm_type(context, candidate)
+
+def lookup_allocation_info(context, llvm_type):
+    trimmed = trim_text(llvm_type)
+    if len(trimmed) == 0:
+        return None
+    if ends_with_pointer_suffix(trimmed):
+        return None
+    if trimmed == "double":
+        return TypeAllocationInfo(llvm_type=trimmed, size=8, align=8)
+    if trimmed == "i64"  or  trimmed == "int":
+        return TypeAllocationInfo(llvm_type=trimmed, size=8, align=8)
+    if trimmed == "i32":
+        return TypeAllocationInfo(llvm_type=trimmed, size=4, align=4)
+    if trimmed == "i1":
+        return TypeAllocationInfo(llvm_type=trimmed, size=1, align=1)
+    if trimmed == "i8":
+        return TypeAllocationInfo(llvm_type=trimmed, size=1, align=1)
+    struct_info = find_struct_info_by_llvm_type(context, trimmed)
+    if struct_info != None:
+        align_value = struct_info.align
+        if align_value <= 0:
+            align_value = 1
+        return TypeAllocationInfo(llvm_type=struct_info.llvm_name, size=struct_info.size, align=align_value)
+    enum_info = find_enum_info_by_llvm_type(context, trimmed)
+    if enum_info != None:
+        align_value = enum_info.align
+        if align_value <= 0:
+            align_value = 1
+        return TypeAllocationInfo(llvm_type=enum_info.llvm_name, size=enum_info.size, align=align_value)
+    return None
 
 def resolve_struct_info_for_method_target(base, bindings, locals, context):
     trimmed = trim_text(base)
@@ -4856,6 +4920,33 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
     operand = LLVMOperand(llvm_type=info.llvm_name, value=previous_value)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
 
+def box_aggregate_operand(operand, expected_pointer_type, temp_index, lines, context):
+    diagnostics = []
+    current_lines = lines
+    current_temp = temp_index
+    allocation = lookup_allocation_info(context, operand.llvm_type)
+    if allocation == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to allocate heap storage for `" + operand.llvm_type + "` when assigning to `" + expected_pointer_type + "`")
+        return HeapBoxResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    if allocation.size <= 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: computed heap allocation size for `" + operand.llvm_type + "` is zero")
+        return HeapBoxResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    malloc_temp = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + number_to_string(allocation.size) + ")")
+    typed_ptr_temp = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*")
+    current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp)
+    pointer_operand = LLVMOperand(llvm_type="i8*", value=malloc_temp)
+    trimmed_expected = trim_text(expected_pointer_type)
+    if len(trimmed_expected) > 0  and  trimmed_expected != "i8*":
+        cast_temp = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + trimmed_expected)
+        pointer_operand = LLVMOperand(llvm_type=trimmed_expected, value=cast_temp)
+    return HeapBoxResult(lines=current_lines, temp_index=current_temp, operand=pointer_operand, diagnostics=diagnostics)
+
 def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, context):
     diagnostics = parse.diagnostics
     current_lines = lines
@@ -4920,7 +5011,15 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                 current_lines = lowered.lines
                 current_temp = lowered.temp_index
                 if lowered.operand != None:
-                    coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines)
+                    field_operand = lowered.operand
+                    if ends_with_pointer_suffix(expected.llvm_type)  and  not ends_with_pointer_suffix(field_operand.llvm_type):
+                        boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context)
+                        diagnostics = (diagnostics) + (boxed.diagnostics)
+                        current_lines = boxed.lines
+                        current_temp = boxed.temp_index
+                        if boxed.operand != None:
+                            field_operand = boxed.operand
+                    coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines)
                     diagnostics = (diagnostics) + (coerced.diagnostics)
                     current_lines = coerced.lines
                     current_temp = coerced.temp_index

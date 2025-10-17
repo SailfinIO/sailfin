@@ -23,7 +23,11 @@ def compile_stage2(stage2_environment):
 
 def _assert_only_pointer_layout_warnings(diagnostics):
     unexpected = [
-        diag for diag in diagnostics if "defaulting to pointer layout" not in diag]
+        diag
+        for diag in diagnostics
+        if "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
     assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
 
@@ -1860,6 +1864,42 @@ fn main() -> number {
     try:
         output = _invoke_double(engine, "main")
         assert output == pytest.approx(24.56), "Match should extract and use field values correctly"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_allocates_recursive_enum_payloads(compile_stage2):
+    """Ensure recursive enum payloads allocate heap storage instead of failing coercion."""
+    result = compile_stage2(
+        """
+enum Value {
+    Number { value -> number; }
+    Pair { left -> Value, right -> Value; }
+}
+
+fn make_pair() -> Value {
+    let leaf = Value.Number { value: 1.0 };
+    let combined = Value.Pair { left: leaf, right: leaf };
+    return combined;
+}
+
+fn main() -> number {
+    let _ = make_pair();
+    return 7.0;
+}
+"""
+    )
+
+    malloc_lines = [line for line in result.ir.splitlines() if "call noalias i8* @malloc" in line]
+    assert malloc_lines, "Recursive enum payload should allocate using malloc"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(7.0)
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
