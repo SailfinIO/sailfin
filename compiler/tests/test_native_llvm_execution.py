@@ -1702,3 +1702,45 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_stores_enum_payload_fields(compile_stage2):
+    """Test that enum variants with payload fields can be constructed and stored."""
+    result = compile_stage2(
+        """
+enum Shape {
+    Circle { radius -> number; }
+    Rectangle { width -> number, height -> number; }
+}
+
+fn make_circle() -> Shape {
+    return Shape.Circle { radius: 5.0 };
+}
+
+fn main() -> number {
+    let circle = make_circle();
+    return 42;
+}
+"""
+    )
+
+    # Check for alloca instruction for payload storage
+    assert "alloca %Shape" in result.ir, "Payload enum should use stack allocation"
+
+    # Check for getelementptr to access payload
+    assert "getelementptr inbounds %Shape" in result.ir, "Should access enum fields via GEP"
+
+    # Check for store instruction for payload field
+    assert "store double" in result.ir, "Should store payload field value"
+
+    # Check for load instruction to get complete enum value
+    assert "load %Shape" in result.ir, "Should load complete enum value from stack"
+
+    _assert_only_pointer_layout_warnings(result.diagnostics)
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(42.0), "Should execute successfully with payload enum"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

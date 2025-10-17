@@ -63,13 +63,14 @@ roadmaps.
   (`{ tag_type, [payload_bytes x payload_size] }`) where the tag identifies the
   active variant and the payload area stores variant-specific fields. Enum
   constructor expressions (both unit variants like `Color.Red` and payload variants
-  like `Shape.Circle { radius: 5.0 }`) lower into LLVM `insertvalue` instructions
-  that populate the tag field; regression coverage lives in
-  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_basic_enum_types`
-  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_constructs_simple_enum_variant`.
-  Full payload field storage for variants with data is partially implemented
-  (tag insertion works, but bitcast/store operations for payload fields emit
-  diagnostics indicating runtime fallback is used).
+  like `Shape.Circle { radius: 5.0 }`) now fully lower into LLVM: unit variants use
+  `insertvalue` to populate the tag field, while payload variants allocate the enum
+  on the stack, store the tag, then use `getelementptr` and `bitcast` to store each
+  payload field at its correct byte offset within the payload array before loading
+  the complete enum value. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_basic_enum_types`,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_constructs_simple_enum_variant`,
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_stores_enum_payload_fields`.
   Match expressions now destructure enum operands natively by extracting the tag
   field via `extractvalue` and comparing it against variant tag values, enabling
   Stage2 programs to dispatch on enum variants without Python fallbacks. Unit

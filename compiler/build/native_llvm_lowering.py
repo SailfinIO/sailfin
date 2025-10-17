@@ -3806,6 +3806,13 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         last = stripped[len(stripped) - 1]
         if first == "["  and  last == "]":
             return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context)
+    enum_parse = parse_enum_literal(stripped)
+    if enum_parse.recognized  and  enum_parse.success:
+        enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name)
+        if enum_info != None:
+            lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context)
+            combined = (diagnostics) + (lowered_enum.diagnostics)
+            return ExpressionResult(lines=lowered_enum.lines, temp_index=lowered_enum.temp_index, operand=lowered_enum.operand, diagnostics=combined)
     struct_parse = parse_struct_literal(stripped)
     if struct_parse.recognized:
         if not struct_parse.success:
@@ -3814,13 +3821,6 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context)
         combined = (diagnostics) + (lowered_struct.diagnostics)
         return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined)
-    enum_parse = parse_enum_literal(stripped)
-    if enum_parse.recognized  and  enum_parse.success:
-        enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name)
-        if enum_info != None:
-            lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context)
-            combined = (diagnostics) + (lowered_enum.diagnostics)
-            return ExpressionResult(lines=lowered_enum.lines, temp_index=lowered_enum.temp_index, operand=lowered_enum.operand, diagnostics=combined)
     member_parse = parse_member_access(stripped)
     if member_parse.success:
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context)
@@ -4799,11 +4799,23 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
     if enum_info.tag_type == "i64":
         tag_llvm_type = "i64"
     enum_value = "undef"
-    tag_temp = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0")
-    current_temp += 1
-    enum_value = tag_temp
+    enum_alloca = None
     if len(variant_info.fields) > 0:
+        alloca_temp = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + enum_info.llvm_name)
+        enum_alloca = alloca_temp
+        tag_ptr_temp = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + tag_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_temp + ", i32 0, i32 0")
+        current_lines = append_string(current_lines, "  store " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", " + tag_llvm_type + "* " + tag_ptr_temp)
+    else:
+        tag_temp = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0")
+        current_temp += 1
+        enum_value = tag_temp
+    if len(variant_info.fields) > 0:
+        alloca_ptr = enum_alloca
         used_names = []
         field_index = 0
         while True:
@@ -4830,8 +4842,24 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                     diagnostics = (diagnostics) + (coerced.diagnostics)
                     current_lines = coerced.lines
                     current_temp = coerced.temp_index
-                    if coerced.operand != None:
-                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload field storage not yet fully implemented for `" + parse.enum_name + "." + parse.variant_name + "." + expected.name + "`; runtime will use fallback")
+                    if coerced.operand != None  and  alloca_ptr != None:
+                        payload_ptr_temp = format_temp_name(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1")
+                        byte_array_ptr_temp = format_temp_name(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                        field_offset = variant_info.fields[field_index].index
+                        field_byte_ptr_temp = byte_array_ptr_temp
+                        if field_offset > 0:
+                            offset_ptr_temp = format_temp_name(current_temp)
+                            current_temp += 1
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset))
+                            field_byte_ptr_temp = offset_ptr_temp
+                        field_ptr_temp = format_temp_name(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*")
+                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp)
                 if not string_array_contains(used_names, expected.name):
                     used_names = append_string(used_names, expected.name)
             else:
@@ -4845,6 +4873,11 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
             if not string_array_contains(used_names, literal_field.name):
                 diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`")
             extra_index += 1
+        if alloca_ptr != None:
+            load_temp = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr)
+            enum_value = load_temp
     operand = LLVMOperand(llvm_type=enum_info.llvm_name, value=enum_value)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
 

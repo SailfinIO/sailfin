@@ -5685,18 +5685,8 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         }
     }
 
-    let struct_parse = parse_struct_literal(stripped);
-    if struct_parse.recognized {
-        if !struct_parse.success {
-            diagnostics = diagnostics.concat(struct_parse.diagnostics);
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
-        }
-        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context);
-        let combined = diagnostics.concat(lowered_struct.diagnostics);
-        return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined };
-    }
-
     // Try enum literal first - check if this looks like EnumName.VariantName
+    // This must come before struct literal parsing because Shape.Circle { ... } could be either
     let enum_parse = parse_enum_literal(stripped);
     if enum_parse.recognized && enum_parse.success {
         // Verify this is actually an enum by checking context
@@ -5706,6 +5696,17 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             let combined = diagnostics.concat(lowered_enum.diagnostics);
             return ExpressionResult { lines: lowered_enum.lines, temp_index: lowered_enum.temp_index, operand: lowered_enum.operand, diagnostics: combined };
         }
+    }
+
+    let struct_parse = parse_struct_literal(stripped);
+    if struct_parse.recognized {
+        if !struct_parse.success {
+            diagnostics = diagnostics.concat(struct_parse.diagnostics);
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
+        }
+        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context);
+        let combined = diagnostics.concat(lowered_struct.diagnostics);
+        return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined };
     }
 
     // Not an enum, try member access
@@ -7008,18 +7009,35 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
         tag_llvm_type = "i64";
     }
 
-    // Start with undef enum value
+    // For variants with payload fields, use stack allocation approach
+    // Otherwise use insertvalue for unit variants
     let mut enum_value -> string = "undef";
+    let mut enum_alloca -> string? = null;
 
-    // Insert tag value at index 0
-    let tag_temp = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0");
-    current_temp += 1;
-    enum_value = tag_temp;
+    if variant_info.fields.length > 0 {
+        // Allocate enum on stack for variants with payloads
+        let alloca_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + enum_info.llvm_name);
+        enum_alloca = alloca_temp;
+
+        // Store the tag at index 0
+        let tag_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  " + tag_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_temp + ", i32 0, i32 0");
+        current_lines = append_string(current_lines, "  store " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", " + tag_llvm_type + "* " + tag_ptr_temp);
+    } else {
+        // For unit variants (no payload), use insertvalue directly
+        let tag_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0");
+        current_temp += 1;
+        enum_value = tag_temp;
+    }
 
     // For variants with payload fields, we need to store them in the payload area
     // The payload is at index 1 and is represented as a byte array
     if variant_info.fields.length > 0 {
+        let alloca_ptr = enum_alloca;
         let mut used_names -> string[] = [];
         let mut field_index -> number = 0;
         loop {
@@ -7051,11 +7069,34 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                     diagnostics = diagnostics.concat(coerced.diagnostics);
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
-                    if coerced.operand != null {
-                        // For now, we'll emit a diagnostic that full enum payload storage is not yet implemented
-                        // The full implementation would use bitcast and store operations to place the field values
-                        // into the correct offset within the payload byte array
-                        diagnostics = append_string(diagnostics, "llvm lowering: enum payload field storage not yet fully implemented for `" + parse.enum_name + "." + parse.variant_name + "." + expected.name + "`; runtime will use fallback");
+                    if coerced.operand != null && alloca_ptr != null {
+                        // Get pointer to the payload byte array (field 1)
+                        let payload_ptr_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1");
+
+                        // Cast payload byte array pointer to i8*
+                        let byte_array_ptr_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*");
+
+                        // Use field offset from variant layout metadata
+                        let field_offset = variant_info.fields[field_index].index;  // This should be the byte offset
+                        let mut field_byte_ptr_temp -> string = byte_array_ptr_temp;
+                        if field_offset > 0 {
+                            let offset_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset));
+                            field_byte_ptr_temp = offset_ptr_temp;
+                        }
+
+                        // Cast byte pointer to field type pointer
+                        let field_ptr_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*");
+
+                        // Store the field value
+                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp);
                     }
                 }
                 if !string_array_contains(used_names, expected.name) {
@@ -7078,6 +7119,14 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                 diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`");
             }
             extra_index += 1;
+        }
+
+        // Load the complete enum value from the stack
+        if alloca_ptr != null {
+            let load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr);
+            enum_value = load_temp;
         }
     }
 
