@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.34 (2025-10-17)
+
+### Bug Fixes
+
+- Straight-line ifs
+  ([`2e50344`](https://github.com/SailfinIO/sailfin/commit/2e50344b7fa944e7b68e60ffe97e6f0c3e48db2c))
+
+
 ## v0.1.1-alpha.33 (2025-10-17)
 
 ### Bug Fixes
