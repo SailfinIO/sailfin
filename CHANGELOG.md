@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.32 (2025-10-17)
+
+### Bug Fixes
+
+- Mutation capture
+  ([`46e108e`](https://github.com/SailfinIO/sailfin/commit/46e108e86de67a76d8ce358bf90c04d35a6d6782))
+
+### Documentation
+
+- Roadmap task enhancement
+  ([`bd5580e`](https://github.com/SailfinIO/sailfin/commit/bd5580ef16969e12eb1627d34b0df3a9b7f2d9b7))
+
+
 ## v0.1.1-alpha.31 (2025-10-17)
 
 ### Bug Fixes
