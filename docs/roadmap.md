@@ -58,45 +58,336 @@ _Near-term (unlock compiler parity & safety checks)_
 
 _Mid-term (runtime capabilities & effect enforcement)_
 
-- [ ] Introduce capability-aware intrinsics (IO, model, net) for the native backend so effect enforcement survives codegen.
-- [ ] Bridge capability adapters (`fs`, `http`, `serve`, `spawn`, channel primitives) into stage2 lowering with symbol declarations and smoke coverage in `compiler/tests/test_native_llvm_execution.py`.
-- [ ] Extend the stage2 runner to register capability adapters (filesystem, HTTP, model, serve, spawn, channel primitives), enforcing capability manifests when delegates execute and adding runtime smoke tests that exercise each adapter via native LLVM binaries.
-- [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
+- [ ] **Capability-aware intrinsics for native backend** — Introduce intrinsic declarations that preserve effect annotations through LLVM codegen so Stage2 binaries enforce capability requirements at the IR level.
+
+  - [ ] Define intrinsic signatures for core capability operations (`io_print`, `io_read`, `model_invoke`, `net_request`) in `compiler/src/native_ir.sfn` with effect metadata that survives lowering.
+  - [ ] Extend `compiler/src/native_llvm_lowering.sfn` to emit LLVM function declarations for intrinsics, annotating them with capability metadata in IR comments.
+  - [ ] Wire intrinsic calls through `lower_call_expression` so Stage2 routes `console.info`, `fs.*`, `http.*`, `prompt` to the declared intrinsics instead of Python fallbacks.
+  - [ ] Add unit tests in `compiler/tests/test_native_llvm_execution.py` that validate intrinsic declarations emit, capability metadata propagates, and simple IO/model/net calls compile without diagnostics.
+  - [ ] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
+
+- [ ] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
+
+  - [ ] Declare adapter function signatures in `compiler/src/native_ir.sfn` for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP (`http_get`, `http_post`), model (`model_invoke_with_prompt`), serving (`serve_start`, `serve_handler_dispatch`), concurrency (`spawn_task`, `channel_create`, `channel_send`, `channel_receive`).
+  - [ ] Implement adapter lowering in `compiler/src/native_llvm_lowering.sfn` that emits external function declarations and routes Sailfin runtime helper calls to the corresponding adapter symbols.
+  - [ ] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` for each adapter category:
+    - [ ] `test_native_llvm_execution_calls_fs_adapter` — validates filesystem read/write declarations emit.
+    - [ ] `test_native_llvm_execution_calls_http_adapter` — validates HTTP get/post declarations emit.
+    - [ ] `test_native_llvm_execution_calls_model_adapter` — validates model invoke declaration emits.
+    - [ ] `test_native_llvm_execution_calls_serve_adapter` — validates serve handler declaration emits.
+    - [ ] `test_native_llvm_execution_calls_spawn_adapter` — validates spawn/channel declarations emit.
+  - [ ] Ensure adapter calls propagate capability requirements into the module's capability manifest (validated by existing manifest tests plus new adapter-specific coverage).
+
+- [ ] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
+
+  - [ ] Implement adapter registration in `Stage2Runner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
+  - [ ] Extend `Stage2Runner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
+  - [ ] Add bridge implementations for each adapter that translate LLVM ABI calls to Python runtime helpers:
+    - [ ] Filesystem adapters — `fs_read_file`, `fs_write_file`, `fs_list_directory` bridging to `runtime_support.fs.*` with path validation and error handling.
+    - [ ] HTTP adapters — `http_get`, `http_post` bridging to `runtime_support.http.*` with request/response marshalling.
+    - [ ] Model adapters — `model_invoke_with_prompt` bridging to `runtime_support.prompt` with capability check and result marshalling.
+    - [ ] Serve adapters — `serve_start`, `serve_handler_dispatch` bridging to `runtime_support.serve` with handler registration and request routing.
+    - [ ] Concurrency adapters — `spawn_task` bridging to `runtime_support.spawn`, channel creation/send/receive bridging to `runtime_support.channel` with asyncio integration.
+  - [ ] Add end-to-end runtime smoke tests in `compiler/tests/test_native_llvm_execution.py` that compile Sailfin programs calling adapters, execute them via Stage2Runner, and validate behavior:
+    - [ ] `test_stage2_runner_executes_fs_operations` — write/read file round-trip.
+    - [ ] `test_stage2_runner_executes_http_request` — mock HTTP get with stub adapter.
+    - [ ] `test_stage2_runner_executes_model_prompt` — mock prompt invocation with stub adapter.
+    - [ ] `test_stage2_runner_executes_serve_handler` — register handler and dispatch mock request.
+    - [ ] `test_stage2_runner_executes_spawn_and_channel` — spawn task, send/receive via channel.
+  - [ ] Document adapter ABI, registration flow, and capability enforcement in `docs/runtime_audit.md` and update `docs/status.md` with coverage.
+
+- [ ] **Extend suspension-conflict tracking to coroutines** — Once `async fn` and generator support lands, extend borrow lifetime checks to reject mutable borrows held across `yield`/resume boundaries in coroutine frames.
+  - [ ] Add coroutine/generator lowering infrastructure (tracked separately in "Async & Concurrency Substrate" roadmap item; this subtask assumes that work is complete).
+  - [ ] Extend `compiler/src/native_llvm_lowering.sfn` suspension tracking to recognize `yield` instructions and treat them like `await` for borrow conflict analysis.
+  - [ ] Implement resumable frame lifetime analysis that tracks which locals survive across suspension points and rejects mutable borrows that would be live at `yield` sites.
+  - [ ] Add diagnostics for generator yield conflicts mirroring the existing `await` suspension diagnostics (cite both the borrow initializer and the yield site with source spans).
+  - [ ] Add test coverage in `compiler/tests/test_native_llvm_execution.py`:
+    - [ ] `test_native_llvm_rejects_mutable_borrow_across_yield` — generator holding `&mut` across yield emits diagnostic.
+    - [ ] `test_native_llvm_allows_yield_without_mutable_borrow` — generator yielding after borrow release compiles successfully.
+  - [ ] Document coroutine borrow rules and suspension lattice (`!mut ⊄ !async` extended to generators) in `docs/spec.md` and update `docs/status.md` with coverage.
 
 _Final delivery (self-hosting, automation, distribution)_
 
-- [ ] Bootstrap stage2 self-hosting: compile the Sailfin compiler with stage2 artifacts, execute the stage2-built binary end-to-end, and gate CI on the self-hosted pipeline as soon as the mid-term runtime work is passing.
-- [ ] Wire CI to run the stage2 smoke binary and self-hosted compiler on every PR once the self-hosting milestone is green, promoting stage2 to the default gate while retaining stage1 as a fallback job.
-- [ ] Package stage2 artifacts alongside stage1 in releases after CI is enforcing the self-hosted pipeline, ensuring downstream projects can install the native toolchain.
+- [ ] **Bootstrap Stage2 self-hosting** — Compile the Sailfin compiler with Stage2 native backend, execute the resulting binary end-to-end, and lock self-hosted compilation as a CI gate.
+
+  - [ ] Create self-hosting compilation script in `scripts/bootstrap_stage2.py` that compiles all `compiler/src/*.sfn` modules using Stage2 LLVM backend with full capability grants.
+  - [ ] Extend `tools/compile_with_stage1.py` to optionally target Stage2 executable output and link all compiler modules into a standalone binary.
+  - [ ] Add smoke tests that validate the self-hosted compiler binary can:
+    - [ ] Parse and compile a minimal Sailfin program (`examples/basics/hello.sfn`).
+    - [ ] Generate valid `.sfn-asm` IR and LLVM modules.
+    - [ ] Execute compiled programs through Stage2Runner with matching output to Stage1.
+  - [ ] Add `make bootstrap-stage2` target that runs the full self-hosting pipeline and reports success/failure.
+  - [ ] Document self-hosting compilation flow, capability requirements, and validation steps in `docs/self-hosting.md`.
+
+- [ ] **Wire CI for self-hosted builds** — Promote Stage2 self-hosted compiler to default CI gate while keeping Stage1 as fallback job.
+
+  - [ ] Add `.github/workflows/stage2-self-hosted.yml` that runs the self-hosting pipeline on every PR:
+    - [ ] Compile compiler with Stage2 backend.
+    - [ ] Execute self-hosted compiler to build example suite.
+    - [ ] Run Stage2 execution tests on compiled examples.
+    - [ ] Validate output matches Stage1 baseline.
+  - [ ] Update `.github/workflows/test.yml` to include both Stage1 and Stage2 self-hosted jobs, marking Stage2 as required once it reaches parity.
+  - [ ] Add CI status badges to README.md showing Stage1 (stable) and Stage2 (self-hosted) pipeline status.
+  - [ ] Configure branch protection to require Stage2 self-hosted job passing before merge once the milestone is green.
+
+- [ ] **Package Stage2 artifacts for distribution** — Bundle Stage2 native toolchain alongside Stage1 in releases so downstream projects can install both compiler backends.
+  - [ ] Extend `tools/package_stage1.py` to also build and package Stage2 executable artifacts (compiler binary, runtime adapters, prelude modules).
+  - [ ] Update release workflow (`.github/workflows/stage1-release.yml` → rename to `release.yml`) to:
+    - [ ] Build both Stage1 (Python-based) and Stage2 (native LLVM) compiler packages.
+    - [ ] Run full test suites for both backends before packaging.
+    - [ ] Bundle stage2 binary, adapter libraries, and runtime prelude into platform-specific archives (Linux x64, macOS ARM64, etc.).
+    - [ ] Generate SHA256 checksums for all release artifacts.
+  - [ ] Update `scripts/install_stage1.py` (rename to `scripts/install_sailfin.py`) to detect platform and install both Stage1 and Stage2 toolchains:
+    - [ ] Detect OS and architecture (Linux x64, macOS ARM64, Windows x64).
+    - [ ] Download appropriate Stage2 native binary package.
+    - [ ] Install to `~/.sailfin/stage2/` with symlinks to system path.
+    - [ ] Validate installation with version check and smoke test.
+  - [ ] Update README.md installation instructions to cover both Stage1 and Stage2 installation paths.
+  - [ ] Document release artifact structure, platform support matrix, and installation troubleshooting in `docs/README.md`.
 
 2. **Runtime & FFI Foundations**
 
-- [ ] Capability adapter injection — Wire the new runtime capability bridges to host-provided adapters in the stage2 runner so filesystem, HTTP, and model calls no longer depend on `runtime_support.py`; ship adapter docs alongside samples.
-- [ ] Runtime type metadata — Emit module descriptors so `check_type` no longer relies on `runtime.resolve_runtime_type`; update `docs/runtime_audit.md` once the bridge is removed.
-- [ ] Port remaining Python-only helpers (async runtime glue, capability shims) into Sailfin modules now that enum/struct formatting is stable.
-- [ ] Concurrency substrate — Prototype async scheduling / task primitives required by `spawn`, `serve`, and `pipeline` execution in self-hosted builds.
-- [ ] Unicode normalization helpers — Expose NFC/NFD routines in the Sailfin runtime so locale-aware casing and future stage2 pipelines stay Python-free.
+- [ ] **Native capability adapter implementation** — Replace `runtime_support.py` Python implementations with native Sailfin modules for filesystem, HTTP, and model adapters.
+
+  - [ ] Create `runtime/adapters/fs.sfn` implementing filesystem operations (`read_file`, `write_file`, `list_directory`, `delete_file`, `create_directory`) using platform-specific system calls via `unsafe extern` declarations.
+  - [ ] Create `runtime/adapters/http.sfn` implementing HTTP client (`get`, `post`, `put`, `delete`) using native networking primitives or FFI bindings to libcurl/platform APIs.
+  - [ ] Create `runtime/adapters/model.sfn` implementing model invocation adapter that routes to registered engine implementations (OpenAI API, local inference, etc.).
+  - [ ] Compile adapter modules to LLVM and link them into Stage2 runtime library.
+  - [ ] Update Stage2Runner to load native adapter implementations instead of `runtime_support.py` shims.
+  - [ ] Add regression tests validating native adapters match Python adapter behavior for all existing examples in `examples/io/` and `examples/ai/`.
+  - [ ] Document native adapter FFI contracts and platform-specific requirements in `docs/runtime_audit.md`.
+
+- [ ] **Runtime type metadata emission** — Generate module-level type descriptors during compilation so `check_type` can validate types without Python runtime bridges.
+
+  - [ ] Extend `.sfn-asm` format to include `.typedef` metadata sections carrying struct/enum/interface descriptors with field names, types, and layout information.
+  - [ ] Update `compiler/src/emit_native.sfn` to emit typedef metadata for all user-defined types in each module.
+  - [ ] Implement `runtime/type_registry.sfn` that loads typedef metadata and provides `check_type(value, type_name)` functionality natively.
+  - [ ] Replace `runtime_support.resolve_runtime_type` Python helper with native `type_registry.check_type` implementation.
+  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py` validating type checks execute correctly for structs, enums, and interface values.
+  - [ ] Update `docs/runtime_audit.md` marking `resolve_runtime_type` as removed and document the native type registry.
+
+- [ ] **Port async runtime glue to Sailfin** — Reimplement `asyncio`-based helpers (`spawn`, `channel`, `serve`) as native Sailfin modules with capability enforcement.
+
+  - [ ] Create `runtime/async_runtime.sfn` implementing:
+    - [ ] Event loop abstraction compatible with native coroutine lowering.
+    - [ ] Task scheduler for `spawn` with named task tracking.
+    - [ ] Channel implementation (bounded/unbounded queues) for inter-task communication.
+  - [ ] Create `runtime/server.sfn` implementing HTTP/WebSocket server handler dispatch for `serve`.
+  - [ ] Integrate async runtime with Stage2 coroutine lowering once generator/async support lands (depends on mid-term suspension work).
+  - [ ] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` exercising:
+    - [ ] Native spawn with channel communication (validate task executes and channel send/receive works).
+    - [ ] Native serve with mock request handling (validate handler registration and dispatch).
+  - [ ] Convert `examples/concurrency/*.sfn` to use native async runtime and validate all examples execute correctly.
+
+- [ ] **Unicode normalization for native runtime** — Expose NFC/NFD normalization routines so Stage2 pipelines handle locale-aware text without Python dependencies.
+  - [ ] Integrate ICU library (or Rust `unicode-normalization`) via FFI for normalization operations.
+  - [ ] Create `runtime/unicode.sfn` exposing:
+    - [ ] `normalize_nfc(string) -> string` — canonical composition.
+    - [ ] `normalize_nfd(string) -> string` — canonical decomposition.
+    - [ ] `normalize_nfkc(string) -> string` — compatibility composition.
+    - [ ] `normalize_nfkd(string) -> string` — compatibility decomposition.
+  - [ ] Update `runtime/prelude.sfn` string helpers to use native normalization for case folding and comparison operations.
+  - [ ] Add tests in `compiler/tests/test_string_utils.py` validating normalization behavior matches Unicode spec for:
+    - [ ] Composed characters (é vs e + combining accent).
+    - [ ] Compatibility forms (ligatures, full-width characters).
+    - [ ] Mixed scripts (Latin, Greek, Cyrillic with combining marks).
+  - [ ] Document Unicode normalization API and locale handling strategy in `docs/spec.md`.
 
 5. **Toolchain De-Pythonisation**
 
-- [ ] Native emission milestone — Flip the default stage1 build to target the stage2 executable backend once minimal LLVM/WASM runners exist, keeping a Python fallback only for regression hunting.
-- [ ] Sailfin-native CLI ("sfn") — Reimplement the `sailfin-stage1` launcher, installer, and packaging flow without invoking Python entrypoints; ship the CLI as a Sailfin binary that exercises the runtime prelude directly.
-- [ ] Release pipeline guardrails — Update CI to build the compiler, runtime, and examples using only Sailfin-generated artifacts and fail if Python runtime shims (`runtime_support.py`, bootstrap scripts) are invoked.
-- [ ] Test harness migration — Port the stage1 pytest coverage to an equivalent Sailfin-native smoke/integration suite so compiler regressions can be detected without Python tooling.
+- [ ] **Native emission milestone** — Switch default compilation target from Python codegen to Stage2 LLVM executable backend.
+
+  - [ ] Update `compiler/src/main.sfn` to default `--backend` flag to `native` instead of `python`, with explicit `--backend=python` option for fallback.
+  - [ ] Ensure all compiler modules compile cleanly with Stage2 backend and pass existing test suite.
+  - [ ] Update Makefile targets:
+    - [ ] `make compile` defaults to Stage2 LLVM backend.
+    - [ ] Add `make compile-python` for explicit Python fallback.
+    - [ ] Keep Stage1 Python artifacts available for bisecting regressions.
+  - [ ] Validate that `examples/` suite compiles and executes with Stage2 as default backend (regression coverage via `make test`).
+  - [ ] Document backend selection, fallback strategy, and known Stage2 limitations in `docs/README.md`.
+
+- [ ] **Sailfin-native CLI (`sfn`)** — Reimplement compiler launcher, project commands, and package management in Sailfin without Python entrypoints.
+
+  - [ ] Create `cli/main.sfn` implementing:
+    - [ ] Command-line argument parsing (using native string utilities).
+    - [ ] Subcommand dispatch for `sfn compile`, `sfn run`, `sfn test`, `sfn add`, `sfn publish`.
+    - [ ] File I/O for reading source files and writing artifacts (using native `fs` adapter).
+    - [ ] Error reporting with formatted diagnostics (using native `console` helpers).
+  - [ ] Implement core commands in separate Sailfin modules:
+    - [ ] `cli/compile.sfn` — invoke compiler pipeline, handle output paths, emit diagnostics.
+    - [ ] `cli/run.sfn` — compile and execute entry point with capability grants.
+    - [ ] `cli/test.sfn` — discover test functions, execute them, report results (deferred until native test framework lands).
+    - [ ] `cli/add.sfn` — fetch capsule from registry, update fleet.toml (deferred until registry work lands).
+    - [ ] `cli/publish.sfn` — package capsule, upload to registry with provenance (deferred until registry work lands).
+  - [ ] Compile CLI to native binary via Stage2 LLVM backend and install as `sfn` executable.
+  - [ ] Add smoke tests in `compiler/tests/test_native_cli.py`:
+    - [ ] `test_sfn_compile_hello_world` — compile and validate output artifact.
+    - [ ] `test_sfn_run_hello_world` — compile and execute, check stdout.
+    - [ ] `test_sfn_reports_compile_error` — invalid syntax produces diagnostic.
+  - [ ] Update README.md with `sfn` CLI usage examples replacing Python `sailfin-stage1` references.
+
+- [ ] **Release pipeline guardrails** — Enforce that CI builds use only Sailfin artifacts, failing if Python runtime shims are invoked.
+
+  - [ ] Add CI job `.github/workflows/python-free-build.yml` that:
+    - [ ] Compiles compiler using Stage2 backend without `runtime_support.py` in path.
+    - [ ] Compiles all examples using self-hosted compiler.
+    - [ ] Executes examples and validates output matches baseline.
+    - [ ] Fails if `import runtime_support` or bootstrap script imports are detected in execution traces.
+  - [ ] Add runtime instrumentation to detect Python shim usage:
+    - [ ] Wrap Stage2Runner to log any fallback calls to Python helpers.
+    - [ ] Emit warnings during compilation if Python codegen is invoked.
+  - [ ] Update release workflow to require `python-free-build` job passing before artifact publication.
+  - [ ] Document Python-free validation strategy and known exceptions (developer tooling, test harness) in `docs/README.md`.
+
+- [ ] **Test harness migration** — Replace pytest-based compiler tests with Sailfin-native test framework.
+  - [ ] Design native test framework in `docs/proposals/native-test-framework.md`:
+    - [ ] Test discovery (find functions with `#[test]` attribute or `test_*` naming).
+    - [ ] Assertion library (`assert_eq`, `assert_ne`, `assert_true`, etc.).
+    - [ ] Test execution (sequential/parallel, timeout, fixture support).
+    - [ ] Result reporting (pass/fail counts, diagnostic output, timing).
+  - [ ] Implement test framework in `runtime/testing.sfn`:
+    - [ ] Test discovery via module introspection.
+    - [ ] Assertion macros with source location reporting.
+    - [ ] Test runner with configurable parallelism.
+    - [ ] JUnit XML output for CI integration.
+  - [ ] Port high-value test suites to native framework:
+    - [ ] `compiler/tests/test_stage1_pipeline.py` → `compiler/tests_native/pipeline.sfn`.
+    - [ ] `compiler/tests/test_native_llvm_execution.py` → `compiler/tests_native/llvm_execution.sfn`.
+    - [ ] `compiler/tests/test_effect_checker.py` → `compiler/tests_native/effect_checker.sfn`.
+  - [ ] Add `make test-native` target that compiles and runs native test suite.
+  - [ ] Update CI to run both pytest and native test suites during transition period.
+  - [ ] Document test migration strategy and deprecation timeline for pytest in `CONTRIBUTING.md`.
 
 3. **Diagnostics Parity**
 
-- [ ] Expand `typecheck.sfn` to cover type inference gaps (generics, interface conformance) and port the historical stage0 diagnostics.
+- [ ] **Expand typecheck coverage** — Complete type inference for generics, interface conformance, and port remaining stage0 diagnostics.
+
   - [x] Locked regression coverage for duplicate symbol diagnostics across structs, enums, interfaces, models, and type parameters via `compiler/tests/test_stage1_typecheck_duplicates.py`.
   - [x] Implements clauses now enforce interface type argument counts, rejecting missing or extra generics with coverage in `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_type_arguments_for_generic_interface_reports_diagnostic` and `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_mismatched_type_argument_count_reports_diagnostic`.
-- [ ] Surface structured diagnostics with source snippets in the stage1 CLI and artifact logging path - if sfn stage2 cli has already landed, implement there instead.
-- [ ] CLI effect fixer — Teach the stage1 CLI to apply suggested `![effect]` annotations automatically when developers accept fix prompts if sfn stage2 cli has already landed, implement there instead.
+  - [ ] Generic function type inference — Infer type parameters from call-site arguments when not explicitly provided.
+    - [ ] Extend `compiler/src/typecheck.sfn` to collect type parameter constraints from function signature and call arguments.
+    - [ ] Implement unification algorithm that solves for type parameters based on argument types.
+    - [ ] Add diagnostics for ambiguous type parameter inference with suggestions to add explicit type annotations.
+    - [ ] Add tests in `compiler/tests/test_stage1_typecheck_generics.py` covering:
+      - [ ] `test_generic_function_infers_type_from_arguments` — `fn identity<T>(x: T) -> T` called with `identity(42)` infers `T = int`.
+      - [ ] `test_generic_function_reports_ambiguous_inference` — multiple possible type parameter bindings emit diagnostic.
+      - [ ] `test_generic_function_validates_constraints` — interface-constrained type parameters checked at call site.
+  - [ ] Generic struct/enum type inference — Infer type parameters from constructor arguments and field assignments.
+    - [ ] Extend constructor lowering to propagate type constraints from field initializers.
+    - [ ] Add diagnostics for under-constrained type parameters requiring explicit annotations.
+    - [ ] Add tests in `compiler/tests/test_stage1_typecheck_generics.py` covering struct literal and enum variant inference.
+  - [ ] Interface conformance validation — Verify method signatures match interface requirements with proper variance.
+    - [ ] Extend `compiler/src/typecheck.sfn` to check method return types and parameter types match interface declarations (considering covariance/contravariance).
+    - [ ] Add diagnostics for signature mismatches citing both the interface declaration and the implementation.
+    - [ ] Add tests in `compiler/tests/test_stage1_typecheck_interfaces.py` covering:
+      - [ ] `test_struct_method_signature_mismatch_reports_diagnostic` — wrong parameter/return types.
+      - [ ] `test_struct_method_effect_mismatch_reports_diagnostic` — missing or extra effects in implementation.
+  - [ ] Document generic type inference rules, variance, and interface conformance checking in `docs/spec.md`.
+
+- [ ] **Enhanced diagnostic rendering** — Improve CLI/artifact diagnostic output with multi-line snippets, caret highlights, and suggested fixes.
+
+  - [ ] Extend diagnostic types in `compiler/src/typecheck.sfn` and `compiler/src/effect_checker.sfn` to carry:
+    - [ ] Primary span (error location) and secondary spans (related locations like definition sites).
+    - [ ] Suggested fixes as text edits (e.g., add `![io]` to signature).
+    - [ ] Severity levels (error, warning, note).
+  - [ ] Implement rich diagnostic renderer in `compiler/src/diagnostics.sfn`:
+    - [ ] Multi-line source context with line numbers.
+    - [ ] Caret highlighting (`^^^^^`) under error spans.
+    - [ ] Secondary span annotations (e.g., "defined here" notes).
+    - [ ] Color-coded severity (red for errors, yellow for warnings).
+    - [ ] Suggested fix rendering ("help: add `![io]` to signature").
+  - [ ] Wire renderer into Stage1 CLI output (`compiler/src/main.sfn` or native `cli/main.sfn` if that has landed).
+  - [ ] Add tests in `compiler/tests/test_stage1_diagnostics.py` validating:
+    - [ ] Multi-line error context renders correctly.
+    - [ ] Secondary spans appear with proper labels.
+    - [ ] Suggested fixes format as expected.
+  - [ ] Document diagnostic format and rendering behavior in `docs/spec.md`.
+
+- [ ] **CLI effect fixer** — Implement interactive fix application for missing effect annotations.
+  - [ ] Add `--fix` flag to CLI (`compiler/src/main.sfn` or `cli/main.sfn`) that:
+    - [ ] Collects diagnostics with suggested fixes during compilation.
+    - [ ] Prompts user to accept/reject each fix interactively (or apply all with `--fix=auto`).
+    - [ ] Applies accepted fixes by rewriting source files with updated effect annotations.
+  - [ ] Implement fix application in `compiler/src/fix_engine.sfn`:
+    - [ ] Parse suggested fix text edits from diagnostic metadata.
+    - [ ] Apply edits to source files with proper span-to-offset mapping.
+    - [ ] Validate that fixed source still parses successfully.
+    - [ ] Recompile and verify fixes resolve the original diagnostics.
+  - [ ] Add tests in `compiler/tests/test_stage1_cli_fixer.py`:
+    - [ ] `test_cli_applies_missing_effect_fix` — function missing `![io]` gets annotation added when accepted.
+    - [ ] `test_cli_rejects_fix_leaves_source_unchanged` — declining fix keeps original source.
+    - [ ] `test_cli_auto_fix_applies_all_suggestions` — `--fix=auto` mode applies all fixes without prompts.
+  - [ ] Document `--fix` flag usage and interactive workflow in README.md and `docs/README.md`.
 
 4. **Registry & Capsule Workflow**
 
-- [ ] Manifest schema — Finalise capsule (`sail.toml`) and fleet (`fleet.toml`) formats, aligning with `docs/proposals/package-management.md`.
-- [ ] CLI integration — Implement `sfn add`, `sfn run`, and `sfn publish` against `registry.sailfin.dev` using the Sailfin toolchain once native builds are viable.
-- [ ] Provenance channels — Surface model generation cards with cost / latency metadata in pipeline outputs.
+- [ ] **Finalize manifest schemas** — Define and validate capsule (`sail.toml`) and fleet (`fleet.toml`) formats per package management proposal.
+
+  - [ ] Review and refine manifest format in `docs/proposals/package-management.md`:
+    - [ ] Capsule manifest (`sail.toml`) — package name, version, authors, license, dependencies, effect declarations, entry points.
+    - [ ] Fleet manifest (`fleet.toml`) — workspace root, member capsules, shared dependencies, dev/build dependencies.
+    - [ ] Lockfile format (`fleet.lock`) — resolved dependency graph with version pins and integrity hashes.
+  - [ ] Implement manifest parser in `registry/manifest_parser.sfn`:
+    - [ ] TOML parsing (or JSON if simpler for bootstrap).
+    - [ ] Schema validation with diagnostic reporting for malformed manifests.
+    - [ ] Semantic checks (e.g., circular dependencies, version compatibility).
+  - [ ] Implement manifest generator in `registry/manifest_generator.sfn`:
+    - [ ] Scaffold new `sail.toml` with defaults when running `sfn init`.
+    - [ ] Update `fleet.toml` when adding dependencies via `sfn add`.
+    - [ ] Generate `fleet.lock` after dependency resolution.
+  - [ ] Add tests in `compiler/tests/test_registry_manifests.py`:
+    - [ ] Valid manifests parse successfully and extract expected fields.
+    - [ ] Invalid manifests report clear diagnostics.
+    - [ ] Lockfile generation is deterministic.
+  - [ ] Document manifest schemas with field descriptions and examples in `docs/proposals/package-management.md`.
+
+- [ ] **Registry CLI commands** — Implement capsule management commands against `registry.sailfin.dev`.
+
+  - [ ] Implement `sfn init` in `cli/init.sfn`:
+    - [ ] Create project directory structure.
+    - [ ] Generate default `sail.toml` with template values.
+    - [ ] Create initial `src/main.sfn` with hello-world template.
+  - [ ] Implement `sfn add <capsule>` in `cli/add.sfn`:
+    - [ ] Query registry API for capsule metadata and version resolution.
+    - [ ] Download capsule archive (tarball or zip) with integrity verification.
+    - [ ] Extract capsule into local cache (`~/.sailfin/capsules/`).
+    - [ ] Update `fleet.toml` dependencies and regenerate lockfile.
+  - [ ] Implement `sfn run [target]` in `cli/run.sfn`:
+    - [ ] Resolve entry point from `sail.toml` or command-line argument.
+    - [ ] Compile capsule with all dependencies.
+    - [ ] Execute entry point with capability grants from manifest.
+  - [ ] Implement `sfn publish` in `cli/publish.sfn`:
+    - [ ] Validate capsule manifest and ensure all files are tracked.
+    - [ ] Package capsule into archive (excluding `target/`, `build/`, etc.).
+    - [ ] Generate provenance metadata (build timestamp, compiler version, capability manifest).
+    - [ ] Upload to registry API with authentication.
+    - [ ] Verify publication and display registry URL.
+  - [ ] Add smoke tests in `compiler/tests/test_registry_cli.py`:
+    - [ ] `test_sfn_init_creates_project` — validate directory structure and manifest.
+    - [ ] `test_sfn_add_downloads_capsule` — mock registry and verify download/extract.
+    - [ ] `test_sfn_run_executes_entry_point` — compile and run simple capsule.
+    - [ ] `test_sfn_publish_uploads_capsule` — mock registry and verify package upload.
+  - [ ] Document CLI commands with usage examples in README.md.
+
+- [ ] **Provenance channels** — Surface model generation metadata with cost/latency tracking in pipeline outputs.
+  - [ ] Define provenance card schema in `docs/proposals/package-management.md`:
+    - [ ] Model invocation details (prompt tokens, completion tokens, model name/version).
+    - [ ] Cost tracking (token cost, API charges, compute time).
+    - [ ] Latency metrics (request time, first-token time, total duration).
+    - [ ] Generation metadata (temperature, top-p, seed, timestamp).
+  - [ ] Implement provenance tracking in model adapter (`runtime/adapters/model.sfn`):
+    - [ ] Wrap model invocations with timing instrumentation.
+    - [ ] Extract token counts and cost from API responses.
+    - [ ] Generate provenance card JSON for each invocation.
+    - [ ] Attach provenance cards to pipeline outputs (as metadata or sidecar files).
+  - [ ] Expose provenance query API in `runtime/prelude.sfn`:
+    - [ ] `get_generation_provenance(value) -> ProvenanceCard` — retrieve metadata for model-generated values.
+    - [ ] `pipeline_provenance_summary() -> ProvenanceSummary` — aggregate cost/latency across entire pipeline.
+  - [ ] Add tests in `compiler/tests/test_provenance_tracking.py`:
+    - [ ] Model invocation records cost and latency correctly.
+    - [ ] Provenance cards serialize to valid JSON.
+    - [ ] Pipeline summary aggregates multiple invocations.
+  - [ ] Document provenance card format and tracking API in `docs/proposals/model-engines-and-training.md`.
 
 ## Ready Next (Pull When Active Stream Clears)
 
