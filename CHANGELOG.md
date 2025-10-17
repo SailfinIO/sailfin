@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.27 (2025-10-17)
+
+### Bug Fixes
+
+- Some of the pointer fallback warnings during compilation
+  ([`c784af4`](https://github.com/SailfinIO/sailfin/commit/c784af49b87653250e126dd3b7a613993488cb97))
+
+
 ## v0.1.1-alpha.26 (2025-10-17)
 
 ### Bug Fixes
