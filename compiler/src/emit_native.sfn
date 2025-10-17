@@ -121,6 +121,12 @@ struct LayoutEnumDefinition {
     variants -> LayoutEnumVariantDefinition[];
 }
 
+struct CanonicalTypeLayout {
+    name -> string;
+    size -> number;
+    align -> number;
+}
+
 struct LayoutContext {
     structs -> LayoutStructDefinition[];
     enums -> LayoutEnumDefinition[];
@@ -1108,6 +1114,13 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if trimmed == "boolean" || trimmed == "bool" || trimmed == "i1" {
         return TypeLayoutInfo { size: 1, align: 1, diagnostics: diagnostics };
     }
+    if trimmed == "any" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    let canonical = lookup_canonical_type_layout(trimmed);
+    if canonical != null {
+        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
+    }
     if is_array_type(trimmed) {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
@@ -1188,6 +1201,10 @@ fn append_layout_enum_variant_definition(values -> LayoutEnumVariantDefinition[]
     return values.concat([value]);
 }
 
+fn append_canonical_type_layout(values -> CanonicalTypeLayout[], value -> CanonicalTypeLayout) -> CanonicalTypeLayout[] {
+    return values.concat([value]);
+}
+
 fn find_layout_struct_definition(context -> LayoutContext, name -> string) -> LayoutStructDefinition? {
     let mut index -> number = 0;
     loop {
@@ -1212,6 +1229,60 @@ fn find_layout_enum_definition(context -> LayoutContext, name -> string) -> Layo
         let definition = context.enums[index];
         if definition.name == name {
             return definition;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn canonical_type_layouts() -> CanonicalTypeLayout[] {
+    let mut layouts -> CanonicalTypeLayout[] = [];
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeAnnotation", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Block", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "SourceSpan", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Expression", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Parameter", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "WithClause", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ObjectField", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ElseBranch", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "NamedSpecifier", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumField", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariantDefinition", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumType", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumInstance", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "StructField", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeDescriptor", size: 8, align: 8 });
+    return layouts;
+}
+
+fn lookup_canonical_type_layout(name -> string) -> CanonicalTypeLayout? {
+    let layouts = canonical_type_layouts();
+    let mut index -> number = 0;
+    loop {
+        if index >= layouts.length {
+            break;
+        }
+        let layout = layouts[index];
+        if layout.name == name {
+            return layout;
         }
         index += 1;
     }

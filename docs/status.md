@@ -41,6 +41,11 @@ roadmaps.
   (`insertvalue` sequences) so Stage2 functions can construct, return, and consume
   user-defined structs without Python fallbacks; the behaviour is exercised by
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_struct_literals`.
+  Builtin compiler and runtime aggregates (e.g. `Token`, parser result wrappers, `runtime.StructField`)
+  now publish canonical pointer-based ABI descriptors so Stage1 emits consistent layouts without
+  surfacing `defaulting to pointer layout` warnings when compiling dependent modules. Regression
+  coverage: `compiler/tests/test_stage1_pipeline.py::test_stage1_builtin_ast_layouts_do_not_warn`
+  and `compiler/tests/test_runtime_prelude.py::test_runtime_prelude_collection_helpers`.
   Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. LLVM lowering
   now interprets that metadata for struct element types, so `.for` loops can

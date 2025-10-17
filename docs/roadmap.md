@@ -43,10 +43,10 @@ _Near-term (unlock compiler parity & safety checks)_
   - [ ] Emit layout manifests alongside each module artifact and persist them in the build output.
   - [ ] Load and merge dependency manifests during lowering so cross-module references have concrete layouts.
   - [ ] Cover cross-module struct/enum usage with a stage1 + stage2 regression harness.
-- [ ] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings.
-  - [ ] Inventory builtin/runtime types used by the compiler and define canonical ABI descriptors.
-  - [ ] Teach the native emitter to consume the canonical descriptors before defaulting to pointer layouts.
-  - [ ] Update diagnostics/tests to assert the absence of pointer-layout fallbacks for the covered types.
+- [x] Canonicalise ABI metadata for builtin/runtime types (`Token`, parser state, `runtime.StructField`, etc.) and surface it to the native emitter so bootstrap helpers stop returning pointer-layout warnings. Validation: `compiler/tests/test_stage1_pipeline.py::test_stage1_builtin_ast_layouts_do_not_warn`, `compiler/tests/test_runtime_prelude.py::test_runtime_prelude_collection_helpers`.
+  - [x] Inventory builtin/runtime types used by the compiler and define canonical ABI descriptors.
+  - [x] Teach the native emitter to consume the canonical descriptors before defaulting to pointer layouts.
+  - [x] Update diagnostics/tests to assert the absence of pointer-layout fallbacks for the covered types.
 - [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
   - [ ] Build a minimal multi-module fixture that exercises shared structs/enums through both pipelines.
   - [ ] Wire the fixture into `make test` (stage1) and the native LLVM execution suite.

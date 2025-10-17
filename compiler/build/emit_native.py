@@ -157,6 +157,15 @@ class LayoutEnumDefinition:
     def __repr__(self):
         return runtime.struct_repr('LayoutEnumDefinition', [runtime.struct_field('name', self.name), runtime.struct_field('variants', self.variants)])
 
+class CanonicalTypeLayout:
+    def __init__(self, name, size, align):
+        self.name = name
+        self.size = size
+        self.align = align
+
+    def __repr__(self):
+        return runtime.struct_repr('CanonicalTypeLayout', [runtime.struct_field('name', self.name), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align)])
+
 class LayoutContext:
     def __init__(self, structs, enums):
         self.structs = structs
@@ -889,6 +898,11 @@ def analyze_type_layout(context, visiting, type_annotation, container_kind, cont
         return TypeLayoutInfo(size=4, align=4, diagnostics=diagnostics)
     if trimmed == "boolean"  or  trimmed == "bool"  or  trimmed == "i1":
         return TypeLayoutInfo(size=1, align=1, diagnostics=diagnostics)
+    if trimmed == "any":
+        return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
+    canonical = lookup_canonical_type_layout(trimmed)
+    if canonical != None:
+        return TypeLayoutInfo(size=canonical.size, align=canonical.align, diagnostics=diagnostics)
     if is_array_type(trimmed):
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
     if trimmed == "string":
@@ -950,6 +964,9 @@ def append_layout_enum_definition(values, value):
 def append_layout_enum_variant_definition(values, value):
     return (values) + ([value])
 
+def append_canonical_type_layout(values, value):
+    return (values) + ([value])
+
 def find_layout_struct_definition(context, name):
     index = 0
     while True:
@@ -969,6 +986,55 @@ def find_layout_enum_definition(context, name):
         definition = context.enums[index]
         if definition.name == name:
             return definition
+        index += 1
+    return None
+
+def canonical_type_layouts():
+    layouts = []
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Token", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TokenKind", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Program", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeAnnotation", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeParameter", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Block", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="SourceSpan", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Expression", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Parameter", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="WithClause", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ObjectField", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ElseBranch", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ForClause", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MatchCase", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelProperty", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FieldDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MethodDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariant", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FunctionSignature", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="PipelineDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ToolDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TestDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelDeclaration", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Decorator", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="DecoratorArgument", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="NamedSpecifier", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Statement", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumField", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariantDefinition", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumType", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumInstance", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="StructField", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeDescriptor", size=8, align=8))
+    return layouts
+
+def lookup_canonical_type_layout(name):
+    layouts = canonical_type_layouts()
+    index = 0
+    while True:
+        if index >= len(layouts):
+            break
+        layout = layouts[index]
+        if layout.name == name:
+            return layout
         index += 1
     return None
 

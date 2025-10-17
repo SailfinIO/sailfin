@@ -26,7 +26,9 @@ def _runtime_prelude_python_source() -> str:
             unexpected.append(f"fatal: {entry}")
             continue
         for message in getattr(entry, "messages", []):
-            if "defaulting to pointer layout" not in message:
+            if "defaulting to pointer layout" in message:
+                unexpected.append(f"pointer layout fallback: {message}")
+            else:
                 unexpected.append(message)
     assert not unexpected, f"Stage1 surfaced diagnostics compiling runtime prelude: {unexpected}"
 

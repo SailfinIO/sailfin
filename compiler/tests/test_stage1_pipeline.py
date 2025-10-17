@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import pathlib
 
 import pytest
 
@@ -214,6 +215,26 @@ def test_struct_method_lowering() -> None:
     pair_instance = pair_class(1, 2)
     assert hasattr(pair_instance, "sum"), "sum method missing on struct facade"
     assert pair_instance.sum() == 3
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_stage1_builtin_ast_layouts_do_not_warn() -> None:
+    stage1_main = importlib.import_module("compiler.build.main")
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+
+    ast_source = (repo_root / "compiler" / "src" / "ast.sfn").read_text()
+    ast_result = stage1_main.compile_to_native_python(ast_source)
+    ast_pointer = [
+        diag for diag in ast_result.diagnostics if "defaulting to pointer layout" in diag]
+    assert not ast_pointer, f"AST module still reported pointer layout fallbacks: {ast_pointer}"
+
+    parser_source = (repo_root / "compiler" / "src" / "parser.sfn").read_text()
+    parser_result = stage1_main.compile_to_native_python(parser_source)
+    parser_pointer = [
+        diag for diag in parser_result.diagnostics if "defaulting to pointer layout" in diag]
+    assert not parser_pointer, (
+        f"Parser module still reported pointer layout fallbacks: {parser_pointer}"
+    )
 
 
 @pytest.mark.usefixtures("stage1_environment")
