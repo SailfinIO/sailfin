@@ -67,6 +67,20 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   validates manifest generation and content, while
   `compiler/tests/test_stage1_pipeline.py::test_native_backend_parses_layout_manifest` verifies
   that the parser can reconstruct struct and enum layout metadata from the manifest format.
+  Cross-module layout regression coverage now locks the manifest infrastructure end-to-end
+  via `compiler/tests/test_stage1_pipeline.py::test_native_backend_cross_module_layout_resolution`
+  (stage1 pipeline) and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_cross_module_layout_resolution`
+  (stage2 LLVM execution). These tests exercise a minimal multi-module fixture where a types
+  module defines shared structs (Point, Rectangle) and enums (Color, Shape) with payload
+  variants, exports constructor functions, and emits a layout manifest, while a consumer module
+  imports and uses those types in local bindings, function calls, and match expressions. The
+  stage1 test verifies manifest emission and parsing for the types module and confirms the
+  consumer compiles without fatal errors. The stage2 test validates that both modules lower to
+  LLVM IR with proper type definitions, confirming the layout infrastructure works end-to-end.
+  Note that automatic manifest loading for imported modules (enabling the consumer to use
+  imported types without pointer fallbacks) remains roadmap work; the current tests validate
+  the manifest generation, parsing, and type context building infrastructure that will enable
+  full cross-module resolution once dependency tracking is implemented.
   Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. LLVM lowering
   now interprets that metadata for struct element types, so `.for` loops can

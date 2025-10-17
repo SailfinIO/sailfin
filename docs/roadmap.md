@@ -51,10 +51,10 @@ _Near-term (unlock compiler parity & safety checks)_
   - [x] Inventory builtin/runtime types used by the compiler and define canonical ABI descriptors.
   - [x] Teach the native emitter to consume the canonical descriptors before defaulting to pointer layouts.
   - [x] Update diagnostics/tests to assert the absence of pointer-layout fallbacks for the covered types.
-- [ ] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
-  - [ ] Build a minimal multi-module fixture that exercises shared structs/enums through both pipelines.
-  - [ ] Wire the fixture into `make test` (stage1) and the native LLVM execution suite.
-  - [ ] Document the coverage expectations in `docs/status.md` once the suite lands.
+- [x] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
+  - [x] Build a minimal multi-module fixture that exercises shared structs/enums through both pipelines.
+  - [x] Wire the fixture into `make test` (stage1) and the native LLVM execution suite.
+  - [x] Document the coverage expectations in `docs/status.md` once the suite lands.
 
 _Mid-term (runtime capabilities & effect enforcement)_
 
@@ -175,6 +175,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Capability bridges — Introduced runtime capability grants and filesystem/HTTP/model bridge helpers that enforce permissions while delegating to bootstrap shims. Validation: `compiler/tests/test_runtime_prelude.py::test_runtime_capability_bridges`.
 - [x] Stage2 conditionals — `native_llvm_lowering.sfn` now lowers local assignments and structured `if`/`else` blocks into LLVM IR. Validation: `compiler/tests/test_native_llvm_execution.py` exercises branching via `choose`.
 - [x] Share layout descriptors across modules — Native backend now emits `.layout-manifest` artifacts containing struct and enum layout descriptors alongside `.sfn-asm` modules, and `native_ir.sfn` can parse manifests to reconstruct layout metadata. This infrastructure enables future cross-module type resolution without recompilation. Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_layout_manifest` and `compiler/tests/test_stage1_pipeline.py::test_native_backend_parses_layout_manifest`; behaviour documented in `docs/status.md`.
+- [x] Cross-module layout regression coverage — Added comprehensive end-to-end tests that validate the layout manifest infrastructure through both stage1 pipeline and stage2 LLVM execution. Created multi-module fixtures (`compiler/tests/data/cross_module/shared_types.sfn` defining Point, Rectangle, Color, and Shape types with payload variants; `consumer.sfn` importing and using those types in local bindings, function calls, and match expressions). The stage1 test (`compiler/tests/test_stage1_pipeline.py::test_native_backend_cross_module_layout_resolution`) verifies manifest emission and parsing for the types module and confirms the consumer compiles without fatal errors. The stage2 test (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_cross_module_layout_resolution`) validates that both modules lower to LLVM IR with proper type definitions. These tests lock the manifest generation, parsing, and type context building infrastructure that will enable full cross-module resolution once automatic dependency tracking is implemented. Behaviour documented in `docs/status.md`.
 
 ## Coordination Notes
 

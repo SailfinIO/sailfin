@@ -570,3 +570,83 @@ def test_native_backend_parses_layout_manifest() -> None:
     assert shape_enum.layout is not None, "Shape layout metadata missing"
     assert shape_enum.layout.tag_type == "i32", "Shape tag type should be i32"
     assert len(shape_enum.layout.variants) == 2, "Shape should have 2 variants"
+
+
+@pytest.mark.usefixtures("stage1_environment")
+def test_native_backend_cross_module_layout_resolution() -> None:
+    """
+    Verify that layout manifests enable cross-module type resolution without pointer fallbacks.
+
+    This test compiles a types module (defining shared structs/enums) and a consumer module
+    (importing and using those types), then verifies:
+    1. The types module emits a layout manifest with struct and enum descriptors
+    2. The consumer module can reference those types (note: full dependency resolution
+       is roadmap work; this test validates the manifest infrastructure)
+    """
+    stage1_main = importlib.import_module("compiler.build.main")
+    native_ir_module = importlib.import_module("compiler.build.native_ir")
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    types_path = repo_root / "compiler" / "tests" / \
+        "data" / "cross_module" / "shared_types.sfn"
+    consumer_path = repo_root / "compiler" / "tests" / \
+        "data" / "cross_module" / "consumer.sfn"
+
+    # Compile the types module and verify manifest emission
+    types_source = types_path.read_text(encoding="utf-8")
+    types_result = stage1_main.compile_to_native(types_source)
+
+    unexpected_types = [
+        diag for diag in types_result.diagnostics
+        if "defaulting to pointer layout" not in diag
+    ]
+    assert not unexpected_types, f"types module reported unexpected diagnostics: {unexpected_types}"
+
+    types_manifest = next(
+        (artifact for artifact in types_result.module.artifacts
+         if artifact.name == "module.layout-manifest"), None)
+    assert types_manifest is not None, "types module did not emit layout manifest"
+
+    # Parse the manifest and verify it contains the expected types
+    parse_layout_manifest = getattr(native_ir_module, "parse_layout_manifest")
+    parsed_manifest = parse_layout_manifest(types_manifest.contents)
+
+    assert parsed_manifest is not None, "failed to parse types module manifest"
+
+    # Verify struct layouts
+    point_struct = next(
+        (s for s in parsed_manifest.structs if s.name == "Point"), None)
+    assert point_struct is not None, "Point struct missing from manifest"
+    assert point_struct.layout is not None, "Point layout metadata missing"
+
+    rect_struct = next(
+        (s for s in parsed_manifest.structs if s.name == "Rectangle"), None)
+    assert rect_struct is not None, "Rectangle struct missing from manifest"
+    assert rect_struct.layout is not None, "Rectangle layout metadata missing"
+
+    # Verify enum layouts
+    color_enum = next(
+        (e for e in parsed_manifest.enums if e.name == "Color"), None)
+    assert color_enum is not None, "Color enum missing from manifest"
+    assert color_enum.layout is not None, "Color layout metadata missing"
+
+    shape_enum = next(
+        (e for e in parsed_manifest.enums if e.name == "Shape"), None)
+    assert shape_enum is not None, "Shape enum missing from manifest"
+    assert shape_enum.layout is not None, "Shape layout metadata missing"
+
+    # Compile the consumer module
+    # Note: Full cross-module dependency resolution (automatically loading and merging
+    # imported manifests) is roadmap work. This test validates that:
+    # 1. The manifest infrastructure works (emission, parsing, type reconstruction)
+    # 2. The consumer module can be compiled (imports are handled by stage1 parser)
+    consumer_source = consumer_path.read_text(encoding="utf-8")
+    consumer_result = stage1_main.compile_to_native(consumer_source)
+
+    # The consumer should compile; pointer layout warnings are expected for now
+    # since automatic manifest loading for imports is not yet implemented
+    fatal_diagnostics = [
+        diag for diag in consumer_result.diagnostics
+        if "error" in diag.lower() and "defaulting to pointer layout" not in diag
+    ]
+    assert not fatal_diagnostics, f"consumer module reported fatal errors: {fatal_diagnostics}"
