@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.42 (2025-10-17)
+
+### Bug Fixes
+
+- Payload field extraction
+  ([`a742968`](https://github.com/SailfinIO/sailfin/commit/a742968e4f70c8874337b1c865f7a5e125434534))
+
+
 ## v0.1.1-alpha.41 (2025-10-17)
 
 ### Bug Fixes
