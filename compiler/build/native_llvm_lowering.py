@@ -173,16 +173,26 @@ class OwnershipConsumption:
         return runtime.struct_repr('OwnershipConsumption', [runtime.struct_field('kind', self.kind), runtime.struct_field('name', self.name)])
 
 class LifetimeRegionMetadata:
-    def __init__(self, binding, base, mutable, scope_id, scope_depth, start_span=None):
+    def __init__(self, binding, base, mutable, scope_id, scope_depth, base_scope_id, base_scope_depth, start_span=None):
         self.binding = binding
         self.base = base
         self.mutable = mutable
         self.start_span = start_span
         self.scope_id = scope_id
         self.scope_depth = scope_depth
+        self.base_scope_id = base_scope_id
+        self.base_scope_depth = base_scope_depth
 
     def __repr__(self):
-        return runtime.struct_repr('LifetimeRegionMetadata', [runtime.struct_field('binding', self.binding), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable), runtime.struct_field('start_span', self.start_span), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
+        return runtime.struct_repr('LifetimeRegionMetadata', [runtime.struct_field('binding', self.binding), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable), runtime.struct_field('start_span', self.start_span), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth), runtime.struct_field('base_scope_id', self.base_scope_id), runtime.struct_field('base_scope_depth', self.base_scope_depth)])
+
+class ScopeMetadata:
+    def __init__(self, scope_id, scope_depth):
+        self.scope_id = scope_id
+        self.scope_depth = scope_depth
+
+    def __repr__(self):
+        return runtime.struct_repr('ScopeMetadata', [runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
 
 class StructFieldInfo:
     def __init__(self, name, llvm_type, index):
@@ -308,15 +318,16 @@ class BorrowArgumentParse:
         return runtime.struct_repr('BorrowArgumentParse', [runtime.struct_field('success', self.success), runtime.struct_field('argument', self.argument), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class ExpressionStatementResult:
-    def __init__(self, lines, temp_index, locals, bindings, diagnostics):
+    def __init__(self, lines, temp_index, locals, bindings, diagnostics, lifetime_regions):
         self.lines = lines
         self.temp_index = temp_index
         self.locals = locals
         self.bindings = bindings
         self.diagnostics = diagnostics
+        self.lifetime_regions = lifetime_regions
 
     def __repr__(self):
-        return runtime.struct_repr('ExpressionStatementResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('ExpressionStatementResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions)])
 
 class LetLoweringResult:
     def __init__(self, lines, allocas, locals, bindings, temp_index, diagnostics, next_local_id, lifetime_regions):
@@ -1250,6 +1261,8 @@ def emit_function(function, functions, effects, context):
     body = emit_body(function, llvm_return, preparation.bindings, functions, context)
     lines = (lines) + (body.lines)
     diagnostics = (diagnostics) + (body.diagnostics)
+    lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions)
+    diagnostics = (diagnostics) + (lifetime_diagnostics)
     lines = append_string(lines, "}")
     return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions)
 
@@ -1266,6 +1279,33 @@ def emit_body(function, llvm_return, bindings, functions, context):
             diagnostics = append_string(diagnostics, "llvm lowering: missing return in function `" + function.name + "`")
             lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
     return BodyResult(lines=lines, diagnostics=diagnostics, lifetime_regions=lowered.lifetime_regions)
+
+def validate_borrow_lifetimes(function, regions):
+    diagnostics = []
+    index = 0
+    root_scope = format_root_scope_id(function.name)
+    while True:
+        if index >= len(regions):
+            break
+        region = regions[index]
+        base_scope_id = region.base_scope_id
+        base_scope_depth = region.base_scope_depth
+        if len(base_scope_id) == 0:
+            base_scope_id = root_scope
+            base_scope_depth = 0
+        violation = False
+        if region.scope_depth < base_scope_depth:
+            violation = True
+        else:
+            if not is_scope_descendant(base_scope_id, region.scope_id):
+                violation = True
+        if violation:
+            location = ""
+            if region.start_span != None:
+                location = " at " + format_span_location(region.start_span)
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location)
+        index += 1
+    return diagnostics
 
 def lower_instruction_range(function, start_index, end, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, functions, loop_stack, context, scope_id, scope_depth):
     diagnostics = []
@@ -1322,6 +1362,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     current_temp = lowered.temp_index
                     current_locals = lowered.locals
                     current_bindings = lowered.bindings
+                    collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
             else:
                 if instruction.variant == "Return":
                     lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context)
@@ -1330,6 +1371,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     current_temp = lowered.temp_index
                     current_locals = lowered.locals
                     current_bindings = lowered.bindings
+                    collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
                     terminated = True
                     index += 1
                     if index < end:
@@ -1667,7 +1709,8 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_lines = append_string(current_lines, "  store double " + start_operand.value + ", double* " + iteration_pointer)
         current_lines = append_string(current_lines, "  br label %" + loop_header_label)
         current_lines = append_string(current_lines, loop_header_label + ":")
-        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double", type_annotation="number", ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth)
+        loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label)
+        iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type="double", type_annotation="number", ownership=None, consumed=False, scope_id=loop_body_scope_id, scope_depth=scope_depth + 1)
         header_load = load_local_operand(iteration_binding, current_temp, current_lines)
         diagnostics = (diagnostics) + (header_load.diagnostics)
         current_lines = header_load.lines
@@ -1718,7 +1761,6 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         loop_context = LoopContext(break_label=loop_exit_label, continue_label=loop_increment_label)
         stacked = append_loop_context(loop_stack, loop_context)
         body_locals = append_local_binding(current_locals, iteration_binding)
-        loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label)
         body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, functions, stacked, context, loop_body_scope_id, scope_depth + 1 )
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
@@ -1822,9 +1864,9 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     current_lines = append_string(current_lines, "  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer)
     loop_context = LoopContext(break_label=loop_exit_label, continue_label=loop_increment_label)
     stacked = append_loop_context(loop_stack, loop_context)
-    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, type_annotation="", ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth)
-    body_locals = append_local_binding(current_locals, iteration_binding)
     element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label)
+    iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, type_annotation="", ownership=None, consumed=False, scope_id=element_loop_scope_id, scope_depth=scope_depth + 1)
+    body_locals = append_local_binding(current_locals, iteration_binding)
     body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, functions, stacked, context, element_loop_scope_id, scope_depth + 1 )
     diagnostics = (diagnostics) + (body_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
@@ -2202,7 +2244,8 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name)
         diagnostics = (diagnostics) + (conflict_diagnostics)
         if ownership.variant == "Borrow":
-            region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth)
+            base_scope = infer_borrow_base_scope(ownership.base, current_locals, bindings, function.name)
+            region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth)
             lifetime_regions = append_lifetime_region(lifetime_regions, region)
     if consumption != None:
         if consumption.kind == "local":
@@ -2250,6 +2293,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
     current_temp = temp_index
     current_locals = locals
     current_bindings = bindings
+    lifetime_regions = []
     parsed_assignment = parse_assignment_expression(expression)
     if parsed_assignment.success:
         binding = find_local_binding(current_locals, parsed_assignment.target)
@@ -2258,6 +2302,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
         else:
             ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings)
             diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
+            assignment_ownership = ownership_analysis.ownership
             consumption = ownership_analysis.consumption
             lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -2283,7 +2328,13 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                     if consumption.kind == "parameter":
                         current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
             current_locals = reset_local_consumption(current_locals, parsed_assignment.target)
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+            current_locals = update_local_ownership(current_locals, parsed_assignment.target, assignment_ownership)
+            if assignment_ownership != None:
+                if assignment_ownership.variant == "Borrow":
+                    base_scope = infer_borrow_base_scope(assignment_ownership.base, current_locals, current_bindings, function_name)
+                    region = make_lifetime_region_metadata(parsed_assignment.target, assignment_ownership, binding.scope_id, binding.scope_depth, base_scope.scope_id, base_scope.scope_depth)
+                    lifetime_regions = append_lifetime_region(lifetime_regions, region)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
     ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     consumption = ownership_analysis.consumption
@@ -2297,7 +2348,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
         else:
             if consumption.kind == "parameter":
                 current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
-    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
 
 def parse_assignment_expression(expression):
     trimmed = trim_text(expression)
@@ -2427,13 +2478,14 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
     diagnostics = []
     current_lines = lines
     current_temp = temp_index
+    lifetime_regions = []
     if instruction.expression == None  or  len(instruction.expression) == 0:
         if llvm_return == "void":
             current_lines = append_string(current_lines, "  ret void")
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`")
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
     current_locals = locals
     current_bindings = bindings
     suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name, instruction.span)
@@ -2448,12 +2500,12 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
     if lowered.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`")
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
     operand = lowered.operand
     if llvm_return == "void":
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value")
         current_lines = append_string(current_lines, "  ret void")
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
     coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines)
     diagnostics = (diagnostics) + (coerced.diagnostics)
     current_lines = coerced.lines
@@ -2461,7 +2513,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
     if coerced.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`")
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
     coerced_operand = coerced.operand
     current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value)
     if consumption != None:
@@ -2470,7 +2522,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         else:
             if consumption.kind == "parameter":
                 current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
-    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics)
+    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions)
 
 def prepare_parameters(function, context):
     signature = []
@@ -2824,6 +2876,21 @@ def reset_local_consumption(locals, name):
         entry = locals[index]
         if entry.name == name:
             updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=False, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
+            result = (result) + ([updated])
+        else:
+            result = (result) + ([entry])
+        index += 1
+    return result
+
+def update_local_ownership(locals, name, ownership):
+    result = []
+    index = 0
+    while True:
+        if index >= len(locals):
+            break
+        entry = locals[index]
+        if entry.name == name:
+            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=ownership, consumed=entry.consumed, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
             result = (result) + ([updated])
         else:
             result = (result) + ([entry])
@@ -4437,11 +4504,20 @@ def find_local_binding(locals, name):
         index += 1
     return None
 
+def infer_borrow_base_scope(base, locals, bindings, function_name):
+    local = find_local_binding(locals, base)
+    if local != None:
+        return ScopeMetadata(scope_id=local.scope_id, scope_depth=local.scope_depth)
+    parameter = find_parameter_binding(bindings, base)
+    if parameter != None:
+        return ScopeMetadata(scope_id=format_root_scope_id(function_name), scope_depth=0)
+    return ScopeMetadata(scope_id=format_root_scope_id(function_name), scope_depth=0)
+
 def append_lifetime_region(values, value):
     return (values) + ([value])
 
-def make_lifetime_region_metadata(binding, ownership, scope_id, scope_depth):
-    return LifetimeRegionMetadata(binding=binding, base=ownership.base, mutable=ownership.mutable, start_span=ownership.span, scope_id=scope_id, scope_depth=scope_depth)
+def make_lifetime_region_metadata(binding, ownership, scope_id, scope_depth, base_scope_id, base_scope_depth):
+    return LifetimeRegionMetadata(binding=binding, base=ownership.base, mutable=ownership.mutable, start_span=ownership.span, scope_id=scope_id, scope_depth=scope_depth, base_scope_id=base_scope_id, base_scope_depth=base_scope_depth)
 
 def format_root_scope_id(function_name):
     sanitized = sanitize_symbol(function_name)
@@ -4456,6 +4532,18 @@ def make_child_scope_id(parent, child):
     if len(parent) == 0:
         return sanitized_child
     return parent + "::" + sanitized_child
+
+def is_scope_descendant(parent, candidate):
+    if len(parent) == 0:
+        return True
+    if len(candidate) == 0:
+        return False
+    if candidate == parent:
+        return True
+    prefix = parent + "::"
+    if len(candidate) <= len(prefix):
+        return False
+    return starts_with(candidate, prefix)
 
 def append_local_binding(values, value):
     return (values) + ([value])

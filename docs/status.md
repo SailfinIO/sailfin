@@ -63,6 +63,12 @@ roadmaps.
   diagnostics and follow-on tooling can reason about scope exits without
   re-parsing `.sfn-asm`. Regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`.
+  The recorded scope metadata now feeds borrow-release validation: assignments
+  that bind a borrow whose base lives in a deeper scope emit
+  `llvm lowering: borrow ... escapes lifetime ...` diagnostics, preventing
+  escaped references from crossing scope boundaries. Regression coverage lives
+  in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`.
   Ownership consumption now survives merges across loops, `if`/`else`, and `match`
   blocks, so use-after-move checks on locals and parameters fire when those
   values are reused after being consumed; the execution suite in

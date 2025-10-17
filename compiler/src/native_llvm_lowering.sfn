@@ -115,6 +115,13 @@ struct LifetimeRegionMetadata {
     start_span -> NativeSourceSpan?;
     scope_id -> string;
     scope_depth -> number;
+    base_scope_id -> string;
+    base_scope_depth -> number;
+}
+
+struct ScopeMetadata {
+    scope_id -> string;
+    scope_depth -> number;
 }
 
 struct StructFieldInfo {
@@ -207,6 +214,7 @@ struct ExpressionStatementResult {
     locals -> LocalBinding[];
     bindings -> ParameterBinding[];
     diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
 }
 
 struct LetLoweringResult {
@@ -1382,6 +1390,8 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     let body = emit_body(function, llvm_return, preparation.bindings, functions, context);
     lines = lines.concat(body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
+    let lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions);
+    diagnostics = diagnostics.concat(lifetime_diagnostics);
     lines = append_string(lines, "}");
 
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: body.lifetime_regions };
@@ -1421,6 +1431,39 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
     }
 
     return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: lowered.lifetime_regions };
+}
+
+fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegionMetadata[]) -> string[] {
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    let root_scope = format_root_scope_id(function.name);
+    loop {
+        if index >= regions.length {
+            break;
+        }
+        let region = regions[index];
+        let mut base_scope_id = region.base_scope_id;
+        let mut base_scope_depth = region.base_scope_depth;
+        if base_scope_id.length == 0 {
+            base_scope_id = root_scope;
+            base_scope_depth = 0;
+        }
+        let mut violation -> boolean = false;
+        if region.scope_depth < base_scope_depth {
+            violation = true;
+        } else if !is_scope_descendant(base_scope_id, region.scope_id) {
+            violation = true;
+        }
+        if violation {
+            let mut location -> string = "";
+            if region.start_span != null {
+                location = " at " + format_span_location(region.start_span);
+            }
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location);
+        }
+        index += 1;
+    }
+    return diagnostics;
 }
 
 fn lower_instruction_range(
@@ -1507,6 +1550,7 @@ fn lower_instruction_range(
                 current_temp = lowered.temp_index;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
+                collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             }
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
@@ -1515,6 +1559,7 @@ fn lower_instruction_range(
             current_temp = lowered.temp_index;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             terminated = true;
             index += 1;
             if index < end {
@@ -2212,8 +2257,8 @@ fn lower_for_instruction(
 
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_header_label + ":");
-
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth };
+        let loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label);
+        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false, scope_id: loop_body_scope_id, scope_depth: scope_depth + 1 };
         let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
         diagnostics = diagnostics.concat(header_load.diagnostics);
         current_lines = header_load.lines;
@@ -2313,11 +2358,10 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br i1 " + continue_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
         current_lines = append_string(current_lines, loop_body_label + ":");
 
-    let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
-    let stacked = append_loop_context(loop_stack, loop_context);
+        let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+        let stacked = append_loop_context(loop_stack, loop_context);
 
         let body_locals = append_local_binding(current_locals, iteration_binding);
-        let loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label);
         let body_result = lower_instruction_range(
             function,
             structure.body_start,
@@ -2509,9 +2553,9 @@ fn lower_for_instruction(
     let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
     let stacked = append_loop_context(loop_stack, loop_context);
 
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth };
-    let body_locals = append_local_binding(current_locals, iteration_binding);
     let element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label);
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false, scope_id: element_loop_scope_id, scope_depth: scope_depth + 1 };
+    let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
@@ -3254,7 +3298,8 @@ fn lower_let_instruction(
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
         diagnostics = diagnostics.concat(conflict_diagnostics);
         if ownership.variant == "Borrow" {
-            let region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth);
+            let base_scope = infer_borrow_base_scope(ownership.base, current_locals, bindings, function.name);
+            let region = make_lifetime_region_metadata(instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth);
             lifetime_regions = append_lifetime_region(lifetime_regions, region);
         }
     }
@@ -3340,6 +3385,7 @@ fn lower_expression_statement(
     let mut current_temp -> number = temp_index;
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_bindings -> ParameterBinding[] = bindings;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -3349,6 +3395,7 @@ fn lower_expression_statement(
         } else {
             let ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings);
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+            let assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
 
             let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
@@ -3380,8 +3427,17 @@ fn lower_expression_statement(
             }
 
             current_locals = reset_local_consumption(current_locals, parsed_assignment.target);
+            current_locals = update_local_ownership(current_locals, parsed_assignment.target, assignment_ownership);
+
+            if assignment_ownership != null {
+                if assignment_ownership.variant == "Borrow" {
+                    let base_scope = infer_borrow_base_scope(assignment_ownership.base, current_locals, current_bindings, function_name);
+                    let region = make_lifetime_region_metadata(parsed_assignment.target, assignment_ownership, binding.scope_id, binding.scope_depth, base_scope.scope_id, base_scope.scope_depth);
+                    lifetime_regions = append_lifetime_region(lifetime_regions, region);
+                }
+            }
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
     }
 
     let ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings);
@@ -3399,7 +3455,7 @@ fn lower_expression_statement(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
 }
 
 fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
@@ -3574,6 +3630,7 @@ fn lower_return_instruction(
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
 
     if instruction.expression == null || instruction.expression.length == 0 {
         if llvm_return == "void" {
@@ -3582,7 +3639,7 @@ fn lower_return_instruction(
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         }
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
     }
 
     let mut current_locals -> LocalBinding[] = locals;
@@ -3603,14 +3660,14 @@ fn lower_return_instruction(
     if lowered.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
     }
 
     let operand = lowered.operand;
     if llvm_return == "void" {
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
         current_lines = append_string(current_lines, "  ret void");
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
     }
 
     let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
@@ -3620,7 +3677,7 @@ fn lower_return_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
     }
 
     let coerced_operand = coerced.operand;
@@ -3632,7 +3689,7 @@ fn lower_return_instruction(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics };
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions };
 }
 
 
@@ -4129,6 +4186,34 @@ fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBin
                 type_annotation: entry.type_annotation,
                 ownership: entry.ownership,
                 consumed: false,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: ownership,
+                consumed: entry.consumed,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
@@ -6300,11 +6385,23 @@ fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding?
     return null;
 }
 
+fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> ScopeMetadata {
+    let local = find_local_binding(locals, base);
+    if local != null {
+        return ScopeMetadata { scope_id: local.scope_id, scope_depth: local.scope_depth };
+    }
+    let parameter = find_parameter_binding(bindings, base);
+    if parameter != null {
+        return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+    }
+    return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+}
+
 fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
     return values.concat([value]);
 }
 
-fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata {
+fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
     return LifetimeRegionMetadata {
         binding: binding,
         base: ownership.base,
@@ -6312,6 +6409,8 @@ fn make_lifetime_region_metadata(binding -> string, ownership -> OwnershipInfo, 
         start_span: ownership.span,
         scope_id: scope_id,
         scope_depth: scope_depth,
+        base_scope_id: base_scope_id,
+        base_scope_depth: base_scope_depth,
     };
 }
 
@@ -6332,6 +6431,23 @@ fn make_child_scope_id(parent -> string, child -> string) -> string {
         return sanitized_child;
     }
     return parent + "::" + sanitized_child;
+}
+
+fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
+    if parent.length == 0 {
+        return true;
+    }
+    if candidate.length == 0 {
+        return false;
+    }
+    if candidate == parent {
+        return true;
+    }
+    let prefix = parent + "::";
+    if candidate.length <= prefix.length {
+        return false;
+    }
+    return starts_with(candidate, prefix);
 }
 
 fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {

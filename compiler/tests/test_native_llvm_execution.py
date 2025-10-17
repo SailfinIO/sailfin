@@ -593,6 +593,31 @@ fn main() -> number {
     assert alias_region.start_span.start_column > 0
 
 
+def test_native_llvm_execution_reports_borrow_lifetime_violation() -> None:
+    source = """
+fn leak(flag -> number) -> number {
+    let mut outer -> number = 1;
+    let mut alias -> &number = &outer;
+    if flag {
+        let mut inner -> number = 2;
+        alias = &inner;
+    }
+    return outer;
+}
+
+fn main() -> number {
+    return leak(1);
+}
+"""
+
+    lowered = compile_to_native_llvm(source)
+    diagnostics = lowered.diagnostics
+    violation = [
+        diag for diag in diagnostics if "borrow `alias` of `inner` escapes lifetime" in diag
+    ]
+    assert violation, f"expected lifetime violation diagnostic, saw: {diagnostics}"
+
+
 def test_native_llvm_execution_iterates_non_number_arrays() -> None:
     source = """
 fn any_true(values -> boolean[]) -> boolean {

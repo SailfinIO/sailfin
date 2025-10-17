@@ -11,7 +11,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 1. **Stage2 Backend Delivery**
 
-- [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners.
+- [ ] Track borrow lifetimes across control-flow merges so Stage2 can release borrows at scope exits, accept reborrows that shorten lifetime regions, and reject borrows that would outlive their owners. (In progress: Stage2 now rejects borrow assignments whose base scope outlives the borrowing local; regression coverage in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`.)
 - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
 - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
@@ -79,6 +79,12 @@ Move checked tasks here with links to PRs / status updates for traceability.
       mutability, scope identifiers, and source spans so diagnostics and future
       analyses can reason about scope exits without re-scanning `.sfn-asm`.
       Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_lifetime_regions`;
+      behaviour documented in `docs/status.md`.
+- [x] Stage2 borrow lifetime enforcement — LLVM lowering now cross-checks recorded
+      lifetime regions against their base scopes and emits
+      `llvm lowering: borrow ... escapes lifetime ...` diagnostics when borrows
+      would outlive their owners. Validation:
+      `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_borrow_lifetime_violation`;
       behaviour documented in `docs/status.md`.
 - [x] Stage1 diagnostic snippets — Stage1 CLI output and native lowering diagnostics now render caret-highlighted source snippets alongside messages. Validation: `compiler/tests/test_stage1_diagnostics.py::test_missing_effect_diagnostic_includes_source_snippet`; behaviour documented in `docs/status.md`.
 - [x] Struct interface conformance — Stage1 type checking now verifies that
