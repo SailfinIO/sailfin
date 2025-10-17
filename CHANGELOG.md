@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.38 (2025-10-17)
+
+### Bug Fixes
+
+- Refactor finalized ssa/phi
+  ([`4ef4076`](https://github.com/SailfinIO/sailfin/commit/4ef40762817bc09629be32544a6394f6ca9ff684))
+
+
 ## v0.1.1-alpha.37 (2025-10-17)
 
 ### Bug Fixes
