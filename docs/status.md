@@ -43,6 +43,11 @@ roadmaps.
   walk `Pair[]` (and other user-defined aggregates) without defaulting to
   pointer fallbacks; regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_struct_arrays`.
+  Struct method invocations now lower into `Struct::method` call sites with the
+  receiver injected as the leading argument (loading pointers to match recorded
+  layouts), removing the lingering `value.method` diagnostics; regression coverage
+  lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_struct_methods`.
   Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source

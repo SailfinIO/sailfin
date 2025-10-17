@@ -744,6 +744,41 @@ fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) ->
     return null;
 }
 
+fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+    let mut candidate = trim_text(llvm_type);
+    if candidate.length == 0 {
+        return null;
+    }
+    if ends_with_pointer_suffix(candidate) {
+        candidate = strip_pointer_suffix(candidate);
+    }
+    return find_struct_info_by_llvm_type(context, candidate);
+}
+
+fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? {
+    let trimmed = trim_text(base);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if is_simple_identifier(trimmed) {
+        let parameter = find_parameter_binding(bindings, trimmed);
+        if parameter != null {
+            let info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type);
+            if info != null {
+                return info;
+            }
+        }
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
+            if info != null {
+                return info;
+            }
+        }
+    }
+    return null;
+}
+
 fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> StructFieldInfo? {
     let mut index -> number = 0;
     loop {
@@ -4688,6 +4723,28 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut current_lines = lines;
     let mut current_temp -> number = temp_index;
     let mut operands -> LLVMOperand[] = [];
+    let mut injected_argument_count -> number = 0;
+    let mut method_operand -> LLVMOperand? = null;
+
+    let method_parse = parse_member_access(trimmed_target);
+    if method_parse.success {
+        let method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context);
+        if method_info != null {
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context);
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand != null {
+                method_operand = lowered_self.operand;
+                trimmed_target = method_info.name + "::" + method_parse.field;
+                injected_argument_count = 1;
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
+            }
+        }
+    }
+
     let mut index -> number = 0;
     loop {
         if index >= arguments.length {
@@ -4709,7 +4766,23 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         index += 1;
     }
 
-    if operands.length != arguments.length {
+    if method_operand != null {
+        let operand_value = method_operand;
+        let mut combined_operands -> LLVMOperand[] = [];
+        combined_operands = append_llvm_operand(combined_operands, operand_value);
+        let mut operand_index -> number = 0;
+        loop {
+            if operand_index >= operands.length {
+                break;
+            }
+            combined_operands = append_llvm_operand(combined_operands, operands[operand_index]);
+            operand_index += 1;
+        }
+        operands = combined_operands;
+    }
+
+    let expected_operand_count = arguments.length + injected_argument_count;
+    if operands.length != expected_operand_count {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics };
     }
@@ -4726,6 +4799,29 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         expected_params = collect_parameter_types(context, function_entry.parameters);
     } else {
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+    }
+
+    if function_entry != null && injected_argument_count == 1 {
+        if operands.length > 0 && expected_params.length > 0 {
+            let expected_self_type = expected_params[0];
+            let self_operand = operands[0];
+            if self_operand.llvm_type != expected_self_type {
+                if ends_with_pointer_suffix(self_operand.llvm_type) {
+                    let stripped = strip_pointer_suffix(self_operand.llvm_type);
+                    if stripped == expected_self_type {
+                        let load_name = format_temp_name(current_temp);
+                        current_lines = append_string(current_lines, "  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
+                        current_temp += 1;
+                        let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
+                        operands = replace_llvm_operand(operands, 0, updated_operand);
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                }
+            }
+        }
     }
 
     let mut coerced_operands -> LLVMOperand[] = [];
@@ -6456,6 +6552,23 @@ fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> Loca
 
 fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[] {
     return values.concat([value]);
+}
+
+fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMOperand) -> LLVMOperand[] {
+    let mut result -> LLVMOperand[] = [];
+    let mut current -> number = 0;
+    loop {
+        if current >= values.length {
+            break;
+        }
+        if current == index {
+            result = append_llvm_operand(result, value);
+        } else {
+            result = append_llvm_operand(result, values[current]);
+        }
+        current += 1;
+    }
+    return result;
 }
 
 fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction? {

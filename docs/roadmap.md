@@ -15,7 +15,7 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 - [ ] Extend suspension-conflict tracking to coroutine lowering once `async fn`/generator support lands, ensuring resumable frames cannot hold mutable borrows across `yield`/resume boundaries.
 - [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - [ ] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
-- [ ] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Add focused coverage to `compiler/tests/test_native_llvm_execution.py`.)
+- [x] Emit LLVM struct layouts and method bodies from the recorded descriptors, covering field access, struct literals, and method calls. (Regression coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_struct_methods`.)
 - [ ] Introduce interface trait objects (data pointer + vtable) and emit vtables for each `implements` pair so interface values can be passed to functions and stored in locals.
 - [ ] Lower method dispatch through interface values (boxing on assignment, indirect calls on `.method()`), with regression coverage using `examples/basics/interfaces.sfn` in the LLVM suite.
 - [ ] Surface enum array metadata in LLVM lowering once layout descriptors exist, enabling typed iteration over tagged aggregates.

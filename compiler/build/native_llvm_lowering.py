@@ -784,6 +784,31 @@ def find_struct_info_by_llvm_type(context, llvm_type):
         index += 1
     return None
 
+def resolve_struct_info_from_llvm_type(context, llvm_type):
+    candidate = trim_text(llvm_type)
+    if len(candidate) == 0:
+        return None
+    if ends_with_pointer_suffix(candidate):
+        candidate = strip_pointer_suffix(candidate)
+    return find_struct_info_by_llvm_type(context, candidate)
+
+def resolve_struct_info_for_method_target(base, bindings, locals, context):
+    trimmed = trim_text(base)
+    if len(trimmed) == 0:
+        return None
+    if is_simple_identifier(trimmed):
+        parameter = find_parameter_binding(bindings, trimmed)
+        if parameter != None:
+            info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type)
+            if info != None:
+                return info
+        local = find_local_binding(locals, trimmed)
+        if local != None:
+            info = resolve_struct_info_from_llvm_type(context, local.llvm_type)
+            if info != None:
+                return info
+    return None
+
 def find_struct_field_info(info, field_name):
     index = 0
     while True:
@@ -3227,6 +3252,23 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     current_lines = lines
     current_temp = temp_index
     operands = []
+    injected_argument_count = 0
+    method_operand = None
+    method_parse = parse_member_access(trimmed_target)
+    if method_parse.success:
+        method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
+        if method_info != None:
+            lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context)
+            diagnostics = (diagnostics) + (lowered_self.diagnostics)
+            current_lines = lowered_self.lines
+            current_temp = lowered_self.temp_index
+            if lowered_self.operand != None:
+                method_operand = lowered_self.operand
+                trimmed_target = method_info.name + "::" + method_parse.field
+                injected_argument_count = 1
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
     index = 0
     while True:
         if index >= len(arguments):
@@ -3243,7 +3285,19 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
         index += 1
-    if len(operands) != len(arguments):
+    if method_operand != None:
+        operand_value = method_operand
+        combined_operands = []
+        combined_operands = append_llvm_operand(combined_operands, operand_value)
+        operand_index = 0
+        while True:
+            if operand_index >= len(operands):
+                break
+            combined_operands = append_llvm_operand(combined_operands, operands[operand_index])
+            operand_index += 1
+        operands = combined_operands
+    expected_operand_count = len(arguments) + injected_argument_count
+    if len(operands) != expected_operand_count:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
     llvm_return = "double"
@@ -3257,6 +3311,23 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         expected_params = collect_parameter_types(context, function_entry.parameters)
     else:
         diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
+    if function_entry != None  and  injected_argument_count == 1:
+        if len(operands) > 0  and  len(expected_params) > 0:
+            expected_self_type = expected_params[0]
+            self_operand = operands[0]
+            if self_operand.llvm_type != expected_self_type:
+                if ends_with_pointer_suffix(self_operand.llvm_type):
+                    stripped = strip_pointer_suffix(self_operand.llvm_type)
+                    if stripped == expected_self_type:
+                        load_name = format_temp_name(current_temp)
+                        current_lines = append_string(current_lines, "  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value)
+                        current_temp += 1
+                        updated_operand = LLVMOperand(llvm_type=expected_self_type, value=load_name)
+                        operands = replace_llvm_operand(operands, 0, updated_operand)
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                else:
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
     coerced_operands = []
     index = 0
     while True:
@@ -4550,6 +4621,19 @@ def append_local_binding(values, value):
 
 def append_llvm_operand(values, value):
     return (values) + ([value])
+
+def replace_llvm_operand(values, index, value):
+    result = []
+    current = 0
+    while True:
+        if current >= len(values):
+            break
+        if current == index:
+            result = append_llvm_operand(result, value)
+        else:
+            result = append_llvm_operand(result, values[current])
+        current += 1
+    return result
 
 def find_function_by_name(functions, name):
     index = 0

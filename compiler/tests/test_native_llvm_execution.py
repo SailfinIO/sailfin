@@ -471,6 +471,48 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_calls_struct_methods(compile_stage2) -> None:
+    source = """
+struct Pair {
+    left -> number;
+    right -> number;
+
+    fn sum(self -> Pair) -> number {
+        return self.left + self.right;
+    }
+
+    fn translate(self -> Pair, delta -> number) -> Pair {
+        let new_left -> number = self.left + delta;
+        let new_right -> number = self.right + delta;
+        return Pair { left: new_left, right: new_right };
+    }
+}
+
+fn accumulate(value -> Pair) -> number {
+    return value.sum();
+}
+
+fn main() -> number {
+    let base -> Pair = Pair { left: 1, right: 2 };
+    let shifted -> Pair = base.translate(3);
+    return base.sum() + accumulate(shifted);
+}
+"""
+
+    lowered = compile_stage2(source, module_name="struct_methods")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+    ir = lowered.ir
+    assert "define double @Pairsum(%Pair %self)" in ir
+    assert "call double @Pairsum(%Pair" in ir
+
+    engine, module = _compile_ir(ir)
+    try:
+        assert _invoke_double(engine, "main") == pytest.approx(12.0)
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
 def test_native_llvm_execution_iterates_array_bindings_without_annotations(compile_stage2) -> None:
     source = """
 fn sum_alias(values -> number[]) -> number {
