@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.35 (2025-10-17)
+
+### Bug Fixes
+
+- If/else merges
+  ([`1f979d6`](https://github.com/SailfinIO/sailfin/commit/1f979d672dc3bcfd8ba3b87af30d465651b7b188))
+
+
 ## v0.1.1-alpha.34 (2025-10-17)
 
 ### Bug Fixes
