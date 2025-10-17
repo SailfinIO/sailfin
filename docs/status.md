@@ -114,8 +114,14 @@ roadmaps.
   targeting the increment label. For `match` statements, the compiler now emits multi-input
   phi nodes at the shared merge label for each local mutated in any arm, accumulating
   mutations per arm (including guards) with their terminating labels and skipping terminated
-  arms during phi generation. This enables LLVM's optimization passes to work more
-  effectively with the generated IR. Regression coverage lives in
+  arms during phi generation. All phi node emission functions share common helper logic:
+  `find_preloaded_value` retrieves the initial value for a local before control flow diverges,
+  `collect_mutation_names` builds a unique set of mutated local names from mutation lists,
+  `find_mutation_for_name` looks up mutation metadata for a specific local, `join_strings`
+  concatenates phi input strings, and `build_phi_and_store` generates paired phi and store
+  instructions (ensuring LLVM's requirement that all phi nodes appear grouped at the top of
+  each basic block before any other instructions). This enables LLVM's optimization passes to
+  work more effectively with the generated IR. Regression coverage lives in
   `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`
   plus propagation tests (`test_mutations_propagate_through_if_then`,
   `test_mutations_propagate_through_if_else`, `test_mutations_propagate_through_loop`,

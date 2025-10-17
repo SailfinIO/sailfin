@@ -545,6 +545,22 @@ class PhiMergeResult:
     def __repr__(self):
         return runtime.struct_repr('PhiMergeResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
 
+class PhiInputEntry:
+    def __init__(self, value, label):
+        self.value = value
+        self.label = label
+
+    def __repr__(self):
+        return runtime.struct_repr('PhiInputEntry', [runtime.struct_field('value', self.value), runtime.struct_field('label', self.label)])
+
+class PhiStoreEntry:
+    def __init__(self, phi_line, store_line):
+        self.phi_line = phi_line
+        self.store_line = store_line
+
+    def __repr__(self):
+        return runtime.struct_repr('PhiStoreEntry', [runtime.struct_field('phi_line', self.phi_line), runtime.struct_field('store_line', self.store_line)])
+
 class MatchArmMutations:
     def __init__(self, mutations, label, terminated):
         self.mutations = mutations
@@ -2519,6 +2535,67 @@ def lower_condition_to_i1(function_name, expression, bindings, locals, temp_inde
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`")
     return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
 
+def find_preloaded_value(locals, preloaded_values, name):
+    local_index = 0
+    while True:
+        if local_index >= len(locals):
+            break
+        check_local = locals[local_index]
+        if check_local.name == name  and  local_index < len(preloaded_values):
+            return preloaded_values[local_index]
+        local_index += 1
+    return None
+
+def collect_mutation_names(mutations):
+    names = []
+    index = 0
+    while True:
+        if index >= len(mutations):
+            break
+        mutation = mutations[index]
+        already_added = False
+        check_index = 0
+        while True:
+            if check_index >= len(names):
+                break
+            if names[check_index] == mutation.name:
+                already_added = True
+                break
+            check_index += 1
+        if not already_added:
+            names = append_string(names, mutation.name)
+        index += 1
+    return names
+
+def find_mutation_for_name(mutations, name):
+    index = 0
+    while True:
+        if index >= len(mutations):
+            break
+        if mutations[index].name == name:
+            return mutations[index]
+        index += 1
+    return None
+
+def join_strings(strings, separator):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(strings):
+            break
+        if index > 0:
+            result = result + separator
+        result = result + strings[index]
+        index += 1
+    return result
+
+def build_phi_and_store(local, llvm_type, phi_inputs, temp_index):
+    phi_temp = format_temp_name(temp_index)
+    phi_input_str = join_strings(phi_inputs, ", ")
+    phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str
+    store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
+    return PhiStoreEntry(phi_line=phi_line, store_line=store_line)
+
 def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_label, then_label, lines, temp_index):
     phi_lines = []
     store_lines = []
@@ -2530,25 +2607,13 @@ def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_la
         mutation = mutations[index]
         local = find_local_binding(locals, mutation.name)
         if local != None:
-            local_index = 0
-            preloaded_value = ""
-            found_preload = False
-            while True:
-                if local_index >= len(locals):
-                    break
-                check_local = locals[local_index]
-                if check_local.name == mutation.name  and  local_index < len(preloaded_values):
-                    preloaded_value = preloaded_values[local_index]
-                    found_preload = True
-                    break
-                local_index += 1
-            if found_preload  and  len(preloaded_value) > 0:
-                phi_temp = format_temp_name(current_temp)
+            preloaded_value = find_preloaded_value(locals, preloaded_values, mutation.name)
+            if preloaded_value != None  and  len(preloaded_value) > 0:
+                phi_inputs = ["[ " + mutation.value_name + ", %" + then_label + " ]", "[ " + preloaded_value + ", %" + base_label + " ]"]
+                entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp)
+                phi_lines = append_string(phi_lines, entry.phi_line)
+                store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
-                phi_line = "  " + phi_temp + " = phi " + mutation.llvm_type + " [ " + mutation.value_name + ", %" + then_label + " ], [ " + preloaded_value + ", %" + base_label + " ]"
-                phi_lines = append_string(phi_lines, phi_line)
-                store_line = "  store " + mutation.llvm_type + " " + phi_temp + ", " + mutation.llvm_type + "* " + local.pointer
-                store_lines = append_string(store_lines, store_line)
         index += 1
     combined_lines = (lines) + ((phi_lines)) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
@@ -2557,41 +2622,26 @@ def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloade
     phi_lines = []
     store_lines = []
     current_temp = temp_index
-    mutated_names = []
-    name_index = 0
+    then_names = collect_mutation_names(then_mutations)
+    else_names = collect_mutation_names(else_mutations)
+    mutated_names = then_names
+    else_idx = 0
     while True:
-        if name_index >= len(then_mutations):
+        if else_idx >= len(else_names):
             break
-        mutation = then_mutations[name_index]
+        else_name = else_names[else_idx]
         already_added = False
-        check_index = 0
+        check_idx = 0
         while True:
-            if check_index >= len(mutated_names):
+            if check_idx >= len(mutated_names):
                 break
-            if mutated_names[check_index] == mutation.name:
+            if mutated_names[check_idx] == else_name:
                 already_added = True
                 break
-            check_index += 1
+            check_idx += 1
         if not already_added:
-            mutated_names = append_string(mutated_names, mutation.name)
-        name_index += 1
-    name_index = 0
-    while True:
-        if name_index >= len(else_mutations):
-            break
-        mutation = else_mutations[name_index]
-        already_added = False
-        check_index = 0
-        while True:
-            if check_index >= len(mutated_names):
-                break
-            if mutated_names[check_index] == mutation.name:
-                already_added = True
-                break
-            check_index += 1
-        if not already_added:
-            mutated_names = append_string(mutated_names, mutation.name)
-        name_index += 1
+            mutated_names = append_string(mutated_names, else_name)
+        else_idx += 1
     name_idx = 0
     while True:
         if name_idx >= len(mutated_names):
@@ -2599,78 +2649,32 @@ def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloade
         name = mutated_names[name_idx]
         local = find_local_binding(locals, name)
         if local != None:
-            then_value = ""
-            then_type = ""
-            found_then = False
-            then_idx = 0
-            while True:
-                if then_idx >= len(then_mutations):
-                    break
-                if then_mutations[then_idx].name == name:
-                    then_value = then_mutations[then_idx].value_name
-                    then_type = then_mutations[then_idx].llvm_type
-                    found_then = True
-                    break
-                then_idx += 1
-            else_value = ""
-            else_type = ""
-            found_else = False
-            else_idx = 0
-            while True:
-                if else_idx >= len(else_mutations):
-                    break
-                if else_mutations[else_idx].name == name:
-                    else_value = else_mutations[else_idx].value_name
-                    else_type = else_mutations[else_idx].llvm_type
-                    found_else = True
-                    break
-                else_idx += 1
-            preloaded_value = ""
-            found_preload = False
-            local_index = 0
-            while True:
-                if local_index >= len(locals):
-                    break
-                check_local = locals[local_index]
-                if check_local.name == name  and  local_index < len(preloaded_values):
-                    preloaded_value = preloaded_values[local_index]
-                    found_preload = True
-                    break
-                local_index += 1
+            then_mutation = find_mutation_for_name(then_mutations, name)
+            else_mutation = find_mutation_for_name(else_mutations, name)
+            preloaded_value = find_preloaded_value(locals, preloaded_values, name)
             llvm_type = local.llvm_type
-            if found_then:
-                llvm_type = then_type
-            if found_else  and  len(else_type) > 0:
-                llvm_type = else_type
+            if then_mutation != None:
+                llvm_type = then_mutation.llvm_type
+            if else_mutation != None  and  len(else_mutation.llvm_type) > 0:
+                llvm_type = else_mutation.llvm_type
             phi_inputs = []
             if not then_terminated:
-                if found_then:
-                    phi_inputs = append_string(phi_inputs, "[ " + then_value + ", %" + then_label + " ]")
+                if then_mutation != None:
+                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_label + " ]")
                 else:
-                    if found_preload:
+                    if preloaded_value != None:
                         phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]")
             if not else_terminated:
-                if found_else:
-                    phi_inputs = append_string(phi_inputs, "[ " + else_value + ", %" + else_label + " ]")
+                if else_mutation != None:
+                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_label + " ]")
                 else:
-                    if found_preload:
+                    if preloaded_value != None:
                         phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]")
             if len(phi_inputs) >= 2:
-                phi_temp = format_temp_name(current_temp)
+                entry = build_phi_and_store(local, llvm_type, phi_inputs, current_temp)
+                phi_lines = append_string(phi_lines, entry.phi_line)
+                store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
-                phi_input_str = ""
-                input_idx = 0
-                while True:
-                    if input_idx >= len(phi_inputs):
-                        break
-                    if input_idx > 0:
-                        phi_input_str = phi_input_str + ", "
-                    phi_input_str = phi_input_str + phi_inputs[input_idx]
-                    input_idx += 1
-                phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str
-                phi_lines = append_string(phi_lines, phi_line)
-                store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
-                store_lines = append_string(store_lines, store_line)
         name_idx += 1
     combined_lines = (lines) + ((phi_lines)) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
@@ -2685,23 +2689,24 @@ def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, line
         if arm_idx >= len(arm_mutations_list):
             break
         arm = arm_mutations_list[arm_idx]
-        name_index = 0
+        arm_names = collect_mutation_names(arm.mutations)
+        name_idx = 0
         while True:
-            if name_index >= len(arm.mutations):
+            if name_idx >= len(arm_names):
                 break
-            mutation = arm.mutations[name_index]
+            arm_name = arm_names[name_idx]
             already_added = False
-            check_index = 0
+            check_idx = 0
             while True:
-                if check_index >= len(mutated_names):
+                if check_idx >= len(mutated_names):
                     break
-                if mutated_names[check_index] == mutation.name:
+                if mutated_names[check_idx] == arm_name:
                     already_added = True
                     break
-                check_index += 1
+                check_idx += 1
             if not already_added:
-                mutated_names = append_string(mutated_names, mutation.name)
-            name_index += 1
+                mutated_names = append_string(mutated_names, arm_name)
+            name_idx += 1
         arm_idx += 1
     name_idx = 0
     while True:
@@ -2710,18 +2715,7 @@ def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, line
         name = mutated_names[name_idx]
         local = find_local_binding(locals, name)
         if local != None:
-            preloaded_value = ""
-            found_preload = False
-            local_index = 0
-            while True:
-                if local_index >= len(locals):
-                    break
-                check_local = locals[local_index]
-                if check_local.name == name  and  local_index < len(preloaded_values):
-                    preloaded_value = preloaded_values[local_index]
-                    found_preload = True
-                    break
-                local_index += 1
+            preloaded_value = find_preloaded_value(locals, preloaded_values, name)
             llvm_type = local.llvm_type
             phi_inputs = []
             arm_scan_idx = 0
@@ -2730,43 +2724,20 @@ def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, line
                     break
                 arm = arm_mutations_list[arm_scan_idx]
                 if not arm.terminated:
-                    found_mutation = False
-                    mut_value = ""
-                    mut_type = ""
-                    mut_idx = 0
-                    while True:
-                        if mut_idx >= len(arm.mutations):
-                            break
-                        if arm.mutations[mut_idx].name == name:
-                            mut_value = arm.mutations[mut_idx].value_name
-                            mut_type = arm.mutations[mut_idx].llvm_type
-                            found_mutation = True
-                            if len(mut_type) > 0:
-                                llvm_type = mut_type
-                            break
-                        mut_idx += 1
-                    if found_mutation:
-                        phi_inputs = append_string(phi_inputs, "[ " + mut_value + ", %" + arm.label + " ]")
+                    arm_mutation = find_mutation_for_name(arm.mutations, name)
+                    if arm_mutation != None:
+                        if len(arm_mutation.llvm_type) > 0:
+                            llvm_type = arm_mutation.llvm_type
+                        phi_inputs = append_string(phi_inputs, "[ " + arm_mutation.value_name + ", %" + arm.label + " ]")
                     else:
-                        if found_preload:
+                        if preloaded_value != None:
                             phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + arm.label + " ]")
                 arm_scan_idx += 1
             if len(phi_inputs) >= 2:
-                phi_temp = format_temp_name(current_temp)
+                entry = build_phi_and_store(local, llvm_type, phi_inputs, current_temp)
+                phi_lines = append_string(phi_lines, entry.phi_line)
+                store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
-                phi_input_str = ""
-                input_idx = 0
-                while True:
-                    if input_idx >= len(phi_inputs):
-                        break
-                    if input_idx > 0:
-                        phi_input_str = phi_input_str + ", "
-                    phi_input_str = phi_input_str + phi_inputs[input_idx]
-                    input_idx += 1
-                phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str
-                phi_lines = append_string(phi_lines, phi_line)
-                store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
-                store_lines = append_string(store_lines, store_line)
         name_idx += 1
     combined_lines = (lines) + ((phi_lines)) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
