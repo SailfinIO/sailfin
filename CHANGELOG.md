@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.28 (2025-10-17)
+
+### Bug Fixes
+
+- Runtime adapter bridging
+  ([`31bf982`](https://github.com/SailfinIO/sailfin/commit/31bf982758e25eba1288b19a97776a7e3d86b0c3))
+
+
 ## v0.1.1-alpha.27 (2025-10-17)
 
 ### Bug Fixes
