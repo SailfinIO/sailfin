@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.39 (2025-10-17)
+
+### Bug Fixes
+
+- Enum lowering
+  ([`69a32ec`](https://github.com/SailfinIO/sailfin/commit/69a32ec49b086a314a227d8cdd68cd77b16df73e))
+
+
 ## v0.1.1-alpha.38 (2025-10-17)
 
 ### Bug Fixes
