@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.30 (2025-10-17)
+
+### Bug Fixes
+
+- Borrow lifetime tracking
+  ([`dd4f2ae`](https://github.com/SailfinIO/sailfin/commit/dd4f2ae590e9121364c1f238b182672f7db86918))
+
+
 ## v0.1.1-alpha.29 (2025-10-17)
 
 ### Bug Fixes
