@@ -1886,7 +1886,6 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     collected_mutations = (collected_mutations) + (body_result.mutations)
     header_phis = []
     phi_stores = []
-    phi_index = 0
     mutated_names = []
     mut_idx = 0
     while True:

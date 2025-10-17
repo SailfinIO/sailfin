@@ -2343,7 +2343,6 @@ fn lower_loop_instruction(
     // Now emit phi nodes in the header for mutated locals
     let mut header_phis -> string[] = [];
     let mut phi_stores -> string[] = [];
-    let mut phi_index -> number = 0;
 
     // Build a unique set of mutated local names
     let mut mutated_names -> string[] = [];
