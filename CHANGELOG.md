@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.37 (2025-10-17)
+
+### Bug Fixes
+
+- Phi match merges
+  ([`3e40c15`](https://github.com/SailfinIO/sailfin/commit/3e40c1504f99c97a81cc3871b84c6eb2749f21b6))
+
+- Unused var
+  ([`95a40dd`](https://github.com/SailfinIO/sailfin/commit/95a40dd60a5028fce483554b0154833e8c5f3657))
+
+
 ## v0.1.1-alpha.36 (2025-10-17)
 
 ### Bug Fixes
