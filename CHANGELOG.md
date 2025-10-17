@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.22 (2025-10-17)
+
+### Bug Fixes
+
+- Accumulate regions during lowering
+  ([`3cd4fac`](https://github.com/SailfinIO/sailfin/commit/3cd4facf265cc77a8c0d8fea41dbea8f0352a93d))
+
+
 ## v0.1.1-alpha.21 (2025-10-16)
 
 ### Bug Fixes
