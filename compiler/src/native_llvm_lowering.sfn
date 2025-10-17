@@ -3518,6 +3518,201 @@ fn emit_phi_merges_for_straight_if(
     return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
 }
 
+fn emit_phi_merges_for_if_else(
+    then_mutations -> LocalMutation[],
+    else_mutations -> LocalMutation[],
+    locals -> LocalBinding[],
+    preloaded_values -> string[],
+    then_label -> string,
+    else_label -> string,
+    then_terminated -> boolean,
+    else_terminated -> boolean,
+    lines -> string[],
+    temp_index -> number
+) -> PhiMergeResult {
+    let mut phi_lines -> string[] = [];
+    let mut store_lines -> string[] = [];
+    let mut current_temp -> number = temp_index;
+
+    // Build a union of mutated local names from both branches
+    let mut mutated_names -> string[] = [];
+    let mut name_index -> number = 0;
+
+    // Collect unique names from then branch
+    loop {
+        if name_index >= then_mutations.length {
+            break;
+        }
+        let mutation = then_mutations[name_index];
+        let mut already_added -> boolean = false;
+        let mut check_index -> number = 0;
+        loop {
+            if check_index >= mutated_names.length {
+                break;
+            }
+            if mutated_names[check_index] == mutation.name {
+                already_added = true;
+                break;
+            }
+            check_index += 1;
+        }
+        if !already_added {
+            mutated_names = append_string(mutated_names, mutation.name);
+        }
+        name_index += 1;
+    }
+
+    // Add unique names from else branch
+    name_index = 0;
+    loop {
+        if name_index >= else_mutations.length {
+            break;
+        }
+        let mutation = else_mutations[name_index];
+        let mut already_added -> boolean = false;
+        let mut check_index -> number = 0;
+        loop {
+            if check_index >= mutated_names.length {
+                break;
+            }
+            if mutated_names[check_index] == mutation.name {
+                already_added = true;
+                break;
+            }
+            check_index += 1;
+        }
+        if !already_added {
+            mutated_names = append_string(mutated_names, mutation.name);
+        }
+        name_index += 1;
+    }
+
+    // For each mutated name, emit a phi node
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+
+        // Find the local binding
+        let local = find_local_binding(locals, name);
+        if local != null {
+            // Find the then mutation (if exists)
+            let mut then_value -> string = "";
+            let mut then_type -> string = "";
+            let mut found_then -> boolean = false;
+            let mut then_idx -> number = 0;
+            loop {
+                if then_idx >= then_mutations.length {
+                    break;
+                }
+                if then_mutations[then_idx].name == name {
+                    then_value = then_mutations[then_idx].value_name;
+                    then_type = then_mutations[then_idx].llvm_type;
+                    found_then = true;
+                    break;
+                }
+                then_idx += 1;
+            }
+
+            // Find the else mutation (if exists)
+            let mut else_value -> string = "";
+            let mut else_type -> string = "";
+            let mut found_else -> boolean = false;
+            let mut else_idx -> number = 0;
+            loop {
+                if else_idx >= else_mutations.length {
+                    break;
+                }
+                if else_mutations[else_idx].name == name {
+                    else_value = else_mutations[else_idx].value_name;
+                    else_type = else_mutations[else_idx].llvm_type;
+                    found_else = true;
+                    break;
+                }
+                else_idx += 1;
+            }
+
+            // Find preloaded value for this local (fallback if not mutated in a branch)
+            let mut preloaded_value -> string = "";
+            let mut found_preload -> boolean = false;
+            let mut local_index -> number = 0;
+            loop {
+                if local_index >= locals.length {
+                    break;
+                }
+                let check_local = locals[local_index];
+                if check_local.name == name && local_index < preloaded_values.length {
+                    preloaded_value = preloaded_values[local_index];
+                    found_preload = true;
+                    break;
+                }
+                local_index += 1;
+            }
+
+            // Determine the LLVM type (prefer found mutation, fallback to local)
+            let mut llvm_type -> string = local.llvm_type;
+            if found_then {
+                llvm_type = then_type;
+            }
+            if found_else && else_type.length > 0 {
+                llvm_type = else_type;
+            }
+
+            // Build phi inputs, skipping terminated branches
+            let mut phi_inputs -> string[] = [];
+
+            if !then_terminated {
+                if found_then {
+                    phi_inputs = append_string(phi_inputs, "[ " + then_value + ", %" + then_label + " ]");
+                } else if found_preload {
+                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]");
+                }
+            }
+
+            if !else_terminated {
+                if found_else {
+                    phi_inputs = append_string(phi_inputs, "[ " + else_value + ", %" + else_label + " ]");
+                } else if found_preload {
+                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]");
+                }
+            }
+
+            // Only emit phi if we have at least 2 inputs
+            if phi_inputs.length >= 2 {
+                let phi_temp = format_temp_name(current_temp);
+                current_temp += 1;
+
+                // Join phi inputs with ", "
+                let mut phi_input_str -> string = "";
+                let mut input_idx -> number = 0;
+                loop {
+                    if input_idx >= phi_inputs.length {
+                        break;
+                    }
+                    if input_idx > 0 {
+                        phi_input_str = phi_input_str + ", ";
+                    }
+                    phi_input_str = phi_input_str + phi_inputs[input_idx];
+                    input_idx += 1;
+                }
+
+                let phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str;
+                phi_lines = append_string(phi_lines, phi_line);
+
+                let store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer;
+                store_lines = append_string(store_lines, store_line);
+            }
+        }
+
+        name_idx += 1;
+    }
+
+    let combined_lines = lines.concat(phi_lines).concat(store_lines);
+    return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
+}
+
 fn lower_if_instruction(
     function -> NativeFunction,
     start_index -> number,
@@ -3607,21 +3802,20 @@ fn lower_if_instruction(
         false_target = else_label;
     }
 
+    // Preload all locals before the branch (needed for phi nodes in both straight-line and if/else cases)
     let mut preloaded_locals -> string[] = [];
-    if !structure.has_else {
-        let mut preload_index -> number = 0;
-        loop {
-            if preload_index >= current_locals.length {
-                break;
-            }
-            let local = current_locals[preload_index];
-            let preload_temp = format_temp_name(current_temp);
-            current_temp += 1;
-            let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-            current_lines = append_string(current_lines, preload_line);
-            preloaded_locals = append_string(preloaded_locals, preload_temp);
-            preload_index += 1;
+    let mut preload_index -> number = 0;
+    loop {
+        if preload_index >= current_locals.length {
+            break;
         }
+        let local = current_locals[preload_index];
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        current_lines = append_string(current_lines, preload_line);
+        preloaded_locals = append_string(preloaded_locals, preload_temp);
+        preload_index += 1;
     }
 
     current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target);
@@ -3664,13 +3858,15 @@ fn lower_if_instruction(
     then_bindings = then_result.bindings;
     current_next_region = then_result.next_lifetime_region_id;
     current_lines = current_lines.concat(then_result.lines);
-    collected_mutations = collected_mutations.concat(then_result.mutations);
+    let then_mutations = then_result.mutations;
+    collected_mutations = collected_mutations.concat(then_mutations);
     let then_terminated = then_result.terminated;
     if !then_terminated {
         current_lines = append_string(current_lines, "  br label %" + merge_label);
     }
 
     let mut else_terminated -> boolean = false;
+    let mut else_mutations -> LocalMutation[] = [];
     if structure.has_else {
         current_lines = append_string(current_lines, else_label + ":");
         let else_scope_id = make_child_scope_id(scope_id, else_label);
@@ -3705,7 +3901,8 @@ fn lower_if_instruction(
         current_next_region = else_result.next_lifetime_region_id;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
-    collected_mutations = collected_mutations.concat(else_result.mutations);
+        else_mutations = else_result.mutations;
+        collected_mutations = collected_mutations.concat(else_mutations);
         if !else_terminated {
             current_lines = append_string(current_lines, "  br label %" + merge_label);
         }
@@ -3719,18 +3916,40 @@ fn lower_if_instruction(
     if !terminated || !structure.has_else {
         current_lines = append_string(current_lines, merge_label + ":");
 
-        if !structure.has_else && !then_terminated && collected_mutations.length > 0 {
-            let phi_result = emit_phi_merges_for_straight_if(
-                collected_mutations,
-                base_locals,
-                preloaded_locals,
-                current_label,
-                then_label,
-                current_lines,
-                current_temp
-            );
-            current_lines = phi_result.lines;
-            current_temp = phi_result.temp_index;
+        // Emit phi nodes for mutated locals
+        if structure.has_else {
+            // Full if/else: emit phi nodes merging values from both branches
+            if (!then_terminated || !else_terminated) && collected_mutations.length > 0 {
+                let phi_result = emit_phi_merges_for_if_else(
+                    then_mutations,
+                    else_mutations,
+                    base_locals,
+                    preloaded_locals,
+                    then_label,
+                    else_label,
+                    then_terminated,
+                    else_terminated,
+                    current_lines,
+                    current_temp
+                );
+                current_lines = phi_result.lines;
+                current_temp = phi_result.temp_index;
+            }
+        } else {
+            // Straight-line if: emit phi nodes merging then branch with base
+            if !then_terminated && collected_mutations.length > 0 {
+                let phi_result = emit_phi_merges_for_straight_if(
+                    collected_mutations,
+                    base_locals,
+                    preloaded_locals,
+                    current_label,
+                    then_label,
+                    current_lines,
+                    current_temp
+                );
+                current_lines = phi_result.lines;
+                current_temp = phi_result.temp_index;
+            }
         }
     }
 

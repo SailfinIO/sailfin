@@ -1325,3 +1325,76 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_emits_phi_for_if_else(compile_stage2) -> None:
+    """Verify phi nodes are emitted for locals mutated in both if and else branches."""
+    source = """
+fn select_value(condition -> boolean, a -> number, b -> number) -> number {
+    let mut result -> number = 0;
+    let mut bonus -> number = 0;
+    if condition {
+        result = a + 10;
+        bonus = 5;
+    } else {
+        result = b + 20;
+        bonus = 3;
+    }
+    return result + bonus;
+}
+
+fn partial_mutation(condition -> boolean, base -> number) -> number {
+    let mut shared -> number = base;
+    let mut then_only -> number = 0;
+    let mut else_only -> number = 0;
+    if condition {
+        shared = base + 10;
+        then_only = 100;
+    } else {
+        shared = base + 20;
+        else_only = 200;
+    }
+    return shared + then_only + else_only;
+}
+
+fn main() -> number {
+    let result_true = select_value(true, 5, 10);
+    let result_false = select_value(false, 5, 10);
+    let partial_true = partial_mutation(true, 5);
+    let partial_false = partial_mutation(false, 5);
+    return result_true + result_false + partial_true + partial_false;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="phi_if_else_test")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+    # Verify phi nodes are present in the generated IR
+    assert "phi double" in lowered.ir, "Expected phi nodes for double values in generated IR"
+    assert "define double @select_value" in lowered.ir
+    assert "define double @partial_mutation" in lowered.ir
+
+    ir = lowered.ir
+    engine, module = _compile_ir(ir)
+    try:
+        # Test select_value with both branches
+        result_true = _invoke(engine, "select_value", ctypes.c_double, (ctypes.c_bool, ctypes.c_double, ctypes.c_double), True, 5.0, 10.0)
+        assert result_true == pytest.approx(20.0), "When condition is true, should return (5 + 10) + 5 = 20"
+
+        result_false = _invoke(engine, "select_value", ctypes.c_double, (ctypes.c_bool, ctypes.c_double, ctypes.c_double), False, 5.0, 10.0)
+        assert result_false == pytest.approx(33.0), "When condition is false, should return (10 + 20) + 3 = 33"
+
+        # Test partial_mutation where different locals are mutated in each branch
+        partial_true = _invoke(engine, "partial_mutation", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), True, 5.0)
+        assert partial_true == pytest.approx(115.0), "When condition is true, should return (5 + 10) + 100 + 0 = 115"
+
+        partial_false = _invoke(engine, "partial_mutation", ctypes.c_double, (ctypes.c_bool, ctypes.c_double), False, 5.0)
+        assert partial_false == pytest.approx(225.0), "When condition is false, should return (5 + 20) + 0 + 200 = 225"
+
+        # Test main to ensure all paths work together
+        main_result = _invoke_double(engine, "main")
+        assert main_result == pytest.approx(393.0), "Main should return 20 + 33 + 115 + 225 = 393"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

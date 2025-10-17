@@ -2429,6 +2429,128 @@ def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_la
     combined_lines = (lines) + ((phi_lines)) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
 
+def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloaded_values, then_label, else_label, then_terminated, else_terminated, lines, temp_index):
+    phi_lines = []
+    store_lines = []
+    current_temp = temp_index
+    mutated_names = []
+    name_index = 0
+    while True:
+        if name_index >= len(then_mutations):
+            break
+        mutation = then_mutations[name_index]
+        already_added = False
+        check_index = 0
+        while True:
+            if check_index >= len(mutated_names):
+                break
+            if mutated_names[check_index] == mutation.name:
+                already_added = True
+                break
+            check_index += 1
+        if not already_added:
+            mutated_names = append_string(mutated_names, mutation.name)
+        name_index += 1
+    name_index = 0
+    while True:
+        if name_index >= len(else_mutations):
+            break
+        mutation = else_mutations[name_index]
+        already_added = False
+        check_index = 0
+        while True:
+            if check_index >= len(mutated_names):
+                break
+            if mutated_names[check_index] == mutation.name:
+                already_added = True
+                break
+            check_index += 1
+        if not already_added:
+            mutated_names = append_string(mutated_names, mutation.name)
+        name_index += 1
+    name_idx = 0
+    while True:
+        if name_idx >= len(mutated_names):
+            break
+        name = mutated_names[name_idx]
+        local = find_local_binding(locals, name)
+        if local != None:
+            then_value = ""
+            then_type = ""
+            found_then = False
+            then_idx = 0
+            while True:
+                if then_idx >= len(then_mutations):
+                    break
+                if then_mutations[then_idx].name == name:
+                    then_value = then_mutations[then_idx].value_name
+                    then_type = then_mutations[then_idx].llvm_type
+                    found_then = True
+                    break
+                then_idx += 1
+            else_value = ""
+            else_type = ""
+            found_else = False
+            else_idx = 0
+            while True:
+                if else_idx >= len(else_mutations):
+                    break
+                if else_mutations[else_idx].name == name:
+                    else_value = else_mutations[else_idx].value_name
+                    else_type = else_mutations[else_idx].llvm_type
+                    found_else = True
+                    break
+                else_idx += 1
+            preloaded_value = ""
+            found_preload = False
+            local_index = 0
+            while True:
+                if local_index >= len(locals):
+                    break
+                check_local = locals[local_index]
+                if check_local.name == name  and  local_index < len(preloaded_values):
+                    preloaded_value = preloaded_values[local_index]
+                    found_preload = True
+                    break
+                local_index += 1
+            llvm_type = local.llvm_type
+            if found_then:
+                llvm_type = then_type
+            if found_else  and  len(else_type) > 0:
+                llvm_type = else_type
+            phi_inputs = []
+            if not then_terminated:
+                if found_then:
+                    phi_inputs = append_string(phi_inputs, "[ " + then_value + ", %" + then_label + " ]")
+                else:
+                    if found_preload:
+                        phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]")
+            if not else_terminated:
+                if found_else:
+                    phi_inputs = append_string(phi_inputs, "[ " + else_value + ", %" + else_label + " ]")
+                else:
+                    if found_preload:
+                        phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]")
+            if len(phi_inputs) >= 2:
+                phi_temp = format_temp_name(current_temp)
+                current_temp += 1
+                phi_input_str = ""
+                input_idx = 0
+                while True:
+                    if input_idx >= len(phi_inputs):
+                        break
+                    if input_idx > 0:
+                        phi_input_str = phi_input_str + ", "
+                    phi_input_str = phi_input_str + phi_inputs[input_idx]
+                    input_idx += 1
+                phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str
+                phi_lines = append_string(phi_lines, phi_line)
+                store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
+                store_lines = append_string(store_lines, store_line)
+        name_idx += 1
+    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
+
 def lower_if_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
     current_lines = lines
     current_allocas = allocas
@@ -2467,18 +2589,17 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     if structure.has_else:
         false_target = else_label
     preloaded_locals = []
-    if not structure.has_else:
-        preload_index = 0
-        while True:
-            if preload_index >= len(current_locals):
-                break
-            local = current_locals[preload_index]
-            preload_temp = format_temp_name(current_temp)
-            current_temp += 1
-            preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-            current_lines = append_string(current_lines, preload_line)
-            preloaded_locals = append_string(preloaded_locals, preload_temp)
-            preload_index += 1
+    preload_index = 0
+    while True:
+        if preload_index >= len(current_locals):
+            break
+        local = current_locals[preload_index]
+        preload_temp = format_temp_name(current_temp)
+        current_temp += 1
+        preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+        current_lines = append_string(current_lines, preload_line)
+        preloaded_locals = append_string(preloaded_locals, preload_temp)
+        preload_index += 1
     current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target)
     base_locals = current_locals
     base_allocas = current_allocas
@@ -2498,11 +2619,13 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     then_bindings = then_result.bindings
     current_next_region = then_result.next_lifetime_region_id
     current_lines = (current_lines) + (then_result.lines)
-    collected_mutations = (collected_mutations) + (then_result.mutations)
+    then_mutations = then_result.mutations
+    collected_mutations = (collected_mutations) + (then_mutations)
     then_terminated = then_result.terminated
     if not then_terminated:
         current_lines = append_string(current_lines, "  br label %" + merge_label)
     else_terminated = False
+    else_mutations = []
     if structure.has_else:
         current_lines = append_string(current_lines, else_label + ":")
         else_scope_id = make_child_scope_id(scope_id, else_label)
@@ -2518,7 +2641,8 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
         current_next_region = else_result.next_lifetime_region_id
         current_lines = (current_lines) + (else_result.lines)
         else_terminated = else_result.terminated
-        collected_mutations = (collected_mutations) + (else_result.mutations)
+        else_mutations = else_result.mutations
+        collected_mutations = (collected_mutations) + (else_mutations)
         if not else_terminated:
             current_lines = append_string(current_lines, "  br label %" + merge_label)
     terminated = False
@@ -2526,10 +2650,16 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
         terminated = then_terminated  and  else_terminated
     if not terminated  or  not structure.has_else:
         current_lines = append_string(current_lines, merge_label + ":")
-        if not structure.has_else  and  not then_terminated  and  len(collected_mutations) > 0:
-            phi_result = emit_phi_merges_for_straight_if( collected_mutations, base_locals, preloaded_locals, current_label, then_label, current_lines, current_temp )
-            current_lines = phi_result.lines
-            current_temp = phi_result.temp_index
+        if structure.has_else:
+            if not then_terminated  or  not else_terminated  and  len(collected_mutations) > 0:
+                phi_result = emit_phi_merges_for_if_else( then_mutations, else_mutations, base_locals, preloaded_locals, then_label, else_label, then_terminated, else_terminated, current_lines, current_temp )
+                current_lines = phi_result.lines
+                current_temp = phi_result.temp_index
+        else:
+            if not then_terminated  and  len(collected_mutations) > 0:
+                phi_result = emit_phi_merges_for_straight_if( collected_mutations, base_locals, preloaded_locals, current_label, then_label, current_lines, current_temp )
+                current_lines = phi_result.lines
+                current_temp = phi_result.temp_index
     current_locals = base_locals
     merged_bindings = base_bindings
     if not then_terminated:

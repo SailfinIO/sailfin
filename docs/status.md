@@ -102,13 +102,17 @@ roadmaps.
   For straight-line `if` statements (without `else`), the compiler now emits SSA
   phi nodes at merge points to select between the mutated value (from the `then` branch)
   and the original value (from the base block), storing the result back through the
-  local pointer. This enables LLVM's optimization passes to work more effectively
-  with the generated IR. Regression coverage lives in
+  local pointer. For full `if`/`else` statements, the compiler emits phi nodes that
+  union mutations from both branches, correctly handling cases where both arms mutate
+  shared locals and cases where each arm mutates unique locals. Terminated branches are
+  skipped during phi generation. This enables LLVM's optimization passes to work more
+  effectively with the generated IR. Regression coverage lives in
   `compiler/tests/test_stage2_mutation_capture.py::test_lower_instruction_range_records_local_mutations`
   plus propagation tests (`test_mutations_propagate_through_if_then`,
   `test_mutations_propagate_through_if_else`, `test_mutations_propagate_through_loop`,
   `test_mutations_propagate_through_match`) and execution validation via
-  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`.
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_straight_line_if`
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_if_else`.
   Move diagnostics now thread source spans from `.sfn-asm` through the native IR,
   so LLVM lowering reports use-after-move errors with line and column ranges
   (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move`
