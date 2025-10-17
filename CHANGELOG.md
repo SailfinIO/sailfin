@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.26 (2025-10-17)
+
+### Bug Fixes
+
+- Test modernization
+  ([`9b23feb`](https://github.com/SailfinIO/sailfin/commit/9b23febdc81b6211ac46e85f11cdcc6b17bf255a))
+
+
 ## v0.1.1-alpha.25 (2025-10-17)
 
 ### Bug Fixes
