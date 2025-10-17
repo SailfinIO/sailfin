@@ -1744,3 +1744,70 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_matches_payload_enum_by_tag(compile_stage2):
+    """Test that match can discriminate payload variants by tag (without field binding)."""
+    result = compile_stage2(
+        """
+enum Shape {
+    Circle { radius -> number; }
+    Rectangle { width -> number, height -> number; }
+    Point;
+}
+
+fn classify(s -> Shape) -> number {
+    match s {
+        Shape.Circle { radius } => {
+            return 1;
+        }
+        Shape.Rectangle { width, height } => {
+            return 2;
+        }
+        Shape.Point => {
+            return 3;
+        }
+        _ => {
+            return 0;
+        }
+    }
+}
+
+fn main() -> number {
+    let circle = Shape.Circle { radius: 5.0 };
+    let rect = Shape.Rectangle { width: 10.0, height: 20.0 };
+    let point = Shape.Point;
+
+    let c = classify(circle);
+    let r = classify(rect);
+    let p = classify(point);
+
+    // Should return 1 + 2 + 3 = 6
+    return c + r + p;
+}
+"""
+    )
+
+    # Check for extractvalue to get tags
+    assert "extractvalue %Shape" in result.ir, "Should extract enum tag"
+
+    # Check for tag comparisons
+    assert "icmp eq" in result.ir, "Should compare tags"
+
+    # Should have diagnostic about payload field destructuring not being implemented
+    payload_diags = [d for d in result.diagnostics if "enum payload destructuring in match patterns not yet implemented" in d]
+    assert len(payload_diags) == 2, f"Should warn about payload destructuring for Circle and Rectangle, got: {payload_diags}"
+
+    # Check that we only have expected diagnostics (payload destructuring warnings and pointer layout warnings)
+    unexpected = [d for d in result.diagnostics
+                  if "enum payload destructuring in match patterns not yet implemented" not in d
+                  and "defaulting to pointer layout" not in d]
+    assert not unexpected, f"Unexpected diagnostics: {unexpected}"
+
+    engine, module = _compile_ir(result.ir)
+    try:
+        output = _invoke_double(engine, "main")
+        assert output == pytest.approx(6.0), "Match should correctly identify variants by tag even without field binding"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

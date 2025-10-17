@@ -74,11 +74,16 @@ roadmaps.
   Match expressions now destructure enum operands natively by extracting the tag
   field via `extractvalue` and comparing it against variant tag values, enabling
   Stage2 programs to dispatch on enum variants without Python fallbacks. Unit
-  variants (e.g., `Color.Red`, `Status.Pending`) fully work in match arms;
-  payload variants emit a diagnostic that field destructuring is not yet implemented.
+  variants (e.g., `Color.Red`, `Status.Pending`) fully work in match arms.
+  Payload variants (e.g., `Shape.Circle { radius }`) can be matched by their tag
+  to discriminate between variants, but field binding (extracting the `radius` value
+  into a local variable) is not yet implemented and emits a diagnostic. This allows
+  match expressions to route control flow based on payload variant tags while
+  deferring field extraction to follow-on work.
   Regression coverage lives in
-  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_enum_variants`
-  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_mixed_enum_variants`.
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_enum_variants`,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_mixed_enum_variants`,
+  and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_matches_payload_enum_by_tag`.
   Interface
   declarations and struct `implements` clauses now flow through the native IR so
   the LLVM backend can reason about trait membership without inspecting source
