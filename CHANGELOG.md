@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.47 (2025-10-17)
+
+### Bug Fixes
+
+- Share layout descriptors
+  ([`0770f14`](https://github.com/SailfinIO/sailfin/commit/0770f141284d864434be6316bdad22a729477f4b))
+
+
 ## v0.1.1-alpha.46 (2025-10-17)
 
 ### Bug Fixes
