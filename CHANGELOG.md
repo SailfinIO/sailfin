@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.50 (2025-10-18)
+
+### Bug Fixes
+
+- Bridge capability adapters
+  ([`f6c891b`](https://github.com/SailfinIO/sailfin/commit/f6c891ba218c3922fb5da766261d16df38700b35))
+
+- Register capability adapters
+  ([`a0bfabb`](https://github.com/SailfinIO/sailfin/commit/a0bfabb358574c3fab03451752d0b7601fac18d4))
+
+
 ## v0.1.1-alpha.49 (2025-10-18)
 
 ### Bug Fixes
