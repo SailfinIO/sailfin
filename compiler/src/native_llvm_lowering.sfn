@@ -7755,6 +7755,32 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     let mut current_temp -> number = base_result.temp_index;
     let base_operand = base_result.operand;
 
+    // Check for .length access on array types first
+    // Arrays are represented as { element_type*, i64 }* where field 1 is the length
+    if parse.field == "length" && ends_with_pointer_suffix(base_operand.llvm_type) {
+        let inner_type = strip_pointer_suffix(base_operand.llvm_type);
+        // Check if it looks like an array struct: { ..., i64 }
+        if starts_with(inner_type, "{") && inner_type.length > 0 && inner_type[inner_type.length - 1] == "}" {
+            let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
+            // Look for the pattern of array types: { type*, i64 }
+            if contains_text(struct_inner, ", i64") {
+                // This looks like an array type, extract the length field
+                // Load the array struct from the pointer
+                let loaded_array = format_temp_name(current_temp);
+                current_lines = append_string(current_lines, "  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value);
+                current_temp += 1;
+                
+                // Extract the length (field 1)
+                let length_temp = format_temp_name(current_temp);
+                current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1");
+                current_temp += 1;
+                
+                let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+        }
+    }
+
     let mut struct_info -> StructTypeInfo? = null;
     let mut pointer_available -> boolean = false;
     let pointer_operand = base_operand;
@@ -9643,6 +9669,27 @@ fn starts_with(value -> string, prefix -> string) -> boolean {
     }
     let head = substring(value, 0, prefix.length);
     return head == prefix;
+}
+
+fn contains_text(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return true;
+    }
+    if haystack.length < needle.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index + needle.length > haystack.length {
+            break;
+        }
+        let candidate = substring(haystack, index, index + needle.length);
+        if candidate == needle {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
 }
 
 fn strip_mut_prefix(value -> string) -> string {

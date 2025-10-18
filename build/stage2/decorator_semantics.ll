@@ -43,114 +43,125 @@ entry:
   %t7 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t42 = phi i1 [ %t6, %entry ], [ %t40, %loop.latch2 ]
-  %t43 = phi double [ %t7, %entry ], [ %t41, %loop.latch2 ]
-  store i1 %t42, i1* %l1
-  store double %t43, double* %l2
+  %t49 = phi i1 [ %t6, %entry ], [ %t47, %loop.latch2 ]
+  %t50 = phi double [ %t7, %entry ], [ %t48, %loop.latch2 ]
+  store i1 %t49, i1* %l1
+  store double %t50, double* %l2
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l2
-  %t9 = load double, double* %l2
-  %t10 = load { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %decorators
-  %t11 = extractvalue { %DecoratorInfo*, i64 } %t10, 0
-  %t12 = extractvalue { %DecoratorInfo*, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr %DecoratorInfo, %DecoratorInfo* %t11, i64 %t9
-  %t15 = load %DecoratorInfo, %DecoratorInfo* %t14
-  store %DecoratorInfo %t15, %DecoratorInfo* %l3
-  %t18 = load %DecoratorInfo, %DecoratorInfo* %l3
-  %t19 = extractvalue %DecoratorInfo %t18, 0
-  %s20 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.20, i32 0, i32 0
-  %t21 = icmp eq i8* %t19, %s20
-  br label %logical_or_entry_17
-
-logical_or_entry_17:
-  br i1 %t21, label %logical_or_merge_17, label %logical_or_right_17
-
-logical_or_right_17:
-  %t22 = load %DecoratorInfo, %DecoratorInfo* %l3
-  %t23 = extractvalue %DecoratorInfo %t22, 0
-  %s24 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.24, i32 0, i32 0
-  %t25 = icmp eq i8* %t23, %s24
-  br label %logical_or_right_end_17
-
-logical_or_right_end_17:
-  br label %logical_or_merge_17
-
-logical_or_merge_17:
-  %t26 = phi i1 [ true, %logical_or_entry_17 ], [ %t25, %logical_or_right_end_17 ]
-  br label %logical_or_entry_16
-
-logical_or_entry_16:
-  br i1 %t26, label %logical_or_merge_16, label %logical_or_right_16
-
-logical_or_right_16:
-  %t27 = load %DecoratorInfo, %DecoratorInfo* %l3
-  %t28 = extractvalue %DecoratorInfo %t27, 0
-  %s29 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.29, i32 0, i32 0
-  %t30 = icmp eq i8* %t28, %s29
-  br label %logical_or_right_end_16
-
-logical_or_right_end_16:
-  br label %logical_or_merge_16
-
-logical_or_merge_16:
-  %t31 = phi i1 [ true, %logical_or_entry_16 ], [ %t30, %logical_or_right_end_16 ]
-  %t32 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t33 = load i1, i1* %l1
-  %t34 = load double, double* %l2
-  %t35 = load %DecoratorInfo, %DecoratorInfo* %l3
-  br i1 %t31, label %then4, label %merge5
+  %t9 = load { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %decorators
+  %t10 = extractvalue { %DecoratorInfo*, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t14 = load i1, i1* %l1
+  %t15 = load double, double* %l2
+  br i1 %t12, label %then4, label %merge5
 then4:
-  store i1 1, i1* %l1
-  br label %merge5
+  br label %afterloop3
 merge5:
-  %t36 = phi i1 [ 1, %then4 ], [ %t33, %loop.body1 ]
-  store i1 %t36, i1* %l1
-  %t37 = load double, double* %l2
-  %t38 = sitofp i64 1 to double
-  %t39 = fadd double %t37, %t38
-  store double %t39, double* %l2
-  br label %loop.latch2
-loop.latch2:
+  %t16 = load double, double* %l2
+  %t17 = load { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %decorators
+  %t18 = extractvalue { %DecoratorInfo*, i64 } %t17, 0
+  %t19 = extractvalue { %DecoratorInfo*, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr %DecoratorInfo, %DecoratorInfo* %t18, i64 %t16
+  %t22 = load %DecoratorInfo, %DecoratorInfo* %t21
+  store %DecoratorInfo %t22, %DecoratorInfo* %l3
+  %t25 = load %DecoratorInfo, %DecoratorInfo* %l3
+  %t26 = extractvalue %DecoratorInfo %t25, 0
+  %s27 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.27, i32 0, i32 0
+  %t28 = icmp eq i8* %t26, %s27
+  br label %logical_or_entry_24
+
+logical_or_entry_24:
+  br i1 %t28, label %logical_or_merge_24, label %logical_or_right_24
+
+logical_or_right_24:
+  %t29 = load %DecoratorInfo, %DecoratorInfo* %l3
+  %t30 = extractvalue %DecoratorInfo %t29, 0
+  %s31 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.31, i32 0, i32 0
+  %t32 = icmp eq i8* %t30, %s31
+  br label %logical_or_right_end_24
+
+logical_or_right_end_24:
+  br label %logical_or_merge_24
+
+logical_or_merge_24:
+  %t33 = phi i1 [ true, %logical_or_entry_24 ], [ %t32, %logical_or_right_end_24 ]
+  br label %logical_or_entry_23
+
+logical_or_entry_23:
+  br i1 %t33, label %logical_or_merge_23, label %logical_or_right_23
+
+logical_or_right_23:
+  %t34 = load %DecoratorInfo, %DecoratorInfo* %l3
+  %t35 = extractvalue %DecoratorInfo %t34, 0
+  %s36 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.36, i32 0, i32 0
+  %t37 = icmp eq i8* %t35, %s36
+  br label %logical_or_right_end_23
+
+logical_or_right_end_23:
+  br label %logical_or_merge_23
+
+logical_or_merge_23:
+  %t38 = phi i1 [ true, %logical_or_entry_23 ], [ %t37, %logical_or_right_end_23 ]
+  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t40 = load i1, i1* %l1
   %t41 = load double, double* %l2
-  br label %loop.header0
-afterloop3:
-  %t45 = load i1, i1* %l1
-  br label %logical_and_entry_44
-
-logical_and_entry_44:
-  br i1 %t45, label %logical_and_right_44, label %logical_and_merge_44
-
-logical_and_right_44:
-  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s47 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.47, i32 0, i32 0
-  %t48 = call i1 @contains_effect({ i8**, i64 }* %t46, i8* %s47)
-  %t49 = xor i1 %t48, 1
-  br label %logical_and_right_end_44
-
-logical_and_right_end_44:
-  br label %logical_and_merge_44
-
-logical_and_merge_44:
-  %t50 = phi i1 [ false, %logical_and_entry_44 ], [ %t49, %logical_and_right_end_44 ]
-  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t52 = load i1, i1* %l1
-  %t53 = load double, double* %l2
-  br i1 %t50, label %then6, label %merge7
+  %t42 = load %DecoratorInfo, %DecoratorInfo* %l3
+  br i1 %t38, label %then6, label %merge7
 then6:
-  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s55 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.55, i32 0, i32 0
-  %t56 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t54, i8* %s55)
-  store { i8**, i64 }* %t56, { i8**, i64 }** %l0
+  store i1 1, i1* %l1
   br label %merge7
 merge7:
-  %t57 = phi { i8**, i64 }* [ %t56, %then6 ], [ %t51, %entry ]
-  store { i8**, i64 }* %t57, { i8**, i64 }** %l0
+  %t43 = phi i1 [ 1, %then6 ], [ %t40, %loop.body1 ]
+  store i1 %t43, i1* %l1
+  %t44 = load double, double* %l2
+  %t45 = sitofp i64 1 to double
+  %t46 = fadd double %t44, %t45
+  store double %t46, double* %l2
+  br label %loop.latch2
+loop.latch2:
+  %t47 = load i1, i1* %l1
+  %t48 = load double, double* %l2
+  br label %loop.header0
+afterloop3:
+  %t52 = load i1, i1* %l1
+  br label %logical_and_entry_51
+
+logical_and_entry_51:
+  br i1 %t52, label %logical_and_right_51, label %logical_and_merge_51
+
+logical_and_right_51:
+  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s54 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.54, i32 0, i32 0
+  %t55 = call i1 @contains_effect({ i8**, i64 }* %t53, i8* %s54)
+  %t56 = xor i1 %t55, 1
+  br label %logical_and_right_end_51
+
+logical_and_right_end_51:
+  br label %logical_and_merge_51
+
+logical_and_merge_51:
+  %t57 = phi i1 [ false, %logical_and_entry_51 ], [ %t56, %logical_and_right_end_51 ]
   %t58 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t58
+  %t59 = load i1, i1* %l1
+  %t60 = load double, double* %l2
+  br i1 %t57, label %then8, label %merge9
+then8:
+  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s62 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.62, i32 0, i32 0
+  %t63 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t61, i8* %s62)
+  store { i8**, i64 }* %t63, { i8**, i64 }** %l0
+  br label %merge9
+merge9:
+  %t64 = phi { i8**, i64 }* [ %t63, %then8 ], [ %t58, %entry ]
+  store { i8**, i64 }* %t64, { i8**, i64 }** %l0
+  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t65
 }
 
 define { %DecoratorInfo*, i64 }* @evaluate_decorators({ i8**, i64 }* %decorators) {
@@ -173,36 +184,46 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t22 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t20, %loop.latch2 ]
-  %t23 = phi double [ %t7, %entry ], [ %t21, %loop.latch2 ]
-  store { %DecoratorInfo*, i64 }* %t22, { %DecoratorInfo*, i64 }** %l0
-  store double %t23, double* %l1
+  %t28 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t26, %loop.latch2 ]
+  %t29 = phi double [ %t7, %entry ], [ %t27, %loop.latch2 ]
+  store { %DecoratorInfo*, i64 }* %t28, { %DecoratorInfo*, i64 }** %l0
+  store double %t29, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  %t9 = load double, double* %l1
-  %t10 = load { i8**, i64 }, { i8**, i64 }* %decorators
-  %t11 = extractvalue { i8**, i64 } %t10, 0
-  %t12 = extractvalue { i8**, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr i8*, i8** %t11, i64 %t9
-  %t15 = load i8*, i8** %t14
-  store i8* %t15, i8** %l2
-  %t16 = load i8*, i8** %l2
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %decorators
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l1
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %decorators
+  %t17 = extractvalue { i8**, i64 } %t16, 0
+  %t18 = extractvalue { i8**, i64 } %t16, 1
+  %t19 = icmp uge i64 %t15, %t18
+  ; bounds check: %t19 (if true, out of bounds)
+  %t20 = getelementptr i8*, i8** %t17, i64 %t15
+  %t21 = load i8*, i8** %t20
+  store i8* %t21, i8** %l2
+  %t22 = load i8*, i8** %l2
   store double 0.0, double* %l3
-  %t17 = load double, double* %l1
-  %t18 = sitofp i64 1 to double
-  %t19 = fadd double %t17, %t18
-  store double %t19, double* %l1
+  %t23 = load double, double* %l1
+  %t24 = sitofp i64 1 to double
+  %t25 = fadd double %t23, %t24
+  store double %t25, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t20 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  %t21 = load double, double* %l1
+  %t26 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  %t27 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t24 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  ret { %DecoratorInfo*, i64 }* %t24
+  %t30 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  ret { %DecoratorInfo*, i64 }* %t30
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments({ i8**, i64 }* %arguments) {
@@ -225,36 +246,46 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t22 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t20, %loop.latch2 ]
-  %t23 = phi double [ %t7, %entry ], [ %t21, %loop.latch2 ]
-  store { %DecoratorArgumentInfo*, i64 }* %t22, { %DecoratorArgumentInfo*, i64 }** %l0
-  store double %t23, double* %l1
+  %t28 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t26, %loop.latch2 ]
+  %t29 = phi double [ %t7, %entry ], [ %t27, %loop.latch2 ]
+  store { %DecoratorArgumentInfo*, i64 }* %t28, { %DecoratorArgumentInfo*, i64 }** %l0
+  store double %t29, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  %t9 = load double, double* %l1
-  %t10 = load { i8**, i64 }, { i8**, i64 }* %arguments
-  %t11 = extractvalue { i8**, i64 } %t10, 0
-  %t12 = extractvalue { i8**, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr i8*, i8** %t11, i64 %t9
-  %t15 = load i8*, i8** %t14
-  store i8* %t15, i8** %l2
-  %t16 = load i8*, i8** %l2
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %arguments
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l1
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %arguments
+  %t17 = extractvalue { i8**, i64 } %t16, 0
+  %t18 = extractvalue { i8**, i64 } %t16, 1
+  %t19 = icmp uge i64 %t15, %t18
+  ; bounds check: %t19 (if true, out of bounds)
+  %t20 = getelementptr i8*, i8** %t17, i64 %t15
+  %t21 = load i8*, i8** %t20
+  store i8* %t21, i8** %l2
+  %t22 = load i8*, i8** %l2
   store double 0.0, double* %l3
-  %t17 = load double, double* %l1
-  %t18 = sitofp i64 1 to double
-  %t19 = fadd double %t17, %t18
-  store double %t19, double* %l1
+  %t23 = load double, double* %l1
+  %t24 = sitofp i64 1 to double
+  %t25 = fadd double %t23, %t24
+  store double %t25, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t20 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  %t21 = load double, double* %l1
+  %t26 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t27 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t24 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  ret { %DecoratorArgumentInfo*, i64 }* %t24
+  %t30 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  ret { %DecoratorArgumentInfo*, i64 }* %t30
 }
 
 define %LiteralValue @evaluate_expression(i8* %expr) {
@@ -625,36 +656,46 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t23 = phi { i8**, i64 }* [ %t6, %entry ], [ %t21, %loop.latch2 ]
-  %t24 = phi double [ %t7, %entry ], [ %t22, %loop.latch2 ]
-  store { i8**, i64 }* %t23, { i8**, i64 }** %l0
-  store double %t24, double* %l1
+  %t29 = phi { i8**, i64 }* [ %t6, %entry ], [ %t27, %loop.latch2 ]
+  %t30 = phi double [ %t7, %entry ], [ %t28, %loop.latch2 ]
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l0
+  store double %t30, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t10 = load double, double* %l1
-  %t11 = load { i8**, i64 }, { i8**, i64 }* %effects
-  %t12 = extractvalue { i8**, i64 } %t11, 0
-  %t13 = extractvalue { i8**, i64 } %t11, 1
-  %t14 = icmp uge i64 %t10, %t13
-  ; bounds check: %t14 (if true, out of bounds)
-  %t15 = getelementptr i8*, i8** %t12, i64 %t10
-  %t16 = load i8*, i8** %t15
-  %t17 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t9, i8* %t16)
-  store { i8**, i64 }* %t17, { i8**, i64 }** %l0
-  %t18 = load double, double* %l1
-  %t19 = sitofp i64 1 to double
-  %t20 = fadd double %t18, %t19
-  store double %t20, double* %l1
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t16 = load double, double* %l1
+  %t17 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t18 = extractvalue { i8**, i64 } %t17, 0
+  %t19 = extractvalue { i8**, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr i8*, i8** %t18, i64 %t16
+  %t22 = load i8*, i8** %t21
+  %t23 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t15, i8* %t22)
+  store { i8**, i64 }* %t23, { i8**, i64 }** %l0
+  %t24 = load double, double* %l1
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t22 = load double, double* %l1
+  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t28 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t25
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t31
 }
 
 define i1 @contains_effect({ i8**, i64 }* %effects, i8* %effect) {
@@ -665,32 +706,41 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t16 = phi double [ %t1, %entry ], [ %t15, %loop.latch2 ]
-  store double %t16, double* %l0
+  %t21 = phi double [ %t1, %entry ], [ %t20, %loop.latch2 ]
+  store double %t21, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
-  %t3 = load double, double* %l0
-  %t4 = load { i8**, i64 }, { i8**, i64 }* %effects
-  %t5 = extractvalue { i8**, i64 } %t4, 0
-  %t6 = extractvalue { i8**, i64 } %t4, 1
-  %t7 = icmp uge i64 %t3, %t6
-  ; bounds check: %t7 (if true, out of bounds)
-  %t8 = getelementptr i8*, i8** %t5, i64 %t3
-  %t9 = load i8*, i8** %t8
-  %t10 = icmp eq i8* %t9, %effect
-  %t11 = load double, double* %l0
-  br i1 %t10, label %then4, label %merge5
+  %t3 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t4 = extractvalue { i8**, i64 } %t3, 1
+  %t5 = sitofp i64 %t4 to double
+  %t6 = fcmp oge double %t2, %t5
+  %t7 = load double, double* %l0
+  br i1 %t6, label %then4, label %merge5
 then4:
-  ret i1 1
+  br label %afterloop3
 merge5:
-  %t12 = load double, double* %l0
-  %t13 = sitofp i64 1 to double
-  %t14 = fadd double %t12, %t13
-  store double %t14, double* %l0
+  %t8 = load double, double* %l0
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t10 = extractvalue { i8**, i64 } %t9, 0
+  %t11 = extractvalue { i8**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr i8*, i8** %t10, i64 %t8
+  %t14 = load i8*, i8** %t13
+  %t15 = icmp eq i8* %t14, %effect
+  %t16 = load double, double* %l0
+  br i1 %t15, label %then6, label %merge7
+then6:
+  ret i1 1
+merge7:
+  %t17 = load double, double* %l0
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t15 = load double, double* %l0
+  %t20 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0

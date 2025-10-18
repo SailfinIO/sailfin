@@ -347,6 +347,14 @@ entry:
   store i64 0, i64* %t4
   store { i8**, i64 }* null, { i8**, i64 }** %l0
   %t5 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t6 = load { i8**, i64 }, { i8**, i64 }* %t5
+  %t7 = extractvalue { i8**, i64 } %t6, 1
+  %t8 = icmp eq i64 %t7, 0
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br i1 %t8, label %then0, label %merge1
+then0:
+  ret i8* null
+merge1:
   ret i8* null
 }
 
@@ -355,50 +363,68 @@ entry:
   %l0 = alloca i8*
   %l1 = alloca double
   %t0 = load { i8**, i64 }, { i8**, i64 }* %items
-  %t1 = extractvalue { i8**, i64 } %t0, 0
-  %t2 = extractvalue { i8**, i64 } %t0, 1
-  %t3 = icmp uge i64 0, %t2
-  ; bounds check: %t3 (if true, out of bounds)
-  %t4 = getelementptr i8*, i8** %t1, i64 0
-  %t5 = load i8*, i8** %t4
-  store i8* %t5, i8** %l0
-  %t6 = sitofp i64 1 to double
-  store double %t6, double* %l1
-  %t7 = load i8*, i8** %l0
-  %t8 = load double, double* %l1
-  br label %loop.header0
-loop.header0:
-  %t25 = phi i8* [ %t7, %entry ], [ %t23, %loop.latch2 ]
-  %t26 = phi double [ %t8, %entry ], [ %t24, %loop.latch2 ]
-  store i8* %t25, i8** %l0
-  store double %t26, double* %l1
-  br label %loop.body1
-loop.body1:
-  %t9 = load double, double* %l1
-  %t10 = load i8*, i8** %l0
-  %t11 = add i8* %t10, %separator
+  %t1 = extractvalue { i8**, i64 } %t0, 1
+  %t2 = icmp eq i64 %t1, 0
+  br i1 %t2, label %then0, label %merge1
+then0:
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  ret i8* %s3
+merge1:
+  %t4 = load { i8**, i64 }, { i8**, i64 }* %items
+  %t5 = extractvalue { i8**, i64 } %t4, 0
+  %t6 = extractvalue { i8**, i64 } %t4, 1
+  %t7 = icmp uge i64 0, %t6
+  ; bounds check: %t7 (if true, out of bounds)
+  %t8 = getelementptr i8*, i8** %t5, i64 0
+  %t9 = load i8*, i8** %t8
+  store i8* %t9, i8** %l0
+  %t10 = sitofp i64 1 to double
+  store double %t10, double* %l1
+  %t11 = load i8*, i8** %l0
   %t12 = load double, double* %l1
-  %t13 = load { i8**, i64 }, { i8**, i64 }* %items
-  %t14 = extractvalue { i8**, i64 } %t13, 0
-  %t15 = extractvalue { i8**, i64 } %t13, 1
-  %t16 = icmp uge i64 %t12, %t15
-  ; bounds check: %t16 (if true, out of bounds)
-  %t17 = getelementptr i8*, i8** %t14, i64 %t12
-  %t18 = load i8*, i8** %t17
-  %t19 = add i8* %t11, %t18
-  store i8* %t19, i8** %l0
-  %t20 = load double, double* %l1
-  %t21 = sitofp i64 1 to double
-  %t22 = fadd double %t20, %t21
-  store double %t22, double* %l1
-  br label %loop.latch2
-loop.latch2:
-  %t23 = load i8*, i8** %l0
-  %t24 = load double, double* %l1
-  br label %loop.header0
-afterloop3:
-  %t27 = load i8*, i8** %l0
-  ret i8* %t27
+  br label %loop.header2
+loop.header2:
+  %t35 = phi i8* [ %t11, %entry ], [ %t33, %loop.latch4 ]
+  %t36 = phi double [ %t12, %entry ], [ %t34, %loop.latch4 ]
+  store i8* %t35, i8** %l0
+  store double %t36, double* %l1
+  br label %loop.body3
+loop.body3:
+  %t13 = load double, double* %l1
+  %t14 = load { i8**, i64 }, { i8**, i64 }* %items
+  %t15 = extractvalue { i8**, i64 } %t14, 1
+  %t16 = sitofp i64 %t15 to double
+  %t17 = fcmp oge double %t13, %t16
+  %t18 = load i8*, i8** %l0
+  %t19 = load double, double* %l1
+  br i1 %t17, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t20 = load i8*, i8** %l0
+  %t21 = add i8* %t20, %separator
+  %t22 = load double, double* %l1
+  %t23 = load { i8**, i64 }, { i8**, i64 }* %items
+  %t24 = extractvalue { i8**, i64 } %t23, 0
+  %t25 = extractvalue { i8**, i64 } %t23, 1
+  %t26 = icmp uge i64 %t22, %t25
+  ; bounds check: %t26 (if true, out of bounds)
+  %t27 = getelementptr i8*, i8** %t24, i64 %t22
+  %t28 = load i8*, i8** %t27
+  %t29 = add i8* %t21, %t28
+  store i8* %t29, i8** %l0
+  %t30 = load double, double* %l1
+  %t31 = sitofp i64 1 to double
+  %t32 = fadd double %t30, %t31
+  store double %t32, double* %l1
+  br label %loop.latch4
+loop.latch4:
+  %t33 = load i8*, i8** %l0
+  %t34 = load double, double* %l1
+  br label %loop.header2
+afterloop5:
+  %t37 = load i8*, i8** %l0
+  ret i8* %t37
 }
 
 define { i8**, i64 }* @parse_type_arguments(i8* %annotation_text) {

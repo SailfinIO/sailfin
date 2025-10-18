@@ -211,138 +211,178 @@ merge9:
   %t67 = load double, double* %l9
   br label %loop.header10
 loop.header10:
-  %t145 = phi double [ %t67, %entry ], [ %t142, %loop.latch12 ]
-  %t146 = phi { i8**, i64 }* [ %t65, %entry ], [ %t143, %loop.latch12 ]
-  %t147 = phi { %EffectRequirement*, i64 }* [ %t66, %entry ], [ %t144, %loop.latch12 ]
-  store double %t145, double* %l9
-  store { i8**, i64 }* %t146, { i8**, i64 }** %l7
-  store { %EffectRequirement*, i64 }* %t147, { %EffectRequirement*, i64 }** %l8
+  %t158 = phi double [ %t67, %entry ], [ %t155, %loop.latch12 ]
+  %t159 = phi { i8**, i64 }* [ %t65, %entry ], [ %t156, %loop.latch12 ]
+  %t160 = phi { %EffectRequirement*, i64 }* [ %t66, %entry ], [ %t157, %loop.latch12 ]
+  store double %t158, double* %l9
+  store { i8**, i64 }* %t159, { i8**, i64 }** %l7
+  store { %EffectRequirement*, i64 }* %t160, { %EffectRequirement*, i64 }** %l8
   br label %loop.body11
 loop.body11:
   %t68 = load double, double* %l9
   %t69 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t70 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t71 = load double, double* %l9
-  %t72 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t70
-  %t73 = extractvalue { %EffectRequirement*, i64 } %t72, 0
-  %t74 = extractvalue { %EffectRequirement*, i64 } %t72, 1
-  %t75 = icmp uge i64 %t71, %t74
-  ; bounds check: %t75 (if true, out of bounds)
-  %t76 = getelementptr %EffectRequirement, %EffectRequirement* %t73, i64 %t71
-  %t77 = load %EffectRequirement, %EffectRequirement* %t76
-  store %EffectRequirement %t77, %EffectRequirement* %l10
-  %t78 = load %EffectRequirement, %EffectRequirement* %l10
-  %t79 = extractvalue %EffectRequirement %t78, 0
-  store i8* %t79, i8** %l11
-  %t81 = load i8*, i8** %l11
-  %s82 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.82, i32 0, i32 0
-  %t83 = icmp eq i8* %t81, %s82
-  br label %logical_and_entry_80
-
-logical_and_entry_80:
-  br i1 %t83, label %logical_and_right_80, label %logical_and_merge_80
-
-logical_and_right_80:
-  %t84 = load i1, i1* %l3
-  br label %logical_and_right_end_80
-
-logical_and_right_end_80:
-  br label %logical_and_merge_80
-
-logical_and_merge_80:
-  %t85 = phi i1 [ false, %logical_and_entry_80 ], [ %t84, %logical_and_right_end_80 ]
-  %t86 = load double, double* %l0
-  %t87 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t88 = load double, double* %l2
-  %t89 = load i1, i1* %l3
-  %t90 = load double, double* %l4
-  %t91 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t92 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t93 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t94 = load double, double* %l9
-  %t95 = load %EffectRequirement, %EffectRequirement* %l10
-  %t96 = load i8*, i8** %l11
-  br i1 %t85, label %then14, label %merge15
+  %t70 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t69
+  %t71 = extractvalue { %EffectRequirement*, i64 } %t70, 1
+  %t72 = sitofp i64 %t71 to double
+  %t73 = fcmp oge double %t68, %t72
+  %t74 = load double, double* %l0
+  %t75 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t76 = load double, double* %l2
+  %t77 = load i1, i1* %l3
+  %t78 = load double, double* %l4
+  %t79 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t80 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t81 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t82 = load double, double* %l9
+  br i1 %t73, label %then14, label %merge15
 then14:
-  %t97 = load double, double* %l9
-  %t98 = sitofp i64 1 to double
-  %t99 = fadd double %t97, %t98
-  store double %t99, double* %l9
-  br label %loop.latch12
+  br label %afterloop13
 merge15:
+  %t83 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t84 = load double, double* %l9
+  %t85 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t83
+  %t86 = extractvalue { %EffectRequirement*, i64 } %t85, 0
+  %t87 = extractvalue { %EffectRequirement*, i64 } %t85, 1
+  %t88 = icmp uge i64 %t84, %t87
+  ; bounds check: %t88 (if true, out of bounds)
+  %t89 = getelementptr %EffectRequirement, %EffectRequirement* %t86, i64 %t84
+  %t90 = load %EffectRequirement, %EffectRequirement* %t89
+  store %EffectRequirement %t90, %EffectRequirement* %l10
+  %t91 = load %EffectRequirement, %EffectRequirement* %l10
+  %t92 = extractvalue %EffectRequirement %t91, 0
+  store i8* %t92, i8** %l11
+  %t94 = load i8*, i8** %l11
+  %s95 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.95, i32 0, i32 0
+  %t96 = icmp eq i8* %t94, %s95
+  br label %logical_and_entry_93
+
+logical_and_entry_93:
+  br i1 %t96, label %logical_and_right_93, label %logical_and_merge_93
+
+logical_and_right_93:
+  %t97 = load i1, i1* %l3
+  br label %logical_and_right_end_93
+
+logical_and_right_end_93:
+  br label %logical_and_merge_93
+
+logical_and_merge_93:
+  %t98 = phi i1 [ false, %logical_and_entry_93 ], [ %t97, %logical_and_right_end_93 ]
+  %t99 = load double, double* %l0
   %t100 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t101 = load i8*, i8** %l11
-  %t102 = call i1 @contains_effect({ i8**, i64 }* %t100, i8* %t101)
-  %t103 = load double, double* %l0
-  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t105 = load double, double* %l2
-  %t106 = load i1, i1* %l3
-  %t107 = load double, double* %l4
-  %t108 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t109 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t110 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t111 = load double, double* %l9
-  %t112 = load %EffectRequirement, %EffectRequirement* %l10
-  %t113 = load i8*, i8** %l11
-  br i1 %t102, label %then16, label %merge17
+  %t101 = load double, double* %l2
+  %t102 = load i1, i1* %l3
+  %t103 = load double, double* %l4
+  %t104 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t106 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t107 = load double, double* %l9
+  %t108 = load %EffectRequirement, %EffectRequirement* %l10
+  %t109 = load i8*, i8** %l11
+  br i1 %t98, label %then16, label %merge17
 then16:
-  %t114 = load double, double* %l9
-  %t115 = sitofp i64 1 to double
-  %t116 = fadd double %t114, %t115
-  store double %t116, double* %l9
+  %t110 = load double, double* %l9
+  %t111 = sitofp i64 1 to double
+  %t112 = fadd double %t110, %t111
+  store double %t112, double* %l9
   br label %loop.latch12
 merge17:
-  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t118 = load i8*, i8** %l11
-  %t119 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t117, i8* %t118)
-  store { i8**, i64 }* %t119, { i8**, i64 }** %l7
-  %t120 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t121 = load i8*, i8** %l11
-  %t122 = call i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t120, i8* %t121)
-  %t123 = xor i1 %t122, 1
-  %t124 = load double, double* %l0
-  %t125 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t126 = load double, double* %l2
-  %t127 = load i1, i1* %l3
-  %t128 = load double, double* %l4
-  %t129 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t130 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t131 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t132 = load double, double* %l9
-  %t133 = load %EffectRequirement, %EffectRequirement* %l10
-  %t134 = load i8*, i8** %l11
-  br i1 %t123, label %then18, label %merge19
+  %t113 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t114 = load i8*, i8** %l11
+  %t115 = call i1 @contains_effect({ i8**, i64 }* %t113, i8* %t114)
+  %t116 = load double, double* %l0
+  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t118 = load double, double* %l2
+  %t119 = load i1, i1* %l3
+  %t120 = load double, double* %l4
+  %t121 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t122 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t123 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t124 = load double, double* %l9
+  %t125 = load %EffectRequirement, %EffectRequirement* %l10
+  %t126 = load i8*, i8** %l11
+  br i1 %t115, label %then18, label %merge19
 then18:
-  %t135 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t136 = load %EffectRequirement, %EffectRequirement* %l10
-  %t137 = call { %EffectRequirement*, i64 }* @append_requirement({ %EffectRequirement*, i64 }* %t135, %EffectRequirement %t136)
-  store { %EffectRequirement*, i64 }* %t137, { %EffectRequirement*, i64 }** %l8
-  br label %merge19
-merge19:
-  %t138 = phi { %EffectRequirement*, i64 }* [ %t137, %then18 ], [ %t131, %loop.body11 ]
-  store { %EffectRequirement*, i64 }* %t138, { %EffectRequirement*, i64 }** %l8
-  %t139 = load double, double* %l9
-  %t140 = sitofp i64 1 to double
-  %t141 = fadd double %t139, %t140
-  store double %t141, double* %l9
+  %t127 = load double, double* %l9
+  %t128 = sitofp i64 1 to double
+  %t129 = fadd double %t127, %t128
+  store double %t129, double* %l9
   br label %loop.latch12
-loop.latch12:
-  %t142 = load double, double* %l9
+merge19:
+  %t130 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t131 = load i8*, i8** %l11
+  %t132 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t130, i8* %t131)
+  store { i8**, i64 }* %t132, { i8**, i64 }** %l7
+  %t133 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t134 = load i8*, i8** %l11
+  %t135 = call i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t133, i8* %t134)
+  %t136 = xor i1 %t135, 1
+  %t137 = load double, double* %l0
+  %t138 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t139 = load double, double* %l2
+  %t140 = load i1, i1* %l3
+  %t141 = load double, double* %l4
+  %t142 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
   %t143 = load { i8**, i64 }*, { i8**, i64 }** %l7
   %t144 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t145 = load double, double* %l9
+  %t146 = load %EffectRequirement, %EffectRequirement* %l10
+  %t147 = load i8*, i8** %l11
+  br i1 %t136, label %then20, label %merge21
+then20:
+  %t148 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t149 = load %EffectRequirement, %EffectRequirement* %l10
+  %t150 = call { %EffectRequirement*, i64 }* @append_requirement({ %EffectRequirement*, i64 }* %t148, %EffectRequirement %t149)
+  store { %EffectRequirement*, i64 }* %t150, { %EffectRequirement*, i64 }** %l8
+  br label %merge21
+merge21:
+  %t151 = phi { %EffectRequirement*, i64 }* [ %t150, %then20 ], [ %t144, %loop.body11 ]
+  store { %EffectRequirement*, i64 }* %t151, { %EffectRequirement*, i64 }** %l8
+  %t152 = load double, double* %l9
+  %t153 = sitofp i64 1 to double
+  %t154 = fadd double %t152, %t153
+  store double %t154, double* %l9
+  br label %loop.latch12
+loop.latch12:
+  %t155 = load double, double* %l9
+  %t156 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t157 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
   br label %loop.header10
 afterloop13:
-  %t148 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t149 = alloca [0 x double]
-  %t150 = getelementptr [0 x double], [0 x double]* %t149, i32 0, i32 0
-  %t151 = alloca { double*, i64 }
-  %t152 = getelementptr { double*, i64 }, { double*, i64 }* %t151, i32 0, i32 0
-  store double* %t150, double** %t152
-  %t153 = getelementptr { double*, i64 }, { double*, i64 }* %t151, i32 0, i32 1
-  store i64 0, i64* %t153
+  %t161 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t162 = load { i8**, i64 }, { i8**, i64 }* %t161
+  %t163 = extractvalue { i8**, i64 } %t162, 1
+  %t164 = icmp eq i64 %t163, 0
+  %t165 = load double, double* %l0
+  %t166 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t167 = load double, double* %l2
+  %t168 = load i1, i1* %l3
+  %t169 = load double, double* %l4
+  %t170 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t171 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t172 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t173 = load double, double* %l9
+  br i1 %t164, label %then22, label %merge23
+then22:
+  %t174 = alloca [0 x double]
+  %t175 = getelementptr [0 x double], [0 x double]* %t174, i32 0, i32 0
+  %t176 = alloca { double*, i64 }
+  %t177 = getelementptr { double*, i64 }, { double*, i64 }* %t176, i32 0, i32 0
+  store double* %t175, double** %t177
+  %t178 = getelementptr { double*, i64 }, { double*, i64 }* %t176, i32 0, i32 1
+  store i64 0, i64* %t178
+  ret { %EffectViolation*, i64 }* null
+merge23:
+  %t179 = alloca [0 x double]
+  %t180 = getelementptr [0 x double], [0 x double]* %t179, i32 0, i32 0
+  %t181 = alloca { double*, i64 }
+  %t182 = getelementptr { double*, i64 }, { double*, i64 }* %t181, i32 0, i32 0
+  store double* %t180, double** %t182
+  %t183 = getelementptr { double*, i64 }, { double*, i64 }* %t181, i32 0, i32 1
+  store i64 0, i64* %t183
   store { %EffectViolation*, i64 }* null, { %EffectViolation*, i64 }** %l12
-  %t154 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
-  ret { %EffectViolation*, i64 }* %t154
+  %t184 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
+  ret { %EffectViolation*, i64 }* %t184
 }
 
 define { %EffectRequirement*, i64 }* @required_effects(i8* %body) {
@@ -525,75 +565,85 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi { %EffectRequirement*, i64 }* [ %t1, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t2, %entry ], [ %t44, %loop.latch2 ]
-  store { %EffectRequirement*, i64 }* %t45, { %EffectRequirement*, i64 }** %l0
-  store double %t46, double* %l1
+  %t51 = phi { %EffectRequirement*, i64 }* [ %t1, %entry ], [ %t49, %loop.latch2 ]
+  %t52 = phi double [ %t2, %entry ], [ %t50, %loop.latch2 ]
+  store { %EffectRequirement*, i64 }* %t51, { %EffectRequirement*, i64 }** %l0
+  store double %t52, double* %l1
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
-  %t4 = load double, double* %l1
-  %t5 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t6 = extractvalue { i8**, i64 } %t5, 0
-  %t7 = extractvalue { i8**, i64 } %t5, 1
-  %t8 = icmp uge i64 %t4, %t7
-  ; bounds check: %t8 (if true, out of bounds)
-  %t9 = getelementptr i8*, i8** %t6, i64 %t4
-  %t10 = load i8*, i8** %t9
-  store i8* %t10, i8** %l2
-  %t11 = load i8*, i8** %l2
-  %s12 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.12, i32 0, i32 0
-  %t13 = call i1 @is_identifier_token(i8* %t11, i8* %s12)
-  %t14 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  %t15 = load double, double* %l1
-  %t16 = load i8*, i8** %l2
-  br i1 %t13, label %then4, label %merge5
+  %t4 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t5 = extractvalue { i8**, i64 } %t4, 1
+  %t6 = sitofp i64 %t5 to double
+  %t7 = fcmp oge double %t3, %t6
+  %t8 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t9 = load double, double* %l1
+  br i1 %t7, label %then4, label %merge5
 then4:
-  %t17 = load double, double* %l1
-  %t18 = sitofp i64 1 to double
-  %t19 = fadd double %t17, %t18
-  %t20 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t19)
-  store double %t20, double* %l3
-  %s21 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.21, i32 0, i32 0
-  store i8* %s21, i8** %l4
-  %t22 = load double, double* %l3
-  %t23 = sitofp i64 -1 to double
-  %t24 = fcmp une double %t22, %t23
-  %t25 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  %t26 = load double, double* %l1
-  %t27 = load i8*, i8** %l2
-  %t28 = load double, double* %l3
-  %t29 = load i8*, i8** %l4
-  br i1 %t24, label %then6, label %merge7
+  br label %afterloop3
+merge5:
+  %t10 = load double, double* %l1
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
+  store i8* %t16, i8** %l2
+  %t17 = load i8*, i8** %l2
+  %s18 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.18, i32 0, i32 0
+  %t19 = call i1 @is_identifier_token(i8* %t17, i8* %s18)
+  %t20 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t21 = load double, double* %l1
+  %t22 = load i8*, i8** %l2
+  br i1 %t19, label %then6, label %merge7
 then6:
-  %t30 = load double, double* %l3
-  %t31 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t32 = extractvalue { i8**, i64 } %t31, 0
-  %t33 = extractvalue { i8**, i64 } %t31, 1
-  %t34 = icmp uge i64 %t30, %t33
-  ; bounds check: %t34 (if true, out of bounds)
-  %t35 = getelementptr i8*, i8** %t32, i64 %t30
-  %t36 = load i8*, i8** %t35
-  store i8* %t36, i8** %l5
-  %t38 = load i8*, i8** %l5
+  %t23 = load double, double* %l1
+  %t24 = sitofp i64 1 to double
+  %t25 = fadd double %t23, %t24
+  %t26 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t25)
+  store double %t26, double* %l3
+  %s27 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.27, i32 0, i32 0
+  store i8* %s27, i8** %l4
+  %t28 = load double, double* %l3
+  %t29 = sitofp i64 -1 to double
+  %t30 = fcmp une double %t28, %t29
+  %t31 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t32 = load double, double* %l1
+  %t33 = load i8*, i8** %l2
+  %t34 = load double, double* %l3
+  %t35 = load i8*, i8** %l4
+  br i1 %t30, label %then8, label %merge9
+then8:
+  %t36 = load double, double* %l3
+  %t37 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t38 = extractvalue { i8**, i64 } %t37, 0
+  %t39 = extractvalue { i8**, i64 } %t37, 1
+  %t40 = icmp uge i64 %t36, %t39
+  ; bounds check: %t40 (if true, out of bounds)
+  %t41 = getelementptr i8*, i8** %t38, i64 %t36
+  %t42 = load i8*, i8** %t41
+  store i8* %t42, i8** %l5
+  %t44 = load i8*, i8** %l5
+  br label %merge9
+merge9:
   br label %merge7
 merge7:
-  br label %merge5
-merge5:
-  %t39 = phi { %EffectRequirement*, i64 }* [ null, %then4 ], [ %t14, %loop.body1 ]
-  store { %EffectRequirement*, i64 }* %t39, { %EffectRequirement*, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t45 = phi { %EffectRequirement*, i64 }* [ null, %then6 ], [ %t20, %loop.body1 ]
+  store { %EffectRequirement*, i64 }* %t45, { %EffectRequirement*, i64 }** %l0
+  %t46 = load double, double* %l1
+  %t47 = sitofp i64 1 to double
+  %t48 = fadd double %t46, %t47
+  store double %t48, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  %t44 = load double, double* %l1
+  %t49 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t50 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  ret { %EffectRequirement*, i64 }* %t47
+  %t53 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  ret { %EffectRequirement*, i64 }* %t53
 }
 
 define { %EffectRequirement*, i64 }* @append_identifier_dot_effect({ %EffectRequirement*, i64 }* %requirements, { i8**, i64 }* %tokens, i8* %identifier, i8* %effect, i8* %description) {
@@ -612,26 +662,37 @@ entry:
   %t5 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t13 = phi { %EffectRequirement*, i64 }* [ %t4, %entry ], [ %t11, %loop.latch2 ]
-  %t14 = phi double [ %t5, %entry ], [ %t12, %loop.latch2 ]
-  store { %EffectRequirement*, i64 }* %t13, { %EffectRequirement*, i64 }** %l1
-  store double %t14, double* %l2
+  %t20 = phi { %EffectRequirement*, i64 }* [ %t4, %entry ], [ %t18, %loop.latch2 ]
+  %t21 = phi double [ %t5, %entry ], [ %t19, %loop.latch2 ]
+  store { %EffectRequirement*, i64 }* %t20, { %EffectRequirement*, i64 }** %l1
+  store double %t21, double* %l2
   br label %loop.body1
 loop.body1:
   %t6 = load double, double* %l2
   %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t8 = load double, double* %l2
-  %t9 = sitofp i64 1 to double
-  %t10 = fadd double %t8, %t9
-  store double %t10, double* %l2
+  %t8 = load { i8**, i64 }, { i8**, i64 }* %t7
+  %t9 = extractvalue { i8**, i64 } %t8, 1
+  %t10 = sitofp i64 %t9 to double
+  %t11 = fcmp oge double %t6, %t10
+  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t13 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  %t14 = load double, double* %l2
+  br i1 %t11, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l2
+  %t16 = sitofp i64 1 to double
+  %t17 = fadd double %t15, %t16
+  store double %t17, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
-  %t12 = load double, double* %l2
+  %t18 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  %t19 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t15 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
-  ret { %EffectRequirement*, i64 }* %t15
+  %t22 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  ret { %EffectRequirement*, i64 }* %t22
 }
 
 define { %EffectRequirement*, i64 }* @append_identifier_call_effect({ %EffectRequirement*, i64 }* %requirements, { i8**, i64 }* %tokens, i8* %identifier, i8* %effect, i8* %description) {
@@ -649,26 +710,37 @@ entry:
   %t4 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t12 = phi { %EffectRequirement*, i64 }* [ %t3, %entry ], [ %t10, %loop.latch2 ]
-  %t13 = phi double [ %t4, %entry ], [ %t11, %loop.latch2 ]
-  store { %EffectRequirement*, i64 }* %t12, { %EffectRequirement*, i64 }** %l1
-  store double %t13, double* %l2
+  %t19 = phi { %EffectRequirement*, i64 }* [ %t3, %entry ], [ %t17, %loop.latch2 ]
+  %t20 = phi double [ %t4, %entry ], [ %t18, %loop.latch2 ]
+  store { %EffectRequirement*, i64 }* %t19, { %EffectRequirement*, i64 }** %l1
+  store double %t20, double* %l2
   br label %loop.body1
 loop.body1:
   %t5 = load double, double* %l2
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t7 = load double, double* %l2
-  %t8 = sitofp i64 1 to double
-  %t9 = fadd double %t7, %t8
-  store double %t9, double* %l2
+  %t7 = load { i8**, i64 }, { i8**, i64 }* %t6
+  %t8 = extractvalue { i8**, i64 } %t7, 1
+  %t9 = sitofp i64 %t8 to double
+  %t10 = fcmp oge double %t5, %t9
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t12 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  %t13 = load double, double* %l2
+  br i1 %t10, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t14 = load double, double* %l2
+  %t15 = sitofp i64 1 to double
+  %t16 = fadd double %t14, %t15
+  store double %t16, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t10 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
-  %t11 = load double, double* %l2
+  %t17 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  %t18 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t14 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
-  ret { %EffectRequirement*, i64 }* %t14
+  %t21 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l1
+  ret { %EffectRequirement*, i64 }* %t21
 }
 
 define { i8**, i64 }* @find_identifier_followed_by_symbol({ i8**, i64 }* %tokens, i8* %name, i8* %symbol) {
@@ -690,100 +762,110 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t60 = phi { i8**, i64 }* [ %t6, %entry ], [ %t58, %loop.latch2 ]
-  %t61 = phi double [ %t7, %entry ], [ %t59, %loop.latch2 ]
-  store { i8**, i64 }* %t60, { i8**, i64 }** %l0
-  store double %t61, double* %l1
+  %t66 = phi { i8**, i64 }* [ %t6, %entry ], [ %t64, %loop.latch2 ]
+  %t67 = phi double [ %t7, %entry ], [ %t65, %loop.latch2 ]
+  store { i8**, i64 }* %t66, { i8**, i64 }** %l0
+  store double %t67, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  %t9 = load double, double* %l1
-  %t10 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t11 = extractvalue { i8**, i64 } %t10, 0
-  %t12 = extractvalue { i8**, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr i8*, i8** %t11, i64 %t9
-  %t15 = load i8*, i8** %t14
-  %t16 = call i1 @is_identifier_token(i8* %t15, i8* %name)
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t18 = load double, double* %l1
-  br i1 %t16, label %then4, label %merge5
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
 then4:
-  %t19 = load double, double* %l1
-  %t20 = sitofp i64 1 to double
-  %t21 = fadd double %t19, %t20
-  %t22 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t21)
-  store double %t22, double* %l2
-  %t24 = load double, double* %l2
-  %t25 = sitofp i64 -1 to double
-  %t26 = fcmp une double %t24, %t25
-  br label %logical_and_entry_23
-
-logical_and_entry_23:
-  br i1 %t26, label %logical_and_right_23, label %logical_and_merge_23
-
-logical_and_right_23:
-  %t27 = load double, double* %l2
-  %t28 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t29 = extractvalue { i8**, i64 } %t28, 0
-  %t30 = extractvalue { i8**, i64 } %t28, 1
-  %t31 = icmp uge i64 %t27, %t30
-  ; bounds check: %t31 (if true, out of bounds)
-  %t32 = getelementptr i8*, i8** %t29, i64 %t27
-  %t33 = load i8*, i8** %t32
-  %t34 = call i1 @is_symbol_token(i8* %t33, i8* %symbol)
-  br label %logical_and_right_end_23
-
-logical_and_right_end_23:
-  br label %logical_and_merge_23
-
-logical_and_merge_23:
-  %t35 = phi i1 [ false, %logical_and_entry_23 ], [ %t34, %logical_and_right_end_23 ]
-  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t37 = load double, double* %l1
-  %t38 = load double, double* %l2
-  br i1 %t35, label %then6, label %merge7
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l1
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t17 = extractvalue { i8**, i64 } %t16, 0
+  %t18 = extractvalue { i8**, i64 } %t16, 1
+  %t19 = icmp uge i64 %t15, %t18
+  ; bounds check: %t19 (if true, out of bounds)
+  %t20 = getelementptr i8*, i8** %t17, i64 %t15
+  %t21 = load i8*, i8** %t20
+  %t22 = call i1 @is_identifier_token(i8* %t21, i8* %name)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load double, double* %l1
+  br i1 %t22, label %then6, label %merge7
 then6:
-  %t39 = load double, double* %l1
-  %t40 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t41 = extractvalue { i8**, i64 } %t40, 0
-  %t42 = extractvalue { i8**, i64 } %t40, 1
-  %t43 = icmp uge i64 %t39, %t42
-  ; bounds check: %t43 (if true, out of bounds)
-  %t44 = getelementptr i8*, i8** %t41, i64 %t39
-  %t45 = load i8*, i8** %t44
-  %t46 = alloca [1 x i8*]
-  %t47 = getelementptr [1 x i8*], [1 x i8*]* %t46, i32 0, i32 0
-  %t48 = getelementptr i8*, i8** %t47, i64 0
-  store i8* %t45, i8** %t48
-  %t49 = alloca { i8**, i64 }
-  %t50 = getelementptr { i8**, i64 }, { i8**, i64 }* %t49, i32 0, i32 0
-  store i8** %t47, i8*** %t50
-  %t51 = getelementptr { i8**, i64 }, { i8**, i64 }* %t49, i32 0, i32 1
-  store i64 1, i64* %t51
-  %t52 = call double @matchesconcat({ i8**, i64 }* %t49)
+  %t25 = load double, double* %l1
+  %t26 = sitofp i64 1 to double
+  %t27 = fadd double %t25, %t26
+  %t28 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t27)
+  store double %t28, double* %l2
+  %t30 = load double, double* %l2
+  %t31 = sitofp i64 -1 to double
+  %t32 = fcmp une double %t30, %t31
+  br label %logical_and_entry_29
+
+logical_and_entry_29:
+  br i1 %t32, label %logical_and_right_29, label %logical_and_merge_29
+
+logical_and_right_29:
+  %t33 = load double, double* %l2
+  %t34 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t35 = extractvalue { i8**, i64 } %t34, 0
+  %t36 = extractvalue { i8**, i64 } %t34, 1
+  %t37 = icmp uge i64 %t33, %t36
+  ; bounds check: %t37 (if true, out of bounds)
+  %t38 = getelementptr i8*, i8** %t35, i64 %t33
+  %t39 = load i8*, i8** %t38
+  %t40 = call i1 @is_symbol_token(i8* %t39, i8* %symbol)
+  br label %logical_and_right_end_29
+
+logical_and_right_end_29:
+  br label %logical_and_merge_29
+
+logical_and_merge_29:
+  %t41 = phi i1 [ false, %logical_and_entry_29 ], [ %t40, %logical_and_right_end_29 ]
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t43 = load double, double* %l1
+  %t44 = load double, double* %l2
+  br i1 %t41, label %then8, label %merge9
+then8:
+  %t45 = load double, double* %l1
+  %t46 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t47 = extractvalue { i8**, i64 } %t46, 0
+  %t48 = extractvalue { i8**, i64 } %t46, 1
+  %t49 = icmp uge i64 %t45, %t48
+  ; bounds check: %t49 (if true, out of bounds)
+  %t50 = getelementptr i8*, i8** %t47, i64 %t45
+  %t51 = load i8*, i8** %t50
+  %t52 = alloca [1 x i8*]
+  %t53 = getelementptr [1 x i8*], [1 x i8*]* %t52, i32 0, i32 0
+  %t54 = getelementptr i8*, i8** %t53, i64 0
+  store i8* %t51, i8** %t54
+  %t55 = alloca { i8**, i64 }
+  %t56 = getelementptr { i8**, i64 }, { i8**, i64 }* %t55, i32 0, i32 0
+  store i8** %t53, i8*** %t56
+  %t57 = getelementptr { i8**, i64 }, { i8**, i64 }* %t55, i32 0, i32 1
+  store i64 1, i64* %t57
+  %t58 = call double @matchesconcat({ i8**, i64 }* %t55)
   store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge9
+merge9:
+  %t59 = phi { i8**, i64 }* [ null, %then8 ], [ %t42, %then6 ]
+  store { i8**, i64 }* %t59, { i8**, i64 }** %l0
   br label %merge7
 merge7:
-  %t53 = phi { i8**, i64 }* [ null, %then6 ], [ %t36, %then4 ]
-  store { i8**, i64 }* %t53, { i8**, i64 }** %l0
-  br label %merge5
-merge5:
-  %t54 = phi { i8**, i64 }* [ null, %then4 ], [ %t17, %loop.body1 ]
-  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
-  %t55 = load double, double* %l1
-  %t56 = sitofp i64 1 to double
-  %t57 = fadd double %t55, %t56
-  store double %t57, double* %l1
+  %t60 = phi { i8**, i64 }* [ null, %then6 ], [ %t23, %loop.body1 ]
+  store { i8**, i64 }* %t60, { i8**, i64 }** %l0
+  %t61 = load double, double* %l1
+  %t62 = sitofp i64 1 to double
+  %t63 = fadd double %t61, %t62
+  store double %t63, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t59 = load double, double* %l1
+  %t64 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t65 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t62 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t62
+  %t68 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t68
 }
 
 define { i8**, i64 }* @find_identifier_call({ i8**, i64 }* %tokens, i8* %name) {
@@ -805,101 +887,111 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t61 = phi { i8**, i64 }* [ %t6, %entry ], [ %t59, %loop.latch2 ]
-  %t62 = phi double [ %t7, %entry ], [ %t60, %loop.latch2 ]
-  store { i8**, i64 }* %t61, { i8**, i64 }** %l0
-  store double %t62, double* %l1
+  %t67 = phi { i8**, i64 }* [ %t6, %entry ], [ %t65, %loop.latch2 ]
+  %t68 = phi double [ %t7, %entry ], [ %t66, %loop.latch2 ]
+  store { i8**, i64 }* %t67, { i8**, i64 }** %l0
+  store double %t68, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  %t9 = load double, double* %l1
-  %t10 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t11 = extractvalue { i8**, i64 } %t10, 0
-  %t12 = extractvalue { i8**, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr i8*, i8** %t11, i64 %t9
-  %t15 = load i8*, i8** %t14
-  %t16 = call i1 @is_identifier_token(i8* %t15, i8* %name)
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t18 = load double, double* %l1
-  br i1 %t16, label %then4, label %merge5
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
 then4:
-  %t19 = load double, double* %l1
-  %t20 = sitofp i64 1 to double
-  %t21 = fadd double %t19, %t20
-  %t22 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t21)
-  store double %t22, double* %l2
-  %t24 = load double, double* %l2
-  %t25 = sitofp i64 -1 to double
-  %t26 = fcmp une double %t24, %t25
-  br label %logical_and_entry_23
-
-logical_and_entry_23:
-  br i1 %t26, label %logical_and_right_23, label %logical_and_merge_23
-
-logical_and_right_23:
-  %t27 = load double, double* %l2
-  %t28 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t29 = extractvalue { i8**, i64 } %t28, 0
-  %t30 = extractvalue { i8**, i64 } %t28, 1
-  %t31 = icmp uge i64 %t27, %t30
-  ; bounds check: %t31 (if true, out of bounds)
-  %t32 = getelementptr i8*, i8** %t29, i64 %t27
-  %t33 = load i8*, i8** %t32
-  %s34 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.34, i32 0, i32 0
-  %t35 = call i1 @is_symbol_token(i8* %t33, i8* %s34)
-  br label %logical_and_right_end_23
-
-logical_and_right_end_23:
-  br label %logical_and_merge_23
-
-logical_and_merge_23:
-  %t36 = phi i1 [ false, %logical_and_entry_23 ], [ %t35, %logical_and_right_end_23 ]
-  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t38 = load double, double* %l1
-  %t39 = load double, double* %l2
-  br i1 %t36, label %then6, label %merge7
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l1
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t17 = extractvalue { i8**, i64 } %t16, 0
+  %t18 = extractvalue { i8**, i64 } %t16, 1
+  %t19 = icmp uge i64 %t15, %t18
+  ; bounds check: %t19 (if true, out of bounds)
+  %t20 = getelementptr i8*, i8** %t17, i64 %t15
+  %t21 = load i8*, i8** %t20
+  %t22 = call i1 @is_identifier_token(i8* %t21, i8* %name)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load double, double* %l1
+  br i1 %t22, label %then6, label %merge7
 then6:
-  %t40 = load double, double* %l1
-  %t41 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t42 = extractvalue { i8**, i64 } %t41, 0
-  %t43 = extractvalue { i8**, i64 } %t41, 1
-  %t44 = icmp uge i64 %t40, %t43
-  ; bounds check: %t44 (if true, out of bounds)
-  %t45 = getelementptr i8*, i8** %t42, i64 %t40
-  %t46 = load i8*, i8** %t45
-  %t47 = alloca [1 x i8*]
-  %t48 = getelementptr [1 x i8*], [1 x i8*]* %t47, i32 0, i32 0
-  %t49 = getelementptr i8*, i8** %t48, i64 0
-  store i8* %t46, i8** %t49
-  %t50 = alloca { i8**, i64 }
-  %t51 = getelementptr { i8**, i64 }, { i8**, i64 }* %t50, i32 0, i32 0
-  store i8** %t48, i8*** %t51
-  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t50, i32 0, i32 1
-  store i64 1, i64* %t52
-  %t53 = call double @matchesconcat({ i8**, i64 }* %t50)
+  %t25 = load double, double* %l1
+  %t26 = sitofp i64 1 to double
+  %t27 = fadd double %t25, %t26
+  %t28 = call double @next_non_trivia({ i8**, i64 }* %tokens, double %t27)
+  store double %t28, double* %l2
+  %t30 = load double, double* %l2
+  %t31 = sitofp i64 -1 to double
+  %t32 = fcmp une double %t30, %t31
+  br label %logical_and_entry_29
+
+logical_and_entry_29:
+  br i1 %t32, label %logical_and_right_29, label %logical_and_merge_29
+
+logical_and_right_29:
+  %t33 = load double, double* %l2
+  %t34 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t35 = extractvalue { i8**, i64 } %t34, 0
+  %t36 = extractvalue { i8**, i64 } %t34, 1
+  %t37 = icmp uge i64 %t33, %t36
+  ; bounds check: %t37 (if true, out of bounds)
+  %t38 = getelementptr i8*, i8** %t35, i64 %t33
+  %t39 = load i8*, i8** %t38
+  %s40 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.40, i32 0, i32 0
+  %t41 = call i1 @is_symbol_token(i8* %t39, i8* %s40)
+  br label %logical_and_right_end_29
+
+logical_and_right_end_29:
+  br label %logical_and_merge_29
+
+logical_and_merge_29:
+  %t42 = phi i1 [ false, %logical_and_entry_29 ], [ %t41, %logical_and_right_end_29 ]
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t44 = load double, double* %l1
+  %t45 = load double, double* %l2
+  br i1 %t42, label %then8, label %merge9
+then8:
+  %t46 = load double, double* %l1
+  %t47 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t48 = extractvalue { i8**, i64 } %t47, 0
+  %t49 = extractvalue { i8**, i64 } %t47, 1
+  %t50 = icmp uge i64 %t46, %t49
+  ; bounds check: %t50 (if true, out of bounds)
+  %t51 = getelementptr i8*, i8** %t48, i64 %t46
+  %t52 = load i8*, i8** %t51
+  %t53 = alloca [1 x i8*]
+  %t54 = getelementptr [1 x i8*], [1 x i8*]* %t53, i32 0, i32 0
+  %t55 = getelementptr i8*, i8** %t54, i64 0
+  store i8* %t52, i8** %t55
+  %t56 = alloca { i8**, i64 }
+  %t57 = getelementptr { i8**, i64 }, { i8**, i64 }* %t56, i32 0, i32 0
+  store i8** %t54, i8*** %t57
+  %t58 = getelementptr { i8**, i64 }, { i8**, i64 }* %t56, i32 0, i32 1
+  store i64 1, i64* %t58
+  %t59 = call double @matchesconcat({ i8**, i64 }* %t56)
   store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge9
+merge9:
+  %t60 = phi { i8**, i64 }* [ null, %then8 ], [ %t43, %then6 ]
+  store { i8**, i64 }* %t60, { i8**, i64 }** %l0
   br label %merge7
 merge7:
-  %t54 = phi { i8**, i64 }* [ null, %then6 ], [ %t37, %then4 ]
-  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
-  br label %merge5
-merge5:
-  %t55 = phi { i8**, i64 }* [ null, %then4 ], [ %t17, %loop.body1 ]
-  store { i8**, i64 }* %t55, { i8**, i64 }** %l0
-  %t56 = load double, double* %l1
-  %t57 = sitofp i64 1 to double
-  %t58 = fadd double %t56, %t57
-  store double %t58, double* %l1
+  %t61 = phi { i8**, i64 }* [ null, %then6 ], [ %t23, %loop.body1 ]
+  store { i8**, i64 }* %t61, { i8**, i64 }** %l0
+  %t62 = load double, double* %l1
+  %t63 = sitofp i64 1 to double
+  %t64 = fadd double %t62, %t63
+  store double %t64, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t60 = load double, double* %l1
+  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t66 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t63
+  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t69
 }
 
 define double @next_non_trivia({ i8**, i64 }* %tokens, double %start) {
@@ -910,41 +1002,50 @@ entry:
   %t0 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t19 = phi double [ %t0, %entry ], [ %t18, %loop.latch2 ]
-  store double %t19, double* %l0
+  %t24 = phi double [ %t0, %entry ], [ %t23, %loop.latch2 ]
+  store double %t24, double* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load double, double* %l0
-  %t2 = load double, double* %l0
-  %t3 = load { i8**, i64 }, { i8**, i64 }* %tokens
-  %t4 = extractvalue { i8**, i64 } %t3, 0
-  %t5 = extractvalue { i8**, i64 } %t3, 1
-  %t6 = icmp uge i64 %t2, %t5
-  ; bounds check: %t6 (if true, out of bounds)
-  %t7 = getelementptr i8*, i8** %t4, i64 %t2
-  %t8 = load i8*, i8** %t7
-  store i8* %t8, i8** %l1
-  %t9 = load i8*, i8** %l1
-  %t10 = call i1 @is_trivia_token(i8* %t9)
-  %t11 = xor i1 %t10, 1
-  %t12 = load double, double* %l0
-  %t13 = load i8*, i8** %l1
-  br i1 %t11, label %then4, label %merge5
+  %t2 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t3 = extractvalue { i8**, i64 } %t2, 1
+  %t4 = sitofp i64 %t3 to double
+  %t5 = fcmp oge double %t1, %t4
+  %t6 = load double, double* %l0
+  br i1 %t5, label %then4, label %merge5
 then4:
-  %t14 = load double, double* %l0
-  ret double %t14
+  br label %afterloop3
 merge5:
-  %t15 = load double, double* %l0
-  %t16 = sitofp i64 1 to double
-  %t17 = fadd double %t15, %t16
-  store double %t17, double* %l0
+  %t7 = load double, double* %l0
+  %t8 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t9 = extractvalue { i8**, i64 } %t8, 0
+  %t10 = extractvalue { i8**, i64 } %t8, 1
+  %t11 = icmp uge i64 %t7, %t10
+  ; bounds check: %t11 (if true, out of bounds)
+  %t12 = getelementptr i8*, i8** %t9, i64 %t7
+  %t13 = load i8*, i8** %t12
+  store i8* %t13, i8** %l1
+  %t14 = load i8*, i8** %l1
+  %t15 = call i1 @is_trivia_token(i8* %t14)
+  %t16 = xor i1 %t15, 1
+  %t17 = load double, double* %l0
+  %t18 = load i8*, i8** %l1
+  br i1 %t16, label %then6, label %merge7
+then6:
+  %t19 = load double, double* %l0
+  ret double %t19
+merge7:
+  %t20 = load double, double* %l0
+  %t21 = sitofp i64 1 to double
+  %t22 = fadd double %t20, %t21
+  store double %t22, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t18 = load double, double* %l0
+  %t23 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t20 = sitofp i64 -1 to double
-  ret double %t20
+  %t25 = sitofp i64 -1 to double
+  ret double %t25
 }
 
 define i1 @is_trivia_token(i8* %token) {
@@ -973,44 +1074,54 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t23 = phi { %EffectViolation*, i64 }* [ %t1, %entry ], [ %t21, %loop.latch2 ]
-  %t24 = phi double [ %t2, %entry ], [ %t22, %loop.latch2 ]
-  store { %EffectViolation*, i64 }* %t23, { %EffectViolation*, i64 }** %l0
-  store double %t24, double* %l1
+  %t29 = phi { %EffectViolation*, i64 }* [ %t1, %entry ], [ %t27, %loop.latch2 ]
+  %t30 = phi double [ %t2, %entry ], [ %t28, %loop.latch2 ]
+  store { %EffectViolation*, i64 }* %t29, { %EffectViolation*, i64 }** %l0
+  store double %t30, double* %l1
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
-  %t4 = load double, double* %l1
-  %t5 = load { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %new_violations
-  %t6 = extractvalue { %EffectViolation*, i64 } %t5, 0
-  %t7 = extractvalue { %EffectViolation*, i64 } %t5, 1
-  %t8 = icmp uge i64 %t4, %t7
-  ; bounds check: %t8 (if true, out of bounds)
-  %t9 = getelementptr %EffectViolation, %EffectViolation* %t6, i64 %t4
-  %t10 = load %EffectViolation, %EffectViolation* %t9
-  %t11 = alloca [1 x %EffectViolation]
-  %t12 = getelementptr [1 x %EffectViolation], [1 x %EffectViolation]* %t11, i32 0, i32 0
-  %t13 = getelementptr %EffectViolation, %EffectViolation* %t12, i64 0
-  store %EffectViolation %t10, %EffectViolation* %t13
-  %t14 = alloca { %EffectViolation*, i64 }
-  %t15 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t14, i32 0, i32 0
-  store %EffectViolation* %t12, %EffectViolation** %t15
-  %t16 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t14, i32 0, i32 1
-  store i64 1, i64* %t16
-  %t17 = call double @resultconcat({ %EffectViolation*, i64 }* %t14)
+  %t4 = load { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %new_violations
+  %t5 = extractvalue { %EffectViolation*, i64 } %t4, 1
+  %t6 = sitofp i64 %t5 to double
+  %t7 = fcmp oge double %t3, %t6
+  %t8 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t9 = load double, double* %l1
+  br i1 %t7, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t10 = load double, double* %l1
+  %t11 = load { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %new_violations
+  %t12 = extractvalue { %EffectViolation*, i64 } %t11, 0
+  %t13 = extractvalue { %EffectViolation*, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr %EffectViolation, %EffectViolation* %t12, i64 %t10
+  %t16 = load %EffectViolation, %EffectViolation* %t15
+  %t17 = alloca [1 x %EffectViolation]
+  %t18 = getelementptr [1 x %EffectViolation], [1 x %EffectViolation]* %t17, i32 0, i32 0
+  %t19 = getelementptr %EffectViolation, %EffectViolation* %t18, i64 0
+  store %EffectViolation %t16, %EffectViolation* %t19
+  %t20 = alloca { %EffectViolation*, i64 }
+  %t21 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t20, i32 0, i32 0
+  store %EffectViolation* %t18, %EffectViolation** %t21
+  %t22 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t20, i32 0, i32 1
+  store i64 1, i64* %t22
+  %t23 = call double @resultconcat({ %EffectViolation*, i64 }* %t20)
   store { %EffectViolation*, i64 }* null, { %EffectViolation*, i64 }** %l0
-  %t18 = load double, double* %l1
-  %t19 = sitofp i64 1 to double
-  %t20 = fadd double %t18, %t19
-  store double %t20, double* %l1
+  %t24 = load double, double* %l1
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t21 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
-  %t22 = load double, double* %l1
+  %t27 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t28 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t25 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
-  ret { %EffectViolation*, i64 }* %t25
+  %t31 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  ret { %EffectViolation*, i64 }* %t31
 }
 
 define { %EffectViolation*, i64 }* @append_violation({ %EffectViolation*, i64 }* %collection, %EffectViolation %item) {
@@ -1056,32 +1167,41 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t16 = phi double [ %t1, %entry ], [ %t15, %loop.latch2 ]
-  store double %t16, double* %l0
+  %t21 = phi double [ %t1, %entry ], [ %t20, %loop.latch2 ]
+  store double %t21, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
-  %t3 = load double, double* %l0
-  %t4 = load { i8**, i64 }, { i8**, i64 }* %effects
-  %t5 = extractvalue { i8**, i64 } %t4, 0
-  %t6 = extractvalue { i8**, i64 } %t4, 1
-  %t7 = icmp uge i64 %t3, %t6
-  ; bounds check: %t7 (if true, out of bounds)
-  %t8 = getelementptr i8*, i8** %t5, i64 %t3
-  %t9 = load i8*, i8** %t8
-  %t10 = icmp eq i8* %t9, %effect
-  %t11 = load double, double* %l0
-  br i1 %t10, label %then4, label %merge5
+  %t3 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t4 = extractvalue { i8**, i64 } %t3, 1
+  %t5 = sitofp i64 %t4 to double
+  %t6 = fcmp oge double %t2, %t5
+  %t7 = load double, double* %l0
+  br i1 %t6, label %then4, label %merge5
 then4:
-  ret i1 1
+  br label %afterloop3
 merge5:
-  %t12 = load double, double* %l0
-  %t13 = sitofp i64 1 to double
-  %t14 = fadd double %t12, %t13
-  store double %t14, double* %l0
+  %t8 = load double, double* %l0
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %effects
+  %t10 = extractvalue { i8**, i64 } %t9, 0
+  %t11 = extractvalue { i8**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr i8*, i8** %t10, i64 %t8
+  %t14 = load i8*, i8** %t13
+  %t15 = icmp eq i8* %t14, %effect
+  %t16 = load double, double* %l0
+  br i1 %t15, label %then6, label %merge7
+then6:
+  ret i1 1
+merge7:
+  %t17 = load double, double* %l0
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t15 = load double, double* %l0
+  %t20 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0
@@ -1113,44 +1233,54 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t23 = phi { %EffectRequirement*, i64 }* [ %t1, %entry ], [ %t21, %loop.latch2 ]
-  %t24 = phi double [ %t2, %entry ], [ %t22, %loop.latch2 ]
-  store { %EffectRequirement*, i64 }* %t23, { %EffectRequirement*, i64 }** %l0
-  store double %t24, double* %l1
+  %t29 = phi { %EffectRequirement*, i64 }* [ %t1, %entry ], [ %t27, %loop.latch2 ]
+  %t30 = phi double [ %t2, %entry ], [ %t28, %loop.latch2 ]
+  store { %EffectRequirement*, i64 }* %t29, { %EffectRequirement*, i64 }** %l0
+  store double %t30, double* %l1
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
-  %t4 = load double, double* %l1
-  %t5 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %additions
-  %t6 = extractvalue { %EffectRequirement*, i64 } %t5, 0
-  %t7 = extractvalue { %EffectRequirement*, i64 } %t5, 1
-  %t8 = icmp uge i64 %t4, %t7
-  ; bounds check: %t8 (if true, out of bounds)
-  %t9 = getelementptr %EffectRequirement, %EffectRequirement* %t6, i64 %t4
-  %t10 = load %EffectRequirement, %EffectRequirement* %t9
-  %t11 = alloca [1 x %EffectRequirement]
-  %t12 = getelementptr [1 x %EffectRequirement], [1 x %EffectRequirement]* %t11, i32 0, i32 0
-  %t13 = getelementptr %EffectRequirement, %EffectRequirement* %t12, i64 0
-  store %EffectRequirement %t10, %EffectRequirement* %t13
-  %t14 = alloca { %EffectRequirement*, i64 }
-  %t15 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t14, i32 0, i32 0
-  store %EffectRequirement* %t12, %EffectRequirement** %t15
-  %t16 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t14, i32 0, i32 1
-  store i64 1, i64* %t16
-  %t17 = call double @resultconcat({ %EffectRequirement*, i64 }* %t14)
+  %t4 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %additions
+  %t5 = extractvalue { %EffectRequirement*, i64 } %t4, 1
+  %t6 = sitofp i64 %t5 to double
+  %t7 = fcmp oge double %t3, %t6
+  %t8 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t9 = load double, double* %l1
+  br i1 %t7, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t10 = load double, double* %l1
+  %t11 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %additions
+  %t12 = extractvalue { %EffectRequirement*, i64 } %t11, 0
+  %t13 = extractvalue { %EffectRequirement*, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr %EffectRequirement, %EffectRequirement* %t12, i64 %t10
+  %t16 = load %EffectRequirement, %EffectRequirement* %t15
+  %t17 = alloca [1 x %EffectRequirement]
+  %t18 = getelementptr [1 x %EffectRequirement], [1 x %EffectRequirement]* %t17, i32 0, i32 0
+  %t19 = getelementptr %EffectRequirement, %EffectRequirement* %t18, i64 0
+  store %EffectRequirement %t16, %EffectRequirement* %t19
+  %t20 = alloca { %EffectRequirement*, i64 }
+  %t21 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t20, i32 0, i32 0
+  store %EffectRequirement* %t18, %EffectRequirement** %t21
+  %t22 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t20, i32 0, i32 1
+  store i64 1, i64* %t22
+  %t23 = call double @resultconcat({ %EffectRequirement*, i64 }* %t20)
   store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l0
-  %t18 = load double, double* %l1
-  %t19 = sitofp i64 1 to double
-  %t20 = fadd double %t18, %t19
-  store double %t20, double* %l1
+  %t24 = load double, double* %l1
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t21 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  %t22 = load double, double* %l1
+  %t27 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  %t28 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t25 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
-  ret { %EffectRequirement*, i64 }* %t25
+  %t31 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
+  ret { %EffectRequirement*, i64 }* %t31
 }
 
 define i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %requirements, i8* %effect) {
@@ -1161,33 +1291,42 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t17 = phi double [ %t1, %entry ], [ %t16, %loop.latch2 ]
-  store double %t17, double* %l0
+  %t22 = phi double [ %t1, %entry ], [ %t21, %loop.latch2 ]
+  store double %t22, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
-  %t3 = load double, double* %l0
-  %t4 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %requirements
-  %t5 = extractvalue { %EffectRequirement*, i64 } %t4, 0
-  %t6 = extractvalue { %EffectRequirement*, i64 } %t4, 1
-  %t7 = icmp uge i64 %t3, %t6
-  ; bounds check: %t7 (if true, out of bounds)
-  %t8 = getelementptr %EffectRequirement, %EffectRequirement* %t5, i64 %t3
-  %t9 = load %EffectRequirement, %EffectRequirement* %t8
-  %t10 = extractvalue %EffectRequirement %t9, 0
-  %t11 = icmp eq i8* %t10, %effect
-  %t12 = load double, double* %l0
-  br i1 %t11, label %then4, label %merge5
+  %t3 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %requirements
+  %t4 = extractvalue { %EffectRequirement*, i64 } %t3, 1
+  %t5 = sitofp i64 %t4 to double
+  %t6 = fcmp oge double %t2, %t5
+  %t7 = load double, double* %l0
+  br i1 %t6, label %then4, label %merge5
 then4:
-  ret i1 1
+  br label %afterloop3
 merge5:
-  %t13 = load double, double* %l0
-  %t14 = sitofp i64 1 to double
-  %t15 = fadd double %t13, %t14
-  store double %t15, double* %l0
+  %t8 = load double, double* %l0
+  %t9 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %requirements
+  %t10 = extractvalue { %EffectRequirement*, i64 } %t9, 0
+  %t11 = extractvalue { %EffectRequirement*, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr %EffectRequirement, %EffectRequirement* %t10, i64 %t8
+  %t14 = load %EffectRequirement, %EffectRequirement* %t13
+  %t15 = extractvalue %EffectRequirement %t14, 0
+  %t16 = icmp eq i8* %t15, %effect
+  %t17 = load double, double* %l0
+  br i1 %t16, label %then6, label %merge7
+then6:
+  ret i1 1
+merge7:
+  %t18 = load double, double* %l0
+  %t19 = sitofp i64 1 to double
+  %t20 = fadd double %t18, %t19
+  store double %t20, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t16 = load double, double* %l0
+  %t21 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0

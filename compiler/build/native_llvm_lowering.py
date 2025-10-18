@@ -5149,6 +5149,19 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
     current_lines = base_result.lines
     current_temp = base_result.temp_index
     base_operand = base_result.operand
+    if parse.field == "length"  and  ends_with_pointer_suffix(base_operand.llvm_type):
+        inner_type = strip_pointer_suffix(base_operand.llvm_type)
+        if starts_with(inner_type, "{")  and  len(inner_type) > 0  and  inner_type[len(inner_type) - 1] == "}":
+            struct_inner = trim_text(substring(inner_type, 1, len(inner_type) - 1))
+            if contains_text(struct_inner, ", i64"):
+                loaded_array = format_temp_name(current_temp)
+                current_lines = append_string(current_lines, "  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value)
+                current_temp += 1
+                length_temp = format_temp_name(current_temp)
+                current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1")
+                current_temp += 1
+                operand = LLVMOperand(llvm_type="i64", value=length_temp)
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     struct_info = None
     pointer_available = False
     pointer_operand = base_operand
@@ -6519,6 +6532,21 @@ def starts_with(value, prefix):
         return False
     head = substring(value, 0, len(prefix))
     return head == prefix
+
+def contains_text(haystack, needle):
+    if len(needle) == 0:
+        return True
+    if len(haystack) < len(needle):
+        return False
+    index = 0
+    while True:
+        if index + len(needle) > len(haystack):
+            break
+        candidate = substring(haystack, index, index + len(needle))
+        if candidate == needle:
+            return True
+        index += 1
+    return False
 
 def strip_mut_prefix(value):
     trimmed = trim_text(value)

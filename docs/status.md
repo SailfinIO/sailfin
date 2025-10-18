@@ -262,6 +262,34 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   indexing implemented, Stage2 bootstrap warnings for `unsupported expression
   decorators[index]` and `unsupported expression text[0]` are eliminated,
   unblocking progress on warning-free self-compilation.
+  Array `.length` member access now fully lowers to LLVM, enabling loop conditions,
+  bounds checks, and array size queries to compile without fallbacks. The
+  `lower_member_access` function recognizes when a member access expression targets
+  the `length` field on an array type (identified by the `{ element_type*, i64 }*`
+  LLVM representation where field 1 stores the length as `i64`). For array parameters
+  and locals (e.g., `items.length` where `items` has type `number[]`), the compiler
+  loads the array struct pointer, extracts the length field via `extractvalue` on
+  field index 1, and returns an `i64` operand. This enables common patterns like
+  `if index >= array.length` in loop conditions, `return items.length` for array
+  size queries, and comparisons between array lengths (`first.length == second.length`)
+  without emitting "member access base `{ ..., i64 }*` lacks struct metadata"
+  diagnostics. The implementation uses a simple pattern match: if the field name
+  is "length" and the base type ends with `*` and the inner type contains `{ ..., i64 }`,
+  treat it as an array access and emit the length extraction. This unblocks numerous
+  Stage2 bootstrap warnings where compiler code iterates over decorator arrays,
+  token arrays, and AST node collections with `.length`-based termination conditions.
+  Regression coverage lives in `compiler/tests/test_array_length.py::test_native_llvm_array_length_in_condition`
+  (validates `items.length > 0` in if conditions compiles with proper load, extractvalue,
+  and icmp instructions), `test_native_llvm_array_length_return` (validates returning
+  `array.length` produces correct `ret i64` with proper field extraction),
+  `test_native_llvm_array_length_comparison` (validates comparing two array lengths
+  via `first.length == second.length` emits multiple extractvalue instructions and
+  integer comparison), `test_native_llvm_array_length_in_loop` (validates using
+  `.length` in loop termination conditions like `index >= numbers.length` works
+  end-to-end), `test_native_llvm_empty_array_length` (validates `.length` access
+  on empty array literals compiles without errors), and
+  `test_native_llvm_struct_array_length` (validates `.length` works on arrays of
+  user-defined structs like `Point[]`).
   Compound assignment operators (`+=`, `-=`, `*=`, `/=`) now lower to LLVM by
   desugaring into simple assignments during lowering. The `parse_assignment_expression`
   function recognizes compound operators when scanning for `=` characters and
