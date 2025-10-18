@@ -267,6 +267,28 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   ensures intrinsic calls compile without Python fallbacks, and
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_includes_intrinsic_effects`
   verifies effects flow into the manifest for entry points.
+  Capability adapter declarations now expose `fs`, `http`, `model`, `serve`,
+  and concurrency primitives as callable symbols in Stage2 LLVM modules. The
+  LLVM lowering pipeline defines adapter function signatures for filesystem
+  operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP
+  operations (`http_get`, `http_post`), model invocation
+  (`model_invoke_with_prompt`), server handling (`serve_start`,
+  `serve_handler_dispatch`), and concurrency operations (`spawn_task`,
+  `channel_create`, `channel_send`, `channel_receive`). Each adapter is tagged
+  with appropriate effect annotations (`io`, `net`, `model`, `spawn`, `channel`)
+  and emits LLVM external function declarations when referenced. Adapter calls
+  route through the existing runtime helper infrastructure, ensuring proper
+  symbol resolution and capability metadata propagation. Coverage:
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_fs_adapter`
+  validates filesystem adapter declarations,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_http_adapter`
+  validates HTTP adapter declarations,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_model_adapter`
+  validates model adapter declarations,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_serve_adapter`
+  validates server adapter declarations, and
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_spawn_adapter`
+  validates concurrency adapter declarations.
   Stage2 lowering now rejects suspension points (`await`, `yield`)
   that would keep a mutable borrow or mutable borrow parameter alive, enforcing
   the lattice rule `!mut ⊄ !async`. Diagnostics now attach source spans for both

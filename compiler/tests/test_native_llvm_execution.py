@@ -2589,3 +2589,242 @@ def test_native_llvm_execution_capability_manifest_includes_intrinsic_effects() 
     assert "io" in effects, "main should have io effect from console.info and fs.read"
     assert "net" in effects, "main should have net effect from http.get"
     assert "model" in effects, "main should have model effect from prompt"
+
+
+def test_native_llvm_execution_calls_fs_adapter() -> None:
+    """
+    Verify that filesystem adapter declarations emit correctly.
+
+    Tests that fs_read_file, fs_write_file, and fs_list_directory adapters:
+    1. Generate proper LLVM declare statements
+    2. Include capability metadata comments showing required effects
+    """
+    artifact_text = """
+        .fn fs_adapter_test
+        .param path string
+        .meta return string
+        .meta effects io
+        
+        .let content = fs_read_file(path)
+        .let _ignored1 = fs_write_file(path, content)
+        .let _ignored2 = fs_list_directory(path)
+        .return content
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for adapter declarations with capability metadata
+    assert "; intrinsic sailfin_adapter_fs_read_file requires capabilities: ![io]" in ir, \
+        "fs_read_file should emit capability metadata for io"
+    assert "declare i8* @sailfin_adapter_fs_read_file(i8*)" in ir, \
+        "fs_read_file should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_fs_write_file requires capabilities: ![io]" in ir, \
+        "fs_write_file should emit capability metadata for io"
+    assert "declare void @sailfin_adapter_fs_write_file(i8*, i8*)" in ir, \
+        "fs_write_file should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_fs_list_directory requires capabilities: ![io]" in ir, \
+        "fs_list_directory should emit capability metadata for io"
+    assert "declare i8* @sailfin_adapter_fs_list_directory(i8*)" in ir, \
+        "fs_list_directory should emit adapter declaration"
+
+
+def test_native_llvm_execution_calls_http_adapter() -> None:
+    """
+    Verify that HTTP adapter declarations emit correctly.
+
+    Tests that http_get and http_post adapters:
+    1. Generate proper LLVM declare statements
+    2. Include capability metadata comments showing required effects
+    """
+    artifact_text = """
+        .fn http_adapter_test
+        .param url string
+        .param body string
+        .meta return string
+        .meta effects net
+        
+        .let response1 = http_get(url)
+        .let response2 = http_post(url, body)
+        .return response1
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for adapter declarations with capability metadata
+    assert "; intrinsic sailfin_adapter_http_get requires capabilities: ![net]" in ir, \
+        "http_get should emit capability metadata for net"
+    assert "declare i8* @sailfin_adapter_http_get(i8*)" in ir, \
+        "http_get should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_http_post requires capabilities: ![net]" in ir, \
+        "http_post should emit capability metadata for net"
+    assert "declare i8* @sailfin_adapter_http_post(i8*, i8*)" in ir, \
+        "http_post should emit adapter declaration"
+
+
+def test_native_llvm_execution_calls_model_adapter() -> None:
+    """
+    Verify that model adapter declaration emits correctly.
+
+    Tests that model_invoke_with_prompt adapter:
+    1. Generates proper LLVM declare statement
+    2. Includes capability metadata comment showing required effects
+    """
+    artifact_text = """
+        .fn model_adapter_test
+        .param system_prompt string
+        .param user_message string
+        .meta return string
+        .meta effects model
+        
+        .let result = model_invoke_with_prompt(system_prompt, user_message)
+        .return result
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for adapter declaration with capability metadata
+    assert "; intrinsic sailfin_adapter_model_invoke_with_prompt requires capabilities: ![model]" in ir, \
+        "model_invoke_with_prompt should emit capability metadata for model"
+    assert "declare i8* @sailfin_adapter_model_invoke_with_prompt(i8*, i8*)" in ir, \
+        "model_invoke_with_prompt should emit adapter declaration"
+
+
+def test_native_llvm_execution_calls_serve_adapter() -> None:
+    """
+    Verify that serve adapter declarations emit correctly.
+
+    Tests that serve_start and serve_handler_dispatch adapters:
+    1. Generate proper LLVM declare statements
+    2. Include capability metadata comments showing required effects
+    """
+    artifact_text = """
+        .fn serve_adapter_test
+        .param host string
+        .param port number
+        .param request string
+        .param handler string
+        .meta return string
+        .meta effects net, io
+        
+        .let port_int = 8080
+        .let _ignored1 = serve_start(host, port_int)
+        .let response = serve_handler_dispatch(request, handler)
+        .return response
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for adapter declarations with capability metadata
+    assert "; intrinsic sailfin_adapter_serve_start requires capabilities: ![net, io]" in ir, \
+        "serve_start should emit capability metadata for net and io"
+    assert "declare void @sailfin_adapter_serve_start(i8*, i32)" in ir, \
+        "serve_start should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_serve_handler_dispatch requires capabilities: ![net, io]" in ir, \
+        "serve_handler_dispatch should emit capability metadata for net and io"
+    assert "declare i8* @sailfin_adapter_serve_handler_dispatch(i8*, i8*)" in ir, \
+        "serve_handler_dispatch should emit adapter declaration"
+
+
+def test_native_llvm_execution_calls_spawn_adapter() -> None:
+    """
+    Verify that concurrency adapter declarations emit correctly.
+
+    Tests that spawn_task, channel_create, channel_send, and channel_receive adapters:
+    1. Generate proper LLVM declare statements
+    2. Include capability metadata comments showing required effects
+    """
+    artifact_text = """
+        .fn spawn_adapter_test
+        .param task_fn string
+        .param channel_capacity number
+        .param message string
+        .meta return string
+        .meta effects spawn, channel
+        
+        .let task_handle = spawn_task(task_fn)
+        .let capacity_int = 10
+        .let channel = channel_create(capacity_int)
+        .let _ignored = channel_send(channel, message)
+        .let received = channel_receive(channel)
+        .return received
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for adapter declarations with capability metadata
+    assert "; intrinsic sailfin_adapter_spawn_task requires capabilities: ![spawn]" in ir, \
+        "spawn_task should emit capability metadata for spawn"
+    assert "declare i8* @sailfin_adapter_spawn_task(i8*)" in ir, \
+        "spawn_task should emit adapter declaration"
+
+    assert "declare i8* @sailfin_adapter_channel_create(i32)" in ir, \
+        "channel_create should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_channel_send requires capabilities: ![channel]" in ir, \
+        "channel_send should emit capability metadata for channel"
+    assert "declare void @sailfin_adapter_channel_send(i8*, i8*)" in ir, \
+        "channel_send should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_channel_receive requires capabilities: ![channel]" in ir, \
+        "channel_receive should emit capability metadata for channel"
+    assert "declare i8* @sailfin_adapter_channel_receive(i8*)" in ir, \
+        "channel_receive should emit adapter declaration"

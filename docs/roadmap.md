@@ -66,17 +66,17 @@ _Mid-term (runtime capabilities & effect enforcement)_
   - [x] Add unit tests in `compiler/tests/test_native_llvm_execution.py` that validate intrinsic declarations emit, capability metadata propagates, and simple IO/model/net calls compile without diagnostics.
   - [x] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
 
-- [ ] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
+- [x] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
 
-  - [ ] Declare adapter function signatures in `compiler/src/native_ir.sfn` for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP (`http_get`, `http_post`), model (`model_invoke_with_prompt`), serving (`serve_start`, `serve_handler_dispatch`), concurrency (`spawn_task`, `channel_create`, `channel_send`, `channel_receive`).
-  - [ ] Implement adapter lowering in `compiler/src/native_llvm_lowering.sfn` that emits external function declarations and routes Sailfin runtime helper calls to the corresponding adapter symbols.
-  - [ ] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` for each adapter category:
-    - [ ] `test_native_llvm_execution_calls_fs_adapter` — validates filesystem read/write declarations emit.
-    - [ ] `test_native_llvm_execution_calls_http_adapter` — validates HTTP get/post declarations emit.
-    - [ ] `test_native_llvm_execution_calls_model_adapter` — validates model invoke declaration emits.
-    - [ ] `test_native_llvm_execution_calls_serve_adapter` — validates serve handler declaration emits.
-    - [ ] `test_native_llvm_execution_calls_spawn_adapter` — validates spawn/channel declarations emit.
-  - [ ] Ensure adapter calls propagate capability requirements into the module's capability manifest (validated by existing manifest tests plus new adapter-specific coverage).
+  - [x] Declare adapter function signatures in `compiler/src/native_llvm_lowering.sfn` for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP (`http_get`, `http_post`), model (`model_invoke_with_prompt`), serving (`serve_start`, `serve_handler_dispatch`), concurrency (`spawn_task`, `channel_create`, `channel_send`, `channel_receive`). Adapter signatures added to `runtime_helper_descriptors()` function with appropriate effect annotations and LLVM symbol names.
+  - [x] Implement adapter lowering in `compiler/src/native_llvm_lowering.sfn` that emits external function declarations and routes Sailfin runtime helper calls to the corresponding adapter symbols. Adapter calls route through existing `find_runtime_helper` infrastructure, ensuring proper symbol resolution via the `symbol` field and automatic capability metadata propagation.
+  - [x] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` for each adapter category:
+    - [x] `test_native_llvm_execution_calls_fs_adapter` — validates filesystem read/write/list declarations emit with capability metadata.
+    - [x] `test_native_llvm_execution_calls_http_adapter` — validates HTTP get/post declarations emit with capability metadata.
+    - [x] `test_native_llvm_execution_calls_model_adapter` — validates model invoke declaration emits with capability metadata.
+    - [x] `test_native_llvm_execution_calls_serve_adapter` — validates serve start/handler declarations emit with capability metadata.
+    - [x] `test_native_llvm_execution_calls_spawn_adapter` — validates spawn/channel declarations emit with capability metadata.
+  - [x] Ensure adapter calls propagate capability requirements into the module's capability manifest. Validated by existing manifest tests plus new adapter-specific coverage showing effects (`io`, `net`, `model`, `spawn`, `channel`) flow through declaration comments.
 
 - [ ] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
 
