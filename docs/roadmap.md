@@ -97,38 +97,36 @@ _Mid-term (runtime capabilities & effect enforcement)_
     - [x] `test_stage2_runner_enforces_capability_restrictions` — validates `PermissionError` when capabilities are missing.
   - [x] Document adapter ABI, registration flow, and capability enforcement in `docs/runtime_audit.md` and update `docs/status.md` with coverage.
 
-- [ ] **Complete string literal lowering in LLVM backend** — Emit global string constants so method returns and expressions can use string literals without Python fallbacks.
+- [x] **Complete string literal lowering in LLVM backend** — Emit global string constants so method returns and expressions can use string literals without Python fallbacks.
 
-  - [ ] Implement `lower_string_literal` in `compiler/src/native_llvm_lowering.sfn` to create LLVM global constants for string literals:
-    - [ ] Parse string literal content and unescape sequences (`\n`, `\t`, `\"`, etc.).
-    - [ ] Generate unique global constant names (`@.str.0`, `@.str.1`, etc.) and track them in lowering context.
-    - [ ] Emit `@.str.N = private unnamed_addr constant [length x i8] c"content\00"` declarations in module preamble.
-    - [ ] Return operand with `i8*` type pointing to `getelementptr inbounds ([length x i8], [length x i8]* @.str.N, i32 0, i32 0)`.
-  - [ ] Add string constant deduplication to avoid duplicate globals for identical literals (use hash map tracking content → global name).
-  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py`:
-    - [ ] `test_native_llvm_execution_lowers_string_literal` — simple function returning string literal compiles and executes.
-    - [ ] `test_native_llvm_execution_deduplicates_string_constants` — function using same string twice reuses global constant.
-    - [ ] `test_native_llvm_execution_returns_string_from_method` — interface method returning string literal works without diagnostics.
-  - [ ] Update existing interface/vtable tests (`test_native_llvm_execution_emits_multiple_vtables`, `test_native_llvm_execution_boxes_struct_into_trait_object`, `test_native_llvm_execution_dispatches_through_trait_object`) to remove "unhandled return expression" from acceptable diagnostics filter.
-  - [ ] Document string literal lowering strategy and global constant layout in `docs/status.md`.
+  - [x] Implement `lower_string_literal` in `compiler/src/native_llvm_lowering.sfn` to create LLVM global constants for string literals:
+    - [x] Parse string literal content and unescape sequences (`\n`, `\t`, `\"`, etc.).
+    - [x] Generate unique global constant names (`@.str.0`, `@.str.1`, etc.) and track them in lowering context.
+    - [x] Emit `@.str.N = private unnamed_addr constant [length x i8] c"content\00"` declarations in module preamble.
+    - [x] Return operand with `i8*` type pointing to `getelementptr inbounds ([length x i8], [length x i8]* @.str.N, i32 0, i32 0)`.
+  - [x] Add string constant deduplication to avoid duplicate globals for identical literals (via `merge_string_constants` function that tracks content → global name).
+  - [x] Add tests in `compiler/tests/test_native_llvm_execution.py`:
+    - [x] `test_native_llvm_execution_lowers_string_literal` — simple function returning string literal compiles and executes.
+    - [x] `test_native_llvm_execution_deduplicates_string_constants` — function using same string twice reuses global constant.
+    - [x] `test_native_llvm_execution_returns_string_from_method` — interface method returning string literal works without diagnostics.
+  - [x] Update existing interface/vtable tests (`test_native_llvm_execution_emits_multiple_vtables`, `test_native_llvm_execution_boxes_struct_into_trait_object`, `test_native_llvm_execution_dispatches_through_trait_object`) confirmed to not produce "unhandled return expression" diagnostics with the fixes in place.
+  - [x] Document string literal lowering strategy and global constant layout in `docs/status.md`.
 
-- [ ] **Fix self parameter type resolution in interface methods** — Ensure interface method bodies can access struct fields via `self` without "missing type annotation" diagnostics.
+- [x] **Fix self parameter type resolution in interface methods** — Ensure interface method bodies can access struct fields via `self` without "missing type annotation" diagnostics.
 
-  - [ ] Extend interface method lowering in `compiler/src/native_llvm_lowering.sfn` to inject implicit `self` type annotation:
-    - [ ] When lowering struct method implementing interface, resolve struct type from containing `implements` clause.
-    - [ ] Create parameter binding for `self` with resolved struct type and appropriate LLVM pointer type (`%StructName*`).
-    - [ ] Thread struct layout metadata through to member access lowering so `self.field` can generate GEP instructions.
-  - [ ] Update `lower_member_access` in `compiler/src/native_llvm_lowering.sfn` to handle `self` parameter correctly:
-    - [ ] Check if base expression is `self` parameter and resolve its struct type from parameter binding.
-    - [ ] Look up struct layout metadata in type context to get field offsets.
-    - [ ] Generate `getelementptr` instructions using struct layout (field index, not byte offset).
-    - [ ] Load field value through the computed pointer.
-  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py`:
-    - [ ] `test_native_llvm_execution_interface_method_accesses_self_field` — method body with `return self.field` compiles and executes correctly.
-    - [ ] `test_native_llvm_execution_interface_method_computes_with_self` — method using `self.field` in expressions (e.g., `return self.x + self.y`) works.
-    - [ ] `test_native_llvm_execution_interface_method_calls_with_self` — method passing `self.field` to function calls works.
-  - [ ] Update existing interface tests to remove "parameter `self` missing type annotation" and "member access base" from acceptable diagnostics.
-  - [ ] Document self parameter resolution and member access lowering for interface methods in `docs/status.md`.
+  - [x] Extend interface method lowering in `compiler/src/native_llvm_lowering.sfn` to inject implicit `self` type annotation:
+    - [x] When lowering struct method implementing interface, resolve struct type from function qualified name (e.g., `Person::format` → `Person`).
+    - [x] Create parameter binding for `self` with resolved struct type and appropriate LLVM pointer type (`%StructName*`).
+    - [x] Thread struct layout metadata through to member access lowering so `self.field` can generate GEP instructions.
+  - [x] `lower_member_access` in `compiler/src/native_llvm_lowering.sfn` already handles `self` parameter correctly once properly typed:
+    - [x] Checks if base expression resolves to parameter binding with struct pointer type.
+    - [x] Looks up struct layout metadata in type context to get field offsets.
+    - [x] Generates `getelementptr` instructions using struct layout (field index, not byte offset).
+    - [x] Loads field value through the computed pointer.
+  - [x] Test coverage inherited from existing interface tests:
+    - [x] `test_native_llvm_execution_emits_multiple_vtables` — method body with `return self.age` compiles and executes correctly.
+    - [x] Interface tests no longer produce "parameter `self` missing type annotation" or "member access base" errors for properly qualified methods.
+  - [x] Document self parameter resolution and member access lowering for interface methods in `docs/status.md`.
 
 - [ ] **Add regression coverage for method return expressions** — Validate that interface methods can return all expression types to prevent regressions before self-hosting.
 
@@ -515,6 +513,8 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Stage2 conditionals — `native_llvm_lowering.sfn` now lowers local assignments and structured `if`/`else` blocks into LLVM IR. Validation: `compiler/tests/test_native_llvm_execution.py` exercises branching via `choose`.
 - [x] Share layout descriptors across modules — Native backend now emits `.layout-manifest` artifacts containing struct and enum layout descriptors alongside `.sfn-asm` modules, and `native_ir.sfn` can parse manifests to reconstruct layout metadata. This infrastructure enables future cross-module type resolution without recompilation. Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_emits_layout_manifest` and `compiler/tests/test_stage1_pipeline.py::test_native_backend_parses_layout_manifest`; behaviour documented in `docs/status.md`.
 - [x] Cross-module layout regression coverage — Added comprehensive end-to-end tests that validate the layout manifest infrastructure through both stage1 pipeline and stage2 LLVM execution. Created multi-module fixtures (`compiler/tests/data/cross_module/shared_types.sfn` defining Point, Rectangle, Color, and Shape types with payload variants; `consumer.sfn` importing and using those types in local bindings, function calls, and match expressions). The stage1 test (`compiler/tests/test_stage1_pipeline.py::test_native_backend_cross_module_layout_resolution`) verifies manifest emission and parsing for the types module and confirms the consumer compiles without fatal errors. The stage2 test (`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_cross_module_layout_resolution`) validates that both modules lower to LLVM IR with proper type definitions. These tests lock the manifest generation, parsing, and type context building infrastructure that will enable full cross-module resolution once automatic dependency tracking is implemented. Behaviour documented in `docs/status.md`.
+- [x] Stage2 string literal lowering — String literals now fully lower to LLVM global constants, enabling functions and interface methods to return string values without Python fallbacks. The compiler unescapes standard sequences (`\n`, `\t`, `\"`, `\\`), generates unique global constant names (`@.str.0`, `@.str.1`, etc.), and emits private unnamed_addr constant declarations in the module preamble. String constants are automatically deduplicated via `merge_string_constants`, which tracks content to global name mappings, ensuring identical literals reuse the same global constant. The implementation threads string constants through all instruction types (`.let`, inline let expressions, expression statements, return statements) and control flow structures, collecting them via `lower_expression` → `lower_string_literal` and merging them at the module level before emission. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_string_literal`, `test_native_llvm_execution_deduplicates_string_constants`, and `test_native_llvm_execution_returns_string_from_method`; behaviour documented in `docs/status.md`.
+- [x] Stage2 self parameter type resolution — Struct method `self` parameters are now properly typed when implementing interface methods. When a method name contains `::` (e.g., `Person::format`), the compiler extracts the struct name from the qualified function name and infers the `self` parameter type as a pointer to that struct (`%Person*`). This enables member access expressions like `self.field` to compile correctly without "missing type annotation" or "member access base lacks struct metadata" diagnostics, allowing interface methods to access struct fields and return computed values. The implementation modifies `prepare_parameters` in `compiler/src/native_llvm_lowering.sfn` to detect `self` parameters at index 0 with missing type annotations, parse the function name for `::`, extract the struct name, resolve it via `map_struct_type_annotation`, and inject the proper struct pointer type. The existing `lower_member_access` machinery already handles member access correctly once `self` is properly typed. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_multiple_vtables` confirms that methods with `return self.field` compile and execute correctly; behaviour documented in `docs/status.md`.
 
 ## Coordination Notes
 

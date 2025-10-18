@@ -166,6 +166,30 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   regardless of the underlying concrete type. Regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_boxes_struct_into_trait_object`
   and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_dispatches_through_trait_object`.
+  String literals now fully lower to LLVM global constants, enabling functions
+  and interface methods to return string values without Python fallbacks. When
+  lowering string literals (e.g., `"Hello, World!"`), the compiler unescapes
+  standard sequences (`\n`, `\t`, `\"`, `\\`), generates a unique global constant
+  name (`@.str.0`, `@.str.1`, etc.), and emits a private unnamed_addr constant
+  declaration in the module preamble (`@.str.N = private unnamed_addr constant
+  [length x i8] c"content\00"`). The lowered expression references the global via
+  `getelementptr inbounds` to produce an `i8*` pointer suitable for string-typed
+  returns and assignments. String constants are automatically deduplicated:
+  identical literals across multiple functions reuse the same global constant,
+  reducing code size and memory footprint. Additionally, struct method `self`
+  parameters are now properly typed when implementing interface methods: when a
+  method name contains `::` (e.g., `Person::format`), the compiler extracts the
+  struct name and infers the `self` parameter type as a pointer to that struct
+  (`%Person*`), enabling member access expressions like `self.field` to compile
+  correctly without "missing type annotation" diagnostics. This allows interface
+  methods to access struct fields and return computed values. Regression coverage
+  lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_lowers_string_literal`
+  (verifies global constant emission and LLVM IR compilation),
+  `test_native_llvm_execution_deduplicates_string_constants` (validates that
+  identical literals share a single global), and
+  `test_native_llvm_execution_returns_string_from_method` (confirms interface
+  methods returning string literals compile without "unhandled return expression"
+  diagnostics).
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by
