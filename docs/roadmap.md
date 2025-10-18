@@ -1,6 +1,6 @@
 # Sailfin Roadmap
 
-Updated: October 15, 2025  
+Updated: October 18, 2025  
 Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
@@ -159,6 +159,115 @@ _Final delivery (self-hosting, automation, distribution)_
   - [ ] Add execution validation tests that run self-hosted compiler on simple inputs (e.g., `examples/basics/hello.sfn`).
   - [ ] Validate the self-hosted compiler binary can parse and compile a minimal Sailfin program and generate valid `.sfn-asm` IR and LLVM modules.
   - [ ] Execute compiled programs through Stage2Runner with matching output to Stage1.
+
+- [ ] **Complete Stage2 LLVM lowering for warning-free self-compilation** — Implement missing language features in LLVM backend so the compiler can compile itself without diagnostic warnings, achieving full Stage2 feature parity.
+
+  _Priority: CRITICAL — blocks Stage2 production readiness and self-hosting CI integration_
+
+  - [ ] **Fix complex type lowering fallbacks** — Address cases where complex types (arrays, enums, structs) are incorrectly lowered as `double` due to missing type resolution.
+
+    - [ ] Investigate type resolution failures in `lower_expression` that cause `{ %DecoratorInfo*, i64 }*` and similar complex types to fallback to `double` primitive.
+    - [ ] Ensure `resolve_struct_info_for_literal`, `resolve_enum_info_for_literal`, and array type resolution correctly propagate through all expression contexts.
+    - [ ] Fix parameter type resolution in decorator evaluation functions (`evaluate_decorators`, `evaluate_arguments`, `evaluate_expression`) where `Decorator[]`, `DecoratorArgument[]`, and `Expression` parameters lose type metadata.
+    - [ ] Add unit tests in `compiler/tests/test_native_llvm_execution.py` validating complex parameter types compile without "`double` lacks struct metadata" warnings:
+      - [ ] `test_native_llvm_function_with_struct_array_parameter` — function accepting struct array compiles cleanly.
+      - [ ] `test_native_llvm_function_with_enum_array_parameter` — function accepting enum array compiles cleanly.
+      - [ ] `test_native_llvm_function_with_nested_struct_parameter` — function with nested struct parameter compiles cleanly.
+    - [ ] Target diagnostics: eliminate "member access base `double` lacks struct metadata" warnings from bootstrap output.
+
+  - [ ] **Implement array indexing in LLVM lowering** — Support `array[index]` expressions so compiler internals can access AST node fields, token arrays, and decorator lists.
+
+    - [ ] Add `lower_index_expression` function in `compiler/src/native_llvm_lowering.sfn` that:
+      - [ ] Recognizes `base[index]` syntax and splits into base expression and index expression.
+      - [ ] Lowers base expression to get array operand with `{ element_type*, i64 }` or `[N x element_type]` LLVM type.
+      - [ ] Lowers index expression to get `i64` index value.
+      - [ ] Emits bounds check (compare index against array length) with trap on out-of-bounds access.
+      - [ ] Generates `getelementptr` to compute element address.
+      - [ ] Loads element value and returns operand with correct element type.
+    - [ ] Integrate index expression recognition into `lower_expression` after member access but before fallback.
+    - [ ] Handle both heap-allocated arrays (`{ element_type*, i64 }*`) and stack arrays (`[N x element_type]`).
+    - [ ] Add tests validating array indexing compiles and executes correctly:
+      - [ ] `test_native_llvm_execution_indexes_primitive_array` — access elements of `number[]`.
+      - [ ] `test_native_llvm_execution_indexes_struct_array` — access elements of `Token[]`, `Decorator[]`.
+      - [ ] `test_native_llvm_execution_checks_array_bounds` — out-of-bounds access traps or returns error.
+    - [ ] Target diagnostics: eliminate "unsupported expression `array[index]`", "unsupported expression `decorators[index]`", "unsupported expression `text[0]`" warnings.
+
+  - [ ] **Fix string indexing and character operations** — Support `string[index]` access and character comparison so lexer/parser string utilities work natively.
+
+    - [ ] Extend `lower_index_expression` to recognize string base types (`i8*` LLVM representation).
+    - [ ] Generate `getelementptr` for character access returning `i8` value.
+    - [ ] Implement `is_whitespace_char`, `is_digit_char`, `is_alpha_char` as native helpers or inline comparisons.
+    - [ ] Add tests for string character access:
+      - [ ] `test_native_llvm_execution_indexes_string_character` — `"hello"[0]` returns correct character.
+      - [ ] `test_native_llvm_execution_compares_string_characters` — `text[i] == 'a'` works correctly.
+      - [ ] `test_native_llvm_execution_validates_character_classes` — whitespace/digit checks work.
+    - [ ] Target diagnostics: eliminate "member access base `i8*` lacks struct metadata", "unsupported expression `value[start]`", "unsupported expression `text[0]`" warnings.
+
+  - [ ] **Implement compound assignment operators** — Support `+=`, `-=`, `*=`, `/=` operators so mutation-heavy compiler code (loop counters, accumulators) lowers without fallbacks.
+
+    - [ ] Recognize compound assignment syntax in `lower_expression_statement`.
+    - [ ] Desugar `variable += expression` into `variable = variable + expression` during lowering.
+    - [ ] Ensure desugared form uses existing local binding infrastructure and mutation tracking.
+    - [ ] Add tests for compound assignments:
+      - [ ] `test_native_llvm_execution_compound_add_assignment` — `count += 1` in loop compiles and executes.
+      - [ ] `test_native_llvm_execution_compound_subtract_assignment` — `total -= value` works.
+      - [ ] `test_native_llvm_execution_compound_multiply_divide` — `product *= factor` and `quotient /= divisor` work.
+    - [ ] Target diagnostics: eliminate "assignment to unknown local `index +`", "unsupported expression `= 1`" warnings.
+
+  - [ ] **Fix logical operator lowering** — Support `&&`, `||` operators with short-circuit evaluation so conditional expressions in compiler logic compile correctly.
+
+    - [ ] Implement `lower_logical_and` and `lower_logical_or` in `compiler/src/native_llvm_lowering.sfn`:
+      - [ ] For `a && b`: evaluate `a`, branch to short-circuit exit if false, otherwise evaluate `b`.
+      - [ ] For `a || b`: evaluate `a`, branch to short-circuit exit if true, otherwise evaluate `b`.
+      - [ ] Emit phi node at merge point to produce final boolean result.
+    - [ ] Recognize `&&` and `||` in `lower_expression` before additive operators.
+    - [ ] Add tests for logical operators:
+      - [ ] `test_native_llvm_execution_logical_and_short_circuits` — second operand not evaluated if first is false.
+      - [ ] `test_native_llvm_execution_logical_or_short_circuits` — second operand not evaluated if first is true.
+      - [ ] `test_native_llvm_execution_nested_logical_operators` — `a && b || c && d` compiles correctly.
+    - [ ] Target diagnostics: eliminate "call to unknown function `requires_io && !contains_effect`" warnings.
+
+  - [ ] **Support conditional expression ternary operator** — Implement `condition ? true_value : false_value` so inline conditionals in compiler code compile without fallback.
+
+    - [ ] Recognize ternary syntax in `lower_expression`.
+    - [ ] Lower condition expression, branch to `then`/`else` labels, evaluate corresponding expression, emit phi merge.
+    - [ ] Add tests:
+      - [ ] `test_native_llvm_execution_ternary_operator` — `let result = x > 0 ? x : -x` compiles and executes.
+      - [ ] `test_native_llvm_execution_nested_ternary` — nested ternary expressions work.
+    - [ ] Target diagnostics: eliminate conditional expression fallback warnings (if any).
+
+  - [ ] **Fix if-statement condition lowering failures** — Address cases where if/match conditions produce no value due to type coercion issues.
+
+    - [ ] Audit `lower_condition` in `compiler/src/native_llvm_lowering.sfn` to ensure all boolean-producing expressions return operands.
+    - [ ] Handle cases where complex expressions (member access, calls) need type coercion to `i1` for branch conditions.
+    - [ ] Ensure enum variant tag comparisons in match lowering produce boolean operands.
+    - [ ] Add tests for complex conditions:
+      - [ ] `test_native_llvm_execution_if_with_complex_condition` — `if struct.field > threshold` works.
+      - [ ] `test_native_llvm_execution_match_with_complex_guard` — match guard with compound expression compiles.
+    - [ ] Target diagnostics: eliminate "condition produced no value in `function_name`", "unable to lower if condition in `function_name`" warnings.
+
+  - [ ] **Implement unsupported expression fallback handlers** — Add lowering support for remaining expression types used in compiler source.
+
+    - [ ] **Struct literal initialization** — Ensure all struct literal field assignments lower correctly (already mostly working, but validate no fallbacks).
+    - [ ] **Nested member access chains** — Support `a.b.c.d` without intermediate fallbacks.
+    - [ ] **Method call syntax** — Ensure `object.method(args)` routes correctly for both struct methods and interface dispatch.
+    - [ ] Add comprehensive expression tests:
+      - [ ] `test_native_llvm_execution_nested_member_access` — multi-level field access compiles.
+      - [ ] `test_native_llvm_execution_method_calls` — struct method calls work end-to-end.
+    - [ ] Target diagnostics: eliminate "unsupported expression `...`" warnings for all compiler-used patterns.
+
+  - [ ] **Add type coercion for unsupported types** — Implement fallback coercion strategies for complex types that can't be fully lowered yet.
+
+    - [ ] When lowering fails for array/struct return types, emit warning but continue with pointer fallback.
+    - [ ] Ensure coercion diagnostics are non-fatal so bootstrap completes even with missing features.
+    - [ ] Add tracking metadata in generated LLVM IR comments marking fallback coercions for future work.
+    - [ ] Target diagnostics: convert "unable to coerce operand" errors to non-fatal warnings where safe.
+
+  - [ ] **Validate warning-free bootstrap** — Ensure full compiler self-compilation produces clean LLVM IR without diagnostic warnings.
+    - [ ] Run `make bootstrap-stage2` and capture all diagnostic output.
+    - [ ] Create test in `compiler/tests/test_stage2_bootstrap.py::test_bootstrap_stage2_produces_no_warnings` that fails if any "llvm lowering:" warnings are emitted.
+    - [ ] Document remaining known limitations (if any) in `docs/self-hosting.md` under "Known Limitations" section.
+    - [ ] Update `docs/status.md` marking Stage2 as "warning-free self-compilation complete".
 
 - [ ] **Wire CI for self-hosted builds** — Promote Stage2 self-hosted compiler to default CI gate while keeping Stage1 as fallback job.
 
