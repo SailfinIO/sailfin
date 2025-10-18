@@ -252,7 +252,9 @@ _Final delivery (self-hosting, automation, distribution)_
 
   - [ ] **Implement unsupported expression fallback handlers** — Add lowering support for remaining expression types used in compiler source.
 
-    - [ ] **Struct literal initialization** — Ensure all struct literal field assignments lower correctly (already mostly working, but validate no fallbacks).
+    - [x] **Unary negation operator** — Implement `!` operator lowering using `xor i1 <value>, 1` instruction. Eliminates all "call to unknown function `!...`" warnings (e.g., `!contains_effect`, `!starts_with`). Tests: `compiler/tests/test_negation_operator.py`.
+    - [x] **Null literal support** — Implement `null` keyword lowering as `i8* null` pointer. Enables struct fields with optional types (e.g., `primary: null` in Diagnostic structs) to compile without "unsupported expression `null`" warnings. Eliminates ~50+ bootstrap warnings. Tests: `compiler/tests/test_null_literal.py`.
+    - [ ] **Struct literal initialization** — Investigation revealed remaining "struct literal missing closing `}`" warnings (192 occurrences) are cascading failures from unsupported optional return types (`Token?`, `Diagnostic?`), not from struct literal parsing itself. Requires optional type support (separate task).
     - [ ] **Nested member access chains** — Support `a.b.c.d` without intermediate fallbacks.
     - [ ] **Method call syntax** — Ensure `object.method(args)` routes correctly for both struct methods and interface dispatch.
     - [ ] Add comprehensive expression tests:
@@ -260,7 +262,7 @@ _Final delivery (self-hosting, automation, distribution)_
       - [ ] `test_native_llvm_execution_method_calls` — struct method calls work end-to-end.
     - [ ] Target diagnostics: eliminate "unsupported expression `...`" warnings for all compiler-used patterns.
 
-  - [ ] **Add type coercion for unsupported types** — Implement fallback coercion strategies for complex types that can't be fully lowered yet.
+  - [ ] **Add type coercion for unsupported types** — Implement fallback coercion strategies for complex types that can't be fully lowered yet (if at all possible we want to fully support in order to make this more future-proof).
 
     - [ ] When lowering fails for array/struct return types, emit warning but continue with pointer fallback.
     - [ ] Ensure coercion diagnostics are non-fatal so bootstrap completes even with missing features.

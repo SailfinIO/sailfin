@@ -310,6 +310,42 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   and execute correctly). With logical operator support, Stage2 bootstrap warnings
   like "call to unknown function `requires_io && !contains_effect`" are eliminated,
   bringing the compiler closer to warning-free self-compilation.
+  Unary negation operator (`!`) now lowers to LLVM using the `xor i1 <value>, 1`
+  instruction, enabling boolean negation in compiler logic to compile without
+  fallbacks. The implementation checks for a leading `!` character in expressions,
+  lowers the operand, coerces it to `i1` type, and emits an XOR instruction with
+  constant 1 to flip the boolean value. This unblocks compilation of common compiler
+  patterns like `!contains_effect`, `!starts_with`, and `!ready` that previously
+  triggered "call to unknown function" warnings. Double negation (`!!value`)
+  works correctly by recursively lowering nested negation expressions. The operator
+  integrates with logical operators (`&&`, `||`) and conditional expressions,
+  so complex boolean logic like `!a && !b` or `if !ready { ... }` compiles and
+  executes correctly. Regression coverage lives in
+  `compiler/tests/test_negation_operator.py::test_native_llvm_execution_negates_boolean_value`
+  (validates `!`, `!!`, basic negation with `true`/`false` constants, and LLVM
+  IR emits `xor i1` instructions) and
+  `test_negation_operator.py::test_native_llvm_execution_negation_in_condition`
+  (validates `!` in if conditions and return statements executes correctly). With
+  negation operator support, all Stage2 bootstrap warnings like "call to unknown
+  function `!contains_effect`" and "call to unknown function `!starts_with`" are
+  eliminated, representing a major step toward warning-free self-compilation.
+  Null literals (`null`) now lower to LLVM as null pointers (`i8* null`), enabling
+  struct fields with optional types to compile without fallbacks. The implementation
+  adds `is_null_literal` helper function that recognizes the `null` keyword
+  (case-insensitive) and returns an `i8*` null pointer operand. This unblocks
+  compilation of compiler code that uses optional fields (e.g., `primary: null` in
+  Diagnostic structs, `span: null` for synthetic tokens). Null literals can appear
+  in struct literal field values, function arguments, return expressions, and
+  variable initializers. The LLVM representation uses LLVM's native null pointer
+  syntax which is compatible with any pointer type through LLVM's type coercion.
+  Regression coverage lives in
+  `compiler/tests/test_null_literal.py::test_native_llvm_execution_null_literal_lowers`
+  (validates null literals produce valid LLVM IR without "unsupported expression"
+  diagnostics) and `test_null_literal.py::test_native_llvm_execution_null_in_struct_field`
+  (validates null in struct fields doesn't trigger struct literal parsing errors).
+  With null literal support, all Stage2 bootstrap warnings like "unsupported expression
+  `null`" are eliminated (previously ~50+ occurrences across compiler sources),
+  removing a major category of warnings blocking warning-free self-compilation.
   Ternary conditional expressions (`condition ? true_value : false_value`) now lower
   to LLVM with proper control flow and type merging, enabling inline conditionals in
   compiler code to compile without fallbacks. The implementation uses LLVM control flow

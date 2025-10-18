@@ -94,20 +94,44 @@ forbody1:
   store %ModuleCompilationResult %t20, %ModuleCompilationResult* %l4
   %t21 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
   %t22 = extractvalue %ModuleCompilationResult %t21, 0
-  %t23 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
-  %t24 = extractvalue %ModuleCompilationResult %t23, 1
+  %t23 = icmp ne i8* %t22, null
+  %t24 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
+  %t25 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t26 = load i8*, i8** %l3
+  %t27 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  br i1 %t23, label %then4, label %merge5
+then4:
+  %t28 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  %t29 = extractvalue %ModuleCompilationResult %t28, 0
+  %t30 = alloca [1 x i8*]
+  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
+  %t32 = getelementptr i8*, i8** %t31, i64 0
+  store i8* %t29, i8** %t32
+  %t33 = alloca { i8**, i64 }
+  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
+  store i8** %t31, i8*** %t34
+  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
+  store i64 1, i64* %t35
+  %t36 = call double @modulesconcat({ i8**, i64 }* %t33)
+  store { %CompiledModule*, i64 }* null, { %CompiledModule*, i64 }** %l0
+  br label %merge5
+merge5:
+  %t37 = phi { %CompiledModule*, i64 }* [ null, %then4 ], [ %t24, %forbody1 ]
+  store { %CompiledModule*, i64 }* %t37, { %CompiledModule*, i64 }** %l0
+  %t38 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  %t39 = extractvalue %ModuleCompilationResult %t38, 1
   br label %forinc2
 forinc2:
-  %t25 = load i64, i64* %l2
-  %t26 = add i64 %t25, 1
-  store i64 %t26, i64* %l2
+  %t40 = load i64, i64* %l2
+  %t41 = add i64 %t40, 1
+  store i64 %t41, i64* %l2
   br label %for0
 afterfor3:
-  %t27 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
-  %t28 = insertvalue %ProjectCompilation undef, { i8**, i64 }* null, 0
-  %t29 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t30 = insertvalue %ProjectCompilation %t28, { i8**, i64 }* null, 1
-  ret %ProjectCompilation %t30
+  %t42 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
+  %t43 = insertvalue %ProjectCompilation undef, { i8**, i64 }* null, 0
+  %t44 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t45 = insertvalue %ProjectCompilation %t43, { i8**, i64 }* null, 1
+  ret %ProjectCompilation %t45
 }
 
 ; fn compile_source_at_path effects: ![io]

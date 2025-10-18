@@ -298,8 +298,8 @@ merge17:
   store { i8**, i64 }* %t119, { i8**, i64 }** %l7
   %t120 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
   %t121 = load i8*, i8** %l11
-  %t122 = call double @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t120, i8* %t121)
-  %t123 = fcmp one double %t122, 0.0
+  %t122 = call i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t120, i8* %t121)
+  %t123 = xor i1 %t122, 1
   %t124 = load double, double* %l0
   %t125 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t126 = load double, double* %l2
@@ -422,13 +422,25 @@ entry:
 
 define { %EffectRequirement*, i64 }* @collect_effects_from_expression(i8* %expression) {
 entry:
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
-  store i64 0, i64* %t4
+  %t0 = icmp eq i8* %expression, null
+  br i1 %t0, label %then0, label %merge1
+then0:
+  %t1 = alloca [0 x double]
+  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
+  %t3 = alloca { double*, i64 }
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
+  store double* %t2, double** %t4
+  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  store i64 0, i64* %t5
+  ret { %EffectRequirement*, i64 }* null
+merge1:
+  %t6 = alloca [0 x double]
+  %t7 = getelementptr [0 x double], [0 x double]* %t6, i32 0, i32 0
+  %t8 = alloca { double*, i64 }
+  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 0
+  store double* %t7, double** %t9
+  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
+  store i64 0, i64* %t10
   ret { %EffectRequirement*, i64 }* null
 }
 
@@ -913,8 +925,8 @@ loop.body1:
   %t8 = load i8*, i8** %t7
   store i8* %t8, i8** %l1
   %t9 = load i8*, i8** %l1
-  %t10 = call double @is_trivia_token(i8* %t9)
-  %t11 = fcmp one double %t10, 0.0
+  %t10 = call i1 @is_trivia_token(i8* %t9)
+  %t11 = xor i1 %t10, 1
   %t12 = load double, double* %l0
   %t13 = load i8*, i8** %l1
   br i1 %t11, label %then4, label %merge5

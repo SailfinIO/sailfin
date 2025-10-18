@@ -24,8 +24,8 @@ declare noalias i8* @malloc(i64)
 @.str.4 = private unnamed_addr constant [27 x i8] c"; Sailfin Native Prototype\00"
 @.str.7 = private unnamed_addr constant [13 x i8] c".module main\00"
 @.str.0 = private unnamed_addr constant [40 x i8] c"native backend: unsupported statement `\00"
-@.str.1 = private unnamed_addr constant [5 x i8] c" as \00"
-@.str.0 = private unnamed_addr constant [7 x i8] c".span \00"
+@.str.2 = private unnamed_addr constant [5 x i8] c" as \00"
+@.str.1 = private unnamed_addr constant [7 x i8] c".span \00"
 @.str.1 = private unnamed_addr constant [6 x i8] c".let \00"
 @.str.2 = private unnamed_addr constant [5 x i8] c".fn \00"
 @.str.16 = private unnamed_addr constant [7 x i8] c".endfn\00"
@@ -71,13 +71,46 @@ declare noalias i8* @malloc(i64)
 @.str.16 = private unnamed_addr constant [21 x i8] c".layout struct name=\00"
 @.str.18 = private unnamed_addr constant [7 x i8] c" size=\00"
 @.str.24 = private unnamed_addr constant [8 x i8] c" align=\00"
-@.str.30 = private unnamed_addr constant [19 x i8] c".layout enum name=\00"
-@.str.32 = private unnamed_addr constant [24 x i8] c" tag_type=i32 tag_size=\00"
+@.str.35 = private unnamed_addr constant [19 x i8] c".layout enum name=\00"
+@.str.37 = private unnamed_addr constant [24 x i8] c" tag_type=i32 tag_size=\00"
 @.str.136 = private unnamed_addr constant [16 x i8] c"native layout: \00"
 @.str.138 = private unnamed_addr constant [3 x i8] c" `\00"
 @.str.141 = private unnamed_addr constant [10 x i8] c"` field `\00"
 @.str.144 = private unnamed_addr constant [26 x i8] c"` uses unsupported type `\00"
 @.str.148 = private unnamed_addr constant [32 x i8] c"`; defaulting to pointer layout\00"
+@.str.6 = private unnamed_addr constant [6 x i8] c"Token\00"
+@.str.14 = private unnamed_addr constant [10 x i8] c"TokenKind\00"
+@.str.22 = private unnamed_addr constant [8 x i8] c"Program\00"
+@.str.30 = private unnamed_addr constant [15 x i8] c"TypeAnnotation\00"
+@.str.38 = private unnamed_addr constant [14 x i8] c"TypeParameter\00"
+@.str.46 = private unnamed_addr constant [6 x i8] c"Block\00"
+@.str.54 = private unnamed_addr constant [11 x i8] c"SourceSpan\00"
+@.str.62 = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.70 = private unnamed_addr constant [10 x i8] c"Parameter\00"
+@.str.78 = private unnamed_addr constant [11 x i8] c"WithClause\00"
+@.str.86 = private unnamed_addr constant [12 x i8] c"ObjectField\00"
+@.str.94 = private unnamed_addr constant [11 x i8] c"ElseBranch\00"
+@.str.102 = private unnamed_addr constant [10 x i8] c"ForClause\00"
+@.str.110 = private unnamed_addr constant [10 x i8] c"MatchCase\00"
+@.str.118 = private unnamed_addr constant [14 x i8] c"ModelProperty\00"
+@.str.126 = private unnamed_addr constant [17 x i8] c"FieldDeclaration\00"
+@.str.134 = private unnamed_addr constant [18 x i8] c"MethodDeclaration\00"
+@.str.142 = private unnamed_addr constant [12 x i8] c"EnumVariant\00"
+@.str.150 = private unnamed_addr constant [18 x i8] c"FunctionSignature\00"
+@.str.158 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.166 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.174 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.str.182 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.str.190 = private unnamed_addr constant [10 x i8] c"Decorator\00"
+@.str.198 = private unnamed_addr constant [18 x i8] c"DecoratorArgument\00"
+@.str.206 = private unnamed_addr constant [15 x i8] c"NamedSpecifier\00"
+@.str.214 = private unnamed_addr constant [10 x i8] c"Statement\00"
+@.str.222 = private unnamed_addr constant [10 x i8] c"EnumField\00"
+@.str.230 = private unnamed_addr constant [22 x i8] c"EnumVariantDefinition\00"
+@.str.238 = private unnamed_addr constant [9 x i8] c"EnumType\00"
+@.str.246 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
+@.str.254 = private unnamed_addr constant [12 x i8] c"StructField\00"
+@.str.262 = private unnamed_addr constant [15 x i8] c"TypeDescriptor\00"
 @.str.0 = private unnamed_addr constant [3 x i8] c"[]\00"
 @.str.0 = private unnamed_addr constant [2 x i8] c"?\00"
 @.str.4 = private unnamed_addr constant [11 x i8] c"0123456789\00"
@@ -331,23 +364,40 @@ afterloop3:
 
 define i8* @format_native_specifier(i8* %name, i8* %alias) {
 entry:
-  %s1 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1, i32 0, i32 0
-  %t2 = add i8* %name, %s1
-  %t3 = add i8* %t2, %alias
-  ret i8* %t3
+  %t1 = icmp eq i8* %alias, null
+  br label %logical_or_entry_0
+
+logical_or_entry_0:
+  br i1 %t1, label %logical_or_merge_0, label %logical_or_right_0
+
+logical_or_right_0:
+  %s2 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %name, %s2
+  %t4 = add i8* %t3, %alias
+  ret i8* %t4
 }
 
 define %NativeState @emit_span_if_present(%NativeState %state, i8* %span) {
 entry:
-  %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.0, i32 0, i32 0
-  %t1 = call i8* @format_span(i8* %span)
-  %t2 = add i8* %s0, %t1
-  %t3 = call %NativeState @state_emit_line(%NativeState %state, i8* %t2)
-  ret %NativeState %t3
+  %t0 = icmp eq i8* %span, null
+  br i1 %t0, label %then0, label %merge1
+then0:
+  ret %NativeState %state
+merge1:
+  %s1 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1, i32 0, i32 0
+  %t2 = call i8* @format_span(i8* %span)
+  %t3 = add i8* %s1, %t2
+  %t4 = call %NativeState @state_emit_line(%NativeState %state, i8* %t3)
+  ret %NativeState %t4
 }
 
 define %NativeState @emit_initializer_span_if_present(%NativeState %state, i8* %span) {
 entry:
+  %t0 = icmp eq i8* %span, null
+  br i1 %t0, label %then0, label %merge1
+then0:
+  ret %NativeState %state
+merge1:
   ret %NativeState zeroinitializer
 }
 
@@ -1562,10 +1612,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t17 = phi { %LayoutEnumVariantDefinition*, i64 }* [ %t6, %entry ], [ %t15, %loop.latch2 ]
-  %t18 = phi double [ %t7, %entry ], [ %t16, %loop.latch2 ]
-  store { %LayoutEnumVariantDefinition*, i64 }* %t17, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  store double %t18, double* %l1
+  %t22 = phi { %LayoutEnumVariantDefinition*, i64 }* [ %t6, %entry ], [ %t20, %loop.latch2 ]
+  %t23 = phi double [ %t7, %entry ], [ %t21, %loop.latch2 ]
+  store { %LayoutEnumVariantDefinition*, i64 }* %t22, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  store double %t23, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -1574,25 +1624,23 @@ loop.body1:
   %t10 = call { %LayoutFieldInput*, i64 }* @convert_variant_fields(i8* null)
   store { %LayoutFieldInput*, i64 }* %t10, { %LayoutFieldInput*, i64 }** %l3
   %t11 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  %t12 = load double, double* %l1
-  %t13 = sitofp i64 1 to double
-  %t14 = fadd double %t12, %t13
-  store double %t14, double* %l1
+  %t12 = load double, double* %l2
+  %t13 = insertvalue %LayoutEnumVariantDefinition undef, i8* null, 0
+  %t14 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l3
+  %t15 = insertvalue %LayoutEnumVariantDefinition %t13, { i8**, i64 }* null, 1
+  %t16 = call { %LayoutEnumVariantDefinition*, i64 }* @append_layout_enum_variant_definition({ %LayoutEnumVariantDefinition*, i64 }* %t11, %LayoutEnumVariantDefinition %t15)
+  store { %LayoutEnumVariantDefinition*, i64 }* %t16, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  %t17 = load double, double* %l1
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t15 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  %t16 = load double, double* %l1
+  %t20 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  %t21 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t19 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  %t20 = alloca [0 x double]
-  %t21 = getelementptr [0 x double], [0 x double]* %t20, i32 0, i32 0
-  %t22 = alloca { double*, i64 }
-  %t23 = getelementptr { double*, i64 }, { double*, i64 }* %t22, i32 0, i32 0
-  store double* %t21, double** %t23
-  %t24 = getelementptr { double*, i64 }, { double*, i64 }* %t22, i32 0, i32 1
-  store i64 0, i64* %t24
-  store double 0.0, double* %l4
+  %t24 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
   %t25 = alloca [0 x double]
   %t26 = getelementptr [0 x double], [0 x double]* %t25, i32 0, i32 0
   %t27 = alloca { double*, i64 }
@@ -1600,131 +1648,139 @@ afterloop3:
   store double* %t26, double** %t28
   %t29 = getelementptr { double*, i64 }, { double*, i64 }* %t27, i32 0, i32 1
   store i64 0, i64* %t29
+  store double 0.0, double* %l4
+  %t30 = alloca [0 x double]
+  %t31 = getelementptr [0 x double], [0 x double]* %t30, i32 0, i32 0
+  %t32 = alloca { double*, i64 }
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t32, i32 0, i32 0
+  store double* %t31, double** %t33
+  %t34 = getelementptr { double*, i64 }, { double*, i64 }* %t32, i32 0, i32 1
+  store i64 0, i64* %t34
   store { i8**, i64 }* null, { i8**, i64 }** %l5
-  %s30 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.30, i32 0, i32 0
+  %s35 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.35, i32 0, i32 0
   store i8* null, i8** %l6
-  %t31 = load i8*, i8** %l6
-  %s32 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.32, i32 0, i32 0
-  %t33 = add i8* %t31, %s32
-  %t34 = load double, double* %l4
-  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l5
   %t36 = load i8*, i8** %l6
-  %t37 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t35, i8* %t36)
-  store { i8**, i64 }* %t37, { i8**, i64 }** %l5
-  %t38 = sitofp i64 0 to double
-  store double %t38, double* %l7
-  %t39 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = load double, double* %l4
-  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t43 = load i8*, i8** %l6
-  %t44 = load double, double* %l7
+  %s37 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.37, i32 0, i32 0
+  %t38 = add i8* %t36, %s37
+  %t39 = load double, double* %l4
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t41 = load i8*, i8** %l6
+  %t42 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t40, i8* %t41)
+  store { i8**, i64 }* %t42, { i8**, i64 }** %l5
+  %t43 = sitofp i64 0 to double
+  store double %t43, double* %l7
+  %t44 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  %t45 = load double, double* %l1
+  %t46 = load double, double* %l4
+  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t48 = load i8*, i8** %l6
+  %t49 = load double, double* %l7
   br label %loop.header4
 loop.header4:
-  %t115 = phi { i8**, i64 }* [ %t42, %entry ], [ %t113, %loop.latch6 ]
-  %t116 = phi double [ %t44, %entry ], [ %t114, %loop.latch6 ]
-  store { i8**, i64 }* %t115, { i8**, i64 }** %l5
-  store double %t116, double* %l7
+  %t120 = phi { i8**, i64 }* [ %t47, %entry ], [ %t118, %loop.latch6 ]
+  %t121 = phi double [ %t49, %entry ], [ %t119, %loop.latch6 ]
+  store { i8**, i64 }* %t120, { i8**, i64 }** %l5
+  store double %t121, double* %l7
   br label %loop.body5
 loop.body5:
-  %t45 = load double, double* %l7
-  %t46 = load double, double* %l4
-  %t47 = load double, double* %l4
+  %t50 = load double, double* %l7
+  %t51 = load double, double* %l4
+  %t52 = load double, double* %l4
   store double 0.0, double* %l8
-  %s48 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.48, i32 0, i32 0
-  %t49 = load double, double* %l8
+  %s53 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.53, i32 0, i32 0
+  %t54 = load double, double* %l8
   store i8* null, i8** %l9
-  %t50 = load i8*, i8** %l9
-  %s51 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.51, i32 0, i32 0
-  %t52 = add i8* %t50, %s51
-  %t53 = load double, double* %l8
-  %t54 = load i8*, i8** %l9
-  %s55 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.55, i32 0, i32 0
-  %t56 = add i8* %t54, %s55
-  %t57 = load double, double* %l8
-  %t58 = load i8*, i8** %l9
-  %s59 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.59, i32 0, i32 0
-  %t60 = add i8* %t58, %s59
-  %t61 = load double, double* %l8
-  %t62 = load i8*, i8** %l9
-  %s63 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.63, i32 0, i32 0
-  %t64 = add i8* %t62, %s63
-  %t65 = load double, double* %l8
-  %t66 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t55 = load i8*, i8** %l9
+  %s56 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.56, i32 0, i32 0
+  %t57 = add i8* %t55, %s56
+  %t58 = load double, double* %l8
+  %t59 = load i8*, i8** %l9
+  %s60 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.60, i32 0, i32 0
+  %t61 = add i8* %t59, %s60
+  %t62 = load double, double* %l8
+  %t63 = load i8*, i8** %l9
+  %s64 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.64, i32 0, i32 0
+  %t65 = add i8* %t63, %s64
+  %t66 = load double, double* %l8
   %t67 = load i8*, i8** %l9
-  %t68 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t66, i8* %t67)
-  store { i8**, i64 }* %t68, { i8**, i64 }** %l5
-  %t69 = sitofp i64 0 to double
-  store double %t69, double* %l10
-  %t70 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
-  %t71 = load double, double* %l1
-  %t72 = load double, double* %l4
-  %t73 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t74 = load i8*, i8** %l6
-  %t75 = load double, double* %l7
-  %t76 = load double, double* %l8
-  %t77 = load i8*, i8** %l9
-  %t78 = load double, double* %l10
+  %s68 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.68, i32 0, i32 0
+  %t69 = add i8* %t67, %s68
+  %t70 = load double, double* %l8
+  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t72 = load i8*, i8** %l9
+  %t73 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t71, i8* %t72)
+  store { i8**, i64 }* %t73, { i8**, i64 }** %l5
+  %t74 = sitofp i64 0 to double
+  store double %t74, double* %l10
+  %t75 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  %t76 = load double, double* %l1
+  %t77 = load double, double* %l4
+  %t78 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t79 = load i8*, i8** %l6
+  %t80 = load double, double* %l7
+  %t81 = load double, double* %l8
+  %t82 = load i8*, i8** %l9
+  %t83 = load double, double* %l10
   br label %loop.header8
 loop.header8:
-  %t108 = phi { i8**, i64 }* [ %t73, %loop.body5 ], [ %t106, %loop.latch10 ]
-  %t109 = phi double [ %t78, %loop.body5 ], [ %t107, %loop.latch10 ]
-  store { i8**, i64 }* %t108, { i8**, i64 }** %l5
-  store double %t109, double* %l10
+  %t113 = phi { i8**, i64 }* [ %t78, %loop.body5 ], [ %t111, %loop.latch10 ]
+  %t114 = phi double [ %t83, %loop.body5 ], [ %t112, %loop.latch10 ]
+  store { i8**, i64 }* %t113, { i8**, i64 }** %l5
+  store double %t114, double* %l10
   br label %loop.body9
 loop.body9:
-  %t79 = load double, double* %l10
-  %t80 = load double, double* %l8
-  %t81 = load double, double* %l8
+  %t84 = load double, double* %l10
+  %t85 = load double, double* %l8
+  %t86 = load double, double* %l8
   store double 0.0, double* %l11
-  %s82 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.82, i32 0, i32 0
-  %t83 = load double, double* %l8
+  %s87 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.87, i32 0, i32 0
+  %t88 = load double, double* %l8
   store i8* null, i8** %l12
-  %t84 = load i8*, i8** %l12
-  %s85 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.85, i32 0, i32 0
-  %t86 = add i8* %t84, %s85
-  %t87 = load double, double* %l11
-  %t88 = load i8*, i8** %l12
-  %s89 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.89, i32 0, i32 0
-  %t90 = add i8* %t88, %s89
-  %t91 = load double, double* %l11
-  %t92 = load i8*, i8** %l12
-  %s93 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.93, i32 0, i32 0
-  %t94 = add i8* %t92, %s93
-  %t95 = load double, double* %l11
-  %t96 = load i8*, i8** %l12
-  %s97 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.97, i32 0, i32 0
-  %t98 = add i8* %t96, %s97
-  %t99 = load double, double* %l11
-  %t100 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t89 = load i8*, i8** %l12
+  %s90 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.90, i32 0, i32 0
+  %t91 = add i8* %t89, %s90
+  %t92 = load double, double* %l11
+  %t93 = load i8*, i8** %l12
+  %s94 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.94, i32 0, i32 0
+  %t95 = add i8* %t93, %s94
+  %t96 = load double, double* %l11
+  %t97 = load i8*, i8** %l12
+  %s98 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.98, i32 0, i32 0
+  %t99 = add i8* %t97, %s98
+  %t100 = load double, double* %l11
   %t101 = load i8*, i8** %l12
-  %t102 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t100, i8* %t101)
-  store { i8**, i64 }* %t102, { i8**, i64 }** %l5
-  %t103 = load double, double* %l10
-  %t104 = sitofp i64 1 to double
-  %t105 = fadd double %t103, %t104
-  store double %t105, double* %l10
+  %s102 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.102, i32 0, i32 0
+  %t103 = add i8* %t101, %s102
+  %t104 = load double, double* %l11
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t106 = load i8*, i8** %l12
+  %t107 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t105, i8* %t106)
+  store { i8**, i64 }* %t107, { i8**, i64 }** %l5
+  %t108 = load double, double* %l10
+  %t109 = sitofp i64 1 to double
+  %t110 = fadd double %t108, %t109
+  store double %t110, double* %l10
   br label %loop.latch10
 loop.latch10:
-  %t106 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t107 = load double, double* %l10
+  %t111 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t112 = load double, double* %l10
   br label %loop.header8
 afterloop11:
-  %t110 = load double, double* %l7
-  %t111 = sitofp i64 1 to double
-  %t112 = fadd double %t110, %t111
-  store double %t112, double* %l7
+  %t115 = load double, double* %l7
+  %t116 = sitofp i64 1 to double
+  %t117 = fadd double %t115, %t116
+  store double %t117, double* %l7
   br label %loop.latch6
 loop.latch6:
-  %t113 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t114 = load double, double* %l7
+  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t119 = load double, double* %l7
   br label %loop.header4
 afterloop7:
-  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t118 = insertvalue %LayoutEmitResult undef, { i8**, i64 }* %t117, 0
-  %t119 = load double, double* %l4
-  %t120 = insertvalue %LayoutEmitResult %t118, { i8**, i64 }* null, 1
-  ret %LayoutEmitResult %t120
+  %t122 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t123 = insertvalue %LayoutEmitResult undef, { i8**, i64 }* %t122, 0
+  %t124 = load double, double* %l4
+  %t125 = insertvalue %LayoutEmitResult %t123, { i8**, i64 }* null, 1
+  ret %LayoutEmitResult %t125
 }
 
 define %EnumAggregateLayout @infer_enum_aggregate_layout(%LayoutContext %context, i8* %enum_name, { %LayoutEnumVariantDefinition*, i64 }* %variants, { i8**, i64 }* %visiting) {
@@ -2499,10 +2555,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t24 = phi { %LayoutFieldInput*, i64 }* [ %t6, %entry ], [ %t22, %loop.latch2 ]
-  %t25 = phi double [ %t7, %entry ], [ %t23, %loop.latch2 ]
-  store { %LayoutFieldInput*, i64 }* %t24, { %LayoutFieldInput*, i64 }** %l0
-  store double %t25, double* %l1
+  %t29 = phi { %LayoutFieldInput*, i64 }* [ %t6, %entry ], [ %t27, %loop.latch2 ]
+  %t30 = phi double [ %t7, %entry ], [ %t28, %loop.latch2 ]
+  store { %LayoutFieldInput*, i64 }* %t29, { %LayoutFieldInput*, i64 }** %l0
+  store double %t30, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -2519,18 +2575,24 @@ loop.body1:
   store i8* %s16, i8** %l3
   %t17 = load i8*, i8** %l2
   %t18 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
-  %t19 = load double, double* %l1
-  %t20 = sitofp i64 1 to double
-  %t21 = fadd double %t19, %t20
-  store double %t21, double* %l1
+  %t19 = load i8*, i8** %l2
+  %t20 = insertvalue %LayoutFieldInput undef, i8* null, 0
+  %t21 = load i8*, i8** %l3
+  %t22 = insertvalue %LayoutFieldInput %t20, i8* %t21, 1
+  %t23 = call { %LayoutFieldInput*, i64 }* @append_layout_field_input({ %LayoutFieldInput*, i64 }* %t18, %LayoutFieldInput %t22)
+  store { %LayoutFieldInput*, i64 }* %t23, { %LayoutFieldInput*, i64 }** %l0
+  %t24 = load double, double* %l1
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t22 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
-  %t23 = load double, double* %l1
+  %t27 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
+  %t28 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t26 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
-  ret { %LayoutFieldInput*, i64 }* %t26
+  %t31 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
+  ret { %LayoutFieldInput*, i64 }* %t31
 }
 
 define { %LayoutFieldInput*, i64 }* @convert_variant_fields(i8* %variant) {
@@ -2655,40 +2717,304 @@ entry:
   store i64 0, i64* %t4
   store { %CanonicalTypeLayout*, i64 }* null, { %CanonicalTypeLayout*, i64 }** %l0
   %t5 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t6 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t7 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t8 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t9 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t10 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t11 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t12 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s6 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.6, i32 0, i32 0
+  %t7 = insertvalue %CanonicalTypeLayout undef, i8* %s6, 0
+  %t8 = sitofp i64 8 to double
+  %t9 = insertvalue %CanonicalTypeLayout %t7, double %t8, 1
+  %t10 = sitofp i64 8 to double
+  %t11 = insertvalue %CanonicalTypeLayout %t9, double %t10, 2
+  %t12 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t5, %CanonicalTypeLayout %t11)
+  store { %CanonicalTypeLayout*, i64 }* %t12, { %CanonicalTypeLayout*, i64 }** %l0
   %t13 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t14 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t15 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t16 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t17 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t18 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t19 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t20 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s14 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.14, i32 0, i32 0
+  %t15 = insertvalue %CanonicalTypeLayout undef, i8* %s14, 0
+  %t16 = sitofp i64 8 to double
+  %t17 = insertvalue %CanonicalTypeLayout %t15, double %t16, 1
+  %t18 = sitofp i64 8 to double
+  %t19 = insertvalue %CanonicalTypeLayout %t17, double %t18, 2
+  %t20 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t13, %CanonicalTypeLayout %t19)
+  store { %CanonicalTypeLayout*, i64 }* %t20, { %CanonicalTypeLayout*, i64 }** %l0
   %t21 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t22 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t23 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t24 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t25 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t26 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t27 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t28 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s22 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.22, i32 0, i32 0
+  %t23 = insertvalue %CanonicalTypeLayout undef, i8* %s22, 0
+  %t24 = sitofp i64 8 to double
+  %t25 = insertvalue %CanonicalTypeLayout %t23, double %t24, 1
+  %t26 = sitofp i64 8 to double
+  %t27 = insertvalue %CanonicalTypeLayout %t25, double %t26, 2
+  %t28 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t21, %CanonicalTypeLayout %t27)
+  store { %CanonicalTypeLayout*, i64 }* %t28, { %CanonicalTypeLayout*, i64 }** %l0
   %t29 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t30 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t31 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t32 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t33 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t34 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t35 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t36 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.30, i32 0, i32 0
+  %t31 = insertvalue %CanonicalTypeLayout undef, i8* %s30, 0
+  %t32 = sitofp i64 8 to double
+  %t33 = insertvalue %CanonicalTypeLayout %t31, double %t32, 1
+  %t34 = sitofp i64 8 to double
+  %t35 = insertvalue %CanonicalTypeLayout %t33, double %t34, 2
+  %t36 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t29, %CanonicalTypeLayout %t35)
+  store { %CanonicalTypeLayout*, i64 }* %t36, { %CanonicalTypeLayout*, i64 }** %l0
   %t37 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  %t38 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
-  ret { %CanonicalTypeLayout*, i64 }* %t38
+  %s38 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.38, i32 0, i32 0
+  %t39 = insertvalue %CanonicalTypeLayout undef, i8* %s38, 0
+  %t40 = sitofp i64 8 to double
+  %t41 = insertvalue %CanonicalTypeLayout %t39, double %t40, 1
+  %t42 = sitofp i64 8 to double
+  %t43 = insertvalue %CanonicalTypeLayout %t41, double %t42, 2
+  %t44 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t37, %CanonicalTypeLayout %t43)
+  store { %CanonicalTypeLayout*, i64 }* %t44, { %CanonicalTypeLayout*, i64 }** %l0
+  %t45 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s46 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.46, i32 0, i32 0
+  %t47 = insertvalue %CanonicalTypeLayout undef, i8* %s46, 0
+  %t48 = sitofp i64 8 to double
+  %t49 = insertvalue %CanonicalTypeLayout %t47, double %t48, 1
+  %t50 = sitofp i64 8 to double
+  %t51 = insertvalue %CanonicalTypeLayout %t49, double %t50, 2
+  %t52 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t45, %CanonicalTypeLayout %t51)
+  store { %CanonicalTypeLayout*, i64 }* %t52, { %CanonicalTypeLayout*, i64 }** %l0
+  %t53 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s54 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.54, i32 0, i32 0
+  %t55 = insertvalue %CanonicalTypeLayout undef, i8* %s54, 0
+  %t56 = sitofp i64 8 to double
+  %t57 = insertvalue %CanonicalTypeLayout %t55, double %t56, 1
+  %t58 = sitofp i64 8 to double
+  %t59 = insertvalue %CanonicalTypeLayout %t57, double %t58, 2
+  %t60 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t53, %CanonicalTypeLayout %t59)
+  store { %CanonicalTypeLayout*, i64 }* %t60, { %CanonicalTypeLayout*, i64 }** %l0
+  %t61 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s62 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.62, i32 0, i32 0
+  %t63 = insertvalue %CanonicalTypeLayout undef, i8* %s62, 0
+  %t64 = sitofp i64 8 to double
+  %t65 = insertvalue %CanonicalTypeLayout %t63, double %t64, 1
+  %t66 = sitofp i64 8 to double
+  %t67 = insertvalue %CanonicalTypeLayout %t65, double %t66, 2
+  %t68 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t61, %CanonicalTypeLayout %t67)
+  store { %CanonicalTypeLayout*, i64 }* %t68, { %CanonicalTypeLayout*, i64 }** %l0
+  %t69 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s70 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.70, i32 0, i32 0
+  %t71 = insertvalue %CanonicalTypeLayout undef, i8* %s70, 0
+  %t72 = sitofp i64 8 to double
+  %t73 = insertvalue %CanonicalTypeLayout %t71, double %t72, 1
+  %t74 = sitofp i64 8 to double
+  %t75 = insertvalue %CanonicalTypeLayout %t73, double %t74, 2
+  %t76 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t69, %CanonicalTypeLayout %t75)
+  store { %CanonicalTypeLayout*, i64 }* %t76, { %CanonicalTypeLayout*, i64 }** %l0
+  %t77 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s78 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.78, i32 0, i32 0
+  %t79 = insertvalue %CanonicalTypeLayout undef, i8* %s78, 0
+  %t80 = sitofp i64 8 to double
+  %t81 = insertvalue %CanonicalTypeLayout %t79, double %t80, 1
+  %t82 = sitofp i64 8 to double
+  %t83 = insertvalue %CanonicalTypeLayout %t81, double %t82, 2
+  %t84 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t77, %CanonicalTypeLayout %t83)
+  store { %CanonicalTypeLayout*, i64 }* %t84, { %CanonicalTypeLayout*, i64 }** %l0
+  %t85 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s86 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.86, i32 0, i32 0
+  %t87 = insertvalue %CanonicalTypeLayout undef, i8* %s86, 0
+  %t88 = sitofp i64 8 to double
+  %t89 = insertvalue %CanonicalTypeLayout %t87, double %t88, 1
+  %t90 = sitofp i64 8 to double
+  %t91 = insertvalue %CanonicalTypeLayout %t89, double %t90, 2
+  %t92 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t85, %CanonicalTypeLayout %t91)
+  store { %CanonicalTypeLayout*, i64 }* %t92, { %CanonicalTypeLayout*, i64 }** %l0
+  %t93 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s94 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.94, i32 0, i32 0
+  %t95 = insertvalue %CanonicalTypeLayout undef, i8* %s94, 0
+  %t96 = sitofp i64 8 to double
+  %t97 = insertvalue %CanonicalTypeLayout %t95, double %t96, 1
+  %t98 = sitofp i64 8 to double
+  %t99 = insertvalue %CanonicalTypeLayout %t97, double %t98, 2
+  %t100 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t93, %CanonicalTypeLayout %t99)
+  store { %CanonicalTypeLayout*, i64 }* %t100, { %CanonicalTypeLayout*, i64 }** %l0
+  %t101 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s102 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.102, i32 0, i32 0
+  %t103 = insertvalue %CanonicalTypeLayout undef, i8* %s102, 0
+  %t104 = sitofp i64 8 to double
+  %t105 = insertvalue %CanonicalTypeLayout %t103, double %t104, 1
+  %t106 = sitofp i64 8 to double
+  %t107 = insertvalue %CanonicalTypeLayout %t105, double %t106, 2
+  %t108 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t101, %CanonicalTypeLayout %t107)
+  store { %CanonicalTypeLayout*, i64 }* %t108, { %CanonicalTypeLayout*, i64 }** %l0
+  %t109 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s110 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.110, i32 0, i32 0
+  %t111 = insertvalue %CanonicalTypeLayout undef, i8* %s110, 0
+  %t112 = sitofp i64 8 to double
+  %t113 = insertvalue %CanonicalTypeLayout %t111, double %t112, 1
+  %t114 = sitofp i64 8 to double
+  %t115 = insertvalue %CanonicalTypeLayout %t113, double %t114, 2
+  %t116 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t109, %CanonicalTypeLayout %t115)
+  store { %CanonicalTypeLayout*, i64 }* %t116, { %CanonicalTypeLayout*, i64 }** %l0
+  %t117 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s118 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.118, i32 0, i32 0
+  %t119 = insertvalue %CanonicalTypeLayout undef, i8* %s118, 0
+  %t120 = sitofp i64 8 to double
+  %t121 = insertvalue %CanonicalTypeLayout %t119, double %t120, 1
+  %t122 = sitofp i64 8 to double
+  %t123 = insertvalue %CanonicalTypeLayout %t121, double %t122, 2
+  %t124 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t117, %CanonicalTypeLayout %t123)
+  store { %CanonicalTypeLayout*, i64 }* %t124, { %CanonicalTypeLayout*, i64 }** %l0
+  %t125 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s126 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.126, i32 0, i32 0
+  %t127 = insertvalue %CanonicalTypeLayout undef, i8* %s126, 0
+  %t128 = sitofp i64 8 to double
+  %t129 = insertvalue %CanonicalTypeLayout %t127, double %t128, 1
+  %t130 = sitofp i64 8 to double
+  %t131 = insertvalue %CanonicalTypeLayout %t129, double %t130, 2
+  %t132 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t125, %CanonicalTypeLayout %t131)
+  store { %CanonicalTypeLayout*, i64 }* %t132, { %CanonicalTypeLayout*, i64 }** %l0
+  %t133 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s134 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.134, i32 0, i32 0
+  %t135 = insertvalue %CanonicalTypeLayout undef, i8* %s134, 0
+  %t136 = sitofp i64 8 to double
+  %t137 = insertvalue %CanonicalTypeLayout %t135, double %t136, 1
+  %t138 = sitofp i64 8 to double
+  %t139 = insertvalue %CanonicalTypeLayout %t137, double %t138, 2
+  %t140 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t133, %CanonicalTypeLayout %t139)
+  store { %CanonicalTypeLayout*, i64 }* %t140, { %CanonicalTypeLayout*, i64 }** %l0
+  %t141 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s142 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.142, i32 0, i32 0
+  %t143 = insertvalue %CanonicalTypeLayout undef, i8* %s142, 0
+  %t144 = sitofp i64 8 to double
+  %t145 = insertvalue %CanonicalTypeLayout %t143, double %t144, 1
+  %t146 = sitofp i64 8 to double
+  %t147 = insertvalue %CanonicalTypeLayout %t145, double %t146, 2
+  %t148 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t141, %CanonicalTypeLayout %t147)
+  store { %CanonicalTypeLayout*, i64 }* %t148, { %CanonicalTypeLayout*, i64 }** %l0
+  %t149 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s150 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.150, i32 0, i32 0
+  %t151 = insertvalue %CanonicalTypeLayout undef, i8* %s150, 0
+  %t152 = sitofp i64 8 to double
+  %t153 = insertvalue %CanonicalTypeLayout %t151, double %t152, 1
+  %t154 = sitofp i64 8 to double
+  %t155 = insertvalue %CanonicalTypeLayout %t153, double %t154, 2
+  %t156 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t149, %CanonicalTypeLayout %t155)
+  store { %CanonicalTypeLayout*, i64 }* %t156, { %CanonicalTypeLayout*, i64 }** %l0
+  %t157 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s158 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.158, i32 0, i32 0
+  %t159 = insertvalue %CanonicalTypeLayout undef, i8* %s158, 0
+  %t160 = sitofp i64 8 to double
+  %t161 = insertvalue %CanonicalTypeLayout %t159, double %t160, 1
+  %t162 = sitofp i64 8 to double
+  %t163 = insertvalue %CanonicalTypeLayout %t161, double %t162, 2
+  %t164 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t157, %CanonicalTypeLayout %t163)
+  store { %CanonicalTypeLayout*, i64 }* %t164, { %CanonicalTypeLayout*, i64 }** %l0
+  %t165 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s166 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.166, i32 0, i32 0
+  %t167 = insertvalue %CanonicalTypeLayout undef, i8* %s166, 0
+  %t168 = sitofp i64 8 to double
+  %t169 = insertvalue %CanonicalTypeLayout %t167, double %t168, 1
+  %t170 = sitofp i64 8 to double
+  %t171 = insertvalue %CanonicalTypeLayout %t169, double %t170, 2
+  %t172 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t165, %CanonicalTypeLayout %t171)
+  store { %CanonicalTypeLayout*, i64 }* %t172, { %CanonicalTypeLayout*, i64 }** %l0
+  %t173 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s174 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.174, i32 0, i32 0
+  %t175 = insertvalue %CanonicalTypeLayout undef, i8* %s174, 0
+  %t176 = sitofp i64 8 to double
+  %t177 = insertvalue %CanonicalTypeLayout %t175, double %t176, 1
+  %t178 = sitofp i64 8 to double
+  %t179 = insertvalue %CanonicalTypeLayout %t177, double %t178, 2
+  %t180 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t173, %CanonicalTypeLayout %t179)
+  store { %CanonicalTypeLayout*, i64 }* %t180, { %CanonicalTypeLayout*, i64 }** %l0
+  %t181 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s182 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.182, i32 0, i32 0
+  %t183 = insertvalue %CanonicalTypeLayout undef, i8* %s182, 0
+  %t184 = sitofp i64 8 to double
+  %t185 = insertvalue %CanonicalTypeLayout %t183, double %t184, 1
+  %t186 = sitofp i64 8 to double
+  %t187 = insertvalue %CanonicalTypeLayout %t185, double %t186, 2
+  %t188 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t181, %CanonicalTypeLayout %t187)
+  store { %CanonicalTypeLayout*, i64 }* %t188, { %CanonicalTypeLayout*, i64 }** %l0
+  %t189 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s190 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.190, i32 0, i32 0
+  %t191 = insertvalue %CanonicalTypeLayout undef, i8* %s190, 0
+  %t192 = sitofp i64 8 to double
+  %t193 = insertvalue %CanonicalTypeLayout %t191, double %t192, 1
+  %t194 = sitofp i64 8 to double
+  %t195 = insertvalue %CanonicalTypeLayout %t193, double %t194, 2
+  %t196 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t189, %CanonicalTypeLayout %t195)
+  store { %CanonicalTypeLayout*, i64 }* %t196, { %CanonicalTypeLayout*, i64 }** %l0
+  %t197 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s198 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.198, i32 0, i32 0
+  %t199 = insertvalue %CanonicalTypeLayout undef, i8* %s198, 0
+  %t200 = sitofp i64 8 to double
+  %t201 = insertvalue %CanonicalTypeLayout %t199, double %t200, 1
+  %t202 = sitofp i64 8 to double
+  %t203 = insertvalue %CanonicalTypeLayout %t201, double %t202, 2
+  %t204 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t197, %CanonicalTypeLayout %t203)
+  store { %CanonicalTypeLayout*, i64 }* %t204, { %CanonicalTypeLayout*, i64 }** %l0
+  %t205 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s206 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.206, i32 0, i32 0
+  %t207 = insertvalue %CanonicalTypeLayout undef, i8* %s206, 0
+  %t208 = sitofp i64 8 to double
+  %t209 = insertvalue %CanonicalTypeLayout %t207, double %t208, 1
+  %t210 = sitofp i64 8 to double
+  %t211 = insertvalue %CanonicalTypeLayout %t209, double %t210, 2
+  %t212 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t205, %CanonicalTypeLayout %t211)
+  store { %CanonicalTypeLayout*, i64 }* %t212, { %CanonicalTypeLayout*, i64 }** %l0
+  %t213 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s214 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.214, i32 0, i32 0
+  %t215 = insertvalue %CanonicalTypeLayout undef, i8* %s214, 0
+  %t216 = sitofp i64 8 to double
+  %t217 = insertvalue %CanonicalTypeLayout %t215, double %t216, 1
+  %t218 = sitofp i64 8 to double
+  %t219 = insertvalue %CanonicalTypeLayout %t217, double %t218, 2
+  %t220 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t213, %CanonicalTypeLayout %t219)
+  store { %CanonicalTypeLayout*, i64 }* %t220, { %CanonicalTypeLayout*, i64 }** %l0
+  %t221 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s222 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.222, i32 0, i32 0
+  %t223 = insertvalue %CanonicalTypeLayout undef, i8* %s222, 0
+  %t224 = sitofp i64 8 to double
+  %t225 = insertvalue %CanonicalTypeLayout %t223, double %t224, 1
+  %t226 = sitofp i64 8 to double
+  %t227 = insertvalue %CanonicalTypeLayout %t225, double %t226, 2
+  %t228 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t221, %CanonicalTypeLayout %t227)
+  store { %CanonicalTypeLayout*, i64 }* %t228, { %CanonicalTypeLayout*, i64 }** %l0
+  %t229 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s230 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.230, i32 0, i32 0
+  %t231 = insertvalue %CanonicalTypeLayout undef, i8* %s230, 0
+  %t232 = sitofp i64 8 to double
+  %t233 = insertvalue %CanonicalTypeLayout %t231, double %t232, 1
+  %t234 = sitofp i64 8 to double
+  %t235 = insertvalue %CanonicalTypeLayout %t233, double %t234, 2
+  %t236 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t229, %CanonicalTypeLayout %t235)
+  store { %CanonicalTypeLayout*, i64 }* %t236, { %CanonicalTypeLayout*, i64 }** %l0
+  %t237 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s238 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.238, i32 0, i32 0
+  %t239 = insertvalue %CanonicalTypeLayout undef, i8* %s238, 0
+  %t240 = sitofp i64 8 to double
+  %t241 = insertvalue %CanonicalTypeLayout %t239, double %t240, 1
+  %t242 = sitofp i64 8 to double
+  %t243 = insertvalue %CanonicalTypeLayout %t241, double %t242, 2
+  %t244 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t237, %CanonicalTypeLayout %t243)
+  store { %CanonicalTypeLayout*, i64 }* %t244, { %CanonicalTypeLayout*, i64 }** %l0
+  %t245 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s246 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.246, i32 0, i32 0
+  %t247 = insertvalue %CanonicalTypeLayout undef, i8* %s246, 0
+  %t248 = sitofp i64 8 to double
+  %t249 = insertvalue %CanonicalTypeLayout %t247, double %t248, 1
+  %t250 = sitofp i64 8 to double
+  %t251 = insertvalue %CanonicalTypeLayout %t249, double %t250, 2
+  %t252 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t245, %CanonicalTypeLayout %t251)
+  store { %CanonicalTypeLayout*, i64 }* %t252, { %CanonicalTypeLayout*, i64 }** %l0
+  %t253 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s254 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.254, i32 0, i32 0
+  %t255 = insertvalue %CanonicalTypeLayout undef, i8* %s254, 0
+  %t256 = sitofp i64 8 to double
+  %t257 = insertvalue %CanonicalTypeLayout %t255, double %t256, 1
+  %t258 = sitofp i64 8 to double
+  %t259 = insertvalue %CanonicalTypeLayout %t257, double %t258, 2
+  %t260 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t253, %CanonicalTypeLayout %t259)
+  store { %CanonicalTypeLayout*, i64 }* %t260, { %CanonicalTypeLayout*, i64 }** %l0
+  %t261 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  %s262 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.262, i32 0, i32 0
+  %t263 = insertvalue %CanonicalTypeLayout undef, i8* %s262, 0
+  %t264 = sitofp i64 8 to double
+  %t265 = insertvalue %CanonicalTypeLayout %t263, double %t264, 1
+  %t266 = sitofp i64 8 to double
+  %t267 = insertvalue %CanonicalTypeLayout %t265, double %t266, 2
+  %t268 = call { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }* %t261, %CanonicalTypeLayout %t267)
+  store { %CanonicalTypeLayout*, i64 }* %t268, { %CanonicalTypeLayout*, i64 }** %l0
+  %t269 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
+  ret { %CanonicalTypeLayout*, i64 }* %t269
 }
 
 define double @align_to(double %value, double %alignment) {

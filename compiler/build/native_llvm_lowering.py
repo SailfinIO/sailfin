@@ -4322,6 +4322,29 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     borrow_parse = parse_borrow_expression(stripped)
     if borrow_parse.recognized:
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines)
+    if len(stripped) > 0:
+        first_ch = stripped[0]
+        if first_ch == "!":
+            operand_text = trim_text(substring(stripped, 1, len(stripped)))
+            if len(operand_text) > 0:
+                lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context)
+                diagnostics = lowered_operand.diagnostics
+                current_lines = lowered_operand.lines
+                current_temp = lowered_operand.temp_index
+                if lowered_operand.operand != None:
+                    operand = lowered_operand.operand
+                    coerced = coerce_operand_to_type(operand, "i1", current_temp, current_lines)
+                    diagnostics = (diagnostics) + (coerced.diagnostics)
+                    current_lines = coerced.lines
+                    current_temp = coerced.temp_index
+                    if coerced.operand != None:
+                        bool_operand = coerced.operand
+                        result_temp = format_temp_name(current_temp)
+                        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1")
+                        current_temp += 1
+                        result_operand = LLVMOperand(llvm_type="i1", value=result_temp)
+                        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=lowered_operand.string_constants)
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=lowered_operand.string_constants)
     logical = find_logical_operator(stripped)
     if logical.success:
         if logical.symbol == "&&":
@@ -4386,6 +4409,9 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         if matches_case_insensitive(literal_candidate, "true"):
             value = "1"
         operand = LLVMOperand(llvm_type="i1", value=value)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
+    if is_null_literal(literal_candidate):
+        operand = LLVMOperand(llvm_type="i8*", value="null")
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
     if is_integer_literal(literal_candidate):
         operand = LLVMOperand(llvm_type="i64", value=literal_candidate)
@@ -6273,26 +6299,46 @@ def split_call_arguments(text):
         return []
     entries = []
     current = ""
-    depth = 0
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
     index = 0
     while True:
         if index >= len(text):
             break
         ch = text[index]
         if ch == "(":
-            depth += 1
+            paren_depth += 1
             current = current + ch
         else:
             if ch == ")":
-                if depth > 0:
-                    depth -= 1
+                if paren_depth > 0:
+                    paren_depth -= 1
                 current = current + ch
             else:
-                if ch == ","  and  depth == 0:
-                    entries = append_string(entries, trim_text(current))
-                    current = ""
-                else:
+                if ch == "[":
+                    bracket_depth += 1
                     current = current + ch
+                else:
+                    if ch == "]":
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                        current = current + ch
+                    else:
+                        if ch == "{":
+                            brace_depth += 1
+                            current = current + ch
+                        else:
+                            if ch == "}":
+                                if brace_depth > 0:
+                                    brace_depth -= 1
+                                current = current + ch
+                            else:
+                                if ch == ","  and  paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
+                                    entries = append_string(entries, trim_text(current))
+                                    current = ""
+                                else:
+                                    current = current + ch
         index += 1
     entries = append_string(entries, trim_text(current))
     return entries
@@ -6930,6 +6976,12 @@ def is_boolean_literal(text):
     if matches_case_insensitive(trimmed, "true"):
         return True
     if matches_case_insensitive(trimmed, "false"):
+        return True
+    return False
+
+def is_null_literal(text):
+    trimmed = trim_text(text)
+    if matches_case_insensitive(trimmed, "null"):
         return True
     return False
 

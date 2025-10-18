@@ -16,8 +16,8 @@ declare noalias i8* @malloc(i64)
 @.str.11 = private unnamed_addr constant [2 x i8] c"\0D\00"
 @.str.0 = private unnamed_addr constant [21 x i8] c" is missing effect '\00"
 @.str.3 = private unnamed_addr constant [2 x i8] c"'\00"
-@.str.6 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
-@.str.9 = private unnamed_addr constant [61 x i8] c"] to the signature or accept the CLI fix prompt when offered\00"
+@.str.12 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
+@.str.15 = private unnamed_addr constant [61 x i8] c"] to the signature or accept the CLI fix prompt when offered\00"
 
 define %TypecheckResult @typecheck_program(i8* %program) {
 entry:
@@ -1149,15 +1149,26 @@ entry:
   %s3 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.3, i32 0, i32 0
   %t4 = add i8* %t2, %s3
   store i8* %t4, i8** %l0
-  %t5 = load i8*, i8** %l0
-  %s6 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.6, i32 0, i32 0
-  %t7 = add i8* %t5, %s6
-  %t8 = add i8* %t7, %effect
-  %s9 = getelementptr inbounds [61 x i8], [61 x i8]* @.str.9, i32 0, i32 0
-  %t10 = add i8* %t8, %s9
+  %t5 = icmp ne i8* %requirement, null
+  %t6 = load i8*, i8** %l0
+  br i1 %t5, label %then0, label %merge1
+then0:
+  %t7 = load i8*, i8** %l0
+  %s8 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.8, i32 0, i32 0
+  %t9 = add i8* %t7, %s8
+  br label %merge1
+merge1:
+  %t10 = phi i8* [ null, %then0 ], [ %t6, %entry ]
   store i8* %t10, i8** %l0
   %t11 = load i8*, i8** %l0
-  ret i8* %t11
+  %s12 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.12, i32 0, i32 0
+  %t13 = add i8* %t11, %s12
+  %t14 = add i8* %t13, %effect
+  %s15 = getelementptr inbounds [61 x i8], [61 x i8]* @.str.15, i32 0, i32 0
+  %t16 = add i8* %t14, %s15
+  store i8* %t16, i8** %l0
+  %t17 = load i8*, i8** %l0
+  ret i8* %t17
 }
 
 define i1 @contains_string({ i8**, i64 }* %items, i8* %candidate) {
@@ -1271,6 +1282,19 @@ entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %t0 = call { %SymbolEntry*, i64 }* @clone_bindings({ %SymbolEntry*, i64 }* %symbols)
   store { %SymbolEntry*, i64 }* %t0, { %SymbolEntry*, i64 }** %l0
+  %t1 = insertvalue %SymbolEntry undef, i8* %name, 0
+  %t2 = insertvalue %SymbolEntry %t1, i8* %kind, 1
+  %t3 = insertvalue %SymbolEntry %t2, i8* %span, 2
+  %t4 = alloca [1 x %SymbolEntry]
+  %t5 = getelementptr [1 x %SymbolEntry], [1 x %SymbolEntry]* %t4, i32 0, i32 0
+  %t6 = getelementptr %SymbolEntry, %SymbolEntry* %t5, i64 0
+  store %SymbolEntry %t3, %SymbolEntry* %t6
+  %t7 = alloca { %SymbolEntry*, i64 }
+  %t8 = getelementptr { %SymbolEntry*, i64 }, { %SymbolEntry*, i64 }* %t7, i32 0, i32 0
+  store %SymbolEntry* %t5, %SymbolEntry** %t8
+  %t9 = getelementptr { %SymbolEntry*, i64 }, { %SymbolEntry*, i64 }* %t7, i32 0, i32 1
+  store i64 1, i64* %t9
+  %t10 = call double @updatedconcat({ %SymbolEntry*, i64 }* %t7)
   ret { %SymbolEntry*, i64 }* null
 }
 

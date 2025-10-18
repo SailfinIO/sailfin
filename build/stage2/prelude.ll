@@ -184,50 +184,70 @@ entry:
   %l2 = alloca i64
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
+  %t0 = icmp eq i8* %definition, null
+  br i1 %t0, label %then0, label %merge1
+then0:
+  ret { %EnumField*, i64 }* %provided
+merge1:
   store double 0.0, double* %l0
-  %t0 = load double, double* %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
+  %t1 = load double, double* %l0
+  %t2 = alloca [0 x double]
+  %t3 = getelementptr [0 x double], [0 x double]* %t2, i32 0, i32 0
+  %t4 = alloca { double*, i64 }
+  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 0
+  store double* %t3, double** %t5
+  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 1
+  store i64 0, i64* %t6
   store { %EnumField*, i64 }* null, { %EnumField*, i64 }** %l1
   store i64 0, i64* %l2
-  %t6 = load double, double* %l0
-  %t7 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t8 = load i64, i64* %l2
-  br label %loop.header0
-loop.header0:
-  %t20 = phi { %EnumField*, i64 }* [ %t7, %entry ], [ %t18, %loop.latch2 ]
-  %t21 = phi i64 [ %t8, %entry ], [ %t19, %loop.latch2 ]
-  store { %EnumField*, i64 }* %t20, { %EnumField*, i64 }** %l1
-  store i64 %t21, i64* %l2
-  br label %loop.body1
-loop.body1:
+  %t7 = load double, double* %l0
+  %t8 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
   %t9 = load i64, i64* %l2
-  %t10 = load double, double* %l0
+  br label %loop.header2
+loop.header2:
+  %t32 = phi { %EnumField*, i64 }* [ %t8, %entry ], [ %t30, %loop.latch4 ]
+  %t33 = phi i64 [ %t9, %entry ], [ %t31, %loop.latch4 ]
+  store { %EnumField*, i64 }* %t32, { %EnumField*, i64 }** %l1
+  store i64 %t33, i64* %l2
+  br label %loop.body3
+loop.body3:
+  %t10 = load i64, i64* %l2
   %t11 = load double, double* %l0
-  %t12 = load i64, i64* %l2
+  %t12 = load double, double* %l0
+  %t13 = load i64, i64* %l2
   store double 0.0, double* %l3
-  %t13 = load double, double* %l3
-  %t14 = call double @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* null)
-  store double %t14, double* %l4
-  store double 0.0, double* %l5
-  %t15 = load double, double* %l4
-  %t16 = load i64, i64* %l2
-  %t17 = add i64 %t16, 1
-  store i64 %t17, i64* %l2
-  br label %loop.latch2
-loop.latch2:
-  %t18 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t19 = load i64, i64* %l2
-  br label %loop.header0
-afterloop3:
-  %t22 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  ret { %EnumField*, i64 }* %t22
+  %t14 = load double, double* %l3
+  %t15 = call double @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* null)
+  store double %t15, double* %l4
+  store i8* null, i8** %l5
+  %t16 = load double, double* %l4
+  %t17 = load double, double* %l3
+  %t18 = insertvalue %EnumField undef, i8* null, 0
+  %t19 = load i8*, i8** %l5
+  %t20 = insertvalue %EnumField %t18, i8* %t19, 1
+  %t21 = alloca [1 x %EnumField]
+  %t22 = getelementptr [1 x %EnumField], [1 x %EnumField]* %t21, i32 0, i32 0
+  %t23 = getelementptr %EnumField, %EnumField* %t22, i64 0
+  store %EnumField %t20, %EnumField* %t23
+  %t24 = alloca { %EnumField*, i64 }
+  %t25 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t24, i32 0, i32 0
+  store %EnumField* %t22, %EnumField** %t25
+  %t26 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t24, i32 0, i32 1
+  store i64 1, i64* %t26
+  %t27 = call double @normalizedconcat({ %EnumField*, i64 }* %t24)
+  store { %EnumField*, i64 }* null, { %EnumField*, i64 }** %l1
+  %t28 = load i64, i64* %l2
+  %t29 = add i64 %t28, 1
+  store i64 %t29, i64* %l2
+  br label %loop.latch4
+loop.latch4:
+  %t30 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t31 = load i64, i64* %l2
+  br label %loop.header2
+afterloop5:
+  %t34 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  ret { %EnumField*, i64 }* %t34
 }
 
 define %EnumInstance @enum_instantiate(%EnumType %enum_type, i8* %variant_name, { %EnumField*, i64 }* %provided) {
@@ -279,7 +299,7 @@ loop.latch2:
   %t14 = load i64, i64* %l0
   br label %loop.header0
 afterloop3:
-  ret void zeroinitializer
+  ret void
 }
 
 define %StructField @struct_field(i8* %name, double %value) {
@@ -433,13 +453,15 @@ entry:
 define %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %descriptors) {
 entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
-  ret %TypeDescriptor zeroinitializer
+  %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
+  ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_intersection({ %TypeDescriptor*, i64 }* %descriptors) {
 entry:
   %s0 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.0, i32 0, i32 0
-  ret %TypeDescriptor zeroinitializer
+  %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
+  ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_array(%TypeDescriptor %inner) {
@@ -454,7 +476,8 @@ entry:
   store %TypeDescriptor* %t2, %TypeDescriptor** %t5
   %t6 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t4, i32 0, i32 1
   store i64 1, i64* %t6
-  ret %TypeDescriptor zeroinitializer
+  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t4)
+  ret %TypeDescriptor %t7
 }
 
 define %TypeDescriptor @type_descriptor_function() {
@@ -467,7 +490,8 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  ret %TypeDescriptor zeroinitializer
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* null)
+  ret %TypeDescriptor %t6
 }
 
 define %TypeDescriptor @type_descriptor_named(i8* %name) {
@@ -494,7 +518,8 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  ret %TypeDescriptor zeroinitializer
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* null)
+  ret %TypeDescriptor %t6
 }
 
 define i8* @descriptor_trim(i8* %value) {
@@ -746,8 +771,8 @@ entry:
   %t1 = load i8*, i8** %l0
   br label %loop.header0
 loop.header0:
-  %t27 = phi i8* [ %t1, %entry ], [ %t26, %loop.latch2 ]
-  store i8* %t27, i8** %l0
+  %t37 = phi i8* [ %t1, %entry ], [ %t36, %loop.latch2 ]
+  store i8* %t37, i8** %l0
   br label %loop.body1
 loop.body1:
   %t2 = load i8*, i8** %l0
@@ -785,11 +810,37 @@ loop.latch6:
   %t21 = load i64, i64* %l2
   br label %loop.header4
 afterloop7:
-  %t24 = load i8*, i8** %l0
-  %t25 = load i8*, i8** %l0
+  %t24 = load i1, i1* %l3
+  br label %logical_or_entry_23
+
+logical_or_entry_23:
+  br i1 %t24, label %logical_or_merge_23, label %logical_or_right_23
+
+logical_or_right_23:
+  %t25 = load i64, i64* %l1
+  %t26 = icmp ne i64 %t25, 0
+  br label %logical_or_right_end_23
+
+logical_or_right_end_23:
+  br label %logical_or_merge_23
+
+logical_or_merge_23:
+  %t27 = phi i1 [ true, %logical_or_entry_23 ], [ %t26, %logical_or_right_end_23 ]
+  %t28 = xor i1 %t27, 1
+  %t29 = load i8*, i8** %l0
+  %t30 = load i64, i64* %l1
+  %t31 = load i64, i64* %l2
+  %t32 = load i1, i1* %l3
+  br i1 %t28, label %then8, label %merge9
+then8:
+  %t33 = load i8*, i8** %l0
+  ret i8* %t33
+merge9:
+  %t34 = load i8*, i8** %l0
+  %t35 = load i8*, i8** %l0
   br label %loop.latch2
 loop.latch2:
-  %t26 = load i8*, i8** %l0
+  %t36 = load i8*, i8** %l0
   br label %loop.header0
 afterloop3:
   ret i8* null
@@ -1214,165 +1265,176 @@ entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %t3 = extractvalue %TypeDescriptor %descriptor, 1
-  %t4 = extractvalue %TypeDescriptor %descriptor, 1
-  %t5 = call i1 @check_type_primitive(double %value, i8* %t4)
-  ret i1 %t5
-merge1:
-  %t6 = extractvalue %TypeDescriptor %descriptor, 0
-  %s7 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.7, i32 0, i32 0
-  %t8 = icmp eq i8* %t6, %s7
-  br i1 %t8, label %then2, label %merge3
+  %t4 = icmp eq i8* %t3, null
+  br i1 %t4, label %then2, label %merge3
 then2:
-  store i64 0, i64* %l0
-  %t9 = load i64, i64* %l0
-  br label %loop.header4
-loop.header4:
-  %t25 = phi i64 [ %t9, %then2 ], [ %t24, %loop.latch6 ]
-  store i64 %t25, i64* %l0
-  br label %loop.body5
-loop.body5:
-  %t10 = load i64, i64* %l0
-  %t11 = extractvalue %TypeDescriptor %descriptor, 2
-  %t12 = extractvalue %TypeDescriptor %descriptor, 2
-  %t13 = load i64, i64* %l0
-  %t14 = load { i8**, i64 }, { i8**, i64 }* %t12
-  %t15 = extractvalue { i8**, i64 } %t14, 0
-  %t16 = extractvalue { i8**, i64 } %t14, 1
-  %t17 = icmp uge i64 %t13, %t16
-  ; bounds check: %t17 (if true, out of bounds)
-  %t18 = getelementptr i8*, i8** %t15, i64 %t13
-  %t19 = load i8*, i8** %t18
-  %t20 = call i1 @check_type_descriptor(double %value, %TypeDescriptor zeroinitializer)
-  %t21 = load i64, i64* %l0
-  br i1 %t20, label %then8, label %merge9
-then8:
-  ret i1 1
-merge9:
-  %t22 = load i64, i64* %l0
-  %t23 = add i64 %t22, 1
-  store i64 %t23, i64* %l0
-  br label %loop.latch6
-loop.latch6:
-  %t24 = load i64, i64* %l0
-  br label %loop.header4
-afterloop7:
   ret i1 0
 merge3:
-  %t26 = extractvalue %TypeDescriptor %descriptor, 0
-  %s27 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.27, i32 0, i32 0
-  %t28 = icmp eq i8* %t26, %s27
-  br i1 %t28, label %then10, label %merge11
+  %t5 = extractvalue %TypeDescriptor %descriptor, 1
+  %t6 = call i1 @check_type_primitive(double %value, i8* %t5)
+  ret i1 %t6
+merge1:
+  %t7 = extractvalue %TypeDescriptor %descriptor, 0
+  %s8 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.8, i32 0, i32 0
+  %t9 = icmp eq i8* %t7, %s8
+  br i1 %t9, label %then4, label %merge5
+then4:
+  store i64 0, i64* %l0
+  %t10 = load i64, i64* %l0
+  br label %loop.header6
+loop.header6:
+  %t26 = phi i64 [ %t10, %then4 ], [ %t25, %loop.latch8 ]
+  store i64 %t26, i64* %l0
+  br label %loop.body7
+loop.body7:
+  %t11 = load i64, i64* %l0
+  %t12 = extractvalue %TypeDescriptor %descriptor, 2
+  %t13 = extractvalue %TypeDescriptor %descriptor, 2
+  %t14 = load i64, i64* %l0
+  %t15 = load { i8**, i64 }, { i8**, i64 }* %t13
+  %t16 = extractvalue { i8**, i64 } %t15, 0
+  %t17 = extractvalue { i8**, i64 } %t15, 1
+  %t18 = icmp uge i64 %t14, %t17
+  ; bounds check: %t18 (if true, out of bounds)
+  %t19 = getelementptr i8*, i8** %t16, i64 %t14
+  %t20 = load i8*, i8** %t19
+  %t21 = call i1 @check_type_descriptor(double %value, %TypeDescriptor zeroinitializer)
+  %t22 = load i64, i64* %l0
+  br i1 %t21, label %then10, label %merge11
 then10:
-  store i64 0, i64* %l1
-  %t29 = load i64, i64* %l1
-  br label %loop.header12
-loop.header12:
-  %t46 = phi i64 [ %t29, %then10 ], [ %t45, %loop.latch14 ]
-  store i64 %t46, i64* %l1
-  br label %loop.body13
-loop.body13:
-  %t30 = load i64, i64* %l1
-  %t31 = extractvalue %TypeDescriptor %descriptor, 2
-  %t32 = extractvalue %TypeDescriptor %descriptor, 2
-  %t33 = load i64, i64* %l1
-  %t34 = load { i8**, i64 }, { i8**, i64 }* %t32
-  %t35 = extractvalue { i8**, i64 } %t34, 0
-  %t36 = extractvalue { i8**, i64 } %t34, 1
-  %t37 = icmp uge i64 %t33, %t36
-  ; bounds check: %t37 (if true, out of bounds)
-  %t38 = getelementptr i8*, i8** %t35, i64 %t33
-  %t39 = load i8*, i8** %t38
-  %t40 = call double @check_type_descriptor(double %value, i8* %t39)
-  %t41 = fcmp one double %t40, 0.0
-  %t42 = load i64, i64* %l1
-  br i1 %t41, label %then16, label %merge17
-then16:
-  ret i1 0
-merge17:
-  %t43 = load i64, i64* %l1
-  %t44 = add i64 %t43, 1
-  store i64 %t44, i64* %l1
-  br label %loop.latch14
-loop.latch14:
-  %t45 = load i64, i64* %l1
-  br label %loop.header12
-afterloop15:
-  %t47 = extractvalue %TypeDescriptor %descriptor, 2
-  ret i1 false
-merge11:
-  %t48 = extractvalue %TypeDescriptor %descriptor, 0
-  %s49 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.49, i32 0, i32 0
-  %t50 = icmp eq i8* %t48, %s49
-  br i1 %t50, label %then18, label %merge19
-then18:
-  %t51 = extractvalue %TypeDescriptor %descriptor, 2
-  %t52 = call double @runtimeis_array(double %value)
-  %t53 = fcmp one double %t52, 0.0
-  br i1 %t53, label %then20, label %merge21
-then20:
-  ret i1 0
-merge21:
-  %t54 = extractvalue %TypeDescriptor %descriptor, 2
-  %t55 = load { i8**, i64 }, { i8**, i64 }* %t54
-  %t56 = extractvalue { i8**, i64 } %t55, 0
-  %t57 = extractvalue { i8**, i64 } %t55, 1
-  %t58 = icmp uge i64 0, %t57
-  ; bounds check: %t58 (if true, out of bounds)
-  %t59 = getelementptr i8*, i8** %t56, i64 0
-  %t60 = load i8*, i8** %t59
-  store i8* %t60, i8** %l2
-  store i64 0, i64* %l3
-  %t61 = load i8*, i8** %l2
-  %t62 = load i64, i64* %l3
-  br label %loop.header22
-loop.header22:
-  %t69 = phi i64 [ %t62, %then18 ], [ %t68, %loop.latch24 ]
-  store i64 %t69, i64* %l3
-  br label %loop.body23
-loop.body23:
-  %t63 = load i64, i64* %l3
-  %t64 = load i64, i64* %l3
-  %t65 = load i8*, i8** %l2
-  %t66 = load i64, i64* %l3
-  %t67 = add i64 %t66, 1
-  store i64 %t67, i64* %l3
-  br label %loop.latch24
-loop.latch24:
-  %t68 = load i64, i64* %l3
-  br label %loop.header22
-afterloop25:
   ret i1 1
-merge19:
-  %t70 = extractvalue %TypeDescriptor %descriptor, 0
-  %s71 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.71, i32 0, i32 0
-  %t72 = icmp eq i8* %t70, %s71
-  br i1 %t72, label %then26, label %merge27
-then26:
-  %t73 = call double @runtimeis_callable(double %value)
-  %t74 = fcmp one double %t73, 0.0
-  ret i1 %t74
-merge27:
-  %t75 = extractvalue %TypeDescriptor %descriptor, 0
-  %s76 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.76, i32 0, i32 0
-  %t77 = icmp eq i8* %t75, %s76
-  br i1 %t77, label %then28, label %merge29
-then28:
-  %t78 = extractvalue %TypeDescriptor %descriptor, 1
-  %t79 = extractvalue %TypeDescriptor %descriptor, 1
-  %t80 = call double @runtimeresolve_runtime_type(i8* %t79)
-  store double %t80, double* %l4
-  %t81 = load double, double* %l4
-  %t82 = call double @runtimeinstance_of(double %value, double %t81)
-  %t83 = fcmp one double %t82, 0.0
-  ret i1 %t83
-merge29:
-  %t84 = extractvalue %TypeDescriptor %descriptor, 0
-  %s85 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.85, i32 0, i32 0
-  %t86 = icmp eq i8* %t84, %s85
-  br i1 %t86, label %then30, label %merge31
-then30:
+merge11:
+  %t23 = load i64, i64* %l0
+  %t24 = add i64 %t23, 1
+  store i64 %t24, i64* %l0
+  br label %loop.latch8
+loop.latch8:
+  %t25 = load i64, i64* %l0
+  br label %loop.header6
+afterloop9:
   ret i1 0
+merge5:
+  %t27 = extractvalue %TypeDescriptor %descriptor, 0
+  %s28 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.28, i32 0, i32 0
+  %t29 = icmp eq i8* %t27, %s28
+  br i1 %t29, label %then12, label %merge13
+then12:
+  store i64 0, i64* %l1
+  %t30 = load i64, i64* %l1
+  br label %loop.header14
+loop.header14:
+  %t47 = phi i64 [ %t30, %then12 ], [ %t46, %loop.latch16 ]
+  store i64 %t47, i64* %l1
+  br label %loop.body15
+loop.body15:
+  %t31 = load i64, i64* %l1
+  %t32 = extractvalue %TypeDescriptor %descriptor, 2
+  %t33 = extractvalue %TypeDescriptor %descriptor, 2
+  %t34 = load i64, i64* %l1
+  %t35 = load { i8**, i64 }, { i8**, i64 }* %t33
+  %t36 = extractvalue { i8**, i64 } %t35, 0
+  %t37 = extractvalue { i8**, i64 } %t35, 1
+  %t38 = icmp uge i64 %t34, %t37
+  ; bounds check: %t38 (if true, out of bounds)
+  %t39 = getelementptr i8*, i8** %t36, i64 %t34
+  %t40 = load i8*, i8** %t39
+  %t41 = call i1 @check_type_descriptor(double %value, %TypeDescriptor zeroinitializer)
+  %t42 = xor i1 %t41, 1
+  %t43 = load i64, i64* %l1
+  br i1 %t42, label %then18, label %merge19
+then18:
+  ret i1 0
+merge19:
+  %t44 = load i64, i64* %l1
+  %t45 = add i64 %t44, 1
+  store i64 %t45, i64* %l1
+  br label %loop.latch16
+loop.latch16:
+  %t46 = load i64, i64* %l1
+  br label %loop.header14
+afterloop17:
+  %t48 = extractvalue %TypeDescriptor %descriptor, 2
+  ret i1 false
+merge13:
+  %t49 = extractvalue %TypeDescriptor %descriptor, 0
+  %s50 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.50, i32 0, i32 0
+  %t51 = icmp eq i8* %t49, %s50
+  br i1 %t51, label %then20, label %merge21
+then20:
+  %t52 = extractvalue %TypeDescriptor %descriptor, 2
+  %t53 = call double @runtimeis_array(double %value)
+  %t54 = fcmp one double %t53, 0.0
+  %t55 = xor i1 %t54, 1
+  br i1 %t55, label %then22, label %merge23
+then22:
+  ret i1 0
+merge23:
+  %t56 = extractvalue %TypeDescriptor %descriptor, 2
+  %t57 = load { i8**, i64 }, { i8**, i64 }* %t56
+  %t58 = extractvalue { i8**, i64 } %t57, 0
+  %t59 = extractvalue { i8**, i64 } %t57, 1
+  %t60 = icmp uge i64 0, %t59
+  ; bounds check: %t60 (if true, out of bounds)
+  %t61 = getelementptr i8*, i8** %t58, i64 0
+  %t62 = load i8*, i8** %t61
+  store i8* %t62, i8** %l2
+  store i64 0, i64* %l3
+  %t63 = load i8*, i8** %l2
+  %t64 = load i64, i64* %l3
+  br label %loop.header24
+loop.header24:
+  %t71 = phi i64 [ %t64, %then20 ], [ %t70, %loop.latch26 ]
+  store i64 %t71, i64* %l3
+  br label %loop.body25
+loop.body25:
+  %t65 = load i64, i64* %l3
+  %t66 = load i64, i64* %l3
+  %t67 = load i8*, i8** %l2
+  %t68 = load i64, i64* %l3
+  %t69 = add i64 %t68, 1
+  store i64 %t69, i64* %l3
+  br label %loop.latch26
+loop.latch26:
+  %t70 = load i64, i64* %l3
+  br label %loop.header24
+afterloop27:
+  ret i1 1
+merge21:
+  %t72 = extractvalue %TypeDescriptor %descriptor, 0
+  %s73 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.73, i32 0, i32 0
+  %t74 = icmp eq i8* %t72, %s73
+  br i1 %t74, label %then28, label %merge29
+then28:
+  %t75 = call double @runtimeis_callable(double %value)
+  %t76 = fcmp one double %t75, 0.0
+  ret i1 %t76
+merge29:
+  %t77 = extractvalue %TypeDescriptor %descriptor, 0
+  %s78 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.78, i32 0, i32 0
+  %t79 = icmp eq i8* %t77, %s78
+  br i1 %t79, label %then30, label %merge31
+then30:
+  %t80 = extractvalue %TypeDescriptor %descriptor, 1
+  %t81 = icmp eq i8* %t80, null
+  br i1 %t81, label %then32, label %merge33
+then32:
+  ret i1 0
+merge33:
+  %t82 = extractvalue %TypeDescriptor %descriptor, 1
+  %t83 = call double @runtimeresolve_runtime_type(i8* %t82)
+  store double %t83, double* %l4
+  %t84 = load double, double* %l4
+  %t85 = call double @runtimeinstance_of(double %value, double %t84)
+  %t86 = fcmp one double %t85, 0.0
+  ret i1 %t86
 merge31:
+  %t87 = extractvalue %TypeDescriptor %descriptor, 0
+  %s88 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.88, i32 0, i32 0
+  %t89 = icmp eq i8* %t87, %s88
+  br i1 %t89, label %then34, label %merge35
+then34:
+  ret i1 0
+merge35:
   ret i1 0
 }
 
@@ -2211,20 +2273,20 @@ merge1:
   %t26 = load i64, i64* %l6
   br label %loop.header2
 loop.header2:
-  %t218 = phi { i8**, i64 }* [ %t20, %entry ], [ %t211, %loop.latch4 ]
-  %t219 = phi i8 [ %t21, %entry ], [ %t212, %loop.latch4 ]
-  %t220 = phi i64 [ %t25, %entry ], [ %t213, %loop.latch4 ]
-  %t221 = phi double [ %t22, %entry ], [ %t214, %loop.latch4 ]
-  %t222 = phi double [ %t23, %entry ], [ %t215, %loop.latch4 ]
-  %t223 = phi i1 [ %t24, %entry ], [ %t216, %loop.latch4 ]
-  %t224 = phi i64 [ %t26, %entry ], [ %t217, %loop.latch4 ]
-  store { i8**, i64 }* %t218, { i8**, i64 }** %l0
-  store i8 %t219, i8* %l1
-  store i64 %t220, i64* %l5
-  store double %t221, double* %l2
-  store double %t222, double* %l3
-  store i1 %t223, i1* %l4
-  store i64 %t224, i64* %l6
+  %t255 = phi { i8**, i64 }* [ %t20, %entry ], [ %t248, %loop.latch4 ]
+  %t256 = phi i8 [ %t21, %entry ], [ %t249, %loop.latch4 ]
+  %t257 = phi i64 [ %t25, %entry ], [ %t250, %loop.latch4 ]
+  %t258 = phi double [ %t22, %entry ], [ %t251, %loop.latch4 ]
+  %t259 = phi double [ %t23, %entry ], [ %t252, %loop.latch4 ]
+  %t260 = phi i1 [ %t24, %entry ], [ %t253, %loop.latch4 ]
+  %t261 = phi i64 [ %t26, %entry ], [ %t254, %loop.latch4 ]
+  store { i8**, i64 }* %t255, { i8**, i64 }** %l0
+  store i8 %t256, i8* %l1
+  store i64 %t257, i64* %l5
+  store double %t258, double* %l2
+  store double %t259, double* %l3
+  store i1 %t260, i1* %l4
+  store i64 %t261, i64* %l6
   br label %loop.body3
 loop.body3:
   %t27 = load i64, i64* %l6
@@ -2458,101 +2520,163 @@ then24:
   store i64 %t168, i64* %l5
   br label %merge26
 else25:
+  %t170 = load double, double* %l9
+  %t171 = fcmp one double %t170, 0.0
+  br label %logical_and_entry_169
+
+logical_and_entry_169:
+  br i1 %t171, label %logical_and_right_169, label %logical_and_merge_169
+
+logical_and_right_169:
+  %t172 = load i1, i1* %l10
+  %t173 = xor i1 %t172, 1
+  br label %logical_and_right_end_169
+
+logical_and_right_end_169:
+  br label %logical_and_merge_169
+
+logical_and_merge_169:
+  %t174 = phi i1 [ false, %logical_and_entry_169 ], [ %t173, %logical_and_right_end_169 ]
+  %t175 = xor i1 %t174, 1
+  %t176 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t177 = load i8, i8* %l1
+  %t178 = load double, double* %l2
+  %t179 = load double, double* %l3
+  %t180 = load i1, i1* %l4
+  %t181 = load i64, i64* %l5
+  %t182 = load i64, i64* %l6
+  %t183 = load i8, i8* %l7
+  %t184 = load double, double* %l8
+  %t185 = load double, double* %l9
+  %t186 = load i1, i1* %l10
+  %t187 = load i1, i1* %l11
+  %t188 = load i1, i1* %l12
+  br i1 %t175, label %then27, label %merge28
+then27:
+  store i64 0, i64* %l5
+  br label %merge28
+merge28:
+  %t189 = phi i64 [ 0, %then27 ], [ %t181, %else25 ]
+  store i64 %t189, i64* %l5
   br label %merge26
 merge26:
-  %t170 = phi i64 [ %t168, %then24 ], [ %t159, %else25 ]
-  store i64 %t170, i64* %l5
+  %t190 = phi i64 [ %t168, %then24 ], [ 0, %else25 ]
+  store i64 %t190, i64* %l5
   br label %merge20
 merge20:
-  %t171 = phi { i8**, i64 }* [ null, %then18 ], [ %t113, %else19 ]
-  %t172 = phi i8 [ %t134, %then18 ], [ %t152, %else19 ]
-  %t173 = phi i64 [ 1, %then18 ], [ %t168, %else19 ]
-  store { i8**, i64 }* %t171, { i8**, i64 }** %l0
-  store i8 %t172, i8* %l1
-  store i64 %t173, i64* %l5
-  %t174 = load double, double* %l8
-  store double %t174, double* %l2
-  %t175 = load double, double* %l9
-  store double %t175, double* %l3
-  %t176 = load double, double* %l9
-  %t177 = fcmp one double %t176, 0.0
-  %t178 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t179 = load i8, i8* %l1
-  %t180 = load double, double* %l2
-  %t181 = load double, double* %l3
-  %t182 = load i1, i1* %l4
-  %t183 = load i64, i64* %l5
-  %t184 = load i64, i64* %l6
-  %t185 = load i8, i8* %l7
-  %t186 = load double, double* %l8
-  %t187 = load double, double* %l9
-  %t188 = load i1, i1* %l10
-  %t189 = load i1, i1* %l11
-  %t190 = load i1, i1* %l12
-  br i1 %t177, label %then27, label %else28
-then27:
+  %t191 = phi { i8**, i64 }* [ null, %then18 ], [ %t113, %else19 ]
+  %t192 = phi i8 [ %t134, %then18 ], [ %t152, %else19 ]
+  %t193 = phi i64 [ 1, %then18 ], [ %t168, %else19 ]
+  store { i8**, i64 }* %t191, { i8**, i64 }** %l0
+  store i8 %t192, i8* %l1
+  store i64 %t193, i64* %l5
+  %t194 = load double, double* %l8
+  store double %t194, double* %l2
+  %t195 = load double, double* %l9
+  store double %t195, double* %l3
+  %t196 = load double, double* %l9
+  %t197 = fcmp one double %t196, 0.0
+  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t199 = load i8, i8* %l1
+  %t200 = load double, double* %l2
+  %t201 = load double, double* %l3
+  %t202 = load i1, i1* %l4
+  %t203 = load i64, i64* %l5
+  %t204 = load i64, i64* %l6
+  %t205 = load i8, i8* %l7
+  %t206 = load double, double* %l8
+  %t207 = load double, double* %l9
+  %t208 = load i1, i1* %l10
+  %t209 = load i1, i1* %l11
+  %t210 = load i1, i1* %l12
+  br i1 %t197, label %then29, label %else30
+then29:
   store i1 0, i1* %l4
   store i64 0, i64* %l5
-  br label %merge29
-else28:
-  %t191 = load i1, i1* %l10
-  %t192 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t193 = load i8, i8* %l1
-  %t194 = load double, double* %l2
-  %t195 = load double, double* %l3
-  %t196 = load i1, i1* %l4
-  %t197 = load i64, i64* %l5
-  %t198 = load i64, i64* %l6
-  %t199 = load i8, i8* %l7
-  %t200 = load double, double* %l8
-  %t201 = load double, double* %l9
-  %t202 = load i1, i1* %l10
-  %t203 = load i1, i1* %l11
-  %t204 = load i1, i1* %l12
-  br i1 %t191, label %then30, label %else31
-then30:
-  br label %merge32
-else31:
-  %t205 = load i1, i1* %l11
-  store i1 %t205, i1* %l4
-  br label %merge32
-merge32:
-  %t206 = phi i1 [ %t196, %then30 ], [ %t205, %else31 ]
-  store i1 %t206, i1* %l4
-  br label %merge29
-merge29:
-  %t207 = phi i1 [ 0, %then27 ], [ %t205, %else28 ]
-  %t208 = phi i64 [ 0, %then27 ], [ %t183, %else28 ]
-  store i1 %t207, i1* %l4
-  store i64 %t208, i64* %l5
-  %t209 = load i64, i64* %l6
-  %t210 = add i64 %t209, 1
-  store i64 %t210, i64* %l6
-  br label %loop.latch4
-loop.latch4:
-  %t211 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t212 = load i8, i8* %l1
-  %t213 = load i64, i64* %l5
+  br label %merge31
+else30:
+  %t211 = load i1, i1* %l10
+  %t212 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t213 = load i8, i8* %l1
   %t214 = load double, double* %l2
   %t215 = load double, double* %l3
   %t216 = load i1, i1* %l4
-  %t217 = load i64, i64* %l6
+  %t217 = load i64, i64* %l5
+  %t218 = load i64, i64* %l6
+  %t219 = load i8, i8* %l7
+  %t220 = load double, double* %l8
+  %t221 = load double, double* %l9
+  %t222 = load i1, i1* %l10
+  %t223 = load i1, i1* %l11
+  %t224 = load i1, i1* %l12
+  br i1 %t211, label %then32, label %else33
+then32:
+  br label %merge34
+else33:
+  %t225 = load i1, i1* %l11
+  store i1 %t225, i1* %l4
+  %t226 = load i1, i1* %l11
+  %t227 = xor i1 %t226, 1
+  %t228 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t229 = load i8, i8* %l1
+  %t230 = load double, double* %l2
+  %t231 = load double, double* %l3
+  %t232 = load i1, i1* %l4
+  %t233 = load i64, i64* %l5
+  %t234 = load i64, i64* %l6
+  %t235 = load i8, i8* %l7
+  %t236 = load double, double* %l8
+  %t237 = load double, double* %l9
+  %t238 = load i1, i1* %l10
+  %t239 = load i1, i1* %l11
+  %t240 = load i1, i1* %l12
+  br i1 %t227, label %then35, label %merge36
+then35:
+  store i64 0, i64* %l5
+  br label %merge36
+merge36:
+  %t241 = phi i64 [ 0, %then35 ], [ %t233, %else33 ]
+  store i64 %t241, i64* %l5
+  br label %merge34
+merge34:
+  %t242 = phi i1 [ %t216, %then32 ], [ %t225, %else33 ]
+  %t243 = phi i64 [ %t217, %then32 ], [ 0, %else33 ]
+  store i1 %t242, i1* %l4
+  store i64 %t243, i64* %l5
+  br label %merge31
+merge31:
+  %t244 = phi i1 [ 0, %then29 ], [ %t225, %else30 ]
+  %t245 = phi i64 [ 0, %then29 ], [ 0, %else30 ]
+  store i1 %t244, i1* %l4
+  store i64 %t245, i64* %l5
+  %t246 = load i64, i64* %l6
+  %t247 = add i64 %t246, 1
+  store i64 %t247, i64* %l6
+  br label %loop.latch4
+loop.latch4:
+  %t248 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t249 = load i8, i8* %l1
+  %t250 = load i64, i64* %l5
+  %t251 = load double, double* %l2
+  %t252 = load double, double* %l3
+  %t253 = load i1, i1* %l4
+  %t254 = load i64, i64* %l6
   br label %loop.header2
 afterloop5:
-  %t225 = load i8, i8* %l1
-  %t226 = alloca [1 x i8]
-  %t227 = getelementptr [1 x i8], [1 x i8]* %t226, i32 0, i32 0
-  %t228 = getelementptr i8, i8* %t227, i64 0
-  store i8 %t225, i8* %t228
-  %t229 = alloca { i8*, i64 }
-  %t230 = getelementptr { i8*, i64 }, { i8*, i64 }* %t229, i32 0, i32 0
-  store i8* %t227, i8** %t230
-  %t231 = getelementptr { i8*, i64 }, { i8*, i64 }* %t229, i32 0, i32 1
-  store i64 1, i64* %t231
-  %t232 = call double @clustersconcat({ i8*, i64 }* %t229)
+  %t262 = load i8, i8* %l1
+  %t263 = alloca [1 x i8]
+  %t264 = getelementptr [1 x i8], [1 x i8]* %t263, i32 0, i32 0
+  %t265 = getelementptr i8, i8* %t264, i64 0
+  store i8 %t262, i8* %t265
+  %t266 = alloca { i8*, i64 }
+  %t267 = getelementptr { i8*, i64 }, { i8*, i64 }* %t266, i32 0, i32 0
+  store i8* %t264, i8** %t267
+  %t268 = getelementptr { i8*, i64 }, { i8*, i64 }* %t266, i32 0, i32 1
+  store i64 1, i64* %t268
+  %t269 = call double @clustersconcat({ i8*, i64 }* %t266)
   store { i8**, i64 }* null, { i8**, i64 }** %l0
-  %t233 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t233
+  %t270 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t270
 }
 
 define double @grapheme_count(i8* %text) {

@@ -6558,6 +6558,37 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
+    // Check for unary prefix operators (!, -, +)
+    if stripped.length > 0 {
+        let first_ch = stripped[0];
+        if first_ch == "!" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context);
+                let mut diagnostics = lowered_operand.diagnostics;
+                let mut current_lines = lowered_operand.lines;
+                let mut current_temp = lowered_operand.temp_index;
+                if lowered_operand.operand != null {
+                    let operand = lowered_operand.operand;
+                    // Convert operand to i1 if needed
+                    let coerced = coerce_operand_to_type(operand, "i1", current_temp, current_lines);
+                    diagnostics = diagnostics.concat(coerced.diagnostics);
+                    current_lines = coerced.lines;
+                    current_temp = coerced.temp_index;
+                    if coerced.operand != null {
+                        let bool_operand = coerced.operand;
+                        let result_temp = format_temp_name(current_temp);
+                        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1");
+                        current_temp += 1;
+                        let result_operand = LLVMOperand { llvm_type: "i1", value: result_temp };
+                        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: lowered_operand.string_constants };
+                    }
+                }
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: lowered_operand.string_constants };
+            }
+        }
+    }
+
     let logical = find_logical_operator(stripped);
     if logical.success {
         if logical.symbol == "&&" {
@@ -6660,6 +6691,13 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             value = "1";
         }
         let operand = LLVMOperand { llvm_type: "i1", value: value };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    if is_null_literal(literal_candidate) {
+        // Represent null as a null pointer (i8* null)
+        // This allows null to be used in optional fields and pointer contexts
+        let operand = LLVMOperand { llvm_type: "i8*", value: "null" };
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
     }
 
@@ -9322,7 +9360,9 @@ fn split_call_arguments(text -> string) -> string[] {
     }
     let mut entries -> string[] = [];
     let mut current -> string = "";
-    let mut depth -> number = 0;
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= text.length {
@@ -9330,14 +9370,30 @@ fn split_call_arguments(text -> string) -> string[] {
         }
         let ch = text[index];
         if ch == "(" {
-            depth += 1;
+            paren_depth += 1;
             current = current + ch;
         } else if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
+            if paren_depth > 0 {
+                paren_depth -= 1;
             }
             current = current + ch;
-        } else if ch == "," && depth == 0 {
+        } else if ch == "[" {
+            bracket_depth += 1;
+            current = current + ch;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "{" {
+            brace_depth += 1;
+            current = current + ch;
+        } else if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
             entries = append_string(entries, trim_text(current));
             current = "";
         } else {
@@ -10219,6 +10275,14 @@ fn is_boolean_literal(text -> string) -> boolean {
         return true;
     }
     if matches_case_insensitive(trimmed, "false") {
+        return true;
+    }
+    return false;
+}
+
+fn is_null_literal(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if matches_case_insensitive(trimmed, "null") {
         return true;
     }
     return false;

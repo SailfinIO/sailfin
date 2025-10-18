@@ -127,8 +127,8 @@ logical_and_entry_44:
 logical_and_right_44:
   %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s47 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.47, i32 0, i32 0
-  %t48 = call double @contains_effect({ i8**, i64 }* %t46, i8* %s47)
-  %t49 = fcmp one double %t48, 0.0
+  %t48 = call i1 @contains_effect({ i8**, i64 }* %t46, i8* %s47)
+  %t49 = xor i1 %t48, 1
   br label %logical_and_right_end_44
 
 logical_and_right_end_44:
@@ -399,8 +399,8 @@ loop.body1:
   %t9 = load i8, i8* %l2
   %s10 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.10, i32 0, i32 0
   %t11 = load i8, i8* %l2
-  %t12 = call double @is_decimal_digit(i8 %t11)
-  %t13 = fcmp one double %t12, 0.0
+  %t12 = call i1 @is_decimal_digit(i8* null)
+  %t13 = xor i1 %t12, 1
   %t14 = load i1, i1* %l0
   %t15 = load double, double* %l1
   %t16 = load i8, i8* %l2
