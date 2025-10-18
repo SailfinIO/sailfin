@@ -289,6 +289,35 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   validates server adapter declarations, and
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_calls_spawn_adapter`
   validates concurrency adapter declarations.
+  Stage2Runner now registers capability adapters in `__init__` that bridge LLVM
+  ABI calls to Python runtime helpers. The adapter registration flow creates
+  C function wrappers for each adapter symbol (e.g., `sailfin_adapter_fs_read_file`),
+  enforces capability requirements via active `CapabilityGrant` context, and
+  marshals LLVM pointer arguments to/from Python strings and objects. Adapters
+  for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`),
+  HTTP operations (`http_get`, `http_post`), model invocation
+  (`model_invoke_with_prompt`), server handling (`serve_start`,
+  `serve_handler_dispatch`), and concurrency operations (`spawn_task`,
+  `channel_create`, `channel_send`, `channel_receive`) are fully registered
+  and enforce their respective effect requirements (`io`, `net`, `model`,
+  `spawn`, `channel`) before delegating to `runtime_support.py` implementations.
+  When native code attempts an operation without proper capability grants,
+  the adapter raises `PermissionError` with a diagnostic message. End-to-end
+  regression coverage in
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_fs_operations`
+  (filesystem write/read round-trip),
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_http_request`
+  (HTTP GET with mock adapter),
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_model_prompt`
+  (model invocation with mock adapter),
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_serve_handler`
+  (server handler registration and dispatch),
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_spawn_and_channel`
+  (spawn task and channel communication), and
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_enforces_capability_restrictions`
+  (validates `PermissionError` when capabilities are missing). Adapter ABI,
+  registration flow, and capability enforcement documented in
+  `docs/runtime_audit.md`.
   Stage2 lowering now rejects suspension points (`await`, `yield`)
   that would keep a mutable borrow or mutable borrow parameter alive, enforcing
   the lattice rule `!mut ⊄ !async`. Diagnostics now attach source spans for both

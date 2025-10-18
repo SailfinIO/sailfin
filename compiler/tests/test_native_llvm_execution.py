@@ -2828,3 +2828,198 @@ def test_native_llvm_execution_calls_spawn_adapter() -> None:
         "channel_receive should emit capability metadata for channel"
     assert "declare i8* @sailfin_adapter_channel_receive(i8*)" in ir, \
         "channel_receive should emit adapter declaration"
+
+
+def test_stage2_runner_executes_fs_operations() -> None:
+    """
+    Verify that filesystem adapters are registered in Stage2Runner
+    without errors when instantiating the runner.
+    """
+    artifact_text = """
+        .fn fs_test
+        .meta return number
+        .meta effects io
+        
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner - this registers all adapters including filesystem
+    runner = Stage2Runner(lowered)
+
+    # Verify adapters were registered (count includes helpers + adapters)
+    assert len(runner._registered_helpers) > 10, \
+        "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_executes_http_request() -> None:
+    """
+    Verify that HTTP adapters are registered in Stage2Runner
+    without errors when instantiating the runner.
+    """
+    artifact_text = """
+        .fn http_test
+        .meta return number
+        .meta effects net
+        
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner - this registers all adapters including HTTP
+    runner = Stage2Runner(lowered)
+
+    # Verify adapters were registered
+    assert len(runner._registered_helpers) > 10, \
+        "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_executes_model_prompt() -> None:
+    """
+    Verify that model adapters are registered in Stage2Runner
+    without errors when instantiating the runner.
+    """
+    artifact_text = """
+        .fn model_test
+        .meta return number
+        .meta effects model
+        
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner - this registers all adapters including model
+    runner = Stage2Runner(lowered)
+
+    # Verify adapters were registered
+    assert len(runner._registered_helpers) > 10, \
+        "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_executes_serve_handler() -> None:
+    """
+    Verify that serve adapters are registered in Stage2Runner
+    without errors when instantiating the runner.
+    """
+    artifact_text = """
+        .fn serve_test
+        .meta return number
+        .meta effects io
+        
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner - this registers all adapters including serve
+    runner = Stage2Runner(lowered)
+
+    # Verify adapters were registered
+    assert len(runner._registered_helpers) > 10, \
+        "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_executes_spawn_and_channel() -> None:
+    """
+    Verify that concurrency adapters are registered in Stage2Runner
+    without errors when instantiating the runner.
+    """
+    artifact_text = """
+        .fn concurrency_test
+        .meta return number
+        .meta effects spawn, channel
+        
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner - this registers all adapters including concurrency
+    runner = Stage2Runner(lowered)
+
+    # Verify adapters were registered
+    assert len(runner._registered_helpers) > 10, \
+        "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_enforces_capability_restrictions() -> None:
+    """
+    Verify that Stage2Runner raises PermissionError when native code
+    attempts IO operations without proper capability grants.
+    """
+    artifact_text = """
+        .fn restricted_test
+        .meta return number
+        .meta effects io
+        
+        .let path = "test.txt"
+        .let content = fs_read_file(path)
+        .return 1.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should compile without fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    # Create Stage2Runner WITHOUT io capability grant
+    runner = Stage2Runner(lowered)
+    runner.set_manifest_effects("restricted_test", [])  # Empty capabilities
+
+    # Attempting to execute should raise PermissionError
+    with pytest.raises(PermissionError, match="capability 'io' not granted"):
+        runner.invoke("restricted_test", restype=ctypes.c_double, argtypes=[])

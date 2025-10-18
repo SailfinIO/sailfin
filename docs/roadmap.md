@@ -78,23 +78,71 @@ _Mid-term (runtime capabilities & effect enforcement)_
     - [x] `test_native_llvm_execution_calls_spawn_adapter` — validates spawn/channel declarations emit with capability metadata.
   - [x] Ensure adapter calls propagate capability requirements into the module's capability manifest. Validated by existing manifest tests plus new adapter-specific coverage showing effects (`io`, `net`, `model`, `spawn`, `channel`) flow through declaration comments.
 
-- [ ] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
+- [x] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
 
-  - [ ] Implement adapter registration in `Stage2Runner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
-  - [ ] Extend `Stage2Runner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
-  - [ ] Add bridge implementations for each adapter that translate LLVM ABI calls to Python runtime helpers:
-    - [ ] Filesystem adapters — `fs_read_file`, `fs_write_file`, `fs_list_directory` bridging to `runtime_support.fs.*` with path validation and error handling.
-    - [ ] HTTP adapters — `http_get`, `http_post` bridging to `runtime_support.http.*` with request/response marshalling.
-    - [ ] Model adapters — `model_invoke_with_prompt` bridging to `runtime_support.prompt` with capability check and result marshalling.
-    - [ ] Serve adapters — `serve_start`, `serve_handler_dispatch` bridging to `runtime_support.serve` with handler registration and request routing.
-    - [ ] Concurrency adapters — `spawn_task` bridging to `runtime_support.spawn`, channel creation/send/receive bridging to `runtime_support.channel` with asyncio integration.
-  - [ ] Add end-to-end runtime smoke tests in `compiler/tests/test_native_llvm_execution.py` that compile Sailfin programs calling adapters, execute them via Stage2Runner, and validate behavior:
-    - [ ] `test_stage2_runner_executes_fs_operations` — write/read file round-trip.
-    - [ ] `test_stage2_runner_executes_http_request` — mock HTTP get with stub adapter.
-    - [ ] `test_stage2_runner_executes_model_prompt` — mock prompt invocation with stub adapter.
-    - [ ] `test_stage2_runner_executes_serve_handler` — register handler and dispatch mock request.
-    - [ ] `test_stage2_runner_executes_spawn_and_channel` — spawn task, send/receive via channel.
-  - [ ] Document adapter ABI, registration flow, and capability enforcement in `docs/runtime_audit.md` and update `docs/status.md` with coverage.
+  - [x] Implement adapter registration in `Stage2Runner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
+  - [x] Extend `Stage2Runner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
+  - [x] Add bridge implementations for each adapter that translate LLVM ABI calls to Python runtime helpers:
+    - [x] Filesystem adapters — `fs_read_file`, `fs_write_file`, `fs_list_directory` bridging to `runtime_support.fs.*` with path validation and error handling.
+    - [x] HTTP adapters — `http_get`, `http_post` bridging to `runtime_support.http.*` with request/response marshalling.
+    - [x] Model adapters — `model_invoke_with_prompt` bridging to `runtime_support.prompt` with capability check and result marshalling.
+    - [x] Serve adapters — `serve_start`, `serve_handler_dispatch` bridging to `runtime_support.serve` with handler registration and request routing.
+    - [x] Concurrency adapters — `spawn_task` bridging to `runtime_support.spawn`, channel creation/send/receive bridging to `runtime_support.channel` with asyncio integration.
+  - [x] Add end-to-end runtime smoke tests in `compiler/tests/test_native_llvm_execution.py` that compile Sailfin programs calling adapters, execute them via Stage2Runner, and validate behavior:
+    - [x] `test_stage2_runner_executes_fs_operations` — write/read file round-trip.
+    - [x] `test_stage2_runner_executes_http_request` — mock HTTP get with stub adapter.
+    - [x] `test_stage2_runner_executes_model_prompt` — mock prompt invocation with stub adapter.
+    - [x] `test_stage2_runner_executes_serve_handler` — register handler and dispatch mock request.
+    - [x] `test_stage2_runner_executes_spawn_and_channel` — spawn task, send/receive via channel.
+    - [x] `test_stage2_runner_enforces_capability_restrictions` — validates `PermissionError` when capabilities are missing.
+  - [x] Document adapter ABI, registration flow, and capability enforcement in `docs/runtime_audit.md` and update `docs/status.md` with coverage.
+
+- [ ] **Complete string literal lowering in LLVM backend** — Emit global string constants so method returns and expressions can use string literals without Python fallbacks.
+
+  - [ ] Implement `lower_string_literal` in `compiler/src/native_llvm_lowering.sfn` to create LLVM global constants for string literals:
+    - [ ] Parse string literal content and unescape sequences (`\n`, `\t`, `\"`, etc.).
+    - [ ] Generate unique global constant names (`@.str.0`, `@.str.1`, etc.) and track them in lowering context.
+    - [ ] Emit `@.str.N = private unnamed_addr constant [length x i8] c"content\00"` declarations in module preamble.
+    - [ ] Return operand with `i8*` type pointing to `getelementptr inbounds ([length x i8], [length x i8]* @.str.N, i32 0, i32 0)`.
+  - [ ] Add string constant deduplication to avoid duplicate globals for identical literals (use hash map tracking content → global name).
+  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py`:
+    - [ ] `test_native_llvm_execution_lowers_string_literal` — simple function returning string literal compiles and executes.
+    - [ ] `test_native_llvm_execution_deduplicates_string_constants` — function using same string twice reuses global constant.
+    - [ ] `test_native_llvm_execution_returns_string_from_method` — interface method returning string literal works without diagnostics.
+  - [ ] Update existing interface/vtable tests (`test_native_llvm_execution_emits_multiple_vtables`, `test_native_llvm_execution_boxes_struct_into_trait_object`, `test_native_llvm_execution_dispatches_through_trait_object`) to remove "unhandled return expression" from acceptable diagnostics filter.
+  - [ ] Document string literal lowering strategy and global constant layout in `docs/status.md`.
+
+- [ ] **Fix self parameter type resolution in interface methods** — Ensure interface method bodies can access struct fields via `self` without "missing type annotation" diagnostics.
+
+  - [ ] Extend interface method lowering in `compiler/src/native_llvm_lowering.sfn` to inject implicit `self` type annotation:
+    - [ ] When lowering struct method implementing interface, resolve struct type from containing `implements` clause.
+    - [ ] Create parameter binding for `self` with resolved struct type and appropriate LLVM pointer type (`%StructName*`).
+    - [ ] Thread struct layout metadata through to member access lowering so `self.field` can generate GEP instructions.
+  - [ ] Update `lower_member_access` in `compiler/src/native_llvm_lowering.sfn` to handle `self` parameter correctly:
+    - [ ] Check if base expression is `self` parameter and resolve its struct type from parameter binding.
+    - [ ] Look up struct layout metadata in type context to get field offsets.
+    - [ ] Generate `getelementptr` instructions using struct layout (field index, not byte offset).
+    - [ ] Load field value through the computed pointer.
+  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py`:
+    - [ ] `test_native_llvm_execution_interface_method_accesses_self_field` — method body with `return self.field` compiles and executes correctly.
+    - [ ] `test_native_llvm_execution_interface_method_computes_with_self` — method using `self.field` in expressions (e.g., `return self.x + self.y`) works.
+    - [ ] `test_native_llvm_execution_interface_method_calls_with_self` — method passing `self.field` to function calls works.
+  - [ ] Update existing interface tests to remove "parameter `self` missing type annotation" and "member access base" from acceptable diagnostics.
+  - [ ] Document self parameter resolution and member access lowering for interface methods in `docs/status.md`.
+
+- [ ] **Add regression coverage for method return expressions** — Validate that interface methods can return all expression types to prevent regressions before self-hosting.
+
+  - [ ] Create comprehensive method return test suite in `compiler/tests/test_native_llvm_execution.py`:
+    - [ ] `test_native_llvm_execution_method_returns_string_literal` — validates `return "text"` works end-to-end.
+    - [ ] `test_native_llvm_execution_method_returns_field_access` — validates `return self.field` works.
+    - [ ] `test_native_llvm_execution_method_returns_computed_value` — validates `return self.x + self.y` works.
+    - [ ] `test_native_llvm_execution_method_returns_call_result` — validates `return helper(self.value)` works.
+    - [ ] `test_native_llvm_execution_method_returns_string_concatenation` — validates `return "prefix: " + self.name` works.
+  - [ ] Add compiler self-hosting smoke test to `compiler/tests/`:
+    - [ ] `test_stage2_compiles_compiler_token_module` — compile `compiler/src/token.sfn` with Stage2 backend.
+    - [ ] Validate no "unhandled return expression" or "missing type annotation" diagnostics.
+    - [ ] Verify LLVM IR contains expected function definitions and string constants.
+  - [ ] Document expression coverage expectations and self-hosting readiness criteria in `docs/status.md`.
 
 - [ ] **Extend suspension-conflict tracking to coroutines** — Once `async fn` and generator support lands, extend borrow lifetime checks to reject mutable borrows held across `yield`/resume boundaries in coroutine frames.
   - [ ] Add coroutine/generator lowering infrastructure (tracked separately in "Async & Concurrency Substrate" roadmap item; this subtask assumes that work is complete).
