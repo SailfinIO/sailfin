@@ -3508,3 +3508,130 @@ fn main() -> int {
 
     # Verify it compiles successfully
     _compile_ir(ir)
+
+
+def test_native_llvm_execution_compound_add_assignment(compile_stage2):
+    """Test that += operator works in loops and accumulator patterns"""
+    source = """
+fn increment_loop() -> number {
+    let mut count -> number = 0.0;
+    let mut i -> number = 0.0;
+    loop {
+        if i >= 5.0 {
+            break;
+        }
+        count += 1.0;
+        i += 1.0;
+    }
+    return count;
+}
+
+fn main() -> number {
+    return increment_loop();
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Check for proper diagnostics
+    unexpected_diagnostics = [
+        diag for diag in lowered.diagnostics
+        if "assignment to unknown local" in diag or "unsupported expression" in diag
+    ]
+    assert not unexpected_diagnostics, f"Compound add should work without errors: {unexpected_diagnostics}"
+
+    # Verify the IR contains add instructions (from desugaring)
+    ir = lowered.ir
+    assert "fadd double" in ir or "add " in ir, "Add operation should be present in IR"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_double(engine, "main")
+        assert result == pytest.approx(5.0), f"Expected 5.0, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_compound_subtract_assignment(compile_stage2):
+    """Test that -= operator works correctly"""
+    source = """
+fn countdown() -> number {
+    let mut total -> number = 10.0;
+    let mut i -> number = 0.0;
+    loop {
+        if i >= 3.0 {
+            break;
+        }
+        total -= 2.0;
+        i += 1.0;
+    }
+    return total;
+}
+
+fn main() -> number {
+    return countdown();
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Check for proper diagnostics
+    unexpected_diagnostics = [
+        diag for diag in lowered.diagnostics
+        if "assignment to unknown local" in diag or "unsupported expression" in diag
+    ]
+    assert not unexpected_diagnostics, f"Compound subtract should work without errors: {unexpected_diagnostics}"
+
+    # Verify the IR contains subtract instructions
+    ir = lowered.ir
+    assert "fsub double" in ir or "sub " in ir, "Subtract operation should be present in IR"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_double(engine, "main")
+        assert result == pytest.approx(
+            4.0), f"Expected 4.0 (10 - 2*3), got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_compound_multiply_divide(compile_stage2):
+    """Test that *= and /= operators work correctly"""
+    source = """
+fn compute() -> number {
+    let mut value -> number = 2.0;
+    value *= 3.0;  // value = 6.0
+    value *= 2.0;  // value = 12.0
+    value /= 4.0;  // value = 3.0
+    return value;
+}
+
+fn main() -> number {
+    return compute();
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Check for proper diagnostics
+    unexpected_diagnostics = [
+        diag for diag in lowered.diagnostics
+        if "assignment to unknown local" in diag or "unsupported expression" in diag
+    ]
+    assert not unexpected_diagnostics, f"Compound multiply/divide should work without errors: {unexpected_diagnostics}"
+
+    # Verify the IR contains multiply and divide instructions
+    ir = lowered.ir
+    assert "fmul double" in ir or "mul " in ir, "Multiply operation should be present in IR"
+    assert "fdiv double" in ir or "div " in ir, "Divide operation should be present in IR"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_double(engine, "main")
+        assert result == pytest.approx(
+            3.0), f"Expected 3.0 (2*3*2/4), got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

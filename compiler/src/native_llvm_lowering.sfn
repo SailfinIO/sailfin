@@ -303,6 +303,7 @@ struct AssignmentParseResult {
     success -> boolean;
     target -> string;
     value -> string;
+    operator -> string;  // "" for simple assignment, "+", "-", "*", "/" for compound
 }
 
 struct BorrowParseResult {
@@ -5563,14 +5564,20 @@ fn lower_expression_statement(
         if binding == null {
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`");
         } else {
+            // Desugar compound assignments: "x += y" becomes "x = x + y"
+            let mut effective_value -> string = parsed_assignment.value;
+            if parsed_assignment.operator.length > 0 {
+                effective_value = parsed_assignment.target + " " + parsed_assignment.operator + " " + parsed_assignment.value;
+            }
+            
             let previous_ownership -> OwnershipInfo? = binding.ownership;
-            let ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings);
+            let ownership_analysis = analyze_value_ownership(effective_value, instruction.span, current_locals, current_bindings);
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
             let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
             let mut stored_value -> string = default_return_literal(binding.llvm_type);
 
-            let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
+            let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
@@ -5707,7 +5714,20 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             if index + 1 < trimmed.length {
                 next_char = trimmed[index + 1];
             }
-            if previous == "=" || previous == "!" || previous == ">" || previous == "<" || previous == "-" {
+            
+            // Check for compound assignment operators: +=, -=, *=, /=
+            if previous == "+" || previous == "-" || previous == "*" || previous == "/" {
+                // This is a compound assignment
+                let target = trim_text(substring(trimmed, 0, index - 1));
+                let value = trim_text(substring(trimmed, index + 1, trimmed.length));
+                if target.length == 0 || value.length == 0 {
+                    return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
+                }
+                return AssignmentParseResult { success: true, target: target, value: value, operator: previous };
+            }
+            
+            // Skip comparison operators and other non-assignment uses of =
+            if previous == "=" || previous == "!" || previous == ">" || previous == "<" {
                 index += 1;
                 continue;
             }
@@ -5715,16 +5735,18 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                 index += 1;
                 continue;
             }
+            
+            // Simple assignment
             let target = trim_text(substring(trimmed, 0, index));
             let value = trim_text(substring(trimmed, index + 1, trimmed.length));
             if target.length == 0 || value.length == 0 {
-                return AssignmentParseResult { success: false, target: "", value: "" };
+                return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
             }
-            return AssignmentParseResult { success: true, target: target, value: value };
+            return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
         }
         index += 1;
     }
-    return AssignmentParseResult { success: false, target: "", value: "" };
+    return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
 }
 
 fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {

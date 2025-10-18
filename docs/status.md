@@ -262,6 +262,27 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   indexing implemented, Stage2 bootstrap warnings for `unsupported expression
   decorators[index]` and `unsupported expression text[0]` are eliminated,
   unblocking progress on warning-free self-compilation.
+  Compound assignment operators (`+=`, `-=`, `*=`, `/=`) now lower to LLVM by
+  desugaring into simple assignments during lowering. The `parse_assignment_expression`
+  function recognizes compound operators when scanning for `=` characters and
+  returns an `operator` field alongside `target` and `value`. When
+  `lower_expression_statement` encounters a compound assignment (e.g., `count += 1`),
+  it transforms it into an equivalent simple assignment with a binary expression
+  (`count = count + 1`) before lowering, reusing the existing binary operation
+  infrastructure. This enables mutation-heavy compiler code (loop counters,
+  accumulators) to compile without fallback diagnostics. The implementation
+  handles `+=` (addition), `-=` (subtraction), `*=` (multiplication), and `/=`
+  (division) for both integer and floating-point types, generating appropriate
+  LLVM arithmetic instructions (`fadd`, `fsub`, `fmul`, `fdiv` for `number`,
+  `add`, `sub`, `mul`, `sdiv` for `int`). Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_compound_add_assignment`
+  (validates `+=` in loop counters and accumulators compiles and executes correctly),
+  `test_native_llvm_execution_compound_subtract_assignment` (validates `-=` operator
+  with proper arithmetic result), and
+  `test_native_llvm_execution_compound_multiply_divide` (validates `*=` and `/=`
+  operators in computation sequences). With compound assignment support, Stage2
+  bootstrap warnings like "assignment to unknown local `index +`" are eliminated,
+  bringing the compiler closer to warning-free self-compilation.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by

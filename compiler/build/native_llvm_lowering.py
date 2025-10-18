@@ -439,13 +439,14 @@ class OperatorMatch:
         return runtime.struct_repr('OperatorMatch', [runtime.struct_field('index', self.index), runtime.struct_field('symbol', self.symbol), runtime.struct_field('success', self.success)])
 
 class AssignmentParseResult:
-    def __init__(self, success, target, value):
+    def __init__(self, success, target, value, operator):
         self.success = success
         self.target = target
         self.value = value
+        self.operator = operator
 
     def __repr__(self):
-        return runtime.struct_repr('AssignmentParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('value', self.value)])
+        return runtime.struct_repr('AssignmentParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('value', self.value), runtime.struct_field('operator', self.operator)])
 
 class BorrowParseResult:
     def __init__(self, recognized, success, target, mutable, diagnostics):
@@ -3628,13 +3629,16 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
         if binding == None:
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`")
         else:
+            effective_value = parsed_assignment.value
+            if len(parsed_assignment.operator) > 0:
+                effective_value = parsed_assignment.target + " " + parsed_assignment.operator + " " + parsed_assignment.value
             previous_ownership = binding.ownership
-            ownership_analysis = analyze_value_ownership(parsed_assignment.value, instruction.span, current_locals, current_bindings)
+            ownership_analysis = analyze_value_ownership(effective_value, instruction.span, current_locals, current_bindings)
             diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
             assignment_ownership = ownership_analysis.ownership
             consumption = ownership_analysis.consumption
             stored_value = default_return_literal(binding.llvm_type)
-            lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context)
+            lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (lowered.diagnostics)
             string_constants = lowered.string_constants
             current_lines = lowered.lines
@@ -3724,7 +3728,13 @@ def parse_assignment_expression(expression):
             next_char = ""
             if index + 1 < len(trimmed):
                 next_char = trimmed[index + 1]
-            if previous == "="  or  previous == "!"  or  previous == ">"  or  previous == "<"  or  previous == "-":
+            if previous == "+"  or  previous == "-"  or  previous == "*"  or  previous == "/":
+                target = trim_text(substring(trimmed, 0, index - 1))
+                value = trim_text(substring(trimmed, index + 1, len(trimmed)))
+                if len(target) == 0  or  len(value) == 0:
+                    return AssignmentParseResult(success=False, target="", value="", operator="")
+                return AssignmentParseResult(success=True, target=target, value=value, operator=previous)
+            if previous == "="  or  previous == "!"  or  previous == ">"  or  previous == "<":
                 index += 1
                 continue
             if next_char == "="  or  next_char == ">":
@@ -3733,10 +3743,10 @@ def parse_assignment_expression(expression):
             target = trim_text(substring(trimmed, 0, index))
             value = trim_text(substring(trimmed, index + 1, len(trimmed)))
             if len(target) == 0  or  len(value) == 0:
-                return AssignmentParseResult(success=False, target="", value="")
-            return AssignmentParseResult(success=True, target=target, value=value)
+                return AssignmentParseResult(success=False, target="", value="", operator="")
+            return AssignmentParseResult(success=True, target=target, value=value, operator="")
         index += 1
-    return AssignmentParseResult(success=False, target="", value="")
+    return AssignmentParseResult(success=False, target="", value="", operator="")
 
 def parse_inline_let_expression(expression):
     diagnostics = []

@@ -204,16 +204,16 @@ _Final delivery (self-hosting, automation, distribution)_
       - [ ] `test_native_llvm_execution_validates_character_classes` — whitespace/digit checks work.
     - [x] Target diagnostics: eliminate "member access base `i8*` lacks struct metadata", "unsupported expression `value[start]`", "unsupported expression `text[0]`" warnings.
 
-  - [ ] **Implement compound assignment operators** — Support `+=`, `-=`, `*=`, `/=` operators so mutation-heavy compiler code (loop counters, accumulators) lowers without fallbacks.
+  - [x] **Implement compound assignment operators** — Support `+=`, `-=`, `*=`, `/=` operators so mutation-heavy compiler code (loop counters, accumulators) lowers without fallbacks.
 
-    - [ ] Recognize compound assignment syntax in `lower_expression_statement`.
-    - [ ] Desugar `variable += expression` into `variable = variable + expression` during lowering.
-    - [ ] Ensure desugared form uses existing local binding infrastructure and mutation tracking.
-    - [ ] Add tests for compound assignments:
-      - [ ] `test_native_llvm_execution_compound_add_assignment` — `count += 1` in loop compiles and executes.
-      - [ ] `test_native_llvm_execution_compound_subtract_assignment` — `total -= value` works.
-      - [ ] `test_native_llvm_execution_compound_multiply_divide` — `product *= factor` and `quotient /= divisor` work.
-    - [ ] Target diagnostics: eliminate "assignment to unknown local `index +`", "unsupported expression `= 1`" warnings.
+    - [x] Recognize compound assignment syntax in `lower_expression_statement`.
+    - [x] Desugar `variable += expression` into `variable = variable + expression` during lowering.
+    - [x] Ensure desugared form uses existing local binding infrastructure and mutation tracking.
+    - [x] Add tests for compound assignments:
+      - [x] `test_native_llvm_execution_compound_add_assignment` — `count += 1` in loop compiles and executes.
+      - [x] `test_native_llvm_execution_compound_subtract_assignment` — `total -= value` works.
+      - [x] `test_native_llvm_execution_compound_multiply_divide` — `product *= factor` and `quotient /= divisor` work.
+    - [x] Target diagnostics: eliminate "assignment to unknown local `index +`", "unsupported expression `= 1`" warnings.
 
   - [ ] **Fix logical operator lowering** — Support `&&`, `||` operators with short-circuit evaluation so conditional expressions in compiler logic compile correctly.
 

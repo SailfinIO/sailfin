@@ -54,6 +54,8 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
+  %t21 = phi double [ %t7, %entry ], [ %t20, %loop.latch2 ]
+  store double %t21, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -67,12 +69,17 @@ loop.body1:
   %t15 = load i8*, i8** %t14
   store i8* %t15, i8** %l2
   %t16 = load i8*, i8** %l2
+  %t17 = load double, double* %l1
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l1
   br label %loop.latch2
 loop.latch2:
+  %t20 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t17
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t22
 }
 
 define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, i8* %compilation) {
@@ -94,6 +101,8 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
+  %t21 = phi double [ %t7, %entry ], [ %t20, %loop.latch2 ]
+  store double %t21, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -107,12 +116,17 @@ loop.body1:
   %t15 = load i8*, i8** %t14
   store i8* %t15, i8** %l2
   %t16 = load i8*, i8** %l2
+  %t17 = load double, double* %l1
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l1
   br label %loop.latch2
 loop.latch2:
+  %t20 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t17
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t22
 }
 
 define i1 @module_present(i8* %target, { i8**, i64 }* %modules) {
@@ -123,6 +137,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
+  %t14 = phi double [ %t1, %entry ], [ %t13, %loop.latch2 ]
+  store double %t14, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -134,8 +150,13 @@ loop.body1:
   ; bounds check: %t7 (if true, out of bounds)
   %t8 = getelementptr i8*, i8** %t5, i64 %t3
   %t9 = load i8*, i8** %t8
+  %t10 = load double, double* %l0
+  %t11 = sitofp i64 1 to double
+  %t12 = fadd double %t10, %t11
+  store double %t12, double* %l0
   br label %loop.latch2
 loop.latch2:
+  %t13 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0
