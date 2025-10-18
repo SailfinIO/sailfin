@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.51 (2025-10-18)
+
+### Bug Fixes
+
+- String lowering in llvm backend passing again
+  ([`4de2a96`](https://github.com/SailfinIO/sailfin/commit/4de2a96873375fa5608c407ae5b0e0a23f86d5f9))
+
+
 ## v0.1.1-alpha.50 (2025-10-18)
 
 ### Bug Fixes
