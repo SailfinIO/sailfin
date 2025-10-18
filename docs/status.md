@@ -250,6 +250,23 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   helpers and rejects runtime calls whose effects are absent from the grant
   (`compiler/tests/test_native_llvm_execution.py::test_stage2_runner_applies_capability_manifest`
   and `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_denies_missing_capabilities`).
+  Capability-aware intrinsics now declare their required effects at the LLVM
+  backend layer. The LLVM lowering pipeline (`native_llvm_lowering.sfn`) defines
+  runtime helper descriptors for IO operations (`console.info`, `fs.read`,
+  `fs.write`, `fs.exists`), network operations (`http.get`, `http.post`),
+  and model operations (`prompt`, `model_invoke`), each tagged with their
+  required capabilities (`io`, `net`, or `model`). LLVM IR generation emits
+  these intrinsics as `declare` statements prefixed with capability metadata
+  comments (e.g., `; intrinsic sailfin_intrinsic_io_print requires capabilities: ![io]`),
+  making effect requirements visible in the generated IR. Calls to these
+  intrinsics automatically inherit the intrinsic's effects and propagate them
+  through the capability manifest. Coverage:
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_intrinsic_declarations`
+  validates declaration generation with metadata,
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_intrinsic_calls_compile`
+  ensures intrinsic calls compile without Python fallbacks, and
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_includes_intrinsic_effects`
+  verifies effects flow into the manifest for entry points.
   Stage2 lowering now rejects suspension points (`await`, `yield`)
   that would keep a mutable borrow or mutable borrow parameter alive, enforcing
   the lattice rule `!mut ⊄ !async`. Diagnostics now attach source spans for both

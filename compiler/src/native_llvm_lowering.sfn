@@ -43,6 +43,7 @@ struct RuntimeHelperDescriptor {
     symbol -> string;
     return_type -> string;
     parameter_types -> string[];
+    effects -> string[];
 }
 
 struct FunctionCallEntry {
@@ -702,6 +703,11 @@ fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
         }
         let descriptor = descriptors[index];
         if string_array_contains(used_targets, descriptor.target) {
+            // Emit capability metadata comment if the intrinsic has effects
+            if descriptor.effects.length > 0 {
+                let effects_text = join_with_separator(descriptor.effects, ", ");
+                lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
+            }
             let mut parameter_text -> string = "";
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
@@ -1916,30 +1922,130 @@ fn append_manifest_entry(entries -> CapabilityManifestEntry[], entry -> Capabili
 
 fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     let mut descriptors -> RuntimeHelperDescriptor[] = [];
+    // Console/print intrinsics
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "print.info",
         symbol: "sailfin_runtime_print_info",
         return_type: "void",
         parameter_types: ["i8*"],
+        effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "print.error",
         symbol: "sailfin_runtime_print_error",
         return_type: "void",
         parameter_types: ["i8*"],
+        effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "print.warn",
         symbol: "sailfin_runtime_print_warn",
         return_type: "void",
         parameter_types: ["i8*"],
+        effects: ["io"],
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "console.info",
+        symbol: "sailfin_intrinsic_io_print",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "console.log",
+        symbol: "sailfin_intrinsic_io_print",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "console.error",
+        symbol: "sailfin_runtime_print_error",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    
+    // IO intrinsics
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io_read",
+        symbol: "sailfin_intrinsic_io_read",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    
+    // Filesystem intrinsics
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.read",
+        symbol: "sailfin_intrinsic_fs_read",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.write",
+        symbol: "sailfin_intrinsic_fs_write",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.exists",
+        symbol: "sailfin_intrinsic_fs_exists",
+        return_type: "i1",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    
+    // Model intrinsics
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "model_invoke",
+        symbol: "sailfin_intrinsic_model_invoke",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["model"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "prompt",
+        symbol: "sailfin_intrinsic_model_invoke",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["model"],
+    });
+    
+    // Network intrinsics
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "net_request",
+        symbol: "sailfin_intrinsic_net_request",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*", "i8*"],
+        effects: ["net"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http.get",
+        symbol: "sailfin_intrinsic_http_get",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["net"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http.post",
+        symbol: "sailfin_intrinsic_http_post",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["net"],
+    });
+    
+    // Concurrency intrinsics (sleep is existing)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sleep",
         symbol: "sailfin_runtime_sleep",
         return_type: "void",
         parameter_types: ["double"],
+        effects: ["io"],
     });
+    
     return descriptors;
 }
 
@@ -2265,7 +2371,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     let llvm_return = map_return_type(context, function.return_type);
     if llvm_return.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name);
-        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics };
+        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [] };
     }
 
     let preparation = prepare_parameters(function, context);

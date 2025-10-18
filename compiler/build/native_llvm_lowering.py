@@ -70,14 +70,15 @@ class CapabilityManifest:
         return runtime.struct_repr('CapabilityManifest', [runtime.struct_field('entries', self.entries)])
 
 class RuntimeHelperDescriptor:
-    def __init__(self, target, symbol, return_type, parameter_types):
+    def __init__(self, target, symbol, return_type, parameter_types, effects):
         self.target = target
         self.symbol = symbol
         self.return_type = return_type
         self.parameter_types = parameter_types
+        self.effects = effects
 
     def __repr__(self):
-        return runtime.struct_repr('RuntimeHelperDescriptor', [runtime.struct_field('target', self.target), runtime.struct_field('symbol', self.symbol), runtime.struct_field('return_type', self.return_type), runtime.struct_field('parameter_types', self.parameter_types)])
+        return runtime.struct_repr('RuntimeHelperDescriptor', [runtime.struct_field('target', self.target), runtime.struct_field('symbol', self.symbol), runtime.struct_field('return_type', self.return_type), runtime.struct_field('parameter_types', self.parameter_types), runtime.struct_field('effects', self.effects)])
 
 class FunctionCallEntry:
     def __init__(self, name, callees):
@@ -849,6 +850,9 @@ def render_runtime_helper_declarations(used_targets):
             break
         descriptor = descriptors[index]
         if string_array_contains(used_targets, descriptor.target):
+            if len(descriptor.effects) > 0:
+                effects_text = join_with_separator(descriptor.effects, ", ")
+                lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]")
             parameter_text = ""
             if len(descriptor.parameter_types) > 0:
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ")
@@ -1710,10 +1714,22 @@ def append_manifest_entry(entries, entry):
 
 def runtime_helper_descriptors():
     descriptors = []
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.info", symbol="sailfin_runtime_print_info", return_type="void", parameter_types=["i8*"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.error", symbol="sailfin_runtime_print_error", return_type="void", parameter_types=["i8*"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.warn", symbol="sailfin_runtime_print_warn", return_type="void", parameter_types=["i8*"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.info", symbol="sailfin_runtime_print_info", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.error", symbol="sailfin_runtime_print_error", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="print.warn", symbol="sailfin_runtime_print_warn", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="console.info", symbol="sailfin_intrinsic_io_print", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="console.log", symbol="sailfin_intrinsic_io_print", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="console.error", symbol="sailfin_runtime_print_error", return_type="void", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="io_read", symbol="sailfin_intrinsic_io_read", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.read", symbol="sailfin_intrinsic_fs_read", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.write", symbol="sailfin_intrinsic_fs_write", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.exists", symbol="sailfin_intrinsic_fs_exists", return_type="i1", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="model_invoke", symbol="sailfin_intrinsic_model_invoke", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["model"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="prompt", symbol="sailfin_intrinsic_model_invoke", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["model"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="net_request", symbol="sailfin_intrinsic_net_request", return_type="i8*", parameter_types=["i8*", "i8*", "i8*"], effects=["net"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.get", symbol="sailfin_intrinsic_http_get", return_type="i8*", parameter_types=["i8*"], effects=["net"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.post", symbol="sailfin_intrinsic_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["io"]))
     return descriptors
 
 def append_runtime_helper(values, value):
@@ -1959,7 +1975,7 @@ def emit_function(function, functions, effects, context):
     llvm_return = map_return_type(context, function.return_type)
     if len(llvm_return) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name)
-        return LoweredLLVMFunction(lines=[], diagnostics=diagnostics)
+        return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[])
     preparation = prepare_parameters(function, context)
     diagnostics = (diagnostics) + (preparation.diagnostics)
     lines = []

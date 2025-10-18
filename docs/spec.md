@@ -598,6 +598,68 @@ fn summarize(user: PII<Text>) -> Summary ![model] {
 }
 ```
 
+### 7.2 Runtime Intrinsics and Native Capability ABI
+
+The Stage2 LLVM backend exposes capability-gated operations as **runtime intrinsics**—
+declared external functions that preserve their effect requirements through the native
+compilation pipeline.
+
+#### 7.2.1 Intrinsic Declarations
+
+Intrinsics are declared in `compiler/src/native_llvm_lowering.sfn` via the
+`RuntimeHelperDescriptor` structure, which associates each intrinsic with:
+
+- **Name** — the symbol used in the `.sfn-asm` intermediate representation
+  (e.g., `console.info`, `fs.read`, `http.get`).
+- **Mangled symbol** — the LLVM function name (e.g., `sailfin_intrinsic_io_print`,
+  `sailfin_intrinsic_fs_read`, `sailfin_intrinsic_http_get`).
+- **Signature** — parameter types and return type in LLVM terms (e.g., `(i8*) -> void`,
+  `(i8*) -> i8*`, `(i8*, i8*) -> i8*`).
+- **Effects** — the capability requirements (e.g., `["io"]`, `["net"]`, `["model"]`).
+
+When the LLVM lowering pipeline emits IR, it generates `declare` statements for each
+intrinsic, prefixed with a capability metadata comment:
+
+```llvm
+; intrinsic sailfin_intrinsic_io_print requires capabilities: ![io]
+declare void @sailfin_intrinsic_io_print(i8*)
+
+; intrinsic sailfin_intrinsic_http_get requires capabilities: ![net]
+declare i8* @sailfin_intrinsic_http_get(i8*)
+
+; intrinsic sailfin_intrinsic_model_invoke requires capabilities: ![model]
+declare i8* @sailfin_intrinsic_model_invoke(i8*, i8*)
+```
+
+#### 7.2.2 Intrinsic Call Routing
+
+Calls to runtime helpers in Sailfin source (e.g., `console.info(message)`,
+`fs.read(path)`, `http.get(url)`, `prompt(system, user)`) are automatically routed
+to their corresponding intrinsics during LLVM lowering. The effect requirements
+declared in the intrinsic descriptor propagate into the calling function's effect
+set and ultimately into the capability manifest for entry points.
+
+#### 7.2.3 Current Intrinsics
+
+| Sailfin Name    | LLVM Symbol                      | Signature            | Effects    |
+| --------------- | -------------------------------- | -------------------- | ---------- |
+| `console.info`  | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
+| `console.log`   | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
+| `console.error` | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
+| `fs.read`       | `sailfin_intrinsic_fs_read`      | `(i8*) -> i8*`       | `![io]`    |
+| `fs.write`      | `sailfin_intrinsic_fs_write`     | `(i8*, i8*) -> void` | `![io]`    |
+| `fs.exists`     | `sailfin_intrinsic_fs_exists`    | `(i8*) -> i1`        | `![io]`    |
+| `http.get`      | `sailfin_intrinsic_http_get`     | `(i8*) -> i8*`       | `![net]`   |
+| `http.post`     | `sailfin_intrinsic_http_post`    | `(i8*, i8*) -> i8*`  | `![net]`   |
+| `prompt`        | `sailfin_intrinsic_model_invoke` | `(i8*, i8*) -> i8*`  | `![model]` |
+| `model_invoke`  | `sailfin_intrinsic_model_invoke` | `(i8*, i8*) -> i8*`  | `![model]` |
+
+**Status**: Coverage for intrinsic declaration emission, capability metadata propagation,
+and manifest integration is provided by
+`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_intrinsic_declarations`,
+`compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_intrinsic_calls_compile`,
+and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_includes_intrinsic_effects`.
+
 ## 8. Testing, Evaluators, and Replay
 
 Tests are first-class declarations introduced with `test`. They may declare

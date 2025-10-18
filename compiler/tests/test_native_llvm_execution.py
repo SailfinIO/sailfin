@@ -2386,3 +2386,206 @@ def test_native_llvm_execution_cross_module_layout_resolution(compile_stage2) ->
     consumer_ir = consumer_result.ir
     assert consumer_ir, "consumer module should emit LLVM IR"
     assert "define" in consumer_ir, "consumer module should define functions"
+
+
+def test_native_llvm_execution_emits_intrinsic_declarations() -> None:
+    """
+    Verify that capability-aware intrinsics emit function declarations with effect metadata.
+
+    Tests that io_print, fs.read, http.get, and model_invoke intrinsics:
+    1. Generate proper LLVM declare statements
+    2. Include capability metadata comments showing required effects
+    """
+    artifact_text = """
+        .fn console_test
+        .param message string
+        .meta return void
+        .meta effects io
+        
+        .let _ignored = console.info(message)
+        .return
+        .endfn
+        
+        .fn fs_test  
+        .param path string
+        .meta return string
+        .meta effects io
+        
+        .let content = fs.read(path)
+        .return content
+        .endfn
+        
+        .fn http_test
+        .param url string
+        .meta return string
+        .meta effects net
+        
+        .let response = http.get(url)
+        .return response
+        .endfn
+        
+        .fn model_test
+        .param system_prompt string
+        .param user_message string
+        .meta return string
+        .meta effects model
+        
+        .let result = prompt(system_prompt, user_message)
+        .return result
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no fatal errors
+    fatal = [
+        diag for diag in lowered.diagnostics
+        if "error" in diag.lower()
+        and "defaulting to pointer layout" not in diag
+        and "lowering as `i8*`" not in diag
+    ]
+    assert not fatal, f"unexpected fatal errors: {fatal}"
+
+    ir = lowered.ir
+
+    # Check for intrinsic declarations with capability metadata
+    # IO intrinsics
+    assert "; intrinsic sailfin_intrinsic_io_print requires capabilities: ![io]" in ir, \
+        "console.info should emit capability metadata for io"
+    assert "declare void @sailfin_intrinsic_io_print(i8*)" in ir, \
+        "console.info should emit intrinsic declaration"
+
+    # Filesystem intrinsics
+    assert "; intrinsic sailfin_intrinsic_fs_read requires capabilities: ![io]" in ir, \
+        "fs.read should emit capability metadata for io"
+    assert "declare i8* @sailfin_intrinsic_fs_read(i8*)" in ir, \
+        "fs.read should emit intrinsic declaration"
+
+    # Network intrinsics
+    assert "; intrinsic sailfin_intrinsic_http_get requires capabilities: ![net]" in ir, \
+        "http.get should emit capability metadata for net"
+    assert "declare i8* @sailfin_intrinsic_http_get(i8*)" in ir, \
+        "http.get should emit intrinsic declaration"
+
+    # Model intrinsics
+    assert "; intrinsic sailfin_intrinsic_model_invoke requires capabilities: ![model]" in ir, \
+        "prompt should emit capability metadata for model"
+    assert "declare i8* @sailfin_intrinsic_model_invoke(i8*, i8*)" in ir, \
+        "prompt should emit intrinsic declaration"
+
+
+def test_native_llvm_execution_intrinsic_calls_compile() -> None:
+    """
+    Verify that intrinsic calls compile without diagnostics when effects are declared.
+
+    Tests that functions calling intrinsics with matching effect declarations:
+    1. Compile successfully
+    2. Generate proper call instructions
+    3. Do not emit Python fallback warnings
+    """
+    artifact_text = """
+        .fn io_operations
+        .param message string
+        .param filepath string
+        .meta return string
+        .meta effects io
+        
+        .let _ignored1 = console.info(message)
+        .let data = fs.read(filepath)
+        .let _ignored2 = fs.write(filepath, data)
+        .return data
+        .endfn
+        
+        .fn network_operations
+        .param url string
+        .meta return string
+        .meta effects net
+        
+        .let response = http.get(url)
+        .let _ignored = http.post(url, response)
+        .return response
+        .endfn
+        
+        .fn ai_operations
+        .param system_msg string
+        .param user_msg string
+        .meta return string
+        .meta effects model
+        
+        .let result = prompt(system_msg, user_msg)
+        .let another = model_invoke(system_msg, user_msg)
+        .return result
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+
+    # Should have no Python fallback warnings
+    fallback_warnings = [
+        diag for diag in lowered.diagnostics
+        if "python" in diag.lower() or "fallback" in diag.lower()
+    ]
+    assert not fallback_warnings, f"intrinsics should not fall back to Python: {fallback_warnings}"
+
+    # Verify intrinsic calls are emitted
+    ir = lowered.ir
+
+    # IO operations should call intrinsics
+    assert "call void @sailfin_intrinsic_io_print" in ir, \
+        "console.info should emit call to io_print intrinsic"
+    assert "call i8* @sailfin_intrinsic_fs_read" in ir, \
+        "fs.read should emit call to fs_read intrinsic"
+    assert "call void @sailfin_intrinsic_fs_write" in ir, \
+        "fs.write should emit call to fs_write intrinsic"
+
+    # Network operations should call intrinsics
+    assert "call i8* @sailfin_intrinsic_http_get" in ir, \
+        "http.get should emit call to http_get intrinsic"
+    assert "call i8* @sailfin_intrinsic_http_post" in ir, \
+        "http.post should emit call to http_post intrinsic"
+
+    # Model operations should call intrinsics
+    assert "call i8* @sailfin_intrinsic_model_invoke" in ir, \
+        "prompt should emit call to model_invoke intrinsic"
+
+
+def test_native_llvm_execution_capability_manifest_includes_intrinsic_effects() -> None:
+    """
+    Verify that capability manifests track effects from intrinsic calls.
+
+    Tests that when a function calls capability-aware intrinsics,
+    those effects propagate into the function's effect list and
+    ultimately into the capability manifest for entry points.
+    """
+    artifact_text = """
+        .fn main
+        .meta return number
+        .meta effects io, net, model
+        
+        .let _ignored1 = console.info("Starting...")
+        .let data = fs.read("config.json")
+        .let response = http.get("https://api.example.com")
+        .let result = prompt("system", "user")
+        .return 0.0
+        .endfn
+    """
+
+    # Create a module with main as an entry point
+    module = NativeModule(
+        artifacts=[NativeArtifact(name="test.sfn-asm", format="sailfin-native-text",
+                                  contents=textwrap.dedent(artifact_text).strip())],
+        entry_points=["main"],
+        symbol_count=0,
+    )
+    lowered = lower_to_llvm(module)
+
+    # Check capability manifest
+    manifest = lowered.capability_manifest
+    assert len(manifest.entries) == 1, "Should have one manifest entry for main"
+
+    main_entry = manifest.entries[0]
+    assert main_entry.symbol == "main", "Manifest entry should be for main function"
+
+    # Main should have io, net, and model effects from intrinsic calls
+    effects = set(main_entry.effects)
+    assert "io" in effects, "main should have io effect from console.info and fs.read"
+    assert "net" in effects, "main should have net effect from http.get"
+    assert "model" in effects, "main should have model effect from prompt"

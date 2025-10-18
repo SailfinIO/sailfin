@@ -58,13 +58,13 @@ _Near-term (unlock compiler parity & safety checks)_
 
 _Mid-term (runtime capabilities & effect enforcement)_
 
-- [ ] **Capability-aware intrinsics for native backend** — Introduce intrinsic declarations that preserve effect annotations through LLVM codegen so Stage2 binaries enforce capability requirements at the IR level.
+- [x] **Capability-aware intrinsics for native backend** — Introduce intrinsic declarations that preserve effect annotations through LLVM codegen so Stage2 binaries enforce capability requirements at the IR level.
 
-  - [ ] Define intrinsic signatures for core capability operations (`io_print`, `io_read`, `model_invoke`, `net_request`) in `compiler/src/native_ir.sfn` with effect metadata that survives lowering.
-  - [ ] Extend `compiler/src/native_llvm_lowering.sfn` to emit LLVM function declarations for intrinsics, annotating them with capability metadata in IR comments.
-  - [ ] Wire intrinsic calls through `lower_call_expression` so Stage2 routes `console.info`, `fs.*`, `http.*`, `prompt` to the declared intrinsics instead of Python fallbacks.
-  - [ ] Add unit tests in `compiler/tests/test_native_llvm_execution.py` that validate intrinsic declarations emit, capability metadata propagates, and simple IO/model/net calls compile without diagnostics.
-  - [ ] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
+  - [x] Define intrinsic signatures for core capability operations (`io_print`, `io_read`, `model_invoke`, `net_request`) in `compiler/src/native_ir.sfn` with effect metadata that survives lowering.
+  - [x] Extend `compiler/src/native_llvm_lowering.sfn` to emit LLVM function declarations for intrinsics, annotating them with capability metadata in IR comments.
+  - [x] Wire intrinsic calls through `lower_call_expression` so Stage2 routes `console.info`, `fs.*`, `http.*`, `prompt` to the declared intrinsics instead of Python fallbacks.
+  - [x] Add unit tests in `compiler/tests/test_native_llvm_execution.py` that validate intrinsic declarations emit, capability metadata propagates, and simple IO/model/net calls compile without diagnostics.
+  - [x] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
 
 - [ ] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
 
