@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.49 (2025-10-18)
+
+### Bug Fixes
+
+- Capability aware intrinsics
+  ([`3925fad`](https://github.com/SailfinIO/sailfin/commit/3925fadfda31068a0556fe9fce784bb7c14f1b22))
+
+### Documentation
+
+- Roadmap updates
+  ([`c6807b5`](https://github.com/SailfinIO/sailfin/commit/c6807b50ebc0df5431ce15d96d689e0f11ee0d27))
+
+
 ## v0.1.1-alpha.48 (2025-10-17)
 
 ### Bug Fixes
