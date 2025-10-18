@@ -283,6 +283,33 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   operators in computation sequences). With compound assignment support, Stage2
   bootstrap warnings like "assignment to unknown local `index +`" are eliminated,
   bringing the compiler closer to warning-free self-compilation.
+  Logical operators (`&&`, `||`) now lower to LLVM with proper short-circuit
+  evaluation semantics, enabling conditional expressions in compiler logic to compile
+  without fallbacks. The implementation uses LLVM control flow primitives (basic blocks,
+  conditional branches, phi nodes) to skip right operand evaluation when the left
+  operand determines the result. For `a && b`, the compiler evaluates `a`, coerces it
+  to `i1`, branches to a check_right label if true or directly to merge if false;
+  the check_right block evaluates `b`, and the merge block emits a phi node selecting
+  `false` (from the short-circuit path) or the evaluated right value. For `a || b`,
+  the logic inverts: branch to merge if left is true (short-circuit with `true`),
+  otherwise evaluate right. Nested logical operators (e.g., `a && b || c && d`) work
+  correctly by recursively emitting sub-expressions with unique label IDs derived from
+  incrementing temp indices, ensuring no label collisions. The implementation inserts
+  intermediate `right_end` labels after evaluating right operands to isolate control
+  flow from nested expressions before branching to the merge label, satisfying LLVM's
+  requirement that phi nodes reference actual predecessor blocks. Regression coverage
+  lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_logical_and_short_circuits`
+  (validates `&&` compiles with proper labels, branches, and phi nodes, and executes
+  with correct short-circuit behavior),
+  `test_native_llvm_execution_logical_or_short_circuits` (similar for `||`),
+  `test_native_llvm_execution_nested_logical_operators` (validates complex expressions
+  like `a && b || c && d` and chained operators like `temp1 || temp2 || true` generate
+  valid IR with unique labels), and
+  `test_native_llvm_execution_logical_operators_with_comparisons` (validates logical
+  operators combined with comparison expressions like `x > 0.0 && x < 100.0` compile
+  and execute correctly). With logical operator support, Stage2 bootstrap warnings
+  like "call to unknown function `requires_io && !contains_effect`" are eliminated,
+  bringing the compiler closer to warning-free self-compilation.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by

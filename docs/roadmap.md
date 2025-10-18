@@ -215,18 +215,19 @@ _Final delivery (self-hosting, automation, distribution)_
       - [x] `test_native_llvm_execution_compound_multiply_divide` — `product *= factor` and `quotient /= divisor` work.
     - [x] Target diagnostics: eliminate "assignment to unknown local `index +`", "unsupported expression `= 1`" warnings.
 
-  - [ ] **Fix logical operator lowering** — Support `&&`, `||` operators with short-circuit evaluation so conditional expressions in compiler logic compile correctly.
+  - [x] **Fix logical operator lowering** — Support `&&`, `||` operators with short-circuit evaluation so conditional expressions in compiler logic compile correctly.
 
-    - [ ] Implement `lower_logical_and` and `lower_logical_or` in `compiler/src/native_llvm_lowering.sfn`:
-      - [ ] For `a && b`: evaluate `a`, branch to short-circuit exit if false, otherwise evaluate `b`.
-      - [ ] For `a || b`: evaluate `a`, branch to short-circuit exit if true, otherwise evaluate `b`.
-      - [ ] Emit phi node at merge point to produce final boolean result.
-    - [ ] Recognize `&&` and `||` in `lower_expression` before additive operators.
-    - [ ] Add tests for logical operators:
-      - [ ] `test_native_llvm_execution_logical_and_short_circuits` — second operand not evaluated if first is false.
-      - [ ] `test_native_llvm_execution_logical_or_short_circuits` — second operand not evaluated if first is true.
-      - [ ] `test_native_llvm_execution_nested_logical_operators` — `a && b || c && d` compiles correctly.
-    - [ ] Target diagnostics: eliminate "call to unknown function `requires_io && !contains_effect`" warnings.
+    - [x] Implement `lower_logical_and` and `lower_logical_or` in `compiler/src/native_llvm_lowering.sfn`:
+      - [x] For `a && b`: evaluate `a`, branch to short-circuit exit if false, otherwise evaluate `b`.
+      - [x] For `a || b`: evaluate `a`, branch to short-circuit exit if true, otherwise evaluate `b`.
+      - [x] Emit phi node at merge point to produce final boolean result.
+    - [x] Recognize `&&` and `||` in `lower_expression` before additive operators.
+    - [x] Add tests for logical operators:
+      - [x] `test_native_llvm_execution_logical_and_short_circuits` — second operand not evaluated if first is false.
+      - [x] `test_native_llvm_execution_logical_or_short_circuits` — second operand not evaluated if first is true.
+      - [x] `test_native_llvm_execution_nested_logical_operators` — `a && b || c && d` compiles correctly.
+      - [x] `test_native_llvm_execution_logical_operators_with_comparisons` — `x > 0.0 && x < 100.0` compiles correctly.
+    - [x] Target diagnostics: eliminate "call to unknown function `requires_io && !contains_effect`" warnings.
 
   - [ ] **Support conditional expression ternary operator** — Implement `condition ? true_value : false_value` so inline conditionals in compiler code compile without fallback.
 

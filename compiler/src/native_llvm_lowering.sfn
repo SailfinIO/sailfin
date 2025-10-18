@@ -6544,6 +6544,16 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
+    let logical = find_logical_operator(stripped);
+    if logical.success {
+        if logical.symbol == "&&" {
+            return lower_logical_and(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+        if logical.symbol == "||" {
+            return lower_logical_or(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+    }
+
     let comparison = find_comparison_operator(stripped);
     if comparison.success {
         return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context);
@@ -6999,6 +7009,175 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     }
 
     return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: comparison.operand, diagnostics: diagnostics, string_constants: string_constants };
+}
+
+fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let left_text = trim_text(substring(expression, 0, match.index));
+    let right_text = trim_text(substring(expression, match.index + 2, expression.length));
+    let mut diagnostics -> string[] = [];
+    let mut string_constants -> StringConstant[] = [];
+    
+    if left_text.length == 0 || right_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed && expression `" + expression + "`");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Create labels for short-circuit control flow (use temp_index for uniqueness)
+    let label_id = number_to_string(temp_index);
+    let entry_label = "logical_and_entry_" + label_id;
+    let check_right_label = "logical_and_right_" + label_id;
+    let right_end_label = "logical_and_right_end_" + label_id;
+    let merge_label = "logical_and_merge_" + label_id;
+    
+    // Reserve temp indices for our labels to avoid conflicts with nested logical operators
+    // We need 4 labels (entry, check_right, right_end, merge) but only increment for result temp
+    let label_temp_offset -> number = temp_index + 1;
+    
+    // Evaluate left operand in current block (no need for explicit entry label jump)
+    let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context);
+    diagnostics = diagnostics.concat(left_result.diagnostics);
+    string_constants = left_result.string_constants;
+    if left_result.operand == null {
+        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Coerce left to boolean if needed
+    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
+    diagnostics = diagnostics.concat(left_bool.diagnostics);
+    string_constants = merge_string_constants(string_constants, left_result.string_constants);
+    if left_bool.operand == null {
+        return ExpressionResult { lines: left_bool.lines, temp_index: left_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add a label before branching so we can reference it in the phi node
+    let mut current_lines = left_bool.lines;
+    current_lines = append_string(current_lines, "  br label %" + entry_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, entry_label + ":");
+    
+    // Branch: if left is false, skip right and go to merge with false
+    current_lines = append_string(current_lines, "  br i1 " + left_bool.operand.value + ", label %" + check_right_label + ", label %" + merge_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, check_right_label + ":");
+    
+    // Evaluate right operand
+    let right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context);
+    diagnostics = diagnostics.concat(right_result.diagnostics);
+    string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    if right_result.operand == null {
+        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Coerce right to boolean if needed
+    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
+    diagnostics = diagnostics.concat(right_bool.diagnostics);
+    string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    if right_bool.operand == null {
+        return ExpressionResult { lines: right_bool.lines, temp_index: right_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add a label to mark the end of right evaluation before branching to merge
+    // This is needed because right expression might create nested labels
+    current_lines = right_bool.lines;
+    current_lines = append_string(current_lines, "  br label %" + right_end_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, right_end_label + ":");
+    
+    // Branch to merge
+    current_lines = append_string(current_lines, "  br label %" + merge_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, merge_label + ":");
+    
+    // Emit phi node to merge results (false from entry_label, right value from right_end_label)
+    let result_temp = format_temp_name(right_bool.temp_index);
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi i1 [ false, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]");
+    
+    let operand = LLVMOperand { llvm_type: "i1", value: result_temp };
+    return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+}
+
+fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let left_text = trim_text(substring(expression, 0, match.index));
+    let right_text = trim_text(substring(expression, match.index + 2, expression.length));
+    let mut diagnostics -> string[] = [];
+    let mut string_constants -> StringConstant[] = [];
+    
+    if left_text.length == 0 || right_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed || expression `" + expression + "`");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Create labels for short-circuit control flow
+    let label_id = number_to_string(temp_index);
+    let entry_label = "logical_or_entry_" + label_id;
+    let check_right_label = "logical_or_right_" + label_id;
+    let right_end_label = "logical_or_right_end_" + label_id;
+    let merge_label = "logical_or_merge_" + label_id;
+    
+    // Reserve temp indices for our labels to avoid conflicts with nested logical operators
+    let label_temp_offset -> number = temp_index + 1;
+    
+    // Evaluate left operand in current block (no need for explicit entry label jump)
+    let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context);
+    diagnostics = diagnostics.concat(left_result.diagnostics);
+    string_constants = left_result.string_constants;
+    if left_result.operand == null {
+        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Coerce left to boolean if needed
+    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
+    diagnostics = diagnostics.concat(left_bool.diagnostics);
+    string_constants = merge_string_constants(string_constants, left_result.string_constants);
+    if left_bool.operand == null {
+        return ExpressionResult { lines: left_bool.lines, temp_index: left_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add a label before branching so we can reference it in the phi node
+    let mut current_lines = left_bool.lines;
+    current_lines = append_string(current_lines, "  br label %" + entry_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, entry_label + ":");
+    
+    // Branch: if left is true, skip right and go to merge with true
+    current_lines = append_string(current_lines, "  br i1 " + left_bool.operand.value + ", label %" + merge_label + ", label %" + check_right_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, check_right_label + ":");
+    
+    // Evaluate right operand
+    let right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context);
+    diagnostics = diagnostics.concat(right_result.diagnostics);
+    string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    if right_result.operand == null {
+        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Coerce right to boolean if needed
+    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
+    diagnostics = diagnostics.concat(right_bool.diagnostics);
+    string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    if right_bool.operand == null {
+        return ExpressionResult { lines: right_bool.lines, temp_index: right_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add a label to mark the end of right evaluation before branching to merge
+    // This is needed because right expression might create nested labels
+    current_lines = right_bool.lines;
+    current_lines = append_string(current_lines, "  br label %" + right_end_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, right_end_label + ":");
+    
+    // Branch to merge
+    current_lines = append_string(current_lines, "  br label %" + merge_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, merge_label + ":");
+    
+    // Emit phi node to merge results (true from entry_label, right value from right_end_label)
+    let result_temp = format_temp_name(right_bool.temp_index);
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi i1 [ true, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]");
+    
+    let operand = LLVMOperand { llvm_type: "i1", value: result_temp };
+    return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
@@ -8760,6 +8939,68 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
             return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
         }
         index += 1;
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn find_logical_operator(expression -> string) -> OperatorMatch {
+    let mut depth -> number = 0;
+    let mut index -> number = expression.length;
+    // Scan right-to-left for || (lowest precedence)
+    loop {
+        if index <= 1 {
+            break;
+        }
+        index -= 1;
+        let ch = expression[index];
+        if ch == ")" {
+            depth += 1;
+            continue;
+        }
+        if ch == "(" {
+            if depth > 0 {
+                depth -= 1;
+                continue;
+            }
+        }
+        if depth > 0 {
+            continue;
+        }
+        if index + 1 < expression.length {
+            let two = substring(expression, index, index + 2);
+            if two == "||" {
+                return OperatorMatch { index: index, symbol: "||", success: true };
+            }
+        }
+    }
+    // Reset and scan for && (higher precedence)
+    index = expression.length;
+    depth = 0;
+    loop {
+        if index <= 1 {
+            break;
+        }
+        index -= 1;
+        let ch = expression[index];
+        if ch == ")" {
+            depth += 1;
+            continue;
+        }
+        if ch == "(" {
+            if depth > 0 {
+                depth -= 1;
+                continue;
+            }
+        }
+        if depth > 0 {
+            continue;
+        }
+        if index + 1 < expression.length {
+            let two = substring(expression, index, index + 2);
+            if two == "&&" {
+                return OperatorMatch { index: index, symbol: "&&", success: true };
+            }
+        }
     }
     return OperatorMatch { index: -1, symbol: "", success: false };
 }

@@ -4308,6 +4308,12 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     borrow_parse = parse_borrow_expression(stripped)
     if borrow_parse.recognized:
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines)
+    logical = find_logical_operator(stripped)
+    if logical.success:
+        if logical.symbol == "&&":
+            return lower_logical_and(stripped, logical, bindings, locals, temp_index, lines, functions, context)
+        if logical.symbol == "||":
+            return lower_logical_or(stripped, logical, bindings, locals, temp_index, lines, functions, context)
     comparison = find_comparison_operator(stripped)
     if comparison.success:
         return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context)
@@ -4630,6 +4636,112 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     if comparison.operand == None:
         return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=comparison.operand, diagnostics=diagnostics, string_constants=string_constants)
+
+def lower_logical_and(expression, match, bindings, locals, temp_index, lines, functions, context):
+    left_text = trim_text(substring(expression, 0, match.index))
+    right_text = trim_text(substring(expression, match.index + 2, len(expression)))
+    diagnostics = []
+    string_constants = []
+    if len(left_text) == 0  or  len(right_text) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed && expression `" + expression + "`")
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    label_id = number_to_string(temp_index)
+    entry_label = "logical_and_entry_" + label_id
+    check_right_label = "logical_and_right_" + label_id
+    right_end_label = "logical_and_right_end_" + label_id
+    merge_label = "logical_and_merge_" + label_id
+    label_temp_offset = temp_index + 1
+    left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context)
+    diagnostics = (diagnostics) + (left_result.diagnostics)
+    string_constants = left_result.string_constants
+    if left_result.operand == None:
+        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines)
+    diagnostics = (diagnostics) + (left_bool.diagnostics)
+    string_constants = merge_string_constants(string_constants, left_result.string_constants)
+    if left_bool.operand == None:
+        return ExpressionResult(lines=left_bool.lines, temp_index=left_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    current_lines = left_bool.lines
+    current_lines = append_string(current_lines, "  br label %" + entry_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, entry_label + ":")
+    current_lines = append_string(current_lines, "  br i1 " + left_bool.operand.value + ", label %" + check_right_label + ", label %" + merge_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, check_right_label + ":")
+    right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context)
+    diagnostics = (diagnostics) + (right_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
+    if right_result.operand == None:
+        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
+    diagnostics = (diagnostics) + (right_bool.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
+    if right_bool.operand == None:
+        return ExpressionResult(lines=right_bool.lines, temp_index=right_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    current_lines = right_bool.lines
+    current_lines = append_string(current_lines, "  br label %" + right_end_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, right_end_label + ":")
+    current_lines = append_string(current_lines, "  br label %" + merge_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, merge_label + ":")
+    result_temp = format_temp_name(right_bool.temp_index)
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi i1 [ false, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]")
+    operand = LLVMOperand(llvm_type="i1", value=result_temp)
+    return ExpressionResult(lines=current_lines, temp_index=right_bool.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
+
+def lower_logical_or(expression, match, bindings, locals, temp_index, lines, functions, context):
+    left_text = trim_text(substring(expression, 0, match.index))
+    right_text = trim_text(substring(expression, match.index + 2, len(expression)))
+    diagnostics = []
+    string_constants = []
+    if len(left_text) == 0  or  len(right_text) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed || expression `" + expression + "`")
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    label_id = number_to_string(temp_index)
+    entry_label = "logical_or_entry_" + label_id
+    check_right_label = "logical_or_right_" + label_id
+    right_end_label = "logical_or_right_end_" + label_id
+    merge_label = "logical_or_merge_" + label_id
+    label_temp_offset = temp_index + 1
+    left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context)
+    diagnostics = (diagnostics) + (left_result.diagnostics)
+    string_constants = left_result.string_constants
+    if left_result.operand == None:
+        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines)
+    diagnostics = (diagnostics) + (left_bool.diagnostics)
+    string_constants = merge_string_constants(string_constants, left_result.string_constants)
+    if left_bool.operand == None:
+        return ExpressionResult(lines=left_bool.lines, temp_index=left_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    current_lines = left_bool.lines
+    current_lines = append_string(current_lines, "  br label %" + entry_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, entry_label + ":")
+    current_lines = append_string(current_lines, "  br i1 " + left_bool.operand.value + ", label %" + merge_label + ", label %" + check_right_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, check_right_label + ":")
+    right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context)
+    diagnostics = (diagnostics) + (right_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
+    if right_result.operand == None:
+        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
+    diagnostics = (diagnostics) + (right_bool.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
+    if right_bool.operand == None:
+        return ExpressionResult(lines=right_bool.lines, temp_index=right_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    current_lines = right_bool.lines
+    current_lines = append_string(current_lines, "  br label %" + right_end_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, right_end_label + ":")
+    current_lines = append_string(current_lines, "  br label %" + merge_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, merge_label + ":")
+    result_temp = format_temp_name(right_bool.temp_index)
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi i1 [ true, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]")
+    operand = LLVMOperand(llvm_type="i1", value=result_temp)
+    return ExpressionResult(lines=current_lines, temp_index=right_bool.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
 
 def lower_call_expression(target, arguments, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
@@ -5894,6 +6006,49 @@ def find_comparison_operator(expression):
         if ch == "<"  or  ch == ">":
             return OperatorMatch(index=index, symbol=substring(expression, index, index + 1), success=True)
         index += 1
+    return OperatorMatch(index=-1, symbol="", success=False)
+
+def find_logical_operator(expression):
+    depth = 0
+    index = len(expression)
+    while True:
+        if index <= 1:
+            break
+        index -= 1
+        ch = expression[index]
+        if ch == ")":
+            depth += 1
+            continue
+        if ch == "(":
+            if depth > 0:
+                depth -= 1
+                continue
+        if depth > 0:
+            continue
+        if index + 1 < len(expression):
+            two = substring(expression, index, index + 2)
+            if two == "||":
+                return OperatorMatch(index=index, symbol="||", success=True)
+    index = len(expression)
+    depth = 0
+    while True:
+        if index <= 1:
+            break
+        index -= 1
+        ch = expression[index]
+        if ch == ")":
+            depth += 1
+            continue
+        if ch == "(":
+            if depth > 0:
+                depth -= 1
+                continue
+        if depth > 0:
+            continue
+        if index + 1 < len(expression):
+            two = substring(expression, index, index + 2)
+            if two == "&&":
+                return OperatorMatch(index=index, symbol="&&", success=True)
     return OperatorMatch(index=-1, symbol="", success=False)
 
 def contains_char(set, ch):

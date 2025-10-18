@@ -3635,3 +3635,268 @@ fn main() -> number {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+def test_native_llvm_execution_logical_and_short_circuits(compile_stage2):
+    """Verify that && operator short-circuits when left operand is false."""
+    source = """
+fn test_and(x -> boolean, y -> boolean) -> boolean {
+    return x && y;
+}
+
+fn should_short_circuit() -> boolean {
+    return false && true;
+}
+
+fn both_true() -> boolean {
+    return true && true;
+}
+
+fn both_false() -> boolean {
+    return false && false;
+}
+
+fn main() -> int {
+    let result1 = test_and(true, true);
+    let result2 = test_and(false, true);
+    let result3 = should_short_circuit();
+    let result4 = both_true();
+    let result5 = both_false();
+    
+    // result1 should be true, result2/3/5 should be false, result4 should be true
+    if result1 {
+        if result4 {
+            if result2 == false {
+                if result3 == false {
+                    if result5 == false {
+                        return 42;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # Should not have "call to unknown function" warnings for logical operators
+    unknown_function_warnings = [
+        diag for diag in lowered.diagnostics
+        if "call to unknown function" in diag and "&&" in diag
+    ]
+    assert not unknown_function_warnings, f"Logical && should not produce 'unknown function' warnings: {unknown_function_warnings}"
+
+    # IR should contain logical_and labels for control flow
+    ir = lowered.ir
+    assert "logical_and" in ir, "IR should contain logical_and labels"
+
+    # Should have branch instructions for short-circuit evaluation
+    assert "br i1" in ir, "IR should have branch instructions"
+
+    # Should have phi nodes to merge results
+    assert "phi i1" in ir, "IR should have phi nodes for boolean merging"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 42, f"Expected 42 from logical AND operations, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_logical_or_short_circuits(compile_stage2):
+    """Verify that || operator short-circuits when left operand is true."""
+    source = """
+fn test_or(x -> boolean, y -> boolean) -> boolean {
+    return x || y;
+}
+
+fn should_short_circuit() -> boolean {
+    return true || false;
+}
+
+fn both_false() -> boolean {
+    return false || false;
+}
+
+fn both_true() -> boolean {
+    return true || true;
+}
+
+fn main() -> int {
+    let result1 = test_or(true, false);
+    let result2 = test_or(false, false);
+    let result3 = should_short_circuit();
+    let result4 = both_true();
+    let result5 = both_false();
+    
+    // result1/3/4 should be true, result2/5 should be false
+    if result1 {
+        if result3 {
+            if result4 {
+                if result2 == false {
+                    if result5 == false {
+                        return 99;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # Should not have "call to unknown function" warnings for logical operators
+    unknown_function_warnings = [
+        diag for diag in lowered.diagnostics
+        if "call to unknown function" in diag and "||" in diag
+    ]
+    assert not unknown_function_warnings, f"Logical || should not produce 'unknown function' warnings: {unknown_function_warnings}"
+
+    # IR should contain logical_or labels for control flow
+    ir = lowered.ir
+    assert "logical_or" in ir, "IR should contain logical_or labels"
+
+    # Should have branch instructions for short-circuit evaluation
+    assert "br i1" in ir, "IR should have branch instructions"
+
+    # Should have phi nodes to merge results
+    assert "phi i1" in ir, "IR should have phi nodes for boolean merging"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 99, f"Expected 99 from logical OR operations, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_nested_logical_operators(compile_stage2):
+    """Verify that nested logical operators (a && b || c && d) compile correctly."""
+    source = """
+fn complex_logic(a -> boolean, b -> boolean, c -> boolean, d -> boolean) -> boolean {
+    return a && b || c && d;
+}
+
+fn nested_and_or() -> boolean {
+    let temp1 = true && false;
+    let temp2 = false && true;
+    return temp1 || temp2 || true;
+}
+
+fn main() -> int {
+    let result1 = complex_logic(true, true, false, false);
+    let result2 = complex_logic(false, false, true, true);
+    let result3 = nested_and_or();
+    
+    if result1 {
+        if result2 {
+            if result3 {
+                return 123;
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # IR should contain both logical_and and logical_or labels
+    ir = lowered.ir
+    assert "logical_and" in ir or "logical_or" in ir, "IR should contain logical operator labels"
+
+    # Should have multiple branch and phi instructions for nested logic
+    assert ir.count(
+        "br i1") >= 2, "IR should have multiple branch instructions for nested logic"
+    assert ir.count(
+        "phi i1") >= 1, "IR should have phi instructions for nested logic"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 123, f"Expected 123 from nested logical operations, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+def test_native_llvm_execution_logical_operators_with_comparisons(compile_stage2):
+    """Verify that logical operators work correctly with comparison expressions."""
+    source = """
+fn range_check(x -> number) -> boolean {
+    return x > 0.0 && x < 100.0;
+}
+
+fn multi_condition(a -> int, b -> int) -> boolean {
+    return a == b || a > b;
+}
+
+fn main() -> int {
+    let result1 = range_check(50.0);
+    let result2 = range_check(-5.0);
+    let result3 = range_check(150.0);
+    let result4 = multi_condition(10, 10);
+    let result5 = multi_condition(20, 10);
+    let result6 = multi_condition(5, 10);
+    
+    // result1/4/5 should be true, result2/3/6 should be false
+    if result1 {
+        if result2 == false {
+            if result3 == false {
+                if result4 {
+                    if result5 {
+                        if result6 == false {
+                            return 777;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # Should not have "call to unknown function" warnings for logical operators
+    unknown_function_warnings = [
+        diag for diag in lowered.diagnostics
+        if "call to unknown function" in diag and ("&&" in diag or "||" in diag)
+    ]
+    assert not unknown_function_warnings, f"Logical operators should not produce 'unknown function' warnings: {unknown_function_warnings}"
+
+    # Compile and execute
+    engine, module = _compile_ir(lowered.ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 777, f"Expected 777 from logical operations with comparisons, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
