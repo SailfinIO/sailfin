@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.52 (2025-10-18)
+
+### Bug Fixes
+
+- Additional test ahead of stage2 compile
+  ([`f8a9327`](https://github.com/SailfinIO/sailfin/commit/f8a9327a631cf18836c6e5db766336809bdb525b))
+
+### Documentation
+
+- String literal and self roadmap completion
+  ([`33294ba`](https://github.com/SailfinIO/sailfin/commit/33294ba529b70dba8b357fbd6984f527ca93f170))
+
+
 ## v0.1.1-alpha.51 (2025-10-18)
 
 ### Bug Fixes
