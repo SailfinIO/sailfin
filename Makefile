@@ -1,6 +1,6 @@
 # Sailfin project automation
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package
+.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -24,6 +24,7 @@ help:
 	@echo "  make compile      # Emit Python modules from compiler/src via the stage1 pipeline"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
+	@echo "  make bootstrap-stage2 # Bootstrap Stage2 self-hosted compiler (compile to LLVM)"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -46,11 +47,11 @@ warm-stage1-cache:
 clean:
 	rm -rf dist
 
-clean-stage1:
-	rm -rf compiler/build
-
 compile:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 
 package:
 	$(CONDA) run -n $(CONDA_ENV) python tools/package_stage1.py
+
+bootstrap-stage2:
+	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate

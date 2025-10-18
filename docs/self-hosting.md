@@ -92,3 +92,81 @@ diagnostics, and a more expressive runtime.
 Stay tuned—this is where the language begins to compile itself.
 
 Roadmap milestones that affect this directory live in `../docs/roadmap.md`.
+
+## Stage2 Bootstrap (LLVM Self-Hosting)
+
+As of October 2025, Sailfin supports bootstrapping the Stage2 self-hosted compiler that compiles all compiler sources to native LLVM IR. This represents a major milestone toward full self-hosting.
+
+### Quick Start
+
+Bootstrap the Stage2 compiler to LLVM:
+
+```bash
+make bootstrap-stage2
+```
+
+This compiles all `compiler/src/*.sfn` and `runtime/prelude.sfn` modules using the Stage2 LLVM backend, generating `.ll` (LLVM IR) files in `build/stage2/`.
+
+Expected output:
+
+```
+[stage2-bootstrap] starting Stage2 self-hosting compilation...
+[stage2-bootstrap] compiled 16 module(s) to build/stage2
+[stage2-bootstrap] ✓ Stage2 bootstrap completed successfully
+```
+
+### What Gets Generated
+
+For each source file `X.sfn`, the bootstrap process generates:
+
+- **LLVM IR module**: `build/stage2/X.ll` — Human-readable intermediate representation that can be compiled to machine code or executed with LLVM tools
+
+Example output:
+
+```
+build/stage2/
+├── ast.ll (1.4 KB)
+├── parser.ll (235 KB)
+├── native_llvm_lowering.ll (479 KB)
+├── main.ll (44 KB)
+└── ... (16 modules total)
+```
+
+### Validation
+
+Run tests to verify bootstrap integrity:
+
+```bash
+pytest compiler/tests/test_stage2_bootstrap.py -v
+```
+
+Tests validate:
+
+- All expected LLVM modules are generated
+- Generated IR has valid LLVM structure
+- Module sizes are reasonable (not empty or corrupt)
+
+### Current Limitations
+
+Stage2 bootstrap currently:
+
+- ✅ Compiles all compiler sources to LLVM IR
+- ✅ Generates valid (though incomplete) LLVM modules
+- ✅ Passes validation tests
+- ❌ Does not yet link modules into a single executable
+- ❌ Does not yet resolve cross-module imports
+- ❌ Does not yet compile IR to native binaries
+- ❌ Cannot yet replace Stage1 as the primary compiler
+
+### Known Issues
+
+The bootstrap process emits many warnings about unsupported Stage2 features (array indexing, some control flow patterns, etc.). These are expected and tracked in the roadmap. The compiler still generates valid LLVM IR for supported features.
+
+### Next Steps
+
+See the [Stage2 delivery roadmap](roadmap.md#active-workstreams-do-now) for upcoming work:
+
+- Module linking and cross-module resolution
+- Native binary generation with `llc`
+- Self-hosted compiler execution and validation
+- CI integration and distribution packaging

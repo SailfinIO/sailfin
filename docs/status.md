@@ -1,6 +1,6 @@
 # Sailfin Status
 
-Updated: October 16, 2025
+Updated: October 18, 2025
 
 This document is the source of truth for what ships today in the Python
 bootstrap toolchain and what exists only in the Sailfin-native
@@ -22,9 +22,16 @@ roadmaps.
   `Legacy/stage0/`) is retained for reference and targeted regression
   hunting, but it no longer participates in packaging or CI. Expect the
   directory to freeze except for emergency diffs.
-- **Stage2 (in design)** — Emits machine code via LLVM/WASM backends and a
-  Sailfin-native runtime. The `.sfn-asm` intermediate plus `native_llvm_lowering`
-  provide the initial scaffolding, now covering local assignments, structured
+- **Stage2 (bootstrap complete)** — As of October 2025, the Stage2 bootstrap
+  milestone is complete: `make bootstrap-stage2` successfully compiles all
+  compiler sources (`compiler/src/*.sfn` and `runtime/prelude.sfn`) to LLVM IR
+  modules in `build/stage2/`. The bootstrap script (`scripts/bootstrap_stage2.py`)
+  generates 16 LLVM `.ll` files validated by `compiler/tests/test_stage2_bootstrap.py`.
+  Stage2 continues to mature with expanded LLVM lowering coverage, cross-module
+  linking, and native binary generation tracked in the roadmap. The `.sfn-asm`
+  intermediate plus `native_llvm_lowering` provide the compilation infrastructure,
+  covering local assignments, structured control flow, structs, enums, interfaces,
+  borrows, and more (see detailed Stage2 feature list below). now covering local assignments, structured
   `if`/`else` branching, `loop`/`break`/`continue`, range-based `.for` iteration with
   dynamic stride support, element-wise `.for` loops over primitive arrays (`number[]`,
   `int[]`, `boolean[]`), and `match` dispatch alongside

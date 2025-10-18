@@ -3392,7 +3392,7 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     collected_string_constants = condition.string_constants
     if condition.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_index=structure.next_index + 1, mutations=[], string_constants=collected_string_constants)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=[], string_constants=collected_string_constants)
     then_label_alloc = allocate_block_label("then", current_block_counter)
     then_label = then_label_alloc.label
     current_block_counter = then_label_alloc.next_counter
@@ -3612,6 +3612,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
     lifetime_releases = []
     current_next_region = next_region_id
     mutations = []
+    string_constants = []
     parsed_assignment = parse_assignment_expression(expression)
     if parsed_assignment.success:
         binding = find_local_binding(current_locals, parsed_assignment.target)
@@ -4901,6 +4902,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     diagnostics = []
     current_lines = lines
     current_temp = temp_index
+    collected_string_constants = []
     inner = trim_text(substring(text, 1, len(text) - 1))
     elements = split_array_elements(inner)
     metadata = parse_array_literal_metadata(elements, context)
@@ -4917,6 +4919,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
             continue
         lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context)
         diagnostics = (diagnostics) + (lowered.diagnostics)
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
         if lowered.operand == None:
@@ -4981,7 +4984,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     current_temp += 1
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer)
     operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_alloca)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=[])
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def find_matching_closing_brace(text, open_index):
     depth = 0

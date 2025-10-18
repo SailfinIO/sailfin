@@ -5118,8 +5118,10 @@ fn lower_if_instruction(
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
             next_index: structure.next_index + 1,
-            mutations: [], string_constants: collected_string_constants,
+            mutations: [],
+            string_constants: collected_string_constants,
         };
     }
 
@@ -5547,6 +5549,7 @@ fn lower_expression_statement(
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut mutations -> LocalMutation[] = [];
+    let mut string_constants -> StringConstant[] = [];
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -5563,7 +5566,7 @@ fn lower_expression_statement(
 
             let lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
-            let string_constants = lowered.string_constants;
+            string_constants = lowered.string_constants;
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             if lowered.operand == null {
@@ -7363,6 +7366,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
+    let mut collected_string_constants -> StringConstant[] = [];
 
     let inner = trim_text(substring(text, 1, text.length - 1));
     let elements = split_array_elements(inner);
@@ -7383,6 +7387,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         }
         let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context);
         diagnostics = diagnostics.concat(lowered.diagnostics);
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         if lowered.operand == null {
@@ -7469,7 +7474,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer);
 
     let operand = LLVMOperand { llvm_type: struct_type + "*", value: struct_alloca };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: [] };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
 fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
