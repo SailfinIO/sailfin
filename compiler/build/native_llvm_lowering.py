@@ -5946,6 +5946,26 @@ def comparison_predicate_for_symbol(symbol, llvm_type):
         if symbol == "!=":
             return "icmp ne"
         return ""
+    if llvm_type == "i8":
+        if symbol == "==":
+            return "icmp eq"
+        if symbol == "!=":
+            return "icmp ne"
+        if symbol == "<":
+            return "icmp slt"
+        if symbol == "<=":
+            return "icmp sle"
+        if symbol == ">":
+            return "icmp sgt"
+        if symbol == ">=":
+            return "icmp sge"
+        return ""
+    if llvm_type == "i8*":
+        if symbol == "==":
+            return "icmp eq"
+        if symbol == "!=":
+            return "icmp ne"
+        return ""
     return ""
 
 def collect_parameter_types(context, parameters):
@@ -5999,6 +6019,11 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
             current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64")
             coerced = LLVMOperand(llvm_type="i64", value=temp_name)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        if operand.llvm_type == "i8":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i64")
+            coerced = LLVMOperand(llvm_type="i64", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     if target_type == "i1":
         if operand.llvm_type == "double":
             temp_name = format_temp_name(temp_index)
@@ -6023,6 +6048,8 @@ def dominant_type(first, second):
     if first == "double"  or  second == "double":
         return "double"
     if first == "i64"  or  second == "i64":
+        return "i64"
+    if first == "i8"  and  second == "i64"  or  first == "i64"  and  second == "i8":
         return "i64"
     if first == "i1"  or  second == "i1":
         return "i1"

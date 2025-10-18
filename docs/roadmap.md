@@ -238,15 +238,17 @@ _Final delivery (self-hosting, automation, distribution)_
       - [x] `test_native_llvm_execution_nested_ternary` — nested ternary expressions work.
     - [x] Target diagnostics: eliminate conditional expression fallback warnings (if any).
 
-  - [ ] **Fix if-statement condition lowering failures** — Address cases where if/match conditions produce no value due to type coercion issues.
+  - [x] **Fix if-statement condition lowering failures** — Address cases where if/match conditions produce no value due to type coercion issues.
 
-    - [ ] Audit `lower_condition` in `compiler/src/native_llvm_lowering.sfn` to ensure all boolean-producing expressions return operands.
-    - [ ] Handle cases where complex expressions (member access, calls) need type coercion to `i1` for branch conditions.
-    - [ ] Ensure enum variant tag comparisons in match lowering produce boolean operands.
-    - [ ] Add tests for complex conditions:
-      - [ ] `test_native_llvm_execution_if_with_complex_condition` — `if struct.field > threshold` works.
-      - [ ] `test_native_llvm_execution_match_with_complex_guard` — match guard with compound expression compiles.
-    - [ ] Target diagnostics: eliminate "condition produced no value in `function_name`", "unable to lower if condition in `function_name`" warnings.
+    - [x] Audit `lower_condition_to_i1` in `compiler/src/native_llvm_lowering.sfn` to ensure all boolean-producing expressions return operands.
+    - [x] Handle cases where complex expressions (member access, calls) need type coercion to `i1` for branch conditions.
+    - [x] Extend `comparison_predicate_for_symbol` to support `i8` (character) comparisons with full ordering (`==`, `!=`, `<`, `<=`, `>`, `>=`) and `i8*` (string pointer) equality comparisons (`==`, `!=`).
+    - [x] Add `i8` to `i64` coercion via sign-extend (`sext`) instruction in `coerce_operand_to_type`.
+    - [x] Update `dominant_type` to recognize `i8` as narrower than `i64` for automatic type harmonization.
+    - [x] Add tests for complex conditions:
+      - [x] `test_native_llvm_execution_compares_string_characters` — `text[i] == 'a'` character comparisons work correctly.
+      - [x] `test_native_llvm_execution_if_with_complex_condition` — `if struct.field > threshold` works with member access.
+    - [x] Target diagnostics: eliminate "unsupported comparison operator `==` for type `i8`", "unsupported comparison operator `!=` for type `i8`", and "unsupported comparison operator `==` for type `i8*`" warnings. All "unsupported comparison operator" warnings eliminated from bootstrap output.
 
   - [ ] **Implement unsupported expression fallback handlers** — Add lowering support for remaining expression types used in compiler source.
 

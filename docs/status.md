@@ -338,6 +338,27 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   correctly). With ternary operator support, Stage2 can compile inline conditional
   expressions found throughout compiler internals, bringing the compiler closer to
   warning-free self-compilation.
+  Character and string pointer comparisons now fully support all comparison operators
+  in if-statement and match guard conditions, eliminating "unsupported comparison operator"
+  and "condition produced no value" warnings for character-based logic in lexer/parser
+  utilities. The LLVM lowering pipeline extends comparison operator support to `i8`
+  (character) types with full ordering (`==`, `!=`, `<`, `<=`, `>`, `>=`) and `i8*`
+  (string pointer) types with equality checks (`==`, `!=`). When comparing values of
+  different integer widths (e.g., `i8` character vs `i64` integer literal), the compiler
+  automatically coerces the narrower type to the dominant type using sign-extend (`sext`)
+  instructions, ensuring type compatibility before emitting the comparison. For example,
+  `if text[i] == 97` (comparing `i8` character to `i64` literal) lowers as `sext i8 %ch
+  to i64` followed by `icmp eq i64 %extended, 97`. This enables string processing utilities
+  like `starts_with`, `contains_string`, and character class validators to compile without
+  fallbacks. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_compares_string_characters`
+  (validates character comparisons in if-conditions compile and execute correctly with
+  proper type coercion) and
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_if_with_complex_condition`
+  (validates if-statements with complex conditions like member access combined with
+  comparisons lower successfully). With character and string pointer comparison support,
+  Stage2 bootstrap eliminates all "unsupported comparison operator" warnings, reducing
+  condition lowering failures and bringing self-compilation closer to warning-free status.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by

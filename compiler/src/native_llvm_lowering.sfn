@@ -8845,6 +8845,38 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         }
         return "";
     }
+    // Support character (i8) comparisons for lexer/parser string utilities
+    if llvm_type == "i8" {
+        if symbol == "==" {
+            return "icmp eq";
+        }
+        if symbol == "!=" {
+            return "icmp ne";
+        }
+        if symbol == "<" {
+            return "icmp slt";
+        }
+        if symbol == "<=" {
+            return "icmp sle";
+        }
+        if symbol == ">" {
+            return "icmp sgt";
+        }
+        if symbol == ">=" {
+            return "icmp sge";
+        }
+        return "";
+    }
+    // Support string pointer (i8*) comparisons for equality checks
+    if llvm_type == "i8*" {
+        if symbol == "==" {
+            return "icmp eq";
+        }
+        if symbol == "!=" {
+            return "icmp ne";
+        }
+        return "";
+    }
     return "";
 }
 
@@ -8918,6 +8950,12 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
+        if operand.llvm_type == "i8" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
     if target_type == "i1" {
         if operand.llvm_type == "double" {
@@ -8951,6 +8989,10 @@ fn dominant_type(first -> string, second -> string) -> string {
         return "double";
     }
     if first == "i64" || second == "i64" {
+        return "i64";
+    }
+    // i8 is narrower than i64, so i64 dominates
+    if (first == "i8" && second == "i64") || (first == "i64" && second == "i8") {
         return "i64";
     }
     if first == "i1" || second == "i1" {

@@ -10,6 +10,10 @@ source_filename = "sailfin"
 declare noalias i8* @malloc(i64)
 
 @.str.5 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.3 = private unnamed_addr constant [2 x i8] c" \00"
+@.str.5 = private unnamed_addr constant [2 x i8] c"\0A\00"
+@.str.8 = private unnamed_addr constant [2 x i8] c"\09\00"
+@.str.11 = private unnamed_addr constant [2 x i8] c"\0D\00"
 @.str.0 = private unnamed_addr constant [21 x i8] c" is missing effect '\00"
 @.str.3 = private unnamed_addr constant [2 x i8] c"'\00"
 @.str.6 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
@@ -588,7 +592,54 @@ afterloop7:
 
 define i1 @is_whitespace(i8* %ch) {
 entry:
-  ret i1 false
+  %s3 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.3, i32 0, i32 0
+  %t4 = icmp eq i8* %ch, %s3
+  br label %logical_or_entry_2
+
+logical_or_entry_2:
+  br i1 %t4, label %logical_or_merge_2, label %logical_or_right_2
+
+logical_or_right_2:
+  %s5 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.5, i32 0, i32 0
+  %t6 = icmp eq i8* %ch, %s5
+  br label %logical_or_right_end_2
+
+logical_or_right_end_2:
+  br label %logical_or_merge_2
+
+logical_or_merge_2:
+  %t7 = phi i1 [ true, %logical_or_entry_2 ], [ %t6, %logical_or_right_end_2 ]
+  br label %logical_or_entry_1
+
+logical_or_entry_1:
+  br i1 %t7, label %logical_or_merge_1, label %logical_or_right_1
+
+logical_or_right_1:
+  %s8 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.8, i32 0, i32 0
+  %t9 = icmp eq i8* %ch, %s8
+  br label %logical_or_right_end_1
+
+logical_or_right_end_1:
+  br label %logical_or_merge_1
+
+logical_or_merge_1:
+  %t10 = phi i1 [ true, %logical_or_entry_1 ], [ %t9, %logical_or_right_end_1 ]
+  br label %logical_or_entry_0
+
+logical_or_entry_0:
+  br i1 %t10, label %logical_or_merge_0, label %logical_or_right_0
+
+logical_or_right_0:
+  %s11 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.11, i32 0, i32 0
+  %t12 = icmp eq i8* %ch, %s11
+  br label %logical_or_right_end_0
+
+logical_or_right_end_0:
+  br label %logical_or_merge_0
+
+logical_or_merge_0:
+  %t13 = phi i1 [ true, %logical_or_entry_0 ], [ %t12, %logical_or_right_end_0 ]
+  ret i1 %t13
 }
 
 define { %Diagnostic*, i64 }* @check_struct_methods({ i8**, i64 }* %methods) {
@@ -1130,11 +1181,17 @@ forbody1:
   %t8 = load i8*, i8** %t7
   store i8* %t8, i8** %l1
   %t9 = load i8*, i8** %l1
+  %t10 = icmp eq i8* %t9, %candidate
+  %t11 = load i8*, i8** %l1
+  br i1 %t10, label %then4, label %merge5
+then4:
+  ret i1 1
+merge5:
   br label %forinc2
 forinc2:
-  %t10 = load i64, i64* %l0
-  %t11 = add i64 %t10, 1
-  store i64 %t11, i64* %l0
+  %t12 = load i64, i64* %l0
+  %t13 = add i64 %t12, 1
+  store i64 %t13, i64* %l0
   br label %for0
 afterfor3:
   ret i1 0
@@ -1291,11 +1348,17 @@ forbody1:
   store %SymbolEntry %t8, %SymbolEntry* %l1
   %t9 = load %SymbolEntry, %SymbolEntry* %l1
   %t10 = extractvalue %SymbolEntry %t9, 0
+  %t11 = icmp eq i8* %t10, %name
+  %t12 = load %SymbolEntry, %SymbolEntry* %l1
+  br i1 %t11, label %then4, label %merge5
+then4:
+  ret i1 1
+merge5:
   br label %forinc2
 forinc2:
-  %t11 = load i64, i64* %l0
-  %t12 = add i64 %t11, 1
-  store i64 %t12, i64* %l0
+  %t13 = load i64, i64* %l0
+  %t14 = add i64 %t13, 1
+  store i64 %t14, i64* %l0
   br label %for0
 afterfor3:
   ret i1 0
@@ -1334,8 +1397,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t13 = phi double [ %t1, %entry ], [ %t12, %loop.latch2 ]
-  store double %t13, double* %l0
+  %t15 = phi double [ %t1, %entry ], [ %t14, %loop.latch2 ]
+  store double %t15, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -1345,13 +1408,19 @@ loop.body1:
   %t6 = load double, double* %l0
   %t7 = getelementptr i8, i8* %prefix, i64 %t6
   %t8 = load i8, i8* %t7
-  %t9 = load double, double* %l0
-  %t10 = sitofp i64 1 to double
-  %t11 = fadd double %t9, %t10
-  store double %t11, double* %l0
+  %t9 = icmp ne i8 %t5, %t8
+  %t10 = load double, double* %l0
+  br i1 %t9, label %then4, label %merge5
+then4:
+  ret i1 0
+merge5:
+  %t11 = load double, double* %l0
+  %t12 = sitofp i64 1 to double
+  %t13 = fadd double %t11, %t12
+  store double %t13, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t12 = load double, double* %l0
+  %t14 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 1

@@ -4044,3 +4044,103 @@ fn main() -> int {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_compares_string_characters(compile_stage2):
+    """Test that character comparisons work in if-statement conditions."""
+    source = """
+fn check_char(text -> string, index -> int) -> int {
+    let ch = text[index];
+    if ch == 97 {
+        return 1;
+    }
+    if ch != 98 {
+        return 2;
+    }
+    return 0;
+}
+
+fn main() -> int {
+    return check_char("abc", 0);
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Check that character comparisons don't produce unsupported operator warnings
+    unsupported_errors = [
+        diag for diag in lowered.diagnostics
+        if "unsupported comparison operator" in diag and "i8" in diag
+    ]
+    assert not unsupported_errors, f"Character comparisons should be supported: {unsupported_errors}"
+
+    # Check that condition doesn't fail to lower
+    condition_errors = [
+        diag for diag in lowered.diagnostics
+        if "condition produced no value" in diag or "unable to lower if condition" in diag
+    ]
+    assert not condition_errors, f"Character comparison conditions should lower: {condition_errors}"
+
+    ir = lowered.ir
+
+    # Check that icmp is used for character comparison (may be coerced to i64)
+    assert "icmp eq" in ir or "icmp ne" in ir, "icmp instruction should be used for character comparison"
+    assert "sext i8" in ir, "i8 character should be extended to i64 for comparison"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 1, f"Expected 1 (character 'a' == 97), got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_if_with_complex_condition(compile_stage2):
+    """Test that if-statements with complex conditions (member access, comparisons) work."""
+    source = """
+struct Point {
+    x -> number;
+    y -> number;
+}
+
+fn check_point(p -> Point, threshold -> number) -> int {
+    if p.x > threshold {
+        return 1;
+    }
+    if p.y <= threshold {
+        return 2;
+    }
+    return 0;
+}
+
+fn main() -> int {
+    let point = Point { x: 10.0, y: 5.0 };
+    return check_point(point, 7.0);
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Check that member access in conditions doesn't fail
+    condition_errors = [
+        diag for diag in lowered.diagnostics
+        if "condition produced no value" in diag or "unable to lower if condition" in diag
+    ]
+    assert not condition_errors, f"Complex conditions should lower: {condition_errors}"
+
+    ir = lowered.ir
+
+    # Check that member access and comparison are present
+    assert "extractvalue" in ir or "getelementptr" in ir, "Member access should use extractvalue or GEP"
+    assert "fcmp" in ir, "Comparison should use fcmp for floating point"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 1, f"Expected 1 (p.x=10.0 > threshold=7.0), got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
