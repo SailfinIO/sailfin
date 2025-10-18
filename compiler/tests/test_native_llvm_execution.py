@@ -3044,14 +3044,14 @@ fn main() -> number {
     assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
     ir = lowered.ir
-    
+
     # Check that string constant is emitted as global
     assert "@.str." in ir, "String constant not found in IR"
     assert "c\"Hello, World!\\00\"" in ir, "String content not found in IR"
-    
+
     # Check that getelementptr is used to get pointer
     assert "getelementptr inbounds" in ir, "getelementptr instruction not found"
-    
+
     # Verify it compiles and executes without errors
     _compile_ir(ir)
 
@@ -3082,12 +3082,12 @@ fn main() -> number {
     assert not unexpected, f"unexpected diagnostics: {unexpected}"
 
     ir = lowered.ir
-    
+
     # Count occurrences of the string constant definition
     # There should only be one @.str.N definition for "duplicate"
     string_constant_count = ir.count('c"duplicate\\00"')
     assert string_constant_count == 1, f"Expected 1 string constant, found {string_constant_count}"
-    
+
     # Verify it compiles
     _compile_ir(ir)
 
@@ -3122,16 +3122,239 @@ fn main() -> number {
     ]
     unexpected = [
         diag for diag in lowered.diagnostics if diag not in acceptable_diags]
-    
+
     # Check that "unhandled return expression" is NOT in unexpected diagnostics
-    has_unhandled_return = any("unhandled return expression" in diag for diag in unexpected)
+    has_unhandled_return = any(
+        "unhandled return expression" in diag for diag in unexpected)
     assert not has_unhandled_return, "String literal return should now be handled"
-    
+
     ir = lowered.ir
-    
+
     # Check that string constant is emitted
     assert "@.str." in ir, "String constant not found in IR"
     assert 'c"Hi\\00"' in ir, "String content not found in IR"
-    
+
     # Verify it compiles
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_method_returns_string_literal(compile_stage2) -> None:
+    """Validate that interface methods can return string literals end-to-end."""
+    source = """
+interface Formatter {
+    fn format(self) -> string;
+}
+
+struct Document implements Formatter {
+    id -> number;
+    
+    fn format(self) -> string {
+        return "Document text";
+    }
+}
+
+fn main() -> number {
+    let doc = Document { id: 123 };
+    let result = doc.format();
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="method_returns_string")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "method call expects" in diag
+        or "unable to coerce operand" in diag
+        or "unable to coerce argument" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that string constant is properly emitted
+    assert "@.str." in ir, "String constant not found in IR"
+    assert 'c"Document text\\00"' in ir, "String content not found in IR"
+
+    # Check that method definition exists
+    assert "define" in ir and "Document::format" in ir or "format" in ir, \
+        "Method definition should exist"
+
+    # Check that return instruction exists
+    assert "ret" in ir, "Return instruction should exist"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_method_returns_field_access(compile_stage2) -> None:
+    """Validate that methods can return struct field values (return self.field)."""
+    source = """
+interface Identifiable {
+    fn get_id(self) -> number;
+}
+
+struct Product implements Identifiable {
+    id -> number;
+    name -> string;
+    
+    fn get_id(self) -> number {
+        return self.id;
+    }
+}
+
+fn main() -> number {
+    let product = Product { id: 42, name: "Widget" };
+    let result = product.get_id();
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="method_returns_field")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "method call expects" in diag
+        or "unable to coerce operand" in diag
+        or "unable to coerce argument" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that method definition exists
+    assert "define" in ir, "Method definition should exist"
+
+    # Check for GEP instruction to access struct field
+    assert "getelementptr" in ir, "GEP instruction should exist for field access"
+
+    # Check for load instruction to read field value
+    assert "load" in ir, "Load instruction should exist for reading field"
+
+    # Check that return instruction exists
+    assert "ret" in ir, "Return instruction should exist"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_method_returns_computed_value(compile_stage2) -> None:
+    """Validate that methods can return computed expressions (return self.x + self.y)."""
+    source = """
+interface Summable {
+    fn sum(self) -> number;
+}
+
+struct Point implements Summable {
+    x -> number;
+    y -> number;
+    
+    fn sum(self) -> number {
+        return self.x + self.y;
+    }
+}
+
+fn main() -> number {
+    let point = Point { x: 10.0, y: 20.0 };
+    let result = point.sum();
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="method_returns_computed")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "method call expects" in diag
+        or "unable to coerce operand" in diag
+        or "unable to coerce argument" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that method definition exists
+    assert "define" in ir, "Method definition should exist"
+
+    # Check for field access instructions
+    assert "getelementptr" in ir, "GEP instruction should exist for field access"
+    assert "load" in ir, "Load instruction should exist for reading fields"
+
+    # Check for arithmetic operation
+    assert "fadd" in ir or "add" in ir, "Addition operation should exist"
+
+    # Check that return instruction exists
+    assert "ret" in ir, "Return instruction should exist"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_method_returns_call_result(compile_stage2) -> None:
+    """Validate that methods can return the result of calling other functions/methods."""
+    source = """
+fn helper(x -> number) -> number {
+    return x * 2.0;
+}
+
+interface Calculator {
+    fn compute(self) -> number;
+}
+
+struct Value implements Calculator {
+    data -> number;
+    
+    fn compute(self) -> number {
+        return helper(self.data);
+    }
+}
+
+fn main() -> number {
+    let val = Value { data: 21.0 };
+    let result = val.compute();
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="method_returns_call")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "method call expects" in diag
+        or "unable to coerce operand" in diag
+        or "unable to coerce argument" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+
+    # Check that method definition exists
+    assert "define" in ir, "Method definition should exist"
+
+    # Check that helper function exists
+    assert "define" in ir and "helper" in ir, "Helper function should be defined"
+
+    # Check for call instruction to helper
+    assert "call" in ir, "Call instruction should exist"
+
+    # Check for field access to get argument
+    assert "getelementptr" in ir, "GEP instruction should exist for field access"
+    assert "load" in ir, "Load instruction should exist for reading field"
+
+    # Check that return instruction exists
+    assert "ret" in ir, "Return instruction should exist"
+
+    # Verify it compiles successfully
     _compile_ir(ir)

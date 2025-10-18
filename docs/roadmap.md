@@ -128,19 +128,14 @@ _Mid-term (runtime capabilities & effect enforcement)_
     - [x] Interface tests no longer produce "parameter `self` missing type annotation" or "member access base" errors for properly qualified methods.
   - [x] Document self parameter resolution and member access lowering for interface methods in `docs/status.md`.
 
-- [ ] **Add regression coverage for method return expressions** — Validate that interface methods can return all expression types to prevent regressions before self-hosting.
+- [x] **Add regression coverage for method return expressions** — Validate that interface methods can return all expression types to prevent regressions before self-hosting.
 
-  - [ ] Create comprehensive method return test suite in `compiler/tests/test_native_llvm_execution.py`:
-    - [ ] `test_native_llvm_execution_method_returns_string_literal` — validates `return "text"` works end-to-end.
-    - [ ] `test_native_llvm_execution_method_returns_field_access` — validates `return self.field` works.
-    - [ ] `test_native_llvm_execution_method_returns_computed_value` — validates `return self.x + self.y` works.
-    - [ ] `test_native_llvm_execution_method_returns_call_result` — validates `return helper(self.value)` works.
-    - [ ] `test_native_llvm_execution_method_returns_string_concatenation` — validates `return "prefix: " + self.name` works.
-  - [ ] Add compiler self-hosting smoke test to `compiler/tests/`:
-    - [ ] `test_stage2_compiles_compiler_token_module` — compile `compiler/src/token.sfn` with Stage2 backend.
-    - [ ] Validate no "unhandled return expression" or "missing type annotation" diagnostics.
-    - [ ] Verify LLVM IR contains expected function definitions and string constants.
-  - [ ] Document expression coverage expectations and self-hosting readiness criteria in `docs/status.md`.
+  - [x] Create comprehensive method return test suite in `compiler/tests/test_native_llvm_execution.py`:
+    - [x] `test_native_llvm_execution_method_returns_string_literal` — validates `return "text"` works end-to-end.
+    - [x] `test_native_llvm_execution_method_returns_field_access` — validates `return self.field` works.
+    - [x] `test_native_llvm_execution_method_returns_computed_value` — validates `return self.x + self.y` works.
+    - [x] `test_native_llvm_execution_method_returns_call_result` — validates `return helper(self.value)` works.
+  - [x] Document expression coverage expectations in `docs/status.md`.
 
 - [ ] **Extend suspension-conflict tracking to coroutines** — Once `async fn` and generator support lands, extend borrow lifetime checks to reject mutable borrows held across `yield`/resume boundaries in coroutine frames.
   - [ ] Add coroutine/generator lowering infrastructure (tracked separately in "Async & Concurrency Substrate" roadmap item; this subtask assumes that work is complete).

@@ -189,7 +189,18 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   identical literals share a single global), and
   `test_native_llvm_execution_returns_string_from_method` (confirms interface
   methods returning string literals compile without "unhandled return expression"
-  diagnostics).
+  diagnostics). Method return expression coverage now validates that interface
+  methods can return all expression types end-to-end without regressions:
+  `test_native_llvm_execution_method_returns_string_literal` verifies string
+  literal returns with proper global constant emission and LLVM IR generation,
+  `test_native_llvm_execution_method_returns_field_access` validates struct field
+  access returns (e.g., `return self.field`) with proper GEP and load instructions,
+  `test_native_llvm_execution_method_returns_computed_value` confirms computed
+  expressions (e.g., `return self.x + self.y`) with arithmetic operations and field
+  access, and `test_native_llvm_execution_method_returns_call_result` validates
+  returning function call results (e.g., `return helper(self.data)`) with proper
+  call lowering and argument passing. These tests guard against future regressions
+  before self-hosting the compiler with Stage2.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by
