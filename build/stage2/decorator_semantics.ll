@@ -68,11 +68,11 @@ merge5:
   ret { i8**, i64 }* %t29
 }
 
-define { %DecoratorInfo*, i64 }* @evaluate_decorators(double %decorators) {
+define { %DecoratorInfo*, i64 }* @evaluate_decorators({ i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca { %DecoratorInfo*, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -88,29 +88,36 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { %DecoratorInfo*, i64 }* %t12, { %DecoratorInfo*, i64 }** %l0
+  %t18 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t17, %loop.latch2 ]
+  store { %DecoratorInfo*, i64 }* %t18, { %DecoratorInfo*, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %decorators
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store double 0.0, double* %l3
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  %t17 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  ret { %DecoratorInfo*, i64 }* %t13
+  %t19 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  ret { %DecoratorInfo*, i64 }* %t19
 }
 
-define { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments(double %arguments) {
+define { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments({ i8**, i64 }* %arguments) {
 entry:
   %l0 = alloca { %DecoratorArgumentInfo*, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -126,31 +133,38 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { %DecoratorArgumentInfo*, i64 }* %t12, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t18 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t17, %loop.latch2 ]
+  store { %DecoratorArgumentInfo*, i64 }* %t18, { %DecoratorArgumentInfo*, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %arguments
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store double 0.0, double* %l3
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t17 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  ret { %DecoratorArgumentInfo*, i64 }* %t13
+  %t19 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  ret { %DecoratorArgumentInfo*, i64 }* %t19
 }
 
-define %LiteralValue @evaluate_expression(double %expr) {
+define %LiteralValue @evaluate_expression(i8* %expr) {
 entry:
   %t0 = call double @LiteralValueUnsupported()
   ret %LiteralValue zeroinitializer
 }
 
-define { %DecoratorInfo*, i64 }* @evaluate_statement_decorators(double %statement) {
+define { %DecoratorInfo*, i64 }* @evaluate_statement_decorators(i8* %statement) {
 entry:
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0

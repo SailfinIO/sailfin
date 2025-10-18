@@ -36,13 +36,13 @@ declare noalias i8* @malloc(i64)
 @.str.7 = private unnamed_addr constant [50 x i8] c"(\22 + format_parameters(signature.parameters) + \22)\00"
 @.str.0 = private unnamed_addr constant [3 x i8] c"![\00"
 @.str.0 = private unnamed_addr constant [4 x i8] c"fn \00"
-@.str.18 = private unnamed_addr constant [15 x i8] c"(\22 + args + \22)\00"
+@.str.24 = private unnamed_addr constant [15 x i8] c"(\22 + args + \22)\00"
 @.str.8 = private unnamed_addr constant [3 x i8] c"{\0A\00"
 @.str.10 = private unnamed_addr constant [2 x i8] c"\0A\00"
 @.str.13 = private unnamed_addr constant [3 x i8] c"\0A}\00"
 @.str.0 = private unnamed_addr constant [2 x i8] c"\22\00"
 
-define i8* @emit_program(double %program) {
+define i8* @emit_program(i8* %program) {
 entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca double
@@ -80,16 +80,16 @@ afterloop3:
   ret i8* %t17
 }
 
-define %TextBuilder @emit_statement(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_statement(%TextBuilder %builder, i8* %statement) {
 entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_import(%TextBuilder %builder, double %specifiers, i8* %source) {
+define %TextBuilder @emit_import(%TextBuilder %builder, { i8**, i64 }* %specifiers, i8* %source) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
-  %t0 = call i8* @format_import_specifiers(double %specifiers)
+  %t0 = call i8* @format_import_specifiers({ i8**, i64 }* %specifiers)
   store i8* %t0, i8** %l0
   %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1, i32 0, i32 0
   %t2 = load i8*, i8** %l0
@@ -105,11 +105,11 @@ entry:
   ret %TextBuilder %t10
 }
 
-define %TextBuilder @emit_export(%TextBuilder %builder, double %specifiers, i8* %source) {
+define %TextBuilder @emit_export(%TextBuilder %builder, { i8**, i64 }* %specifiers, i8* %source) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
-  %t0 = call i8* @format_export_specifiers(double %specifiers)
+  %t0 = call i8* @format_export_specifiers({ i8**, i64 }* %specifiers)
   store i8* %t0, i8** %l0
   %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1, i32 0, i32 0
   %t2 = load i8*, i8** %l0
@@ -125,7 +125,7 @@ entry:
   ret %TextBuilder %t10
 }
 
-define %TextBuilder @emit_variable(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_variable(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.0, i32 0, i32 0
@@ -140,45 +140,45 @@ entry:
   ret %TextBuilder %t7
 }
 
-define %TextBuilder @emit_function(%TextBuilder %builder, double %signature, double %body, double %decorators) {
+define %TextBuilder @emit_function(%TextBuilder %builder, i8* %signature, i8* %body, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca i8*
-  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, double %decorators)
+  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, { i8**, i64 }* %decorators)
   store %TextBuilder %t0, %TextBuilder* %l0
-  %t1 = call i8* @format_function_header(double %signature)
+  %t1 = call i8* @format_function_header(i8* %signature)
   store i8* %t1, i8** %l1
   %t2 = load %TextBuilder, %TextBuilder* %l0
   %t3 = load i8*, i8** %l1
   %t4 = call %TextBuilder @builder_emit_line(%TextBuilder %t2, i8* %t3)
   store %TextBuilder %t4, %TextBuilder* %l0
   %t5 = load %TextBuilder, %TextBuilder* %l0
-  %t6 = call %TextBuilder @emit_block(%TextBuilder %t5, double %body)
+  %t6 = call %TextBuilder @emit_block(%TextBuilder %t5, i8* %body)
   store %TextBuilder %t6, %TextBuilder* %l0
   %t7 = load %TextBuilder, %TextBuilder* %l0
   ret %TextBuilder %t7
 }
 
-define %TextBuilder @emit_callable(%TextBuilder %builder, i8* %keyword, double %signature, double %body, double %decorators) {
+define %TextBuilder @emit_callable(%TextBuilder %builder, i8* %keyword, i8* %signature, i8* %body, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca i8*
-  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, double %decorators)
+  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, { i8**, i64 }* %decorators)
   store %TextBuilder %t0, %TextBuilder* %l0
-  %t1 = call i8* @format_callable_header(i8* %keyword, double %signature)
+  %t1 = call i8* @format_callable_header(i8* %keyword, i8* %signature)
   store i8* %t1, i8** %l1
   %t2 = load %TextBuilder, %TextBuilder* %l0
   %t3 = load i8*, i8** %l1
   %t4 = call %TextBuilder @builder_emit_line(%TextBuilder %t2, i8* %t3)
   store %TextBuilder %t4, %TextBuilder* %l0
   %t5 = load %TextBuilder, %TextBuilder* %l0
-  %t6 = call %TextBuilder @emit_block(%TextBuilder %t5, double %body)
+  %t6 = call %TextBuilder @emit_block(%TextBuilder %t5, i8* %body)
   store %TextBuilder %t6, %TextBuilder* %l0
   %t7 = load %TextBuilder, %TextBuilder* %l0
   ret %TextBuilder %t7
 }
 
-define %TextBuilder @emit_test(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_test(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -200,7 +200,7 @@ entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_model(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_model(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -260,7 +260,7 @@ afterloop3:
   ret %TextBuilder zeroinitializer
 }
 
-define i8* @format_import_specifiers(double %specifiers) {
+define i8* @format_import_specifiers({ i8**, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -279,28 +279,42 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t15 = phi { i8**, i64 }* [ %t6, %entry ], [ %t14, %loop.latch2 ]
-  store { i8**, i64 }* %t15, { i8**, i64 }** %l0
+  %t27 = phi { i8**, i64 }* [ %t6, %entry ], [ %t26, %loop.latch2 ]
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  %t10 = load double, double* %l1
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  %t16 = load double, double* %l1
+  %t17 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t18 = extractvalue { i8**, i64 } %t17, 0
+  %t19 = extractvalue { i8**, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr i8*, i8** %t18, i64 %t16
+  %t22 = load i8*, i8** %t21
   store double 0.0, double* %l2
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t12 = load double, double* %l2
-  %t13 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t11, i8* null)
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load double, double* %l2
+  %t25 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t23, i8* null)
+  store { i8**, i64 }* %t25, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @format_export_specifiers(double %specifiers) {
+define i8* @format_export_specifiers({ i8**, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -319,35 +333,50 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t15 = phi { i8**, i64 }* [ %t6, %entry ], [ %t14, %loop.latch2 ]
-  store { i8**, i64 }* %t15, { i8**, i64 }** %l0
+  %t27 = phi { i8**, i64 }* [ %t6, %entry ], [ %t26, %loop.latch2 ]
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  %t10 = load double, double* %l1
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  %t16 = load double, double* %l1
+  %t17 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t18 = extractvalue { i8**, i64 } %t17, 0
+  %t19 = extractvalue { i8**, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr i8*, i8** %t18, i64 %t16
+  %t22 = load i8*, i8** %t21
   store double 0.0, double* %l2
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t12 = load double, double* %l2
-  %t13 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t11, i8* null)
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load double, double* %l2
+  %t25 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t23, i8* null)
+  store { i8**, i64 }* %t25, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @format_specifier_entry(i8* %name, double %alias) {
+define i8* @format_specifier_entry(i8* %name, i8* %alias) {
 entry:
   %s0 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.0, i32 0, i32 0
   %t1 = add i8* %name, %s0
-  ret i8* null
+  %t2 = add i8* %t1, %alias
+  ret i8* %t2
 }
 
-define %TextBuilder @emit_type_alias(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_type_alias(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
@@ -360,7 +389,7 @@ entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_interface(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_interface(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -393,7 +422,7 @@ loop.body1:
   store double 0.0, double* %l3
   %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.12, i32 0, i32 0
   %t13 = load double, double* %l3
-  %t14 = call i8* @format_signature_line(i8* %s12, double %t13)
+  %t14 = call i8* @format_signature_line(i8* %s12, i8* null)
   %s15 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.15, i32 0, i32 0
   %t16 = add i8* %t14, %s15
   store i8* %t16, i8** %l4
@@ -413,7 +442,7 @@ afterloop3:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_enum(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_enum(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -445,7 +474,7 @@ loop.body1:
   store double 0.0, double* %l3
   %t12 = load double, double* %l0
   %t13 = load double, double* %l3
-  %t14 = call i8* @format_enum_variant(double %t13)
+  %t14 = call i8* @format_enum_variant(i8* null)
   %s15 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.15, i32 0, i32 0
   %t16 = add i8* %t14, %s15
   %t17 = call %TextBuilder @builder_emit_line(%TextBuilder zeroinitializer, i8* %t16)
@@ -462,7 +491,7 @@ afterloop3:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_struct(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_struct(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -533,13 +562,13 @@ afterloop7:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_block(%TextBuilder %builder, double %block) {
+define %TextBuilder @emit_block(%TextBuilder %builder, i8* %block) {
 entry:
   %l0 = alloca %TextBuilder
   %t0 = call %TextBuilder @emit_block_start(%TextBuilder %builder)
   store %TextBuilder %t0, %TextBuilder* %l0
   %t1 = load %TextBuilder, %TextBuilder* %l0
-  %t2 = call %TextBuilder @emit_block_body(%TextBuilder %t1, double %block)
+  %t2 = call %TextBuilder @emit_block_body(%TextBuilder %t1, i8* %block)
   store %TextBuilder %t2, %TextBuilder* %l0
   %t3 = load %TextBuilder, %TextBuilder* %l0
   %t4 = call %TextBuilder @emit_block_end(%TextBuilder %t3)
@@ -548,7 +577,7 @@ entry:
   ret %TextBuilder %t5
 }
 
-define %TextBuilder @emit_block_body(%TextBuilder %builder, double %block) {
+define %TextBuilder @emit_block_body(%TextBuilder %builder, i8* %block) {
 entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca double
@@ -574,12 +603,12 @@ afterloop3:
   ret %TextBuilder %t7
 }
 
-define %TextBuilder @emit_block_statement(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_block_statement(%TextBuilder %builder, i8* %statement) {
 entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_prompt(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_prompt(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -597,7 +626,7 @@ entry:
   ret %TextBuilder %t7
 }
 
-define %TextBuilder @emit_with(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_with(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -648,7 +677,7 @@ afterloop3:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_if(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_if(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -664,12 +693,12 @@ entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_else_branch(%TextBuilder %builder, double %branch) {
+define %TextBuilder @emit_else_branch(%TextBuilder %builder, i8* %branch) {
 entry:
   ret %TextBuilder %builder
 }
 
-define %TextBuilder @emit_for(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_for(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -684,7 +713,7 @@ entry:
   ret %TextBuilder zeroinitializer
 }
 
-define %TextBuilder @emit_match(%TextBuilder %builder, double %statement) {
+define %TextBuilder @emit_match(%TextBuilder %builder, i8* %statement) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -730,7 +759,7 @@ afterloop3:
   ret %TextBuilder %t21
 }
 
-define %TextBuilder @emit_match_case(%TextBuilder %builder, double %case) {
+define %TextBuilder @emit_match_case(%TextBuilder %builder, i8* %case) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca %TextBuilder
@@ -775,17 +804,17 @@ entry:
   ret %TextBuilder %t3
 }
 
-define %TextBuilder @emit_decorators_then_line(%TextBuilder %builder, double %decorators, i8* %line) {
+define %TextBuilder @emit_decorators_then_line(%TextBuilder %builder, { i8**, i64 }* %decorators, i8* %line) {
 entry:
   %l0 = alloca %TextBuilder
-  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, double %decorators)
+  %t0 = call %TextBuilder @emit_decorators(%TextBuilder %builder, { i8**, i64 }* %decorators)
   store %TextBuilder %t0, %TextBuilder* %l0
   %t1 = load %TextBuilder, %TextBuilder* %l0
   %t2 = call %TextBuilder @builder_emit_line(%TextBuilder %t1, i8* %line)
   ret %TextBuilder %t2
 }
 
-define %TextBuilder @emit_decorators(%TextBuilder %builder, double %decorators) {
+define %TextBuilder @emit_decorators(%TextBuilder %builder, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca double
@@ -796,23 +825,33 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t7 = phi %TextBuilder [ %t1, %entry ], [ %t6, %loop.latch2 ]
-  store %TextBuilder %t7, %TextBuilder* %l0
+  %t15 = phi %TextBuilder [ %t1, %entry ], [ %t14, %loop.latch2 ]
+  store %TextBuilder %t15, %TextBuilder* %l0
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
   %t4 = load %TextBuilder, %TextBuilder* %l0
   %t5 = load double, double* %l1
+  %t6 = load { i8**, i64 }, { i8**, i64 }* %decorators
+  %t7 = extractvalue { i8**, i64 } %t6, 0
+  %t8 = extractvalue { i8**, i64 } %t6, 1
+  %t9 = icmp uge i64 %t5, %t8
+  ; bounds check: %t9 (if true, out of bounds)
+  %t10 = getelementptr i8*, i8** %t7, i64 %t5
+  %t11 = load i8*, i8** %t10
+  %t12 = call i8* @format_decorator(i8* %t11)
+  %t13 = call %TextBuilder @builder_emit_line(%TextBuilder %t4, i8* %t12)
+  store %TextBuilder %t13, %TextBuilder* %l0
   br label %loop.latch2
 loop.latch2:
-  %t6 = load %TextBuilder, %TextBuilder* %l0
+  %t14 = load %TextBuilder, %TextBuilder* %l0
   br label %loop.header0
 afterloop3:
-  %t8 = load %TextBuilder, %TextBuilder* %l0
-  ret %TextBuilder %t8
+  %t16 = load %TextBuilder, %TextBuilder* %l0
+  ret %TextBuilder %t16
 }
 
-define i8* @format_decorator(double %decorator) {
+define i8* @format_decorator(i8* %decorator) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca { i8**, i64 }*
@@ -851,14 +890,14 @@ afterloop3:
   ret i8* %t16
 }
 
-define i8* @format_decorator_argument(double %argument) {
+define i8* @format_decorator_argument(i8* %argument) {
 entry:
   %l0 = alloca double
   store double 0.0, double* %l0
   ret i8* null
 }
 
-define i8* @format_for_clause(double %clause) {
+define i8* @format_for_clause(i8* %clause) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -870,27 +909,27 @@ entry:
   ret i8* null
 }
 
-define i8* @format_function_header(double %signature) {
+define i8* @format_function_header(i8* %signature) {
 entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.0, i32 0, i32 0
-  %t1 = call i8* @format_signature_line(i8* %s0, double %signature)
+  %t1 = call i8* @format_signature_line(i8* %s0, i8* %signature)
   ret i8* %t1
 }
 
-define i8* @format_method_header(double %signature) {
+define i8* @format_method_header(i8* %signature) {
 entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.0, i32 0, i32 0
-  %t1 = call i8* @format_signature_line(i8* %s0, double %signature)
+  %t1 = call i8* @format_signature_line(i8* %s0, i8* %signature)
   ret i8* %t1
 }
 
-define i8* @format_callable_header(i8* %keyword, double %signature) {
+define i8* @format_callable_header(i8* %keyword, i8* %signature) {
 entry:
-  %t0 = call i8* @format_signature_line(i8* %keyword, double %signature)
+  %t0 = call i8* @format_signature_line(i8* %keyword, i8* %signature)
   ret i8* %t0
 }
 
-define i8* @format_signature_line(i8* %keyword, double %signature) {
+define i8* @format_signature_line(i8* %keyword, i8* %signature) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -913,7 +952,7 @@ entry:
   ret i8* %t10
 }
 
-define i8* @format_field(double %field) {
+define i8* @format_field(i8* %field) {
 entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
@@ -924,7 +963,7 @@ entry:
   ret i8* %t3
 }
 
-define i8* @format_enum_variant(double %variant) {
+define i8* @format_enum_variant(i8* %variant) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -956,7 +995,7 @@ afterloop3:
   ret i8* null
 }
 
-define i8* @format_parameters(double %parameters) {
+define i8* @format_parameters({ i8**, i64 }* %parameters) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -974,23 +1013,33 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { i8**, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { i8**, i64 }* %t12, { i8**, i64 }** %l0
+  %t20 = phi { i8**, i64 }* [ %t6, %entry ], [ %t19, %loop.latch2 ]
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load double, double* %l1
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %parameters
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
+  %t17 = call i8* @format_parameter(i8* %t16)
+  %t18 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t9, i8* %t17)
+  store { i8**, i64 }* %t18, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @format_parameter(double %parameter) {
+define i8* @format_parameter(i8* %parameter) {
 entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
@@ -999,11 +1048,11 @@ entry:
   ret i8* %t1
 }
 
-define i8* @format_type_parameters(double %parameters) {
+define i8* @format_type_parameters({ i8**, i64 }* %parameters) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca i8*
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -1019,37 +1068,44 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t16 = phi { i8**, i64 }* [ %t6, %entry ], [ %t15, %loop.latch2 ]
-  store { i8**, i64 }* %t16, { i8**, i64 }** %l0
+  %t22 = phi { i8**, i64 }* [ %t6, %entry ], [ %t21, %loop.latch2 ]
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %parameters
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store i8* null, i8** %l3
-  %t11 = load double, double* %l2
-  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t13 = load i8*, i8** %l3
-  %t14 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t12, i8* %t13)
-  store { i8**, i64 }* %t14, { i8**, i64 }** %l0
+  %t17 = load i8*, i8** %l2
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load i8*, i8** %l3
+  %t20 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t18, i8* %t19)
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
   ret i8* null
 }
 
-define i8* @format_type_annotation(double %annotation) {
+define i8* @format_type_annotation(i8* %annotation) {
 entry:
   ret i8* null
 }
 
-define i8* @format_initializer(double %initializer) {
+define i8* @format_initializer(i8* %initializer) {
 entry:
   %l0 = alloca i8*
-  %t0 = call i8* @format_expression(double %initializer)
+  %t0 = call i8* @format_expression(i8* %initializer)
   store i8* %t0, i8** %l0
   %t1 = load i8*, i8** %l0
   %s2 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.2, i32 0, i32 0
@@ -1064,7 +1120,7 @@ entry:
   ret i8* null
 }
 
-define i8* @join_type_annotations(double %values) {
+define i8* @join_type_annotations({ i8**, i64 }* %values) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -1082,29 +1138,36 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { i8**, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { i8**, i64 }* %t12, { i8**, i64 }** %l0
+  %t18 = phi { i8**, i64 }* [ %t6, %entry ], [ %t17, %loop.latch2 ]
+  store { i8**, i64 }* %t18, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load double, double* %l1
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %values
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @format_expression(double %expression) {
+define i8* @format_expression(i8* %expression) {
 entry:
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
   ret i8* %s0
 }
 
-define i8* @format_lambda_expression(double %expression) {
+define i8* @format_lambda_expression(i8* %expression) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -1121,11 +1184,11 @@ entry:
   ret i8* null
 }
 
-define i8* @format_lambda_parameters(double %parameters) {
+define i8* @format_lambda_parameters({ i8**, i64 }* %parameters) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca i8*
   %l4 = alloca double
   %t0 = alloca [0 x double]
@@ -1142,32 +1205,39 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t16 = phi { i8**, i64 }* [ %t6, %entry ], [ %t15, %loop.latch2 ]
-  store { i8**, i64 }* %t16, { i8**, i64 }** %l0
+  %t22 = phi { i8**, i64 }* [ %t6, %entry ], [ %t21, %loop.latch2 ]
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %parameters
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store i8* null, i8** %l3
-  %t11 = load double, double* %l2
-  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t13 = load i8*, i8** %l3
-  %t14 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t12, i8* %t13)
-  store { i8**, i64 }* %t14, { i8**, i64 }** %l0
+  %t17 = load i8*, i8** %l2
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load i8*, i8** %l3
+  %t20 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t18, i8* %t19)
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
   store double 0.0, double* %l4
-  %s18 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.18, i32 0, i32 0
-  ret i8* %s18
+  %s24 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.24, i32 0, i32 0
+  ret i8* %s24
 }
 
-define i8* @format_lambda_body(double %body) {
+define i8* @format_lambda_body(i8* %body) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { i8**, i64 }*
@@ -1193,7 +1263,7 @@ entry:
   ret i8* %t14
 }
 
-define i8* @format_lambda_statement(double %statement) {
+define i8* @format_lambda_statement(i8* %statement) {
 entry:
   ret i8* null
 }
@@ -1471,7 +1541,7 @@ afterloop3:
   ret i8* %t26
 }
 
-define i8* @tokens_to_source(double %tokens) {
+define i8* @tokens_to_source({ i8**, i64 }* %tokens) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -1489,23 +1559,30 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { i8**, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { i8**, i64 }* %t12, { i8**, i64 }** %l0
+  %t18 = phi { i8**, i64 }* [ %t6, %entry ], [ %t17, %loop.latch2 ]
+  store { i8**, i64 }* %t18, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load double, double* %l1
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s14 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.14, i32 0, i32 0
-  %t15 = call i8* @join_with_separator({ i8**, i64 }* %t13, i8* %s14)
-  %t16 = call i8* @collapse_whitespace(i8* %t15)
-  ret i8* %t16
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s20 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.20, i32 0, i32 0
+  %t21 = call i8* @join_with_separator({ i8**, i64 }* %t19, i8* %s20)
+  %t22 = call i8* @collapse_whitespace(i8* %t21)
+  ret i8* %t22
 }
 
 define %TextBuilder @builder_new() {

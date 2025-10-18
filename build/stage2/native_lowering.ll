@@ -39,7 +39,7 @@ declare noalias i8* @malloc(i64)
 @.str.9 = private unnamed_addr constant [18 x i8] c"def __init__(self\00"
 @.str.13 = private unnamed_addr constant [2 x i8] c":\00"
 @.str.23 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
-@.str.16 = private unnamed_addr constant [96 x i8] c"return runtime.struct_repr('\22 + class_name + \22', [\22 + join_with_separator(rendered, \22, \22) + \22])\00"
+@.str.22 = private unnamed_addr constant [96 x i8] c"return runtime.struct_repr('\22 + class_name + \22', [\22 + join_with_separator(rendered, \22, \22) + \22])\00"
 @.str.3 = private unnamed_addr constant [2 x i8] c"?\00"
 @.str.0 = private unnamed_addr constant [2 x i8] c"'\00"
 @.str.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -54,7 +54,7 @@ declare noalias i8* @malloc(i64)
 @.str.1 = private unnamed_addr constant [2 x i8] c"\0A\00"
 @.str.1 = private unnamed_addr constant [12 x i8] c"[lowering] \00"
 
-define %LoweredPythonResult @lower_to_python(double %native_module) {
+define %LoweredPythonResult @lower_to_python(i8* %native_module) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -90,13 +90,13 @@ entry:
   ret %LoweredPythonResult %t18
 }
 
-define %PythonModuleEmission @emit_python_module(double %functions, double %imports, double %structs, double %enums, double %bindings) {
+define %PythonModuleEmission @emit_python_module({ i8**, i64 }* %functions, { i8**, i64 }* %imports, { i8**, i64 }* %structs, { i8**, i64 }* %enums, { i8**, i64 }* %bindings) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
-  %l4 = alloca double
+  %l4 = alloca %PythonFunctionEmission
   %t0 = call %PythonBuilder @builder_new()
   store %PythonBuilder %t0, %PythonBuilder* %l0
   %t1 = alloca [0 x double]
@@ -140,33 +140,46 @@ entry:
   %t27 = load double, double* %l3
   br label %loop.header0
 loop.header0:
-  %t38 = phi %PythonBuilder [ %t24, %entry ], [ %t36, %loop.latch2 ]
-  %t39 = phi { i8**, i64 }* [ %t25, %entry ], [ %t37, %loop.latch2 ]
-  store %PythonBuilder %t38, %PythonBuilder* %l0
-  store { i8**, i64 }* %t39, { i8**, i64 }** %l1
+  %t48 = phi %PythonBuilder [ %t24, %entry ], [ %t46, %loop.latch2 ]
+  %t49 = phi { i8**, i64 }* [ %t25, %entry ], [ %t47, %loop.latch2 ]
+  store %PythonBuilder %t48, %PythonBuilder* %l0
+  store { i8**, i64 }* %t49, { i8**, i64 }** %l1
   br label %loop.body1
 loop.body1:
   %t28 = load double, double* %l3
   %t29 = load %PythonBuilder, %PythonBuilder* %l0
   %t30 = load double, double* %l3
-  store double 0.0, double* %l4
-  %t31 = load double, double* %l4
-  %t32 = load double, double* %l4
-  %t33 = load double, double* %l3
-  %t34 = sitofp i64 1 to double
-  %t35 = fadd double %t33, %t34
+  %t31 = load { i8**, i64 }, { i8**, i64 }* %functions
+  %t32 = extractvalue { i8**, i64 } %t31, 0
+  %t33 = extractvalue { i8**, i64 } %t31, 1
+  %t34 = icmp uge i64 %t30, %t33
+  ; bounds check: %t34 (if true, out of bounds)
+  %t35 = getelementptr i8*, i8** %t32, i64 %t30
+  %t36 = load i8*, i8** %t35
+  %t37 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t29, i8* %t36)
+  store %PythonFunctionEmission %t37, %PythonFunctionEmission* %l4
+  %t38 = load %PythonFunctionEmission, %PythonFunctionEmission* %l4
+  %t39 = extractvalue %PythonFunctionEmission %t38, 0
+  store %PythonBuilder zeroinitializer, %PythonBuilder* %l0
+  %t40 = load %PythonFunctionEmission, %PythonFunctionEmission* %l4
+  %t41 = extractvalue %PythonFunctionEmission %t40, 1
+  %t42 = call double @diagnosticsconcat({ i8**, i64 }* %t41)
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  %t43 = load double, double* %l3
+  %t44 = sitofp i64 1 to double
+  %t45 = fadd double %t43, %t44
   br label %loop.latch2
 loop.latch2:
-  %t36 = load %PythonBuilder, %PythonBuilder* %l0
-  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t46 = load %PythonBuilder, %PythonBuilder* %l0
+  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header0
 afterloop3:
-  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t41 = load %PythonBuilder, %PythonBuilder* %l0
-  %t42 = insertvalue %PythonModuleEmission undef, i8* null, 0
-  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t44 = insertvalue %PythonModuleEmission %t42, { i8**, i64 }* %t43, 1
-  ret %PythonModuleEmission %t44
+  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t51 = load %PythonBuilder, %PythonBuilder* %l0
+  %t52 = insertvalue %PythonModuleEmission undef, i8* null, 0
+  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t54 = insertvalue %PythonModuleEmission %t52, { i8**, i64 }* %t53, 1
+  ret %PythonModuleEmission %t54
 }
 
 define %PythonBuilder @emit_runtime_aliases(%PythonBuilder %builder) {
@@ -231,11 +244,11 @@ entry:
   ret %PythonBuilder %t41
 }
 
-define %PythonBuilder @emit_top_level_bindings(%PythonBuilder %builder, double %bindings) {
+define %PythonBuilder @emit_top_level_bindings(%PythonBuilder %builder, { i8**, i64 }* %bindings) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca double
   %l4 = alloca i8*
   store %PythonBuilder %builder, %PythonBuilder* %l0
@@ -245,38 +258,45 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t13 = phi %PythonBuilder [ %t1, %entry ], [ %t12, %loop.latch2 ]
-  store %PythonBuilder %t13, %PythonBuilder* %l0
+  %t19 = phi %PythonBuilder [ %t1, %entry ], [ %t18, %loop.latch2 ]
+  store %PythonBuilder %t19, %PythonBuilder* %l0
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
   %t4 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t5 = load double, double* %l2
+  %t5 = load { i8**, i64 }, { i8**, i64 }* %bindings
+  %t6 = extractvalue { i8**, i64 } %t5, 0
+  %t7 = extractvalue { i8**, i64 } %t5, 1
+  %t8 = icmp uge i64 %t4, %t7
+  ; bounds check: %t8 (if true, out of bounds)
+  %t9 = getelementptr i8*, i8** %t6, i64 %t4
+  %t10 = load i8*, i8** %t9
+  store i8* %t10, i8** %l2
+  %t11 = load i8*, i8** %l2
   store double 0.0, double* %l3
-  %t6 = load double, double* %l3
-  %s7 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.7, i32 0, i32 0
+  %t12 = load double, double* %l3
+  %s13 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.13, i32 0, i32 0
   store i8* null, i8** %l4
-  %t8 = load double, double* %l2
-  %t9 = load %PythonBuilder, %PythonBuilder* %l0
-  %t10 = load i8*, i8** %l4
-  %t11 = call %PythonBuilder @builder_emit(%PythonBuilder %t9, i8* %t10)
-  store %PythonBuilder %t11, %PythonBuilder* %l0
+  %t14 = load i8*, i8** %l2
+  %t15 = load %PythonBuilder, %PythonBuilder* %l0
+  %t16 = load i8*, i8** %l4
+  %t17 = call %PythonBuilder @builder_emit(%PythonBuilder %t15, i8* %t16)
+  store %PythonBuilder %t17, %PythonBuilder* %l0
   br label %loop.latch2
 loop.latch2:
-  %t12 = load %PythonBuilder, %PythonBuilder* %l0
+  %t18 = load %PythonBuilder, %PythonBuilder* %l0
   br label %loop.header0
 afterloop3:
-  %t14 = load %PythonBuilder, %PythonBuilder* %l0
-  ret %PythonBuilder %t14
+  %t20 = load %PythonBuilder, %PythonBuilder* %l0
+  ret %PythonBuilder %t20
 }
 
-define %PythonImportEmission @emit_python_imports(%PythonBuilder %builder, double %imports) {
+define %PythonImportEmission @emit_python_imports(%PythonBuilder %builder, { i8**, i64 }* %imports) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
-  %l3 = alloca double
+  %l3 = alloca i8*
   %l4 = alloca i8*
   store %PythonBuilder %builder, %PythonBuilder* %l0
   %t0 = alloca [0 x double]
@@ -298,24 +318,31 @@ loop.header0:
 loop.body1:
   %t9 = load double, double* %l2
   %t10 = load double, double* %l2
-  store double 0.0, double* %l3
-  %t11 = load double, double* %l3
-  %t12 = load double, double* %l3
-  %t13 = call i8* @render_python_import(double %t12)
-  store i8* %t13, i8** %l4
-  %t14 = load i8*, i8** %l4
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %imports
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
+  store i8* %t16, i8** %l3
+  %t17 = load i8*, i8** %l3
+  %t18 = load i8*, i8** %l3
+  %t19 = call i8* @render_python_import(i8* %t18)
+  store i8* %t19, i8** %l4
+  %t20 = load i8*, i8** %l4
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t15 = load %PythonBuilder, %PythonBuilder* %l0
-  %t16 = insertvalue %PythonImportEmission undef, i8* null, 0
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t18 = insertvalue %PythonImportEmission %t16, { i8**, i64 }* %t17, 1
-  ret %PythonImportEmission %t18
+  %t21 = load %PythonBuilder, %PythonBuilder* %l0
+  %t22 = insertvalue %PythonImportEmission undef, i8* null, 0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t24 = insertvalue %PythonImportEmission %t22, { i8**, i64 }* %t23, 1
+  ret %PythonImportEmission %t24
 }
 
-define %PythonBuilder @emit_enum_definitions(%PythonBuilder %builder, double %enums) {
+define %PythonBuilder @emit_enum_definitions(%PythonBuilder %builder, { i8**, i64 }* %enums) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca double
@@ -326,26 +353,35 @@ entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t10 = phi %PythonBuilder [ %t1, %entry ], [ %t9, %loop.latch2 ]
-  store %PythonBuilder %t10, %PythonBuilder* %l0
+  %t17 = phi %PythonBuilder [ %t1, %entry ], [ %t16, %loop.latch2 ]
+  store %PythonBuilder %t17, %PythonBuilder* %l0
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
   %t4 = load %PythonBuilder, %PythonBuilder* %l0
   %t5 = load double, double* %l1
-  %t6 = load double, double* %l1
-  %t7 = sitofp i64 1 to double
-  %t8 = fadd double %t6, %t7
+  %t6 = load { i8**, i64 }, { i8**, i64 }* %enums
+  %t7 = extractvalue { i8**, i64 } %t6, 0
+  %t8 = extractvalue { i8**, i64 } %t6, 1
+  %t9 = icmp uge i64 %t5, %t8
+  ; bounds check: %t9 (if true, out of bounds)
+  %t10 = getelementptr i8*, i8** %t7, i64 %t5
+  %t11 = load i8*, i8** %t10
+  %t12 = call %PythonBuilder @emit_single_enum(%PythonBuilder %t4, i8* %t11)
+  store %PythonBuilder %t12, %PythonBuilder* %l0
+  %t13 = load double, double* %l1
+  %t14 = sitofp i64 1 to double
+  %t15 = fadd double %t13, %t14
   br label %loop.latch2
 loop.latch2:
-  %t9 = load %PythonBuilder, %PythonBuilder* %l0
+  %t16 = load %PythonBuilder, %PythonBuilder* %l0
   br label %loop.header0
 afterloop3:
-  %t11 = load %PythonBuilder, %PythonBuilder* %l0
-  ret %PythonBuilder %t11
+  %t18 = load %PythonBuilder, %PythonBuilder* %l0
+  ret %PythonBuilder %t18
 }
 
-define %PythonBuilder @emit_single_enum(%PythonBuilder %builder, double %definition) {
+define %PythonBuilder @emit_single_enum(%PythonBuilder %builder, i8* %definition) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -388,7 +424,7 @@ afterloop3:
   ret %PythonBuilder zeroinitializer
 }
 
-define i8* @render_enum_variant_fields(double %fields) {
+define i8* @render_enum_variant_fields({ i8**, i64 }* %fields) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -406,24 +442,31 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t13 = phi { i8**, i64 }* [ %t6, %entry ], [ %t12, %loop.latch2 ]
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
+  %t19 = phi { i8**, i64 }* [ %t6, %entry ], [ %t18, %loop.latch2 ]
+  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s10 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.10, i32 0, i32 0
   %t11 = load double, double* %l1
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %fields
+  %t13 = extractvalue { i8**, i64 } %t12, 0
+  %t14 = extractvalue { i8**, i64 } %t12, 1
+  %t15 = icmp uge i64 %t11, %t14
+  ; bounds check: %t15 (if true, out of bounds)
+  %t16 = getelementptr i8*, i8** %t13, i64 %t11
+  %t17 = load i8*, i8** %t16
   br label %loop.latch2
 loop.latch2:
-  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @render_python_import(double %entry) {
+define i8* @render_python_import(i8* %entry) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -435,7 +478,7 @@ entry:
   ret i8* null
 }
 
-define i8* @render_python_specifiers(double %specifiers) {
+define i8* @render_python_specifiers({ i8**, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -453,23 +496,33 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t12 = phi { i8**, i64 }* [ %t6, %entry ], [ %t11, %loop.latch2 ]
-  store { i8**, i64 }* %t12, { i8**, i64 }** %l0
+  %t20 = phi { i8**, i64 }* [ %t6, %entry ], [ %t19, %loop.latch2 ]
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load double, double* %l1
+  %t11 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t12 = extractvalue { i8**, i64 } %t11, 0
+  %t13 = extractvalue { i8**, i64 } %t11, 1
+  %t14 = icmp uge i64 %t10, %t13
+  ; bounds check: %t14 (if true, out of bounds)
+  %t15 = getelementptr i8*, i8** %t12, i64 %t10
+  %t16 = load i8*, i8** %t15
+  %t17 = call i8* @render_python_specifier(i8* %t16)
+  %t18 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t9, i8* %t17)
+  store { i8**, i64 }* %t18, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
   ret i8* null
 }
 
-define i8* @render_python_specifier(double %specifier) {
+define i8* @render_python_specifier(i8* %specifier) {
 entry:
   %l0 = alloca double
   store double 0.0, double* %l0
@@ -491,12 +544,12 @@ entry:
   ret i8* null
 }
 
-define %PythonStructEmission @emit_struct_definitions(%PythonBuilder %builder, double %structs) {
+define %PythonStructEmission @emit_struct_definitions(%PythonBuilder %builder, { i8**, i64 }* %structs) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
-  %l3 = alloca double
+  %l3 = alloca %PythonStructEmission
   store %PythonBuilder %builder, %PythonBuilder* %l0
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -513,32 +566,45 @@ entry:
   %t8 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t19 = phi %PythonBuilder [ %t6, %entry ], [ %t17, %loop.latch2 ]
-  %t20 = phi { i8**, i64 }* [ %t7, %entry ], [ %t18, %loop.latch2 ]
-  store %PythonBuilder %t19, %PythonBuilder* %l0
-  store { i8**, i64 }* %t20, { i8**, i64 }** %l1
+  %t29 = phi %PythonBuilder [ %t6, %entry ], [ %t27, %loop.latch2 ]
+  %t30 = phi { i8**, i64 }* [ %t7, %entry ], [ %t28, %loop.latch2 ]
+  store %PythonBuilder %t29, %PythonBuilder* %l0
+  store { i8**, i64 }* %t30, { i8**, i64 }** %l1
   br label %loop.body1
 loop.body1:
   %t9 = load double, double* %l2
   %t10 = load %PythonBuilder, %PythonBuilder* %l0
   %t11 = load double, double* %l2
-  store double 0.0, double* %l3
-  %t12 = load double, double* %l3
-  %t13 = load double, double* %l3
-  %t14 = load double, double* %l2
-  %t15 = sitofp i64 1 to double
-  %t16 = fadd double %t14, %t15
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %structs
+  %t13 = extractvalue { i8**, i64 } %t12, 0
+  %t14 = extractvalue { i8**, i64 } %t12, 1
+  %t15 = icmp uge i64 %t11, %t14
+  ; bounds check: %t15 (if true, out of bounds)
+  %t16 = getelementptr i8*, i8** %t13, i64 %t11
+  %t17 = load i8*, i8** %t16
+  %t18 = call %PythonStructEmission @emit_single_struct(%PythonBuilder %t10, i8* %t17)
+  store %PythonStructEmission %t18, %PythonStructEmission* %l3
+  %t19 = load %PythonStructEmission, %PythonStructEmission* %l3
+  %t20 = extractvalue %PythonStructEmission %t19, 0
+  store %PythonBuilder zeroinitializer, %PythonBuilder* %l0
+  %t21 = load %PythonStructEmission, %PythonStructEmission* %l3
+  %t22 = extractvalue %PythonStructEmission %t21, 1
+  %t23 = call double @diagnosticsconcat({ i8**, i64 }* %t22)
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  %t24 = load double, double* %l2
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
   br label %loop.latch2
 loop.latch2:
-  %t17 = load %PythonBuilder, %PythonBuilder* %l0
-  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t27 = load %PythonBuilder, %PythonBuilder* %l0
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header0
 afterloop3:
-  %t21 = load %PythonBuilder, %PythonBuilder* %l0
-  %t22 = insertvalue %PythonStructEmission undef, i8* null, 0
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t24 = insertvalue %PythonStructEmission %t22, { i8**, i64 }* %t23, 1
-  ret %PythonStructEmission %t24
+  %t31 = load %PythonBuilder, %PythonBuilder* %l0
+  %t32 = insertvalue %PythonStructEmission undef, i8* null, 0
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t34 = insertvalue %PythonStructEmission %t32, { i8**, i64 }* %t33, 1
+  ret %PythonStructEmission %t34
 }
 
 define %PythonBuilder @emit_export_list(%PythonBuilder %builder, { i8**, i64 }* %exports) {
@@ -655,11 +721,11 @@ afterloop11:
   ret %PythonBuilder zeroinitializer
 }
 
-define { i8**, i64 }* @collect_export_names({ i8**, i64 }* %existing, double %specifiers) {
+define { i8**, i64 }* @collect_export_names({ i8**, i64 }* %existing, { i8**, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca i8*
   store { i8**, i64 }* %existing, { i8**, i64 }** %l0
   %t0 = sitofp i64 0 to double
@@ -672,25 +738,32 @@ loop.header0:
 loop.body1:
   %t3 = load double, double* %l1
   %t4 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t5 = load double, double* %l2
-  %t6 = call i8* @select_export_name(double %t5)
-  store i8* %t6, i8** %l3
-  %t7 = load i8*, i8** %l3
+  %t5 = load { i8**, i64 }, { i8**, i64 }* %specifiers
+  %t6 = extractvalue { i8**, i64 } %t5, 0
+  %t7 = extractvalue { i8**, i64 } %t5, 1
+  %t8 = icmp uge i64 %t4, %t7
+  ; bounds check: %t8 (if true, out of bounds)
+  %t9 = getelementptr i8*, i8** %t6, i64 %t4
+  %t10 = load i8*, i8** %t9
+  store i8* %t10, i8** %l2
+  %t11 = load i8*, i8** %l2
+  %t12 = call i8* @select_export_name(i8* %t11)
+  store i8* %t12, i8** %l3
+  %t13 = load i8*, i8** %l3
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t8
+  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t14
 }
 
-define i8* @select_export_name(double %specifier) {
+define i8* @select_export_name(i8* %specifier) {
 entry:
   ret i8* null
 }
 
-define %PythonStructEmission @emit_single_struct(%PythonBuilder %builder, double %definition) {
+define %PythonStructEmission @emit_single_struct(%PythonBuilder %builder, i8* %definition) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -760,12 +833,12 @@ entry:
   ret %PythonStructEmission %t40
 }
 
-define { i8**, i64 }* @render_struct_parameters(double %fields) {
+define { i8**, i64 }* @render_struct_parameters({ i8**, i64 }* %fields) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
-  %l3 = alloca double
+  %l3 = alloca i8*
   %l4 = alloca double
   %l5 = alloca i8*
   %t0 = alloca [0 x double]
@@ -795,26 +868,33 @@ loop.header0:
 loop.body1:
   %t14 = load double, double* %l2
   %t15 = load double, double* %l2
-  store double 0.0, double* %l3
-  %t16 = load double, double* %l3
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %fields
+  %t17 = extractvalue { i8**, i64 } %t16, 0
+  %t18 = extractvalue { i8**, i64 } %t16, 1
+  %t19 = icmp uge i64 %t15, %t18
+  ; bounds check: %t19 (if true, out of bounds)
+  %t20 = getelementptr i8*, i8** %t17, i64 %t15
+  %t21 = load i8*, i8** %t20
+  store i8* %t21, i8** %l3
+  %t22 = load i8*, i8** %l3
   store double 0.0, double* %l4
-  %t17 = load double, double* %l4
+  %t23 = load double, double* %l4
   store i8* null, i8** %l5
-  %t18 = load double, double* %l3
+  %t24 = load i8*, i8** %l3
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t20 = call double @requiredconcat({ i8**, i64 }* %t19)
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t26 = call double @requiredconcat({ i8**, i64 }* %t25)
   ret { i8**, i64 }* null
 }
 
-define i8* @render_struct_repr_fields(i8* %class_name, double %fields) {
+define i8* @render_struct_repr_fields(i8* %class_name, { i8**, i64 }* %fields) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -830,26 +910,33 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t15 = phi { i8**, i64 }* [ %t6, %entry ], [ %t14, %loop.latch2 ]
-  store { i8**, i64 }* %t15, { i8**, i64 }** %l0
+  %t21 = phi { i8**, i64 }* [ %t6, %entry ], [ %t20, %loop.latch2 ]
+  store { i8**, i64 }* %t21, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %fields
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store double 0.0, double* %l3
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s12 = getelementptr inbounds [56 x i8], [56 x i8]* @.str.12, i32 0, i32 0
-  %t13 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t11, i8* %s12)
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s18 = getelementptr inbounds [56 x i8], [56 x i8]* @.str.18, i32 0, i32 0
+  %t19 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t17, i8* %s18)
+  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %s16 = getelementptr inbounds [96 x i8], [96 x i8]* @.str.16, i32 0, i32 0
-  ret i8* %s16
+  %s22 = getelementptr inbounds [96 x i8], [96 x i8]* @.str.22, i32 0, i32 0
+  ret i8* %s22
 }
 
 define i1 @is_optional_type(i8* %type_annotation) {
@@ -1430,14 +1517,14 @@ afterloop3:
   ret i8* %t139
 }
 
-define %StructLiteralCapture @capture_struct_literal_expression(i8* %initial, double %instructions, double %start_index) {
+define %StructLiteralCapture @capture_struct_literal_expression(i8* %initial, { i8**, i64 }* %instructions, double %start_index) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %l6 = alloca double
   %l7 = alloca i8*
   %t0 = call i8* @trim_text(i8* %initial)
@@ -1492,22 +1579,29 @@ loop.header4:
 loop.body5:
   %t33 = load double, double* %l2
   %t34 = load double, double* %l2
-  store double 0.0, double* %l5
-  %t35 = load double, double* %l5
-  %t36 = load double, double* %l5
+  %t35 = load { i8**, i64 }, { i8**, i64 }* %instructions
+  %t36 = extractvalue { i8**, i64 } %t35, 0
+  %t37 = extractvalue { i8**, i64 } %t35, 1
+  %t38 = icmp uge i64 %t34, %t37
+  ; bounds check: %t38 (if true, out of bounds)
+  %t39 = getelementptr i8*, i8** %t36, i64 %t34
+  %t40 = load i8*, i8** %t39
+  store i8* %t40, i8** %l5
+  %t41 = load i8*, i8** %l5
+  %t42 = load i8*, i8** %l5
   store double 0.0, double* %l6
-  %t37 = load double, double* %l6
-  %t38 = load double, double* %l4
-  %t39 = sitofp i64 0 to double
-  %t40 = fcmp ole double %t38, %t39
-  %t41 = load i8*, i8** %l0
-  %t42 = load i8*, i8** %l1
-  %t43 = load double, double* %l2
-  %t44 = load double, double* %l3
-  %t45 = load double, double* %l4
-  %t46 = load double, double* %l5
-  %t47 = load double, double* %l6
-  br i1 %t40, label %then8, label %merge9
+  %t43 = load double, double* %l6
+  %t44 = load double, double* %l4
+  %t45 = sitofp i64 0 to double
+  %t46 = fcmp ole double %t44, %t45
+  %t47 = load i8*, i8** %l0
+  %t48 = load i8*, i8** %l1
+  %t49 = load double, double* %l2
+  %t50 = load double, double* %l3
+  %t51 = load double, double* %l4
+  %t52 = load i8*, i8** %l5
+  %t53 = load double, double* %l6
+  br i1 %t46, label %then8, label %merge9
 then8:
   br label %afterloop7
 merge9:
@@ -1515,69 +1609,69 @@ merge9:
 loop.latch6:
   br label %loop.header4
 afterloop7:
-  %t48 = load double, double* %l4
-  %t49 = sitofp i64 0 to double
-  %t50 = fcmp une double %t48, %t49
-  %t51 = load i8*, i8** %l0
-  %t52 = load i8*, i8** %l1
-  %t53 = load double, double* %l2
-  %t54 = load double, double* %l3
-  %t55 = load double, double* %l4
-  br i1 %t50, label %then10, label %merge11
+  %t54 = load double, double* %l4
+  %t55 = sitofp i64 0 to double
+  %t56 = fcmp une double %t54, %t55
+  %t57 = load i8*, i8** %l0
+  %t58 = load i8*, i8** %l1
+  %t59 = load double, double* %l2
+  %t60 = load double, double* %l3
+  %t61 = load double, double* %l4
+  br i1 %t56, label %then10, label %merge11
 then10:
-  %t56 = load i8*, i8** %l0
-  %t57 = insertvalue %StructLiteralCapture undef, i8* %t56, 0
-  %t58 = sitofp i64 0 to double
-  %t59 = insertvalue %StructLiteralCapture %t57, double %t58, 1
-  %t60 = insertvalue %StructLiteralCapture %t59, i1 0, 2
-  ret %StructLiteralCapture %t60
+  %t62 = load i8*, i8** %l0
+  %t63 = insertvalue %StructLiteralCapture undef, i8* %t62, 0
+  %t64 = sitofp i64 0 to double
+  %t65 = insertvalue %StructLiteralCapture %t63, double %t64, 1
+  %t66 = insertvalue %StructLiteralCapture %t65, i1 0, 2
+  ret %StructLiteralCapture %t66
 merge11:
-  %t61 = load double, double* %l3
-  %t62 = sitofp i64 0 to double
-  %t63 = fcmp oeq double %t61, %t62
-  %t64 = load i8*, i8** %l0
-  %t65 = load i8*, i8** %l1
-  %t66 = load double, double* %l2
   %t67 = load double, double* %l3
-  %t68 = load double, double* %l4
-  br i1 %t63, label %then12, label %merge13
+  %t68 = sitofp i64 0 to double
+  %t69 = fcmp oeq double %t67, %t68
+  %t70 = load i8*, i8** %l0
+  %t71 = load i8*, i8** %l1
+  %t72 = load double, double* %l2
+  %t73 = load double, double* %l3
+  %t74 = load double, double* %l4
+  br i1 %t69, label %then12, label %merge13
 then12:
-  %t69 = load i8*, i8** %l0
-  %t70 = insertvalue %StructLiteralCapture undef, i8* %t69, 0
-  %t71 = sitofp i64 0 to double
-  %t72 = insertvalue %StructLiteralCapture %t70, double %t71, 1
-  %t73 = insertvalue %StructLiteralCapture %t72, i1 0, 2
-  ret %StructLiteralCapture %t73
+  %t75 = load i8*, i8** %l0
+  %t76 = insertvalue %StructLiteralCapture undef, i8* %t75, 0
+  %t77 = sitofp i64 0 to double
+  %t78 = insertvalue %StructLiteralCapture %t76, double %t77, 1
+  %t79 = insertvalue %StructLiteralCapture %t78, i1 0, 2
+  ret %StructLiteralCapture %t79
 merge13:
-  %t74 = load i8*, i8** %l1
-  %t75 = call i8* @trim_text(i8* %t74)
-  %t76 = call i8* @trim_trailing_delimiters(i8* %t75)
-  store i8* %t76, i8** %l7
-  %t77 = load i8*, i8** %l7
-  %s78 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.78, i32 0, i32 0
-  %t79 = call double @ends_with(i8* %t77, i8* %s78)
-  %t80 = fcmp one double %t79, 0.0
-  %t81 = load i8*, i8** %l0
-  %t82 = load i8*, i8** %l1
-  %t83 = load double, double* %l2
-  %t84 = load double, double* %l3
-  %t85 = load double, double* %l4
-  %t86 = load i8*, i8** %l7
-  br i1 %t80, label %then14, label %merge15
-then14:
+  %t80 = load i8*, i8** %l1
+  %t81 = call i8* @trim_text(i8* %t80)
+  %t82 = call i8* @trim_trailing_delimiters(i8* %t81)
+  store i8* %t82, i8** %l7
+  %t83 = load i8*, i8** %l7
+  %s84 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.84, i32 0, i32 0
+  %t85 = call double @ends_with(i8* %t83, i8* %s84)
+  %t86 = fcmp one double %t85, 0.0
   %t87 = load i8*, i8** %l0
-  %t88 = insertvalue %StructLiteralCapture undef, i8* %t87, 0
-  %t89 = sitofp i64 0 to double
-  %t90 = insertvalue %StructLiteralCapture %t88, double %t89, 1
-  %t91 = insertvalue %StructLiteralCapture %t90, i1 0, 2
-  ret %StructLiteralCapture %t91
-merge15:
+  %t88 = load i8*, i8** %l1
+  %t89 = load double, double* %l2
+  %t90 = load double, double* %l3
+  %t91 = load double, double* %l4
   %t92 = load i8*, i8** %l7
-  %t93 = insertvalue %StructLiteralCapture undef, i8* %t92, 0
-  %t94 = load double, double* %l3
-  %t95 = insertvalue %StructLiteralCapture %t93, double %t94, 1
-  %t96 = insertvalue %StructLiteralCapture %t95, i1 1, 2
-  ret %StructLiteralCapture %t96
+  br i1 %t86, label %then14, label %merge15
+then14:
+  %t93 = load i8*, i8** %l0
+  %t94 = insertvalue %StructLiteralCapture undef, i8* %t93, 0
+  %t95 = sitofp i64 0 to double
+  %t96 = insertvalue %StructLiteralCapture %t94, double %t95, 1
+  %t97 = insertvalue %StructLiteralCapture %t96, i1 0, 2
+  ret %StructLiteralCapture %t97
+merge15:
+  %t98 = load i8*, i8** %l7
+  %t99 = insertvalue %StructLiteralCapture undef, i8* %t98, 0
+  %t100 = load double, double* %l3
+  %t101 = insertvalue %StructLiteralCapture %t99, double %t100, 1
+  %t102 = insertvalue %StructLiteralCapture %t101, i1 1, 2
+  ret %StructLiteralCapture %t102
 }
 
 define i8* @rewrite_expression_intrinsics(i8* %expression) {
@@ -2075,7 +2169,7 @@ afterloop3:
   ret double %t14
 }
 
-define %ExpressionContinuationCapture @capture_expression_continuation(i8* %initial, double %instructions, double %start_index) {
+define %ExpressionContinuationCapture @capture_expression_continuation(i8* %initial, { i8**, i64 }* %instructions, double %start_index) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -2116,37 +2210,45 @@ entry:
   %t18 = load i1, i1* %l7
   br label %loop.header0
 loop.header0:
-  %t32 = phi i8* [ %t15, %entry ], [ %t31, %loop.latch2 ]
-  store i8* %t32, i8** %l4
+  %t39 = phi i8* [ %t15, %entry ], [ %t38, %loop.latch2 ]
+  store i8* %t39, i8** %l4
   br label %loop.body1
 loop.body1:
   %t19 = load double, double* %l5
   %t20 = load double, double* %l5
-  store double 0.0, double* %l8
-  %t21 = load double, double* %l8
-  %t22 = load double, double* %l8
-  %t23 = call i8* @trim_text(i8* null)
-  store i8* %t23, i8** %l9
-  %t24 = load i8*, i8** %l9
-  %t25 = load i8*, i8** %l4
-  %s26 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.26, i32 0, i32 0
-  %t27 = add i8* %t25, %s26
-  %t28 = load i8*, i8** %l9
-  %t29 = add i8* %t27, %t28
-  store i8* %t29, i8** %l4
-  %t30 = load double, double* %l1
+  %t21 = load { i8**, i64 }, { i8**, i64 }* %instructions
+  %t22 = extractvalue { i8**, i64 } %t21, 0
+  %t23 = extractvalue { i8**, i64 } %t21, 1
+  %t24 = icmp uge i64 %t20, %t23
+  ; bounds check: %t24 (if true, out of bounds)
+  %t25 = getelementptr i8*, i8** %t22, i64 %t20
+  %t26 = load i8*, i8** %t25
+  %t27 = call double @continuation_segment_text(i8* %t26)
+  store double %t27, double* %l8
+  %t28 = load double, double* %l8
+  %t29 = load double, double* %l8
+  %t30 = call i8* @trim_text(i8* null)
+  store i8* %t30, i8** %l9
+  %t31 = load i8*, i8** %l9
+  %t32 = load i8*, i8** %l4
+  %s33 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.33, i32 0, i32 0
+  %t34 = add i8* %t32, %s33
+  %t35 = load i8*, i8** %l9
+  %t36 = add i8* %t34, %t35
+  store i8* %t36, i8** %l4
+  %t37 = load double, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t31 = load i8*, i8** %l4
+  %t38 = load i8*, i8** %l4
   br label %loop.header0
 afterloop3:
-  %t33 = load double, double* %l1
-  %t34 = load i8*, i8** %l0
-  %t35 = insertvalue %ExpressionContinuationCapture undef, i8* %t34, 0
-  %t36 = sitofp i64 0 to double
-  %t37 = insertvalue %ExpressionContinuationCapture %t35, double %t36, 1
-  %t38 = insertvalue %ExpressionContinuationCapture %t37, i1 0, 2
-  ret %ExpressionContinuationCapture %t38
+  %t40 = load double, double* %l1
+  %t41 = load i8*, i8** %l0
+  %t42 = insertvalue %ExpressionContinuationCapture undef, i8* %t41, 0
+  %t43 = sitofp i64 0 to double
+  %t44 = insertvalue %ExpressionContinuationCapture %t42, double %t43, 1
+  %t45 = insertvalue %ExpressionContinuationCapture %t44, i1 0, 2
+  ret %ExpressionContinuationCapture %t45
 }
 
 define i1 @segment_signals_expression_continuation(i8* %segment) {
@@ -2661,7 +2763,7 @@ afterloop5:
   ret double %t18
 }
 
-define %PythonFunctionEmission @emit_python_function(%PythonBuilder %builder, double %function) {
+define %PythonFunctionEmission @emit_python_function(%PythonBuilder %builder, i8* %function) {
 entry:
   %l0 = alloca %PythonBuilder
   %l1 = alloca { i8**, i64 }*
@@ -2987,23 +3089,23 @@ entry:
   ret i8* %t2
 }
 
-define %LoweredCaseCondition @lower_match_case_condition(i8* %subject_name, i8* %pattern, double %guard) {
+define %LoweredCaseCondition @lower_match_case_condition(i8* %subject_name, i8* %pattern, i8* %guard) {
 entry:
   %l0 = alloca i8*
-  %l1 = alloca double
+  %l1 = alloca i8*
   %l2 = alloca i8*
   %l3 = alloca i8*
   %l4 = alloca i1
   %t0 = call i8* @trim_text(i8* %pattern)
   store i8* %t0, i8** %l0
-  store double 0.0, double* %l1
+  store i8* null, i8** %l1
   %t1 = load i8*, i8** %l0
   %t2 = load i8*, i8** %l0
   %t3 = call i8* @lower_expression(i8* %t2)
   store i8* %t3, i8** %l2
   store i8* null, i8** %l3
   store i1 0, i1* %l4
-  %t4 = load double, double* %l1
+  %t4 = load i8*, i8** %l1
   %t5 = load i8*, i8** %l3
   %t6 = insertvalue %LoweredCaseCondition undef, i8* %t5, 0
   %t7 = insertvalue %LoweredCaseCondition %t6, i1 0, 1
@@ -3107,11 +3209,11 @@ afterloop5:
   ret i8* %t44
 }
 
-define { i8**, i64 }* @render_python_parameters(double %parameters) {
+define { i8**, i64 }* @render_python_parameters({ i8**, i64 }* %parameters) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %l3 = alloca i8*
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -3127,27 +3229,34 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t16 = phi { i8**, i64 }* [ %t6, %entry ], [ %t15, %loop.latch2 ]
-  store { i8**, i64 }* %t16, { i8**, i64 }** %l0
+  %t22 = phi { i8**, i64 }* [ %t6, %entry ], [ %t21, %loop.latch2 ]
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t10 = load double, double* %l2
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %parameters
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   store i8* null, i8** %l3
-  %t11 = load double, double* %l2
-  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t13 = load i8*, i8** %l3
-  %t14 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t12, i8* %t13)
-  store { i8**, i64 }* %t14, { i8**, i64 }** %l0
+  %t17 = load i8*, i8** %l2
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load i8*, i8** %l3
+  %t20 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t18, i8* %t19)
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   br label %loop.latch2
 loop.latch2:
-  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
-  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t17
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t23
 }
 
 define %PythonBuilder @builder_new() {

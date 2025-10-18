@@ -177,7 +177,7 @@ entry:
   ret %EnumType %t13
 }
 
-define { %EnumField*, i64 }* @enum_normalize_fields(double %definition, { %EnumField*, i64 }* %provided) {
+define { %EnumField*, i64 }* @enum_normalize_fields(i8* %definition, { %EnumField*, i64 }* %provided) {
 entry:
   %l0 = alloca double
   %l1 = alloca { %EnumField*, i64 }*
@@ -237,7 +237,7 @@ entry:
   %t0 = call double @enum_find_variant(%EnumType %enum_type, i8* %variant_name)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(double %t1, { %EnumField*, i64 }* %provided)
+  %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(i8* null, { %EnumField*, i64 }* %provided)
   store { %EnumField*, i64 }* %t2, { %EnumField*, i64 }** %l1
   %t3 = insertvalue %EnumInstance undef, i8* null, 0
   %t4 = insertvalue %EnumInstance %t3, i8* %variant_name, 1
@@ -365,7 +365,7 @@ entry:
   ret i8* null
 }
 
-define i8* @format_interpolated({ i8**, i64 }* %parts, double %values) {
+define i8* @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i64
@@ -408,10 +408,10 @@ afterloop3:
   ret i8* %t20
 }
 
-define %TypeDescriptor @type_descriptor(i8* %kind, double %name, { %TypeDescriptor*, i64 }* %items) {
+define %TypeDescriptor @type_descriptor(i8* %kind, i8* %name, { %TypeDescriptor*, i64 }* %items) {
 entry:
   %t0 = insertvalue %TypeDescriptor undef, i8* %kind, 0
-  %t1 = insertvalue %TypeDescriptor %t0, i8* null, 1
+  %t1 = insertvalue %TypeDescriptor %t0, i8* %name, 1
   %t2 = insertvalue %TypeDescriptor %t1, { i8**, i64 }* null, 2
   ret %TypeDescriptor %t2
 }
@@ -426,7 +426,7 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, double 0.0, { %TypeDescriptor*, i64 }* null)
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* null)
   ret %TypeDescriptor %t6
 }
 
@@ -480,7 +480,7 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, double 0.0, { %TypeDescriptor*, i64 }* null)
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* null)
   ret %TypeDescriptor %t6
 }
 

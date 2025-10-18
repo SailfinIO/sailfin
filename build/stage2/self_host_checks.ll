@@ -17,7 +17,7 @@ entry:
   %t1 = load double, double* %l0
   store double 0.0, double* %l1
   %t2 = load double, double* %l0
-  %t3 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, double %t2)
+  %t3 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, i8* null)
   store { i8**, i64 }* %t3, { i8**, i64 }** %l2
   store i1 1, i1* %l3
   %t4 = load double, double* %l1
@@ -35,7 +35,47 @@ entry:
   ret %SelfHostCheckResult %t15
 }
 
-define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, double %compilation) {
+define { i8**, i64 }* @collect_fatal_diagnostics({ i8**, i64 }* %entries) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca double
+  %l2 = alloca i8*
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t7 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  br label %loop.body1
+loop.body1:
+  %t8 = load double, double* %l1
+  %t9 = load double, double* %l1
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %entries
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
+  br label %loop.latch2
+loop.latch2:
+  br label %loop.header0
+afterloop3:
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t17
+}
+
+define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, i8* %compilation) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -75,7 +115,7 @@ afterloop3:
   ret { i8**, i64 }* %t17
 }
 
-define i1 @module_present(i8* %target, double %modules) {
+define i1 @module_present(i8* %target, { i8**, i64 }* %modules) {
 entry:
   %l0 = alloca double
   %t0 = sitofp i64 0 to double
@@ -87,6 +127,13 @@ loop.header0:
 loop.body1:
   %t2 = load double, double* %l0
   %t3 = load double, double* %l0
+  %t4 = load { i8**, i64 }, { i8**, i64 }* %modules
+  %t5 = extractvalue { i8**, i64 } %t4, 0
+  %t6 = extractvalue { i8**, i64 } %t4, 1
+  %t7 = icmp uge i64 %t3, %t6
+  ; bounds check: %t7 (if true, out of bounds)
+  %t8 = getelementptr i8*, i8** %t5, i64 %t3
+  %t9 = load i8*, i8** %t8
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0

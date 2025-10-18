@@ -207,7 +207,36 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   access, and `test_native_llvm_execution_method_returns_call_result` validates
   returning function call results (e.g., `return helper(self.data)`) with proper
   call lowering and argument passing. These tests guard against future regressions
-  before self-hosting the compiler with Stage2. Array indexing expressions
+  before self-hosting the compiler with Stage2.
+  Complex parameter and local type resolution now uses pointer-based fallbacks
+  for unresolved types instead of defaulting to `double`, significantly reducing
+  spurious diagnostics when compiling modules that reference types from imported
+  dependencies not in the current module's type context. When `map_parameter_type`
+  or `map_local_type` encounters a type annotation that can't be resolved (e.g.,
+  `Decorator` from `ast.sfn` when lowering `decorator_semantics.sfn`), it now
+  returns `i8*` (generic pointer) instead of failing to `double`. Similarly,
+  `map_array_pointer_type` uses `i8*` as the element type for arrays of unresolved
+  types (e.g., `Decorator[]` becomes `{ i8**, i64 }*` instead of failing). This
+  enables function parameters like `decorators -> Decorator[]`, `arguments ->
+  DecoratorArgument[]`, and `expr -> Expression` to lower to reasonable LLVM types
+  even when the struct/enum definitions aren't available during lowering. The
+  change eliminates "unsupported parameter type" diagnostics and "member access
+  base `double` lacks struct metadata" warnings from Stage2 bootstrap output.
+  Remaining "member access base `i8*` lacks struct metadata" and "member access
+  base `{ i8**, i64 }*` lacks struct metadata" warnings are expected for operations
+  on opaque pointer types (field access, array indexing on imported types) and
+  will be addressed once cross-module type resolution (automatic layout manifest
+  loading for imports) is implemented. Regression coverage lives in
+  `compiler/tests/test_complex_parameter_types.py::test_native_llvm_function_with_struct_array_parameter`
+  (validates struct array parameters like `Point[]` don't produce "unsupported
+  parameter type" diagnostics),
+  `test_native_llvm_function_with_enum_array_parameter` (validates enum array
+  parameters like `Color[]` compile cleanly),
+  `test_native_llvm_function_with_nested_struct_parameter` (validates nested struct
+  parameters like `Rectangle` containing `Point` fields compile correctly), and
+  `test_native_llvm_function_with_unresolved_import_type_uses_pointer_fallback`
+  (confirms unresolved types like `Token` use `i8*` fallback instead of `double`).
+  Array indexing expressions
   (`array[index]`) now fully lower to LLVM, enabling compiler internals to access
   AST node fields, token arrays, and decorator lists without Python fallbacks. The
   implementation recognizes `base[index]` syntax using `parse_index_expression`

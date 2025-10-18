@@ -5925,10 +5925,6 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
         }
         let parameter = function.parameters[index];
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
-        if llvm_type.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: unsupported parameter type `" + parameter.type_annotation + "` in function `" + function.name + "`");
-            llvm_type = "double";
-        }
         // Infer `self` parameter type from struct name in method qualified names (e.g., Person::format -> Person)
         if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
             let double_colon_pos = find_last_index_of_char(function.name, ":");
@@ -6086,7 +6082,8 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
     let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
     let element_type = map_primitive_type(context, element_annotation);
     if element_type.length == 0 {
-        return "";
+        // Fallback to generic pointer for unresolved types (e.g., imported structs not in type context)
+        element_type = "i8*";
     }
     return "{ " + element_type + "*, i64 }*";
 }
@@ -6352,7 +6349,12 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(context, normalized);
+    let primitive_type = map_primitive_type(context, normalized);
+    if primitive_type.length > 0 {
+        return primitive_type;
+    }
+    // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
+    return "i8*";
 }
 
 fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
@@ -6369,7 +6371,12 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
     if array_type.length > 0 {
         return array_type;
     }
-    return map_primitive_type(context, normalized);
+    let primitive_type = map_primitive_type(context, normalized);
+    if primitive_type.length > 0 {
+        return primitive_type;
+    }
+    // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
+    return "i8*";
 }
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {

@@ -15,20 +15,20 @@ declare noalias i8* @malloc(i64)
 @.str.6 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
 @.str.9 = private unnamed_addr constant [61 x i8] c"] to the signature or accept the CLI fix prompt when offered\00"
 
-define %TypecheckResult @typecheck_program(double %program) {
+define %TypecheckResult @typecheck_program(i8* %program) {
 entry:
   %l0 = alloca %SymbolCollectionResult
-  %l1 = alloca double
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca { %Diagnostic*, i64 }*
   %l3 = alloca { %Diagnostic*, i64 }*
-  %t0 = call %SymbolCollectionResult @collect_top_level_symbols(double %program)
+  %t0 = call %SymbolCollectionResult @collect_top_level_symbols(i8* %program)
   store %SymbolCollectionResult %t0, %SymbolCollectionResult* %l0
-  %t1 = call double @collect_interface_definitions(double %program)
-  store double %t1, double* %l1
-  %t2 = load double, double* %l1
-  %t3 = call { %Diagnostic*, i64 }* @check_program_scopes(double %program, double %t2)
+  %t1 = call { i8**, i64 }* @collect_interface_definitions(i8* %program)
+  store { i8**, i64 }* %t1, { i8**, i64 }** %l1
+  %t2 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t3 = call { %Diagnostic*, i64 }* @check_program_scopes(i8* %program, { i8**, i64 }* %t2)
   store { %Diagnostic*, i64 }* %t3, { %Diagnostic*, i64 }** %l2
-  %t4 = call { %Diagnostic*, i64 }* @build_effect_diagnostics(double %program)
+  %t4 = call { %Diagnostic*, i64 }* @build_effect_diagnostics(i8* %program)
   store { %Diagnostic*, i64 }* %t4, { %Diagnostic*, i64 }** %l3
   %t5 = insertvalue %TypecheckResult undef, { i8**, i64 }* null, 0
   %t6 = load %SymbolCollectionResult, %SymbolCollectionResult* %l0
@@ -37,7 +37,22 @@ entry:
   ret %TypecheckResult %t8
 }
 
-define %SymbolCollectionResult @collect_top_level_symbols(double %program) {
+define { i8**, i64 }* @collect_interface_definitions(i8* %program) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  %t5 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t5
+}
+
+define %SymbolCollectionResult @collect_top_level_symbols(i8* %program) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -64,7 +79,7 @@ entry:
   ret %SymbolCollectionResult %t13
 }
 
-define %SymbolCollectionResult @register_top_level_symbol(double %statement, { %SymbolEntry*, i64 }* %existing) {
+define %SymbolCollectionResult @register_top_level_symbol(i8* %statement, { %SymbolEntry*, i64 }* %existing) {
 entry:
   %t0 = insertvalue %SymbolCollectionResult undef, { i8**, i64 }* null, 0
   %t1 = alloca [0 x double]
@@ -78,7 +93,7 @@ entry:
   ret %SymbolCollectionResult %t6
 }
 
-define { %Diagnostic*, i64 }* @check_program_scopes(double %program, double %interfaces) {
+define { %Diagnostic*, i64 }* @check_program_scopes(i8* %program, { i8**, i64 }* %interfaces) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -102,7 +117,7 @@ entry:
   ret { %Diagnostic*, i64 }* %t10
 }
 
-define %ScopeResult @check_statement(double %statement, { %SymbolEntry*, i64 }* %bindings, double %interfaces) {
+define %ScopeResult @check_statement(i8* %statement, { %SymbolEntry*, i64 }* %bindings, { i8**, i64 }* %interfaces) {
 entry:
   %t0 = insertvalue %ScopeResult undef, { i8**, i64 }* null, 0
   %t1 = alloca [0 x double]
@@ -116,22 +131,22 @@ entry:
   ret %ScopeResult %t6
 }
 
-define { %Diagnostic*, i64 }* @check_function_body(double %signature, double %body, double %interfaces) {
+define { %Diagnostic*, i64 }* @check_function_body(i8* %signature, i8* %body, { i8**, i64 }* %interfaces) {
 entry:
   %l0 = alloca %ScopeResult
   %l1 = alloca { %Diagnostic*, i64 }*
-  %t0 = call %ScopeResult @seed_parameter_scope(double %signature)
+  %t0 = call %ScopeResult @seed_parameter_scope(i8* %signature)
   store %ScopeResult %t0, %ScopeResult* %l0
   %t1 = load %ScopeResult, %ScopeResult* %l0
   %t2 = extractvalue %ScopeResult %t1, 0
-  %t3 = call { %Diagnostic*, i64 }* @check_block(double %body, { %SymbolEntry*, i64 }* null, double %interfaces)
+  %t3 = call { %Diagnostic*, i64 }* @check_block(i8* %body, { %SymbolEntry*, i64 }* null, { i8**, i64 }* %interfaces)
   store { %Diagnostic*, i64 }* %t3, { %Diagnostic*, i64 }** %l1
   %t4 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t5 = call double @parameter_scopediagnosticsconcat({ %Diagnostic*, i64 }* %t4)
   ret { %Diagnostic*, i64 }* null
 }
 
-define %ScopeResult @seed_parameter_scope(double %signature) {
+define %ScopeResult @seed_parameter_scope(i8* %signature) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -158,7 +173,7 @@ entry:
   ret %ScopeResult %t13
 }
 
-define { %Diagnostic*, i64 }* @check_block(double %block, { %SymbolEntry*, i64 }* %parent_bindings, double %interfaces) {
+define { %Diagnostic*, i64 }* @check_block(i8* %block, { %SymbolEntry*, i64 }* %parent_bindings, { i8**, i64 }* %interfaces) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -176,7 +191,7 @@ entry:
   ret { %Diagnostic*, i64 }* %t6
 }
 
-define { %Diagnostic*, i64 }* @check_struct_implements_interfaces(double %statement, double %interfaces) {
+define { %Diagnostic*, i64 }* @check_struct_implements_interfaces(i8* %statement, { i8**, i64 }* %interfaces) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -200,10 +215,13 @@ entry:
   ret { %Diagnostic*, i64 }* %t10
 }
 
-define { %Diagnostic*, i64 }* @check_struct_fields(double %fields) {
+define { %Diagnostic*, i64 }* @check_struct_fields({ i8**, i64 }* %fields) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -220,11 +238,65 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %fields, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %fields, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load double, double* %l4
+  %t22 = call i1 @contains_string({ i8**, i64 }* %t20, i8* null)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t25 = load i8*, i8** %l3
+  %t26 = load double, double* %l4
+  br i1 %t22, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t27 = load double, double* %l4
+  %t28 = alloca [1 x double]
+  %t29 = getelementptr [1 x double], [1 x double]* %t28, i32 0, i32 0
+  %t30 = getelementptr double, double* %t29, i64 0
+  store double %t27, double* %t30
+  %t31 = alloca { double*, i64 }
+  %t32 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 0
+  store double* %t29, double** %t32
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 1
+  store i64 1, i64* %t33
+  %t34 = call double @seenconcat({ double*, i64 }* %t31)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t35 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t24, %else5 ]
+  %t36 = phi { i8**, i64 }* [ %t23, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t35, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t37 = load i64, i64* %l2
+  %t38 = add i64 %t37, 1
+  store i64 %t38, i64* %l2
+  br label %for0
+afterfor3:
+  %t39 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t39
 }
 
-define { %Diagnostic*, i64 }* @validate_interface_annotation(i8* %struct_name, double %interface_definition, double %annotation) {
+define { %Diagnostic*, i64 }* @validate_interface_annotation(i8* %struct_name, i8* %interface_definition, i8* %annotation) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -259,7 +331,7 @@ merge1:
   ret { %Diagnostic*, i64 }* null
 }
 
-define i8* @format_interface_signature(double %interface_definition) {
+define i8* @format_interface_signature(i8* %interface_definition) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %t0 = alloca [0 x double]
@@ -491,10 +563,13 @@ entry:
   ret i1 false
 }
 
-define { %Diagnostic*, i64 }* @check_struct_methods(double %methods) {
+define { %Diagnostic*, i64 }* @check_struct_methods({ i8**, i64 }* %methods) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -511,14 +586,72 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %methods, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %methods, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  %t20 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t22 = load double, double* %l4
+  %t23 = call i1 @contains_string({ i8**, i64 }* %t21, i8* null)
+  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t25 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t26 = load i8*, i8** %l3
+  %t27 = load double, double* %l4
+  br i1 %t23, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t28 = load double, double* %l4
+  %t29 = alloca [1 x double]
+  %t30 = getelementptr [1 x double], [1 x double]* %t29, i32 0, i32 0
+  %t31 = getelementptr double, double* %t30, i64 0
+  store double %t28, double* %t31
+  %t32 = alloca { double*, i64 }
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t32, i32 0, i32 0
+  store double* %t30, double** %t33
+  %t34 = getelementptr { double*, i64 }, { double*, i64 }* %t32, i32 0, i32 1
+  store i64 1, i64* %t34
+  %t35 = call double @seenconcat({ double*, i64 }* %t32)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t36 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t25, %else5 ]
+  %t37 = phi { i8**, i64 }* [ %t24, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t36, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t37, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t38 = load i64, i64* %l2
+  %t39 = add i64 %t38, 1
+  store i64 %t39, i64* %l2
+  br label %for0
+afterfor3:
+  %t40 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t40
 }
 
-define { %Diagnostic*, i64 }* @check_enum_variants(double %variants) {
+define { %Diagnostic*, i64 }* @check_enum_variants({ i8**, i64 }* %variants) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -535,14 +668,71 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %variants, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %variants, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load double, double* %l4
+  %t22 = call i1 @contains_string({ i8**, i64 }* %t20, i8* null)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t25 = load i8*, i8** %l3
+  %t26 = load double, double* %l4
+  br i1 %t22, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t27 = load double, double* %l4
+  %t28 = alloca [1 x double]
+  %t29 = getelementptr [1 x double], [1 x double]* %t28, i32 0, i32 0
+  %t30 = getelementptr double, double* %t29, i64 0
+  store double %t27, double* %t30
+  %t31 = alloca { double*, i64 }
+  %t32 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 0
+  store double* %t29, double** %t32
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 1
+  store i64 1, i64* %t33
+  %t34 = call double @seenconcat({ double*, i64 }* %t31)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t35 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t24, %else5 ]
+  %t36 = phi { i8**, i64 }* [ %t23, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t35, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t37 = load i64, i64* %l2
+  %t38 = add i64 %t37, 1
+  store i64 %t38, i64* %l2
+  br label %for0
+afterfor3:
+  %t39 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t39
 }
 
-define { %Diagnostic*, i64 }* @check_interface_members(double %members) {
+define { %Diagnostic*, i64 }* @check_interface_members({ i8**, i64 }* %members) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -559,14 +749,75 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %members, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %members, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  %t20 = call { %Diagnostic*, i64 }* @check_function_signature(i8* %t19)
+  %t21 = call double @diagnosticsconcat({ %Diagnostic*, i64 }* %t20)
+  store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
+  %t22 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load double, double* %l4
+  %t25 = call i1 @contains_string({ i8**, i64 }* %t23, i8* null)
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t27 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t28 = load i8*, i8** %l3
+  %t29 = load double, double* %l4
+  br i1 %t25, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t30 = load double, double* %l4
+  %t31 = alloca [1 x double]
+  %t32 = getelementptr [1 x double], [1 x double]* %t31, i32 0, i32 0
+  %t33 = getelementptr double, double* %t32, i64 0
+  store double %t30, double* %t33
+  %t34 = alloca { double*, i64 }
+  %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t34, i32 0, i32 0
+  store double* %t32, double** %t35
+  %t36 = getelementptr { double*, i64 }, { double*, i64 }* %t34, i32 0, i32 1
+  store i64 1, i64* %t36
+  %t37 = call double @seenconcat({ double*, i64 }* %t34)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t38 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t27, %else5 ]
+  %t39 = phi { i8**, i64 }* [ %t26, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t38, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t39, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t40 = load i64, i64* %l2
+  %t41 = add i64 %t40, 1
+  store i64 %t41, i64* %l2
+  br label %for0
+afterfor3:
+  %t42 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t42
 }
 
-define { %Diagnostic*, i64 }* @check_model_properties(double %properties) {
+define { %Diagnostic*, i64 }* @check_model_properties({ i8**, i64 }* %properties) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -583,19 +834,76 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %properties, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %properties, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load double, double* %l4
+  %t22 = call i1 @contains_string({ i8**, i64 }* %t20, i8* null)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t25 = load i8*, i8** %l3
+  %t26 = load double, double* %l4
+  br i1 %t22, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t27 = load double, double* %l4
+  %t28 = alloca [1 x double]
+  %t29 = getelementptr [1 x double], [1 x double]* %t28, i32 0, i32 0
+  %t30 = getelementptr double, double* %t29, i64 0
+  store double %t27, double* %t30
+  %t31 = alloca { double*, i64 }
+  %t32 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 0
+  store double* %t29, double** %t32
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 1
+  store i64 1, i64* %t33
+  %t34 = call double @seenconcat({ double*, i64 }* %t31)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t35 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t24, %else5 ]
+  %t36 = phi { i8**, i64 }* [ %t23, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t35, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t37 = load i64, i64* %l2
+  %t38 = add i64 %t37, 1
+  store i64 %t38, i64* %l2
+  br label %for0
+afterfor3:
+  %t39 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t39
 }
 
-define { %Diagnostic*, i64 }* @check_function_signature(double %signature) {
+define { %Diagnostic*, i64 }* @check_function_signature(i8* %signature) {
 entry:
   ret { %Diagnostic*, i64 }* null
 }
 
-define { %Diagnostic*, i64 }* @check_type_parameters(double %type_parameters) {
+define { %Diagnostic*, i64 }* @check_type_parameters({ i8**, i64 }* %type_parameters) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
+  %l2 = alloca i64
+  %l3 = alloca i8*
+  %l4 = alloca double
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -612,11 +920,65 @@ entry:
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
   store { %Diagnostic*, i64 }* null, { %Diagnostic*, i64 }** %l1
-  %t10 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t10
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %type_parameters, i32 0, i32 1
+  %t11 = load i64, i64* %t10
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %type_parameters, i32 0, i32 0
+  %t13 = load i8**, i8*** %t12
+  store i64 0, i64* %l2
+  store i8* null, i8** %l3
+  br label %for0
+for0:
+  %t14 = load i64, i64* %l2
+  %t15 = icmp slt i64 %t14, %t11
+  br i1 %t15, label %forbody1, label %afterfor3
+forbody1:
+  %t16 = load i64, i64* %l2
+  %t17 = getelementptr i8*, i8** %t13, i64 %t16
+  %t18 = load i8*, i8** %t17
+  store i8* %t18, i8** %l3
+  %t19 = load i8*, i8** %l3
+  store double 0.0, double* %l4
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load double, double* %l4
+  %t22 = call i1 @contains_string({ i8**, i64 }* %t20, i8* null)
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t25 = load i8*, i8** %l3
+  %t26 = load double, double* %l4
+  br i1 %t22, label %then4, label %else5
+then4:
+  br label %merge6
+else5:
+  %t27 = load double, double* %l4
+  %t28 = alloca [1 x double]
+  %t29 = getelementptr [1 x double], [1 x double]* %t28, i32 0, i32 0
+  %t30 = getelementptr double, double* %t29, i64 0
+  store double %t27, double* %t30
+  %t31 = alloca { double*, i64 }
+  %t32 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 0
+  store double* %t29, double** %t32
+  %t33 = getelementptr { double*, i64 }, { double*, i64 }* %t31, i32 0, i32 1
+  store i64 1, i64* %t33
+  %t34 = call double @seenconcat({ double*, i64 }* %t31)
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  br label %merge6
+merge6:
+  %t35 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t24, %else5 ]
+  %t36 = phi { i8**, i64 }* [ %t23, %then4 ], [ null, %else5 ]
+  store { %Diagnostic*, i64 }* %t35, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  br label %forinc2
+forinc2:
+  %t37 = load i64, i64* %l2
+  %t38 = add i64 %t37, 1
+  store i64 %t38, i64* %l2
+  br label %for0
+afterfor3:
+  %t39 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t39
 }
 
-define { %Diagnostic*, i64 }* @build_effect_diagnostics(double %program) {
+define { %Diagnostic*, i64 }* @build_effect_diagnostics(i8* %program) {
 entry:
   %l0 = alloca double
   %l1 = alloca { %Diagnostic*, i64 }*
@@ -625,7 +987,7 @@ entry:
   %l4 = alloca double
   %l5 = alloca double
   %l6 = alloca double
-  %t0 = call double @validate_effects(double %program)
+  %t0 = call double @validate_effects(i8* %program)
   store double %t0, double* %l0
   %t1 = alloca [0 x double]
   %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
@@ -685,7 +1047,7 @@ afterloop3:
   ret { %Diagnostic*, i64 }* %t29
 }
 
-define i8* @format_effect_message(i8* %routine_name, i8* %effect, double %requirement) {
+define i8* @format_effect_message(i8* %routine_name, i8* %effect, i8* %requirement) {
 entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.0, i32 0, i32 0
@@ -736,15 +1098,15 @@ afterfor3:
   ret i1 0
 }
 
-define %ScopeResult @register_local_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, double %span) {
+define %ScopeResult @register_local_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, i8* %span) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %t0 = call i1 @has_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name)
   br i1 %t0, label %then0, label %merge1
 then0:
   %t1 = insertvalue %ScopeResult undef, { i8**, i64 }* null, 0
-  %t2 = call double @token_from_name(i8* %name, double %span)
-  %t3 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, double %t2)
+  %t2 = call double @token_from_name(i8* %name, i8* %span)
+  %t3 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, i8* null)
   %t4 = alloca [1 x %Diagnostic]
   %t5 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t4, i32 0, i32 0
   %t6 = getelementptr %Diagnostic, %Diagnostic* %t5, i64 0
@@ -757,7 +1119,7 @@ then0:
   %t10 = insertvalue %ScopeResult %t1, { i8**, i64 }* null, 1
   ret %ScopeResult %t10
 merge1:
-  %t11 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, double %span)
+  %t11 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, i8* %span)
   store { %SymbolEntry*, i64 }* %t11, { %SymbolEntry*, i64 }** %l0
   %t12 = load { %SymbolEntry*, i64 }*, { %SymbolEntry*, i64 }** %l0
   %t13 = insertvalue %ScopeResult undef, { i8**, i64 }* null, 0
@@ -772,14 +1134,14 @@ merge1:
   ret %ScopeResult %t19
 }
 
-define %SymbolCollectionResult @register_symbol(i8* %name, i8* %kind, double %span, { %SymbolEntry*, i64 }* %existing) {
+define %SymbolCollectionResult @register_symbol(i8* %name, i8* %kind, i8* %span, { %SymbolEntry*, i64 }* %existing) {
 entry:
   %t0 = call i1 @has_symbol({ %SymbolEntry*, i64 }* %existing, i8* %name)
   br i1 %t0, label %then0, label %merge1
 then0:
   %t1 = insertvalue %SymbolCollectionResult undef, { i8**, i64 }* null, 0
-  %t2 = call double @token_from_name(i8* %name, double %span)
-  %t3 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, double %t2)
+  %t2 = call double @token_from_name(i8* %name, i8* %span)
+  %t3 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, i8* null)
   %t4 = alloca [1 x %Diagnostic]
   %t5 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t4, i32 0, i32 0
   %t6 = getelementptr %Diagnostic, %Diagnostic* %t5, i64 0
@@ -792,7 +1154,7 @@ then0:
   %t10 = insertvalue %SymbolCollectionResult %t1, { i8**, i64 }* null, 1
   ret %SymbolCollectionResult %t10
 merge1:
-  %t11 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %existing, i8* %name, i8* %kind, double %span)
+  %t11 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %existing, i8* %name, i8* %kind, i8* %span)
   %t12 = insertvalue %SymbolCollectionResult undef, { i8**, i64 }* null, 0
   %t13 = alloca [0 x double]
   %t14 = getelementptr [0 x double], [0 x double]* %t13, i32 0, i32 0
@@ -805,7 +1167,7 @@ merge1:
   ret %SymbolCollectionResult %t18
 }
 
-define { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %symbols, i8* %name, i8* %kind, double %span) {
+define { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %symbols, i8* %name, i8* %kind, i8* %span) {
 entry:
   %l0 = alloca { %SymbolEntry*, i64 }*
   %t0 = call { %SymbolEntry*, i64 }* @clone_bindings({ %SymbolEntry*, i64 }* %symbols)
@@ -912,7 +1274,7 @@ entry:
   ret %Diagnostic zeroinitializer
 }
 
-define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, double %token) {
+define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, i8* %token) {
 entry:
   ret %Diagnostic zeroinitializer
 }

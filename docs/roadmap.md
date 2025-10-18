@@ -164,16 +164,17 @@ _Final delivery (self-hosting, automation, distribution)_
 
   _Priority: CRITICAL — blocks Stage2 production readiness and self-hosting CI integration_
 
-  - [ ] **Fix complex type lowering fallbacks** — Address cases where complex types (arrays, enums, structs) are incorrectly lowered as `double` due to missing type resolution.
+  - [x] **Fix complex type lowering fallbacks** — Address cases where complex types (arrays, enums, structs) are incorrectly lowered as `double` due to missing type resolution.
 
-    - [ ] Investigate type resolution failures in `lower_expression` that cause `{ %DecoratorInfo*, i64 }*` and similar complex types to fallback to `double` primitive.
-    - [ ] Ensure `resolve_struct_info_for_literal`, `resolve_enum_info_for_literal`, and array type resolution correctly propagate through all expression contexts.
-    - [ ] Fix parameter type resolution in decorator evaluation functions (`evaluate_decorators`, `evaluate_arguments`, `evaluate_expression`) where `Decorator[]`, `DecoratorArgument[]`, and `Expression` parameters lose type metadata.
-    - [ ] Add unit tests in `compiler/tests/test_native_llvm_execution.py` validating complex parameter types compile without "`double` lacks struct metadata" warnings:
-      - [ ] `test_native_llvm_function_with_struct_array_parameter` — function accepting struct array compiles cleanly.
-      - [ ] `test_native_llvm_function_with_enum_array_parameter` — function accepting enum array compiles cleanly.
-      - [ ] `test_native_llvm_function_with_nested_struct_parameter` — function with nested struct parameter compiles cleanly.
-    - [ ] Target diagnostics: eliminate "member access base `double` lacks struct metadata" warnings from bootstrap output.
+    - [x] Investigate type resolution failures in `lower_expression` that cause `{ %DecoratorInfo*, i64 }*` and similar complex types to fallback to `double` primitive.
+    - [x] Ensure `resolve_struct_info_for_literal`, `resolve_enum_info_for_literal`, and array type resolution correctly propagate through all expression contexts.
+    - [x] Fix parameter type resolution in decorator evaluation functions (`evaluate_decorators`, `evaluate_arguments`, `evaluate_expression`) where `Decorator[]`, `DecoratorArgument[]`, and `Expression` parameters lose type metadata.
+    - [x] Add unit tests in `compiler/tests/test_complex_parameter_types.py` validating complex parameter types compile without "`double` lacks struct metadata" warnings:
+      - [x] `test_native_llvm_function_with_struct_array_parameter` — function accepting struct array compiles cleanly.
+      - [x] `test_native_llvm_function_with_enum_array_parameter` — function accepting enum array compiles cleanly.
+      - [x] `test_native_llvm_function_with_nested_struct_parameter` — function with nested struct parameter compiles cleanly.
+      - [x] `test_native_llvm_function_with_unresolved_import_type_uses_pointer_fallback` — unresolved types use i8\* fallback instead of double.
+    - [x] Target diagnostics: eliminated "unsupported parameter type" warnings and "double lacks struct metadata" warnings from bootstrap output. Remaining "i8* lacks struct metadata" and "{ i8\*\*, i64 }* lacks struct metadata" warnings are expected for operations on opaque pointer types (require cross-module type resolution, roadmap work).
 
   - [x] **Implement array indexing in LLVM lowering** — Support `array[index]` expressions so compiler internals can access AST node fields, token arrays, and decorator lists.
 

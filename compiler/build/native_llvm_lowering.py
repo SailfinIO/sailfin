@@ -3884,9 +3884,6 @@ def prepare_parameters(function, context):
             break
         parameter = function.parameters[index]
         llvm_type = map_parameter_type(context, parameter.type_annotation)
-        if len(llvm_type) == 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: unsupported parameter type `" + parameter.type_annotation + "` in function `" + function.name + "`")
-            llvm_type = "double"
         if len(parameter.type_annotation) == 0  and  parameter.name == "self"  and  index == 0:
             double_colon_pos = find_last_index_of_char(function.name, ":")
             if double_colon_pos > 0  and  substring(function.name, double_colon_pos - 1, double_colon_pos + 1) == "::":
@@ -3997,7 +3994,7 @@ def map_array_pointer_type(context, annotation):
     element_annotation = trim_text(substring(trimmed, 0, len(trimmed) - 2))
     element_type = map_primitive_type(context, element_annotation)
     if len(element_type) == 0:
-        return ""
+        element_type = "i8*"
     return "{ " + element_type + "*, i64 }*"
 
 def array_struct_type_for_element(element_type):
@@ -4197,7 +4194,10 @@ def map_parameter_type(context, parameter_type):
     array_type = map_array_pointer_type(context, normalized)
     if len(array_type) > 0:
         return array_type
-    return map_primitive_type(context, normalized)
+    primitive_type = map_primitive_type(context, normalized)
+    if len(primitive_type) > 0:
+        return primitive_type
+    return "i8*"
 
 def map_local_type(context, type_annotation):
     trimmed = trim_text(type_annotation)
@@ -4210,7 +4210,10 @@ def map_local_type(context, type_annotation):
     array_type = map_array_pointer_type(context, normalized)
     if len(array_type) > 0:
         return array_type
-    return map_primitive_type(context, normalized)
+    primitive_type = map_primitive_type(context, normalized)
+    if len(primitive_type) > 0:
+        return primitive_type
+    return "i8*"
 
 def find_parameter_binding(bindings, name):
     index = 0

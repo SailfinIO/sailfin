@@ -201,13 +201,13 @@ merge1:
   ret %ModuleCompilationResult %t53
 }
 
-define { i8**, i64 }* @format_typecheck_diagnostics(double %entries, i8* %source) {
+define { i8**, i64 }* @format_typecheck_diagnostics({ i8**, i64 }* %entries, i8* %source) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
   %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
-  %l4 = alloca double
+  %l4 = alloca i8*
   %t0 = call { i8**, i64 }* @split_source_lines(i8* %source)
   store { i8**, i64 }* %t0, { i8**, i64 }** %l0
   %t1 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -241,30 +241,38 @@ merge1:
   %t18 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t27 = phi { i8**, i64 }* [ %t17, %entry ], [ %t26, %loop.latch4 ]
-  store { i8**, i64 }* %t27, { i8**, i64 }** %l2
+  %t34 = phi { i8**, i64 }* [ %t17, %entry ], [ %t33, %loop.latch4 ]
+  store { i8**, i64 }* %t34, { i8**, i64 }** %l2
   br label %loop.body3
 loop.body3:
   %t19 = load double, double* %l3
   %t20 = load double, double* %l3
-  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t22 = load double, double* %l1
-  store double 0.0, double* %l4
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t24 = load double, double* %l4
-  %t25 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t23, i8* null)
-  store { i8**, i64 }* %t25, { i8**, i64 }** %l2
+  %t21 = load { i8**, i64 }, { i8**, i64 }* %entries
+  %t22 = extractvalue { i8**, i64 } %t21, 0
+  %t23 = extractvalue { i8**, i64 } %t21, 1
+  %t24 = icmp uge i64 %t20, %t23
+  ; bounds check: %t24 (if true, out of bounds)
+  %t25 = getelementptr i8*, i8** %t22, i64 %t20
+  %t26 = load i8*, i8** %t25
+  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t28 = load double, double* %l1
+  %t29 = call i8* @format_typecheck_diagnostic(i8* %t26, { i8**, i64 }* %t27, double %t28)
+  store i8* %t29, i8** %l4
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t31 = load i8*, i8** %l4
+  %t32 = call { i8**, i64 }* @append_string({ i8**, i64 }* %t30, i8* %t31)
+  store { i8**, i64 }* %t32, { i8**, i64 }** %l2
   br label %loop.latch4
 loop.latch4:
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l2
   br label %loop.header2
 afterloop5:
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  ret { i8**, i64 }* %t28
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  ret { i8**, i64 }* %t35
 }
 
 ; fn report_typecheck_errors effects: ![io]
-define void @report_typecheck_errors(double %entries, i8* %source) {
+define void @report_typecheck_errors({ i8**, i64 }* %entries, i8* %source) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca i8*
@@ -273,7 +281,7 @@ entry:
   %l4 = alloca i8*
   %l5 = alloca { i8**, i64 }*
   %l6 = alloca double
-  %t0 = call { i8**, i64 }* @format_typecheck_diagnostics(double %entries, i8* %source)
+  %t0 = call { i8**, i64 }* @format_typecheck_diagnostics({ i8**, i64 }* %entries, i8* %source)
   store { i8**, i64 }* %t0, { i8**, i64 }** %l0
   %s1 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1, i32 0, i32 0
   store i8* %s1, i8** %l1
@@ -370,7 +378,7 @@ afterloop3:
   ret void
 }
 
-define i8* @format_typecheck_diagnostic(double %entry, { i8**, i64 }* %source_lines, double %line_padding) {
+define i8* @format_typecheck_diagnostic(i8* %entry, { i8**, i64 }* %source_lines, double %line_padding) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double

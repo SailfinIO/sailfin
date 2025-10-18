@@ -72,7 +72,7 @@ entry:
   store double %t3, double* %l3
   %t4 = load double, double* %l3
   %s5 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.5, i32 0, i32 0
-  %t6 = call i1 @identifier_matches(double %t4, i8* %s5)
+  %t6 = call i1 @identifier_matches(i8* null, i8* %s5)
   %t7 = load %Parser, %Parser* %l0
   %t8 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -85,7 +85,7 @@ then0:
 merge1:
   %t13 = load double, double* %l3
   %s14 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.14, i32 0, i32 0
-  %t15 = call i1 @identifier_matches(double %t13, i8* %s14)
+  %t15 = call i1 @identifier_matches(i8* null, i8* %s14)
   %t16 = load %Parser, %Parser* %l0
   %t17 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t18 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -98,7 +98,7 @@ then2:
 merge3:
   %t22 = load double, double* %l3
   %s23 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.23, i32 0, i32 0
-  %t24 = call i1 @identifier_matches(double %t22, i8* %s23)
+  %t24 = call i1 @identifier_matches(i8* null, i8* %s23)
   %t25 = load %Parser, %Parser* %l0
   %t26 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t27 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -107,12 +107,12 @@ merge3:
 then4:
   %t29 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t30 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t31 = call %StatementParseResult @parse_model(%Parser %parser, double 0.0)
+  %t31 = call %StatementParseResult @parse_model(%Parser %parser, { i8**, i64 }* %t30)
   ret %StatementParseResult %t31
 merge5:
   %t32 = load double, double* %l3
   %s33 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.33, i32 0, i32 0
-  %t34 = call i1 @identifier_matches(double %t32, i8* %s33)
+  %t34 = call i1 @identifier_matches(i8* null, i8* %s33)
   %t35 = load %Parser, %Parser* %l0
   %t36 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t37 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -121,12 +121,12 @@ merge5:
 then6:
   %t39 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t40 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t41 = call %StatementParseResult @parse_pipeline(%Parser %parser, double 0.0)
+  %t41 = call %StatementParseResult @parse_pipeline(%Parser %parser, { i8**, i64 }* %t40)
   ret %StatementParseResult %t41
 merge7:
   %t42 = load double, double* %l3
   %s43 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.43, i32 0, i32 0
-  %t44 = call i1 @identifier_matches(double %t42, i8* %s43)
+  %t44 = call i1 @identifier_matches(i8* null, i8* %s43)
   %t45 = load %Parser, %Parser* %l0
   %t46 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t47 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -135,12 +135,12 @@ merge7:
 then8:
   %t49 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t50 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t51 = call %StatementParseResult @parse_tool(%Parser %parser, double 0.0)
+  %t51 = call %StatementParseResult @parse_tool(%Parser %parser, { i8**, i64 }* %t50)
   ret %StatementParseResult %t51
 merge9:
   %t52 = load double, double* %l3
   %s53 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.53, i32 0, i32 0
-  %t54 = call i1 @identifier_matches(double %t52, i8* %s53)
+  %t54 = call i1 @identifier_matches(i8* null, i8* %s53)
   %t55 = load %Parser, %Parser* %l0
   %t56 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t57 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -149,12 +149,12 @@ merge9:
 then10:
   %t59 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t60 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t61 = call %StatementParseResult @parse_test(%Parser %parser, double 0.0)
+  %t61 = call %StatementParseResult @parse_test(%Parser %parser, { i8**, i64 }* %t60)
   ret %StatementParseResult %t61
 merge11:
   %t62 = load double, double* %l3
   %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.63, i32 0, i32 0
-  %t64 = call i1 @identifier_matches(double %t62, i8* %s63)
+  %t64 = call i1 @identifier_matches(i8* null, i8* %s63)
   %t65 = load %Parser, %Parser* %l0
   %t66 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t67 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -162,12 +162,12 @@ merge11:
   br i1 %t64, label %then12, label %merge13
 then12:
   %t69 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t70 = call %StatementParseResult @parse_function(%Parser %parser, i1 0, double 0.0)
+  %t70 = call %StatementParseResult @parse_function(%Parser %parser, i1 0, { i8**, i64 }* %t69)
   ret %StatementParseResult %t70
 merge13:
   %t71 = load double, double* %l3
   %s72 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.72, i32 0, i32 0
-  %t73 = call i1 @identifier_matches(double %t71, i8* %s72)
+  %t73 = call i1 @identifier_matches(i8* null, i8* %s72)
   %t74 = load %Parser, %Parser* %l0
   %t75 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t76 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -176,7 +176,7 @@ merge13:
 then14:
   %t78 = load double, double* %l3
   %s79 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.79, i32 0, i32 0
-  %t80 = call i1 @identifier_matches(double %t78, i8* %s79)
+  %t80 = call i1 @identifier_matches(i8* null, i8* %s79)
   %t81 = load %Parser, %Parser* %l0
   %t82 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t83 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -187,7 +187,7 @@ then16:
 merge17:
   %t85 = load double, double* %l3
   %s86 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.86, i32 0, i32 0
-  %t87 = call i1 @identifier_matches(double %t85, i8* %s86)
+  %t87 = call i1 @identifier_matches(i8* null, i8* %s86)
   %t88 = load %Parser, %Parser* %l0
   %t89 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t90 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -199,7 +199,7 @@ then18:
 merge19:
   %t93 = load double, double* %l3
   %s94 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.94, i32 0, i32 0
-  %t95 = call i1 @identifier_matches(double %t93, i8* %s94)
+  %t95 = call i1 @identifier_matches(i8* null, i8* %s94)
   %t96 = load %Parser, %Parser* %l0
   %t97 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t98 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -212,7 +212,7 @@ merge21:
   store double 0.0, double* %l4
   %t101 = load double, double* %l4
   %s102 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.102, i32 0, i32 0
-  %t103 = call i1 @identifier_matches(double %t101, i8* %s102)
+  %t103 = call i1 @identifier_matches(i8* null, i8* %s102)
   %t104 = load %Parser, %Parser* %l0
   %t105 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t106 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -221,14 +221,14 @@ merge21:
   br i1 %t103, label %then22, label %merge23
 then22:
   %t109 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t110 = call %StatementParseResult @parse_function(%Parser %parser, i1 1, double 0.0)
+  %t110 = call %StatementParseResult @parse_function(%Parser %parser, i1 1, { i8**, i64 }* %t109)
   ret %StatementParseResult %t110
 merge23:
   br label %merge15
 merge15:
   %t111 = load double, double* %l3
   %s112 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.112, i32 0, i32 0
-  %t113 = call i1 @identifier_matches(double %t111, i8* %s112)
+  %t113 = call i1 @identifier_matches(i8* null, i8* %s112)
   %t114 = load %Parser, %Parser* %l0
   %t115 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t116 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -240,7 +240,7 @@ then24:
 merge25:
   %t119 = load double, double* %l3
   %s120 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.120, i32 0, i32 0
-  %t121 = call i1 @identifier_matches(double %t119, i8* %s120)
+  %t121 = call i1 @identifier_matches(i8* null, i8* %s120)
   %t122 = load %Parser, %Parser* %l0
   %t123 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t124 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -252,7 +252,7 @@ then26:
 merge27:
   %t127 = load double, double* %l3
   %s128 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.128, i32 0, i32 0
-  %t129 = call i1 @identifier_matches(double %t127, i8* %s128)
+  %t129 = call i1 @identifier_matches(i8* null, i8* %s128)
   %t130 = load %Parser, %Parser* %l0
   %t131 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t132 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -260,12 +260,12 @@ merge27:
   br i1 %t129, label %then28, label %merge29
 then28:
   %t134 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t135 = call %StatementParseResult @parse_struct(%Parser %parser, double 0.0)
+  %t135 = call %StatementParseResult @parse_struct(%Parser %parser, { i8**, i64 }* %t134)
   ret %StatementParseResult %t135
 merge29:
   %t136 = load double, double* %l3
   %s137 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.137, i32 0, i32 0
-  %t138 = call i1 @identifier_matches(double %t136, i8* %s137)
+  %t138 = call i1 @identifier_matches(i8* null, i8* %s137)
   %t139 = load %Parser, %Parser* %l0
   %t140 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t141 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -273,12 +273,12 @@ merge29:
   br i1 %t138, label %then30, label %merge31
 then30:
   %t143 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t144 = call %StatementParseResult @parse_type_alias(%Parser %parser, double 0.0)
+  %t144 = call %StatementParseResult @parse_type_alias(%Parser %parser, { i8**, i64 }* %t143)
   ret %StatementParseResult %t144
 merge31:
   %t145 = load double, double* %l3
   %s146 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.146, i32 0, i32 0
-  %t147 = call i1 @identifier_matches(double %t145, i8* %s146)
+  %t147 = call i1 @identifier_matches(i8* null, i8* %s146)
   %t148 = load %Parser, %Parser* %l0
   %t149 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t150 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -286,12 +286,12 @@ merge31:
   br i1 %t147, label %then32, label %merge33
 then32:
   %t152 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t153 = call %StatementParseResult @parse_interface(%Parser %parser, double 0.0)
+  %t153 = call %StatementParseResult @parse_interface(%Parser %parser, { i8**, i64 }* %t152)
   ret %StatementParseResult %t153
 merge33:
   %t154 = load double, double* %l3
   %s155 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.155, i32 0, i32 0
-  %t156 = call i1 @identifier_matches(double %t154, i8* %s155)
+  %t156 = call i1 @identifier_matches(i8* null, i8* %s155)
   %t157 = load %Parser, %Parser* %l0
   %t158 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t159 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -299,7 +299,7 @@ merge33:
   br i1 %t156, label %then34, label %merge35
 then34:
   %t161 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t162 = call %StatementParseResult @parse_enum(%Parser %parser, double 0.0)
+  %t162 = call %StatementParseResult @parse_enum(%Parser %parser, { i8**, i64 }* %t161)
   ret %StatementParseResult %t162
 merge35:
   %t163 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -310,7 +310,7 @@ merge35:
 define %StatementParseResult @parse_import(%Parser %parser) {
 entry:
   %l0 = alloca %SpecifierListParseResult
-  %l1 = alloca double
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca %CaptureResult
   %l3 = alloca i8*
   %l4 = alloca double
@@ -318,8 +318,8 @@ entry:
   store %SpecifierListParseResult %t0, %SpecifierListParseResult* %l0
   %t1 = load %SpecifierListParseResult, %SpecifierListParseResult* %l0
   %t2 = extractvalue %SpecifierListParseResult %t1, 1
-  %t3 = call double @build_import_specifiers({ %NamedSpecifier*, i64 }* null)
-  store double %t3, double* %l1
+  %t3 = call { i8**, i64 }* @build_import_specifiers({ %NamedSpecifier*, i64 }* null)
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %s4 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.4, i32 0, i32 0
   %t5 = alloca [1 x i8*]
   %t6 = getelementptr [1 x i8*], [1 x i8*]* %t5, i32 0, i32 0
@@ -334,7 +334,7 @@ entry:
   store %CaptureResult %t11, %CaptureResult* %l2
   %t12 = load %CaptureResult, %CaptureResult* %l2
   %t13 = extractvalue %CaptureResult %t12, 1
-  %t14 = call i8* @tokens_to_text(double 0.0)
+  %t14 = call i8* @tokens_to_text({ i8**, i64 }* %t13)
   %t15 = call i8* @trim_text(i8* %t14)
   store i8* %t15, i8** %l3
   %t16 = load i8*, i8** %l3
@@ -351,7 +351,7 @@ entry:
 define %StatementParseResult @parse_export(%Parser %parser) {
 entry:
   %l0 = alloca %SpecifierListParseResult
-  %l1 = alloca double
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca %CaptureResult
   %l3 = alloca i8*
   %l4 = alloca double
@@ -359,8 +359,8 @@ entry:
   store %SpecifierListParseResult %t0, %SpecifierListParseResult* %l0
   %t1 = load %SpecifierListParseResult, %SpecifierListParseResult* %l0
   %t2 = extractvalue %SpecifierListParseResult %t1, 1
-  %t3 = call double @build_export_specifiers({ %NamedSpecifier*, i64 }* null)
-  store double %t3, double* %l1
+  %t3 = call { i8**, i64 }* @build_export_specifiers({ %NamedSpecifier*, i64 }* null)
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %s4 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.4, i32 0, i32 0
   %t5 = alloca [1 x i8*]
   %t6 = getelementptr [1 x i8*], [1 x i8*]* %t5, i32 0, i32 0
@@ -375,7 +375,7 @@ entry:
   store %CaptureResult %t11, %CaptureResult* %l2
   %t12 = load %CaptureResult, %CaptureResult* %l2
   %t13 = extractvalue %CaptureResult %t12, 1
-  %t14 = call i8* @tokens_to_text(double 0.0)
+  %t14 = call i8* @tokens_to_text({ i8**, i64 }* %t13)
   %t15 = call i8* @trim_text(i8* %t14)
   store i8* %t15, i8** %l3
   %t16 = load i8*, i8** %l3
@@ -391,16 +391,16 @@ entry:
 
 define %StatementParseResult @parse_variable(%Parser %parser) {
 entry:
-  %l0 = alloca { double*, i64 }*
+  %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
   %l2 = alloca i1
   %l3 = alloca double
   %l4 = alloca double
   %l5 = alloca i8*
-  %l6 = alloca double
+  %l6 = alloca i8*
   %l7 = alloca double
-  %l8 = alloca double
-  %l9 = alloca double
+  %l8 = alloca i8*
+  %l9 = alloca i8*
   %l10 = alloca double
   %l11 = alloca double
   %l12 = alloca double
@@ -412,59 +412,59 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l0
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
   %t5 = call double @parser_peek_raw(%Parser %parser)
   store double %t5, double* %l1
-  %t6 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t7 = load double, double* %l1
-  %t8 = call double @append_token(double 0.0, double %t7)
-  store { double*, i64 }* null, { double*, i64 }** %l0
+  %t8 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t6, i8* null)
+  store { i8**, i64 }* %t8, { i8**, i64 }** %l0
   store i1 0, i1* %l2
   %t9 = call double @parser_peek_raw(%Parser %parser)
   store double %t9, double* %l3
   %t10 = load double, double* %l3
   %s11 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.11, i32 0, i32 0
-  %t12 = call i1 @identifier_matches(double %t10, i8* %s11)
-  %t13 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t12 = call i1 @identifier_matches(i8* null, i8* %s11)
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t14 = load double, double* %l1
   %t15 = load i1, i1* %l2
   %t16 = load double, double* %l3
   br i1 %t12, label %then0, label %merge1
 then0:
-  %t17 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t18 = load double, double* %l3
-  %t19 = call double @append_token(double 0.0, double %t18)
-  store { double*, i64 }* null, { double*, i64 }** %l0
+  %t19 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t17, i8* null)
+  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
   store i1 1, i1* %l2
   br label %merge1
 merge1:
-  %t20 = phi { double*, i64 }* [ null, %then0 ], [ %t13, %entry ]
+  %t20 = phi { i8**, i64 }* [ %t19, %then0 ], [ %t13, %entry ]
   %t21 = phi i1 [ 1, %then0 ], [ %t15, %entry ]
-  store { double*, i64 }* %t20, { double*, i64 }** %l0
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   store i1 %t21, i1* %l2
   %t22 = call double @parser_peek_raw(%Parser %parser)
   store double %t22, double* %l4
-  %t23 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t24 = load double, double* %l4
-  %t25 = call double @append_token(double 0.0, double %t24)
-  store { double*, i64 }* null, { double*, i64 }** %l0
+  %t25 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t23, i8* null)
+  store { i8**, i64 }* %t25, { i8**, i64 }** %l0
   %t26 = load double, double* %l4
-  %t27 = call i8* @identifier_text(double %t26)
+  %t27 = call i8* @identifier_text(i8* null)
   store i8* %t27, i8** %l5
-  store double 0.0, double* %l6
+  store i8* null, i8** %l6
   %t28 = call double @parser_peek_raw(%Parser %parser)
   store double %t28, double* %l7
   %t29 = load double, double* %l7
-  store double 0.0, double* %l8
-  store double 0.0, double* %l9
+  store i8* null, i8** %l8
+  store i8* null, i8** %l9
   %t30 = call double @parser_peek_raw(%Parser %parser)
   store double %t30, double* %l10
   %t31 = load double, double* %l10
   %t32 = call double @parser_peek_raw(%Parser %parser)
   store double %t32, double* %l11
   %t33 = load double, double* %l11
-  %t34 = load { double*, i64 }*, { double*, i64 }** %l0
-  %t35 = call double @source_span_from_tokens(double 0.0)
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t35 = call double @source_span_from_tokens({ i8**, i64 }* %t34)
   store double %t35, double* %l12
   store double 0.0, double* %l13
   %t36 = insertvalue %StatementParseResult undef, i8* null, 0
@@ -478,7 +478,7 @@ entry:
   %l0 = alloca { %NamedSpecifier*, i64 }*
   %l1 = alloca double
   %l2 = alloca i8*
-  %l3 = alloca double
+  %l3 = alloca i8*
   %l4 = alloca double
   %l5 = alloca double
   %l6 = alloca double
@@ -502,18 +502,18 @@ loop.body1:
   %t7 = load double, double* %l1
   %t8 = load double, double* %l1
   %t9 = load double, double* %l1
-  %t10 = call i8* @identifier_text(double %t9)
+  %t10 = call i8* @identifier_text(i8* null)
   store i8* %t10, i8** %l2
-  store double 0.0, double* %l3
+  store i8* null, i8** %l3
   %t11 = call double @parser_peek_raw(%Parser %parser)
   store double %t11, double* %l4
   %t12 = load double, double* %l4
   %s13 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.13, i32 0, i32 0
-  %t14 = call i1 @identifier_matches(double %t12, i8* %s13)
+  %t14 = call i1 @identifier_matches(i8* null, i8* %s13)
   %t15 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l0
   %t16 = load double, double* %l1
   %t17 = load i8*, i8** %l2
-  %t18 = load double, double* %l3
+  %t18 = load i8*, i8** %l3
   %t19 = load double, double* %l4
   br i1 %t14, label %then4, label %merge5
 then4:
@@ -537,7 +537,91 @@ afterloop3:
   ret %SpecifierListParseResult %t29
 }
 
-define %StatementParseResult @parse_struct(%Parser %parser, double %decorators) {
+define { i8**, i64 }* @build_import_specifiers({ %NamedSpecifier*, i64 }* %values) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca double
+  %l2 = alloca %NamedSpecifier
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t7 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  %t17 = phi { i8**, i64 }* [ %t6, %entry ], [ %t16, %loop.latch2 ]
+  store { i8**, i64 }* %t17, { i8**, i64 }** %l0
+  br label %loop.body1
+loop.body1:
+  %t8 = load double, double* %l1
+  %t9 = load double, double* %l1
+  %t10 = load { %NamedSpecifier*, i64 }, { %NamedSpecifier*, i64 }* %values
+  %t11 = extractvalue { %NamedSpecifier*, i64 } %t10, 0
+  %t12 = extractvalue { %NamedSpecifier*, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr %NamedSpecifier, %NamedSpecifier* %t11, i64 %t9
+  %t15 = load %NamedSpecifier, %NamedSpecifier* %t14
+  store %NamedSpecifier %t15, %NamedSpecifier* %l2
+  br label %loop.latch2
+loop.latch2:
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br label %loop.header0
+afterloop3:
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t18
+}
+
+define { i8**, i64 }* @build_export_specifiers({ %NamedSpecifier*, i64 }* %values) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca double
+  %l2 = alloca %NamedSpecifier
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t7 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  %t17 = phi { i8**, i64 }* [ %t6, %entry ], [ %t16, %loop.latch2 ]
+  store { i8**, i64 }* %t17, { i8**, i64 }** %l0
+  br label %loop.body1
+loop.body1:
+  %t8 = load double, double* %l1
+  %t9 = load double, double* %l1
+  %t10 = load { %NamedSpecifier*, i64 }, { %NamedSpecifier*, i64 }* %values
+  %t11 = extractvalue { %NamedSpecifier*, i64 } %t10, 0
+  %t12 = extractvalue { %NamedSpecifier*, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr %NamedSpecifier, %NamedSpecifier* %t11, i64 %t9
+  %t15 = load %NamedSpecifier, %NamedSpecifier* %t14
+  store %NamedSpecifier %t15, %NamedSpecifier* %l2
+  br label %loop.latch2
+loop.latch2:
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br label %loop.header0
+afterloop3:
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t18
+}
+
+define %StatementParseResult @parse_struct(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -546,8 +630,8 @@ entry:
   %l4 = alloca { i8**, i64 }*
   %l5 = alloca %ImplementsParseResult
   %l6 = alloca { i8**, i64 }*
-  %l7 = alloca { double*, i64 }*
-  %l8 = alloca { double*, i64 }*
+  %l7 = alloca { i8**, i64 }*
+  %l8 = alloca { i8**, i64 }*
   %l9 = alloca %Parser
   %l10 = alloca %DecoratorParseResult
   %l11 = alloca { i8**, i64 }*
@@ -558,7 +642,7 @@ entry:
   %t0 = call double @parser_peek_raw(%Parser %parser)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  %t2 = call i8* @identifier_text(double %t1)
+  %t2 = call i8* @identifier_text(i8* null)
   store i8* %t2, i8** %l1
   %t3 = load double, double* %l0
   %t4 = alloca [1 x double]
@@ -570,7 +654,7 @@ entry:
   store double* %t5, double** %t8
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 1, i64* %t9
-  %t10 = call double @source_span_from_tokens(double 0.0)
+  %t10 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t10, double* %l2
   %t11 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t11, %TypeParameterParseResult* %l3
@@ -589,7 +673,7 @@ entry:
   store double* %t18, double** %t20
   %t21 = getelementptr { double*, i64 }, { double*, i64 }* %t19, i32 0, i32 1
   store i64 0, i64* %t21
-  store { double*, i64 }* %t19, { double*, i64 }** %l7
+  store { i8**, i64 }* null, { i8**, i64 }** %l7
   %t22 = alloca [0 x double]
   %t23 = getelementptr [0 x double], [0 x double]* %t22, i32 0, i32 0
   %t24 = alloca { double*, i64 }
@@ -597,7 +681,7 @@ entry:
   store double* %t23, double** %t25
   %t26 = getelementptr { double*, i64 }, { double*, i64 }* %t24, i32 0, i32 1
   store i64 0, i64* %t26
-  store { double*, i64 }* %t24, { double*, i64 }** %l8
+  store { i8**, i64 }* null, { i8**, i64 }** %l8
   %t27 = load double, double* %l0
   %t28 = load i8*, i8** %l1
   %t29 = load double, double* %l2
@@ -605,8 +689,8 @@ entry:
   %t31 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t32 = load %ImplementsParseResult, %ImplementsParseResult* %l5
   %t33 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t34 = load { double*, i64 }*, { double*, i64 }** %l7
-  %t35 = load { double*, i64 }*, { double*, i64 }** %l8
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l8
   br label %loop.header0
 loop.header0:
   br label %loop.body1
@@ -624,7 +708,7 @@ loop.body1:
   %t42 = call %StructFieldParseResult @parse_struct_field(%Parser %parser)
   store %StructFieldParseResult %t42, %StructFieldParseResult* %l13
   %t43 = load { i8**, i64 }*, { i8**, i64 }** %l11
-  %t44 = call %MethodParseResult @parse_struct_method(%Parser %parser, double 0.0)
+  %t44 = call %MethodParseResult @parse_struct_method(%Parser %parser, { i8**, i64 }* %t43)
   store %MethodParseResult %t44, %MethodParseResult* %l14
   %t45 = load %MethodParseResult, %MethodParseResult* %l14
   %t46 = extractvalue %MethodParseResult %t45, 2
@@ -635,8 +719,8 @@ loop.body1:
   %t51 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t52 = load %ImplementsParseResult, %ImplementsParseResult* %l5
   %t53 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t54 = load { double*, i64 }*, { double*, i64 }** %l7
-  %t55 = load { double*, i64 }*, { double*, i64 }** %l8
+  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l8
   %t56 = load %Parser, %Parser* %l9
   %t57 = load %DecoratorParseResult, %DecoratorParseResult* %l10
   %t58 = load { i8**, i64 }*, { i8**, i64 }** %l11
@@ -660,7 +744,7 @@ afterloop3:
   ret %StatementParseResult %t66
 }
 
-define %StatementParseResult @parse_type_alias(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_type_alias(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
@@ -678,7 +762,7 @@ entry:
   store double %t0, double* %l1
   %t1 = load double, double* %l1
   %t2 = load double, double* %l1
-  %t3 = call i8* @identifier_text(double %t2)
+  %t3 = call i8* @identifier_text(i8* null)
   store i8* %t3, i8** %l2
   %t4 = load double, double* %l1
   %t5 = alloca [1 x double]
@@ -690,7 +774,7 @@ entry:
   store double* %t6, double** %t9
   %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
   store i64 1, i64* %t10
-  %t11 = call double @source_span_from_tokens(double 0.0)
+  %t11 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t11, double* %l3
   %t12 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t12, %TypeParameterParseResult* %l4
@@ -715,7 +799,7 @@ entry:
   store %CaptureResult %t25, %CaptureResult* %l7
   %t26 = load %CaptureResult, %CaptureResult* %l7
   %t27 = extractvalue %CaptureResult %t26, 1
-  %t28 = call i8* @tokens_to_text(double 0.0)
+  %t28 = call i8* @tokens_to_text({ i8**, i64 }* %t27)
   %t29 = call i8* @trim_text(i8* %t28)
   store i8* %t29, i8** %l8
   %t30 = load i8*, i8** %l8
@@ -728,7 +812,7 @@ entry:
   ret %StatementParseResult %t34
 }
 
-define %StatementParseResult @parse_interface(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_interface(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
@@ -736,7 +820,7 @@ entry:
   %l3 = alloca double
   %l4 = alloca %TypeParameterParseResult
   %l5 = alloca { i8**, i64 }*
-  %l6 = alloca { double*, i64 }*
+  %l6 = alloca { i8**, i64 }*
   %l7 = alloca double
   %l8 = alloca %Parser
   %l9 = alloca %DecoratorParseResult
@@ -748,7 +832,7 @@ entry:
   store double %t0, double* %l1
   %t1 = load double, double* %l1
   %t2 = load double, double* %l1
-  %t3 = call i8* @identifier_text(double %t2)
+  %t3 = call i8* @identifier_text(i8* null)
   store i8* %t3, i8** %l2
   %t4 = load double, double* %l1
   %t5 = alloca [1 x double]
@@ -760,7 +844,7 @@ entry:
   store double* %t6, double** %t9
   %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
   store i64 1, i64* %t10
-  %t11 = call double @source_span_from_tokens(double 0.0)
+  %t11 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t11, double* %l3
   %t12 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t12, %TypeParameterParseResult* %l4
@@ -774,14 +858,14 @@ entry:
   store double* %t16, double** %t18
   %t19 = getelementptr { double*, i64 }, { double*, i64 }* %t17, i32 0, i32 1
   store i64 0, i64* %t19
-  store { double*, i64 }* %t17, { double*, i64 }** %l6
+  store { i8**, i64 }* null, { i8**, i64 }** %l6
   %t20 = load %Parser, %Parser* %l0
   %t21 = load double, double* %l1
   %t22 = load i8*, i8** %l2
   %t23 = load double, double* %l3
   %t24 = load %TypeParameterParseResult, %TypeParameterParseResult* %l4
   %t25 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t26 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l6
   br label %loop.header0
 loop.header0:
   br label %loop.body1
@@ -797,7 +881,7 @@ loop.body1:
   %t32 = extractvalue %DecoratorParseResult %t31, 1
   store { i8**, i64 }* %t32, { i8**, i64 }** %l10
   %t33 = load { i8**, i64 }*, { i8**, i64 }** %l10
-  %t34 = call %InterfaceMemberParseResult @parse_interface_member(%Parser %parser, double 0.0)
+  %t34 = call %InterfaceMemberParseResult @parse_interface_member(%Parser %parser, { i8**, i64 }* %t33)
   store %InterfaceMemberParseResult %t34, %InterfaceMemberParseResult* %l11
   %t35 = load %InterfaceMemberParseResult, %InterfaceMemberParseResult* %l11
   %t36 = extractvalue %InterfaceMemberParseResult %t35, 2
@@ -807,7 +891,7 @@ loop.body1:
   %t40 = load double, double* %l3
   %t41 = load %TypeParameterParseResult, %TypeParameterParseResult* %l4
   %t42 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t43 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l6
   %t44 = load double, double* %l7
   %t45 = load %Parser, %Parser* %l8
   %t46 = load %DecoratorParseResult, %DecoratorParseResult* %l9
@@ -830,7 +914,7 @@ afterloop3:
   ret %StatementParseResult %t53
 }
 
-define %StatementParseResult @parse_enum(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_enum(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
@@ -838,7 +922,7 @@ entry:
   %l3 = alloca double
   %l4 = alloca %TypeParameterParseResult
   %l5 = alloca { i8**, i64 }*
-  %l6 = alloca { double*, i64 }*
+  %l6 = alloca { i8**, i64 }*
   %l7 = alloca double
   %l8 = alloca %EnumVariantParseResult
   %l9 = alloca double
@@ -847,7 +931,7 @@ entry:
   store double %t0, double* %l1
   %t1 = load double, double* %l1
   %t2 = load double, double* %l1
-  %t3 = call i8* @identifier_text(double %t2)
+  %t3 = call i8* @identifier_text(i8* null)
   store i8* %t3, i8** %l2
   %t4 = load double, double* %l1
   %t5 = alloca [1 x double]
@@ -859,7 +943,7 @@ entry:
   store double* %t6, double** %t9
   %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
   store i64 1, i64* %t10
-  %t11 = call double @source_span_from_tokens(double 0.0)
+  %t11 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t11, double* %l3
   %t12 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t12, %TypeParameterParseResult* %l4
@@ -873,14 +957,14 @@ entry:
   store double* %t16, double** %t18
   %t19 = getelementptr { double*, i64 }, { double*, i64 }* %t17, i32 0, i32 1
   store i64 0, i64* %t19
-  store { double*, i64 }* %t17, { double*, i64 }** %l6
+  store { i8**, i64 }* null, { i8**, i64 }** %l6
   %t20 = load %Parser, %Parser* %l0
   %t21 = load double, double* %l1
   %t22 = load i8*, i8** %l2
   %t23 = load double, double* %l3
   %t24 = load %TypeParameterParseResult, %TypeParameterParseResult* %l4
   %t25 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t26 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l6
   br label %loop.header0
 loop.header0:
   br label %loop.body1
@@ -899,7 +983,7 @@ loop.body1:
   %t36 = load double, double* %l3
   %t37 = load %TypeParameterParseResult, %TypeParameterParseResult* %l4
   %t38 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t39 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l6
   %t40 = load double, double* %l7
   %t41 = load %EnumVariantParseResult, %EnumVariantParseResult* %l8
   br i1 %t32, label %then4, label %merge5
@@ -919,7 +1003,7 @@ afterloop3:
   ret %StatementParseResult %t46
 }
 
-define %InterfaceMemberParseResult @parse_interface_member(%Parser %parser, double %decorators) {
+define %InterfaceMemberParseResult @parse_interface_member(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
@@ -933,7 +1017,7 @@ entry:
   %l9 = alloca { i8**, i64 }*
   %l10 = alloca %ParameterListParseResult
   %l11 = alloca { i8**, i64 }*
-  %l12 = alloca double
+  %l12 = alloca i8*
   %l13 = alloca double
   %l14 = alloca %EffectParseResult
   %l15 = alloca { i8**, i64 }*
@@ -949,7 +1033,7 @@ entry:
   store double %t2, double* %l3
   %t3 = load double, double* %l3
   %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.4, i32 0, i32 0
-  %t5 = call i1 @identifier_matches(double %t3, i8* %s4)
+  %t5 = call i1 @identifier_matches(i8* null, i8* %s4)
   %t6 = load %Parser, %Parser* %l0
   %t7 = load %Parser, %Parser* %l1
   %t8 = load i1, i1* %l2
@@ -963,7 +1047,7 @@ then0:
   %t13 = load %Parser, %Parser* %l4
   %t14 = call double @parser_peek_raw(%Parser %t13)
   %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.15, i32 0, i32 0
-  %t16 = call i1 @identifier_matches(double %t14, i8* %s15)
+  %t16 = call i1 @identifier_matches(i8* null, i8* %s15)
   %t17 = load %Parser, %Parser* %l0
   %t18 = load %Parser, %Parser* %l1
   %t19 = load i1, i1* %l2
@@ -1020,7 +1104,7 @@ merge5:
   store double %t50, double* %l5
   %t51 = load double, double* %l5
   %t52 = load double, double* %l5
-  %t53 = call i8* @identifier_text(double %t52)
+  %t53 = call i8* @identifier_text(i8* null)
   store i8* %t53, i8** %l6
   %t54 = load double, double* %l5
   %t55 = alloca [1 x double]
@@ -1032,7 +1116,7 @@ merge5:
   store double* %t56, double** %t59
   %t60 = getelementptr { double*, i64 }, { double*, i64 }* %t58, i32 0, i32 1
   store i64 1, i64* %t60
-  %t61 = call double @source_span_from_tokens(double 0.0)
+  %t61 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t61, double* %l7
   %t62 = load %Parser, %Parser* %l1
   %t63 = call %Parser @parser_advance_raw(%Parser %t62)
@@ -1065,7 +1149,7 @@ merge5:
   %t81 = load %Parser, %Parser* %l1
   %t82 = call %Parser @skip_trivia(%Parser %t81)
   store %Parser %t82, %Parser* %l1
-  store double 0.0, double* %l12
+  store i8* null, i8** %l12
   %t83 = load %Parser, %Parser* %l1
   %t84 = call double @parser_peek_raw(%Parser %t83)
   store double %t84, double* %l13
@@ -1079,7 +1163,7 @@ merge5:
   %t90 = load %EffectParseResult, %EffectParseResult* %l14
   %t91 = extractvalue %EffectParseResult %t90, 1
   store { i8**, i64 }* %t91, { i8**, i64 }** %l15
-  %t92 = call double @evaluate_decorators(double %decorators)
+  %t92 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t92, double* %l16
   %t93 = load { i8**, i64 }*, { i8**, i64 }** %l15
   %t94 = load double, double* %l16
@@ -1108,7 +1192,7 @@ entry:
   %l2 = alloca double
   %l3 = alloca i8*
   %l4 = alloca double
-  %l5 = alloca { double*, i64 }*
+  %l5 = alloca { i8**, i64 }*
   %l6 = alloca double
   %l7 = alloca double
   %l8 = alloca double
@@ -1120,7 +1204,7 @@ entry:
   store double %t2, double* %l2
   %t3 = load double, double* %l2
   %t4 = load double, double* %l2
-  %t5 = call i8* @identifier_text(double %t4)
+  %t5 = call i8* @identifier_text(i8* null)
   store i8* %t5, i8** %l3
   %t6 = load double, double* %l2
   %t7 = alloca [1 x double]
@@ -1132,7 +1216,7 @@ entry:
   store double* %t8, double** %t11
   %t12 = getelementptr { double*, i64 }, { double*, i64 }* %t10, i32 0, i32 1
   store i64 1, i64* %t12
-  %t13 = call double @source_span_from_tokens(double 0.0)
+  %t13 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t13, double* %l4
   %t14 = load %Parser, %Parser* %l1
   %t15 = call %Parser @parser_advance_raw(%Parser %t14)
@@ -1144,7 +1228,7 @@ entry:
   store double* %t17, double** %t19
   %t20 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 1
   store i64 0, i64* %t20
-  store { double*, i64 }* %t18, { double*, i64 }** %l5
+  store { i8**, i64 }* null, { i8**, i64 }** %l5
   %t21 = load %Parser, %Parser* %l1
   %t22 = call %Parser @skip_trivia(%Parser %t21)
   store %Parser %t22, %Parser* %l1
@@ -1194,7 +1278,7 @@ entry:
   store double %t3, double* %l3
   %t4 = load double, double* %l3
   %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.5, i32 0, i32 0
-  %t6 = call i1 @identifier_matches(double %t4, i8* %s5)
+  %t6 = call i1 @identifier_matches(i8* null, i8* %s5)
   %t7 = load %Parser, %Parser* %l0
   %t8 = load i1, i1* %l1
   %t9 = load double, double* %l2
@@ -1223,7 +1307,7 @@ merge1:
   store double %t20, double* %l3
   %t21 = load double, double* %l3
   %t22 = load double, double* %l3
-  %t23 = call i8* @identifier_text(double %t22)
+  %t23 = call i8* @identifier_text(i8* null)
   store i8* %t23, i8** %l4
   %t24 = load double, double* %l3
   %t25 = alloca [1 x double]
@@ -1235,7 +1319,7 @@ merge1:
   store double* %t26, double** %t29
   %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
   store i64 1, i64* %t30
-  %t31 = call double @source_span_from_tokens(double 0.0)
+  %t31 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t31, double* %l5
   %t32 = load %Parser, %Parser* %l0
   %t33 = call %Parser @parser_advance_raw(%Parser %t32)
@@ -1320,7 +1404,7 @@ entry:
   ret %Parser %t4
 }
 
-define %StatementParseResult @parse_model(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_model(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
@@ -1331,7 +1415,7 @@ entry:
   %l6 = alloca double
   %l7 = alloca %EffectParseResult
   %l8 = alloca { i8**, i64 }*
-  %l9 = alloca { double*, i64 }*
+  %l9 = alloca { i8**, i64 }*
   %l10 = alloca double
   %l11 = alloca %Parser
   %l12 = alloca %ModelPropertyParseResult
@@ -1341,7 +1425,7 @@ entry:
   %t0 = call double @parser_peek_raw(%Parser %parser)
   store double %t0, double* %l1
   %t1 = load double, double* %l1
-  %t2 = call i8* @identifier_text(double %t1)
+  %t2 = call i8* @identifier_text(i8* null)
   store i8* %t2, i8** %l2
   %t3 = load double, double* %l1
   %t4 = alloca [1 x double]
@@ -1353,7 +1437,7 @@ entry:
   store double* %t5, double** %t8
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 1, i64* %t9
-  %t10 = call double @source_span_from_tokens(double 0.0)
+  %t10 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t10, double* %l3
   %t11 = call %Parser @skip_trivia(%Parser %parser)
   store double 0.0, double* %l4
@@ -1373,7 +1457,7 @@ entry:
   store double* %t18, double** %t20
   %t21 = getelementptr { double*, i64 }, { double*, i64 }* %t19, i32 0, i32 1
   store i64 0, i64* %t21
-  store { double*, i64 }* %t19, { double*, i64 }** %l9
+  store { i8**, i64 }* null, { i8**, i64 }** %l9
   %t22 = load %Parser, %Parser* %l0
   %t23 = load double, double* %l1
   %t24 = load i8*, i8** %l2
@@ -1383,7 +1467,7 @@ entry:
   %t28 = load double, double* %l6
   %t29 = load %EffectParseResult, %EffectParseResult* %l7
   %t30 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t31 = load { double*, i64 }*, { double*, i64 }** %l9
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l9
   br label %loop.header0
 loop.header0:
   br label %loop.body1
@@ -1410,7 +1494,7 @@ afterloop3:
   ret %StatementParseResult %t41
 }
 
-define %StatementParseResult @parse_pipeline(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_pipeline(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -1419,7 +1503,7 @@ entry:
   %l4 = alloca { i8**, i64 }*
   %l5 = alloca %ParameterListParseResult
   %l6 = alloca { i8**, i64 }*
-  %l7 = alloca double
+  %l7 = alloca i8*
   %l8 = alloca double
   %l9 = alloca %EffectParseResult
   %l10 = alloca { i8**, i64 }*
@@ -1432,7 +1516,7 @@ entry:
   %t0 = call double @parser_peek_raw(%Parser %parser)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  %t2 = call i8* @identifier_text(double %t1)
+  %t2 = call i8* @identifier_text(i8* null)
   store i8* %t2, i8** %l1
   %t3 = load double, double* %l0
   %t4 = alloca [1 x double]
@@ -1444,7 +1528,7 @@ entry:
   store double* %t5, double** %t8
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 1, i64* %t9
-  %t10 = call double @source_span_from_tokens(double 0.0)
+  %t10 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t10, double* %l2
   %t11 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t11, %TypeParameterParseResult* %l3
@@ -1456,7 +1540,7 @@ entry:
   %t15 = load %ParameterListParseResult, %ParameterListParseResult* %l5
   %t16 = extractvalue %ParameterListParseResult %t15, 1
   store { i8**, i64 }* %t16, { i8**, i64 }** %l6
-  store double 0.0, double* %l7
+  store i8* null, i8** %l7
   %t17 = call double @parser_peek_raw(%Parser %parser)
   store double %t17, double* %l8
   %t18 = load double, double* %l8
@@ -1465,7 +1549,7 @@ entry:
   %t20 = load %EffectParseResult, %EffectParseResult* %l9
   %t21 = extractvalue %EffectParseResult %t20, 1
   store { i8**, i64 }* %t21, { i8**, i64 }** %l10
-  %t22 = call double @evaluate_decorators(double %decorators)
+  %t22 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t22, double* %l11
   %t23 = load { i8**, i64 }*, { i8**, i64 }** %l10
   %t24 = load double, double* %l11
@@ -1484,14 +1568,14 @@ entry:
   ret %StatementParseResult %t31
 }
 
-define %StatementParseResult @parse_tool(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_tool(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
   %l2 = alloca double
   %l3 = alloca %ParameterListParseResult
   %l4 = alloca { i8**, i64 }*
-  %l5 = alloca double
+  %l5 = alloca i8*
   %l6 = alloca double
   %l7 = alloca %EffectParseResult
   %l8 = alloca { i8**, i64 }*
@@ -1504,7 +1588,7 @@ entry:
   %t0 = call double @parser_peek_raw(%Parser %parser)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  %t2 = call i8* @identifier_text(double %t1)
+  %t2 = call i8* @identifier_text(i8* null)
   store i8* %t2, i8** %l1
   %t3 = load double, double* %l0
   %t4 = alloca [1 x double]
@@ -1516,14 +1600,14 @@ entry:
   store double* %t5, double** %t8
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 1, i64* %t9
-  %t10 = call double @source_span_from_tokens(double 0.0)
+  %t10 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t10, double* %l2
   %t11 = call %ParameterListParseResult @parse_parameter_list(%Parser %parser)
   store %ParameterListParseResult %t11, %ParameterListParseResult* %l3
   %t12 = load %ParameterListParseResult, %ParameterListParseResult* %l3
   %t13 = extractvalue %ParameterListParseResult %t12, 1
   store { i8**, i64 }* %t13, { i8**, i64 }** %l4
-  store double 0.0, double* %l5
+  store i8* null, i8** %l5
   %t14 = call double @parser_peek_raw(%Parser %parser)
   store double %t14, double* %l6
   %t15 = load double, double* %l6
@@ -1532,7 +1616,7 @@ entry:
   %t17 = load %EffectParseResult, %EffectParseResult* %l7
   %t18 = extractvalue %EffectParseResult %t17, 1
   store { i8**, i64 }* %t18, { i8**, i64 }** %l8
-  %t19 = call double @evaluate_decorators(double %decorators)
+  %t19 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t19, double* %l9
   %t20 = load { i8**, i64 }*, { i8**, i64 }** %l8
   %t21 = load double, double* %l9
@@ -1551,7 +1635,7 @@ entry:
   ret %StatementParseResult %t28
 }
 
-define %StatementParseResult @parse_test(%Parser %parser, double %decorators) {
+define %StatementParseResult @parse_test(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
@@ -1581,7 +1665,7 @@ entry:
   %t7 = load %EffectParseResult, %EffectParseResult* %l5
   %t8 = extractvalue %EffectParseResult %t7, 1
   store { i8**, i64 }* %t8, { i8**, i64 }** %l6
-  %t9 = call double @evaluate_decorators(double %decorators)
+  %t9 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t9, double* %l7
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l6
   %t11 = load double, double* %l7
@@ -1599,7 +1683,7 @@ entry:
   ret %StatementParseResult %t18
 }
 
-define %StatementParseResult @parse_function(%Parser %parser, i1 %starts_with_async, double %decorators) {
+define %StatementParseResult @parse_function(%Parser %parser, i1 %starts_with_async, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca i1
   %l1 = alloca double
@@ -1612,7 +1696,7 @@ entry:
   %l8 = alloca { i8**, i64 }*
   %l9 = alloca %ParameterListParseResult
   %l10 = alloca { i8**, i64 }*
-  %l11 = alloca double
+  %l11 = alloca i8*
   %l12 = alloca double
   %l13 = alloca %EffectParseResult
   %l14 = alloca { i8**, i64 }*
@@ -1633,7 +1717,7 @@ else1:
   store double %t1, double* %l1
   %t2 = load double, double* %l1
   %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.3, i32 0, i32 0
-  %t4 = call i1 @identifier_matches(double %t2, i8* %s3)
+  %t4 = call i1 @identifier_matches(i8* null, i8* %s3)
   %t5 = load i1, i1* %l0
   %t6 = load double, double* %l1
   br i1 %t4, label %then3, label %merge4
@@ -1646,7 +1730,7 @@ then3:
   store double %t10, double* %l3
   %t11 = load double, double* %l3
   %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.12, i32 0, i32 0
-  %t13 = call i1 @identifier_matches(double %t11, i8* %s12)
+  %t13 = call i1 @identifier_matches(i8* null, i8* %s12)
   %t14 = load i1, i1* %l0
   %t15 = load double, double* %l1
   %t16 = load %Parser, %Parser* %l2
@@ -1669,7 +1753,7 @@ merge2:
   %t21 = call double @parser_peek_raw(%Parser %parser)
   store double %t21, double* %l4
   %t22 = load double, double* %l4
-  %t23 = call i8* @identifier_text(double %t22)
+  %t23 = call i8* @identifier_text(i8* null)
   store i8* %t23, i8** %l5
   %t24 = load double, double* %l4
   %t25 = alloca [1 x double]
@@ -1681,7 +1765,7 @@ merge2:
   store double* %t26, double** %t29
   %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
   store i64 1, i64* %t30
-  %t31 = call double @source_span_from_tokens(double 0.0)
+  %t31 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t31, double* %l6
   %t32 = call %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser)
   store %TypeParameterParseResult %t32, %TypeParameterParseResult* %l7
@@ -1693,7 +1777,7 @@ merge2:
   %t36 = load %ParameterListParseResult, %ParameterListParseResult* %l9
   %t37 = extractvalue %ParameterListParseResult %t36, 1
   store { i8**, i64 }* %t37, { i8**, i64 }** %l10
-  store double 0.0, double* %l11
+  store i8* null, i8** %l11
   %t38 = call double @parser_peek_raw(%Parser %parser)
   store double %t38, double* %l12
   %t39 = load double, double* %l12
@@ -1702,7 +1786,7 @@ merge2:
   %t41 = load %EffectParseResult, %EffectParseResult* %l13
   %t42 = extractvalue %EffectParseResult %t41, 1
   store { i8**, i64 }* %t42, { i8**, i64 }** %l14
-  %t43 = call double @evaluate_decorators(double %decorators)
+  %t43 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t43, double* %l15
   %t44 = load { i8**, i64 }*, { i8**, i64 }** %l14
   %t45 = load double, double* %l15
@@ -1723,7 +1807,7 @@ merge2:
 
 define %ParameterListParseResult @parse_parameter_list(%Parser %parser) {
 entry:
-  %l0 = alloca { double*, i64 }*
+  %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
   %l2 = alloca %ParameterParseResult
   %l3 = alloca double
@@ -1734,25 +1818,25 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l0
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
   %t5 = call double @parser_peek_raw(%Parser %parser)
   store double %t5, double* %l1
   %t6 = load double, double* %l1
-  %t7 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t8 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t19 = phi { double*, i64 }* [ %t7, %entry ], [ %t18, %loop.latch2 ]
-  store { double*, i64 }* %t19, { double*, i64 }** %l0
+  %t19 = phi { i8**, i64 }* [ %t7, %entry ], [ %t18, %loop.latch2 ]
+  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
   br label %loop.body1
 loop.body1:
   %t9 = call %ParameterParseResult @parse_single_parameter(%Parser %parser)
   store %ParameterParseResult %t9, %ParameterParseResult* %l2
-  %t10 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t11 = load %ParameterParseResult, %ParameterParseResult* %l2
   %t12 = extractvalue %ParameterParseResult %t11, 1
-  %t13 = call double @append_parameter(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l0
+  %t13 = call { i8**, i64 }* @append_parameter({ i8**, i64 }* %t10, i8* %t12)
+  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
   %t14 = call double @parser_peek_raw(%Parser %parser)
   store double %t14, double* %l3
   %t15 = load double, double* %l3
@@ -1760,12 +1844,12 @@ loop.body1:
   %t17 = load double, double* %l3
   br label %loop.latch2
 loop.latch2:
-  %t18 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %loop.header0
 afterloop3:
   %t20 = insertvalue %ParameterListParseResult undef, i8* null, 0
-  %t21 = load { double*, i64 }*, { double*, i64 }** %l0
-  %t22 = insertvalue %ParameterListParseResult %t20, { i8**, i64 }* null, 1
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t22 = insertvalue %ParameterListParseResult %t20, { i8**, i64 }* %t21, 1
   ret %ParameterListParseResult %t22
 }
 
@@ -1793,7 +1877,7 @@ entry:
   store double %t3, double* %l3
   %t4 = load double, double* %l3
   %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.5, i32 0, i32 0
-  %t6 = call i1 @identifier_matches(double %t4, i8* %s5)
+  %t6 = call i1 @identifier_matches(i8* null, i8* %s5)
   %t7 = load %Parser, %Parser* %l0
   %t8 = load i1, i1* %l1
   %t9 = load double, double* %l2
@@ -1822,7 +1906,7 @@ merge1:
   store double %t20, double* %l3
   %t21 = load double, double* %l3
   %t22 = load double, double* %l3
-  %t23 = call i8* @identifier_text(double %t22)
+  %t23 = call i8* @identifier_text(i8* null)
   store i8* %t23, i8** %l4
   %t24 = load double, double* %l3
   %t25 = alloca [1 x double]
@@ -1834,7 +1918,7 @@ merge1:
   store double* %t26, double** %t29
   %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
   store i64 1, i64* %t30
-  %t31 = call double @source_span_from_tokens(double 0.0)
+  %t31 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t31, double* %l5
   %t32 = load %Parser, %Parser* %l0
   %t33 = call %Parser @parser_advance_raw(%Parser %t32)
@@ -1869,7 +1953,7 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l0
   %t53 = load %CaptureResult, %CaptureResult* %l8
   %t54 = extractvalue %CaptureResult %t53, 1
-  %t55 = call i8* @tokens_to_text(double 0.0)
+  %t55 = call i8* @tokens_to_text({ i8**, i64 }* %t54)
   %t56 = call i8* @trim_text(i8* %t55)
   store i8* %t56, i8** %l9
   %t57 = load i8*, i8** %l9
@@ -1909,7 +1993,7 @@ entry:
   store double %t2, double* %l1
   %t3 = load double, double* %l1
   %t4 = load double, double* %l1
-  %t5 = call i8* @identifier_text(double %t4)
+  %t5 = call i8* @identifier_text(i8* null)
   store i8* %t5, i8** %l2
   %t6 = load %Parser, %Parser* %l0
   %t7 = call %Parser @parser_advance_raw(%Parser %t6)
@@ -1943,7 +2027,7 @@ entry:
   store %Parser zeroinitializer, %Parser* %l0
   %t27 = load %CaptureResult, %CaptureResult* %l4
   %t28 = extractvalue %CaptureResult %t27, 1
-  %t29 = call double @expression_from_tokens(double 0.0)
+  %t29 = call double @expression_from_tokens({ i8**, i64 }* %t28)
   store double %t29, double* %l5
   %t30 = load %Parser, %Parser* %l0
   %t31 = call %Parser @skip_trivia(%Parser %t30)
@@ -1964,7 +2048,7 @@ entry:
   ret %ModelPropertyParseResult %t41
 }
 
-define %MethodParseResult @parse_struct_method(%Parser %parser, double %decorators) {
+define %MethodParseResult @parse_struct_method(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca i1
@@ -1977,7 +2061,7 @@ entry:
   %l8 = alloca { i8**, i64 }*
   %l9 = alloca %ParameterListParseResult
   %l10 = alloca { i8**, i64 }*
-  %l11 = alloca double
+  %l11 = alloca i8*
   %l12 = alloca double
   %l13 = alloca %EffectParseResult
   %l14 = alloca { i8**, i64 }*
@@ -1995,7 +2079,7 @@ entry:
   store double %t2, double* %l2
   %t3 = load double, double* %l2
   %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.4, i32 0, i32 0
-  %t5 = call i1 @identifier_matches(double %t3, i8* %s4)
+  %t5 = call i1 @identifier_matches(i8* null, i8* %s4)
   %t6 = load %Parser, %Parser* %l0
   %t7 = load i1, i1* %l1
   %t8 = load double, double* %l2
@@ -2008,7 +2092,7 @@ then0:
   %t12 = load %Parser, %Parser* %l3
   %t13 = call double @parser_peek_raw(%Parser %t12)
   %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.14, i32 0, i32 0
-  %t15 = call i1 @identifier_matches(double %t13, i8* %s14)
+  %t15 = call i1 @identifier_matches(i8* null, i8* %s14)
   %t16 = load %Parser, %Parser* %l0
   %t17 = load i1, i1* %l1
   %t18 = load double, double* %l2
@@ -2062,7 +2146,7 @@ merge5:
   store double %t46, double* %l4
   %t47 = load double, double* %l4
   %t48 = load double, double* %l4
-  %t49 = call i8* @identifier_text(double %t48)
+  %t49 = call i8* @identifier_text(i8* null)
   store i8* %t49, i8** %l5
   %t50 = load double, double* %l4
   %t51 = alloca [1 x double]
@@ -2074,7 +2158,7 @@ merge5:
   store double* %t52, double** %t55
   %t56 = getelementptr { double*, i64 }, { double*, i64 }* %t54, i32 0, i32 1
   store i64 1, i64* %t56
-  %t57 = call double @source_span_from_tokens(double 0.0)
+  %t57 = call double @source_span_from_tokens({ i8**, i64 }* null)
   store double %t57, double* %l6
   %t58 = load %Parser, %Parser* %l0
   %t59 = call %Parser @parser_advance_raw(%Parser %t58)
@@ -2107,7 +2191,7 @@ merge5:
   %t77 = load %Parser, %Parser* %l0
   %t78 = call %Parser @skip_trivia(%Parser %t77)
   store %Parser %t78, %Parser* %l0
-  store double 0.0, double* %l11
+  store i8* null, i8** %l11
   %t79 = load %Parser, %Parser* %l0
   %t80 = call double @parser_peek_raw(%Parser %t79)
   store double %t80, double* %l12
@@ -2121,7 +2205,7 @@ merge5:
   %t86 = load %EffectParseResult, %EffectParseResult* %l13
   %t87 = extractvalue %EffectParseResult %t86, 1
   store { i8**, i64 }* %t87, { i8**, i64 }** %l14
-  %t88 = call double @evaluate_decorators(double %decorators)
+  %t88 = call double @evaluate_decorators({ i8**, i64 }* %decorators)
   store double %t88, double* %l15
   %t89 = load { i8**, i64 }*, { i8**, i64 }** %l14
   %t90 = load double, double* %l15
@@ -2149,12 +2233,12 @@ merge5:
 define %DecoratorParseResult @parse_decorators(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca %Parser
   %l4 = alloca double
   %l5 = alloca i8*
-  %l6 = alloca { double*, i64 }*
+  %l6 = alloca { i8**, i64 }*
   %l7 = alloca double
   store %Parser %parser, %Parser* %l0
   %t0 = alloca [0 x double]
@@ -2164,15 +2248,15 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = load %Parser, %Parser* %l0
-  %t6 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header0
 loop.header0:
   %t37 = phi %Parser [ %t5, %entry ], [ %t35, %loop.latch2 ]
-  %t38 = phi { double*, i64 }* [ %t6, %entry ], [ %t36, %loop.latch2 ]
+  %t38 = phi { i8**, i64 }* [ %t6, %entry ], [ %t36, %loop.latch2 ]
   store %Parser %t37, %Parser* %l0
-  store { double*, i64 }* %t38, { double*, i64 }** %l1
+  store { i8**, i64 }* %t38, { i8**, i64 }** %l1
   br label %loop.body1
 loop.body1:
   %t7 = load %Parser, %Parser* %l0
@@ -2195,7 +2279,7 @@ loop.body1:
   store double %t18, double* %l4
   %t19 = load double, double* %l4
   %t20 = load double, double* %l4
-  %t21 = call i8* @identifier_text(double %t20)
+  %t21 = call i8* @identifier_text(i8* null)
   store i8* %t21, i8** %l5
   %t22 = load %Parser, %Parser* %l0
   %t23 = call %Parser @parser_advance_raw(%Parser %t22)
@@ -2210,22 +2294,22 @@ loop.body1:
   store double* %t27, double** %t29
   %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
   store i64 0, i64* %t30
-  store { double*, i64 }* %t28, { double*, i64 }** %l6
+  store { i8**, i64 }* null, { i8**, i64 }** %l6
   %t31 = load %Parser, %Parser* %l0
   %t32 = call double @parser_peek_raw(%Parser %t31)
   store double %t32, double* %l7
   %t33 = load double, double* %l7
-  %t34 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.latch2
 loop.latch2:
   %t35 = load %Parser, %Parser* %l0
-  %t36 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header0
 afterloop3:
   %t39 = load %Parser, %Parser* %l0
   %t40 = insertvalue %DecoratorParseResult undef, i8* null, 0
-  %t41 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t42 = insertvalue %DecoratorParseResult %t40, { i8**, i64 }* null, 1
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t42 = insertvalue %DecoratorParseResult %t40, { i8**, i64 }* %t41, 1
   ret %DecoratorParseResult %t42
 }
 
@@ -2233,13 +2317,13 @@ define %TypeParameterParseResult @parse_type_parameter_clause(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
-  %l6 = alloca { double*, i64 }*
+  %l5 = alloca { i8**, i64 }*
+  %l6 = alloca { i8**, i64 }*
   %l7 = alloca double
-  %l8 = alloca double
+  %l8 = alloca { i8**, i64 }*
   %t0 = call %Parser @skip_trivia(%Parser %parser)
   store %Parser %t0, %Parser* %l0
   %t1 = load %Parser, %Parser* %l0
@@ -2256,18 +2340,18 @@ entry:
   store double* %t7, double** %t9
   %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  store { double*, i64 }* %t8, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
   %t11 = sitofp i64 1 to double
   store double %t11, double* %l3
   %t12 = load %Parser, %Parser* %l0
   %t13 = load double, double* %l1
-  %t14 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t15 = load double, double* %l3
   br label %loop.header0
 loop.header0:
-  %t27 = phi { double*, i64 }* [ %t14, %entry ], [ %t25, %loop.latch2 ]
+  %t27 = phi { i8**, i64 }* [ %t14, %entry ], [ %t25, %loop.latch2 ]
   %t28 = phi %Parser [ %t12, %entry ], [ %t26, %loop.latch2 ]
-  store { double*, i64 }* %t27, { double*, i64 }** %l2
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l2
   store %Parser %t28, %Parser* %l0
   br label %loop.body1
 loop.body1:
@@ -2276,22 +2360,22 @@ loop.body1:
   store double %t17, double* %l4
   %t18 = load double, double* %l4
   %t19 = load double, double* %l4
-  %t20 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t21 = load double, double* %l4
-  %t22 = call double @append_token(double 0.0, double %t21)
-  store { double*, i64 }* null, { double*, i64 }** %l2
+  %t22 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t20, i8* null)
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l2
   %t23 = load %Parser, %Parser* %l0
   %t24 = call %Parser @parser_advance_raw(%Parser %t23)
   store %Parser %t24, %Parser* %l0
   br label %loop.latch2
 loop.latch2:
-  %t25 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t26 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
-  %t29 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t30 = call double @split_token_slices_by_comma(double 0.0)
-  store double %t30, double* %l5
+  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t30 = call { i8**, i64 }* @split_token_slices_by_comma({ i8**, i64 }* %t29)
+  store { i8**, i64 }* %t30, { i8**, i64 }** %l5
   %t31 = alloca [0 x double]
   %t32 = getelementptr [0 x double], [0 x double]* %t31, i32 0, i32 0
   %t33 = alloca { double*, i64 }
@@ -2299,42 +2383,50 @@ afterloop3:
   store double* %t32, double** %t34
   %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 1
   store i64 0, i64* %t35
-  store { double*, i64 }* %t33, { double*, i64 }** %l6
+  store { i8**, i64 }* null, { i8**, i64 }** %l6
   %t36 = sitofp i64 0 to double
   store double %t36, double* %l7
   %t37 = load %Parser, %Parser* %l0
   %t38 = load double, double* %l1
-  %t39 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t40 = load double, double* %l3
-  %t41 = load double, double* %l5
-  %t42 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l6
   %t43 = load double, double* %l7
   br label %loop.header4
 loop.header4:
   br label %loop.body5
 loop.body5:
   %t44 = load double, double* %l7
-  %t45 = load double, double* %l5
-  %t46 = load double, double* %l5
+  %t45 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l5
   %t47 = load double, double* %l7
-  store double 0.0, double* %l8
-  %t48 = load double, double* %l8
+  %t48 = load { i8**, i64 }, { i8**, i64 }* %t46
+  %t49 = extractvalue { i8**, i64 } %t48, 0
+  %t50 = extractvalue { i8**, i64 } %t48, 1
+  %t51 = icmp uge i64 %t47, %t50
+  ; bounds check: %t51 (if true, out of bounds)
+  %t52 = getelementptr i8*, i8** %t49, i64 %t47
+  %t53 = load i8*, i8** %t52
+  %t54 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* null)
+  store { i8**, i64 }* %t54, { i8**, i64 }** %l8
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l8
   br label %loop.latch6
 loop.latch6:
   br label %loop.header4
 afterloop7:
-  %t49 = load %Parser, %Parser* %l0
-  %t50 = insertvalue %TypeParameterParseResult undef, i8* null, 0
-  %t51 = load { double*, i64 }*, { double*, i64 }** %l6
-  %t52 = insertvalue %TypeParameterParseResult %t50, { i8**, i64 }* null, 1
-  ret %TypeParameterParseResult %t52
+  %t56 = load %Parser, %Parser* %l0
+  %t57 = insertvalue %TypeParameterParseResult undef, i8* null, 0
+  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t59 = insertvalue %TypeParameterParseResult %t57, { i8**, i64 }* %t58, 1
+  ret %TypeParameterParseResult %t59
 }
 
 define %ImplementsParseResult @parse_implements_clause(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %CaptureResult
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
   %l5 = alloca i8*
@@ -2390,16 +2482,16 @@ merge1:
   store double* %t32, double** %t34
   %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 1
   store i64 0, i64* %t35
-  store { double*, i64 }* %t33, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
   %t36 = load %CaptureResult, %CaptureResult* %l1
   %t37 = extractvalue %CaptureResult %t36, 1
-  %t38 = call { i8**, i64 }* @split_tokens_by_comma(double 0.0)
+  %t38 = call { i8**, i64 }* @split_tokens_by_comma({ i8**, i64 }* %t37)
   store { i8**, i64 }* %t38, { i8**, i64 }** %l3
   %t39 = sitofp i64 0 to double
   store double %t39, double* %l4
   %t40 = load %Parser, %Parser* %l0
   %t41 = load %CaptureResult, %CaptureResult* %l1
-  %t42 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t43 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t44 = load double, double* %l4
   br label %loop.header2
@@ -2426,8 +2518,8 @@ loop.latch4:
 afterloop5:
   %t57 = load %Parser, %Parser* %l0
   %t58 = insertvalue %ImplementsParseResult undef, i8* null, 0
-  %t59 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t60 = insertvalue %ImplementsParseResult %t58, { i8**, i64 }* null, 1
+  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t60 = insertvalue %ImplementsParseResult %t58, { i8**, i64 }* %t59, 1
   %t61 = insertvalue %ImplementsParseResult %t60, i1 1, 2
   ret %ImplementsParseResult %t61
 }
@@ -2440,12 +2532,12 @@ entry:
   %l3 = alloca double
   %l4 = alloca double
   %l5 = alloca i8*
-  %l6 = alloca double
+  %l6 = alloca i8*
   %l7 = alloca double
-  %l8 = alloca double
+  %l8 = alloca i8*
   %l9 = alloca double
   %l10 = alloca double
-  %l11 = alloca double
+  %l11 = alloca { i8**, i64 }*
   %l12 = alloca double
   %l13 = alloca double
   %t0 = extractvalue %Parser %parser, 0
@@ -2457,7 +2549,7 @@ entry:
   store double %t2, double* %l3
   %t3 = load double, double* %l3
   %s4 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.4, i32 0, i32 0
-  %t5 = call i1 @identifier_matches(double %t3, i8* %s4)
+  %t5 = call i1 @identifier_matches(i8* null, i8* %s4)
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t7 = load double, double* %l1
   %t8 = load i1, i1* %l2
@@ -2472,13 +2564,13 @@ merge1:
   %t11 = call double @parser_peek_raw(%Parser %parser)
   store double %t11, double* %l4
   %t12 = load double, double* %l4
-  %t13 = call i8* @identifier_text(double %t12)
+  %t13 = call i8* @identifier_text(i8* null)
   store i8* %t13, i8** %l5
-  store double 0.0, double* %l6
+  store i8* null, i8** %l6
   %t14 = call double @parser_peek_raw(%Parser %parser)
   store double %t14, double* %l7
   %t15 = load double, double* %l7
-  store double 0.0, double* %l8
+  store i8* null, i8** %l8
   %t16 = call double @parser_peek_raw(%Parser %parser)
   store double %t16, double* %l9
   %t17 = load double, double* %l9
@@ -2487,10 +2579,10 @@ merge1:
   %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t20 = load double, double* %l1
   %t21 = load double, double* %l10
-  %t22 = call double @token_slice(double 0.0, double %t20, double %t21)
-  store double %t22, double* %l11
-  %t23 = load double, double* %l11
-  %t24 = call double @source_span_from_tokens(double %t23)
+  %t22 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %t19, double %t20, double %t21)
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l11
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l11
+  %t24 = call double @source_span_from_tokens({ i8**, i64 }* %t23)
   store double %t24, double* %l12
   store double 0.0, double* %l13
   %t25 = insertvalue %ParameterParseResult undef, i8* null, 0
@@ -2541,13 +2633,13 @@ entry:
   %l1 = alloca double
   %l2 = alloca %Parser
   %l3 = alloca double
-  %l4 = alloca { double*, i64 }*
+  %l4 = alloca { i8**, i64 }*
   %l5 = alloca double
   %l6 = alloca %BlockStatementParseResult
   %l7 = alloca double
   %l8 = alloca %StatementParseResult
   %l9 = alloca double
-  %l10 = alloca double
+  %l10 = alloca { i8**, i64 }*
   %l11 = alloca i8*
   %l12 = alloca double
   %t0 = call double @parser_peek_raw(%Parser %parser)
@@ -2566,12 +2658,12 @@ entry:
   store double* %t6, double** %t8
   %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { double*, i64 }* %t7, { double*, i64 }** %l4
+  store { i8**, i64 }* null, { i8**, i64 }** %l4
   %t10 = load double, double* %l0
   %t11 = load double, double* %l1
   %t12 = load %Parser, %Parser* %l2
   %t13 = load double, double* %l3
-  %t14 = load { double*, i64 }*, { double*, i64 }** %l4
+  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l4
   br label %loop.header0
 loop.header0:
   %t61 = phi %Parser [ %t12, %entry ], [ %t60, %loop.latch2 ]
@@ -2595,7 +2687,7 @@ loop.body1:
   %t26 = load double, double* %l1
   %t27 = load %Parser, %Parser* %l2
   %t28 = load double, double* %l3
-  %t29 = load { double*, i64 }*, { double*, i64 }** %l4
+  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t30 = load double, double* %l5
   %t31 = load %BlockStatementParseResult, %BlockStatementParseResult* %l6
   br i1 %t24, label %then4, label %merge5
@@ -2626,7 +2718,7 @@ merge5:
   %t49 = load double, double* %l1
   %t50 = load %Parser, %Parser* %l2
   %t51 = load double, double* %l3
-  %t52 = load { double*, i64 }*, { double*, i64 }** %l4
+  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t53 = load double, double* %l5
   %t54 = load %BlockStatementParseResult, %BlockStatementParseResult* %l6
   %t55 = load double, double* %l7
@@ -2655,7 +2747,7 @@ afterloop3:
   %t68 = load double, double* %l1
   %t69 = load %Parser, %Parser* %l2
   %t70 = load double, double* %l3
-  %t71 = load { double*, i64 }*, { double*, i64 }** %l4
+  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t72 = load double, double* %l9
   br i1 %t66, label %then8, label %merge9
 then8:
@@ -2668,13 +2760,13 @@ merge9:
   %t75 = extractvalue %Parser %parser, 0
   %t76 = load double, double* %l1
   %t77 = load double, double* %l9
-  %t78 = call double @token_slice(double 0.0, double %t76, double %t77)
-  store double %t78, double* %l10
-  %t79 = load double, double* %l10
-  %t80 = call double @trim_block_tokens(double %t79)
-  store double %t80, double* %l10
-  %t81 = load double, double* %l10
-  %t82 = call i8* @tokens_to_text(double %t81)
+  %t78 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %t75, double %t76, double %t77)
+  store { i8**, i64 }* %t78, { i8**, i64 }** %l10
+  %t79 = load { i8**, i64 }*, { i8**, i64 }** %l10
+  %t80 = call { i8**, i64 }* @trim_block_tokens({ i8**, i64 }* %t79)
+  store { i8**, i64 }* %t80, { i8**, i64 }** %l10
+  %t81 = load { i8**, i64 }*, { i8**, i64 }** %l10
+  %t82 = call i8* @tokens_to_text({ i8**, i64 }* %t81)
   store i8* %t82, i8** %l11
   store double 0.0, double* %l12
   %t83 = load %Parser, %Parser* %l2
@@ -2711,7 +2803,7 @@ entry:
   store double %t8, double* %l5
   %t9 = load double, double* %l5
   %s10 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.10, i32 0, i32 0
-  %t11 = call i1 @identifier_matches(double %t9, i8* %s10)
+  %t11 = call i1 @identifier_matches(i8* null, i8* %s10)
   %t12 = load %Parser, %Parser* %l0
   %t13 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t14 = load i8*, i8** %l2
@@ -2722,12 +2814,12 @@ entry:
 then0:
   %t18 = load %Parser, %Parser* %l4
   %t19 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t20 = call %BlockStatementParseResult @parse_for_statement(%Parser %t18, double 0.0)
+  %t20 = call %BlockStatementParseResult @parse_for_statement(%Parser %t18, { i8**, i64 }* %t19)
   ret %BlockStatementParseResult %t20
 merge1:
   %t21 = load double, double* %l5
   %s22 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.22, i32 0, i32 0
-  %t23 = call i1 @identifier_matches(double %t21, i8* %s22)
+  %t23 = call i1 @identifier_matches(i8* null, i8* %s22)
   %t24 = load %Parser, %Parser* %l0
   %t25 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t26 = load i8*, i8** %l2
@@ -2738,12 +2830,12 @@ merge1:
 then2:
   %t30 = load %Parser, %Parser* %l4
   %t31 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t32 = call %BlockStatementParseResult @parse_loop_statement(%Parser %t30, double 0.0)
+  %t32 = call %BlockStatementParseResult @parse_loop_statement(%Parser %t30, { i8**, i64 }* %t31)
   ret %BlockStatementParseResult %t32
 merge3:
   %t33 = load double, double* %l5
   %s34 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.34, i32 0, i32 0
-  %t35 = call i1 @identifier_matches(double %t33, i8* %s34)
+  %t35 = call i1 @identifier_matches(i8* null, i8* %s34)
   %t36 = load %Parser, %Parser* %l0
   %t37 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t38 = load i8*, i8** %l2
@@ -2759,7 +2851,7 @@ then4:
 merge5:
   %t45 = load double, double* %l5
   %s46 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.46, i32 0, i32 0
-  %t47 = call i1 @identifier_matches(double %t45, i8* %s46)
+  %t47 = call i1 @identifier_matches(i8* null, i8* %s46)
   %t48 = load %Parser, %Parser* %l0
   %t49 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t50 = load i8*, i8** %l2
@@ -2775,7 +2867,7 @@ then6:
 merge7:
   %t57 = load double, double* %l5
   %s58 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.58, i32 0, i32 0
-  %t59 = call i1 @identifier_matches(double %t57, i8* %s58)
+  %t59 = call i1 @identifier_matches(i8* null, i8* %s58)
   %t60 = load %Parser, %Parser* %l0
   %t61 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t62 = load i8*, i8** %l2
@@ -2786,12 +2878,12 @@ merge7:
 then8:
   %t66 = load %Parser, %Parser* %l4
   %t67 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t68 = call %BlockStatementParseResult @parse_if_statement(%Parser %t66, double 0.0)
+  %t68 = call %BlockStatementParseResult @parse_if_statement(%Parser %t66, { i8**, i64 }* %t67)
   ret %BlockStatementParseResult %t68
 merge9:
   %t69 = load double, double* %l5
   %s70 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.70, i32 0, i32 0
-  %t71 = call i1 @identifier_matches(double %t69, i8* %s70)
+  %t71 = call i1 @identifier_matches(i8* null, i8* %s70)
   %t72 = load %Parser, %Parser* %l0
   %t73 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t74 = load i8*, i8** %l2
@@ -2802,12 +2894,12 @@ merge9:
 then10:
   %t78 = load %Parser, %Parser* %l4
   %t79 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t80 = call %BlockStatementParseResult @parse_match_statement(%Parser %t78, double 0.0)
+  %t80 = call %BlockStatementParseResult @parse_match_statement(%Parser %t78, { i8**, i64 }* %t79)
   ret %BlockStatementParseResult %t80
 merge11:
   %t81 = load double, double* %l5
   %s82 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.82, i32 0, i32 0
-  %t83 = call i1 @identifier_matches(double %t81, i8* %s82)
+  %t83 = call i1 @identifier_matches(i8* null, i8* %s82)
   %t84 = load %Parser, %Parser* %l0
   %t85 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t86 = load i8*, i8** %l2
@@ -2818,12 +2910,12 @@ merge11:
 then12:
   %t90 = load %Parser, %Parser* %l4
   %t91 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t92 = call %BlockStatementParseResult @parse_prompt_statement(%Parser %t90, double 0.0)
+  %t92 = call %BlockStatementParseResult @parse_prompt_statement(%Parser %t90, { i8**, i64 }* %t91)
   ret %BlockStatementParseResult %t92
 merge13:
   %t93 = load double, double* %l5
   %s94 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.94, i32 0, i32 0
-  %t95 = call i1 @identifier_matches(double %t93, i8* %s94)
+  %t95 = call i1 @identifier_matches(i8* null, i8* %s94)
   %t96 = load %Parser, %Parser* %l0
   %t97 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t98 = load i8*, i8** %l2
@@ -2834,12 +2926,12 @@ merge13:
 then14:
   %t102 = load %Parser, %Parser* %l4
   %t103 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t104 = call %BlockStatementParseResult @parse_with_statement(%Parser %t102, double 0.0)
+  %t104 = call %BlockStatementParseResult @parse_with_statement(%Parser %t102, { i8**, i64 }* %t103)
   ret %BlockStatementParseResult %t104
 merge15:
   %t105 = load double, double* %l5
   %s106 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.106, i32 0, i32 0
-  %t107 = call i1 @identifier_matches(double %t105, i8* %s106)
+  %t107 = call i1 @identifier_matches(i8* null, i8* %s106)
   %t108 = load %Parser, %Parser* %l0
   %t109 = load %DecoratorParseResult, %DecoratorParseResult* %l1
   %t110 = load i8*, i8** %l2
@@ -2855,7 +2947,7 @@ then16:
 merge17:
   %t117 = load %Parser, %Parser* %l4
   %t118 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t119 = call %BlockStatementParseResult @parse_expression_statement(%Parser %t117, double 0.0)
+  %t119 = call %BlockStatementParseResult @parse_expression_statement(%Parser %t117, { i8**, i64 }* %t118)
   store %BlockStatementParseResult %t119, %BlockStatementParseResult* %l6
   %t120 = load %BlockStatementParseResult, %BlockStatementParseResult* %l6
   %t121 = extractvalue %BlockStatementParseResult %t120, 2
@@ -2878,14 +2970,14 @@ merge19:
   ret %BlockStatementParseResult %t133
 }
 
-define %BlockStatementParseResult @parse_for_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_for_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
   %l2 = alloca %CaptureResult
-  %l3 = alloca double
+  %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca { i8**, i64 }*
   %l6 = alloca double
   %l7 = alloca double
   %l8 = alloca double
@@ -2935,12 +3027,12 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l1
   %t27 = load %CaptureResult, %CaptureResult* %l2
   %t28 = extractvalue %CaptureResult %t27, 1
-  %t29 = call double @trim_token_edges(double 0.0)
-  store double %t29, double* %l3
-  %t30 = load double, double* %l3
-  %t31 = load double, double* %l3
+  %t29 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t28)
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l3
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %s32 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.32, i32 0, i32 0
-  %t33 = call double @find_top_level_identifier(double %t31, i8* %s32)
+  %t33 = call double @find_top_level_identifier({ i8**, i64 }* %t31, i8* %s32)
   store double %t33, double* %l4
   %t34 = load double, double* %l4
   %t35 = sitofp i64 -1 to double
@@ -2948,7 +3040,7 @@ merge1:
   %t37 = load %Parser, %Parser* %l0
   %t38 = load %Parser, %Parser* %l1
   %t39 = load %CaptureResult, %CaptureResult* %l2
-  %t40 = load double, double* %l3
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t41 = load double, double* %l4
   br i1 %t36, label %then2, label %merge3
 then2:
@@ -2958,24 +3050,24 @@ then2:
   %t45 = insertvalue %BlockStatementParseResult %t44, i1 0, 2
   ret %BlockStatementParseResult %t45
 merge3:
-  %t46 = load double, double* %l3
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t47 = load double, double* %l4
   %t48 = sitofp i64 0 to double
-  %t49 = call double @token_slice(double %t46, double %t48, double %t47)
-  %t50 = call double @trim_token_edges(double %t49)
-  store double %t50, double* %l5
-  %t51 = load double, double* %l3
+  %t49 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %t46, double %t48, double %t47)
+  %t50 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t49)
+  store { i8**, i64 }* %t50, { i8**, i64 }** %l5
+  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t52 = load double, double* %l4
   %t53 = sitofp i64 1 to double
   %t54 = fadd double %t52, %t53
-  %t55 = load double, double* %l3
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l3
   store double 0.0, double* %l6
-  %t56 = load double, double* %l5
-  %t57 = load double, double* %l5
-  %t58 = call double @expression_from_tokens(double %t57)
+  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t58 = call double @expression_from_tokens({ i8**, i64 }* %t57)
   store double %t58, double* %l7
   %t59 = load double, double* %l6
-  %t60 = call double @expression_from_tokens(double %t59)
+  %t60 = call double @expression_from_tokens({ i8**, i64 }* null)
   store double %t60, double* %l8
   store double 0.0, double* %l9
   %t61 = load %Parser, %Parser* %l1
@@ -3005,7 +3097,7 @@ merge3:
   ret %BlockStatementParseResult %t78
 }
 
-define %BlockStatementParseResult @parse_loop_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_loop_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
@@ -3142,16 +3234,16 @@ merge1:
   ret %BlockStatementParseResult %t24
 }
 
-define %BlockStatementParseResult @parse_if_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_if_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
   %l2 = alloca %CaptureResult
-  %l3 = alloca double
+  %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
   %l5 = alloca %BlockParseResult
   %l6 = alloca i8*
-  %l7 = alloca double
+  %l7 = alloca i8*
   %l8 = alloca double
   %l9 = alloca %BlockStatementParseResult
   %l10 = alloca %BlockParseResult
@@ -3198,11 +3290,11 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l1
   %t27 = load %CaptureResult, %CaptureResult* %l2
   %t28 = extractvalue %CaptureResult %t27, 1
-  %t29 = call double @trim_token_edges(double 0.0)
-  store double %t29, double* %l3
-  %t30 = load double, double* %l3
-  %t31 = load double, double* %l3
-  %t32 = call double @expression_from_tokens(double %t31)
+  %t29 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t28)
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l3
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t32 = call double @expression_from_tokens({ i8**, i64 }* %t31)
   store double %t32, double* %l4
   %t33 = load %Parser, %Parser* %l1
   %t34 = call %BlockParseResult @parse_block(%Parser %t33)
@@ -3218,19 +3310,19 @@ merge1:
   %t41 = load %Parser, %Parser* %l1
   %t42 = call %Parser @skip_trivia(%Parser %t41)
   store %Parser %t42, %Parser* %l1
-  store double 0.0, double* %l7
+  store i8* null, i8** %l7
   %t43 = load %Parser, %Parser* %l1
   %t44 = call double @parser_peek_raw(%Parser %t43)
   %s45 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.45, i32 0, i32 0
-  %t46 = call i1 @identifier_matches(double %t44, i8* %s45)
+  %t46 = call i1 @identifier_matches(i8* null, i8* %s45)
   %t47 = load %Parser, %Parser* %l0
   %t48 = load %Parser, %Parser* %l1
   %t49 = load %CaptureResult, %CaptureResult* %l2
-  %t50 = load double, double* %l3
+  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t51 = load double, double* %l4
   %t52 = load %BlockParseResult, %BlockParseResult* %l5
   %t53 = load i8*, i8** %l6
-  %t54 = load double, double* %l7
+  %t54 = load i8*, i8** %l7
   br i1 %t46, label %then2, label %merge3
 then2:
   %t55 = load %Parser, %Parser* %l1
@@ -3245,15 +3337,15 @@ then2:
   store double %t61, double* %l8
   %t62 = load double, double* %l8
   %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.63, i32 0, i32 0
-  %t64 = call i1 @identifier_matches(double %t62, i8* %s63)
+  %t64 = call i1 @identifier_matches(i8* null, i8* %s63)
   %t65 = load %Parser, %Parser* %l0
   %t66 = load %Parser, %Parser* %l1
   %t67 = load %CaptureResult, %CaptureResult* %l2
-  %t68 = load double, double* %l3
+  %t68 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t69 = load double, double* %l4
   %t70 = load %BlockParseResult, %BlockParseResult* %l5
   %t71 = load i8*, i8** %l6
-  %t72 = load double, double* %l7
+  %t72 = load i8*, i8** %l7
   %t73 = load double, double* %l8
   br i1 %t64, label %then4, label %else5
 then4:
@@ -3265,7 +3357,7 @@ then4:
   store double* %t76, double** %t78
   %t79 = getelementptr { double*, i64 }, { double*, i64 }* %t77, i32 0, i32 1
   store i64 0, i64* %t79
-  %t80 = call %BlockStatementParseResult @parse_if_statement(%Parser %t74, double 0.0)
+  %t80 = call %BlockStatementParseResult @parse_if_statement(%Parser %t74, { i8**, i64 }* null)
   store %BlockStatementParseResult %t80, %BlockStatementParseResult* %l9
   %t81 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
   %t82 = extractvalue %BlockStatementParseResult %t81, 1
@@ -3285,9 +3377,9 @@ else5:
   br label %merge6
 merge6:
   %t91 = phi %Parser [ zeroinitializer, %then4 ], [ zeroinitializer, %else5 ]
-  %t92 = phi double [ 0.0, %then4 ], [ 0.0, %else5 ]
+  %t92 = phi i8* [ null, %then4 ], [ null, %else5 ]
   store %Parser %t91, %Parser* %l1
-  store double %t92, double* %l7
+  store i8* %t92, i8** %l7
   %t93 = load %Parser, %Parser* %l1
   %t94 = call %Parser @skip_trivia(%Parser %t93)
   store %Parser %t94, %Parser* %l1
@@ -3300,16 +3392,16 @@ merge3:
   %t98 = phi %Parser [ %t57, %then2 ], [ %t48, %entry ]
   %t99 = phi %Parser [ %t59, %then2 ], [ %t48, %entry ]
   %t100 = phi %Parser [ zeroinitializer, %then2 ], [ %t48, %entry ]
-  %t101 = phi double [ 0.0, %then2 ], [ %t54, %entry ]
+  %t101 = phi i8* [ null, %then2 ], [ %t54, %entry ]
   %t102 = phi %Parser [ zeroinitializer, %then2 ], [ %t48, %entry ]
-  %t103 = phi double [ 0.0, %then2 ], [ %t54, %entry ]
+  %t103 = phi i8* [ null, %then2 ], [ %t54, %entry ]
   %t104 = phi %Parser [ %t94, %then2 ], [ %t48, %entry ]
   store %Parser %t98, %Parser* %l1
   store %Parser %t99, %Parser* %l1
   store %Parser %t100, %Parser* %l1
-  store double %t101, double* %l7
+  store i8* %t101, i8** %l7
   store %Parser %t102, %Parser* %l1
-  store double %t103, double* %l7
+  store i8* %t103, i8** %l7
   store %Parser %t104, %Parser* %l1
   store double 0.0, double* %l12
   %t105 = load %Parser, %Parser* %l1
@@ -3320,12 +3412,12 @@ merge3:
   ret %BlockStatementParseResult %t109
 }
 
-define %BlockStatementParseResult @parse_match_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_match_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
   %l2 = alloca %CaptureResult
-  %l3 = alloca double
+  %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
   %l5 = alloca %MatchCasesParseResult
   %l6 = alloca double
@@ -3370,11 +3462,11 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l1
   %t27 = load %CaptureResult, %CaptureResult* %l2
   %t28 = extractvalue %CaptureResult %t27, 1
-  %t29 = call double @trim_token_edges(double 0.0)
-  store double %t29, double* %l3
-  %t30 = load double, double* %l3
-  %t31 = load double, double* %l3
-  %t32 = call double @expression_from_tokens(double %t31)
+  %t29 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t28)
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l3
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t32 = call double @expression_from_tokens({ i8**, i64 }* %t31)
   store double %t32, double* %l4
   %t33 = load %Parser, %Parser* %l1
   %t34 = call %MatchCasesParseResult @parse_match_cases(%Parser %t33)
@@ -3402,7 +3494,7 @@ define %MatchCasesParseResult @parse_match_cases(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
   %l4 = alloca %MatchCaseParseResult
   %l5 = alloca double
@@ -3426,16 +3518,16 @@ entry:
   store double* %t10, double** %t12
   %t13 = getelementptr { double*, i64 }, { double*, i64 }* %t11, i32 0, i32 1
   store i64 0, i64* %t13
-  store { double*, i64 }* %t11, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
   %t14 = load %Parser, %Parser* %l0
   %t15 = load double, double* %l1
-  %t16 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l2
   br label %loop.header0
 loop.header0:
   %t38 = phi %Parser [ %t14, %entry ], [ %t36, %loop.latch2 ]
-  %t39 = phi { double*, i64 }* [ %t16, %entry ], [ %t37, %loop.latch2 ]
+  %t39 = phi { i8**, i64 }* [ %t16, %entry ], [ %t37, %loop.latch2 ]
   store %Parser %t38, %Parser* %l0
-  store { double*, i64 }* %t39, { double*, i64 }** %l2
+  store { i8**, i64 }* %t39, { i8**, i64 }** %l2
   br label %loop.body1
 loop.body1:
   %t17 = load %Parser, %Parser* %l0
@@ -3452,11 +3544,11 @@ loop.body1:
   %t25 = load %MatchCaseParseResult, %MatchCaseParseResult* %l4
   %t26 = extractvalue %MatchCaseParseResult %t25, 0
   store %Parser zeroinitializer, %Parser* %l0
-  %t27 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t28 = load %MatchCaseParseResult, %MatchCaseParseResult* %l4
   %t29 = extractvalue %MatchCaseParseResult %t28, 1
-  %t30 = call double @append_match_case(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l2
+  %t30 = call { i8**, i64 }* @append_match_case({ i8**, i64 }* %t27, i8* %t29)
+  store { i8**, i64 }* %t30, { i8**, i64 }** %l2
   %t31 = load %Parser, %Parser* %l0
   %t32 = call %Parser @skip_trivia(%Parser %t31)
   store %Parser %t32, %Parser* %l0
@@ -3467,13 +3559,13 @@ loop.body1:
   br label %loop.latch2
 loop.latch2:
   %t36 = load %Parser, %Parser* %l0
-  %t37 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l2
   br label %loop.header0
 afterloop3:
   %t40 = load %Parser, %Parser* %l0
   %t41 = insertvalue %MatchCasesParseResult undef, i8* null, 0
-  %t42 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t43 = insertvalue %MatchCasesParseResult %t41, { i8**, i64 }* null, 1
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t43 = insertvalue %MatchCasesParseResult %t41, { i8**, i64 }* %t42, 1
   %t44 = insertvalue %MatchCasesParseResult %t43, i1 1, 2
   ret %MatchCasesParseResult %t44
 }
@@ -3485,9 +3577,9 @@ entry:
   %l2 = alloca %PatternCaptureResult
   %l3 = alloca %MatchCaseTokenSplit
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %l6 = alloca double
-  %l7 = alloca double
+  %l7 = alloca i8*
   %l8 = alloca double
   store %Parser %parser, %Parser* %l0
   %t0 = call %Parser @skip_trivia(%Parser %parser)
@@ -3495,7 +3587,7 @@ entry:
   %t1 = load %Parser, %Parser* %l1
   %t2 = call double @parser_peek_raw(%Parser %t1)
   %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
-  %t4 = call i1 @identifier_matches(double %t2, i8* %s3)
+  %t4 = call i1 @identifier_matches(i8* null, i8* %s3)
   %t5 = load %Parser, %Parser* %l0
   %t6 = load %Parser, %Parser* %l1
   br i1 %t4, label %then0, label %merge1
@@ -3521,15 +3613,15 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l1
   %t18 = load %PatternCaptureResult, %PatternCaptureResult* %l2
   %t19 = extractvalue %PatternCaptureResult %t18, 1
-  %t20 = call %MatchCaseTokenSplit @split_match_case_tokens(double 0.0)
+  %t20 = call %MatchCaseTokenSplit @split_match_case_tokens({ i8**, i64 }* %t19)
   store %MatchCaseTokenSplit %t20, %MatchCaseTokenSplit* %l3
   %t21 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t22 = extractvalue %MatchCaseTokenSplit %t21, 0
   %t23 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t24 = extractvalue %MatchCaseTokenSplit %t23, 0
-  %t25 = call double @expression_from_tokens(double 0.0)
+  %t25 = call double @expression_from_tokens({ i8**, i64 }* %t24)
   store double %t25, double* %l4
-  store double 0.0, double* %l5
+  store i8* null, i8** %l5
   %t26 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t27 = extractvalue %MatchCaseTokenSplit %t26, 2
   %t28 = load %Parser, %Parser* %l0
@@ -3537,28 +3629,28 @@ merge1:
   %t30 = load %PatternCaptureResult, %PatternCaptureResult* %l2
   %t31 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t32 = load double, double* %l4
-  %t33 = load double, double* %l5
+  %t33 = load i8*, i8** %l5
   br i1 %t27, label %then2, label %merge3
 then2:
   %t34 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t35 = extractvalue %MatchCaseTokenSplit %t34, 1
   %t36 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
   %t37 = extractvalue %MatchCaseTokenSplit %t36, 1
-  %t38 = call double @expression_from_tokens(double 0.0)
-  store double %t38, double* %l5
+  %t38 = call double @expression_from_tokens({ i8**, i64 }* %t37)
+  store i8* null, i8** %l5
   br label %merge3
 merge3:
-  %t39 = phi double [ %t38, %then2 ], [ %t33, %entry ]
-  store double %t39, double* %l5
+  %t39 = phi i8* [ null, %then2 ], [ %t33, %entry ]
+  store i8* %t39, i8** %l5
   %t40 = load %Parser, %Parser* %l1
   %t41 = call %Parser @skip_trivia(%Parser %t40)
   store %Parser %t41, %Parser* %l1
   %t42 = load %Parser, %Parser* %l1
   %t43 = call double @parser_peek_raw(%Parser %t42)
   store double %t43, double* %l6
-  store double 0.0, double* %l7
+  store i8* null, i8** %l7
   %t44 = load double, double* %l6
-  %t45 = load double, double* %l7
+  %t45 = load i8*, i8** %l7
   store double 0.0, double* %l8
   %t46 = load %Parser, %Parser* %l1
   %t47 = insertvalue %MatchCaseParseResult undef, i8* null, 0
@@ -3568,7 +3660,7 @@ merge3:
   ret %MatchCaseParseResult %t50
 }
 
-define %BlockStatementParseResult @parse_prompt_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_prompt_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
@@ -3637,15 +3729,15 @@ merge1:
   ret %BlockStatementParseResult %t39
 }
 
-define %BlockStatementParseResult @parse_with_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_with_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
   %l2 = alloca %CaptureResult
-  %l3 = alloca double
-  %l4 = alloca { double*, i64 }*
+  %l3 = alloca { i8**, i64 }*
+  %l4 = alloca { i8**, i64 }*
   %l5 = alloca double
-  %l6 = alloca double
+  %l6 = alloca { i8**, i64 }*
   %l7 = alloca %BlockParseResult
   %l8 = alloca i8*
   %l9 = alloca double
@@ -3690,8 +3782,8 @@ merge1:
   store %Parser zeroinitializer, %Parser* %l1
   %t27 = load %CaptureResult, %CaptureResult* %l2
   %t28 = extractvalue %CaptureResult %t27, 1
-  %t29 = call double @split_token_slices_by_comma(double 0.0)
-  store double %t29, double* %l3
+  %t29 = call { i8**, i64 }* @split_token_slices_by_comma({ i8**, i64 }* %t28)
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l3
   %t30 = alloca [0 x double]
   %t31 = getelementptr [0 x double], [0 x double]* %t30, i32 0, i32 0
   %t32 = alloca { double*, i64 }
@@ -3699,62 +3791,70 @@ merge1:
   store double* %t31, double** %t33
   %t34 = getelementptr { double*, i64 }, { double*, i64 }* %t32, i32 0, i32 1
   store i64 0, i64* %t34
-  store { double*, i64 }* %t32, { double*, i64 }** %l4
+  store { i8**, i64 }* null, { i8**, i64 }** %l4
   %t35 = sitofp i64 0 to double
   store double %t35, double* %l5
   %t36 = load %Parser, %Parser* %l0
   %t37 = load %Parser, %Parser* %l1
   %t38 = load %CaptureResult, %CaptureResult* %l2
-  %t39 = load double, double* %l3
-  %t40 = load { double*, i64 }*, { double*, i64 }** %l4
+  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l4
   %t41 = load double, double* %l5
   br label %loop.header2
 loop.header2:
   br label %loop.body3
 loop.body3:
   %t42 = load double, double* %l5
-  %t43 = load double, double* %l3
-  %t44 = load double, double* %l3
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t45 = load double, double* %l5
-  store double 0.0, double* %l6
-  %t46 = load double, double* %l6
+  %t46 = load { i8**, i64 }, { i8**, i64 }* %t44
+  %t47 = extractvalue { i8**, i64 } %t46, 0
+  %t48 = extractvalue { i8**, i64 } %t46, 1
+  %t49 = icmp uge i64 %t45, %t48
+  ; bounds check: %t49 (if true, out of bounds)
+  %t50 = getelementptr i8*, i8** %t47, i64 %t45
+  %t51 = load i8*, i8** %t50
+  %t52 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* null)
+  store { i8**, i64 }* %t52, { i8**, i64 }** %l6
+  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l6
   br label %loop.latch4
 loop.latch4:
   br label %loop.header2
 afterloop5:
-  %t47 = load %Parser, %Parser* %l1
-  %t48 = call %BlockParseResult @parse_block(%Parser %t47)
-  store %BlockParseResult %t48, %BlockParseResult* %l7
-  %t49 = load %BlockParseResult, %BlockParseResult* %l7
-  %t50 = extractvalue %BlockParseResult %t49, 1
-  %t51 = load %BlockParseResult, %BlockParseResult* %l7
-  %t52 = extractvalue %BlockParseResult %t51, 0
+  %t54 = load %Parser, %Parser* %l1
+  %t55 = call %BlockParseResult @parse_block(%Parser %t54)
+  store %BlockParseResult %t55, %BlockParseResult* %l7
+  %t56 = load %BlockParseResult, %BlockParseResult* %l7
+  %t57 = extractvalue %BlockParseResult %t56, 1
+  %t58 = load %BlockParseResult, %BlockParseResult* %l7
+  %t59 = extractvalue %BlockParseResult %t58, 0
   store %Parser zeroinitializer, %Parser* %l1
-  %t53 = load %BlockParseResult, %BlockParseResult* %l7
-  %t54 = extractvalue %BlockParseResult %t53, 1
-  store i8* %t54, i8** %l8
-  %t55 = load %Parser, %Parser* %l1
-  %t56 = call %Parser @skip_trivia(%Parser %t55)
-  store %Parser %t56, %Parser* %l1
-  %t57 = load %Parser, %Parser* %l1
-  %t58 = call double @parser_peek_raw(%Parser %t57)
+  %t60 = load %BlockParseResult, %BlockParseResult* %l7
+  %t61 = extractvalue %BlockParseResult %t60, 1
+  store i8* %t61, i8** %l8
+  %t62 = load %Parser, %Parser* %l1
+  %t63 = call %Parser @skip_trivia(%Parser %t62)
+  store %Parser %t63, %Parser* %l1
+  %t64 = load %Parser, %Parser* %l1
+  %t65 = call double @parser_peek_raw(%Parser %t64)
   store double 0.0, double* %l9
-  %t59 = load %Parser, %Parser* %l1
-  %t60 = insertvalue %BlockStatementParseResult undef, i8* null, 0
-  %t61 = load double, double* %l9
-  %t62 = insertvalue %BlockStatementParseResult %t60, i8* null, 1
-  %t63 = insertvalue %BlockStatementParseResult %t62, i1 1, 2
-  ret %BlockStatementParseResult %t63
+  %t66 = load %Parser, %Parser* %l1
+  %t67 = insertvalue %BlockStatementParseResult undef, i8* null, 0
+  %t68 = load double, double* %l9
+  %t69 = insertvalue %BlockStatementParseResult %t67, i8* null, 1
+  %t70 = insertvalue %BlockStatementParseResult %t69, i1 1, 2
+  ret %BlockStatementParseResult %t70
 }
 
 define %BlockStatementParseResult @parse_return_statement(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca %Parser
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %l6 = alloca double
   %l7 = alloca double
   %l8 = alloca double
@@ -3784,12 +3884,12 @@ merge1:
   store double* %t13, double** %t15
   %t16 = getelementptr { double*, i64 }, { double*, i64 }* %t14, i32 0, i32 1
   store i64 0, i64* %t16
-  store { double*, i64 }* %t14, { double*, i64 }** %l2
-  %t17 = load { double*, i64 }*, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t18 = load %Parser, %Parser* %l1
   %t19 = call double @parser_peek_raw(%Parser %t18)
-  %t20 = call double @append_token(double 0.0, double %t19)
-  store { double*, i64 }* null, { double*, i64 }** %l2
+  %t20 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t17, i8* null)
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l2
   %t21 = load %Parser, %Parser* %l1
   %s22 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.22, i32 0, i32 0
   %t23 = call %Parser @consume_keyword(%Parser %t21, i8* %s22)
@@ -3800,30 +3900,30 @@ merge1:
   %t26 = load double, double* %l3
   %t27 = load double, double* %l3
   store double 0.0, double* %l4
-  store double 0.0, double* %l5
+  store i8* null, i8** %l5
   %t28 = load double, double* %l4
   %t29 = sitofp i64 0 to double
   store double %t29, double* %l6
   %t30 = load %Parser, %Parser* %l0
   %t31 = load %Parser, %Parser* %l1
-  %t32 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t32 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t33 = load double, double* %l3
   %t34 = load double, double* %l4
-  %t35 = load double, double* %l5
+  %t35 = load i8*, i8** %l5
   %t36 = load double, double* %l6
   br label %loop.header2
 loop.header2:
-  %t42 = phi { double*, i64 }* [ %t32, %entry ], [ %t41, %loop.latch4 ]
-  store { double*, i64 }* %t42, { double*, i64 }** %l2
+  %t42 = phi { i8**, i64 }* [ %t32, %entry ], [ %t41, %loop.latch4 ]
+  store { i8**, i64 }* %t42, { i8**, i64 }** %l2
   br label %loop.body3
 loop.body3:
   %t37 = load double, double* %l6
   %t38 = load double, double* %l3
-  %t39 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t40 = load double, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t41 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l2
   br label %loop.header2
 afterloop5:
   %t43 = load %Parser, %Parser* %l1
@@ -3833,8 +3933,8 @@ afterloop5:
   %t46 = call double @parser_peek_raw(%Parser %t45)
   store double %t46, double* %l7
   %t47 = load double, double* %l7
-  %t48 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t49 = call double @source_span_from_tokens(double 0.0)
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t49 = call double @source_span_from_tokens({ i8**, i64 }* %t48)
   store double %t49, double* %l8
   store double 0.0, double* %l9
   %t50 = load %Parser, %Parser* %l1
@@ -3845,14 +3945,14 @@ afterloop5:
   ret %BlockStatementParseResult %t54
 }
 
-define %BlockStatementParseResult @parse_expression_statement(%Parser %parser, double %decorators) {
+define %BlockStatementParseResult @parse_expression_statement(%Parser %parser, { i8**, i64 }* %decorators) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
   %l2 = alloca %CaptureResult
-  %l3 = alloca { double*, i64 }*
+  %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca { i8**, i64 }*
   %l6 = alloca double
   %l7 = alloca double
   %l8 = alloca double
@@ -3886,24 +3986,24 @@ entry:
   store double* %t17, double** %t19
   %t20 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 1
   store i64 0, i64* %t20
-  store { double*, i64 }* %t18, { double*, i64 }** %l3
+  store { i8**, i64 }* null, { i8**, i64 }** %l3
   %t21 = sitofp i64 0 to double
   store double %t21, double* %l4
   %t22 = load %Parser, %Parser* %l0
   %t23 = load double, double* %l1
   %t24 = load %CaptureResult, %CaptureResult* %l2
-  %t25 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t26 = load double, double* %l4
   br label %loop.header0
 loop.header0:
-  %t42 = phi { double*, i64 }* [ %t25, %entry ], [ %t41, %loop.latch2 ]
-  store { double*, i64 }* %t42, { double*, i64 }** %l3
+  %t42 = phi { i8**, i64 }* [ %t25, %entry ], [ %t41, %loop.latch2 ]
+  store { i8**, i64 }* %t42, { i8**, i64 }** %l3
   br label %loop.body1
 loop.body1:
   %t27 = load double, double* %l4
   %t28 = load %CaptureResult, %CaptureResult* %l2
   %t29 = extractvalue %CaptureResult %t28, 1
-  %t30 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t31 = load %CaptureResult, %CaptureResult* %l2
   %t32 = extractvalue %CaptureResult %t31, 1
   %t33 = load double, double* %l4
@@ -3914,18 +4014,18 @@ loop.body1:
   ; bounds check: %t37 (if true, out of bounds)
   %t38 = getelementptr i8*, i8** %t35, i64 %t33
   %t39 = load i8*, i8** %t38
-  %t40 = call double @append_token(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l3
+  %t40 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t30, i8* %t39)
+  store { i8**, i64 }* %t40, { i8**, i64 }** %l3
   br label %loop.latch2
 loop.latch2:
-  %t41 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l3
   br label %loop.header0
 afterloop3:
   %t43 = load %CaptureResult, %CaptureResult* %l2
   %t44 = extractvalue %CaptureResult %t43, 1
-  %t45 = call double @trim_token_edges(double 0.0)
-  store double %t45, double* %l5
-  %t46 = load double, double* %l5
+  %t45 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t44)
+  store { i8**, i64 }* %t45, { i8**, i64 }** %l5
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l5
   %t47 = load %CaptureResult, %CaptureResult* %l2
   %t48 = extractvalue %CaptureResult %t47, 0
   store %Parser zeroinitializer, %Parser* %l0
@@ -3936,18 +4036,18 @@ afterloop3:
   %t52 = call double @parser_peek_raw(%Parser %t51)
   store double %t52, double* %l6
   %t53 = load double, double* %l6
-  %t54 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t55 = load double, double* %l6
-  %t56 = call double @append_token(double 0.0, double %t55)
-  store { double*, i64 }* null, { double*, i64 }** %l3
+  %t56 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t54, i8* null)
+  store { i8**, i64 }* %t56, { i8**, i64 }** %l3
   %t57 = load %Parser, %Parser* %l0
   %t58 = call %Parser @parser_advance_raw(%Parser %t57)
   store %Parser %t58, %Parser* %l0
-  %t59 = load double, double* %l5
-  %t60 = call double @expression_from_tokens(double %t59)
+  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t60 = call double @expression_from_tokens({ i8**, i64 }* %t59)
   store double %t60, double* %l7
-  %t61 = load { double*, i64 }*, { double*, i64 }** %l3
-  %t62 = call double @source_span_from_tokens(double 0.0)
+  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t62 = call double @source_span_from_tokens({ i8**, i64 }* %t61)
   store double %t62, double* %l8
   store double 0.0, double* %l9
   %t63 = load %Parser, %Parser* %l0
@@ -3960,7 +4060,7 @@ afterloop3:
 
 define %StatementParseResult @parse_unknown(%Parser %parser) {
 entry:
-  %l0 = alloca { double*, i64 }*
+  %l0 = alloca { i8**, i64 }*
   %l1 = alloca %Parser
   %l2 = alloca double
   %l3 = alloca double
@@ -3973,28 +4073,28 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l0
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
   store %Parser %parser, %Parser* %l1
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l2
-  %t6 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t7 = load %Parser, %Parser* %l1
   %t8 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t20 = phi { double*, i64 }* [ %t6, %entry ], [ %t18, %loop.latch2 ]
+  %t20 = phi { i8**, i64 }* [ %t6, %entry ], [ %t18, %loop.latch2 ]
   %t21 = phi %Parser [ %t7, %entry ], [ %t19, %loop.latch2 ]
-  store { double*, i64 }* %t20, { double*, i64 }** %l0
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l0
   store %Parser %t21, %Parser* %l1
   br label %loop.body1
 loop.body1:
   %t9 = load %Parser, %Parser* %l1
   %t10 = call double @parser_peek_raw(%Parser %t9)
   store double %t10, double* %l3
-  %t11 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t12 = load double, double* %l3
-  %t13 = call double @append_token(double 0.0, double %t12)
-  store { double*, i64 }* null, { double*, i64 }** %l0
+  %t13 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t11, i8* null)
+  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
   %t14 = load double, double* %l3
   %t15 = load double, double* %l3
   %t16 = load %Parser, %Parser* %l1
@@ -4002,12 +4102,12 @@ loop.body1:
   store %Parser %t17, %Parser* %l1
   br label %loop.latch2
 loop.latch2:
-  %t18 = load { double*, i64 }*, { double*, i64 }** %l0
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t19 = load %Parser, %Parser* %l1
   br label %loop.header0
 afterloop3:
-  %t22 = load { double*, i64 }*, { double*, i64 }** %l0
-  %t23 = call i8* @tokens_to_text(double 0.0)
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t23 = call i8* @tokens_to_text({ i8**, i64 }* %t22)
   store i8* %t23, i8** %l4
   store double 0.0, double* %l5
   %t24 = insertvalue %StatementParseResult undef, i8* null, 0
@@ -4016,17 +4116,17 @@ afterloop3:
   ret %StatementParseResult %t26
 }
 
-define i1 @identifier_matches(double %token, i8* %expected) {
+define i1 @identifier_matches(i8* %token, i8* %expected) {
 entry:
   ret i1 false
 }
 
-define i8* @identifier_text(double %token) {
+define i8* @identifier_text(i8* %token) {
 entry:
   ret i8* null
 }
 
-define i8* @string_literal_value(double %token) {
+define i8* @string_literal_value(i8* %token) {
 entry:
   %l0 = alloca double
   store double 0.0, double* %l0
@@ -4064,7 +4164,7 @@ loop.body1:
   %t14 = load i8*, i8** %t13
   store i8* %t14, i8** %l1
   %t15 = load i8*, i8** %l1
-  %t16 = call i1 @is_trivia_token(double 0.0)
+  %t16 = call i1 @is_trivia_token(i8* %t15)
   %t17 = load %Parser, %Parser* %l0
   %t18 = load i8*, i8** %l1
   br i1 %t16, label %then4, label %merge5
@@ -4098,7 +4198,7 @@ entry:
   %t0 = call double @parser_peek_raw(%Parser %parser)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  %t2 = call i1 @identifier_matches(double %t1, i8* %keyword)
+  %t2 = call i1 @identifier_matches(i8* null, i8* %keyword)
   %t3 = load double, double* %l0
   br i1 %t2, label %then0, label %merge1
 then0:
@@ -4120,7 +4220,7 @@ entry:
 define %CaptureResult @collect_until(%Parser %parser, { i8**, i64 }* %terminators) {
 entry:
   %l0 = alloca %Parser
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
@@ -4135,7 +4235,7 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l2
   %t6 = sitofp i64 0 to double
@@ -4143,15 +4243,15 @@ entry:
   %t7 = sitofp i64 0 to double
   store double %t7, double* %l4
   %t8 = load %Parser, %Parser* %l0
-  %t9 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t10 = load double, double* %l2
   %t11 = load double, double* %l3
   %t12 = load double, double* %l4
   br label %loop.header0
 loop.header0:
-  %t48 = phi { double*, i64 }* [ %t9, %entry ], [ %t46, %loop.latch2 ]
+  %t48 = phi { i8**, i64 }* [ %t9, %entry ], [ %t46, %loop.latch2 ]
   %t49 = phi %Parser [ %t8, %entry ], [ %t47, %loop.latch2 ]
-  store { double*, i64 }* %t48, { double*, i64 }** %l1
+  store { i8**, i64 }* %t48, { i8**, i64 }** %l1
   store %Parser %t49, %Parser* %l0
   br label %loop.body1
 loop.body1:
@@ -4164,7 +4264,7 @@ loop.body1:
   %t17 = load double, double* %l6
   %t18 = fcmp one double %t17, 0.0
   %t19 = load %Parser, %Parser* %l0
-  %t20 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t21 = load double, double* %l2
   %t22 = load double, double* %l3
   %t23 = load double, double* %l4
@@ -4174,10 +4274,10 @@ loop.body1:
 then4:
   br label %afterloop3
 merge5:
-  %t26 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t27 = load double, double* %l5
-  %t28 = call double @append_token(double 0.0, double %t27)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t28 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t26, i8* null)
+  store { i8**, i64 }* %t28, { i8**, i64 }** %l1
   %t29 = load double, double* %l5
   %t30 = load %Parser, %Parser* %l0
   %t31 = call %Parser @parser_advance_raw(%Parser %t30)
@@ -4188,7 +4288,7 @@ merge5:
   %t35 = extractvalue %Parser %t34, 1
   %t36 = fcmp oeq double %t33, %t35
   %t37 = load %Parser, %Parser* %l0
-  %t38 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t38 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t39 = load double, double* %l2
   %t40 = load double, double* %l3
   %t41 = load double, double* %l4
@@ -4203,14 +4303,14 @@ merge7:
   store %Parser %t45, %Parser* %l0
   br label %loop.latch2
 loop.latch2:
-  %t46 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t47 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
   %t50 = load %Parser, %Parser* %l0
   %t51 = insertvalue %CaptureResult undef, i8* null, 0
-  %t52 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t53 = insertvalue %CaptureResult %t51, { i8**, i64 }* null, 1
+  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t53 = insertvalue %CaptureResult %t51, { i8**, i64 }* %t52, 1
   ret %CaptureResult %t53
 }
 
@@ -4218,7 +4318,7 @@ define %ParenthesizedParseResult @collect_parenthesized(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
   %l1 = alloca double
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
   %l4 = alloca double
   %t0 = call %Parser @skip_trivia(%Parser %parser)
@@ -4237,18 +4337,18 @@ entry:
   store double* %t7, double** %t9
   %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  store { double*, i64 }* %t8, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
   %t11 = sitofp i64 1 to double
   store double %t11, double* %l3
   %t12 = load %Parser, %Parser* %l0
   %t13 = load double, double* %l1
-  %t14 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t15 = load double, double* %l3
   br label %loop.header0
 loop.header0:
-  %t27 = phi { double*, i64 }* [ %t14, %entry ], [ %t25, %loop.latch2 ]
+  %t27 = phi { i8**, i64 }* [ %t14, %entry ], [ %t25, %loop.latch2 ]
   %t28 = phi %Parser [ %t12, %entry ], [ %t26, %loop.latch2 ]
-  store { double*, i64 }* %t27, { double*, i64 }** %l2
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l2
   store %Parser %t28, %Parser* %l0
   br label %loop.body1
 loop.body1:
@@ -4257,23 +4357,23 @@ loop.body1:
   store double %t17, double* %l4
   %t18 = load double, double* %l4
   %t19 = load double, double* %l4
-  %t20 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t21 = load double, double* %l4
-  %t22 = call double @append_token(double 0.0, double %t21)
-  store { double*, i64 }* null, { double*, i64 }** %l2
+  %t22 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t20, i8* null)
+  store { i8**, i64 }* %t22, { i8**, i64 }** %l2
   %t23 = load %Parser, %Parser* %l0
   %t24 = call %Parser @parser_advance_raw(%Parser %t23)
   store %Parser %t24, %Parser* %l0
   br label %loop.latch2
 loop.latch2:
-  %t25 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t26 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
   %t29 = load %Parser, %Parser* %l0
   %t30 = insertvalue %ParenthesizedParseResult undef, i8* null, 0
-  %t31 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t32 = insertvalue %ParenthesizedParseResult %t30, { i8**, i64 }* null, 1
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t32 = insertvalue %ParenthesizedParseResult %t30, { i8**, i64 }* %t31, 1
   %t33 = insertvalue %ParenthesizedParseResult %t32, i1 1, 2
   ret %ParenthesizedParseResult %t33
 }
@@ -4281,7 +4381,7 @@ afterloop3:
 define %PatternCaptureResult @collect_pattern_until_arrow(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca %Parser
   %t0 = call %Parser @skip_trivia(%Parser %parser)
@@ -4293,14 +4393,14 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { double*, i64 }* %t3, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t6 = load %Parser, %Parser* %l0
-  %t7 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t7 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header0
 loop.header0:
-  %t37 = phi { double*, i64 }* [ %t7, %entry ], [ %t35, %loop.latch2 ]
+  %t37 = phi { i8**, i64 }* [ %t7, %entry ], [ %t35, %loop.latch2 ]
   %t38 = phi %Parser [ %t6, %entry ], [ %t36, %loop.latch2 ]
-  store { double*, i64 }* %t37, { double*, i64 }** %l1
+  store { i8**, i64 }* %t37, { i8**, i64 }** %l1
   store %Parser %t38, %Parser* %l0
   br label %loop.body1
 loop.body1:
@@ -4309,10 +4409,10 @@ loop.body1:
   store double %t9, double* %l2
   %t10 = load double, double* %l2
   %t11 = load double, double* %l2
-  %t12 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t13 = load double, double* %l2
-  %t14 = call double @append_token(double 0.0, double %t13)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t14 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t12, i8* null)
+  store { i8**, i64 }* %t14, { i8**, i64 }** %l1
   %t15 = load %Parser, %Parser* %l0
   %t16 = call %Parser @parser_advance_raw(%Parser %t15)
   store %Parser %t16, %Parser* %l3
@@ -4322,7 +4422,7 @@ loop.body1:
   %t20 = extractvalue %Parser %t19, 1
   %t21 = fcmp oeq double %t18, %t20
   %t22 = load %Parser, %Parser* %l0
-  %t23 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t24 = load double, double* %l2
   %t25 = load %Parser, %Parser* %l3
   br i1 %t21, label %then4, label %merge5
@@ -4343,40 +4443,40 @@ merge5:
   store %Parser %t34, %Parser* %l0
   br label %loop.latch2
 loop.latch2:
-  %t35 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t36 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
   %t39 = load %Parser, %Parser* %l0
   %t40 = insertvalue %PatternCaptureResult undef, i8* null, 0
-  %t41 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t42 = insertvalue %PatternCaptureResult %t40, { i8**, i64 }* null, 1
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t42 = insertvalue %PatternCaptureResult %t40, { i8**, i64 }* %t41, 1
   %t43 = insertvalue %PatternCaptureResult %t42, i1 1, 2
   ret %PatternCaptureResult %t43
 }
 
-define %MatchCaseTokenSplit @split_match_case_tokens(double %tokens) {
+define %MatchCaseTokenSplit @split_match_case_tokens({ i8**, i64 }* %tokens) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
-  %t0 = call double @trim_token_edges(double %tokens)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = load double, double* %l0
+  %t0 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %tokens)
+  store { i8**, i64 }* %t0, { i8**, i64 }** %l0
+  %t1 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t2 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s3 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.3, i32 0, i32 0
-  %t4 = call double @find_top_level_identifier(double %t2, i8* %s3)
+  %t4 = call double @find_top_level_identifier({ i8**, i64 }* %t2, i8* %s3)
   store double %t4, double* %l1
   %t5 = load double, double* %l1
   %t6 = sitofp i64 -1 to double
   %t7 = fcmp oeq double %t5, %t6
-  %t8 = load double, double* %l0
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t9 = load double, double* %l1
   br i1 %t7, label %then0, label %merge1
 then0:
-  %t10 = load double, double* %l0
-  %t11 = insertvalue %MatchCaseTokenSplit undef, { i8**, i64 }* null, 0
+  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t11 = insertvalue %MatchCaseTokenSplit undef, { i8**, i64 }* %t10, 0
   %t12 = alloca [0 x double]
   %t13 = getelementptr [0 x double], [0 x double]* %t12, i32 0, i32 0
   %t14 = alloca { double*, i64 }
@@ -4388,20 +4488,20 @@ then0:
   %t18 = insertvalue %MatchCaseTokenSplit %t17, i1 0, 2
   ret %MatchCaseTokenSplit %t18
 merge1:
-  %t19 = load double, double* %l0
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t20 = load double, double* %l1
   %t21 = sitofp i64 0 to double
-  %t22 = call double @token_slice(double %t19, double %t21, double %t20)
-  %t23 = call double @trim_token_edges(double %t22)
-  store double %t23, double* %l2
-  %t24 = load double, double* %l0
+  %t22 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %t19, double %t21, double %t20)
+  %t23 = call { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %t22)
+  store { i8**, i64 }* %t23, { i8**, i64 }** %l2
+  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t25 = load double, double* %l1
   %t26 = sitofp i64 1 to double
   %t27 = fadd double %t25, %t26
-  %t28 = load double, double* %l0
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
   store double 0.0, double* %l3
-  %t29 = load double, double* %l2
-  %t30 = insertvalue %MatchCaseTokenSplit undef, { i8**, i64 }* null, 0
+  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t30 = insertvalue %MatchCaseTokenSplit undef, { i8**, i64 }* %t29, 0
   %t31 = load double, double* %l3
   %t32 = insertvalue %MatchCaseTokenSplit %t30, { i8**, i64 }* null, 1
   %t33 = insertvalue %MatchCaseTokenSplit %t32, i1 1, 2
@@ -4453,14 +4553,184 @@ entry:
   ret i1 false
 }
 
-define double @find_top_level_colon(double %tokens) {
+define { i8**, i64 }* @trim_token_edges({ i8**, i64 }* %tokens) {
+entry:
+  %l0 = alloca double
+  %l1 = alloca double
+  %l2 = alloca i8*
+  %l3 = alloca double
+  %t0 = sitofp i64 0 to double
+  store double %t0, double* %l0
+  store double 0.0, double* %l1
+  %t1 = load double, double* %l0
+  %t2 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  br label %loop.body1
+loop.body1:
+  %t3 = load double, double* %l0
+  %t4 = load double, double* %l1
+  %t5 = fcmp oge double %t3, %t4
+  %t6 = load double, double* %l0
+  %t7 = load double, double* %l1
+  br i1 %t5, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t8 = load double, double* %l0
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t10 = extractvalue { i8**, i64 } %t9, 0
+  %t11 = extractvalue { i8**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr i8*, i8** %t10, i64 %t8
+  %t14 = load i8*, i8** %t13
+  store i8* %t14, i8** %l2
+  %t15 = load i8*, i8** %l2
+  %t16 = call i1 @is_trivia_token(i8* %t15)
+  %t17 = load double, double* %l0
+  %t18 = load double, double* %l1
+  %t19 = load i8*, i8** %l2
+  br i1 %t16, label %then6, label %merge7
+then6:
+  br label %loop.latch2
+merge7:
+  br label %afterloop3
+loop.latch2:
+  br label %loop.header0
+afterloop3:
+  %t20 = load double, double* %l0
+  %t21 = load double, double* %l1
+  br label %loop.header8
+loop.header8:
+  br label %loop.body9
+loop.body9:
+  %t22 = load double, double* %l1
+  %t23 = load double, double* %l0
+  %t24 = fcmp ole double %t22, %t23
+  %t25 = load double, double* %l0
+  %t26 = load double, double* %l1
+  br i1 %t24, label %then12, label %merge13
+then12:
+  br label %afterloop11
+merge13:
+  store double 0.0, double* %l3
+  %t27 = load double, double* %l3
+  %t28 = call i1 @is_trivia_token(i8* null)
+  %t29 = load double, double* %l0
+  %t30 = load double, double* %l1
+  %t31 = load double, double* %l3
+  br i1 %t28, label %then14, label %merge15
+then14:
+  %t32 = load double, double* %l1
+  br label %loop.latch10
+merge15:
+  br label %afterloop11
+loop.latch10:
+  br label %loop.header8
+afterloop11:
+  %t33 = load double, double* %l0
+  %t34 = load double, double* %l1
+  %t35 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %tokens, double %t33, double %t34)
+  ret { i8**, i64 }* %t35
+}
+
+define { i8**, i64 }* @token_slice({ i8**, i64 }* %tokens, double %start, double %end) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca double
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store double %start, double* %l1
+  %t5 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t6 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  %t21 = phi { i8**, i64 }* [ %t5, %entry ], [ %t20, %loop.latch2 ]
+  store { i8**, i64 }* %t21, { i8**, i64 }** %l0
+  br label %loop.body1
+loop.body1:
+  %t7 = load double, double* %l1
+  %t8 = fcmp oge double %t7, %end
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t10 = load double, double* %l1
+  br i1 %t8, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t12 = load double, double* %l1
+  %t13 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t14 = extractvalue { i8**, i64 } %t13, 0
+  %t15 = extractvalue { i8**, i64 } %t13, 1
+  %t16 = icmp uge i64 %t12, %t15
+  ; bounds check: %t16 (if true, out of bounds)
+  %t17 = getelementptr i8*, i8** %t14, i64 %t12
+  %t18 = load i8*, i8** %t17
+  %t19 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t11, i8* %t18)
+  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
+  br label %loop.latch2
+loop.latch2:
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br label %loop.header0
+afterloop3:
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t22
+}
+
+define { i8**, i64 }* @trim_block_tokens({ i8**, i64 }* %tokens) {
+entry:
+  %l0 = alloca double
+  %l1 = alloca double
+  %l2 = alloca double
+  %l3 = alloca i8*
+  %t0 = sitofp i64 0 to double
+  store double %t0, double* %l0
+  %t1 = sitofp i64 0 to double
+  store double %t1, double* %l1
+  store double 0.0, double* %l2
+  %t2 = load double, double* %l0
+  %t3 = load double, double* %l1
+  %t4 = load double, double* %l2
+  br label %loop.header0
+loop.header0:
+  br label %loop.body1
+loop.body1:
+  %t5 = load double, double* %l1
+  %t6 = load double, double* %l1
+  %t7 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t8 = extractvalue { i8**, i64 } %t7, 0
+  %t9 = extractvalue { i8**, i64 } %t7, 1
+  %t10 = icmp uge i64 %t6, %t9
+  ; bounds check: %t10 (if true, out of bounds)
+  %t11 = getelementptr i8*, i8** %t8, i64 %t6
+  %t12 = load i8*, i8** %t11
+  store i8* %t12, i8** %l3
+  %t13 = load i8*, i8** %l3
+  br label %loop.latch2
+loop.latch2:
+  br label %loop.header0
+afterloop3:
+  %t14 = load double, double* %l2
+  %t15 = sitofp i64 0 to double
+  %t16 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %tokens, double %t15, double %t14)
+  ret { i8**, i64 }* %t16
+}
+
+define double @find_top_level_colon({ i8**, i64 }* %tokens) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = sitofp i64 0 to double
@@ -4482,20 +4752,27 @@ loop.header0:
 loop.body1:
   %t10 = load double, double* %l4
   %t11 = load double, double* %l4
-  store double 0.0, double* %l5
-  %t12 = load double, double* %l5
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t13 = extractvalue { i8**, i64 } %t12, 0
+  %t14 = extractvalue { i8**, i64 } %t12, 1
+  %t15 = icmp uge i64 %t11, %t14
+  ; bounds check: %t15 (if true, out of bounds)
+  %t16 = getelementptr i8*, i8** %t13, i64 %t11
+  %t17 = load i8*, i8** %t16
+  store i8* %t17, i8** %l5
+  %t18 = load i8*, i8** %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t13 = sitofp i64 -1 to double
-  ret double %t13
+  %t19 = sitofp i64 -1 to double
+  ret double %t19
 }
 
 define %ExpressionCollectResult @expression_tokens_collect_until(%ExpressionTokens %state, { i8**, i64 }* %terminators) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
@@ -4510,7 +4787,7 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l2
   %t6 = sitofp i64 0 to double
@@ -4520,23 +4797,23 @@ entry:
   %t8 = sitofp i64 0 to double
   store double %t8, double* %l5
   %t9 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t10 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t11 = load double, double* %l2
   %t12 = load double, double* %l3
   %t13 = load double, double* %l4
   %t14 = load double, double* %l5
   br label %loop.header0
 loop.header0:
-  %t39 = phi { double*, i64 }* [ %t10, %entry ], [ %t37, %loop.latch2 ]
+  %t39 = phi { i8**, i64 }* [ %t10, %entry ], [ %t37, %loop.latch2 ]
   %t40 = phi %ExpressionTokens [ %t9, %entry ], [ %t38, %loop.latch2 ]
-  store { double*, i64 }* %t39, { double*, i64 }** %l1
+  store { i8**, i64 }* %t39, { i8**, i64 }** %l1
   store %ExpressionTokens %t40, %ExpressionTokens* %l0
   br label %loop.body1
 loop.body1:
   %t15 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t16 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t15)
   %t17 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t18 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t19 = load double, double* %l2
   %t20 = load double, double* %l3
   %t21 = load double, double* %l4
@@ -4545,8 +4822,8 @@ loop.body1:
 then4:
   %t23 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t24 = insertvalue %ExpressionCollectResult undef, i8* null, 0
-  %t25 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t26 = insertvalue %ExpressionCollectResult %t24, { i8**, i64 }* null, 1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t26 = insertvalue %ExpressionCollectResult %t24, { i8**, i64 }* %t25, 1
   %t27 = insertvalue %ExpressionCollectResult %t26, i1 0, 2
   ret %ExpressionCollectResult %t27
 merge5:
@@ -4556,23 +4833,23 @@ merge5:
   %t30 = load double, double* %l2
   store double 0.0, double* %l7
   %t31 = load double, double* %l6
-  %t32 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t32 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t33 = load double, double* %l6
-  %t34 = call double @append_token(double 0.0, double %t33)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t34 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t32, i8* null)
+  store { i8**, i64 }* %t34, { i8**, i64 }** %l1
   %t35 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t36 = call %ExpressionTokens @expression_tokens_advance(%ExpressionTokens %t35)
   store %ExpressionTokens %t36, %ExpressionTokens* %l0
   br label %loop.latch2
 loop.latch2:
-  %t37 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t38 = load %ExpressionTokens, %ExpressionTokens* %l0
   br label %loop.header0
 afterloop3:
   %t41 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t42 = insertvalue %ExpressionCollectResult undef, i8* null, 0
-  %t43 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t44 = insertvalue %ExpressionCollectResult %t42, { i8**, i64 }* null, 1
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t44 = insertvalue %ExpressionCollectResult %t42, { i8**, i64 }* %t43, 1
   %t45 = insertvalue %ExpressionCollectResult %t44, i1 1, 2
   ret %ExpressionCollectResult %t45
 }
@@ -4581,7 +4858,7 @@ define %ExpressionBlockParseResult @collect_expression_block(%ExpressionTokens %
 entry:
   %l0 = alloca %ExpressionTokens
   %l1 = alloca double
-  %l2 = alloca { double*, i64 }*
+  %l2 = alloca { i8**, i64 }*
   %l3 = alloca double
   %l4 = alloca double
   store %ExpressionTokens %state, %ExpressionTokens* %l0
@@ -4614,18 +4891,18 @@ merge1:
   store double* %t16, double** %t18
   %t19 = getelementptr { double*, i64 }, { double*, i64 }* %t17, i32 0, i32 1
   store i64 0, i64* %t19
-  store { double*, i64 }* %t17, { double*, i64 }** %l2
+  store { i8**, i64 }* null, { i8**, i64 }** %l2
   %t20 = sitofp i64 0 to double
   store double %t20, double* %l3
   %t21 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t22 = load double, double* %l1
-  %t23 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t24 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t46 = phi { double*, i64 }* [ %t23, %entry ], [ %t44, %loop.latch4 ]
+  %t46 = phi { i8**, i64 }* [ %t23, %entry ], [ %t44, %loop.latch4 ]
   %t47 = phi %ExpressionTokens [ %t21, %entry ], [ %t45, %loop.latch4 ]
-  store { double*, i64 }* %t46, { double*, i64 }** %l2
+  store { i8**, i64 }* %t46, { i8**, i64 }** %l2
   store %ExpressionTokens %t47, %ExpressionTokens* %l0
   br label %loop.body3
 loop.body3:
@@ -4633,38 +4910,38 @@ loop.body3:
   %t26 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t25)
   %t27 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t28 = load double, double* %l1
-  %t29 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t30 = load double, double* %l3
   br i1 %t26, label %then6, label %merge7
 then6:
   %t31 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t32 = insertvalue %ExpressionBlockParseResult undef, i8* null, 0
-  %t33 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t34 = insertvalue %ExpressionBlockParseResult %t32, { i8**, i64 }* null, 1
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t34 = insertvalue %ExpressionBlockParseResult %t32, { i8**, i64 }* %t33, 1
   %t35 = insertvalue %ExpressionBlockParseResult %t34, i1 0, 2
   ret %ExpressionBlockParseResult %t35
 merge7:
   %t36 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t37 = call double @expression_tokens_peek(%ExpressionTokens %t36)
   store double %t37, double* %l4
-  %t38 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t38 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t39 = load double, double* %l4
-  %t40 = call double @append_token(double 0.0, double %t39)
-  store { double*, i64 }* null, { double*, i64 }** %l2
+  %t40 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t38, i8* null)
+  store { i8**, i64 }* %t40, { i8**, i64 }** %l2
   %t41 = load double, double* %l4
   %t42 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t43 = call %ExpressionTokens @expression_tokens_advance(%ExpressionTokens %t42)
   store %ExpressionTokens %t43, %ExpressionTokens* %l0
   br label %loop.latch4
 loop.latch4:
-  %t44 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t45 = load %ExpressionTokens, %ExpressionTokens* %l0
   br label %loop.header2
 afterloop5:
   %t48 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t49 = insertvalue %ExpressionBlockParseResult undef, i8* null, 0
-  %t50 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t51 = insertvalue %ExpressionBlockParseResult %t49, { i8**, i64 }* null, 1
+  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t51 = insertvalue %ExpressionBlockParseResult %t49, { i8**, i64 }* %t50, 1
   %t52 = insertvalue %ExpressionBlockParseResult %t51, i1 1, 2
   ret %ExpressionBlockParseResult %t52
 }
@@ -4677,11 +4954,11 @@ entry:
   %l3 = alloca double
   %l4 = alloca double
   %l5 = alloca i8*
-  %l6 = alloca double
+  %l6 = alloca i8*
   %l7 = alloca double
-  %l8 = alloca double
+  %l8 = alloca i8*
   %l9 = alloca double
-  %l10 = alloca double
+  %l10 = alloca { i8**, i64 }*
   %l11 = alloca double
   %l12 = alloca double
   store %ExpressionTokens %state, %ExpressionTokens* %l0
@@ -4709,12 +4986,12 @@ merge1:
   store double %t13, double* %l4
   %t14 = load double, double* %l4
   %t15 = load double, double* %l4
-  %t16 = call i8* @identifier_text(double %t15)
+  %t16 = call i8* @identifier_text(i8* null)
   store i8* %t16, i8** %l5
   %t17 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t18 = call %ExpressionTokens @expression_tokens_advance(%ExpressionTokens %t17)
   store %ExpressionTokens %t18, %ExpressionTokens* %l0
-  store double 0.0, double* %l6
+  store i8* null, i8** %l6
   %t19 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t20 = call double @expression_tokens_is_at_end(%ExpressionTokens %t19)
   %t21 = fcmp one double %t20, 0.0
@@ -4724,7 +5001,7 @@ merge1:
   %t25 = load double, double* %l3
   %t26 = load double, double* %l4
   %t27 = load i8*, i8** %l5
-  %t28 = load double, double* %l6
+  %t28 = load i8*, i8** %l6
   br i1 %t21, label %then2, label %merge3
 then2:
   %t29 = load %ExpressionTokens, %ExpressionTokens* %l0
@@ -4733,7 +5010,7 @@ then2:
   %t31 = load double, double* %l7
   br label %merge3
 merge3:
-  store double 0.0, double* %l8
+  store i8* null, i8** %l8
   %t32 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t33 = call double @expression_tokens_is_at_end(%ExpressionTokens %t32)
   %t34 = fcmp one double %t33, 0.0
@@ -4743,8 +5020,8 @@ merge3:
   %t38 = load double, double* %l3
   %t39 = load double, double* %l4
   %t40 = load i8*, i8** %l5
-  %t41 = load double, double* %l6
-  %t42 = load double, double* %l8
+  %t41 = load i8*, i8** %l6
+  %t42 = load i8*, i8** %l8
   br i1 %t34, label %then4, label %merge5
 then4:
   %t43 = load %ExpressionTokens, %ExpressionTokens* %l0
@@ -4757,10 +5034,10 @@ merge5:
   %t47 = load double, double* %l1
   %t48 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t49 = extractvalue %ExpressionTokens %t48, 1
-  %t50 = call double @token_slice(double 0.0, double %t47, double %t49)
-  store double %t50, double* %l10
-  %t51 = load double, double* %l10
-  %t52 = call double @source_span_from_tokens(double %t51)
+  %t50 = call { i8**, i64 }* @token_slice({ i8**, i64 }* %t46, double %t47, double %t49)
+  store { i8**, i64 }* %t50, { i8**, i64 }** %l10
+  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l10
+  %t52 = call double @source_span_from_tokens({ i8**, i64 }* %t51)
   store double %t52, double* %l11
   store double 0.0, double* %l12
   %t53 = load %ExpressionTokens, %ExpressionTokens* %l0
@@ -4774,7 +5051,7 @@ merge5:
 define %LambdaParameterListParseResult @parse_lambda_parameter_list(%ExpressionTokens %state) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca %LambdaParameterParseResult
   %l4 = alloca double
@@ -4786,17 +5063,17 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t6 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t5)
   %t7 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t8 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t6, label %then0, label %merge1
 then0:
   %t9 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t10 = insertvalue %LambdaParameterListParseResult undef, i8* null, 0
-  %t11 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t12 = insertvalue %LambdaParameterListParseResult %t10, { i8**, i64 }* null, 1
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t12 = insertvalue %LambdaParameterListParseResult %t10, { i8**, i64 }* %t11, 1
   %t13 = insertvalue %LambdaParameterListParseResult %t12, i1 0, 2
   ret %LambdaParameterListParseResult %t13
 merge1:
@@ -4805,39 +5082,39 @@ merge1:
   store double %t15, double* %l2
   %t16 = load double, double* %l2
   %t17 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t18 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t19 = load double, double* %l2
   br label %loop.header2
 loop.header2:
-  %t49 = phi { double*, i64 }* [ %t18, %entry ], [ %t47, %loop.latch4 ]
+  %t49 = phi { i8**, i64 }* [ %t18, %entry ], [ %t47, %loop.latch4 ]
   %t50 = phi %ExpressionTokens [ %t17, %entry ], [ %t48, %loop.latch4 ]
-  store { double*, i64 }* %t49, { double*, i64 }** %l1
+  store { i8**, i64 }* %t49, { i8**, i64 }** %l1
   store %ExpressionTokens %t50, %ExpressionTokens* %l0
   br label %loop.body3
 loop.body3:
   %t20 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t21 = call %LambdaParameterParseResult @parse_lambda_parameter(%ExpressionTokens %t20)
   store %LambdaParameterParseResult %t21, %LambdaParameterParseResult* %l3
-  %t22 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t23 = load %LambdaParameterParseResult, %LambdaParameterParseResult* %l3
   %t24 = extractvalue %LambdaParameterParseResult %t23, 1
-  %t25 = call double @append_parameter(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t25 = call { i8**, i64 }* @append_parameter({ i8**, i64 }* %t22, i8* %t24)
+  store { i8**, i64 }* %t25, { i8**, i64 }** %l1
   %t26 = load %LambdaParameterParseResult, %LambdaParameterParseResult* %l3
   %t27 = extractvalue %LambdaParameterParseResult %t26, 0
   store %ExpressionTokens zeroinitializer, %ExpressionTokens* %l0
   %t28 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t29 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t28)
   %t30 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t31 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t32 = load double, double* %l2
   %t33 = load %LambdaParameterParseResult, %LambdaParameterParseResult* %l3
   br i1 %t29, label %then6, label %merge7
 then6:
   %t34 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t35 = insertvalue %LambdaParameterListParseResult undef, i8* null, 0
-  %t36 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t37 = insertvalue %LambdaParameterListParseResult %t35, { i8**, i64 }* null, 1
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t37 = insertvalue %LambdaParameterListParseResult %t35, { i8**, i64 }* %t36, 1
   %t38 = insertvalue %LambdaParameterListParseResult %t37, i1 0, 2
   ret %LambdaParameterListParseResult %t38
 merge7:
@@ -4847,19 +5124,19 @@ merge7:
   %t41 = load double, double* %l4
   %t42 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t43 = insertvalue %LambdaParameterListParseResult undef, i8* null, 0
-  %t44 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t45 = insertvalue %LambdaParameterListParseResult %t43, { i8**, i64 }* null, 1
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t45 = insertvalue %LambdaParameterListParseResult %t43, { i8**, i64 }* %t44, 1
   %t46 = insertvalue %LambdaParameterListParseResult %t45, i1 0, 2
   ret %LambdaParameterListParseResult %t46
 loop.latch4:
-  %t47 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t48 = load %ExpressionTokens, %ExpressionTokens* %l0
   br label %loop.header2
 afterloop5:
   %t51 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t52 = insertvalue %LambdaParameterListParseResult undef, i8* null, 0
-  %t53 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t54 = insertvalue %LambdaParameterListParseResult %t52, { i8**, i64 }* null, 1
+  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t54 = insertvalue %LambdaParameterListParseResult %t52, { i8**, i64 }* %t53, 1
   %t55 = insertvalue %LambdaParameterListParseResult %t54, i1 1, 2
   ret %LambdaParameterListParseResult %t55
 }
@@ -4871,7 +5148,7 @@ entry:
   %l2 = alloca double
   %l3 = alloca %LambdaParameterListParseResult
   %l4 = alloca { i8**, i64 }*
-  %l5 = alloca double
+  %l5 = alloca i8*
   %l6 = alloca double
   %l7 = alloca %ExpressionBlockParseResult
   %l8 = alloca { i8**, i64 }*
@@ -4919,7 +5196,7 @@ merge3:
   %t23 = load %LambdaParameterListParseResult, %LambdaParameterListParseResult* %l3
   %t24 = extractvalue %LambdaParameterListParseResult %t23, 1
   store { i8**, i64 }* %t24, { i8**, i64 }** %l4
-  store double 0.0, double* %l5
+  store i8* null, i8** %l5
   %t25 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t26 = call double @expression_tokens_is_at_end(%ExpressionTokens %t25)
   %t27 = fcmp one double %t26, 0.0
@@ -4928,7 +5205,7 @@ merge3:
   %t30 = load double, double* %l2
   %t31 = load %LambdaParameterListParseResult, %LambdaParameterListParseResult* %l3
   %t32 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t33 = load double, double* %l5
+  %t33 = load i8*, i8** %l5
   br i1 %t27, label %then4, label %merge5
 then4:
   %t34 = load %ExpressionTokens, %ExpressionTokens* %l0
@@ -4944,7 +5221,7 @@ merge5:
   %t41 = load double, double* %l2
   %t42 = load %LambdaParameterListParseResult, %LambdaParameterListParseResult* %l3
   %t43 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t44 = load double, double* %l5
+  %t44 = load i8*, i8** %l5
   br i1 %t38, label %then6, label %merge7
 then6:
   %t45 = call %ExpressionParseResult @expression_parse_failure(%ExpressionTokens %state)
@@ -5093,7 +5370,7 @@ merge1:
   %t7 = extractvalue %ExpressionParseResult %t6, 0
   %t8 = load %ExpressionParseResult, %ExpressionParseResult* %l1
   %t9 = extractvalue %ExpressionParseResult %t8, 1
-  %t10 = call %ExpressionParseResult @parse_postfix_chain(%ExpressionTokens zeroinitializer, double 0.0)
+  %t10 = call %ExpressionParseResult @parse_postfix_chain(%ExpressionTokens zeroinitializer, i8* %t9)
   ret %ExpressionParseResult %t10
 }
 
@@ -5119,16 +5396,16 @@ merge1:
   ret %ExpressionParseResult %t10
 }
 
-define %ExpressionParseResult @parse_postfix_chain(%ExpressionTokens %state, double %expression) {
+define %ExpressionParseResult @parse_postfix_chain(%ExpressionTokens %state, i8* %expression) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca double
+  %l1 = alloca i8*
   %l2 = alloca double
   %l3 = alloca double
   store %ExpressionTokens %state, %ExpressionTokens* %l0
-  store double %expression, double* %l1
+  store i8* %expression, i8** %l1
   %t0 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t1 = load double, double* %l1
+  %t1 = load i8*, i8** %l1
   br label %loop.header0
 loop.header0:
   br label %loop.body1
@@ -5136,7 +5413,7 @@ loop.body1:
   %t2 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t3 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t2)
   %t4 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t5 = load double, double* %l1
+  %t5 = load i8*, i8** %l1
   br i1 %t3, label %then4, label %merge5
 then4:
   br label %afterloop3
@@ -5161,8 +5438,8 @@ loop.latch2:
 afterloop3:
   %t18 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t19 = insertvalue %ExpressionParseResult undef, i8* null, 0
-  %t20 = load double, double* %l1
-  %t21 = insertvalue %ExpressionParseResult %t19, i8* null, 1
+  %t20 = load i8*, i8** %l1
+  %t21 = insertvalue %ExpressionParseResult %t19, i8* %t20, 1
   %t22 = insertvalue %ExpressionParseResult %t21, i1 1, 2
   ret %ExpressionParseResult %t22
 }
@@ -5170,7 +5447,7 @@ afterloop3:
 define %CallArgumentsParseResult @parse_call_arguments(%ExpressionTokens %state) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca %ExpressionParseResult
   %l3 = alloca double
   %t0 = call %ExpressionTokens @expression_tokens_advance(%ExpressionTokens %state)
@@ -5182,11 +5459,11 @@ entry:
   store double* %t2, double** %t4
   %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { double*, i64 }* %t3, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t6 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t7 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t6)
   %t8 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t9 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t7, label %then0, label %merge1
 then0:
   %t10 = insertvalue %CallArgumentsParseResult undef, i8* null, 0
@@ -5204,12 +5481,12 @@ merge1:
   %t18 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t19 = call double @expression_tokens_peek(%ExpressionTokens %t18)
   %t20 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t21 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header2
 loop.header2:
-  %t58 = phi { double*, i64 }* [ %t21, %entry ], [ %t56, %loop.latch4 ]
+  %t58 = phi { i8**, i64 }* [ %t21, %entry ], [ %t56, %loop.latch4 ]
   %t59 = phi %ExpressionTokens [ %t20, %entry ], [ %t57, %loop.latch4 ]
-  store { double*, i64 }* %t58, { double*, i64 }** %l1
+  store { i8**, i64 }* %t58, { i8**, i64 }** %l1
   store %ExpressionTokens %t59, %ExpressionTokens* %l0
   br label %loop.body3
 loop.body3:
@@ -5217,18 +5494,18 @@ loop.body3:
   %t23 = sitofp i64 0 to double
   %t24 = call %ExpressionParseResult @parse_expression_bp(%ExpressionTokens %t22, double %t23)
   store %ExpressionParseResult %t24, %ExpressionParseResult* %l2
-  %t25 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t26 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   %t27 = extractvalue %ExpressionParseResult %t26, 1
-  %t28 = call double @append_expression(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t28 = call { i8**, i64 }* @append_expression({ i8**, i64 }* %t25, i8* %t27)
+  store { i8**, i64 }* %t28, { i8**, i64 }** %l1
   %t29 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   %t30 = extractvalue %ExpressionParseResult %t29, 0
   store %ExpressionTokens zeroinitializer, %ExpressionTokens* %l0
   %t31 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t32 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t31)
   %t33 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t34 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t35 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   br i1 %t32, label %then6, label %merge7
 then6:
@@ -5261,14 +5538,14 @@ merge7:
   %t55 = insertvalue %CallArgumentsParseResult %t54, i1 0, 2
   ret %CallArgumentsParseResult %t55
 loop.latch4:
-  %t56 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t57 = load %ExpressionTokens, %ExpressionTokens* %l0
   br label %loop.header2
 afterloop5:
   %t60 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t61 = insertvalue %CallArgumentsParseResult undef, i8* null, 0
-  %t62 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t63 = insertvalue %CallArgumentsParseResult %t61, { i8**, i64 }* null, 1
+  %t62 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t63 = insertvalue %CallArgumentsParseResult %t61, { i8**, i64 }* %t62, 1
   %t64 = insertvalue %CallArgumentsParseResult %t63, i1 1, 2
   ret %CallArgumentsParseResult %t64
 }
@@ -5276,7 +5553,7 @@ afterloop5:
 define %ArrayLiteralParseResult @parse_array_literal(%ExpressionTokens %state) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca %ExpressionParseResult
   %l3 = alloca double
   store %ExpressionTokens %state, %ExpressionTokens* %l0
@@ -5287,11 +5564,11 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t6 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t5)
   %t7 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t8 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t6, label %then0, label %merge1
 then0:
   %t9 = insertvalue %ArrayLiteralParseResult undef, i8* null, 0
@@ -5309,12 +5586,12 @@ merge1:
   %t17 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t18 = call double @expression_tokens_peek(%ExpressionTokens %t17)
   %t19 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t20 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header2
 loop.header2:
-  %t57 = phi { double*, i64 }* [ %t20, %entry ], [ %t55, %loop.latch4 ]
+  %t57 = phi { i8**, i64 }* [ %t20, %entry ], [ %t55, %loop.latch4 ]
   %t58 = phi %ExpressionTokens [ %t19, %entry ], [ %t56, %loop.latch4 ]
-  store { double*, i64 }* %t57, { double*, i64 }** %l1
+  store { i8**, i64 }* %t57, { i8**, i64 }** %l1
   store %ExpressionTokens %t58, %ExpressionTokens* %l0
   br label %loop.body3
 loop.body3:
@@ -5322,18 +5599,18 @@ loop.body3:
   %t22 = sitofp i64 0 to double
   %t23 = call %ExpressionParseResult @parse_expression_bp(%ExpressionTokens %t21, double %t22)
   store %ExpressionParseResult %t23, %ExpressionParseResult* %l2
-  %t24 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t25 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   %t26 = extractvalue %ExpressionParseResult %t25, 1
-  %t27 = call double @append_expression(double 0.0, double 0.0)
-  store { double*, i64 }* null, { double*, i64 }** %l1
+  %t27 = call { i8**, i64 }* @append_expression({ i8**, i64 }* %t24, i8* %t26)
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l1
   %t28 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   %t29 = extractvalue %ExpressionParseResult %t28, 0
   store %ExpressionTokens zeroinitializer, %ExpressionTokens* %l0
   %t30 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t31 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t30)
   %t32 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t33 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t34 = load %ExpressionParseResult, %ExpressionParseResult* %l2
   br i1 %t31, label %then6, label %merge7
 then6:
@@ -5366,14 +5643,14 @@ merge7:
   %t54 = insertvalue %ArrayLiteralParseResult %t53, i1 0, 2
   ret %ArrayLiteralParseResult %t54
 loop.latch4:
-  %t55 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t56 = load %ExpressionTokens, %ExpressionTokens* %l0
   br label %loop.header2
 afterloop5:
   %t59 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t60 = insertvalue %ArrayLiteralParseResult undef, i8* null, 0
-  %t61 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t62 = insertvalue %ArrayLiteralParseResult %t60, { i8**, i64 }* null, 1
+  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t62 = insertvalue %ArrayLiteralParseResult %t60, { i8**, i64 }* %t61, 1
   %t63 = insertvalue %ArrayLiteralParseResult %t62, i1 1, 2
   ret %ArrayLiteralParseResult %t63
 }
@@ -5381,7 +5658,7 @@ afterloop5:
 define %ObjectLiteralParseResult @parse_object_literal(%ExpressionTokens %state) {
 entry:
   %l0 = alloca %ExpressionTokens
-  %l1 = alloca { double*, i64 }*
+  %l1 = alloca { i8**, i64 }*
   %l2 = alloca double
   %l3 = alloca i8*
   %l4 = alloca double
@@ -5395,11 +5672,11 @@ entry:
   store double* %t1, double** %t3
   %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { double*, i64 }* %t2, { double*, i64 }** %l1
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
   %t5 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t6 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t5)
   %t7 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t8 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t6, label %then0, label %merge1
 then0:
   %t9 = insertvalue %ObjectLiteralParseResult undef, i8* null, 0
@@ -5417,19 +5694,19 @@ merge1:
   %t17 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t18 = call double @expression_tokens_peek(%ExpressionTokens %t17)
   %t19 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t20 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header2
 loop.header2:
   %t95 = phi %ExpressionTokens [ %t19, %entry ], [ %t93, %loop.latch4 ]
-  %t96 = phi { double*, i64 }* [ %t20, %entry ], [ %t94, %loop.latch4 ]
+  %t96 = phi { i8**, i64 }* [ %t20, %entry ], [ %t94, %loop.latch4 ]
   store %ExpressionTokens %t95, %ExpressionTokens* %l0
-  store { double*, i64 }* %t96, { double*, i64 }** %l1
+  store { i8**, i64 }* %t96, { i8**, i64 }** %l1
   br label %loop.body3
 loop.body3:
   %t21 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t22 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t21)
   %t23 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t24 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t22, label %then6, label %merge7
 then6:
   %t25 = insertvalue %ObjectLiteralParseResult undef, i8* null, 0
@@ -5449,7 +5726,7 @@ merge7:
   store double %t34, double* %l2
   %t35 = load double, double* %l2
   %t36 = load double, double* %l2
-  %t37 = call i8* @identifier_text(double %t36)
+  %t37 = call i8* @identifier_text(i8* null)
   store i8* %t37, i8** %l3
   %t38 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t39 = call %ExpressionTokens @expression_tokens_advance(%ExpressionTokens %t38)
@@ -5457,7 +5734,7 @@ merge7:
   %t40 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t41 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t40)
   %t42 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t43 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t44 = load double, double* %l2
   %t45 = load i8*, i8** %l3
   br i1 %t41, label %then8, label %merge9
@@ -5488,11 +5765,11 @@ merge9:
   %t62 = load %ExpressionParseResult, %ExpressionParseResult* %l5
   %t63 = extractvalue %ExpressionParseResult %t62, 0
   store %ExpressionTokens zeroinitializer, %ExpressionTokens* %l0
-  %t64 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t64 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t65 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t66 = call i1 @expression_tokens_is_at_end(%ExpressionTokens %t65)
   %t67 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t68 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t68 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t69 = load double, double* %l2
   %t70 = load i8*, i8** %l3
   %t71 = load double, double* %l4
@@ -5529,22 +5806,22 @@ merge11:
   ret %ObjectLiteralParseResult %t92
 loop.latch4:
   %t93 = load %ExpressionTokens, %ExpressionTokens* %l0
-  %t94 = load { double*, i64 }*, { double*, i64 }** %l1
+  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header2
 afterloop5:
   %t97 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t98 = insertvalue %ObjectLiteralParseResult undef, i8* null, 0
-  %t99 = load { double*, i64 }*, { double*, i64 }** %l1
-  %t100 = insertvalue %ObjectLiteralParseResult %t98, { i8**, i64 }* null, 1
+  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t100 = insertvalue %ObjectLiteralParseResult %t98, { i8**, i64 }* %t99, 1
   %t101 = insertvalue %ObjectLiteralParseResult %t100, i1 1, 2
   ret %ObjectLiteralParseResult %t101
 }
 
-define %ExpressionParseResult @parse_struct_literal(%ExpressionTokens %state, double %target) {
+define %ExpressionParseResult @parse_struct_literal(%ExpressionTokens %state, i8* %target) {
 entry:
   %l0 = alloca %StructTypeNameResult
   %l1 = alloca %ObjectLiteralParseResult
-  %t0 = call %StructTypeNameResult @collect_struct_type_name(double %target)
+  %t0 = call %StructTypeNameResult @collect_struct_type_name(i8* %target)
   store %StructTypeNameResult %t0, %StructTypeNameResult* %l0
   %t1 = call %ObjectLiteralParseResult @parse_object_literal(%ExpressionTokens %state)
   store %ObjectLiteralParseResult %t1, %ObjectLiteralParseResult* %l1
@@ -5578,12 +5855,12 @@ entry:
   ret %ExpressionTokens zeroinitializer
 }
 
-define i1 @expression_is_struct_target(double %expression) {
+define i1 @expression_is_struct_target(i8* %expression) {
 entry:
   ret i1 0
 }
 
-define %StructTypeNameResult @collect_struct_type_name(double %expression) {
+define %StructTypeNameResult @collect_struct_type_name(i8* %expression) {
 entry:
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -5612,7 +5889,47 @@ entry:
   ret double %t0
 }
 
-define i8* @tokens_to_text(double %tokens) {
+define { i8**, i64 }* @filter_trivia({ i8**, i64 }* %tokens) {
+entry:
+  %l0 = alloca double
+  %l1 = alloca { i8**, i64 }*
+  %l2 = alloca i8*
+  %t0 = sitofp i64 0 to double
+  store double %t0, double* %l0
+  %t1 = alloca [0 x double]
+  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
+  %t3 = alloca { double*, i64 }
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
+  store double* %t2, double** %t4
+  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  store i64 0, i64* %t5
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  %t6 = load double, double* %l0
+  %t7 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  br label %loop.header0
+loop.header0:
+  br label %loop.body1
+loop.body1:
+  %t8 = load double, double* %l0
+  %t9 = load double, double* %l0
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
+  br label %loop.latch2
+loop.latch2:
+  br label %loop.header0
+afterloop3:
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  ret { i8**, i64 }* %t17
+}
+
+define i8* @tokens_to_text({ i8**, i64 }* %tokens) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -5624,20 +5941,27 @@ entry:
   %t3 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t8 = phi i8* [ %t2, %entry ], [ %t7, %loop.latch2 ]
-  store i8* %t8, i8** %l0
+  %t14 = phi i8* [ %t2, %entry ], [ %t13, %loop.latch2 ]
+  store i8* %t14, i8** %l0
   br label %loop.body1
 loop.body1:
   %t4 = load double, double* %l1
   %t5 = load i8*, i8** %l0
   %t6 = load double, double* %l1
+  %t7 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t8 = extractvalue { i8**, i64 } %t7, 0
+  %t9 = extractvalue { i8**, i64 } %t7, 1
+  %t10 = icmp uge i64 %t6, %t9
+  ; bounds check: %t10 (if true, out of bounds)
+  %t11 = getelementptr i8*, i8** %t8, i64 %t6
+  %t12 = load i8*, i8** %t11
   br label %loop.latch2
 loop.latch2:
-  %t7 = load i8*, i8** %l0
+  %t13 = load i8*, i8** %l0
   br label %loop.header0
 afterloop3:
-  %t9 = load i8*, i8** %l0
-  ret i8* %t9
+  %t15 = load i8*, i8** %l0
+  ret i8* %t15
 }
 
 define i8* @trim_text(i8* %value) {
@@ -5752,7 +6076,7 @@ afterloop3:
   ret i1 0
 }
 
-define i1 @is_trivia_token(double %token) {
+define i1 @is_trivia_token(i8* %token) {
 entry:
   ret i1 0
 }
@@ -5945,7 +6269,7 @@ entry:
   ret i8* %t2
 }
 
-define { i8**, i64 }* @split_tokens_by_comma(double %tokens) {
+define { i8**, i64 }* @split_tokens_by_comma({ i8**, i64 }* %tokens) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca i8*
@@ -5954,7 +6278,7 @@ entry:
   %l4 = alloca double
   %l5 = alloca double
   %l6 = alloca double
-  %l7 = alloca double
+  %l7 = alloca i8*
   %l8 = alloca i8*
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
@@ -5985,37 +6309,118 @@ entry:
   %t17 = load double, double* %l6
   br label %loop.header0
 loop.header0:
-  %t24 = phi i8* [ %t12, %entry ], [ %t23, %loop.latch2 ]
-  store i8* %t24, i8** %l1
+  %t30 = phi i8* [ %t12, %entry ], [ %t29, %loop.latch2 ]
+  store i8* %t30, i8** %l1
   br label %loop.body1
 loop.body1:
   %t18 = load double, double* %l6
   %t19 = load double, double* %l6
-  store double 0.0, double* %l7
-  %t20 = load double, double* %l7
-  %t21 = load i8*, i8** %l1
-  %t22 = load double, double* %l7
+  %t20 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t21 = extractvalue { i8**, i64 } %t20, 0
+  %t22 = extractvalue { i8**, i64 } %t20, 1
+  %t23 = icmp uge i64 %t19, %t22
+  ; bounds check: %t23 (if true, out of bounds)
+  %t24 = getelementptr i8*, i8** %t21, i64 %t19
+  %t25 = load i8*, i8** %t24
+  store i8* %t25, i8** %l7
+  %t26 = load i8*, i8** %l7
+  %t27 = load i8*, i8** %l1
+  %t28 = load i8*, i8** %l7
   br label %loop.latch2
 loop.latch2:
-  %t23 = load i8*, i8** %l1
+  %t29 = load i8*, i8** %l1
   br label %loop.header0
 afterloop3:
-  %t25 = load i8*, i8** %l1
-  %t26 = call i8* @trim_text(i8* %t25)
-  store i8* %t26, i8** %l8
-  %t27 = load i8*, i8** %l8
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t28
+  %t31 = load i8*, i8** %l1
+  %t32 = call i8* @trim_text(i8* %t31)
+  store i8* %t32, i8** %l8
+  %t33 = load i8*, i8** %l8
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t34
 }
 
-define double @find_top_level_symbol(double %tokens, i8* %symbol) {
+define { i8**, i64 }* @split_token_slices_by_comma({ i8**, i64 }* %tokens) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca { i8**, i64 }*
+  %l2 = alloca double
+  %l3 = alloca double
+  %l4 = alloca double
+  %l5 = alloca double
+  %l6 = alloca double
+  %l7 = alloca i8*
+  %t0 = alloca [0 x double]
+  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
+  %t2 = alloca { double*, i64 }
+  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
+  store double* %t1, double** %t3
+  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  %t5 = alloca [0 x double]
+  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
+  %t7 = alloca { double*, i64 }
+  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
+  store double* %t6, double** %t8
+  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  store i64 0, i64* %t9
+  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  %t10 = sitofp i64 0 to double
+  store double %t10, double* %l2
+  %t11 = sitofp i64 0 to double
+  store double %t11, double* %l3
+  %t12 = sitofp i64 0 to double
+  store double %t12, double* %l4
+  %t13 = sitofp i64 0 to double
+  store double %t13, double* %l5
+  %t14 = sitofp i64 0 to double
+  store double %t14, double* %l6
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t17 = load double, double* %l2
+  %t18 = load double, double* %l3
+  %t19 = load double, double* %l4
+  %t20 = load double, double* %l5
+  %t21 = load double, double* %l6
+  br label %loop.header0
+loop.header0:
+  %t35 = phi { i8**, i64 }* [ %t16, %entry ], [ %t34, %loop.latch2 ]
+  store { i8**, i64 }* %t35, { i8**, i64 }** %l1
+  br label %loop.body1
+loop.body1:
+  %t22 = load double, double* %l6
+  %t23 = load double, double* %l6
+  %t24 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t25 = extractvalue { i8**, i64 } %t24, 0
+  %t26 = extractvalue { i8**, i64 } %t24, 1
+  %t27 = icmp uge i64 %t23, %t26
+  ; bounds check: %t27 (if true, out of bounds)
+  %t28 = getelementptr i8*, i8** %t25, i64 %t23
+  %t29 = load i8*, i8** %t28
+  store i8* %t29, i8** %l7
+  %t30 = load i8*, i8** %l7
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t32 = load i8*, i8** %l7
+  %t33 = call { i8**, i64 }* @append_token({ i8**, i64 }* %t31, i8* %t32)
+  store { i8**, i64 }* %t33, { i8**, i64 }** %l1
+  br label %loop.latch2
+loop.latch2:
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  br label %loop.header0
+afterloop3:
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t37
+}
+
+define double @find_top_level_symbol({ i8**, i64 }* %tokens, i8* %symbol) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = sitofp i64 0 to double
@@ -6037,24 +6442,31 @@ loop.header0:
 loop.body1:
   %t10 = load double, double* %l4
   %t11 = load double, double* %l4
-  store double 0.0, double* %l5
-  %t12 = load double, double* %l5
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t13 = extractvalue { i8**, i64 } %t12, 0
+  %t14 = extractvalue { i8**, i64 } %t12, 1
+  %t15 = icmp uge i64 %t11, %t14
+  ; bounds check: %t15 (if true, out of bounds)
+  %t16 = getelementptr i8*, i8** %t13, i64 %t11
+  %t17 = load i8*, i8** %t16
+  store i8* %t17, i8** %l5
+  %t18 = load i8*, i8** %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t13 = sitofp i64 -1 to double
-  ret double %t13
+  %t19 = sitofp i64 -1 to double
+  ret double %t19
 }
 
-define double @find_top_level_identifier(double %tokens, i8* %keyword) {
+define double @find_top_level_identifier({ i8**, i64 }* %tokens, i8* %keyword) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = sitofp i64 0 to double
@@ -6076,15 +6488,37 @@ loop.header0:
 loop.body1:
   %t10 = load double, double* %l4
   %t11 = load double, double* %l4
-  store double 0.0, double* %l5
-  %t12 = load double, double* %l5
-  %t13 = load double, double* %l5
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %tokens
+  %t13 = extractvalue { i8**, i64 } %t12, 0
+  %t14 = extractvalue { i8**, i64 } %t12, 1
+  %t15 = icmp uge i64 %t11, %t14
+  ; bounds check: %t15 (if true, out of bounds)
+  %t16 = getelementptr i8*, i8** %t13, i64 %t11
+  %t17 = load i8*, i8** %t16
+  store i8* %t17, i8** %l5
+  %t18 = load i8*, i8** %l5
+  %t19 = load i8*, i8** %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t14 = sitofp i64 -1 to double
-  ret double %t14
+  %t20 = sitofp i64 -1 to double
+  ret double %t20
+}
+
+define { i8**, i64 }* @append_statement({ i8**, i64 }* %statements, i8* %statement) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %statement, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @statementsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {
@@ -6102,6 +6536,245 @@ entry:
   ret { i8**, i64 }* null
 }
 
+define { i8**, i64 }* @append_parameter({ i8**, i64 }* %parameters, i8* %parameter) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %parameter, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @parametersconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_model_property({ i8**, i64 }* %properties, i8* %property) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %property, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @propertiesconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_field({ i8**, i64 }* %fields, i8* %field) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %field, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @fieldsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_method({ i8**, i64 }* %methods, i8* %method) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %method, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @methodsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_signature({ i8**, i64 }* %signatures, i8* %signature) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %signature, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @signaturesconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_enum_variant({ i8**, i64 }* %variants, i8* %variant) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %variant, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @variantsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_type_annotation({ i8**, i64 }* %types, i8* %item) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %item, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @typesconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_type_parameter({ i8**, i64 }* %parameters, i8* %parameter) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %parameter, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @parametersconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_decorator({ i8**, i64 }* %decorators, i8* %decorator) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %decorator, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @decoratorsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_decorator_argument({ i8**, i64 }* %arguments, i8* %argument) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %argument, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @argumentsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_with_clause({ i8**, i64 }* %clauses, i8* %clause) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %clause, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @clausesconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_match_case({ i8**, i64 }* %cases, i8* %case) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %case, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @casesconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_expression({ i8**, i64 }* %expressions, i8* %expression) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %expression, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @expressionsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_object_field({ i8**, i64 }* %fields, i8* %field) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %field, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @fieldsconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_token({ i8**, i64 }* %tokens, i8* %token) {
+entry:
+  %t0 = alloca [1 x i8*]
+  %t1 = getelementptr [1 x i8*], [1 x i8*]* %t0, i32 0, i32 0
+  %t2 = getelementptr i8*, i8** %t1, i64 0
+  store i8* %token, i8** %t2
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t1, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @tokensconcat({ i8**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
+
+define { i8**, i64 }* @append_token_array({ i8**, i64 }* %collection, { i8**, i64 }* %tokens) {
+entry:
+  %t0 = alloca [1 x { i8**, i64 }*]
+  %t1 = getelementptr [1 x { i8**, i64 }*], [1 x { i8**, i64 }*]* %t0, i32 0, i32 0
+  %t2 = getelementptr { i8**, i64 }*, { i8**, i64 }** %t1, i64 0
+  store { i8**, i64 }* %tokens, { i8**, i64 }** %t2
+  %t3 = alloca { { i8**, i64 }**, i64 }
+  %t4 = getelementptr { { i8**, i64 }**, i64 }, { { i8**, i64 }**, i64 }* %t3, i32 0, i32 0
+  store { i8**, i64 }** %t1, { i8**, i64 }*** %t4
+  %t5 = getelementptr { { i8**, i64 }**, i64 }, { { i8**, i64 }**, i64 }* %t3, i32 0, i32 1
+  store i64 1, i64* %t5
+  %t6 = call double @collectionconcat({ { i8**, i64 }**, i64 }* %t3)
+  ret { i8**, i64 }* null
+}
 
 define double @add(double %a, double %b) {
 entry:
