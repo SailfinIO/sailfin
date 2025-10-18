@@ -310,6 +310,34 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   and execute correctly). With logical operator support, Stage2 bootstrap warnings
   like "call to unknown function `requires_io && !contains_effect`" are eliminated,
   bringing the compiler closer to warning-free self-compilation.
+  Ternary conditional expressions (`condition ? true_value : false_value`) now lower
+  to LLVM with proper control flow and type merging, enabling inline conditionals in
+  compiler code to compile without fallbacks. The implementation uses LLVM control flow
+  primitives (basic blocks, conditional branches, phi nodes) to evaluate the condition,
+  branch to either the `then` or `else` label, evaluate the corresponding expression,
+  and merge the results with a phi node. The lowering process generates six labels:
+  `cond` (evaluates condition), `then` (evaluates true branch), `then_end` (isolates
+  then branch), `else` (evaluates false branch), `else_end` (isolates else branch),
+  and `merge` (phi node merge point). The condition expression is coerced to `i1` for
+  the branch instruction, and both branches must produce compatible LLVM types for the
+  phi merge (validated at compile time with type checking diagnostics). Intermediate
+  `then_end` and `else_end` labels isolate nested control flow before branching to
+  merge, ensuring phi nodes reference correct predecessor blocks. Nested ternary
+  expressions (e.g., `x > 0 ? (x > 10 ? 2 : 1) : 0`) work correctly by recursively
+  emitting sub-expressions with unique label IDs derived from incrementing temp
+  indices, ensuring no label collisions. Ternary operators integrate with logical
+  operators, allowing conditions like `x > 0.0 && x < 100.0 ? result : fallback` to
+  compile and execute correctly. Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_ternary_operator`
+  (validates basic ternary expressions compile with proper labels, branches, phi nodes,
+  and execute with correct values),
+  `test_native_llvm_execution_nested_ternary` (validates nested ternary expressions
+  generate valid IR with unique labels and correct execution semantics), and
+  `test_native_llvm_execution_ternary_with_logical_operators` (validates ternary
+  operators combined with logical operators in the condition compile and execute
+  correctly). With ternary operator support, Stage2 can compile inline conditional
+  expressions found throughout compiler internals, bringing the compiler closer to
+  warning-free self-compilation.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by

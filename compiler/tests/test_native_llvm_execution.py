@@ -3900,3 +3900,147 @@ fn main() -> int {
     finally:
         engine.run_static_destructors()
         engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_ternary_operator(compile_stage2):
+    """Verify that ternary operator (condition ? true_value : false_value) compiles and executes correctly."""
+    source = """
+fn absolute_value(x -> number) -> number {
+    return x > 0.0 ? x : 0.0 - x;
+}
+
+fn max_value(a -> int, b -> int) -> int {
+    return a > b ? a : b;
+}
+
+fn main() -> int {
+    let abs1 = absolute_value(5.0);
+    let abs2 = absolute_value(0.0 - 3.0);
+    let max_val = max_value(10, 20);
+    
+    if abs1 == 5.0 {
+        if abs2 == 3.0 {
+            if max_val == 20 {
+                return 123;
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # IR should contain ternary control flow labels
+    ir = lowered.ir
+    assert "ternary_cond" in ir or "ternary_then" in ir or "ternary_else" in ir, "IR should contain ternary operator labels"
+
+    # Should have branch and phi instructions for ternary control flow
+    assert ir.count(
+        "br i1") >= 1, "IR should have branch instructions for ternary"
+    assert ir.count(
+        "phi") >= 1, "IR should have phi instructions for ternary merge"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 123, f"Expected 123, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_nested_ternary(compile_stage2):
+    """Verify that nested ternary operators work correctly."""
+    source = """
+fn classify(x -> int) -> int {
+    return x > 0 ? (x > 10 ? 2 : 1) : 0;
+}
+
+fn main() -> int {
+    let result1 = classify(15);
+    let result2 = classify(5);
+    let result3 = classify(0 - 3);
+    
+    if result1 == 2 {
+        if result2 == 1 {
+            if result3 == 0 {
+                return 123;
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # IR should contain multiple ternary labels for nested ternary
+    ir = lowered.ir
+    assert ir.count(
+        "ternary_cond") >= 2, "IR should have multiple ternary conditions for nested operators"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 123, f"Expected 123, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)
+
+
+@pytest.mark.stage2
+def test_native_llvm_execution_ternary_with_logical_operators(compile_stage2):
+    """Verify that ternary operator works with logical operators in condition."""
+    source = """
+fn check_range(x -> number) -> boolean {
+    return x > 0.0 && x < 100.0 ? true : false;
+}
+
+fn main() -> int {
+    let in_range = check_range(50.0);
+    let out_of_range1 = check_range(0.0 - 10.0);
+    let out_of_range2 = check_range(150.0);
+    
+    if in_range {
+        if out_of_range1 == false {
+            if out_of_range2 == false {
+                return 123;
+            }
+        }
+    }
+    return 0;
+}
+"""
+    lowered = compile_stage2(source)
+
+    # Should compile without fatal errors
+    fatal_diagnostics = [
+        diag for diag in lowered.diagnostics if "fatal" in diag.lower()]
+    assert not fatal_diagnostics, f"Should not have fatal errors: {fatal_diagnostics}"
+
+    # IR should contain both logical and ternary labels
+    ir = lowered.ir
+    assert "logical_and" in ir or "logical_or" in ir, "IR should contain logical operator labels"
+    assert "ternary" in ir, "IR should contain ternary operator labels"
+
+    # Compile and execute
+    engine, module = _compile_ir(ir)
+    try:
+        result = _invoke_int(engine, "main")
+        assert result == 123, f"Expected 123, got {result}"
+    finally:
+        engine.run_static_destructors()
+        engine.remove_module(module)

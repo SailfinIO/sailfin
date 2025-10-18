@@ -468,6 +468,17 @@ class BorrowArgumentParse:
     def __repr__(self):
         return runtime.struct_repr('BorrowArgumentParse', [runtime.struct_field('success', self.success), runtime.struct_field('argument', self.argument), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class TernaryParseResult:
+    def __init__(self, success, condition, true_value, false_value, diagnostics):
+        self.success = success
+        self.condition = condition
+        self.true_value = true_value
+        self.false_value = false_value
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('TernaryParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('condition', self.condition), runtime.struct_field('true_value', self.true_value), runtime.struct_field('false_value', self.false_value), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class ExpressionStatementResult:
     def __init__(self, lines, temp_index, locals, bindings, diagnostics, lifetime_regions, lifetime_releases, next_region_id, mutations, string_constants):
         self.lines = lines
@@ -4305,6 +4316,9 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     stripped = strip_enclosing_parentheses(trimmed)
     if stripped != trimmed:
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context)
+    ternary_parse = parse_ternary_expression(stripped)
+    if ternary_parse.success:
+        return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context)
     borrow_parse = parse_borrow_expression(stripped)
     if borrow_parse.recognized:
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines)
@@ -4454,6 +4468,56 @@ def extract_borrow_argument(text):
         return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
     return BorrowArgumentParse(success=True, argument=trim_text(inner), diagnostics=diagnostics)
 
+def parse_ternary_expression(text):
+    diagnostics = []
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    depth = 0
+    question_index = -1
+    colon_index = -1
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == "("  or  ch == "["  or  ch == "{":
+            depth += 1
+            index += 1
+            continue
+        if ch == ")"  or  ch == "]"  or  ch == "}":
+            depth -= 1
+            index += 1
+            continue
+        if depth == 0:
+            if ch == "?"  and  question_index < 0:
+                question_index = index
+                index += 1
+                continue
+            if ch == ":"  and  question_index >= 0  and  colon_index < 0:
+                colon_index = index
+                index += 1
+                continue
+        index += 1
+    if question_index < 0  or  colon_index < 0:
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    if question_index >= colon_index:
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed ternary expression - `:` before `?`")
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    condition = trim_text(substring(trimmed, 0, question_index))
+    true_value = trim_text(substring(trimmed, question_index + 1, colon_index))
+    false_value = trim_text(substring(trimmed, colon_index + 1, len(trimmed)))
+    if len(condition) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing condition")
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    if len(true_value) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing true branch value")
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    if len(false_value) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing false branch value")
+        return TernaryParseResult(success=False, condition="", true_value="", false_value="", diagnostics=diagnostics)
+    return TernaryParseResult(success=True, condition=condition, true_value=true_value, false_value=false_value, diagnostics=diagnostics)
+
 def analyze_value_ownership(initializer, span, locals, bindings):
     if initializer == None:
         return OwnershipAnalysis(ownership=None, consumption=None, diagnostics=[])
@@ -4578,6 +4642,66 @@ def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
     pointer_type = local.llvm_type + "*"
     operand = LLVMOperand(llvm_type=pointer_type, value=local.pointer)
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
+
+def lower_ternary_expression(parse, bindings, locals, temp_index, lines, functions, context):
+    diagnostics = parse.diagnostics
+    string_constants = []
+    label_id = number_to_string(temp_index)
+    cond_label = "ternary_cond_" + label_id
+    then_label = "ternary_then_" + label_id
+    else_label = "ternary_else_" + label_id
+    merge_label = "ternary_merge_" + label_id
+    label_temp_offset = temp_index + 1
+    cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context)
+    diagnostics = (diagnostics) + (cond_result.diagnostics)
+    string_constants = cond_result.string_constants
+    if cond_result.operand == None:
+        return ExpressionResult(lines=cond_result.lines, temp_index=cond_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines)
+    diagnostics = (diagnostics) + (cond_bool.diagnostics)
+    if cond_bool.operand == None:
+        return ExpressionResult(lines=cond_bool.lines, temp_index=cond_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    current_lines = cond_bool.lines
+    current_lines = append_string(current_lines, "  br label %" + cond_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, cond_label + ":")
+    current_lines = append_string(current_lines, "  br i1 " + cond_bool.operand.value + ", label %" + then_label + ", label %" + else_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, then_label + ":")
+    then_result = lower_expression(parse.true_value, bindings, locals, cond_bool.temp_index, current_lines, functions, context)
+    diagnostics = (diagnostics) + (then_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, then_result.string_constants)
+    if then_result.operand == None:
+        return ExpressionResult(lines=then_result.lines, temp_index=then_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    then_end_label = "ternary_then_end_" + label_id
+    current_lines = then_result.lines
+    current_lines = append_string(current_lines, "  br label %" + then_end_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, then_end_label + ":")
+    current_lines = append_string(current_lines, "  br label %" + merge_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, else_label + ":")
+    else_result = lower_expression(parse.false_value, bindings, locals, then_result.temp_index, current_lines, functions, context)
+    diagnostics = (diagnostics) + (else_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, else_result.string_constants)
+    if else_result.operand == None:
+        return ExpressionResult(lines=else_result.lines, temp_index=else_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    else_end_label = "ternary_else_end_" + label_id
+    current_lines = else_result.lines
+    current_lines = append_string(current_lines, "  br label %" + else_end_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, else_end_label + ":")
+    current_lines = append_string(current_lines, "  br label %" + merge_label)
+    current_lines = append_string(current_lines, "")
+    current_lines = append_string(current_lines, merge_label + ":")
+    if then_result.operand.llvm_type != else_result.operand.llvm_type:
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression branches have incompatible types: `" + then_result.operand.llvm_type + "` vs `" + else_result.operand.llvm_type + "`")
+        return ExpressionResult(lines=current_lines, temp_index=else_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    result_temp = format_temp_name(else_result.temp_index)
+    result_type = then_result.operand.llvm_type
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi " + result_type + " [ " + then_result.operand.value + ", %" + then_end_label + " ], [ " + else_result.operand.value + ", %" + else_end_label + " ]")
+    operand = LLVMOperand(llvm_type=result_type, value=result_temp)
+    return ExpressionResult(lines=current_lines, temp_index=else_result.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
 
 def lower_binary_operation(expression, match, bindings, locals, temp_index, lines, functions, context):
     left_text = trim_text(substring(expression, 0, match.index))

@@ -229,14 +229,14 @@ _Final delivery (self-hosting, automation, distribution)_
       - [x] `test_native_llvm_execution_logical_operators_with_comparisons` — `x > 0.0 && x < 100.0` compiles correctly.
     - [x] Target diagnostics: eliminate "call to unknown function `requires_io && !contains_effect`" warnings.
 
-  - [ ] **Support conditional expression ternary operator** — Implement `condition ? true_value : false_value` so inline conditionals in compiler code compile without fallback.
+  - [x] **Support conditional expression ternary operator** — Implement `condition ? true_value : false_value` so inline conditionals in compiler code compile without fallback.
 
-    - [ ] Recognize ternary syntax in `lower_expression`.
-    - [ ] Lower condition expression, branch to `then`/`else` labels, evaluate corresponding expression, emit phi merge.
-    - [ ] Add tests:
-      - [ ] `test_native_llvm_execution_ternary_operator` — `let result = x > 0 ? x : -x` compiles and executes.
-      - [ ] `test_native_llvm_execution_nested_ternary` — nested ternary expressions work.
-    - [ ] Target diagnostics: eliminate conditional expression fallback warnings (if any).
+    - [x] Recognize ternary syntax in `lower_expression`.
+    - [x] Lower condition expression, branch to `then`/`else` labels, evaluate corresponding expression, emit phi merge.
+    - [x] Add tests:
+      - [x] `test_native_llvm_execution_ternary_operator` — `let result = x > 0 ? x : -x` compiles and executes.
+      - [x] `test_native_llvm_execution_nested_ternary` — nested ternary expressions work.
+    - [x] Target diagnostics: eliminate conditional expression fallback warnings (if any).
 
   - [ ] **Fix if-statement condition lowering failures** — Address cases where if/match conditions produce no value due to type coercion issues.
 

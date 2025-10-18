@@ -320,6 +320,14 @@ struct BorrowArgumentParse {
     diagnostics -> string[];
 }
 
+struct TernaryParseResult {
+    success -> boolean;
+    condition -> string;
+    true_value -> string;
+    false_value -> string;
+    diagnostics -> string[];
+}
+
 struct ExpressionStatementResult {
     lines -> string[];
     temp_index -> number;
@@ -6539,6 +6547,12 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
+    // Check for ternary operator first (lowest precedence)
+    let ternary_parse = parse_ternary_expression(stripped);
+    if ternary_parse.success {
+        return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
     let borrow_parse = parse_borrow_expression(stripped);
     if borrow_parse.recognized {
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
@@ -6757,6 +6771,82 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
 }
 
+fn parse_ternary_expression(text -> string) -> TernaryParseResult {
+    let mut diagnostics -> string[] = [];
+    let trimmed = trim_text(text);
+    
+    if trimmed.length == 0 {
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    
+    // Find '?' and ':' at the same nesting level (depth 0)
+    let mut depth -> number = 0;
+    let mut question_index -> number = -1;
+    let mut colon_index -> number = -1;
+    let mut index -> number = 0;
+    
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        
+        if ch == "(" || ch == "[" || ch == "{" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" || ch == "]" || ch == "}" {
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        
+        if depth == 0 {
+            if ch == "?" && question_index < 0 {
+                question_index = index;
+                index += 1;
+                continue;
+            }
+            if ch == ":" && question_index >= 0 && colon_index < 0 {
+                colon_index = index;
+                index += 1;
+                continue;
+            }
+        }
+        
+        index += 1;
+    }
+    
+    if question_index < 0 || colon_index < 0 {
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    
+    if question_index >= colon_index {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed ternary expression - `:` before `?`");
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    
+    let condition = trim_text(substring(trimmed, 0, question_index));
+    let true_value = trim_text(substring(trimmed, question_index + 1, colon_index));
+    let false_value = trim_text(substring(trimmed, colon_index + 1, trimmed.length));
+    
+    if condition.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing condition");
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    if true_value.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing true branch value");
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    if false_value.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing false branch value");
+        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+    }
+    
+    return TernaryParseResult { success: true, condition: condition, true_value: true_value, false_value: false_value, diagnostics: diagnostics };
+}
+
 fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
         return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
@@ -6931,6 +7021,97 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     let pointer_type = local.llvm_type + "*";
     let operand = LLVMOperand { llvm_type: pointer_type, value: local.pointer };
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+}
+
+fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let mut diagnostics -> string[] = parse.diagnostics;
+    let mut string_constants -> StringConstant[] = [];
+    
+    // Create labels for control flow (use temp_index for uniqueness)
+    let label_id = number_to_string(temp_index);
+    let cond_label = "ternary_cond_" + label_id;
+    let then_label = "ternary_then_" + label_id;
+    let else_label = "ternary_else_" + label_id;
+    let merge_label = "ternary_merge_" + label_id;
+    
+    // Reserve temp index for our labels to avoid conflicts with nested expressions
+    let label_temp_offset -> number = temp_index + 1;
+    
+    // Evaluate condition expression
+    let cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context);
+    diagnostics = diagnostics.concat(cond_result.diagnostics);
+    string_constants = cond_result.string_constants;
+    if cond_result.operand == null {
+        return ExpressionResult { lines: cond_result.lines, temp_index: cond_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Coerce condition to boolean if needed
+    let cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines);
+    diagnostics = diagnostics.concat(cond_bool.diagnostics);
+    if cond_bool.operand == null {
+        return ExpressionResult { lines: cond_bool.lines, temp_index: cond_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add condition label and branch
+    let mut current_lines = cond_bool.lines;
+    current_lines = append_string(current_lines, "  br label %" + cond_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, cond_label + ":");
+    current_lines = append_string(current_lines, "  br i1 " + cond_bool.operand.value + ", label %" + then_label + ", label %" + else_label);
+    
+    // Evaluate true branch
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, then_label + ":");
+    let then_result = lower_expression(parse.true_value, bindings, locals, cond_bool.temp_index, current_lines, functions, context);
+    diagnostics = diagnostics.concat(then_result.diagnostics);
+    string_constants = merge_string_constants(string_constants, then_result.string_constants);
+    if then_result.operand == null {
+        return ExpressionResult { lines: then_result.lines, temp_index: then_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add intermediate label after then evaluation to isolate control flow
+    let then_end_label = "ternary_then_end_" + label_id;
+    current_lines = then_result.lines;
+    current_lines = append_string(current_lines, "  br label %" + then_end_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, then_end_label + ":");
+    current_lines = append_string(current_lines, "  br label %" + merge_label);
+    
+    // Evaluate false branch
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, else_label + ":");
+    let else_result = lower_expression(parse.false_value, bindings, locals, then_result.temp_index, current_lines, functions, context);
+    diagnostics = diagnostics.concat(else_result.diagnostics);
+    string_constants = merge_string_constants(string_constants, else_result.string_constants);
+    if else_result.operand == null {
+        return ExpressionResult { lines: else_result.lines, temp_index: else_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Add intermediate label after else evaluation
+    let else_end_label = "ternary_else_end_" + label_id;
+    current_lines = else_result.lines;
+    current_lines = append_string(current_lines, "  br label %" + else_end_label);
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, else_end_label + ":");
+    current_lines = append_string(current_lines, "  br label %" + merge_label);
+    
+    // Create merge label with phi node
+    current_lines = append_string(current_lines, "");
+    current_lines = append_string(current_lines, merge_label + ":");
+    
+    // Type check: both branches must return compatible types
+    if then_result.operand.llvm_type != else_result.operand.llvm_type {
+        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression branches have incompatible types: `" + then_result.operand.llvm_type + "` vs `" + else_result.operand.llvm_type + "`");
+        return ExpressionResult { lines: current_lines, temp_index: else_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    }
+    
+    // Emit phi node to merge results from both branches
+    let result_temp = format_temp_name(else_result.temp_index);
+    let result_type = then_result.operand.llvm_type;
+    current_lines = append_string(current_lines, "  " + result_temp + " = phi " + result_type + " [ " + then_result.operand.value + ", %" + then_end_label + " ], [ " + else_result.operand.value + ", %" + else_end_label + " ]");
+    
+    let operand = LLVMOperand { llvm_type: result_type, value: result_temp };
+    return ExpressionResult { lines: current_lines, temp_index: else_result.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
 fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
