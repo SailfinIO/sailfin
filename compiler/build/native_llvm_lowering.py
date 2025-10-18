@@ -88,35 +88,47 @@ class FunctionCallEntry:
     def __repr__(self):
         return runtime.struct_repr('FunctionCallEntry', [runtime.struct_field('name', self.name), runtime.struct_field('callees', self.callees)])
 
+class StringConstant:
+    def __init__(self, name, content, byte_count):
+        self.name = name
+        self.content = content
+        self.byte_count = byte_count
+
+    def __repr__(self):
+        return runtime.struct_repr('StringConstant', [runtime.struct_field('name', self.name), runtime.struct_field('content', self.content), runtime.struct_field('byte_count', self.byte_count)])
+
 class LoweredLLVMResult:
-    def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest):
+    def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
         self.ir = ir
         self.diagnostics = diagnostics
         self.trait_metadata = trait_metadata
         self.function_effects = function_effects
         self.lifetime_regions = lifetime_regions
         self.capability_manifest = capability_manifest
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest)])
+        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
 class LoweredLLVMFunction:
-    def __init__(self, lines, diagnostics, lifetime_regions):
+    def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
         self.lines = lines
         self.diagnostics = diagnostics
         self.lifetime_regions = lifetime_regions
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMFunction', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions)])
+        return runtime.struct_repr('LoweredLLVMFunction', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('string_constants', self.string_constants)])
 
 class BodyResult:
-    def __init__(self, lines, diagnostics, lifetime_regions):
+    def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
         self.lines = lines
         self.diagnostics = diagnostics
         self.lifetime_regions = lifetime_regions
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('BodyResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions)])
+        return runtime.struct_repr('BodyResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('string_constants', self.string_constants)])
 
 class ParameterBinding:
     def __init__(self, name, llvm_name, llvm_type, type_annotation, consumed, span=None):
@@ -148,14 +160,15 @@ class LLVMOperand:
         return runtime.struct_repr('LLVMOperand', [runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('value', self.value)])
 
 class ExpressionResult:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
+    def __init__(self, lines, temp_index, diagnostics, string_constants, operand=None):
         self.lines = lines
         self.temp_index = temp_index
         self.operand = operand
         self.diagnostics = diagnostics
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('ExpressionResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('ExpressionResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
 
 class ArrayLiteralMetadata:
     def __init__(self, element_type, start_index):
@@ -446,7 +459,7 @@ class BorrowArgumentParse:
         return runtime.struct_repr('BorrowArgumentParse', [runtime.struct_field('success', self.success), runtime.struct_field('argument', self.argument), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class ExpressionStatementResult:
-    def __init__(self, lines, temp_index, locals, bindings, diagnostics, lifetime_regions, lifetime_releases, next_region_id, mutations):
+    def __init__(self, lines, temp_index, locals, bindings, diagnostics, lifetime_regions, lifetime_releases, next_region_id, mutations, string_constants):
         self.lines = lines
         self.temp_index = temp_index
         self.locals = locals
@@ -456,12 +469,13 @@ class ExpressionStatementResult:
         self.lifetime_releases = lifetime_releases
         self.next_region_id = next_region_id
         self.mutations = mutations
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('ExpressionStatementResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('lifetime_releases', self.lifetime_releases), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations)])
+        return runtime.struct_repr('ExpressionStatementResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('lifetime_releases', self.lifetime_releases), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
 
 class LetLoweringResult:
-    def __init__(self, lines, allocas, locals, bindings, temp_index, diagnostics, next_local_id, lifetime_regions, next_region_id, mutations):
+    def __init__(self, lines, allocas, locals, bindings, temp_index, diagnostics, next_local_id, lifetime_regions, next_region_id, mutations, string_constants):
         self.lines = lines
         self.allocas = allocas
         self.locals = locals
@@ -472,9 +486,10 @@ class LetLoweringResult:
         self.lifetime_regions = lifetime_regions
         self.next_region_id = next_region_id
         self.mutations = mutations
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('LetLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations)])
+        return runtime.struct_repr('LetLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
 
 class InlineLetParseResult:
     def __init__(self, success, name, mutable, type_annotation, diagnostics, initializer=None):
@@ -568,7 +583,7 @@ class MatchFieldBinding:
         return runtime.struct_repr('MatchFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_offset', self.field_offset)])
 
 class MatchCaseCondition:
-    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, operand=None, enum_info=None, variant_info=None):
+    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, string_constants, operand=None, enum_info=None, variant_info=None):
         self.lines = lines
         self.temp_index = temp_index
         self.operand = operand
@@ -577,19 +592,21 @@ class MatchCaseCondition:
         self.field_bindings = field_bindings
         self.enum_info = enum_info
         self.variant_info = variant_info
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info)])
+        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info), runtime.struct_field('string_constants', self.string_constants)])
 
 class ConditionConversion:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
+    def __init__(self, lines, temp_index, diagnostics, string_constants, operand=None):
         self.lines = lines
         self.temp_index = temp_index
         self.operand = operand
         self.diagnostics = diagnostics
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('ConditionConversion', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('ConditionConversion', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
 
 class ComparisonEmission:
     def __init__(self, lines, temp_index, diagnostics, operand=None):
@@ -624,7 +641,7 @@ class BinaryAlignmentResult:
         return runtime.struct_repr('BinaryAlignmentResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('left', self.left), runtime.struct_field('right', self.right), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('result_type', self.result_type)])
 
 class BlockLoweringResult:
-    def __init__(self, lines, allocas, locals, bindings, temp_index, block_counter, diagnostics, terminated, next_local_id, lifetime_regions, next_lifetime_region_id, next_index, mutations):
+    def __init__(self, lines, allocas, locals, bindings, temp_index, block_counter, diagnostics, terminated, next_local_id, lifetime_regions, next_lifetime_region_id, next_index, mutations, string_constants):
         self.lines = lines
         self.allocas = allocas
         self.locals = locals
@@ -638,9 +655,10 @@ class BlockLoweringResult:
         self.next_lifetime_region_id = next_lifetime_region_id
         self.next_index = next_index
         self.mutations = mutations
+        self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('BlockLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('block_counter', self.block_counter), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('terminated', self.terminated), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_lifetime_region_id', self.next_lifetime_region_id), runtime.struct_field('next_index', self.next_index), runtime.struct_field('mutations', self.mutations)])
+        return runtime.struct_repr('BlockLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('block_counter', self.block_counter), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('terminated', self.terminated), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_lifetime_region_id', self.next_lifetime_region_id), runtime.struct_field('next_index', self.next_index), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
 
 class PhiMergeResult:
     def __init__(self, lines, temp_index):
@@ -690,7 +708,7 @@ def lower_to_llvm(native_module):
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
-        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest())
+        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=[])
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
@@ -739,8 +757,11 @@ def lower_to_llvm(native_module):
         lines = append_string(lines, "")
     lines = append_string(lines, "declare noalias i8* @malloc(i64)")
     lines = append_string(lines, "")
+    preamble_lines = lines
+    function_lines = []
     index = 0
     has_add_function = False
+    all_string_constants = []
     while True:
         if index >= len(all_functions):
             break
@@ -755,21 +776,28 @@ def lower_to_llvm(native_module):
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
         lifetime_regions = (lifetime_regions) + (lowered.lifetime_regions)
+        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
         if len(lowered.lines) > 0:
-            lines = (lines) + (lowered.lines)
+            function_lines = (function_lines) + (lowered.lines)
             if index + 1 < len(all_functions):
-                lines = append_string(lines, "")
+                function_lines = append_string(function_lines, "")
         index += 1
     if not has_add_function:
-        if len(lines) > 0:
-            lines = append_string(lines, "")
-        lines = (lines) + (["define double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
-    ir = join_with_separator(lines, "\n")
+        if len(function_lines) > 0:
+            function_lines = append_string(function_lines, "")
+        function_lines = (function_lines) + (["define double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
+    string_constant_lines = render_string_constants(all_string_constants)
+    final_lines = preamble_lines
+    if len(string_constant_lines) > 0:
+        final_lines = (final_lines) + (string_constant_lines)
+        final_lines = append_string(final_lines, "")
+    final_lines = (final_lines) + (function_lines)
+    ir = join_with_separator(final_lines, "\n")
     manifest = build_capability_manifest(native_module.entry_points, function_effects)
     output = ir
     if len(output) > 0:
         output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest)
+    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
 
 def empty_trait_metadata():
     return TraitMetadata(interfaces=[], implementations=[])
@@ -1987,7 +2015,7 @@ def emit_function(function, functions, effects, context):
     llvm_return = map_return_type(context, function.return_type)
     if len(llvm_return) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name)
-        return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[])
+        return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=[])
     preparation = prepare_parameters(function, context)
     diagnostics = (diagnostics) + (preparation.diagnostics)
     lines = []
@@ -2004,7 +2032,7 @@ def emit_function(function, functions, effects, context):
     lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions)
     diagnostics = (diagnostics) + (lifetime_diagnostics)
     lines = append_string(lines, "}")
-    return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions)
+    return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=body.string_constants)
 
 def emit_body(function, llvm_return, bindings, functions, context):
     lowered = lower_instruction_range( function, 0, len(function.instructions), llvm_return, bindings, [], [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(function.name), 0, "entry" )
@@ -2018,7 +2046,7 @@ def emit_body(function, llvm_return, bindings, functions, context):
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: missing return in function `" + function.name + "`")
             lines = append_string(lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-    return BodyResult(lines=lines, diagnostics=diagnostics, lifetime_regions=lowered.lifetime_regions)
+    return BodyResult(lines=lines, diagnostics=diagnostics, lifetime_regions=lowered.lifetime_regions, string_constants=lowered.string_constants)
 
 def validate_borrow_lifetimes(function, regions):
     diagnostics = []
@@ -2069,6 +2097,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
     index = start_index
     collected_lifetime_regions = []
     current_mutations = []
+    collected_string_constants = []
     while True:
         if index >= end:
             break
@@ -2085,6 +2114,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
             current_next_local = lowered.next_local_id
             current_next_region = lowered.next_region_id
             current_mutations = (current_mutations) + (lowered.mutations)
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
         else:
             if instruction.variant == "Expression":
                 trimmed_expression = trim_text(instruction.expression)
@@ -2107,6 +2137,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             current_next_local = lowered.next_local_id
                             current_next_region = lowered.next_region_id
                             current_mutations = (current_mutations) + (lowered.mutations)
+                            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
                             handled_inline_let = True
                 if not handled_inline_let:
                     lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label)
@@ -2119,6 +2150,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
                     current_next_region = lowered.next_region_id
                     current_mutations = (current_mutations) + (lowered.mutations)
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
             else:
                 if instruction.variant == "Return":
                     lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context)
@@ -2131,6 +2163,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
                     current_next_region = lowered.next_region_id
                     current_mutations = (current_mutations) + (lowered.mutations)
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
                     terminated = True
                     index += 1
                     if index < end:
@@ -2248,7 +2281,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                                                     else:
                                                         diagnostics = append_string(diagnostics, "llvm lowering: unsupported instruction `" + instruction.variant + "` in `" + function.name + "`")
         index += 1
-    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=collected_lifetime_regions, next_lifetime_region_id=current_next_region, next_index=index, mutations=current_mutations)
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=collected_lifetime_regions, next_lifetime_region_id=current_next_region, next_index=index, mutations=current_mutations, string_constants=collected_string_constants)
 
 def collect_if_structure(instructions, start_index, end, function_name):
     diagnostics = []
@@ -2345,6 +2378,7 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     lifetime_regions = []
     current_next_region = next_region_id
     collected_mutations = []
+    collected_string_constants = []
     structure = collect_loop_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
     preloaded_locals = []
@@ -2389,6 +2423,7 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     current_bindings = body_result.bindings
     current_next_region = body_result.next_lifetime_region_id
     collected_mutations = (collected_mutations) + (body_result.mutations)
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants)
     header_phis = []
     phi_stores = []
     mutated_names = []
@@ -2474,7 +2509,7 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     current_lines = final_lines
     current_lines = append_string(current_lines, exit_label + ":")
     current_locals = base_locals
-    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations)
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
 
 def lower_for_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
     diagnostics = []
@@ -2488,6 +2523,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     lifetime_regions = []
     current_next_region = next_region_id
     collected_mutations = []
+    collected_string_constants = []
     structure = collect_loop_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
     next_index = structure.next_index + 1
@@ -2496,13 +2532,13 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     raw_target = strip_mut_prefix(raw_target)
     if len(raw_target) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     if not is_simple_identifier(raw_target):
         diagnostics = append_string(diagnostics, "llvm lowering: `.for` loop target `" + raw_target + "` is not a simple identifier in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     if find_local_binding(current_locals, raw_target) != None:
         diagnostics = append_string(diagnostics, "llvm lowering: `.for` loop target `" + raw_target + "` shadows existing local in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     range_parse = parse_range_iterable(instruction.iterable)
     if range_parse.success:
         diagnostics = (diagnostics) + (range_parse.diagnostics)
@@ -2512,21 +2548,21 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_temp = start_result.temp_index
         if start_result.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range start in `" + function.name + "`")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context)
         diagnostics = (diagnostics) + (end_result.diagnostics)
         current_lines = end_result.lines
         current_temp = end_result.temp_index
         if end_result.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` range end in `" + function.name + "`")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines)
         diagnostics = (diagnostics) + (start_coerced.diagnostics)
         current_lines = start_coerced.lines
         current_temp = start_coerced.temp_index
         if start_coerced.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         start_operand = start_coerced.operand
         end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines)
         diagnostics = (diagnostics) + (end_coerced.diagnostics)
@@ -2534,7 +2570,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_temp = end_coerced.temp_index
         if end_coerced.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         end_operand = end_coerced.operand
         stride_operand = LLVMOperand(llvm_type="double", value="1.0")
         stride_text = trim_text(range_parse.stride)
@@ -2545,14 +2581,14 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
             current_temp = stride_result.temp_index
             if stride_result.operand == None:
                 diagnostics = append_string(diagnostics, "llvm lowering: `.for` stride expression did not produce a value in `" + function.name + "`")
-                return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+                return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
             stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines)
             diagnostics = (diagnostics) + (stride_coerced.diagnostics)
             current_lines = stride_coerced.lines
             current_temp = stride_coerced.temp_index
             if stride_coerced.operand == None:
                 diagnostics = append_string(diagnostics, "llvm lowering: `.for` stride expression must evaluate to `number` in `" + function.name + "`")
-                return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+                return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
             stride_operand = stride_coerced.operand
             if is_number_literal(stride_text):
                 normalised_stride = normalise_number_literal(stride_text)
@@ -2590,7 +2626,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
             diagnostics = append_string(diagnostics, "llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`")
             current_lines = append_string(current_lines, "  br label %" + loop_exit_label)
             current_lines = append_string(current_lines, loop_exit_label + ":")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         stride_header_name = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + stride_header_name + " = load double, double* " + stride_pointer)
         current_temp += 1
@@ -2608,7 +2644,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
             diagnostics = append_string(diagnostics, "llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`")
             current_lines = append_string(current_lines, "  br label %" + loop_exit_label)
             current_lines = append_string(current_lines, loop_exit_label + ":")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         descending_comparison = emit_comparison_instruction(">", header_load.operand, end_operand, current_temp, current_lines)
         diagnostics = (diagnostics) + (descending_comparison.diagnostics)
         current_lines = descending_comparison.lines
@@ -2617,7 +2653,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
             diagnostics = append_string(diagnostics, "llvm lowering: unable to compare descending `.for` range bounds in `" + function.name + "`")
             current_lines = append_string(current_lines, "  br label %" + loop_exit_label)
             current_lines = append_string(current_lines, loop_exit_label + ":")
-            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+            return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
         ascending_active_name = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + ascending_active_name + " = and i1 " + stride_positive_name + ", " + ascending_comparison.operand.value)
         current_temp += 1
@@ -2663,7 +2699,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         current_lines = append_string(current_lines, "  br label %" + loop_header_label)
         current_lines = append_string(current_lines, loop_exit_label + ":")
         current_locals = locals
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context)
     diagnostics = (diagnostics) + (iterable_result.diagnostics)
     current_lines = iterable_result.lines
@@ -2671,13 +2707,13 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     if iterable_result.operand == None:
         diagnostics = (diagnostics) + (range_parse.diagnostics)
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower `.for` iterable in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     iterable_operand = iterable_result.operand
     element_type = array_pointer_element_type(iterable_operand.llvm_type)
     if len(element_type) == 0:
         diagnostics = (diagnostics) + (range_parse.diagnostics)
         diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     array_struct_type = array_struct_type_for_element(element_type)
     data_pointer_type = element_type + "*"
     data_pointer_pointer_type = data_pointer_type + "*"
@@ -2751,6 +2787,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     current_bindings = body_result.bindings
     current_next_region = body_result.next_lifetime_region_id
     collected_mutations = (collected_mutations) + (body_result.mutations)
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants)
     if not body_result.terminated:
         current_lines = append_string(current_lines, "  br label %" + loop_increment_label)
     current_lines = append_string(current_lines, loop_increment_label + ":")
@@ -2764,7 +2801,7 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     current_lines = append_string(current_lines, "  br label %" + loop_header_label)
     current_lines = append_string(current_lines, loop_exit_label + ":")
     current_locals = locals
-    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations)
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=[])
 
 def collect_match_structure(instructions, start_index, end, function_name):
     diagnostics = []
@@ -2840,6 +2877,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     lifetime_regions = []
     current_next_region = next_region_id
     collected_mutations = []
+    collected_string_constants = []
     structure = collect_match_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
     subject_instruction = function.instructions[start_index]
@@ -2847,9 +2885,10 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     diagnostics = (diagnostics) + (subject_result.diagnostics)
     current_lines = subject_result.lines
     current_temp = subject_result.temp_index
+    collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants)
     if subject_result.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match subject in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
     subject_operand = subject_result.operand
     if len(structure.cases) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`")
@@ -2858,7 +2897,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         current_block_counter = merge_alloc.next_counter
         current_lines = append_string(current_lines, "  br label %" + merge_label)
         current_lines = append_string(current_lines, merge_label + ":")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations)
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
     test_labels = []
     body_labels = []
     index = 0
@@ -2903,6 +2942,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         diagnostics = (diagnostics) + (lowered_condition.diagnostics)
         current_lines = lowered_condition.lines
         current_temp = lowered_condition.temp_index
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants)
         if lowered_condition.is_default:
             has_unconditional_default = True
             current_lines = append_string(current_lines, "  br label %" + body_labels[index])
@@ -2964,6 +3004,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         current_next_local = body_result.next_local_id
         current_next_region = body_result.next_lifetime_region_id
         collected_mutations = (collected_mutations) + (body_result.mutations)
+        collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants)
         arm_mutations_list = append_match_arm_mutations( arm_mutations_list, MatchArmMutations(mutations=body_result.mutations, label=body_labels[index], terminated=body_result.terminated) )
         if not body_result.terminated:
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings)
@@ -2978,7 +3019,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         phi_result = emit_phi_merges_for_match( arm_mutations_list, current_locals, preloaded_locals, current_lines, current_temp )
         current_lines = phi_result.lines
         current_temp = phi_result.temp_index
-    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations)
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations, string_constants=[])
 
 def lower_match_case_condition(function_name, subject_operand, case, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
@@ -2988,6 +3029,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
     field_bindings = []
     matched_enum_info = None
     matched_variant_info = None
+    collected_string_constants = []
     if not case.is_default:
         enum_parse = parse_enum_literal(case.pattern)
         if enum_parse.recognized  and  enum_parse.success:
@@ -3045,6 +3087,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
             diagnostics = (diagnostics) + (pattern_result.diagnostics)
             current_lines = pattern_result.lines
             current_temp = pattern_result.temp_index
+            collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants)
             if pattern_result.operand != None:
                 harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
                 diagnostics = (diagnostics) + (harmonised.diagnostics)
@@ -3068,6 +3111,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
             diagnostics = (diagnostics) + (guard_condition.diagnostics)
             current_lines = guard_condition.lines
             current_temp = guard_condition.temp_index
+            collected_string_constants = merge_string_constants(collected_string_constants, guard_condition.string_constants)
             if guard_condition.operand != None:
                 if condition_operand == None:
                     condition_operand = guard_condition.operand
@@ -3087,7 +3131,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
             guard_trimmed = trim_text(case.guard)
             if len(guard_trimmed) == 0:
                 is_unconditional_default = True
-    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default, field_bindings=field_bindings, enum_info=matched_enum_info, variant_info=matched_variant_info)
+    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default, field_bindings=field_bindings, enum_info=matched_enum_info, variant_info=matched_variant_info, string_constants=collected_string_constants)
 
 def allocate_block_label(prefix, counter):
     return BlockLabelResult(label=prefix + number_to_string(counter), next_counter=counter + 1)
@@ -3098,24 +3142,25 @@ def lower_condition_to_i1(function_name, expression, bindings, locals, temp_inde
     diagnostics = (diagnostics) + (lowered.diagnostics)
     current_lines = lowered.lines
     current_temp = lowered.temp_index
+    string_constants = lowered.string_constants
     if lowered.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "`")
-        return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     operand = lowered.operand
     if operand.llvm_type == "i1":
-        return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+        return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     if operand.llvm_type == "double":
         temp_name = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0")
         converted = LLVMOperand(llvm_type="i1", value=temp_name)
-        return ConditionConversion(lines=current_lines, temp_index=current_temp + 1, operand=converted, diagnostics=diagnostics)
+        return ConditionConversion(lines=current_lines, temp_index=current_temp + 1, operand=converted, diagnostics=diagnostics, string_constants=string_constants)
     if operand.llvm_type == "i32"  or  operand.llvm_type == "i64":
         temp_name = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne " + operand.llvm_type + " " + operand.value + ", " + default_return_literal(operand.llvm_type) + "")
         converted = LLVMOperand(llvm_type="i1", value=temp_name)
-        return ConditionConversion(lines=current_lines, temp_index=current_temp + 1, operand=converted, diagnostics=diagnostics)
+        return ConditionConversion(lines=current_lines, temp_index=current_temp + 1, operand=converted, diagnostics=diagnostics, string_constants=string_constants)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`")
-    return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+    return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
 
 def find_preloaded_value(locals, preloaded_values, name):
     local_index = 0
@@ -3344,9 +3389,10 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     diagnostics = (diagnostics) + (condition.diagnostics)
     current_lines = condition.lines
     current_temp = condition.temp_index
+    collected_string_constants = condition.string_constants
     if condition.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`")
-        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_index=structure.next_index + 1, mutations=[])
+        return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_index=structure.next_index + 1, mutations=[], string_constants=collected_string_constants)
     then_label_alloc = allocate_block_label("then", current_block_counter)
     then_label = then_label_alloc.label
     current_block_counter = then_label_alloc.next_counter
@@ -3394,6 +3440,7 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     current_lines = (current_lines) + (then_result.lines)
     then_mutations = then_result.mutations
     collected_mutations = (collected_mutations) + (then_mutations)
+    collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants)
     then_terminated = then_result.terminated
     if not then_terminated:
         current_lines = append_string(current_lines, "  br label %" + merge_label)
@@ -3416,6 +3463,7 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
         else_terminated = else_result.terminated
         else_mutations = else_result.mutations
         collected_mutations = (collected_mutations) + (else_mutations)
+        collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants)
         if not else_terminated:
             current_lines = append_string(current_lines, "  br label %" + merge_label)
     terminated = False
@@ -3440,7 +3488,7 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     if structure.has_else:
         if not else_terminated:
             merged_bindings = merge_parameter_bindings(merged_bindings, else_bindings)
-    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations)
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
 
 def lower_let_instruction(function, instruction, bindings, locals, allocas, lines, temp_index, next_local_id, next_region_id, functions, context, scope_id, scope_depth, current_label):
     diagnostics = []
@@ -3488,6 +3536,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         else:
             if consumption.kind == "parameter":
                 bindings = mark_parameter_consumed(bindings, consumption.name)
+    string_constants = []
     if instruction.value == None  or  len(instruction.value) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`")
     else:
@@ -3496,6 +3545,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         current_lines = lowered.lines
         current_temp = lowered.temp_index
         operand = lowered.operand
+        string_constants = lowered.string_constants
     if len(llvm_type) == 0:
         if operand != None:
             llvm_type = operand.llvm_type
@@ -3547,7 +3597,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
     mutation = LocalMutation(name=instruction.name, llvm_type=llvm_type, value_name=stored_value, span=initializer_span, originating_label=current_label)
     mutations = (mutations) + ([mutation])
-    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, next_region_id=current_next_region, mutations=mutations)
+    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
 
 def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, current_label):
     suspension_span = None
@@ -3576,6 +3626,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
             stored_value = default_return_literal(binding.llvm_type)
             lowered = lower_expression(parsed_assignment.value, current_bindings, current_locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (lowered.diagnostics)
+            string_constants = lowered.string_constants
             current_lines = lowered.lines
             current_temp = lowered.temp_index
             if lowered.operand == None:
@@ -3619,12 +3670,13 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                     lifetime_regions = append_lifetime_region(lifetime_regions, region)
             mutation = LocalMutation(name=parsed_assignment.target, llvm_type=binding.llvm_type, value_name=stored_value, span=instruction.span, originating_label=current_label)
             mutations = (mutations) + ([mutation])
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations)
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
     ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     consumption = ownership_analysis.consumption
     lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context)
     diagnostics = (diagnostics) + (lowered.diagnostics)
+    string_constants = lowered.string_constants
     current_lines = lowered.lines
     current_temp = lowered.temp_index
     if consumption != None:
@@ -3633,7 +3685,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
         else:
             if consumption.kind == "parameter":
                 current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
-    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations)
+    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
 
 def parse_assignment_expression(expression):
     trimmed = trim_text(expression)
@@ -3772,7 +3824,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`")
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[])
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=locals, bindings=bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=[])
     current_locals = locals
     current_bindings = bindings
     suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name, instruction.span)
@@ -3784,15 +3836,16 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
     diagnostics = (diagnostics) + (lowered.diagnostics)
     current_lines = lowered.lines
     current_temp = lowered.temp_index
+    string_constants = lowered.string_constants
     if lowered.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`")
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[])
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=string_constants)
     operand = lowered.operand
     if llvm_return == "void":
         diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value")
         current_lines = append_string(current_lines, "  ret void")
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[])
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=string_constants)
     coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines)
     diagnostics = (diagnostics) + (coerced.diagnostics)
     current_lines = coerced.lines
@@ -3800,7 +3853,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
     if coerced.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`")
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[])
+        return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=string_constants)
     coerced_operand = coerced.operand
     current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value)
     if consumption != None:
@@ -3809,7 +3862,7 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         else:
             if consumption.kind == "parameter":
                 current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
-    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[])
+    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=string_constants)
 
 def prepare_parameters(function, context):
     signature = []
@@ -3824,6 +3877,13 @@ def prepare_parameters(function, context):
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported parameter type `" + parameter.type_annotation + "` in function `" + function.name + "`")
             llvm_type = "double"
+        if len(parameter.type_annotation) == 0  and  parameter.name == "self"  and  index == 0:
+            double_colon_pos = find_last_index_of_char(function.name, ":")
+            if double_colon_pos > 0  and  substring(function.name, double_colon_pos - 1, double_colon_pos + 1) == "::":
+                struct_name = substring(function.name, 0, double_colon_pos - 1)
+                struct_type = map_struct_type_annotation(context, struct_name)
+                if len(struct_type) > 0:
+                    llvm_type = struct_type + "*"
         if len(parameter.type_annotation) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`")
         sanitized = sanitize_symbol(parameter.name)
@@ -4218,7 +4278,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     diagnostics = []
     if len(trimmed) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: empty expression encountered")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     stripped = strip_enclosing_parentheses(trimmed)
     if stripped != trimmed:
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context)
@@ -4251,27 +4311,27 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         if enum_info != None:
             lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context)
             combined = (diagnostics) + (lowered_enum.diagnostics)
-            return ExpressionResult(lines=lowered_enum.lines, temp_index=lowered_enum.temp_index, operand=lowered_enum.operand, diagnostics=combined)
+            return ExpressionResult(lines=lowered_enum.lines, temp_index=lowered_enum.temp_index, operand=lowered_enum.operand, diagnostics=combined, string_constants=lowered_enum.string_constants)
     struct_parse = parse_struct_literal(stripped)
     if struct_parse.recognized:
         if not struct_parse.success:
             diagnostics = (diagnostics) + (struct_parse.diagnostics)
-            return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
         lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context)
         combined = (diagnostics) + (lowered_struct.diagnostics)
-        return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined)
+        return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined, string_constants=lowered_struct.string_constants)
     member_parse = parse_member_access(stripped)
     if member_parse.success:
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context)
     parameter = find_parameter_binding(bindings, stripped)
     if parameter != None:
         operand = LLVMOperand(llvm_type=parameter.llvm_type, value=parameter.llvm_name)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
     local = find_local_binding(locals, stripped)
     if local != None:
         load_result = load_local_operand(local, temp_index, lines)
         diagnostics = (diagnostics) + (load_result.diagnostics)
-        return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics, string_constants=[])
     literal_candidate = trim_text(stripped)
     if is_string_literal(literal_candidate):
         return lower_string_literal(literal_candidate, temp_index, lines)
@@ -4280,16 +4340,16 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         if matches_case_insensitive(literal_candidate, "true"):
             value = "1"
         operand = LLVMOperand(llvm_type="i1", value=value)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
     if is_integer_literal(literal_candidate):
         operand = LLVMOperand(llvm_type="i64", value=literal_candidate)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
     if is_number_literal(literal_candidate):
         normalised = normalise_number_literal(literal_candidate)
         operand = LLVMOperand(llvm_type="double", value=normalised)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
-    return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+    return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
 
 def parse_borrow_expression(text):
     trimmed = trim_text(text)
@@ -4473,19 +4533,19 @@ def resolve_borrow_base_inner(target, locals, depth):
 def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
     diagnostics = parse.diagnostics
     if not parse.success:
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     target = strip_enclosing_parentheses(parse.target)
     target = trim_text(target)
     if len(target) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     local = find_local_binding(locals, target)
     if local == None:
         diagnostics = append_string(diagnostics, "llvm lowering: borrow requires local binding `" + target + "`")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     pointer_type = local.llvm_type + "*"
     operand = LLVMOperand(llvm_type=pointer_type, value=local.pointer)
-    return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
 
 def lower_binary_operation(expression, match, bindings, locals, temp_index, lines, functions, context):
     left_text = trim_text(substring(expression, 0, match.index))
@@ -4493,19 +4553,21 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
     diagnostics = []
     if len(left_text) == 0  or  len(right_text) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: malformed binary expression `" + expression + "`")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context)
     diagnostics = (diagnostics) + (left_result.diagnostics)
+    string_constants = left_result.string_constants
     if left_result.operand == None:
-        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context)
     diagnostics = (diagnostics) + (right_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
-        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
     diagnostics = (diagnostics) + (harmonised.diagnostics)
     if harmonised.left == None  or  harmonised.right == None:
-        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     left_aligned = harmonised.left
     right_aligned = harmonised.right
     operation = operation_name_for_symbol(match.symbol, harmonised.result_type)
@@ -4513,7 +4575,7 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
     line = "  " + temp_name + " = " + operation + " " + harmonised.result_type + " " + left_aligned.value + ", " + right_aligned.value
     updated_lines = append_string(harmonised.lines, line)
     operand = LLVMOperand(llvm_type=harmonised.result_type, value=temp_name)
-    return ExpressionResult(lines=updated_lines, temp_index=harmonised.temp_index + 1, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=updated_lines, temp_index=harmonised.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
 
 def lower_comparison_operation(expression, match, bindings, locals, temp_index, lines, functions, context):
     operator_length = len(match.symbol)
@@ -4522,31 +4584,34 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     diagnostics = []
     if len(left_text) == 0  or  len(right_text) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: malformed comparison expression `" + expression + "`")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context)
     diagnostics = (diagnostics) + (left_result.diagnostics)
+    string_constants = left_result.string_constants
     if left_result.operand == None:
-        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context)
     diagnostics = (diagnostics) + (right_result.diagnostics)
+    string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
-        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
     diagnostics = (diagnostics) + (harmonised.diagnostics)
     if harmonised.left == None  or  harmonised.right == None:
-        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines)
     diagnostics = (diagnostics) + (comparison.diagnostics)
     if comparison.operand == None:
-        return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=None, diagnostics=diagnostics)
-    return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=comparison.operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+    return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=comparison.operand, diagnostics=diagnostics, string_constants=string_constants)
 
 def lower_call_expression(target, arguments, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
+    collected_string_constants = []
     trimmed_target = trim_text(target)
     if len(trimmed_target) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: call target missing")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     current_lines = lines
     current_temp = temp_index
     operands = []
@@ -4559,6 +4624,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         if method_info != None:
             lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context)
             diagnostics = (diagnostics) + (lowered_self.diagnostics)
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
             current_lines = lowered_self.lines
             current_temp = lowered_self.temp_index
             if lowered_self.operand != None:
@@ -4567,11 +4633,12 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 injected_argument_count = 1
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
-                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         else:
             if interface_info != None:
                 lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context)
                 diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
                 current_lines = lowered_self.lines
                 current_temp = lowered_self.temp_index
                 if lowered_self.operand != None:
@@ -4580,7 +4647,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     injected_argument_count = 1
                 else:
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
-                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index = 0
     while True:
         if index >= len(arguments):
@@ -4590,6 +4657,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`")
         lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context)
         diagnostics = (diagnostics) + (lowered.diagnostics)
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
         if lowered.operand != None:
@@ -4611,7 +4679,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     expected_operand_count = len(arguments) + injected_argument_count
     if len(operands) != expected_operand_count:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     llvm_return = "double"
     expected_params = []
     is_trait_dispatch = False
@@ -4757,12 +4825,12 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                         call_arg_text = join_with_separator(call_args, ", ")
                         if llvm_return == "void":
                             current_lines = append_string(current_lines, "  call void " + method_ptr_temp + "(" + call_arg_text + ")")
-                            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+                            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
                         else:
                             result_temp = format_temp_name(current_temp)
                             current_lines = append_string(current_lines, "  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")")
                             result_operand = LLVMOperand(llvm_type=llvm_return, value=result_temp)
-                            return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=result_operand, diagnostics=diagnostics)
+                            return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=result_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`")
                 else:
@@ -4777,18 +4845,19 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     if llvm_return == "void":
         call_line = "  call void @" + call_symbol + "(" + argument_text + ")"
         current_lines = append_string(current_lines, call_line)
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     temp_name = format_temp_name(current_temp)
     call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")"
     current_lines = append_string(current_lines, call_line)
     operand = LLVMOperand(llvm_type=llvm_return, value=temp_name)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp + 1, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def lower_member_access(parse, bindings, locals, temp_index, lines, functions, context):
     base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context)
     diagnostics = base_result.diagnostics
+    collected_string_constants = base_result.string_constants
     if base_result.operand == None:
-        return ExpressionResult(lines=base_result.lines, temp_index=base_result.temp_index, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=base_result.lines, temp_index=base_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     current_lines = base_result.lines
     current_temp = base_result.temp_index
     base_operand = base_result.operand
@@ -4800,18 +4869,18 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
         struct_info = find_struct_info_by_llvm_type(context, candidate)
         if struct_info == None:
             diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
-            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         pointer_available = True
     else:
         struct_info = find_struct_info_by_llvm_type(context, base_operand.llvm_type)
         if struct_info == None:
             diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
-            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     info = struct_info
     field_info = find_struct_field_info(info, parse.field)
     if field_info == None:
         diagnostics = append_string(diagnostics, "llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     if pointer_available:
         struct_type = info.llvm_name
         gep_name = format_temp_name(current_temp)
@@ -4821,12 +4890,12 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
         current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name)
         current_temp += 1
         operand = LLVMOperand(llvm_type=field_info.llvm_type, value=load_name)
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     extract_name = format_temp_name(current_temp)
     current_lines = append_string(current_lines, "  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index))
     current_temp += 1
     operand = LLVMOperand(llvm_type=field_info.llvm_type, value=extract_name)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def lower_array_literal(text, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
@@ -4852,7 +4921,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         current_temp = lowered.temp_index
         if lowered.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value")
-            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         operands = append_llvm_operand(operands, lowered.operand)
         inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type)
         index += 1
@@ -4861,7 +4930,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
             inferred_element_type = "double"
     if len(inferred_element_type) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported array literal element type")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     element_type = inferred_element_type
     coerced_operands = []
     index = 0
@@ -4875,7 +4944,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         current_temp = coerced.temp_index
         if coerced.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `" + element_type + "`")
-            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
         index += 1
     operands = coerced_operands
@@ -4912,7 +4981,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     current_temp += 1
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer)
     operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_alloca)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=[])
 
 def find_matching_closing_brace(text, open_index):
     depth = 0
@@ -5257,16 +5326,17 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
     diagnostics = parse.diagnostics
     current_lines = lines
     current_temp = temp_index
+    collected_string_constants = []
     info = resolve_struct_info_for_literal(context, parse.type_name)
     if info == None:
         if len(parse.type_name) > 0:
             diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct `" + parse.type_name + "`")
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     if len(info.fields) == 0:
         operand = LLVMOperand(llvm_type=info.llvm_name, value="zeroinitializer")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     used_names = []
     previous_value = ""
     field_index = 0
@@ -5290,6 +5360,7 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
             diagnostics = (diagnostics) + (lowered.diagnostics)
             current_lines = lowered.lines
             current_temp = lowered.temp_index
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
             if lowered.operand != None:
                 coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines)
                 diagnostics = (diagnostics) + (coerced.diagnostics)
@@ -5322,9 +5393,9 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
         extra_index += 1
     if len(previous_value) == 0:
         operand = LLVMOperand(llvm_type=info.llvm_name, value="zeroinitializer")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     operand = LLVMOperand(llvm_type=info.llvm_name, value=previous_value)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def box_aggregate_operand(operand, expected_pointer_type, temp_index, lines, context):
     diagnostics = []
@@ -5363,11 +5434,11 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
             diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum `" + parse.enum_name + "`")
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     variant_info = resolve_enum_variant_info(enum_info, parse.variant_name)
     if variant_info == None:
         diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     tag_llvm_type = "i32"
     if enum_info.tag_type == "i8":
         tag_llvm_type = "i8"
@@ -5467,7 +5538,7 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
             current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr)
             enum_value = load_temp
     operand = LLVMOperand(llvm_type=enum_info.llvm_name, value=enum_value)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=[])
 
 def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index, lines):
     diagnostics = []
@@ -6483,8 +6554,56 @@ def is_string_literal(text):
     return True
 
 def lower_string_literal(literal, temp_index, lines):
-    operand = LLVMOperand(llvm_type="i8*", value="null")
-    return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=[])
+    content = unescape_string_literal(literal)
+    global_name = "@.str." + number_to_string(temp_index)
+    constant = StringConstant(name=global_name, content=content, byte_count=len(content))
+    array_type = "[" + number_to_string(len(content) + 1) + " x i8]"
+    gep_instr = "  %s" + number_to_string(temp_index) + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + global_name + ", i32 0, i32 0"
+    updated_lines = append_string(lines, gep_instr)
+    operand = LLVMOperand(llvm_type="i8*", value="%s" + number_to_string(temp_index))
+    return ExpressionResult(lines=updated_lines, temp_index=temp_index + 1, operand=operand, diagnostics=[], string_constants=[constant])
+
+def unescape_string_literal(literal):
+    if len(literal) < 2:
+        return ""
+    start_index = 1
+    end_index = len(literal) - 1
+    inner = substring(literal, start_index, end_index)
+    result = ""
+    index = 0
+    while True:
+        if index >= len(inner):
+            break
+        ch = inner[index]
+        if ch == "\\"  and  index + 1 < len(inner):
+            next = inner[index + 1]
+            if next == "n":
+                result = result + "\n"
+                index += 2
+                continue
+            else:
+                if next == "r":
+                    result = result + "\r"
+                    index += 2
+                    continue
+                else:
+                    if next == "t":
+                        result = result + "\t"
+                        index += 2
+                        continue
+                    else:
+                        if next == "\"":
+                            result = result + "\""
+                            index += 2
+                            continue
+                        else:
+                            if next == "\\":
+                                result = result + "\\"
+                                index += 2
+                                continue
+        result = result + ch
+        index += 1
+    return result
 
 def trim_text(value):
     start = 0
@@ -6588,5 +6707,68 @@ def join_with_separator(values, separator):
         if index >= len(values):
             break
         result = result + separator + values[index]
+        index += 1
+    return result
+
+def merge_string_constants(existing, new_constants):
+    result = existing
+    index = 0
+    while True:
+        if index >= len(new_constants):
+            break
+        candidate = new_constants[index]
+        found = find_string_constant(result, candidate.content)
+        if found == None:
+            result = (result) + ([candidate])
+        index += 1
+    return result
+
+def find_string_constant(constants, content):
+    index = 0
+    while True:
+        if index >= len(constants):
+            break
+        if constants[index].content == content:
+            return constants[index]
+        index += 1
+    return None
+
+def render_string_constants(constants):
+    lines = []
+    index = 0
+    while True:
+        if index >= len(constants):
+            break
+        constant = constants[index]
+        escaped = escape_string_for_llvm(constant.content)
+        length_str = number_to_string(constant.byte_count + 1)
+        declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\""
+        lines = append_string(lines, declaration)
+        index += 1
+    return lines
+
+def escape_string_for_llvm(content):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(content):
+            break
+        ch = content[index]
+        if ch == "\n":
+            result = result + "\\0A"
+        else:
+            if ch == "\r":
+                result = result + "\\0D"
+            else:
+                if ch == "\t":
+                    result = result + "\\09"
+                else:
+                    if ch == "\"":
+                        result = result + "\\22"
+                    else:
+                        if ch == "\\":
+                            result = result + "\\5C"
+                        else:
+                            result = result + ch
         index += 1
     return result

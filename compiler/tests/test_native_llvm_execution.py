@@ -2185,7 +2185,6 @@ fn main() -> number {
         or "lowering as `i8*`" in diag
         or "parameter `self` missing type annotation" in diag
         or "member access base" in diag  # Related to missing self type
-        or "unhandled return expression" in diag  # Related to member access issues
     ]
     unexpected = [
         diag for diag in lowered.diagnostics if diag not in acceptable_diags]
@@ -2235,7 +2234,6 @@ fn main() -> number {
         or "lowering as `i8*`" in diag
         or "parameter `self` missing type annotation" in diag
         or "member access base" in diag
-        or "unhandled return expression" in diag
     ]
     unexpected = [
         diag for diag in lowered.diagnostics if diag not in acceptable_diags]
@@ -2301,7 +2299,6 @@ fn main() -> number {
         or "lowering as `i8*`" in diag
         or "parameter `self` missing type annotation" in diag
         or "member access base" in diag
-        or "unhandled return expression" in diag
     ]
     unexpected = [
         diag for diag in lowered.diagnostics if diag not in acceptable_diags]
@@ -3023,3 +3020,118 @@ def test_stage2_runner_enforces_capability_restrictions() -> None:
     # Attempting to execute should raise PermissionError
     with pytest.raises(PermissionError, match="capability 'io' not granted"):
         runner.invoke("restricted_test", restype=ctypes.c_double, argtypes=[])
+
+
+def test_native_llvm_execution_lowers_string_literal(compile_stage2) -> None:
+    """Verify that string literals lower to LLVM global constants."""
+    source = """
+fn get_message() -> string {
+    return "Hello, World!";
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="string_literal")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+    
+    # Check that string constant is emitted as global
+    assert "@.str." in ir, "String constant not found in IR"
+    assert "c\"Hello, World!\\00\"" in ir, "String content not found in IR"
+    
+    # Check that getelementptr is used to get pointer
+    assert "getelementptr inbounds" in ir, "getelementptr instruction not found"
+    
+    # Verify it compiles and executes without errors
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_deduplicates_string_constants(compile_stage2) -> None:
+    """Verify that identical string literals reuse the same global constant."""
+    source = """
+fn get_first() -> string {
+    return "duplicate";
+}
+
+fn get_second() -> string {
+    return "duplicate";
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="string_dedup")
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    assert not unexpected, f"unexpected diagnostics: {unexpected}"
+
+    ir = lowered.ir
+    
+    # Count occurrences of the string constant definition
+    # There should only be one @.str.N definition for "duplicate"
+    string_constant_count = ir.count('c"duplicate\\00"')
+    assert string_constant_count == 1, f"Expected 1 string constant, found {string_constant_count}"
+    
+    # Verify it compiles
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_returns_string_from_method(compile_stage2) -> None:
+    """Verify that interface methods can return string literals."""
+    source = """
+interface Greeter {
+    fn greet(self) -> string;
+}
+
+struct Person implements Greeter {
+    name -> string;
+    
+    fn greet(self) -> string {
+        return "Hi";
+    }
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+    lowered = compile_stage2(source, module_name="method_string")
+    # Now that string literals are implemented, we should NOT see "unhandled return expression"
+    acceptable_diags = [
+        diag for diag in lowered.diagnostics
+        if "defaulting to pointer layout" in diag
+        or "lowering as `i8*`" in diag
+        or "parameter `self` missing type annotation" in diag
+        or "member access base" in diag
+    ]
+    unexpected = [
+        diag for diag in lowered.diagnostics if diag not in acceptable_diags]
+    
+    # Check that "unhandled return expression" is NOT in unexpected diagnostics
+    has_unhandled_return = any("unhandled return expression" in diag for diag in unexpected)
+    assert not has_unhandled_return, "String literal return should now be handled"
+    
+    ir = lowered.ir
+    
+    # Check that string constant is emitted
+    assert "@.str." in ir, "String constant not found in IR"
+    assert 'c"Hi\\00"' in ir, "String content not found in IR"
+    
+    # Verify it compiles
+    _compile_ir(ir)

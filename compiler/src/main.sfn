@@ -97,6 +97,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
         function_effects: lowered.function_effects,
         lifetime_regions: lowered.lifetime_regions,
         capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
     };
 }
 
