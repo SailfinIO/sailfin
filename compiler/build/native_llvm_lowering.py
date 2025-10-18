@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan
+from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest
 from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
@@ -724,6 +724,33 @@ class LoadLocalResult:
     def __repr__(self):
         return runtime.struct_repr('LoadLocalResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
 
+def load_imported_layout_manifests(imports):
+    # effects: io
+    manifests = []
+    index = 0
+    while True:
+        if index >= len(imports):
+            break
+        import_entry = imports[index]
+        module_path = import_entry.module
+        manifest_name = ""
+        if starts_with(module_path, "./"):
+            manifest_name = substring(module_path, 2, len(module_path)) + ".layout-manifest"
+        else:
+            if starts_with(module_path, "../"):
+                index += 1
+                continue
+            else:
+                manifest_name = module_path + ".layout-manifest"
+        manifest_path = "build/stage2/" + manifest_name
+        file_exists = fs.exists(manifest_path)
+        if file_exists:
+            manifest_content = fs.readFile(manifest_path)
+            parsed = parse_layout_manifest(manifest_content)
+            manifests = (manifests) + ([parsed])
+        index += 1
+    return manifests
+
 def lower_to_llvm(native_module):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
@@ -732,8 +759,9 @@ def lower_to_llvm(native_module):
         return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=[])
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
+    imported_manifests = load_imported_layout_manifests(parse.imports)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
-    type_build = build_type_context(parse.structs, parse.enums, parse.interfaces)
+    type_build = build_type_context_with_imports(parse.structs, parse.enums, parse.interfaces, imported_manifests)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
     struct_methods = flatten_struct_methods(parse.structs)
@@ -912,6 +940,19 @@ def render_runtime_helper_declarations(used_targets):
 
 def empty_type_context():
     return TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
+
+def build_type_context_with_imports(structs, enums, interfaces, imported_manifests):
+    all_structs = structs
+    all_enums = enums
+    manifest_index = 0
+    while True:
+        if manifest_index >= len(imported_manifests):
+            break
+        manifest = imported_manifests[manifest_index]
+        all_structs = (all_structs) + (manifest.structs)
+        all_enums = (all_enums) + (manifest.enums)
+        manifest_index += 1
+    return build_type_context(all_structs, all_enums, interfaces)
 
 def build_type_context(structs, enums, interfaces):
     diagnostics = []
@@ -1791,6 +1832,13 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="channel_create", symbol="sailfin_adapter_channel_create", return_type="i8*", parameter_types=["i32"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="channel_send", symbol="sailfin_adapter_channel_send", return_type="void", parameter_types=["i8*", "i8*"], effects=["channel"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="channel_receive", symbol="sailfin_adapter_channel_receive", return_type="i8*", parameter_types=["i8*"], effects=["channel"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="substring", symbol="sailfin_runtime_substring", return_type="i8*", parameter_types=["i8*", "i64", "i64"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_whitespace_char", symbol="sailfin_runtime_is_whitespace_char", return_type="i1", parameter_types=["i8"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_decimal_digit", symbol="sailfin_runtime_is_decimal_digit", return_type="i1", parameter_types=["i8"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_alpha_char", symbol="sailfin_runtime_is_alpha_char", return_type="i1", parameter_types=["i8"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     return descriptors
 
 def append_runtime_helper(values, value):
@@ -4403,6 +4451,10 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics, string_constants=[])
     literal_candidate = trim_text(stripped)
     if is_string_literal(literal_candidate):
+        if is_character_literal(literal_candidate):
+            char_value = get_character_literal_value(literal_candidate)
+            operand = LLVMOperand(llvm_type="i8", value=number_to_string(char_value))
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=[])
         return lower_string_literal(literal_candidate, temp_index, lines)
     if is_boolean_literal(literal_candidate):
         value = "0"
@@ -5169,6 +5221,9 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
         candidate = strip_pointer_suffix(base_operand.llvm_type)
         struct_info = find_struct_info_by_llvm_type(context, candidate)
         if struct_info == None:
+            if base_operand.llvm_type == "i8*":
+                diagnostics = append_string(diagnostics, "llvm lowering: member access on opaque type `i8*` (field `" + parse.field + "`) - layout information not available (check if layout manifest exists)")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
             diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         pointer_available = True
@@ -6074,6 +6129,13 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
             current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i64 " + operand.value + ", 0")
             coerced = LLVMOperand(llvm_type="i1", value=temp_name)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i8"  and  operand.llvm_type == "i8*":
+        char_ptr_temp = format_temp_name(temp_index)
+        char_value_temp = format_temp_name(temp_index + 1)
+        current_lines = append_string(current_lines, "  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0")
+        current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp)
+        coerced = LLVMOperand(llvm_type="i8", value=char_value_temp)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
     return CoercionResult(lines=current_lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
 
@@ -6084,6 +6146,8 @@ def dominant_type(first, second):
         return first
     if first == second:
         return first
+    if first == "i8"  and  second == "i8*"  or  first == "i8*"  and  second == "i8":
+        return "i8"
     if first == "double"  or  second == "double":
         return "double"
     if first == "i64"  or  second == "i64":
@@ -7077,6 +7141,39 @@ def is_string_literal(text):
     if trimmed[len(trimmed) - 1] != "\"":
         return False
     return True
+
+def is_character_literal(text):
+    if len(text) < 2:
+        return False
+    if text[0] != "\""  or  text[len(text) - 1] != "\"":
+        return False
+    inner = substring(text, 1, len(text) - 1)
+    if len(inner) == 2  and  inner[0] == "\\":
+        return True
+    return len(inner) == 1
+
+def get_character_literal_value(text):
+    inner = substring(text, 1, len(text) - 1)
+    if len(inner) == 0:
+        return 0
+    if len(inner) == 2  and  inner[0] == "\\":
+        escape = inner[1]
+        if escape == "n":
+            return char_code("\n")
+        else:
+            if escape == "r":
+                return char_code("\r")
+            else:
+                if escape == "t":
+                    return char_code("\t")
+                else:
+                    if escape == "\"":
+                        return char_code("\"")
+                    else:
+                        if escape == "\\":
+                            return char_code("\\")
+        return char_code(escape)
+    return char_code(inner[0])
 
 def lower_string_literal(literal, temp_index, lines):
     content = unescape_string_literal(literal)

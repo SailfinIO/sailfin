@@ -84,10 +84,25 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   stage1 test verifies manifest emission and parsing for the types module and confirms the
   consumer compiles without fatal errors. The stage2 test validates that both modules lower to
   LLVM IR with proper type definitions, confirming the layout infrastructure works end-to-end.
-  Note that automatic manifest loading for imported modules (enabling the consumer to use
-  imported types without pointer fallbacks) remains roadmap work; the current tests validate
-  the manifest generation, parsing, and type context building infrastructure that will enable
-  full cross-module resolution once dependency tracking is implemented.
+  **Cross-module layout loading is now fully implemented** (October 2025). The LLVM lowering
+  pipeline (`lower_to_llvm` in `compiler/src/native_llvm_lowering.sfn`) now automatically
+  loads layout manifests for imported modules during compilation. When parsing a module's
+  `.sfn-asm` artifact, the lowering extracts all `.import` directives (e.g., `.import "./ast"
+from { Expression, Statement }`), resolves their paths to layout manifest files in
+  `build/stage2/` (e.g., `ast.layout-manifest`), loads and parses those manifests using
+  `parse_layout_manifest`, and merges the imported struct and enum definitions into the
+  type context via `build_type_context_with_imports`. This enables member access on
+  imported types to generate proper `getelementptr` and `load` instructions instead of
+  failing with "member access base `i8*` lacks struct metadata" diagnostics. The
+  bootstrap script (`scripts/bootstrap_stage2.py`) was updated to save layout manifest
+  artifacts alongside `.ll` files, and the runtime (`runtime/runtime_support.py`) gained
+  an `fs.exists()` method to support manifest file discovery. This implementation
+  eliminated **1,174 warnings (4.9%)** from the Stage2 bootstrap, reducing the total
+  from 23,772 to 22,598 warnings. The infrastructure now supports seamless cross-module
+  type access for structs; enum member access (`.variant` field and payload extraction)
+  remains a separate feature tracked in the roadmap. Regression coverage in
+  `compiler/tests/test_cross_module_layout_loading.py` documents the improvement and
+  validates layout manifest artifact generation and selection.
   Array literals embed `#element:<type>` metadata so Stage2 can skip per-element
   inference and prepare typed iteration over richer aggregates. LLVM lowering
   now interprets that metadata for struct element types, so `.for` loops can
@@ -208,6 +223,46 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   returning function call results (e.g., `return helper(self.data)`) with proper
   call lowering and argument passing. These tests guard against future regressions
   before self-hosting the compiler with Stage2.
+  Character literals (single-character string literals like `"a"`, `"t"`, `"\n"`) now
+  lower to `i8` type instead of `i8*`, enabling direct character comparisons without
+  type coercion errors. The implementation adds `is_character_literal` and
+  `get_character_literal_value` helper functions that detect single-character strings
+  (including escape sequences) and extract their ASCII values for LLVM lowering. When
+  lowering expressions in `lower_expression`, string literals are checked via
+  `is_character_literal` before falling back to full string lowering; character
+  literals return an `i8` operand with the numeric ASCII value directly (e.g., `"a"`
+  becomes `i8 97`, `"\n"` becomes `i8 10`). This enables character comparison
+  expressions like `text[0] == "t"` to compile as `icmp eq i8` operations without
+  "unable to convert right operand from `i8*` to `i8`" diagnostics. Escape sequences
+  (`\n`, `\r`, `\t`, `\"`, `\\`) are properly handled in character literals by mapping
+  them to their ASCII values. Regression coverage lives in
+  `compiler/tests/test_string_lowering_improvements.py::test_character_literal_lowering`
+  (validates single-character literals produce `i8` type with correct ASCII values),
+  `test_character_comparison` (validates character comparisons generate `icmp eq i8`
+  without type mismatch errors), and `test_escape_sequence_character_literals`
+  (validates escape sequences lower to correct ASCII values). With character literal
+  support, Stage2 bootstrap warnings for character-based string operations in lexer
+  and parser code are significantly reduced.
+  String utility runtime helpers (`substring`, `is_whitespace_char`, `is_decimal_digit`,
+  `is_alpha_char`) are now registered as runtime helper descriptors, eliminating "call
+  to unknown function" warnings when compiler code invokes these utilities. The
+  implementation extends `runtime_helper_descriptors` with four new entries:
+  `substring` (symbol `sailfin_runtime_substring`, signature `i8*, i64, i64 -> i8*`),
+  `is_whitespace_char` (symbol `sailfin_runtime_is_whitespace_char`, signature
+  `i8 -> i1`), `is_decimal_digit` (symbol `sailfin_runtime_is_decimal_digit`, signature
+  `i8 -> i1`), and `is_alpha_char` (symbol `sailfin_runtime_is_alpha_char`, signature
+  `i8 -> i1`). These descriptors enable call lowering to recognize the function names
+  and emit proper external function declarations with correct LLVM types and capability
+  effects. The `substring` function uses `i64` for start/end indices (matching LLVM's
+  natural integer width), while character classification helpers accept `i8` characters
+  and return `i1` booleans. Regression coverage lives in
+  `compiler/tests/test_string_lowering_improvements.py::test_substring_runtime_helper_registered`
+  (validates `substring` calls emit `sailfin_runtime_substring` declarations and don't
+  produce "unknown function" diagnostics) and
+  `test_character_classification_helpers_registered` (validates all three character
+  helpers emit proper declarations). With these runtime helpers registered, Stage2
+  bootstrap warnings for string manipulation in compiler internals (decorator parsing,
+  token scanning, identifier validation) are significantly reduced.
   Complex parameter and local type resolution now uses pointer-based fallbacks
   for unresolved types instead of defaulting to `double`, significantly reducing
   spurious diagnostics when compiling modules that reference types from imported

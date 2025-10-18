@@ -1,0 +1,13 @@
+; Sailfin Layout Manifest
+.manifest version=1
+
+.layout struct name=EffectRequirement size=24 align=8
+.layout field effect type=string offset=0 size=8 align=8
+.layout field origin type=Token? offset=8 size=8 align=8
+.layout field description type=string offset=16 size=8 align=8
+
+.layout struct name=EffectViolation size=24 align=8
+.layout field routine_name type=string offset=0 size=8 align=8
+.layout field missing_effects type=string[] offset=8 size=8 align=8
+.layout field requirements type=EffectRequirement[] offset=16 size=8 align=8
+

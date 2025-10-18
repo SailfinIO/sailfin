@@ -1,0 +1,242 @@
+; Sailfin Layout Manifest
+.manifest version=1
+
+.layout struct name=NativeSourceSpan size=32 align=8
+.layout field start_line type=number offset=0 size=8 align=8
+.layout field start_column type=number offset=8 size=8 align=8
+.layout field end_line type=number offset=16 size=8 align=8
+.layout field end_column type=number offset=24 size=8 align=8
+
+.layout struct name=NativeParameter size=40 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_annotation type=string offset=8 size=8 align=8
+.layout field mutable type=boolean offset=16 size=1 align=1
+.layout field default_value type=string? offset=24 size=8 align=8
+.layout field span type=NativeSourceSpan? offset=32 size=8 align=8
+
+.layout struct name=NativeFunction size=40 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field parameters type=NativeParameter[] offset=8 size=8 align=8
+.layout field return_type type=string offset=16 size=8 align=8
+.layout field effects type=string[] offset=24 size=8 align=8
+.layout field instructions type=NativeInstruction[] offset=32 size=8 align=8
+
+.layout struct name=NativeImportSpecifier size=16 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field alias type=string? offset=8 size=8 align=8
+
+.layout struct name=NativeImport size=24 align=8
+.layout field kind type=string offset=0 size=8 align=8
+.layout field module type=string offset=8 size=8 align=8
+.layout field specifiers type=NativeImportSpecifier[] offset=16 size=8 align=8
+
+.layout struct name=NativeStructField size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_annotation type=string offset=8 size=8 align=8
+.layout field mutable type=boolean offset=16 size=1 align=1
+
+.layout struct name=NativeStructLayoutField size=40 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_annotation type=string offset=8 size=8 align=8
+.layout field offset type=number offset=16 size=8 align=8
+.layout field size type=number offset=24 size=8 align=8
+.layout field align type=number offset=32 size=8 align=8
+
+.layout struct name=NativeStructLayout size=24 align=8
+.layout field size type=number offset=0 size=8 align=8
+.layout field align type=number offset=8 size=8 align=8
+.layout field fields type=NativeStructLayoutField[] offset=16 size=8 align=8
+
+.layout struct name=NativeStruct size=40 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field fields type=NativeStructField[] offset=8 size=8 align=8
+.layout field methods type=NativeFunction[] offset=16 size=8 align=8
+.layout field implements type=string[] offset=24 size=8 align=8
+.layout field layout type=NativeStructLayout? offset=32 size=8 align=8
+
+.layout struct name=NativeInterfaceSignature size=48 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field is_async type=boolean offset=8 size=1 align=1
+.layout field type_parameters type=string[] offset=16 size=8 align=8
+.layout field parameters type=NativeParameter[] offset=24 size=8 align=8
+.layout field return_type type=string offset=32 size=8 align=8
+.layout field effects type=string[] offset=40 size=8 align=8
+
+.layout struct name=NativeInterface size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_parameters type=string[] offset=8 size=8 align=8
+.layout field signatures type=NativeInterfaceSignature[] offset=16 size=8 align=8
+
+.layout struct name=NativeEnumVariantField size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_annotation type=string offset=8 size=8 align=8
+.layout field mutable type=boolean offset=16 size=1 align=1
+
+.layout struct name=NativeEnumVariant size=16 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field fields type=NativeEnumVariantField[] offset=8 size=8 align=8
+
+.layout struct name=NativeEnumVariantLayout size=48 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field tag type=number offset=8 size=8 align=8
+.layout field offset type=number offset=16 size=8 align=8
+.layout field size type=number offset=24 size=8 align=8
+.layout field align type=number offset=32 size=8 align=8
+.layout field fields type=NativeStructLayoutField[] offset=40 size=8 align=8
+
+.layout struct name=NativeEnumLayout size=48 align=8
+.layout field size type=number offset=0 size=8 align=8
+.layout field align type=number offset=8 size=8 align=8
+.layout field tag_type type=string offset=16 size=8 align=8
+.layout field tag_size type=number offset=24 size=8 align=8
+.layout field tag_align type=number offset=32 size=8 align=8
+.layout field variants type=NativeEnumVariantLayout[] offset=40 size=8 align=8
+
+.layout struct name=NativeEnum size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field variants type=NativeEnumVariant[] offset=8 size=8 align=8
+.layout field layout type=NativeEnumLayout? offset=16 size=8 align=8
+
+.layout struct name=NativeBinding size=32 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field mutable type=boolean offset=8 size=1 align=1
+.layout field type_annotation type=string offset=16 size=8 align=8
+.layout field value type=string? offset=24 size=8 align=8
+
+.layout struct name=EnumParseResult size=24 align=8
+.layout field definition type=NativeEnum? offset=0 size=8 align=8
+.layout field next_index type=number offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=CaseComponents size=16 align=8
+.layout field pattern type=string offset=0 size=8 align=8
+.layout field guard type=string? offset=8 size=8 align=8
+
+.layout struct name=InstructionParseResult size=16 align=8
+.layout field instructions type=NativeInstruction[] offset=0 size=8 align=8
+.layout field span_consumed type=boolean offset=8 size=1 align=1
+.layout field value_span_consumed type=boolean offset=9 size=1 align=1
+
+.layout struct name=StructParseResult size=24 align=8
+.layout field definition type=NativeStruct? offset=0 size=8 align=8
+.layout field next_index type=number offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=InterfaceParseResult size=24 align=8
+.layout field definition type=NativeInterface? offset=0 size=8 align=8
+.layout field next_index type=number offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=InterfaceSignatureParse size=64 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field signature type=NativeInterfaceSignature offset=8 size=48 align=8
+.layout field diagnostics type=string[] offset=56 size=8 align=8
+
+.layout struct name=StructHeaderParse size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field implements type=string[] offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=InterfaceHeaderParse size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_parameters type=string[] offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=HeaderNameParse size=32 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_parameters type=string[] offset=8 size=8 align=8
+.layout field remainder type=string offset=16 size=8 align=8
+.layout field diagnostics type=string[] offset=24 size=8 align=8
+
+.layout struct name=StructLayoutHeaderParse size=40 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field name type=string offset=8 size=8 align=8
+.layout field size type=number offset=16 size=8 align=8
+.layout field align type=number offset=24 size=8 align=8
+.layout field diagnostics type=string[] offset=32 size=8 align=8
+
+.layout struct name=StructLayoutFieldParse size=56 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field field type=NativeStructLayoutField offset=8 size=40 align=8
+.layout field diagnostics type=string[] offset=48 size=8 align=8
+
+.layout struct name=ParseNativeResult size=56 align=8
+.layout field functions type=NativeFunction[] offset=0 size=8 align=8
+.layout field imports type=NativeImport[] offset=8 size=8 align=8
+.layout field structs type=NativeStruct[] offset=16 size=8 align=8
+.layout field interfaces type=NativeInterface[] offset=24 size=8 align=8
+.layout field enums type=NativeEnum[] offset=32 size=8 align=8
+.layout field bindings type=NativeBinding[] offset=40 size=8 align=8
+.layout field diagnostics type=string[] offset=48 size=8 align=8
+
+.layout struct name=EnumLayoutHeaderParse size=64 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field name type=string offset=8 size=8 align=8
+.layout field size type=number offset=16 size=8 align=8
+.layout field align type=number offset=24 size=8 align=8
+.layout field tag_type type=string offset=32 size=8 align=8
+.layout field tag_size type=number offset=40 size=8 align=8
+.layout field tag_align type=number offset=48 size=8 align=8
+.layout field diagnostics type=string[] offset=56 size=8 align=8
+
+.layout struct name=EnumLayoutVariantParse size=64 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field variant type=NativeEnumVariantLayout offset=8 size=48 align=8
+.layout field diagnostics type=string[] offset=56 size=8 align=8
+
+.layout struct name=EnumLayoutPayloadParse size=64 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field variant_name type=string offset=8 size=8 align=8
+.layout field field type=NativeStructLayoutField offset=16 size=40 align=8
+.layout field diagnostics type=string[] offset=56 size=8 align=8
+
+.layout struct name=NumberParseResult size=16 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field value type=number offset=8 size=8 align=8
+
+.layout struct name=LayoutManifest size=24 align=8
+.layout field structs type=NativeStruct[] offset=0 size=8 align=8
+.layout field enums type=NativeEnum[] offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
+.layout struct name=BindingComponents size=24 align=8
+.layout field name type=string offset=0 size=8 align=8
+.layout field type_annotation type=string offset=8 size=8 align=8
+.layout field value type=string? offset=16 size=8 align=8
+
+.layout enum name=NativeInstruction size=56 align=8 tag_type=i32 tag_size=4 tag_align=4
+.layout variant Return tag=0 offset=8 size=16 align=8
+.layout payload Return.expression type=string offset=8 size=8 align=8
+.layout payload Return.span type=NativeSourceSpan? offset=16 size=8 align=8
+.layout variant Expression tag=1 offset=8 size=16 align=8
+.layout payload Expression.expression type=string offset=8 size=8 align=8
+.layout payload Expression.span type=NativeSourceSpan? offset=16 size=8 align=8
+.layout variant Let tag=2 offset=8 size=48 align=8
+.layout payload Let.name type=string offset=8 size=8 align=8
+.layout payload Let.mutable type=boolean offset=16 size=1 align=1
+.layout payload Let.type_annotation type=string offset=24 size=8 align=8
+.layout payload Let.value type=string? offset=32 size=8 align=8
+.layout payload Let.span type=NativeSourceSpan? offset=40 size=8 align=8
+.layout payload Let.value_span type=NativeSourceSpan? offset=48 size=8 align=8
+.layout variant If tag=3 offset=8 size=8 align=8
+.layout payload If.condition type=string offset=8 size=8 align=8
+.layout variant Else tag=4 offset=4 size=0 align=1
+.layout variant EndIf tag=5 offset=4 size=0 align=1
+.layout variant For tag=6 offset=8 size=16 align=8
+.layout payload For.target type=string offset=8 size=8 align=8
+.layout payload For.iterable type=string offset=16 size=8 align=8
+.layout variant EndFor tag=7 offset=4 size=0 align=1
+.layout variant Loop tag=8 offset=4 size=0 align=1
+.layout variant EndLoop tag=9 offset=4 size=0 align=1
+.layout variant Break tag=10 offset=4 size=0 align=1
+.layout variant Continue tag=11 offset=4 size=0 align=1
+.layout variant Match tag=12 offset=8 size=8 align=8
+.layout payload Match.expression type=string offset=8 size=8 align=8
+.layout variant Case tag=13 offset=8 size=16 align=8
+.layout payload Case.pattern type=string offset=8 size=8 align=8
+.layout payload Case.guard type=string? offset=16 size=8 align=8
+.layout variant EndMatch tag=14 offset=4 size=0 align=1
+.layout variant Noop tag=15 offset=4 size=0 align=1
+.layout variant Unknown tag=16 offset=8 size=8 align=8
+.layout payload Unknown.text type=string offset=8 size=8 align=8
+

@@ -1,0 +1,10 @@
+; Sailfin Layout Manifest
+.manifest version=1
+
+.layout struct name=SelfHostCheckResult size=40 align=8
+.layout field success type=boolean offset=0 size=1 align=1
+.layout field compiled_count type=number offset=8 size=8 align=8
+.layout field expected_count type=number offset=16 size=8 align=8
+.layout field fatal_diagnostics type=ModuleDiagnostics[] offset=24 size=8 align=8
+.layout field missing_sources type=string[] offset=32 size=8 align=8
+

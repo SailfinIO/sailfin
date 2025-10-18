@@ -5,7 +5,7 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan } from "./native_ir";
+import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
 import { substring, char_code } from "./string_utils";
 
 struct TraitImplementationDescriptor {
@@ -479,6 +479,43 @@ struct BlockLoweringResult {
     string_constants -> StringConstant[];
 }
 
+fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
+    let mut manifests -> LayoutManifest[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        let import_entry = imports[index];
+        // Convert import path like "./ast" to "ast.layout-manifest"
+        let module_path = import_entry.module;
+        let mut manifest_name -> string = "";
+        
+        if starts_with(module_path, "./") {
+            manifest_name = substring(module_path, 2, module_path.length) + ".layout-manifest";
+        } else if starts_with(module_path, "../") {
+            // Skip relative parent imports for now - would need full path resolution
+            index += 1;
+            continue;
+        } else {
+            manifest_name = module_path + ".layout-manifest";
+        }
+        
+        // Try to load the manifest file from build/stage2/
+        let manifest_path = "build/stage2/" + manifest_name;
+        let file_exists = fs.exists(manifest_path);
+        
+        if file_exists {
+            let manifest_content = fs.readFile(manifest_path);
+            let parsed = parse_layout_manifest(manifest_content);
+            manifests = manifests.concat([parsed]);
+        }
+        
+        index += 1;
+    }
+    return manifests;
+}
+
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
@@ -498,8 +535,11 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
 
+    // Load layout manifests for imported modules to enable cross-module member access
+    let imported_manifests = load_imported_layout_manifests(parse.imports);
+    
     let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let type_build = build_type_context(parse.structs, parse.enums, parse.interfaces);
+    let type_build = build_type_context_with_imports(parse.structs, parse.enums, parse.interfaces, imported_manifests);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
     let struct_methods = flatten_struct_methods(parse.structs);
@@ -767,6 +807,25 @@ fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
 
 fn empty_type_context() -> TypeContext {
     return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
+}
+
+fn build_type_context_with_imports(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[], imported_manifests -> LayoutManifest[]) -> TypeContextBuild {
+    // Merge imported structs and enums with local ones
+    let mut all_structs -> NativeStruct[] = structs;
+    let mut all_enums -> NativeEnum[] = enums;
+    
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= imported_manifests.length {
+            break;
+        }
+        let manifest = imported_manifests[manifest_index];
+        all_structs = all_structs.concat(manifest.structs);
+        all_enums = all_enums.concat(manifest.enums);
+        manifest_index += 1;
+    }
+    
+    return build_type_context(all_structs, all_enums, interfaces);
 }
 
 fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
@@ -2183,6 +2242,62 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         return_type: "i8*",
         parameter_types: ["i8*"],
         effects: ["channel"],
+    });
+    
+    // String utility helpers
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "substring",
+        symbol: "sailfin_runtime_substring",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i64", "i64"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "is_whitespace_char",
+        symbol: "sailfin_runtime_is_whitespace_char",
+        return_type: "i1",
+        parameter_types: ["i8"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "is_decimal_digit",
+        symbol: "sailfin_runtime_is_decimal_digit",
+        return_type: "i1",
+        parameter_types: ["i8"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "is_alpha_char",
+        symbol: "sailfin_runtime_is_alpha_char",
+        return_type: "i1",
+        parameter_types: ["i8"],
+        effects: [],
+    });
+    
+    // Array/collection helpers (generic using i8* for element type)
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "append_string",
+        symbol: "sailfin_runtime_append_string",
+        return_type: "{ i8**, i64 }*",
+        parameter_types: ["{ i8**, i64 }*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "concat",
+        symbol: "sailfin_runtime_concat",
+        return_type: "{ i8**, i64 }*",
+        parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
+        effects: [],
+    });
+    
+    // Generic field accessor for opaque imported types
+    // Takes object pointer and field name, returns field value as i8*
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "get_field",
+        symbol: "sailfin_runtime_get_field",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: [],
     });
     
     return descriptors;
@@ -6682,6 +6797,12 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let literal_candidate = trim_text(stripped);
 
     if is_string_literal(literal_candidate) {
+        // Check if this is a single-character literal that should be treated as i8
+        if is_character_literal(literal_candidate) {
+            let char_value = get_character_literal_value(literal_candidate);
+            let operand = LLVMOperand { llvm_type: "i8", value: number_to_string(char_value) };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        }
         return lower_string_literal(literal_candidate, temp_index, lines);
     }
 
@@ -7789,6 +7910,12 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         let candidate = strip_pointer_suffix(base_operand.llvm_type);
         struct_info = find_struct_info_by_llvm_type(context, candidate);
         if struct_info == null {
+            // Handle opaque imported type (i8*) - this can happen if the layout manifest wasn't found
+            if base_operand.llvm_type == "i8*" {
+                diagnostics = append_string(diagnostics, "llvm lowering: member access on opaque type `i8*` (field `" + parse.field + "`) - layout information not available (check if layout manifest exists)");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            
             diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
@@ -9035,6 +9162,17 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
     }
+    // Special case: i8* string to i8 character conversion (extract first character)
+    // This handles comparing string literals with character indexing results
+    if target_type == "i8" && operand.llvm_type == "i8*" {
+        // Load the first character from the string pointer
+        let char_ptr_temp = format_temp_name(temp_index);
+        let char_value_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0");
+        current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp);
+        let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`");
     return CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
 }
@@ -9048,6 +9186,11 @@ fn dominant_type(first -> string, second -> string) -> string {
     }
     if first == second {
         return first;
+    }
+    // Special case: comparing i8 character with i8* string should use i8 for comparison
+    // This handles cases like: text[0] == "a" where text[0] is i8 and "a" is now i8
+    if (first == "i8" && second == "i8*") || (first == "i8*" && second == "i8") {
+        return "i8";
     }
     if first == "double" || second == "double" {
         return "double";
@@ -10420,6 +10563,47 @@ fn is_string_literal(text -> string) -> boolean {
         return false;
     }
     return true;
+}
+
+fn is_character_literal(text -> string) -> boolean {
+    // Check if this is a single-character string literal like "a", "t", "\n"
+    if text.length < 2 {
+        return false;
+    }
+    if text[0] != "\"" || text[text.length - 1] != "\"" {
+        return false;
+    }
+    let inner = substring(text, 1, text.length - 1);
+    // Handle escape sequences
+    if inner.length == 2 && inner[0] == "\\" {
+        return true;
+    }
+    // Single character
+    return inner.length == 1;
+}
+
+fn get_character_literal_value(text -> string) -> number {
+    let inner = substring(text, 1, text.length - 1);
+    if inner.length == 0 {
+        return 0;
+    }
+    // Handle escape sequences
+    if inner.length == 2 && inner[0] == "\\" {
+        let escape = inner[1];
+        if escape == "n" {
+            return char_code("\n");
+        } else if escape == "r" {
+            return char_code("\r");
+        } else if escape == "t" {
+            return char_code("\t");
+        } else if escape == "\"" {
+            return char_code("\"");
+        } else if escape == "\\" {
+            return char_code("\\");
+        }
+        return char_code(escape);
+    }
+    return char_code(inner[0]);
 }
 
 fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {

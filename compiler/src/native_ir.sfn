@@ -293,6 +293,21 @@ fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
     return null;
 }
 
+fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+    let mut index -> number = 0;
+    loop {
+        if index >= artifacts.length {
+            break;
+        }
+        let artifact = artifacts[index];
+        if artifact.format == "sailfin-layout-manifest" {
+            return artifact;
+        }
+        index += 1;
+    }
+    return null;
+}
+
 fn parse_native_artifact(text -> string) -> ParseNativeResult {
     let lines = split_lines(text);
     let mut diagnostics -> string[] = [];

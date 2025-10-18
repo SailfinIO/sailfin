@@ -1,0 +1,9 @@
+; Sailfin Layout Manifest
+.manifest version=1
+
+.layout struct name=LexerState size=32 align=8
+.layout field source type=string offset=0 size=8 align=8
+.layout field index type=number offset=8 size=8 align=8
+.layout field line type=number offset=16 size=8 align=8
+.layout field column type=number offset=24 size=8 align=8
+

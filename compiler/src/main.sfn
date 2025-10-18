@@ -74,6 +74,11 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
     };
 }
 
+struct LLVMCompilationResult {
+    llvm: LoweredLLVMResult;
+    native_module: NativeModule;
+}
+
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
@@ -98,6 +103,36 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
         lifetime_regions: lowered.lifetime_regions,
         capability_manifest: lowered.capability_manifest,
         string_constants: lowered.string_constants,
+    };
+}
+
+fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] {
+    let native_result = compile_to_native(source);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LLVMCompilationResult {
+        llvm: LoweredLLVMResult {
+            ir: lowered.ir,
+            diagnostics: combined,
+            trait_metadata: lowered.trait_metadata,
+            function_effects: lowered.function_effects,
+            lifetime_regions: lowered.lifetime_regions,
+            capability_manifest: lowered.capability_manifest,
+            string_constants: lowered.string_constants,
+        },
+        native_module: native_result.module,
     };
 }
 

@@ -373,6 +373,16 @@ class _FileSystem:
     def __init__(self) -> None:
         self._writes: Dict[str, str] = {}
 
+    def exists(self, path: str) -> bool:
+        """Check if a file exists at the given path."""
+        if path in self._writes:
+            return True
+        target = pathlib.Path(path)
+        try:
+            return target.exists()
+        except OSError:
+            return False
+
     def readFile(self, path: str) -> str:
         stored = self._writes.get(path)
         if stored is not None:
@@ -402,7 +412,8 @@ class CapabilityGrant:
     """Tracks which effects a caller is authorised to exercise."""
 
     def __init__(self, effects: Iterable[str]):
-        self._effects = {effect for effect in (effect.strip() for effect in effects) if effect}
+        self._effects = {effect for effect in (
+            effect.strip() for effect in effects) if effect}
 
     def allow(self, effect: str) -> bool:
         return effect in self._effects
@@ -410,7 +421,8 @@ class CapabilityGrant:
     def require(self, effect: str) -> None:
         if effect not in self._effects:
             allowed = ", ".join(sorted(self._effects)) or "<none>"
-            raise PermissionError(f"capability '{effect}' not granted; allowed effects: {allowed}")
+            raise PermissionError(
+                f"capability '{effect}' not granted; allowed effects: {allowed}")
 
 
 def create_capability_grant(effects: Iterable[str]) -> CapabilityGrant:
@@ -516,7 +528,8 @@ def sleep(milliseconds: int) -> None:
 def _cancel_pending_tasks() -> None:
     if not _TASKS:
         return
-    tasks_by_loop: Dict[asyncio.AbstractEventLoop, List[asyncio.Task[Any]]] = {}
+    tasks_by_loop: Dict[asyncio.AbstractEventLoop,
+                        List[asyncio.Task[Any]]] = {}
     for loop, task in list(_TASKS):
         tasks_by_loop.setdefault(loop, []).append(task)
     for loop, tasks in tasks_by_loop.items():
@@ -528,7 +541,8 @@ def _cancel_pending_tasks() -> None:
         try:
             if loop.is_running():
                 continue
-            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            loop.run_until_complete(asyncio.gather(
+                *tasks, return_exceptions=True))
         except RuntimeError:
             # Loop already closed; nothing else to do.
             pass
@@ -726,7 +740,8 @@ class EnumInstance:
             raise AttributeError(item) from err
 
     def __repr__(self) -> str:
-        payload = ", ".join(f"{field.name}={field.value!r}" for field in self._fields)
+        payload = ", ".join(
+            f"{field.name}={field.value!r}" for field in self._fields)
         return f"{self._type.name}.{self._variant}({payload})"
 
 
@@ -743,7 +758,8 @@ class EnumType:
         self.register_variant(name, field_names)
 
         def constructor(**kwargs: Any) -> EnumInstance:
-            provided = [EnumField(field, kwargs.get(field)) for field in field_names]
+            provided = [EnumField(field, kwargs.get(field))
+                        for field in field_names]
             return EnumInstance(self, name, provided)
 
         constructor.__name__ = name
@@ -1038,7 +1054,8 @@ class _Response:
 
 def serve(handler: Callable[[Any, Any], Any], config: Optional[Dict[str, Any]] = None) -> None:
     config = config or {}
-    console.info(f"[serve] mock server listening on port {config.get('port', 0)}")
+    console.info(
+        f"[serve] mock server listening on port {config.get('port', 0)}")
     samples = [
         _Request(path="/", method="GET"),
         _Request(path="/compute", method="POST", body={"payload": 1}),
@@ -1065,7 +1082,8 @@ class _WebSocketClient:
 class _WebSocketServer:
     def __init__(self, port: int) -> None:
         self.port = port
-        self._clients = [_WebSocketClient("client-1"), _WebSocketClient("client-2")]
+        self._clients = [_WebSocketClient(
+            "client-1"), _WebSocketClient("client-2")]
 
     def clients(self) -> List[_WebSocketClient]:
         return list(self._clients)

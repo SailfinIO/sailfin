@@ -393,6 +393,17 @@ def select_text_artifact(artifacts):
         index += 1
     return None
 
+def select_layout_manifest_artifact(artifacts):
+    index = 0
+    while True:
+        if index >= len(artifacts):
+            break
+        artifact = artifacts[index]
+        if artifact.format == "sailfin-layout-manifest":
+            return artifact
+        index += 1
+    return None
+
 def parse_native_artifact(text):
     lines = split_lines(text)
     diagnostics = []

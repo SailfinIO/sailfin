@@ -1,0 +1,24 @@
+; Sailfin Layout Manifest
+.manifest version=1
+
+.layout struct name=CompiledModule size=16 align=8
+.layout field source_path type=string offset=0 size=8 align=8
+.layout field python_source type=string offset=8 size=8 align=8
+
+.layout struct name=ModuleDiagnostics size=24 align=8
+.layout field source_path type=string offset=0 size=8 align=8
+.layout field messages type=string[] offset=8 size=8 align=8
+.layout field fatal type=boolean offset=16 size=1 align=1
+
+.layout struct name=ModuleCompilationResult size=16 align=8
+.layout field module type=CompiledModule? offset=0 size=8 align=8
+.layout field diagnostics type=ModuleDiagnostics[] offset=8 size=8 align=8
+
+.layout struct name=ProjectCompilation size=16 align=8
+.layout field modules type=CompiledModule[] offset=0 size=8 align=8
+.layout field diagnostics type=ModuleDiagnostics[] offset=8 size=8 align=8
+
+.layout struct name=LLVMCompilationResult size=16 align=8
+.layout field llvm type=LoweredLLVMResult offset=0 size=8 align=8
+.layout field native_module type=NativeModule offset=8 size=8 align=8
+

@@ -25,9 +25,11 @@ source_filename = "sailfin"
 %DecoratorArgument = type { i8*, i8* }
 %ImportSpecifier = type { i8*, i8* }
 %ExportSpecifier = type { i8*, i8* }
+%Token = type { i8*, i8*, double, double }
 
 %Expression = type { i32, [24 x i8] }
 %Statement = type { i32, [56 x i8] }
+%TokenKind = type { i32, [8 x i8] }
 
 declare noalias i8* @malloc(i64)
 

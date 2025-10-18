@@ -75,7 +75,14 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False)
 
         try:
             source = source_path.read_text(encoding="utf-8")
-            result = stage1_main.compile_to_native_llvm(source)
+            # Try the new function that returns both LLVM and native_module
+            if hasattr(stage1_main, "compile_to_native_llvm_full"):
+                full_result = stage1_main.compile_to_native_llvm_full(source)
+                result = full_result.llvm
+                native_module = full_result.native_module
+            else:
+                result = stage1_main.compile_to_native_llvm(source)
+                native_module = None
 
             # Check for diagnostics
             diagnostics = getattr(result, "diagnostics", [])
@@ -102,6 +109,20 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False)
             output_path = output_dir / source_path.with_suffix(".ll").name
             output_path.write_text(ir, encoding="utf-8")
             compiled_modules.append(output_path)
+
+            # Also extract and save layout manifest if available
+            # The manifest contains struct/enum layout information needed for cross-module type resolution
+            if native_module is not None and hasattr(native_module, "artifacts"):
+                for artifact in native_module.artifacts:
+                    if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
+                        manifest_path = output_dir / \
+                            source_path.with_suffix(".layout-manifest").name
+                        manifest_content = getattr(artifact, "contents", "")
+                        manifest_path.write_text(
+                            manifest_content, encoding="utf-8")
+                        if debug:
+                            print(
+                                f"[stage2-bootstrap]   -> {manifest_path.relative_to(REPO_ROOT)}")
 
             if debug:
                 print(

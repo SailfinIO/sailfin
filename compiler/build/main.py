@@ -57,6 +57,14 @@ class ProjectCompilation:
     def __repr__(self):
         return runtime.struct_repr('ProjectCompilation', [runtime.struct_field('modules', self.modules), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class LLVMCompilationResult:
+    def __init__(self, llvm, native_module):
+        self.llvm = llvm
+        self.native_module = native_module
+
+    def __repr__(self):
+        return runtime.struct_repr('LLVMCompilationResult', [runtime.struct_field('llvm', self.llvm), runtime.struct_field('native_module', self.native_module)])
+
 def compile_to_sailfin(source):
     # effects: io
     program = parse_program(source)
@@ -106,6 +114,22 @@ def compile_to_native_llvm(source):
             print.warn("[native-llvm] " + combined[index])
             index += 1
     return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def compile_to_native_llvm_full(source):
+    # effects: io
+    native_result = compile_to_native(source)
+    lowered = lower_to_llvm(native_result.module)
+    combined = []
+    combined = (combined) + (native_result.diagnostics)
+    combined = (combined) + (lowered.diagnostics)
+    if len(combined) > 0:
+        index = 0
+        while True:
+            if index >= len(combined):
+                break
+            print.warn("[native-llvm] " + combined[index])
+            index += 1
+    return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
 
 def main():
     # effects: io
