@@ -207,7 +207,32 @@ size=16 align=8` followed by `.layout field` entries). The manifest emission fun
   access, and `test_native_llvm_execution_method_returns_call_result` validates
   returning function call results (e.g., `return helper(self.data)`) with proper
   call lowering and argument passing. These tests guard against future regressions
-  before self-hosting the compiler with Stage2.
+  before self-hosting the compiler with Stage2. Array indexing expressions
+  (`array[index]`) now fully lower to LLVM, enabling compiler internals to access
+  AST node fields, token arrays, and decorator lists without Python fallbacks. The
+  implementation recognizes `base[index]` syntax using `parse_index_expression`
+  (which splits into base and index expressions by finding the outermost bracket
+  pair), then lowers both sub-expressions to LLVM operands. For heap-allocated
+  arrays (e.g., `number[]` with LLVM type `{ double*, i64 }*`), the compiler loads
+  the array struct, extracts the data pointer (field 0) and length (field 1) via
+  `extractvalue`, performs bounds checking (`icmp uge` comparing index against
+  length), generates `getelementptr` to compute the element address, and loads
+  the element value. String indexing (e.g., `text[0]` where `text` has type `i8*`)
+  works similarly but skips length extraction since strings don't carry stored
+  length metadata. Bounds checks emit comparison instructions and comments marking
+  potential out-of-bounds access (actual trap handling deferred to follow-on work).
+  Regression coverage lives in
+  `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_indexes_primitive_array`
+  (validates indexing into `number[]` arrays with variable and literal indices),
+  `test_native_llvm_execution_indexes_struct_array` (validates indexing into
+  `Token[]` and other struct arrays with field access on indexed results),
+  `test_native_llvm_execution_checks_array_bounds` (confirms bounds check
+  instructions emit in generated IR), and
+  `test_native_llvm_execution_indexes_string_character` (validates character
+  access from strings via `text[index]` returning `i8` values). With array
+  indexing implemented, Stage2 bootstrap warnings for `unsupported expression
+  decorators[index]` and `unsupported expression text[0]` are eliminated,
+  unblocking progress on warning-free self-compilation.
   Borrow expressions now lower into explicit
   LLVM pointer values so functions can accept and forward `&T` / `&mut T`
   parameters without falling back to the Python bridge (guarded by

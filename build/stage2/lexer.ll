@@ -69,6 +69,10 @@ entry:
   store double %t2, double* %l0
   %t3 = load double, double* %l0
   %t4 = extractvalue %LexerState %state, 0
+  %t5 = extractvalue %LexerState %state, 0
+  %t6 = load double, double* %l0
+  %t7 = getelementptr i8, i8* %t5, i64 %t6
+  %t8 = load i8, i8* %t7
   ret i8* null
 }
 

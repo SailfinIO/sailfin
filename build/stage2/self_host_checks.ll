@@ -39,7 +39,7 @@ define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, double %
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8*
   %t0 = alloca [0 x double]
   %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
   %t2 = alloca { double*, i64 }
@@ -57,14 +57,22 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t9 = load double, double* %l2
+  %t9 = load double, double* %l1
+  %t10 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t11 = extractvalue { i8**, i64 } %t10, 0
+  %t12 = extractvalue { i8**, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr i8*, i8** %t11, i64 %t9
+  %t15 = load i8*, i8** %t14
+  store i8* %t15, i8** %l2
+  %t16 = load i8*, i8** %l2
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t10
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t17
 }
 
 define i1 @module_present(i8* %target, double %modules) {
@@ -78,6 +86,7 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
+  %t3 = load double, double* %l0
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0

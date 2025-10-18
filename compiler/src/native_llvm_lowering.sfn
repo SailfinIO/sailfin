@@ -262,6 +262,12 @@ struct MemberAccessParse {
     field -> string;
 }
 
+struct IndexExpressionParse {
+    success -> boolean;
+    base -> string;
+    index -> string;
+}
+
 struct LocalBinding {
     name -> string;
     pointer -> string;
@@ -6564,7 +6570,13 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined, string_constants: lowered_struct.string_constants };
     }
 
-    // Not an enum, try member access
+    // Try index expression before member access (array[index])
+    let index_parse = parse_index_expression(stripped);
+    if index_parse.success {
+        return lower_index_expression(index_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Not an enum or index, try member access
     let member_parse = parse_member_access(stripped);
     if member_parse.success {
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context);
@@ -7360,6 +7372,140 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     current_temp += 1;
     let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: extract_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+}
+
+fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    // Lower the base expression to get the array operand
+    let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context);
+    let mut diagnostics -> string[] = base_result.diagnostics;
+    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
+    
+    if base_result.operand == null {
+        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    
+    let mut current_lines -> string[] = base_result.lines;
+    let mut current_temp -> number = base_result.temp_index;
+    let base_operand = base_result.operand;
+    
+    // Lower the index expression to get i64 value
+    let index_result = lower_expression(parse.index, bindings, locals, current_temp, current_lines, functions, context);
+    diagnostics = diagnostics.concat(index_result.diagnostics);
+    collected_string_constants = merge_string_constants(collected_string_constants, index_result.string_constants);
+    current_lines = index_result.lines;
+    current_temp = index_result.temp_index;
+    
+    if index_result.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: index expression produced no value");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    
+    let index_operand = index_result.operand;
+    
+    // Determine if we're indexing into a heap-allocated array { element_type*, i64 }* or string i8*
+    let array_type = base_operand.llvm_type;
+    let mut element_type -> string = "";
+    let mut is_heap_array -> boolean = false;
+    let mut is_string -> boolean = false;
+    
+    // Check if it's a string (i8*)
+    if array_type == "i8*" {
+        element_type = "i8";
+        is_string = true;
+    } else if ends_with_pointer_suffix(array_type) {
+        // Heap-allocated array: { element_type*, i64 }*
+        let inner_type = strip_pointer_suffix(array_type);
+        
+        // Parse the struct type to extract element type
+        // Expected format: { element_type*, i64 }
+        if starts_with(inner_type, "{") && inner_type.length > 0 && inner_type[inner_type.length - 1] == "}" {
+            let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
+            
+            // Find comma position
+            let mut comma_pos -> number = -1;
+            let mut i -> number = 0;
+            loop {
+                if i >= struct_inner.length {
+                    break;
+                }
+                if struct_inner[i] == "," {
+                    comma_pos = i;
+                    break;
+                }
+                i += 1;
+            }
+            
+            if comma_pos >= 0 {
+                let first_field = trim_text(substring(struct_inner, 0, comma_pos));
+                if ends_with_pointer_suffix(first_field) {
+                    element_type = strip_pointer_suffix(first_field);
+                    is_heap_array = true;
+                }
+            }
+        }
+    }
+    
+    if element_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    
+    // For heap arrays, we need to extract the data pointer and length, then bounds check
+    if is_heap_array || is_string {
+        let mut data_ptr -> string = "";
+        let mut length_value -> string = "";
+        
+        if is_heap_array {
+            // Load the array struct value from the pointer
+            // base_operand.value is something like %values with type { double*, i64 }*
+            // We need to load it to get the struct value
+            let array_struct_type = strip_pointer_suffix(array_type);
+            let loaded_array = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
+            current_temp += 1;
+            
+            // Extract data pointer (field 0) from the loaded struct value
+            let data_ptr_extracted = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
+            current_temp += 1;
+            data_ptr = data_ptr_extracted;
+            
+            // Extract length (field 1) from the loaded struct value
+            let length_temp = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
+            current_temp += 1;
+            length_value = length_temp;
+            
+            // Bounds check: if index >= length, trap
+            let bounds_check = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + index_operand.value + ", " + length_value);
+            current_temp += 1;
+            
+            // For now, we'll skip the actual trap and just emit a comment
+            // TODO: Implement proper trap/error handling
+            current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
+        } else {
+            // For strings, we don't have a stored length, so just use the pointer directly
+            data_ptr = base_operand.value;
+        }
+        
+        // Compute element address using getelementptr
+        let element_ptr = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + index_operand.value);
+        current_temp += 1;
+        
+        // Load the element value
+        let element_value = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr);
+        current_temp += 1;
+        
+        let operand = LLVMOperand { llvm_type: element_type, value: element_value };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    
+    // If we get here, unsupported array type
+    diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`");
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
 fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
@@ -9216,6 +9362,57 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
         return MemberAccessParse { success: false, base: "", field: "" };
     }
     return MemberAccessParse { success: true, base: base, field: field };
+}
+
+fn parse_index_expression(expression -> string) -> IndexExpressionParse {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    // Look for the last '[' that is not inside nested brackets
+    let mut bracket_depth -> number = 0;
+    let mut index_position -> number = -1;
+    let mut i -> number = trimmed.length - 1;
+    
+    // Start from the end to find the outermost closing bracket
+    if trimmed[trimmed.length - 1] != "]" {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    // Now walk backwards to find the matching opening bracket
+    bracket_depth = 1;
+    i = trimmed.length - 2;
+    loop {
+        if i < 0 {
+            break;
+        }
+        let ch = trimmed[i];
+        if ch == "]" {
+            bracket_depth += 1;
+        }
+        if ch == "[" {
+            bracket_depth -= 1;
+            if bracket_depth == 0 {
+                index_position = i;
+                break;
+            }
+        }
+        i -= 1;
+    }
+    
+    if index_position < 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    let base = trim_text(substring(trimmed, 0, index_position));
+    let index = trim_text(substring(trimmed, index_position + 1, trimmed.length - 1));
+    
+    if base.length == 0 || index.length == 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    return IndexExpressionParse { success: true, base: base, index: index };
 }
 
 fn parse_range_iterable(iterable -> string) -> RangeIterableParse {

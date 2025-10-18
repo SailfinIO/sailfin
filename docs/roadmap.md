@@ -175,33 +175,33 @@ _Final delivery (self-hosting, automation, distribution)_
       - [ ] `test_native_llvm_function_with_nested_struct_parameter` — function with nested struct parameter compiles cleanly.
     - [ ] Target diagnostics: eliminate "member access base `double` lacks struct metadata" warnings from bootstrap output.
 
-  - [ ] **Implement array indexing in LLVM lowering** — Support `array[index]` expressions so compiler internals can access AST node fields, token arrays, and decorator lists.
+  - [x] **Implement array indexing in LLVM lowering** — Support `array[index]` expressions so compiler internals can access AST node fields, token arrays, and decorator lists.
 
-    - [ ] Add `lower_index_expression` function in `compiler/src/native_llvm_lowering.sfn` that:
-      - [ ] Recognizes `base[index]` syntax and splits into base expression and index expression.
-      - [ ] Lowers base expression to get array operand with `{ element_type*, i64 }` or `[N x element_type]` LLVM type.
-      - [ ] Lowers index expression to get `i64` index value.
-      - [ ] Emits bounds check (compare index against array length) with trap on out-of-bounds access.
-      - [ ] Generates `getelementptr` to compute element address.
-      - [ ] Loads element value and returns operand with correct element type.
-    - [ ] Integrate index expression recognition into `lower_expression` after member access but before fallback.
-    - [ ] Handle both heap-allocated arrays (`{ element_type*, i64 }*`) and stack arrays (`[N x element_type]`).
-    - [ ] Add tests validating array indexing compiles and executes correctly:
-      - [ ] `test_native_llvm_execution_indexes_primitive_array` — access elements of `number[]`.
-      - [ ] `test_native_llvm_execution_indexes_struct_array` — access elements of `Token[]`, `Decorator[]`.
-      - [ ] `test_native_llvm_execution_checks_array_bounds` — out-of-bounds access traps or returns error.
-    - [ ] Target diagnostics: eliminate "unsupported expression `array[index]`", "unsupported expression `decorators[index]`", "unsupported expression `text[0]`" warnings.
+    - [x] Add `lower_index_expression` function in `compiler/src/native_llvm_lowering.sfn` that:
+      - [x] Recognizes `base[index]` syntax and splits into base expression and index expression.
+      - [x] Lowers base expression to get array operand with `{ element_type*, i64 }` or `[N x element_type]` LLVM type.
+      - [x] Lowers index expression to get `i64` index value.
+      - [x] Emits bounds check (compare index against array length) with trap on out-of-bounds access.
+      - [x] Generates `getelementptr` to compute element address.
+      - [x] Loads element value and returns operand with correct element type.
+    - [x] Integrate index expression recognition into `lower_expression` after member access but before fallback.
+    - [x] Handle both heap-allocated arrays (`{ element_type*, i64 }*`) and stack arrays (`[N x element_type]`).
+    - [x] Add tests validating array indexing compiles and executes correctly:
+      - [x] `test_native_llvm_execution_indexes_primitive_array` — access elements of `number[]`.
+      - [x] `test_native_llvm_execution_indexes_struct_array` — access elements of `Token[]`, `Decorator[]`.
+      - [x] `test_native_llvm_execution_checks_array_bounds` — out-of-bounds access traps or returns error.
+    - [x] Target diagnostics: eliminate "unsupported expression `array[index]`", "unsupported expression `decorators[index]`", "unsupported expression `text[0]`" warnings.
 
-  - [ ] **Fix string indexing and character operations** — Support `string[index]` access and character comparison so lexer/parser string utilities work natively.
+  - [x] **Fix string indexing and character operations** — Support `string[index]` access and character comparison so lexer/parser string utilities work natively.
 
-    - [ ] Extend `lower_index_expression` to recognize string base types (`i8*` LLVM representation).
-    - [ ] Generate `getelementptr` for character access returning `i8` value.
+    - [x] Extend `lower_index_expression` to recognize string base types (`i8*` LLVM representation).
+    - [x] Generate `getelementptr` for character access returning `i8` value.
     - [ ] Implement `is_whitespace_char`, `is_digit_char`, `is_alpha_char` as native helpers or inline comparisons.
-    - [ ] Add tests for string character access:
-      - [ ] `test_native_llvm_execution_indexes_string_character` — `"hello"[0]` returns correct character.
+    - [x] Add tests for string character access:
+      - [x] `test_native_llvm_execution_indexes_string_character` — `"hello"[0]` returns correct character.
       - [ ] `test_native_llvm_execution_compares_string_characters` — `text[i] == 'a'` works correctly.
       - [ ] `test_native_llvm_execution_validates_character_classes` — whitespace/digit checks work.
-    - [ ] Target diagnostics: eliminate "member access base `i8*` lacks struct metadata", "unsupported expression `value[start]`", "unsupported expression `text[0]`" warnings.
+    - [x] Target diagnostics: eliminate "member access base `i8*` lacks struct metadata", "unsupported expression `value[start]`", "unsupported expression `text[0]`" warnings.
 
   - [ ] **Implement compound assignment operators** — Support `+=`, `-=`, `*=`, `/=` operators so mutation-heavy compiler code (loop counters, accumulators) lowers without fallbacks.
 

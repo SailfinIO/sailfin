@@ -386,6 +386,15 @@ class MemberAccessParse:
     def __repr__(self):
         return runtime.struct_repr('MemberAccessParse', [runtime.struct_field('success', self.success), runtime.struct_field('base', self.base), runtime.struct_field('field', self.field)])
 
+class IndexExpressionParse:
+    def __init__(self, success, base, index):
+        self.success = success
+        self.base = base
+        self.index = index
+
+    def __repr__(self):
+        return runtime.struct_repr('IndexExpressionParse', [runtime.struct_field('success', self.success), runtime.struct_field('base', self.base), runtime.struct_field('index', self.index)])
+
 class LocalBinding:
     def __init__(self, name, pointer, llvm_type, type_annotation, consumed, scope_id, scope_depth, ownership=None):
         self.name = name
@@ -4321,6 +4330,9 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context)
         combined = (diagnostics) + (lowered_struct.diagnostics)
         return ExpressionResult(lines=lowered_struct.lines, temp_index=lowered_struct.temp_index, operand=lowered_struct.operand, diagnostics=combined, string_constants=lowered_struct.string_constants)
+    index_parse = parse_index_expression(stripped)
+    if index_parse.success:
+        return lower_index_expression(index_parse, bindings, locals, temp_index, lines, functions, context)
     member_parse = parse_member_access(stripped)
     if member_parse.success:
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context)
@@ -4897,6 +4909,86 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
     current_temp += 1
     operand = LLVMOperand(llvm_type=field_info.llvm_type, value=extract_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+
+def lower_index_expression(parse, bindings, locals, temp_index, lines, functions, context):
+    base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context)
+    diagnostics = base_result.diagnostics
+    collected_string_constants = base_result.string_constants
+    if base_result.operand == None:
+        return ExpressionResult(lines=base_result.lines, temp_index=base_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    current_lines = base_result.lines
+    current_temp = base_result.temp_index
+    base_operand = base_result.operand
+    index_result = lower_expression(parse.index, bindings, locals, current_temp, current_lines, functions, context)
+    diagnostics = (diagnostics) + (index_result.diagnostics)
+    collected_string_constants = merge_string_constants(collected_string_constants, index_result.string_constants)
+    current_lines = index_result.lines
+    current_temp = index_result.temp_index
+    if index_result.operand == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: index expression produced no value")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    index_operand = index_result.operand
+    array_type = base_operand.llvm_type
+    element_type = ""
+    is_heap_array = False
+    is_string = False
+    if array_type == "i8*":
+        element_type = "i8"
+        is_string = True
+    else:
+        if ends_with_pointer_suffix(array_type):
+            inner_type = strip_pointer_suffix(array_type)
+            if starts_with(inner_type, "{")  and  len(inner_type) > 0  and  inner_type[len(inner_type) - 1] == "}":
+                struct_inner = trim_text(substring(inner_type, 1, len(inner_type) - 1))
+                comma_pos = -1
+                i = 0
+                while True:
+                    if i >= len(struct_inner):
+                        break
+                    if struct_inner[i] == ",":
+                        comma_pos = i
+                        break
+                    i += 1
+                if comma_pos >= 0:
+                    first_field = trim_text(substring(struct_inner, 0, comma_pos))
+                    if ends_with_pointer_suffix(first_field):
+                        element_type = strip_pointer_suffix(first_field)
+                        is_heap_array = True
+    if len(element_type) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    if is_heap_array  or  is_string:
+        data_ptr = ""
+        length_value = ""
+        if is_heap_array:
+            array_struct_type = strip_pointer_suffix(array_type)
+            loaded_array = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value)
+            current_temp += 1
+            data_ptr_extracted = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0")
+            current_temp += 1
+            data_ptr = data_ptr_extracted
+            length_temp = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1")
+            current_temp += 1
+            length_value = length_temp
+            bounds_check = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + index_operand.value + ", " + length_value)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)")
+        else:
+            data_ptr = base_operand.value
+        element_ptr = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + index_operand.value)
+        current_temp += 1
+        element_value = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr)
+        current_temp += 1
+        operand = LLVMOperand(llvm_type=element_type, value=element_value)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+    diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`")
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def lower_array_literal(text, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
@@ -6272,6 +6364,37 @@ def parse_member_access(expression):
     if not is_simple_identifier(field):
         return MemberAccessParse(success=False, base="", field="")
     return MemberAccessParse(success=True, base=base, field=field)
+
+def parse_index_expression(expression):
+    trimmed = trim_text(expression)
+    if len(trimmed) == 0:
+        return IndexExpressionParse(success=False, base="", index="")
+    bracket_depth = 0
+    index_position = -1
+    i = len(trimmed) - 1
+    if trimmed[len(trimmed) - 1] != "]":
+        return IndexExpressionParse(success=False, base="", index="")
+    bracket_depth = 1
+    i = len(trimmed) - 2
+    while True:
+        if i < 0:
+            break
+        ch = trimmed[i]
+        if ch == "]":
+            bracket_depth += 1
+        if ch == "[":
+            bracket_depth -= 1
+            if bracket_depth == 0:
+                index_position = i
+                break
+        i -= 1
+    if index_position < 0:
+        return IndexExpressionParse(success=False, base="", index="")
+    base = trim_text(substring(trimmed, 0, index_position))
+    index = trim_text(substring(trimmed, index_position + 1, len(trimmed) - 1))
+    if len(base) == 0  or  len(index) == 0:
+        return IndexExpressionParse(success=False, base="", index="")
+    return IndexExpressionParse(success=True, base=base, index=index)
 
 def parse_range_iterable(iterable):
     trimmed = trim_text(iterable)

@@ -2315,17 +2315,19 @@ loop.header4:
 loop.body5:
   %t44 = load double, double* %l7
   %t45 = load double, double* %l5
+  %t46 = load double, double* %l5
+  %t47 = load double, double* %l7
   store double 0.0, double* %l8
-  %t46 = load double, double* %l8
+  %t48 = load double, double* %l8
   br label %loop.latch6
 loop.latch6:
   br label %loop.header4
 afterloop7:
-  %t47 = load %Parser, %Parser* %l0
-  %t48 = insertvalue %TypeParameterParseResult undef, i8* null, 0
-  %t49 = load { double*, i64 }*, { double*, i64 }** %l6
-  %t50 = insertvalue %TypeParameterParseResult %t48, { i8**, i64 }* null, 1
-  ret %TypeParameterParseResult %t50
+  %t49 = load %Parser, %Parser* %l0
+  %t50 = insertvalue %TypeParameterParseResult undef, i8* null, 0
+  %t51 = load { double*, i64 }*, { double*, i64 }** %l6
+  %t52 = insertvalue %TypeParameterParseResult %t50, { i8**, i64 }* null, 1
+  ret %TypeParameterParseResult %t52
 }
 
 define %ImplementsParseResult @parse_implements_clause(%Parser %parser) {
@@ -2335,7 +2337,7 @@ entry:
   %l2 = alloca { double*, i64 }*
   %l3 = alloca { i8**, i64 }*
   %l4 = alloca double
-  %l5 = alloca double
+  %l5 = alloca i8*
   %t0 = call %Parser @skip_trivia(%Parser %parser)
   store %Parser %t0, %Parser* %l0
   %t1 = load %Parser, %Parser* %l0
@@ -2406,18 +2408,28 @@ loop.header2:
 loop.body3:
   %t45 = load double, double* %l4
   %t46 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  store double 0.0, double* %l5
-  %t47 = load double, double* %l5
+  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t48 = load double, double* %l4
+  %t49 = load { i8**, i64 }, { i8**, i64 }* %t47
+  %t50 = extractvalue { i8**, i64 } %t49, 0
+  %t51 = extractvalue { i8**, i64 } %t49, 1
+  %t52 = icmp uge i64 %t48, %t51
+  ; bounds check: %t52 (if true, out of bounds)
+  %t53 = getelementptr i8*, i8** %t50, i64 %t48
+  %t54 = load i8*, i8** %t53
+  %t55 = call i8* @trim_text(i8* %t54)
+  store i8* %t55, i8** %l5
+  %t56 = load i8*, i8** %l5
   br label %loop.latch4
 loop.latch4:
   br label %loop.header2
 afterloop5:
-  %t48 = load %Parser, %Parser* %l0
-  %t49 = insertvalue %ImplementsParseResult undef, i8* null, 0
-  %t50 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t51 = insertvalue %ImplementsParseResult %t49, { i8**, i64 }* null, 1
-  %t52 = insertvalue %ImplementsParseResult %t51, i1 1, 2
-  ret %ImplementsParseResult %t52
+  %t57 = load %Parser, %Parser* %l0
+  %t58 = insertvalue %ImplementsParseResult undef, i8* null, 0
+  %t59 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t60 = insertvalue %ImplementsParseResult %t58, { i8**, i64 }* null, 1
+  %t61 = insertvalue %ImplementsParseResult %t60, i1 1, 2
+  ret %ImplementsParseResult %t61
 }
 
 define %ParameterParseResult @parse_single_parameter(%Parser %parser) {
@@ -3702,35 +3714,37 @@ loop.header2:
 loop.body3:
   %t42 = load double, double* %l5
   %t43 = load double, double* %l3
+  %t44 = load double, double* %l3
+  %t45 = load double, double* %l5
   store double 0.0, double* %l6
-  %t44 = load double, double* %l6
+  %t46 = load double, double* %l6
   br label %loop.latch4
 loop.latch4:
   br label %loop.header2
 afterloop5:
-  %t45 = load %Parser, %Parser* %l1
-  %t46 = call %BlockParseResult @parse_block(%Parser %t45)
-  store %BlockParseResult %t46, %BlockParseResult* %l7
-  %t47 = load %BlockParseResult, %BlockParseResult* %l7
-  %t48 = extractvalue %BlockParseResult %t47, 1
+  %t47 = load %Parser, %Parser* %l1
+  %t48 = call %BlockParseResult @parse_block(%Parser %t47)
+  store %BlockParseResult %t48, %BlockParseResult* %l7
   %t49 = load %BlockParseResult, %BlockParseResult* %l7
-  %t50 = extractvalue %BlockParseResult %t49, 0
-  store %Parser zeroinitializer, %Parser* %l1
+  %t50 = extractvalue %BlockParseResult %t49, 1
   %t51 = load %BlockParseResult, %BlockParseResult* %l7
-  %t52 = extractvalue %BlockParseResult %t51, 1
-  store i8* %t52, i8** %l8
-  %t53 = load %Parser, %Parser* %l1
-  %t54 = call %Parser @skip_trivia(%Parser %t53)
-  store %Parser %t54, %Parser* %l1
+  %t52 = extractvalue %BlockParseResult %t51, 0
+  store %Parser zeroinitializer, %Parser* %l1
+  %t53 = load %BlockParseResult, %BlockParseResult* %l7
+  %t54 = extractvalue %BlockParseResult %t53, 1
+  store i8* %t54, i8** %l8
   %t55 = load %Parser, %Parser* %l1
-  %t56 = call double @parser_peek_raw(%Parser %t55)
-  store double 0.0, double* %l9
+  %t56 = call %Parser @skip_trivia(%Parser %t55)
+  store %Parser %t56, %Parser* %l1
   %t57 = load %Parser, %Parser* %l1
-  %t58 = insertvalue %BlockStatementParseResult undef, i8* null, 0
-  %t59 = load double, double* %l9
-  %t60 = insertvalue %BlockStatementParseResult %t58, i8* null, 1
-  %t61 = insertvalue %BlockStatementParseResult %t60, i1 1, 2
-  ret %BlockStatementParseResult %t61
+  %t58 = call double @parser_peek_raw(%Parser %t57)
+  store double 0.0, double* %l9
+  %t59 = load %Parser, %Parser* %l1
+  %t60 = insertvalue %BlockStatementParseResult undef, i8* null, 0
+  %t61 = load double, double* %l9
+  %t62 = insertvalue %BlockStatementParseResult %t60, i8* null, 1
+  %t63 = insertvalue %BlockStatementParseResult %t62, i1 1, 2
+  ret %BlockStatementParseResult %t63
 }
 
 define %BlockStatementParseResult @parse_return_statement(%Parser %parser) {
@@ -3799,35 +3813,36 @@ merge1:
   %t36 = load double, double* %l6
   br label %loop.header2
 loop.header2:
-  %t41 = phi { double*, i64 }* [ %t32, %entry ], [ %t40, %loop.latch4 ]
-  store { double*, i64 }* %t41, { double*, i64 }** %l2
+  %t42 = phi { double*, i64 }* [ %t32, %entry ], [ %t41, %loop.latch4 ]
+  store { double*, i64 }* %t42, { double*, i64 }** %l2
   br label %loop.body3
 loop.body3:
   %t37 = load double, double* %l6
   %t38 = load double, double* %l3
   %t39 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t40 = load double, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t40 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t41 = load { double*, i64 }*, { double*, i64 }** %l2
   br label %loop.header2
 afterloop5:
-  %t42 = load %Parser, %Parser* %l1
-  %t43 = call %Parser @skip_trivia(%Parser %t42)
-  store %Parser %t43, %Parser* %l1
-  %t44 = load %Parser, %Parser* %l1
-  %t45 = call double @parser_peek_raw(%Parser %t44)
-  store double %t45, double* %l7
-  %t46 = load double, double* %l7
-  %t47 = load { double*, i64 }*, { double*, i64 }** %l2
-  %t48 = call double @source_span_from_tokens(double 0.0)
-  store double %t48, double* %l8
+  %t43 = load %Parser, %Parser* %l1
+  %t44 = call %Parser @skip_trivia(%Parser %t43)
+  store %Parser %t44, %Parser* %l1
+  %t45 = load %Parser, %Parser* %l1
+  %t46 = call double @parser_peek_raw(%Parser %t45)
+  store double %t46, double* %l7
+  %t47 = load double, double* %l7
+  %t48 = load { double*, i64 }*, { double*, i64 }** %l2
+  %t49 = call double @source_span_from_tokens(double 0.0)
+  store double %t49, double* %l8
   store double 0.0, double* %l9
-  %t49 = load %Parser, %Parser* %l1
-  %t50 = insertvalue %BlockStatementParseResult undef, i8* null, 0
-  %t51 = load double, double* %l9
-  %t52 = insertvalue %BlockStatementParseResult %t50, i8* null, 1
-  %t53 = insertvalue %BlockStatementParseResult %t52, i1 1, 2
-  ret %BlockStatementParseResult %t53
+  %t50 = load %Parser, %Parser* %l1
+  %t51 = insertvalue %BlockStatementParseResult undef, i8* null, 0
+  %t52 = load double, double* %l9
+  %t53 = insertvalue %BlockStatementParseResult %t51, i8* null, 1
+  %t54 = insertvalue %BlockStatementParseResult %t53, i1 1, 2
+  ret %BlockStatementParseResult %t54
 }
 
 define %BlockStatementParseResult @parse_expression_statement(%Parser %parser, double %decorators) {
@@ -3881,54 +3896,66 @@ entry:
   %t26 = load double, double* %l4
   br label %loop.header0
 loop.header0:
-  %t32 = phi { double*, i64 }* [ %t25, %entry ], [ %t31, %loop.latch2 ]
-  store { double*, i64 }* %t32, { double*, i64 }** %l3
+  %t42 = phi { double*, i64 }* [ %t25, %entry ], [ %t41, %loop.latch2 ]
+  store { double*, i64 }* %t42, { double*, i64 }** %l3
   br label %loop.body1
 loop.body1:
   %t27 = load double, double* %l4
   %t28 = load %CaptureResult, %CaptureResult* %l2
   %t29 = extractvalue %CaptureResult %t28, 1
   %t30 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t31 = load %CaptureResult, %CaptureResult* %l2
+  %t32 = extractvalue %CaptureResult %t31, 1
+  %t33 = load double, double* %l4
+  %t34 = load { i8**, i64 }, { i8**, i64 }* %t32
+  %t35 = extractvalue { i8**, i64 } %t34, 0
+  %t36 = extractvalue { i8**, i64 } %t34, 1
+  %t37 = icmp uge i64 %t33, %t36
+  ; bounds check: %t37 (if true, out of bounds)
+  %t38 = getelementptr i8*, i8** %t35, i64 %t33
+  %t39 = load i8*, i8** %t38
+  %t40 = call double @append_token(double 0.0, double 0.0)
+  store { double*, i64 }* null, { double*, i64 }** %l3
   br label %loop.latch2
 loop.latch2:
-  %t31 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t41 = load { double*, i64 }*, { double*, i64 }** %l3
   br label %loop.header0
 afterloop3:
-  %t33 = load %CaptureResult, %CaptureResult* %l2
-  %t34 = extractvalue %CaptureResult %t33, 1
-  %t35 = call double @trim_token_edges(double 0.0)
-  store double %t35, double* %l5
-  %t36 = load double, double* %l5
-  %t37 = load %CaptureResult, %CaptureResult* %l2
-  %t38 = extractvalue %CaptureResult %t37, 0
+  %t43 = load %CaptureResult, %CaptureResult* %l2
+  %t44 = extractvalue %CaptureResult %t43, 1
+  %t45 = call double @trim_token_edges(double 0.0)
+  store double %t45, double* %l5
+  %t46 = load double, double* %l5
+  %t47 = load %CaptureResult, %CaptureResult* %l2
+  %t48 = extractvalue %CaptureResult %t47, 0
   store %Parser zeroinitializer, %Parser* %l0
-  %t39 = load %Parser, %Parser* %l0
-  %t40 = call %Parser @skip_trivia(%Parser %t39)
-  store %Parser %t40, %Parser* %l0
-  %t41 = load %Parser, %Parser* %l0
-  %t42 = call double @parser_peek_raw(%Parser %t41)
-  store double %t42, double* %l6
-  %t43 = load double, double* %l6
-  %t44 = load { double*, i64 }*, { double*, i64 }** %l3
-  %t45 = load double, double* %l6
-  %t46 = call double @append_token(double 0.0, double %t45)
+  %t49 = load %Parser, %Parser* %l0
+  %t50 = call %Parser @skip_trivia(%Parser %t49)
+  store %Parser %t50, %Parser* %l0
+  %t51 = load %Parser, %Parser* %l0
+  %t52 = call double @parser_peek_raw(%Parser %t51)
+  store double %t52, double* %l6
+  %t53 = load double, double* %l6
+  %t54 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t55 = load double, double* %l6
+  %t56 = call double @append_token(double 0.0, double %t55)
   store { double*, i64 }* null, { double*, i64 }** %l3
-  %t47 = load %Parser, %Parser* %l0
-  %t48 = call %Parser @parser_advance_raw(%Parser %t47)
-  store %Parser %t48, %Parser* %l0
-  %t49 = load double, double* %l5
-  %t50 = call double @expression_from_tokens(double %t49)
-  store double %t50, double* %l7
-  %t51 = load { double*, i64 }*, { double*, i64 }** %l3
-  %t52 = call double @source_span_from_tokens(double 0.0)
-  store double %t52, double* %l8
+  %t57 = load %Parser, %Parser* %l0
+  %t58 = call %Parser @parser_advance_raw(%Parser %t57)
+  store %Parser %t58, %Parser* %l0
+  %t59 = load double, double* %l5
+  %t60 = call double @expression_from_tokens(double %t59)
+  store double %t60, double* %l7
+  %t61 = load { double*, i64 }*, { double*, i64 }** %l3
+  %t62 = call double @source_span_from_tokens(double 0.0)
+  store double %t62, double* %l8
   store double 0.0, double* %l9
-  %t53 = load %Parser, %Parser* %l0
-  %t54 = insertvalue %BlockStatementParseResult undef, i8* null, 0
-  %t55 = load double, double* %l9
-  %t56 = insertvalue %BlockStatementParseResult %t54, i8* null, 1
-  %t57 = insertvalue %BlockStatementParseResult %t56, i1 1, 2
-  ret %BlockStatementParseResult %t57
+  %t63 = load %Parser, %Parser* %l0
+  %t64 = insertvalue %BlockStatementParseResult undef, i8* null, 0
+  %t65 = load double, double* %l9
+  %t66 = insertvalue %BlockStatementParseResult %t64, i8* null, 1
+  %t67 = insertvalue %BlockStatementParseResult %t66, i1 1, 2
+  ret %BlockStatementParseResult %t67
 }
 
 define %StatementParseResult @parse_unknown(%Parser %parser) {
@@ -4011,38 +4038,49 @@ entry:
 define %Parser @skip_trivia(%Parser %parser) {
 entry:
   %l0 = alloca %Parser
-  %l1 = alloca double
+  %l1 = alloca i8*
   store %Parser %parser, %Parser* %l0
   %t0 = load %Parser, %Parser* %l0
   br label %loop.header0
 loop.header0:
-  %t12 = phi %Parser [ %t0, %entry ], [ %t11, %loop.latch2 ]
-  store %Parser %t12, %Parser* %l0
+  %t22 = phi %Parser [ %t0, %entry ], [ %t21, %loop.latch2 ]
+  store %Parser %t22, %Parser* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load %Parser, %Parser* %l0
   %t2 = extractvalue %Parser %t1, 1
   %t3 = load %Parser, %Parser* %l0
   %t4 = extractvalue %Parser %t3, 0
-  store double 0.0, double* %l1
-  %t5 = load double, double* %l1
-  %t6 = call i1 @is_trivia_token(double %t5)
+  %t5 = load %Parser, %Parser* %l0
+  %t6 = extractvalue %Parser %t5, 0
   %t7 = load %Parser, %Parser* %l0
-  %t8 = load double, double* %l1
-  br i1 %t6, label %then4, label %merge5
+  %t8 = extractvalue %Parser %t7, 1
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %t6
+  %t10 = extractvalue { i8**, i64 } %t9, 0
+  %t11 = extractvalue { i8**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr i8*, i8** %t10, i64 %t8
+  %t14 = load i8*, i8** %t13
+  store i8* %t14, i8** %l1
+  %t15 = load i8*, i8** %l1
+  %t16 = call i1 @is_trivia_token(double 0.0)
+  %t17 = load %Parser, %Parser* %l0
+  %t18 = load i8*, i8** %l1
+  br i1 %t16, label %then4, label %merge5
 then4:
-  %t9 = load %Parser, %Parser* %l0
-  %t10 = call %Parser @parser_advance_raw(%Parser %t9)
-  store %Parser %t10, %Parser* %l0
+  %t19 = load %Parser, %Parser* %l0
+  %t20 = call %Parser @parser_advance_raw(%Parser %t19)
+  store %Parser %t20, %Parser* %l0
   br label %loop.latch2
 merge5:
   br label %afterloop3
 loop.latch2:
-  %t11 = load %Parser, %Parser* %l0
+  %t21 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
-  %t13 = load %Parser, %Parser* %l0
-  ret %Parser %t13
+  %t23 = load %Parser, %Parser* %l0
+  ret %Parser %t23
 }
 
 define %Parser @parser_advance_raw(%Parser %parser) {
@@ -4374,27 +4412,32 @@ define i1 @looks_like_number(i8* %text) {
 entry:
   %l0 = alloca i1
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8
   store i1 0, i1* %l0
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l1
-  %t1 = load i1, i1* %l0
-  %t2 = load double, double* %l1
+  %t1 = getelementptr i8, i8* %text, i64 0
+  %t2 = load i8, i8* %t1
+  %t3 = load i1, i1* %l0
+  %t4 = load double, double* %l1
   br label %loop.header0
 loop.header0:
   br label %loop.body1
 loop.body1:
-  %t3 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t4 = load double, double* %l2
-  %s5 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.5, i32 0, i32 0
-  %t6 = load double, double* %l2
-  %t7 = call double @is_decimal_digit(double %t6)
-  %t8 = fcmp one double %t7, 0.0
-  %t9 = load i1, i1* %l0
-  %t10 = load double, double* %l1
-  %t11 = load double, double* %l2
-  br i1 %t8, label %then4, label %merge5
+  %t5 = load double, double* %l1
+  %t6 = load double, double* %l1
+  %t7 = getelementptr i8, i8* %text, i64 %t6
+  %t8 = load i8, i8* %t7
+  store i8 %t8, i8* %l2
+  %t9 = load i8, i8* %l2
+  %s10 = getelementptr inbounds [2 x i8], [2 x i8]* @.str.10, i32 0, i32 0
+  %t11 = load i8, i8* %l2
+  %t12 = call double @is_decimal_digit(i8 %t11)
+  %t13 = fcmp one double %t12, 0.0
+  %t14 = load i1, i1* %l0
+  %t15 = load double, double* %l1
+  %t16 = load i8, i8* %l2
+  br i1 %t13, label %then4, label %merge5
 then4:
   ret i1 0
 merge5:
@@ -4438,14 +4481,15 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l4
+  %t11 = load double, double* %l4
   store double 0.0, double* %l5
-  %t11 = load double, double* %l5
+  %t12 = load double, double* %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t12 = sitofp i64 -1 to double
-  ret double %t12
+  %t13 = sitofp i64 -1 to double
+  ret double %t13
 }
 
 define %ExpressionCollectResult @expression_tokens_collect_until(%ExpressionTokens %state, { i8**, i64 }* %terminators) {
@@ -5580,26 +5624,27 @@ entry:
   %t3 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t7 = phi i8* [ %t2, %entry ], [ %t6, %loop.latch2 ]
-  store i8* %t7, i8** %l0
+  %t8 = phi i8* [ %t2, %entry ], [ %t7, %loop.latch2 ]
+  store i8* %t8, i8** %l0
   br label %loop.body1
 loop.body1:
   %t4 = load double, double* %l1
   %t5 = load i8*, i8** %l0
+  %t6 = load double, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t6 = load i8*, i8** %l0
+  %t7 = load i8*, i8** %l0
   br label %loop.header0
 afterloop3:
-  %t8 = load i8*, i8** %l0
-  ret i8* %t8
+  %t9 = load i8*, i8** %l0
+  ret i8* %t9
 }
 
 define i8* @trim_text(i8* %value) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
-  %l2 = alloca double
+  %l2 = alloca i8
   %l3 = alloca double
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
@@ -5619,13 +5664,16 @@ loop.body1:
 then4:
   br label %afterloop3
 merge5:
-  store double 0.0, double* %l2
-  %t8 = load double, double* %l2
-  %t9 = call i1 @is_trim_whitespace(i8* null)
-  %t10 = load double, double* %l0
-  %t11 = load double, double* %l1
-  %t12 = load double, double* %l2
-  br i1 %t9, label %then6, label %merge7
+  %t8 = load double, double* %l0
+  %t9 = getelementptr i8, i8* %value, i64 %t8
+  %t10 = load i8, i8* %t9
+  store i8 %t10, i8* %l2
+  %t11 = load i8, i8* %l2
+  %t12 = call i1 @is_trim_whitespace(i8* null)
+  %t13 = load double, double* %l0
+  %t14 = load double, double* %l1
+  %t15 = load i8, i8* %l2
+  br i1 %t12, label %then6, label %merge7
 then6:
   br label %loop.latch2
 merge7:
@@ -5633,39 +5681,39 @@ merge7:
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t13 = load double, double* %l0
-  %t14 = load double, double* %l1
+  %t16 = load double, double* %l0
+  %t17 = load double, double* %l1
   br label %loop.header8
 loop.header8:
   br label %loop.body9
 loop.body9:
-  %t15 = load double, double* %l1
-  %t16 = load double, double* %l0
-  %t17 = fcmp ole double %t15, %t16
-  %t18 = load double, double* %l0
-  %t19 = load double, double* %l1
-  br i1 %t17, label %then12, label %merge13
+  %t18 = load double, double* %l1
+  %t19 = load double, double* %l0
+  %t20 = fcmp ole double %t18, %t19
+  %t21 = load double, double* %l0
+  %t22 = load double, double* %l1
+  br i1 %t20, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
   store double 0.0, double* %l3
-  %t20 = load double, double* %l3
-  %t21 = call i1 @is_trim_whitespace(i8* null)
-  %t22 = load double, double* %l0
-  %t23 = load double, double* %l1
-  %t24 = load double, double* %l3
-  br i1 %t21, label %then14, label %merge15
+  %t23 = load double, double* %l3
+  %t24 = call i1 @is_trim_whitespace(i8* null)
+  %t25 = load double, double* %l0
+  %t26 = load double, double* %l1
+  %t27 = load double, double* %l3
+  br i1 %t24, label %then14, label %merge15
 then14:
-  %t25 = load double, double* %l1
+  %t28 = load double, double* %l1
   br label %loop.latch10
 merge15:
   br label %afterloop11
 loop.latch10:
   br label %loop.header8
 afterloop11:
-  %t26 = load double, double* %l0
-  %t27 = load double, double* %l1
-  %t28 = call double @substring(i8* %value, double %t26, double %t27)
+  %t29 = load double, double* %l0
+  %t30 = load double, double* %l1
+  %t31 = call double @substring(i8* %value, double %t29, double %t30)
   ret i8* null
 }
 
@@ -5689,6 +5737,14 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
+  %t3 = load double, double* %l0
+  %t4 = load { i8**, i64 }, { i8**, i64 }* %values
+  %t5 = extractvalue { i8**, i64 } %t4, 0
+  %t6 = extractvalue { i8**, i64 } %t4, 1
+  %t7 = icmp uge i64 %t3, %t6
+  ; bounds check: %t7 (if true, out of bounds)
+  %t8 = getelementptr i8*, i8** %t5, i64 %t3
+  %t9 = load i8*, i8** %t8
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
@@ -5704,7 +5760,7 @@ entry:
 define i1 @is_whitespace_lexeme(i8* %text) {
 entry:
   %l0 = alloca double
-  %l1 = alloca double
+  %l1 = alloca i8
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = load double, double* %l0
@@ -5713,13 +5769,16 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
-  store double 0.0, double* %l1
-  %t3 = load double, double* %l1
-  %t4 = call double @is_trim_whitespace(double %t3)
-  %t5 = fcmp one double %t4, 0.0
-  %t6 = load double, double* %l0
-  %t7 = load double, double* %l1
-  br i1 %t5, label %then4, label %merge5
+  %t3 = load double, double* %l0
+  %t4 = getelementptr i8, i8* %text, i64 %t3
+  %t5 = load i8, i8* %t4
+  store i8 %t5, i8* %l1
+  %t6 = load i8, i8* %l1
+  %t7 = call double @is_trim_whitespace(i8 %t6)
+  %t8 = fcmp one double %t7, 0.0
+  %t9 = load double, double* %l0
+  %t10 = load i8, i8* %l1
+  br i1 %t8, label %then4, label %merge5
 then4:
   ret i1 0
 merge5:
@@ -5867,9 +5926,12 @@ define i8* @strip_surrounding_quotes(i8* %text) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
-  store double 0.0, double* %l0
+  %t0 = getelementptr i8, i8* %text, i64 0
+  %t1 = load i8, i8* %t0
+  %t2 = call double @char_code(i8 %t1)
+  store double %t2, double* %l0
   store double 0.0, double* %l1
-  %t0 = load double, double* %l0
+  %t3 = load double, double* %l0
   ret i8* %text
 }
 
@@ -5923,26 +5985,27 @@ entry:
   %t17 = load double, double* %l6
   br label %loop.header0
 loop.header0:
-  %t23 = phi i8* [ %t12, %entry ], [ %t22, %loop.latch2 ]
-  store i8* %t23, i8** %l1
+  %t24 = phi i8* [ %t12, %entry ], [ %t23, %loop.latch2 ]
+  store i8* %t24, i8** %l1
   br label %loop.body1
 loop.body1:
   %t18 = load double, double* %l6
+  %t19 = load double, double* %l6
   store double 0.0, double* %l7
-  %t19 = load double, double* %l7
-  %t20 = load i8*, i8** %l1
-  %t21 = load double, double* %l7
+  %t20 = load double, double* %l7
+  %t21 = load i8*, i8** %l1
+  %t22 = load double, double* %l7
   br label %loop.latch2
 loop.latch2:
-  %t22 = load i8*, i8** %l1
+  %t23 = load i8*, i8** %l1
   br label %loop.header0
 afterloop3:
-  %t24 = load i8*, i8** %l1
-  %t25 = call i8* @trim_text(i8* %t24)
-  store i8* %t25, i8** %l8
-  %t26 = load i8*, i8** %l8
-  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t27
+  %t25 = load i8*, i8** %l1
+  %t26 = call i8* @trim_text(i8* %t25)
+  store i8* %t26, i8** %l8
+  %t27 = load i8*, i8** %l8
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t28
 }
 
 define double @find_top_level_symbol(double %tokens, i8* %symbol) {
@@ -5973,14 +6036,15 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l4
+  %t11 = load double, double* %l4
   store double 0.0, double* %l5
-  %t11 = load double, double* %l5
+  %t12 = load double, double* %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t12 = sitofp i64 -1 to double
-  ret double %t12
+  %t13 = sitofp i64 -1 to double
+  ret double %t13
 }
 
 define double @find_top_level_identifier(double %tokens, i8* %keyword) {
@@ -6011,15 +6075,16 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l4
+  %t11 = load double, double* %l4
   store double 0.0, double* %l5
-  %t11 = load double, double* %l5
   %t12 = load double, double* %l5
+  %t13 = load double, double* %l5
   br label %loop.latch2
 loop.latch2:
   br label %loop.header0
 afterloop3:
-  %t13 = sitofp i64 -1 to double
-  ret double %t13
+  %t14 = sitofp i64 -1 to double
+  ret double %t14
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {

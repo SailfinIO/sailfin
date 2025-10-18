@@ -3358,3 +3358,153 @@ fn main() -> number {
 
     # Verify it compiles successfully
     _compile_ir(ir)
+
+
+def test_native_llvm_execution_indexes_primitive_array(compile_stage2) -> None:
+    """Test array indexing for primitive types (number[])."""
+    source = """
+fn get_element(values -> number[], index -> int) -> number {
+    return values[index];
+}
+
+fn get_first(values -> number[]) -> number {
+    return values[0];
+}
+
+fn get_last(values -> number[]) -> number {
+    let index = 3;
+    return values[index];
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source)
+
+    # Check that array indexing doesn't produce unsupported expression warnings
+    unsupported_errors = [
+        diag for diag in lowered.diagnostics
+        if "unsupported expression" in diag and "[" in diag
+    ]
+    assert not unsupported_errors, f"Array indexing should be supported: {unsupported_errors}"
+
+    ir = lowered.ir
+
+    # Check that getelementptr is used for indexing
+    assert "getelementptr" in ir, "GEP instruction should be used for array indexing"
+
+    # Check that load is used to read element
+    assert "load" in ir, "Load instruction should be used to read array element"
+
+    # Check for extractvalue to get data pointer from array struct
+    assert "extractvalue" in ir, "Extractvalue should be used to get array data pointer"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_indexes_struct_array(compile_stage2) -> None:
+    """Test array indexing for struct arrays (Token[], Decorator[])."""
+    source = """
+struct Token {
+    text -> string;
+    line -> int;
+}
+
+fn get_token(tokens -> Token[], index -> int) -> Token {
+    return tokens[index];
+}
+
+fn get_first_token_line(tokens -> Token[]) -> int {
+    let token = tokens[0];
+    return token.line;
+}
+
+fn main() -> int {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source)
+
+    # Check that array indexing doesn't produce unsupported expression warnings
+    unsupported_errors = [
+        diag for diag in lowered.diagnostics
+        if "unsupported expression" in diag and "tokens[" in diag
+    ]
+    assert not unsupported_errors, f"Struct array indexing should be supported: {unsupported_errors}"
+
+    ir = lowered.ir
+
+    # Check that Token struct type is defined
+    assert "%Token" in ir, "Token struct type should be defined"
+
+    # Check that getelementptr is used for array indexing
+    assert "getelementptr" in ir, "GEP instruction should be used for array indexing"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_checks_array_bounds(compile_stage2) -> None:
+    """Test that array indexing emits bounds checks."""
+    source = """
+fn access_array(values -> number[], index -> int) -> number {
+    return values[index];
+}
+
+fn main() -> number {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source)
+    ir = lowered.ir
+
+    # Check for bounds check comparison instruction
+    assert "icmp" in ir, "Bounds check comparison should be emitted"
+
+    # Check for bounds check comment
+    assert "bounds check" in ir, "Bounds check comment should be present"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
+
+
+def test_native_llvm_execution_indexes_string_character(compile_stage2) -> None:
+    """Test string indexing to access individual characters."""
+    source = """
+fn get_char(text -> string, index -> int) -> int {
+    return text[index];
+}
+
+fn get_first_char(text -> string) -> int {
+    return text[0];
+}
+
+fn main() -> int {
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source)
+
+    # Check that string indexing doesn't produce unsupported expression warnings
+    unsupported_errors = [
+        diag for diag in lowered.diagnostics
+        if "unsupported expression" in diag and "text[" in diag
+    ]
+    assert not unsupported_errors, f"String indexing should be supported: {unsupported_errors}"
+
+    ir = lowered.ir
+
+    # Check that getelementptr is used for character access
+    assert "getelementptr" in ir, "GEP instruction should be used for string indexing"
+
+    # Check that i8 (character) is loaded
+    assert "load i8" in ir, "i8 load should be used to read character"
+
+    # Verify it compiles successfully
+    _compile_ir(ir)
