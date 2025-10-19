@@ -9,19 +9,19 @@ let fs = runtime.fs;
 let http = runtime.http;
 let websocket = runtime.websocket;
 
-fn capability_grant(effects) {
+fn capability_grant(effects -> string[]) -> any {
     return runtime.create_capability_grant(effects);
 }
 
-fn fs_bridge(grant) {
+fn fs_bridge(grant -> any) -> any {
     return runtime.create_filesystem_bridge(grant);
 }
 
-fn http_bridge(grant) {
+fn http_bridge(grant -> any) -> any {
     return runtime.create_http_bridge(grant);
 }
 
-fn model_bridge(grant) {
+fn model_bridge(grant -> any) -> any {
     return runtime.create_model_bridge(grant);
 }
 
@@ -65,7 +65,7 @@ fn channel<T>(capacity -> number = 0) ![io] {
     return runtime.channel(capacity);
 }
 
-fn parallel(tasks) ![io] {
+fn parallel(tasks -> any[]) -> any[] ![io] {
     let mut results = [];
     for task in tasks {
         let value = task();
@@ -74,7 +74,7 @@ fn parallel(tasks) ![io] {
     return results;
 }
 
-fn spawn(task, name -> string = "") ![io] {
+fn spawn(task -> any, name -> string = "") -> void ![io] {
     if name.length == 0 {
         runtime.spawn(task);
         return;
@@ -82,11 +82,11 @@ fn spawn(task, name -> string = "") ![io] {
     runtime.spawn(task, name);
 }
 
-fn logExecution(callable) {
+fn logExecution(callable -> any) -> any {
     return runtime.logExecution(callable);
 }
 
-fn array_map(items, mapper) {
+fn array_map(items -> any[], mapper -> any) -> any[] {
     let mut result = [];
     for item in items {
         let mapped = mapper(item);
@@ -95,7 +95,7 @@ fn array_map(items, mapper) {
     return result;
 }
 
-fn array_filter(items, predicate) {
+fn array_filter(items -> any[], predicate -> any) -> any[] {
     let mut result = [];
     for item in items {
         if predicate(item) {
@@ -105,7 +105,7 @@ fn array_filter(items, predicate) {
     return result;
 }
 
-fn array_reduce(items, initial, reducer) {
+fn array_reduce(items -> any[], initial -> any, reducer -> any) -> any {
     let mut accumulator = initial;
     for item in items {
         accumulator = reducer(accumulator, item);
@@ -117,7 +117,7 @@ fn enum_type(name -> string) -> EnumType {
     return EnumType { name: name, variants: [] };
 }
 
-fn enum_field(name -> string, value) -> EnumField {
+fn enum_field(name -> string, value -> any) -> EnumField {
     return EnumField { name: name, value: value };
 }
 
@@ -189,7 +189,7 @@ fn enum_instantiate(enum_type -> EnumType, variant_name -> string, provided -> E
     return EnumInstance { type: enum_type, variant: variant_name, fields: fields };
 }
 
-fn enum_get_field(instance -> EnumInstance, name -> string) {
+fn enum_get_field(instance -> EnumInstance, name -> string) -> any {
     let mut index = 0;
     loop {
     if index >= instance.fields.length {
@@ -204,7 +204,7 @@ fn enum_get_field(instance -> EnumInstance, name -> string) {
     return null;
 }
 
-fn struct_field(name -> string, value) -> StructField {
+fn struct_field(name -> string, value -> any) -> StructField {
     return StructField { name: name, value: value };
 }
 
@@ -227,7 +227,7 @@ fn struct_repr(name -> string, fields -> StructField[]) -> string {
     return result;
 }
 
-fn to_debug_string(value) -> string {
+fn to_debug_string(value -> any) -> string {
     return runtime.to_debug_string(value);
 }
 
@@ -533,7 +533,7 @@ fn parse_type_descriptor(text -> string) -> TypeDescriptor {
     return type_descriptor_named(normalized);
 }
 
-fn check_type_primitive(value, name -> string) -> boolean {
+fn check_type_primitive(value -> any, name -> string) -> boolean {
     if name == "string" {
         return runtime.is_string(value);
     }
@@ -549,7 +549,7 @@ fn check_type_primitive(value, name -> string) -> boolean {
     return false;
 }
 
-fn check_type_descriptor(value, descriptor -> TypeDescriptor) -> boolean {
+fn check_type_descriptor(value -> any, descriptor -> TypeDescriptor) -> boolean {
     if descriptor.kind == "primitive" {
         if descriptor.name == null {
             return false;
@@ -618,12 +618,12 @@ fn check_type_descriptor(value, descriptor -> TypeDescriptor) -> boolean {
     return false;
 }
 
-fn check_type(value, descriptor -> string) -> boolean {
+fn check_type(value -> any, descriptor -> string) -> boolean {
     let parsed = parse_type_descriptor(descriptor);
     return check_type_descriptor(value, parsed);
 }
 
-fn serve(handler, config = null) ![io, net] {
+fn serve(handler -> any, config -> any? = null) -> void ![io, net] {
     runtime.serve(handler, config);
 }
 
@@ -702,7 +702,7 @@ fn find_char(text -> string, character -> string, start -> number = 0) -> number
     return -1;
 }
 
-fn match_exhaustive_failed(value) -> void {
+fn match_exhaustive_failed(value -> any) -> void {
     let message = "Non-exhaustive match for value {{ value }}";
     runtime.raise_value_error(message);
 }
