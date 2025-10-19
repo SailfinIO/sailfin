@@ -77,6 +77,7 @@ source_filename = "sailfin"
 %RuntimeHelperDescriptor = type { i8*, i8*, i8*, { i8**, i64 }*, { i8**, i64 }* }
 %FunctionCallEntry = type { i8*, { i8**, i64 }* }
 %StringConstant = type { i8*, i8*, double }
+%StringPointerResult = type { { i8**, i64 }*, double, i8* }
 %LoweredLLVMResult = type { i8*, { i8**, i64 }*, i8*, { i8**, i64 }*, { i8**, i64 }*, i8*, { i8**, i64 }* }
 %LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
 %BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
@@ -157,9 +158,14 @@ declare noalias i8* @malloc(i64)
 @.str.40 = private unnamed_addr constant [3 x i8] c" |\00"
 @.str.47 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.89 = private unnamed_addr constant [4 x i8] c" | \00"
+@.str.102 = private unnamed_addr constant [4 x i8] c" | \00"
+@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.7 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.9 = private unnamed_addr constant [11 x i8] c"0123456789\00"
-@.str.0 = private unnamed_addr constant [26 x i8] c"def needs_python_fallback\00"
+@.str.11 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.8 = private unnamed_addr constant [13 x i8] c"return False\00"
+@.str.4 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.3 = private unnamed_addr constant [1 x i8] c"\00"
 
 ; fn compile_to_sailfin effects: ![io]
 define i8* @compile_to_sailfin(i8* %source) {

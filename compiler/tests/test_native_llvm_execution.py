@@ -2043,6 +2043,68 @@ fn main() -> number {
         engine.remove_module(module)
 
 
+def test_native_llvm_execution_enum_member_variant_selects_tag(compile_stage2) -> None:
+    source = """
+enum Expression {
+    Identifier { name -> string },
+    NumberLiteral { value -> string },
+    BooleanLiteral { value -> boolean },
+}
+
+fn identifier_variant(name -> string) -> string {
+    let expr = Expression.Identifier { name: name };
+    return expr.variant;
+}
+
+fn boolean_variant(flag -> boolean) -> string {
+    let expr = Expression.BooleanLiteral { value: flag };
+    return expr.variant;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="enum_member_variant")
+
+    assert "@.enum.Expression.Identifier.variant" in lowered.ir
+    assert "@.enum.Expression.BooleanLiteral.variant" in lowered.ir
+    assert "select i1" in lowered.ir
+    for diagnostic in lowered.diagnostics:
+        assert "incompatible field types" not in diagnostic
+
+
+def test_native_llvm_execution_enum_member_payload_filtered_types(compile_stage2) -> None:
+    source = """
+enum Expression {
+    StringLiteral { value -> string },
+    NumberLiteral { value -> string },
+    BooleanLiteral { value -> boolean },
+}
+
+fn extract_boolean(expr -> Expression) -> boolean {
+    if expr.variant == "BooleanLiteral" {
+        return expr.value;
+    }
+    return false;
+}
+
+fn extract_string(expr -> Expression) -> string {
+    if expr.variant == "StringLiteral" {
+        return expr.value;
+    }
+    if expr.variant == "NumberLiteral" {
+        return expr.value;
+    }
+    return "";
+}
+"""
+
+    lowered = compile_stage2(source, module_name="enum_member_payload")
+
+    assert "load i1" in lowered.ir
+    assert "select i1" in lowered.ir
+    for diagnostic in lowered.diagnostics:
+        assert "incompatible field types" not in diagnostic
+
+
 def test_native_llvm_execution_emits_vtable_type_definitions(compile_stage2) -> None:
     """Verify that interface trait object types and vtable types are emitted correctly."""
     source = """

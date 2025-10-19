@@ -7,9 +7,11 @@ their layout manifests.
 
 import pytest
 
+pytestmark = [pytest.mark.usefixtures("stage1_environment")]
+
 
 @pytest.mark.unit
-def test_layout_manifest_is_generated(stage1_compiler):
+def test_layout_manifest_is_generated(stage2_environment):
     """Verify that layout manifests are generated during native emission."""
     source = """
     struct Point {
@@ -22,7 +24,7 @@ def test_layout_manifest_is_generated(stage1_compiler):
     }
     """
 
-    result = stage1_compiler.compile_to_native_llvm_full(source)
+    result = stage2_environment.compile_to_native_llvm_full(source)
 
     # Check that native_module has artifacts
     assert hasattr(result, "native_module")
@@ -40,7 +42,7 @@ def test_layout_manifest_is_generated(stage1_compiler):
 
 
 @pytest.mark.unit
-def test_select_layout_manifest_artifact(stage1_compiler):
+def test_select_layout_manifest_artifact(stage2_environment):
     """Test that select_layout_manifest_artifact can find manifests."""
     from compiler.build import native_ir
 
@@ -58,7 +60,7 @@ def test_select_layout_manifest_artifact(stage1_compiler):
 
 
 @pytest.mark.integration
-def test_cross_module_member_access_compiles_without_i8_errors(stage1_compiler, tmp_path):
+def test_cross_module_member_access_compiles_without_i8_errors(stage2_environment, tmp_path):
     """Test that importing types from another module and accessing their fields works.
 
     This is a regression test for the ~1,174 'member access base `i8*` lacks struct
@@ -86,7 +88,7 @@ def test_cross_module_member_access_compiles_without_i8_errors(stage1_compiler, 
     """
 
     # Compile both modules
-    types_result = stage1_compiler.compile_to_native_llvm_full(types_module)
+    types_result = stage2_environment.compile_to_native_llvm_full(types_module)
 
     # Save the types module's layout manifest
     types_manifest_path = tmp_path / "types.layout-manifest"
@@ -97,7 +99,7 @@ def test_cross_module_member_access_compiles_without_i8_errors(stage1_compiler, 
 
     # Compile the main module (which imports from types)
     # In a real scenario, the lowering would load types.layout-manifest
-    main_result = stage1_compiler.compile_to_native_llvm(main_module)
+    main_result = stage2_environment.compile_to_native_llvm(main_module)
 
     # Check that no i8* member access errors occurred
     # Note: This test documents the expected behavior, but the actual loading
@@ -111,7 +113,7 @@ def test_cross_module_member_access_compiles_without_i8_errors(stage1_compiler, 
 
 
 @pytest.mark.integration
-def test_warning_count_reduction(stage1_compiler):
+def test_warning_count_reduction(stage2_environment):
     """Document the warning reduction achieved by cross-module layout loading.
 
     Before: ~23,772 warnings

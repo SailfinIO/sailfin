@@ -31,23 +31,29 @@ def _session_stage1_environment() -> Iterator[pathlib.Path]:
     cleanup_path: pathlib.Path | None = None
 
     if disable_cache:
-        temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="stage1-build-session-"))
+        temp_dir = pathlib.Path(tempfile.mkdtemp(
+            prefix="stage1-build-session-"))
         output_dir = temp_dir / "compiler" / "build"
         try:
-            compile_stage1([REPO_ROOT / "compiler" / "src", REPO_ROOT / "runtime"], output_dir)
+            compile_stage1([REPO_ROOT / "compiler" / "src",
+                           REPO_ROOT / "runtime"], output_dir)
         except Stage1CompileError as exc:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise RuntimeError(f"stage1 compile failed during test setup: {exc}") from exc
+            raise RuntimeError(
+                f"stage1 compile failed during test setup: {exc}") from exc
         build_root = temp_dir
         cleanup_path = temp_dir
         if debug:
-            print(f"[stage1-environment] compiled stage1 without cache into {build_root}")
+            print(
+                f"[stage1-environment] compiled stage1 without cache into {build_root}")
     else:
-        cache_dir = pathlib.Path(os.environ.get(_CACHE_DIR_ENV, _DEFAULT_CACHE_DIR))
+        cache_dir = pathlib.Path(os.environ.get(
+            _CACHE_DIR_ENV, _DEFAULT_CACHE_DIR))
         try:
             build_root = ensure_stage1_cache(cache_dir, debug=debug)
         except Stage1CompileError as exc:
-            raise RuntimeError(f"stage1 compile failed during test setup: {exc}") from exc
+            raise RuntimeError(
+                f"stage1 compile failed during test setup: {exc}") from exc
 
     _clear_stage1_modules()
     sys.path.insert(0, str(build_root))
@@ -107,6 +113,20 @@ class Stage2Harness:
         source = path.read_text(encoding="utf-8")
         return self.compile_to_native_llvm(source, module_name=str(path))
 
+    def compile_to_native_llvm_full(self, source: str, *, module_name: str = "<memory>") -> object:
+        key = (module_name, source)
+        cached = self._llvm_cache.get(key)
+        if cached is not None:
+            return cached
+        stage1_main = importlib.import_module("compiler.build.main")
+        result = stage1_main.compile_to_native_llvm_full(source)
+        self._llvm_cache[key] = result
+        return result
+
+    def compile_to_native_llvm_full_from_path(self, path: pathlib.Path) -> object:
+        source = path.read_text(encoding="utf-8")
+        return self.compile_to_native_llvm_full(source, module_name=str(path))
+
 
 def _clear_stage1_modules() -> None:
     for name in list(sys.modules):
@@ -125,7 +145,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # p
     hits = stats.get("hits", 0)
     misses = stats.get("misses", 0)
     builds = stats.get("builds", 0)
-    print(f"[stage1-cache] summary hits={hits} misses={misses} builds={builds}")
+    print(
+        f"[stage1-cache] summary hits={hits} misses={misses} builds={builds}")
 
 
 @pytest.fixture(scope="session")

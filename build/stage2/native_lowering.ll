@@ -77,8 +77,6 @@ declare noalias i8* @malloc(i64)
 @.str.10 = private unnamed_addr constant [47 x i8] c"from runtime import runtime_support as runtime\00"
 @.str.1 = private unnamed_addr constant [24 x i8] c"print = runtime.console\00"
 @.str.4 = private unnamed_addr constant [22 x i8] c"sleep = runtime.sleep\00"
-@.str.7 = private unnamed_addr constant [26 x i8] c"channel = runtime.channel\00"
-@.str.10 = private unnamed_addr constant [28 x i8] c"parallel = runtime.parallel\00"
 @.str.13 = private unnamed_addr constant [22 x i8] c"spawn = runtime.spawn\00"
 @.str.16 = private unnamed_addr constant [16 x i8] c"fs = runtime.fs\00"
 @.str.19 = private unnamed_addr constant [22 x i8] c"serve = runtime.serve\00"
@@ -89,24 +87,16 @@ declare noalias i8* @malloc(i64)
 @.str.34 = private unnamed_addr constant [36 x i8] c"array_filter = runtime.array_filter\00"
 @.str.37 = private unnamed_addr constant [36 x i8] c"array_reduce = runtime.array_reduce\00"
 @.str.3 = private unnamed_addr constant [42 x i8] c" = runtime.enum_type('\22 + enum_name + \22')\00"
-@.str.13 = private unnamed_addr constant [6 x i8] c"from \00"
-@.str.16 = private unnamed_addr constant [9 x i8] c" import \00"
-@.str.7 = private unnamed_addr constant [5 x i8] c" as \00"
 @.str.119 = private unnamed_addr constant [12 x i8] c"__all__ = [\00"
 @.str.2 = private unnamed_addr constant [7 x i8] c"class \00"
 @.str.18 = private unnamed_addr constant [18 x i8] c"def __init__(self\00"
 @.str.97 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
 @.str.39 = private unnamed_addr constant [96 x i8] c"return runtime.struct_repr('\22 + class_name + \22', [\22 + join_with_separator(rendered, \22, \22) + \22])\00"
 @.str.0 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.0 = private unnamed_addr constant [7 x i8] c".push(\00"
-@.str.1 = private unnamed_addr constant [9 x i8] c".append(\00"
-@.str.0 = private unnamed_addr constant [7 x i8] c"(\22, \22)\00"
-@.str.0 = private unnamed_addr constant [7 x i8] c"[\22, \22]\00"
-@.str.7 = private unnamed_addr constant [5 x i8] c"def \00"
+@.str.67 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.8 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.11 = private unnamed_addr constant [49 x i8] c"(\22 + join_with_separator(parameters, \22, \22) + \22):\00"
-@.str.0 = private unnamed_addr constant [15 x i8] c"__match_value_\00"
-@.str.2 = private unnamed_addr constant [11 x i8] c"0123456789\00"
-@.str.1 = private unnamed_addr constant [12 x i8] c"[lowering] \00"
 
 define %LoweredPythonResult @lower_to_python(%NativeModule %native_module) {
 entry:
@@ -2725,7 +2715,7 @@ entry:
   %l3 = alloca double
   %l4 = alloca double
   %l5 = alloca %NativeInstruction
-  %l6 = alloca double
+  %l6 = alloca i8*
   %l7 = alloca i8*
   %t0 = call i8* @trim_text(i8* %initial)
   store i8* %t0, i8** %l0
@@ -2774,12 +2764,12 @@ merge3:
   %t31 = load double, double* %l4
   br label %loop.header4
 loop.header4:
-  %t75 = phi double [ %t31, %entry ], [ %t72, %loop.latch6 ]
-  %t76 = phi double [ %t30, %entry ], [ %t73, %loop.latch6 ]
-  %t77 = phi double [ %t29, %entry ], [ %t74, %loop.latch6 ]
-  store double %t75, double* %l4
-  store double %t76, double* %l3
-  store double %t77, double* %l2
+  %t145 = phi double [ %t31, %entry ], [ %t142, %loop.latch6 ]
+  %t146 = phi double [ %t30, %entry ], [ %t143, %loop.latch6 ]
+  %t147 = phi double [ %t29, %entry ], [ %t144, %loop.latch6 ]
+  store double %t145, double* %l4
+  store double %t146, double* %l3
+  store double %t147, double* %l2
   br label %loop.body5
 loop.body5:
   %t32 = load double, double* %l2
@@ -2806,105 +2796,180 @@ merge9:
   %t48 = load %NativeInstruction, %NativeInstruction* %t47
   store %NativeInstruction %t48, %NativeInstruction* %l5
   %t49 = load %NativeInstruction, %NativeInstruction* %l5
-  %t50 = load %NativeInstruction, %NativeInstruction* %l5
-  store double 0.0, double* %l6
-  %t51 = load double, double* %l6
-  %t52 = load double, double* %l4
-  %t53 = load double, double* %l6
-  %t54 = call double @compute_brace_balance(i8* null)
-  %t55 = fadd double %t52, %t54
-  store double %t55, double* %l4
-  %t56 = load double, double* %l3
-  %t57 = sitofp i64 1 to double
-  %t58 = fadd double %t56, %t57
-  store double %t58, double* %l3
-  %t59 = load double, double* %l2
-  %t60 = sitofp i64 1 to double
-  %t61 = fadd double %t59, %t60
-  store double %t61, double* %l2
-  %t62 = load double, double* %l4
-  %t63 = sitofp i64 0 to double
-  %t64 = fcmp ole double %t62, %t63
-  %t65 = load i8*, i8** %l0
-  %t66 = load i8*, i8** %l1
-  %t67 = load double, double* %l2
-  %t68 = load double, double* %l3
-  %t69 = load double, double* %l4
-  %t70 = load %NativeInstruction, %NativeInstruction* %l5
-  %t71 = load double, double* %l6
-  br i1 %t64, label %then10, label %merge11
+  %t50 = extractvalue %NativeInstruction %t49, 0
+  %t51 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t52 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t53 = icmp eq i32 %t50, 0
+  %t54 = select i1 %t53, i8* %t52, i8* %t51
+  %t55 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t56 = icmp eq i32 %t50, 1
+  %t57 = select i1 %t56, i8* %t55, i8* %t54
+  %t58 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t59 = icmp eq i32 %t50, 2
+  %t60 = select i1 %t59, i8* %t58, i8* %t57
+  %t61 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t62 = icmp eq i32 %t50, 3
+  %t63 = select i1 %t62, i8* %t61, i8* %t60
+  %t64 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t65 = icmp eq i32 %t50, 4
+  %t66 = select i1 %t65, i8* %t64, i8* %t63
+  %t67 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t68 = icmp eq i32 %t50, 5
+  %t69 = select i1 %t68, i8* %t67, i8* %t66
+  %t70 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t71 = icmp eq i32 %t50, 6
+  %t72 = select i1 %t71, i8* %t70, i8* %t69
+  %t73 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t74 = icmp eq i32 %t50, 7
+  %t75 = select i1 %t74, i8* %t73, i8* %t72
+  %t76 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t77 = icmp eq i32 %t50, 8
+  %t78 = select i1 %t77, i8* %t76, i8* %t75
+  %t79 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t80 = icmp eq i32 %t50, 9
+  %t81 = select i1 %t80, i8* %t79, i8* %t78
+  %t82 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t83 = icmp eq i32 %t50, 10
+  %t84 = select i1 %t83, i8* %t82, i8* %t81
+  %t85 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t86 = icmp eq i32 %t50, 11
+  %t87 = select i1 %t86, i8* %t85, i8* %t84
+  %t88 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t89 = icmp eq i32 %t50, 12
+  %t90 = select i1 %t89, i8* %t88, i8* %t87
+  %t91 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t92 = icmp eq i32 %t50, 13
+  %t93 = select i1 %t92, i8* %t91, i8* %t90
+  %t94 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t95 = icmp eq i32 %t50, 14
+  %t96 = select i1 %t95, i8* %t94, i8* %t93
+  %t97 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t98 = icmp eq i32 %t50, 15
+  %t99 = select i1 %t98, i8* %t97, i8* %t96
+  %t100 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t101 = icmp eq i32 %t50, 16
+  %t102 = select i1 %t101, i8* %t100, i8* %t99
+  %s103 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.103, i32 0, i32 0
+  %t104 = icmp ne i8* %t102, %s103
+  %t105 = load i8*, i8** %l0
+  %t106 = load i8*, i8** %l1
+  %t107 = load double, double* %l2
+  %t108 = load double, double* %l3
+  %t109 = load double, double* %l4
+  %t110 = load %NativeInstruction, %NativeInstruction* %l5
+  br i1 %t104, label %then10, label %merge11
 then10:
   br label %afterloop7
 merge11:
+  %t111 = load %NativeInstruction, %NativeInstruction* %l5
+  %t112 = extractvalue %NativeInstruction %t111, 0
+  %t113 = alloca %NativeInstruction
+  store %NativeInstruction %t111, %NativeInstruction* %t113
+  %t114 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t113, i32 0, i32 1
+  %t115 = bitcast [8 x i8]* %t114 to i8*
+  %t116 = bitcast i8* %t115 to i8**
+  %t117 = load i8*, i8** %t116
+  %t118 = icmp eq i32 %t112, 16
+  %t119 = select i1 %t118, i8* %t117, i8* null
+  %t120 = call i8* @trim_text(i8* %t119)
+  store i8* %t120, i8** %l6
+  %t121 = load i8*, i8** %l6
+  %t122 = load double, double* %l4
+  %t123 = load i8*, i8** %l6
+  %t124 = call double @compute_brace_balance(i8* %t123)
+  %t125 = fadd double %t122, %t124
+  store double %t125, double* %l4
+  %t126 = load double, double* %l3
+  %t127 = sitofp i64 1 to double
+  %t128 = fadd double %t126, %t127
+  store double %t128, double* %l3
+  %t129 = load double, double* %l2
+  %t130 = sitofp i64 1 to double
+  %t131 = fadd double %t129, %t130
+  store double %t131, double* %l2
+  %t132 = load double, double* %l4
+  %t133 = sitofp i64 0 to double
+  %t134 = fcmp ole double %t132, %t133
+  %t135 = load i8*, i8** %l0
+  %t136 = load i8*, i8** %l1
+  %t137 = load double, double* %l2
+  %t138 = load double, double* %l3
+  %t139 = load double, double* %l4
+  %t140 = load %NativeInstruction, %NativeInstruction* %l5
+  %t141 = load i8*, i8** %l6
+  br i1 %t134, label %then12, label %merge13
+then12:
+  br label %afterloop7
+merge13:
   br label %loop.latch6
 loop.latch6:
-  %t72 = load double, double* %l4
-  %t73 = load double, double* %l3
-  %t74 = load double, double* %l2
+  %t142 = load double, double* %l4
+  %t143 = load double, double* %l3
+  %t144 = load double, double* %l2
   br label %loop.header4
 afterloop7:
-  %t78 = load double, double* %l4
-  %t79 = sitofp i64 0 to double
-  %t80 = fcmp une double %t78, %t79
-  %t81 = load i8*, i8** %l0
-  %t82 = load i8*, i8** %l1
-  %t83 = load double, double* %l2
-  %t84 = load double, double* %l3
-  %t85 = load double, double* %l4
-  br i1 %t80, label %then12, label %merge13
-then12:
-  %t86 = load i8*, i8** %l0
-  %t87 = insertvalue %StructLiteralCapture undef, i8* %t86, 0
-  %t88 = sitofp i64 0 to double
-  %t89 = insertvalue %StructLiteralCapture %t87, double %t88, 1
-  %t90 = insertvalue %StructLiteralCapture %t89, i1 0, 2
-  ret %StructLiteralCapture %t90
-merge13:
-  %t91 = load double, double* %l3
-  %t92 = sitofp i64 0 to double
-  %t93 = fcmp oeq double %t91, %t92
-  %t94 = load i8*, i8** %l0
-  %t95 = load i8*, i8** %l1
-  %t96 = load double, double* %l2
-  %t97 = load double, double* %l3
-  %t98 = load double, double* %l4
-  br i1 %t93, label %then14, label %merge15
+  %t148 = load double, double* %l4
+  %t149 = sitofp i64 0 to double
+  %t150 = fcmp une double %t148, %t149
+  %t151 = load i8*, i8** %l0
+  %t152 = load i8*, i8** %l1
+  %t153 = load double, double* %l2
+  %t154 = load double, double* %l3
+  %t155 = load double, double* %l4
+  br i1 %t150, label %then14, label %merge15
 then14:
-  %t99 = load i8*, i8** %l0
-  %t100 = insertvalue %StructLiteralCapture undef, i8* %t99, 0
-  %t101 = sitofp i64 0 to double
-  %t102 = insertvalue %StructLiteralCapture %t100, double %t101, 1
-  %t103 = insertvalue %StructLiteralCapture %t102, i1 0, 2
-  ret %StructLiteralCapture %t103
+  %t156 = load i8*, i8** %l0
+  %t157 = insertvalue %StructLiteralCapture undef, i8* %t156, 0
+  %t158 = sitofp i64 0 to double
+  %t159 = insertvalue %StructLiteralCapture %t157, double %t158, 1
+  %t160 = insertvalue %StructLiteralCapture %t159, i1 0, 2
+  ret %StructLiteralCapture %t160
 merge15:
-  %t104 = load i8*, i8** %l1
-  %t105 = call i8* @trim_text(i8* %t104)
-  %t106 = call i8* @trim_trailing_delimiters(i8* %t105)
-  store i8* %t106, i8** %l7
-  %t107 = load i8*, i8** %l7
-  %t108 = call i1 @ends_with(i8* %t107, i8* null)
-  %t109 = xor i1 %t108, 1
-  %t110 = load i8*, i8** %l0
-  %t111 = load i8*, i8** %l1
-  %t112 = load double, double* %l2
-  %t113 = load double, double* %l3
-  %t114 = load double, double* %l4
-  %t115 = load i8*, i8** %l7
-  br i1 %t109, label %then16, label %merge17
+  %t161 = load double, double* %l3
+  %t162 = sitofp i64 0 to double
+  %t163 = fcmp oeq double %t161, %t162
+  %t164 = load i8*, i8** %l0
+  %t165 = load i8*, i8** %l1
+  %t166 = load double, double* %l2
+  %t167 = load double, double* %l3
+  %t168 = load double, double* %l4
+  br i1 %t163, label %then16, label %merge17
 then16:
-  %t116 = load i8*, i8** %l0
-  %t117 = insertvalue %StructLiteralCapture undef, i8* %t116, 0
-  %t118 = sitofp i64 0 to double
-  %t119 = insertvalue %StructLiteralCapture %t117, double %t118, 1
-  %t120 = insertvalue %StructLiteralCapture %t119, i1 0, 2
-  ret %StructLiteralCapture %t120
+  %t169 = load i8*, i8** %l0
+  %t170 = insertvalue %StructLiteralCapture undef, i8* %t169, 0
+  %t171 = sitofp i64 0 to double
+  %t172 = insertvalue %StructLiteralCapture %t170, double %t171, 1
+  %t173 = insertvalue %StructLiteralCapture %t172, i1 0, 2
+  ret %StructLiteralCapture %t173
 merge17:
-  %t121 = load i8*, i8** %l7
-  %t122 = insertvalue %StructLiteralCapture undef, i8* %t121, 0
-  %t123 = load double, double* %l3
-  %t124 = insertvalue %StructLiteralCapture %t122, double %t123, 1
-  %t125 = insertvalue %StructLiteralCapture %t124, i1 1, 2
-  ret %StructLiteralCapture %t125
+  %t174 = load i8*, i8** %l1
+  %t175 = call i8* @trim_text(i8* %t174)
+  %t176 = call i8* @trim_trailing_delimiters(i8* %t175)
+  store i8* %t176, i8** %l7
+  %t177 = load i8*, i8** %l7
+  %t178 = call i1 @ends_with(i8* %t177, i8* null)
+  %t179 = xor i1 %t178, 1
+  %t180 = load i8*, i8** %l0
+  %t181 = load i8*, i8** %l1
+  %t182 = load double, double* %l2
+  %t183 = load double, double* %l3
+  %t184 = load double, double* %l4
+  %t185 = load i8*, i8** %l7
+  br i1 %t179, label %then18, label %merge19
+then18:
+  %t186 = load i8*, i8** %l0
+  %t187 = insertvalue %StructLiteralCapture undef, i8* %t186, 0
+  %t188 = sitofp i64 0 to double
+  %t189 = insertvalue %StructLiteralCapture %t187, double %t188, 1
+  %t190 = insertvalue %StructLiteralCapture %t189, i1 0, 2
+  ret %StructLiteralCapture %t190
+merge19:
+  %t191 = load i8*, i8** %l7
+  %t192 = insertvalue %StructLiteralCapture undef, i8* %t191, 0
+  %t193 = load double, double* %l3
+  %t194 = insertvalue %StructLiteralCapture %t192, double %t193, 1
+  %t195 = insertvalue %StructLiteralCapture %t194, i1 1, 2
+  ret %StructLiteralCapture %t195
 }
 
 define i8* @rewrite_expression_intrinsics(i8* %expression) {

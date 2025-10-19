@@ -63,13 +63,19 @@ declare noalias i8* @malloc(i64)
 
 @.str.0 = private unnamed_addr constant [7 x i8] c".case \00"
 @.str.2 = private unnamed_addr constant [5 x i8] c" if \00"
-@.str.2 = private unnamed_addr constant [5 x i8] c" as \00"
 @.str.13 = private unnamed_addr constant [9 x i8] c".struct \00"
-@.str.13 = private unnamed_addr constant [12 x i8] c".interface \00"
 @.str.104 = private unnamed_addr constant [5 x i8] c"void\00"
 @.str.8 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.13 = private unnamed_addr constant [7 x i8] c".enum \00"
-@.str.0 = private unnamed_addr constant [6 x i8] c".let \00"
+@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.7 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.48 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.25 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.6 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.46 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.31 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.32 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.66 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.35 = private unnamed_addr constant [1 x i8] c"\00"
 
 define %ParseNativeResult @parse_native_artifact(i8* %text) {
 entry:
@@ -1739,11 +1745,50 @@ entry:
 
 define %NativeBinding @binding_from_instruction(%NativeInstruction %instruction) {
 entry:
-  %t0 = insertvalue %NativeBinding undef, i8* null, 0
-  %t1 = insertvalue %NativeBinding %t0, i1 false, 1
-  %t2 = insertvalue %NativeBinding %t1, i8* null, 2
-  %t3 = insertvalue %NativeBinding %t2, i8* null, 3
-  ret %NativeBinding %t3
+  %t0 = extractvalue %NativeInstruction %instruction, 0
+  %t1 = alloca %NativeInstruction
+  store %NativeInstruction %instruction, %NativeInstruction* %t1
+  %t2 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1, i32 0, i32 1
+  %t3 = bitcast [48 x i8]* %t2 to i8*
+  %t4 = bitcast i8* %t3 to i8**
+  %t5 = load i8*, i8** %t4
+  %t6 = icmp eq i32 %t0, 2
+  %t7 = select i1 %t6, i8* %t5, i8* null
+  %t8 = insertvalue %NativeBinding undef, i8* %t7, 0
+  %t9 = extractvalue %NativeInstruction %instruction, 0
+  %t10 = alloca %NativeInstruction
+  store %NativeInstruction %instruction, %NativeInstruction* %t10
+  %t11 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t10, i32 0, i32 1
+  %t12 = bitcast [48 x i8]* %t11 to i8*
+  %t13 = getelementptr inbounds i8, i8* %t12, i64 8
+  %t14 = bitcast i8* %t13 to i1*
+  %t15 = load i1, i1* %t14
+  %t16 = icmp eq i32 %t9, 2
+  %t17 = select i1 %t16, i1 %t15, i1 false
+  %t18 = insertvalue %NativeBinding %t8, i1 %t17, 1
+  %t19 = extractvalue %NativeInstruction %instruction, 0
+  %t20 = alloca %NativeInstruction
+  store %NativeInstruction %instruction, %NativeInstruction* %t20
+  %t21 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t20, i32 0, i32 1
+  %t22 = bitcast [48 x i8]* %t21 to i8*
+  %t23 = getelementptr inbounds i8, i8* %t22, i64 16
+  %t24 = bitcast i8* %t23 to i8**
+  %t25 = load i8*, i8** %t24
+  %t26 = icmp eq i32 %t19, 2
+  %t27 = select i1 %t26, i8* %t25, i8* null
+  %t28 = insertvalue %NativeBinding %t18, i8* %t27, 2
+  %t29 = extractvalue %NativeInstruction %instruction, 0
+  %t30 = alloca %NativeInstruction
+  store %NativeInstruction %instruction, %NativeInstruction* %t30
+  %t31 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t30, i32 0, i32 1
+  %t32 = bitcast [48 x i8]* %t31 to i8*
+  %t33 = getelementptr inbounds i8, i8* %t32, i64 24
+  %t34 = bitcast i8* %t33 to i8**
+  %t35 = load i8*, i8** %t34
+  %t36 = icmp eq i32 %t29, 2
+  %t37 = select i1 %t36, i8* %t35, i8* null
+  %t38 = insertvalue %NativeBinding %t28, i8* %t37, 3
+  ret %NativeBinding %t38
 }
 
 define %NativeFunction @apply_meta(%NativeFunction %function, i8* %entry) {

@@ -317,6 +317,21 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   indexing implemented, Stage2 bootstrap warnings for `unsupported expression
   decorators[index]` and `unsupported expression text[0]` are eliminated,
   unblocking progress on warning-free self-compilation.
+  Enum member access is now partially supported in Stage2 lowering. When the base
+  expression is an enum value, `lower_member_access` materialises stable global
+  strings for each variant tag and emits `select` chains keyed off the enum's tag,
+  allowing code like `expr.variant == "Identifier"` to lower without Python
+  fallbacks. For fields shared across variants with the same LLVM type, the
+  lowering path extracts each payload, compares the tag, and selects the correct
+  value, which unblocks homogeneous payload projections such as
+  `decorator.arguments.length`. Manual bootstrap validation (`make bootstrap-stage2`,
+  see `scratch/bootstrap_enum4.log`) shows `%Expression` member-access warnings
+  dropping by more than half relative to earlier runs. Heterogeneous payloads
+  (e.g., `Expression.value`, which mixes `string`, `boolean`, and `number`
+  payloads) still emit "enum member access ... uses incompatible field types
+  across variants" diagnostics; roadmap work is tracking the boxing/downcast
+  strategy required to finish the feature. Automated regression tests will land
+  with that follow-up.
   Array `.length` member access now fully lowers to LLVM, enabling loop conditions,
   bounds checks, and array size queries to compile without fallbacks. The
   `lower_member_access` function recognizes when a member access expression targets

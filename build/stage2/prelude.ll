@@ -13,13 +13,7 @@ declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare noalias i8* @malloc(i64)
 
 @.str.0 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.0 = private unnamed_addr constant [10 x i8] c"primitive\00"
-@.str.0 = private unnamed_addr constant [6 x i8] c"union\00"
-@.str.0 = private unnamed_addr constant [13 x i8] c"intersection\00"
-@.str.0 = private unnamed_addr constant [6 x i8] c"array\00"
-@.str.0 = private unnamed_addr constant [9 x i8] c"function\00"
-@.str.0 = private unnamed_addr constant [6 x i8] c"named\00"
-@.str.0 = private unnamed_addr constant [8 x i8] c"unknown\00"
+@.str.19 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.2 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.16 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.32 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
