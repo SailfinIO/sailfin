@@ -1,6 +1,58 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.53 (2025-10-19)
+
+### Bug Fixes
+
+- Reduce stage2 warnings
+  ([`25920a2`](https://github.com/SailfinIO/sailfin/commit/25920a2735e3f2bf6d76d3535107ccae6eb402f8))
+
+- Work on stage2 parity
+  ([`891be5b`](https://github.com/SailfinIO/sailfin/commit/891be5b201a6c32a83d8e74af1357e676d8e2450))
+
+- Work on stage2 parity
+  ([`5117b03`](https://github.com/SailfinIO/sailfin/commit/5117b03533a3385305530b5366c884982f7e0716))
+
+- Work on stage2 parity
+  ([`e93eb60`](https://github.com/SailfinIO/sailfin/commit/e93eb60f9cb322a01ecacd3f4d3d7a4b19efadcd))
+
+- Work on stage2 parity
+  ([`c4145bc`](https://github.com/SailfinIO/sailfin/commit/c4145bcc02612cffd13b2d919ca28fe3a0075b57))
+
+- Work on stage2 parity
+  ([`c8990cf`](https://github.com/SailfinIO/sailfin/commit/c8990cf61880ccb051a52c2936919defc4367fcd))
+
+- Work on stage2 parity
+  ([`3796914`](https://github.com/SailfinIO/sailfin/commit/37969141ac917ee15c475064c7882b976e2ea3ea))
+
+- Work on stage2 parity
+  ([`3f19ea4`](https://github.com/SailfinIO/sailfin/commit/3f19ea41ca470352f5ccdffc836f1bc0eb785203))
+
+- Work on stage2 parity
+  ([`38dbd97`](https://github.com/SailfinIO/sailfin/commit/38dbd976a77bbd0b840d90ffcfefe061ab1a8ae1))
+
+- Work on stage2 parity
+  ([`4d49864`](https://github.com/SailfinIO/sailfin/commit/4d4986468c28c3c2b3d591fd11ed0e68ad9d00df))
+
+- Work on stage2 parity
+  ([`8ad2336`](https://github.com/SailfinIO/sailfin/commit/8ad2336a1d0bd89c8f2a670c4899bafab3263069))
+
+- Work on stage2 parity
+  ([`fcccbac`](https://github.com/SailfinIO/sailfin/commit/fcccbac98464da97158d3de5f4953cf73dcb9949))
+
+- Work on stage2 parity
+  ([`4f69a8d`](https://github.com/SailfinIO/sailfin/commit/4f69a8d0d3293162228914f6da03ce3e72dbc106))
+
+- Work on stage2 parity
+  ([`cf94f3e`](https://github.com/SailfinIO/sailfin/commit/cf94f3eafcef9cc11a0a476e71a3bbb564b74f1f))
+
+### Documentation
+
+- Self hosting stage2 roadmap
+  ([`07e7768`](https://github.com/SailfinIO/sailfin/commit/07e776830abf447ac46a1d842ca4307388258439))
+
+
 ## v0.1.1-alpha.52 (2025-10-18)
 
 ### Bug Fixes
