@@ -1253,16 +1253,33 @@ entry:
   %t33 = call i8* @trim_text(i8* %t32)
   store i8* %t33, i8** %l8
   %t34 = load i8*, i8** %l8
-  %t35 = load i8*, i8** %l8
-  %t36 = insertvalue %TypeAnnotation undef, i8* %t35, 0
-  store %TypeAnnotation %t36, %TypeAnnotation* %l9
-  %t38 = call %Token @parser_peek_raw(%Parser %parser)
-  %t39 = extractvalue %Token %t38, 0
+  %t35 = call i64 @sailfin_runtime_string_length(i8* %t34)
+  %t36 = icmp eq i64 %t35, 0
+  %t37 = load %Parser, %Parser* %l0
+  %t38 = load %Token, %Token* %l1
+  %t39 = load i8*, i8** %l2
+  %t40 = load double, double* %l3
+  %t41 = load %TypeParameterParseResult, %TypeParameterParseResult* %l4
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t43 = load %Token, %Token* %l6
+  %t44 = load %CaptureResult, %CaptureResult* %l7
+  %t45 = load i8*, i8** %l8
+  br i1 %t36, label %then0, label %merge1
+then0:
+  %t46 = load %Parser, %Parser* %l0
+  %t47 = call %StatementParseResult @parse_unknown(%Parser %t46)
+  ret %StatementParseResult %t47
+merge1:
+  %t48 = load i8*, i8** %l8
+  %t49 = insertvalue %TypeAnnotation undef, i8* %t48, 0
+  store %TypeAnnotation %t49, %TypeAnnotation* %l9
+  %t51 = call %Token @parser_peek_raw(%Parser %parser)
+  %t52 = extractvalue %Token %t51, 0
   store double 0.0, double* %l10
-  %t40 = insertvalue %StatementParseResult undef, i8* null, 0
-  %t41 = load double, double* %l10
-  %t42 = insertvalue %StatementParseResult %t40, i8* null, 1
-  ret %StatementParseResult %t42
+  %t53 = insertvalue %StatementParseResult undef, i8* null, 0
+  %t54 = load double, double* %l10
+  %t55 = insertvalue %StatementParseResult %t53, i8* null, 1
+  ret %StatementParseResult %t55
 }
 
 define %StatementParseResult @parse_interface(%Parser %parser, { %Decorator*, i64 }* %decorators) {
@@ -2027,103 +2044,117 @@ entry:
   %t25 = call i8* @trim_text(i8* %t24)
   store i8* %t25, i8** %l5
   %t26 = load i8*, i8** %l5
-  %t27 = load i8*, i8** %l5
-  %t28 = insertvalue %TypeAnnotation undef, i8* %t27, 0
-  store %TypeAnnotation %t28, %TypeAnnotation* %l6
-  %t29 = call %EffectParseResult @parse_effect_list(%Parser %parser)
-  store %EffectParseResult %t29, %EffectParseResult* %l7
-  %t30 = load %EffectParseResult, %EffectParseResult* %l7
-  %t31 = extractvalue %EffectParseResult %t30, 1
-  store { i8**, i64 }* %t31, { i8**, i64 }** %l8
-  %t32 = alloca [0 x %ModelProperty]
-  %t33 = getelementptr [0 x %ModelProperty], [0 x %ModelProperty]* %t32, i32 0, i32 0
-  %t34 = alloca { %ModelProperty*, i64 }
-  %t35 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t34, i32 0, i32 0
-  store %ModelProperty* %t33, %ModelProperty** %t35
-  %t36 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t34, i32 0, i32 1
-  store i64 0, i64* %t36
-  store { %ModelProperty*, i64 }* %t34, { %ModelProperty*, i64 }** %l9
-  %t37 = load %Parser, %Parser* %l0
-  %t38 = load %Token, %Token* %l1
-  %t39 = load i8*, i8** %l2
-  %t40 = load double, double* %l3
-  %t41 = load %CaptureResult, %CaptureResult* %l4
-  %t42 = load i8*, i8** %l5
-  %t43 = load %TypeAnnotation, %TypeAnnotation* %l6
-  %t44 = load %EffectParseResult, %EffectParseResult* %l7
-  %t45 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t46 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
-  br label %loop.header0
-loop.header0:
-  %t85 = phi { %ModelProperty*, i64 }* [ %t46, %entry ], [ %t84, %loop.latch2 ]
-  store { %ModelProperty*, i64 }* %t85, { %ModelProperty*, i64 }** %l9
-  br label %loop.body1
-loop.body1:
-  %t47 = call %Token @parser_peek_raw(%Parser %parser)
-  store %Token %t47, %Token* %l10
-  %t49 = load %Token, %Token* %l10
-  %t50 = extractvalue %Token %t49, 0
-  %t51 = load %Token, %Token* %l10
-  %t52 = extractvalue %Token %t51, 0
+  %t27 = call i64 @sailfin_runtime_string_length(i8* %t26)
+  %t28 = icmp eq i64 %t27, 0
+  %t29 = load %Parser, %Parser* %l0
+  %t30 = load %Token, %Token* %l1
+  %t31 = load i8*, i8** %l2
+  %t32 = load double, double* %l3
+  %t33 = load %CaptureResult, %CaptureResult* %l4
+  %t34 = load i8*, i8** %l5
+  br i1 %t28, label %then0, label %merge1
+then0:
+  %t35 = load %Parser, %Parser* %l0
+  %t36 = call %StatementParseResult @parse_unknown(%Parser %t35)
+  ret %StatementParseResult %t36
+merge1:
+  %t37 = load i8*, i8** %l5
+  %t38 = insertvalue %TypeAnnotation undef, i8* %t37, 0
+  store %TypeAnnotation %t38, %TypeAnnotation* %l6
+  %t39 = call %EffectParseResult @parse_effect_list(%Parser %parser)
+  store %EffectParseResult %t39, %EffectParseResult* %l7
+  %t40 = load %EffectParseResult, %EffectParseResult* %l7
+  %t41 = extractvalue %EffectParseResult %t40, 1
+  store { i8**, i64 }* %t41, { i8**, i64 }** %l8
+  %t42 = alloca [0 x %ModelProperty]
+  %t43 = getelementptr [0 x %ModelProperty], [0 x %ModelProperty]* %t42, i32 0, i32 0
+  %t44 = alloca { %ModelProperty*, i64 }
+  %t45 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t44, i32 0, i32 0
+  store %ModelProperty* %t43, %ModelProperty** %t45
+  %t46 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t44, i32 0, i32 1
+  store i64 0, i64* %t46
+  store { %ModelProperty*, i64 }* %t44, { %ModelProperty*, i64 }** %l9
+  %t47 = load %Parser, %Parser* %l0
+  %t48 = load %Token, %Token* %l1
+  %t49 = load i8*, i8** %l2
+  %t50 = load double, double* %l3
+  %t51 = load %CaptureResult, %CaptureResult* %l4
+  %t52 = load i8*, i8** %l5
+  %t53 = load %TypeAnnotation, %TypeAnnotation* %l6
+  %t54 = load %EffectParseResult, %EffectParseResult* %l7
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t56 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
+  br label %loop.header2
+loop.header2:
+  %t95 = phi { %ModelProperty*, i64 }* [ %t56, %entry ], [ %t94, %loop.latch4 ]
+  store { %ModelProperty*, i64 }* %t95, { %ModelProperty*, i64 }** %l9
+  br label %loop.body3
+loop.body3:
+  %t57 = call %Token @parser_peek_raw(%Parser %parser)
+  store %Token %t57, %Token* %l10
+  %t59 = load %Token, %Token* %l10
+  %t60 = extractvalue %Token %t59, 0
+  %t61 = load %Token, %Token* %l10
+  %t62 = extractvalue %Token %t61, 0
   store %Parser %parser, %Parser* %l11
-  %t53 = call %ModelPropertyParseResult @parse_model_property(%Parser %parser)
-  store %ModelPropertyParseResult %t53, %ModelPropertyParseResult* %l12
-  %t55 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
-  %t56 = extractvalue %ModelPropertyParseResult %t55, 2
-  br label %logical_and_entry_54
+  %t63 = call %ModelPropertyParseResult @parse_model_property(%Parser %parser)
+  store %ModelPropertyParseResult %t63, %ModelPropertyParseResult* %l12
+  %t65 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
+  %t66 = extractvalue %ModelPropertyParseResult %t65, 2
+  br label %logical_and_entry_64
 
-logical_and_entry_54:
-  br i1 %t56, label %logical_and_right_54, label %logical_and_merge_54
+logical_and_entry_64:
+  br i1 %t66, label %logical_and_right_64, label %logical_and_merge_64
 
-logical_and_right_54:
-  %t57 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
-  %t58 = extractvalue %ModelPropertyParseResult %t57, 1
-  %t59 = icmp ne i8* %t58, null
-  br label %logical_and_right_end_54
+logical_and_right_64:
+  %t67 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
+  %t68 = extractvalue %ModelPropertyParseResult %t67, 1
+  %t69 = icmp ne i8* %t68, null
+  br label %logical_and_right_end_64
 
-logical_and_right_end_54:
-  br label %logical_and_merge_54
+logical_and_right_end_64:
+  br label %logical_and_merge_64
 
-logical_and_merge_54:
-  %t60 = phi i1 [ false, %logical_and_entry_54 ], [ %t59, %logical_and_right_end_54 ]
-  %t61 = load %Parser, %Parser* %l0
-  %t62 = load %Token, %Token* %l1
-  %t63 = load i8*, i8** %l2
-  %t64 = load double, double* %l3
-  %t65 = load %CaptureResult, %CaptureResult* %l4
-  %t66 = load i8*, i8** %l5
-  %t67 = load %TypeAnnotation, %TypeAnnotation* %l6
-  %t68 = load %EffectParseResult, %EffectParseResult* %l7
-  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t70 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
-  %t71 = load %Token, %Token* %l10
-  %t72 = load %Parser, %Parser* %l11
-  %t73 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
-  br i1 %t60, label %then4, label %merge5
-then4:
-  %t74 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
-  %t75 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
-  %t76 = extractvalue %ModelPropertyParseResult %t75, 1
-  %t77 = call { %ModelProperty*, i64 }* @append_model_property({ %ModelProperty*, i64 }* %t74, %ModelProperty zeroinitializer)
-  store { %ModelProperty*, i64 }* %t77, { %ModelProperty*, i64 }** %l9
-  br label %loop.latch2
-merge5:
-  %t78 = call %Token @parser_peek_raw(%Parser %parser)
-  store %Token %t78, %Token* %l13
-  %t80 = load %Token, %Token* %l13
-  %t81 = extractvalue %Token %t80, 0
-  %t82 = load %Token, %Token* %l13
-  %t83 = extractvalue %Token %t82, 0
-  br label %loop.latch2
-loop.latch2:
+logical_and_merge_64:
+  %t70 = phi i1 [ false, %logical_and_entry_64 ], [ %t69, %logical_and_right_end_64 ]
+  %t71 = load %Parser, %Parser* %l0
+  %t72 = load %Token, %Token* %l1
+  %t73 = load i8*, i8** %l2
+  %t74 = load double, double* %l3
+  %t75 = load %CaptureResult, %CaptureResult* %l4
+  %t76 = load i8*, i8** %l5
+  %t77 = load %TypeAnnotation, %TypeAnnotation* %l6
+  %t78 = load %EffectParseResult, %EffectParseResult* %l7
+  %t79 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t80 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
+  %t81 = load %Token, %Token* %l10
+  %t82 = load %Parser, %Parser* %l11
+  %t83 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
+  br i1 %t70, label %then6, label %merge7
+then6:
   %t84 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
-  br label %loop.header0
-afterloop3:
+  %t85 = load %ModelPropertyParseResult, %ModelPropertyParseResult* %l12
+  %t86 = extractvalue %ModelPropertyParseResult %t85, 1
+  %t87 = call { %ModelProperty*, i64 }* @append_model_property({ %ModelProperty*, i64 }* %t84, %ModelProperty zeroinitializer)
+  store { %ModelProperty*, i64 }* %t87, { %ModelProperty*, i64 }** %l9
+  br label %loop.latch4
+merge7:
+  %t88 = call %Token @parser_peek_raw(%Parser %parser)
+  store %Token %t88, %Token* %l13
+  %t90 = load %Token, %Token* %l13
+  %t91 = extractvalue %Token %t90, 0
+  %t92 = load %Token, %Token* %l13
+  %t93 = extractvalue %Token %t92, 0
+  br label %loop.latch4
+loop.latch4:
+  %t94 = load { %ModelProperty*, i64 }*, { %ModelProperty*, i64 }** %l9
+  br label %loop.header2
+afterloop5:
   store double 0.0, double* %l14
-  %t86 = insertvalue %StatementParseResult undef, i8* null, 0
-  %t87 = load double, double* %l14
-  %t88 = insertvalue %StatementParseResult %t86, i8* null, 1
-  ret %StatementParseResult %t88
+  %t96 = insertvalue %StatementParseResult undef, i8* null, 0
+  %t97 = load double, double* %l14
+  %t98 = insertvalue %StatementParseResult %t96, i8* null, 1
+  ret %StatementParseResult %t98
 }
 
 define %StatementParseResult @parse_pipeline(%Parser %parser, { %Decorator*, i64 }* %decorators) {
@@ -2306,35 +2337,46 @@ entry:
   %t14 = call i8* @trim_text(i8* %t13)
   store i8* %t14, i8** %l2
   %t15 = load i8*, i8** %l2
-  %t16 = load %CaptureResult, %CaptureResult* %l1
-  %t17 = extractvalue %CaptureResult %t16, 1
-  %t18 = bitcast { i8**, i64 }* %t17 to { %Token*, i64 }*
-  %t19 = call double @source_span_from_tokens({ %Token*, i64 }* %t18)
-  store double %t19, double* %l3
+  %t16 = call i64 @sailfin_runtime_string_length(i8* %t15)
+  %t17 = icmp eq i64 %t16, 0
+  %t18 = load %Parser, %Parser* %l0
+  %t19 = load %CaptureResult, %CaptureResult* %l1
   %t20 = load i8*, i8** %l2
-  %t21 = call i8* @normalize_test_name(i8* %t20)
-  store i8* %t21, i8** %l4
-  %t22 = call %EffectParseResult @parse_effect_list(%Parser %parser)
-  store %EffectParseResult %t22, %EffectParseResult* %l5
-  %t23 = load %EffectParseResult, %EffectParseResult* %l5
-  %t24 = extractvalue %EffectParseResult %t23, 1
-  store { i8**, i64 }* %t24, { i8**, i64 }** %l6
-  %t25 = call double @evaluate_decorators({ %Decorator*, i64 }* %decorators)
-  store double %t25, double* %l7
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t27 = load double, double* %l7
-  %t28 = call double @infer_effects({ i8**, i64 }* %t26, double %t27)
-  store double %t28, double* %l8
-  %t29 = call %BlockParseResult @parse_block(%Parser %parser)
-  store %BlockParseResult %t29, %BlockParseResult* %l9
-  %t30 = load %BlockParseResult, %BlockParseResult* %l9
-  %t31 = extractvalue %BlockParseResult %t30, 1
-  store i8* %t31, i8** %l10
+  br i1 %t17, label %then0, label %merge1
+then0:
+  %t21 = load %Parser, %Parser* %l0
+  %t22 = call %StatementParseResult @parse_unknown(%Parser %t21)
+  ret %StatementParseResult %t22
+merge1:
+  %t23 = load %CaptureResult, %CaptureResult* %l1
+  %t24 = extractvalue %CaptureResult %t23, 1
+  %t25 = bitcast { i8**, i64 }* %t24 to { %Token*, i64 }*
+  %t26 = call double @source_span_from_tokens({ %Token*, i64 }* %t25)
+  store double %t26, double* %l3
+  %t27 = load i8*, i8** %l2
+  %t28 = call i8* @normalize_test_name(i8* %t27)
+  store i8* %t28, i8** %l4
+  %t29 = call %EffectParseResult @parse_effect_list(%Parser %parser)
+  store %EffectParseResult %t29, %EffectParseResult* %l5
+  %t30 = load %EffectParseResult, %EffectParseResult* %l5
+  %t31 = extractvalue %EffectParseResult %t30, 1
+  store { i8**, i64 }* %t31, { i8**, i64 }** %l6
+  %t32 = call double @evaluate_decorators({ %Decorator*, i64 }* %decorators)
+  store double %t32, double* %l7
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t34 = load double, double* %l7
+  %t35 = call double @infer_effects({ i8**, i64 }* %t33, double %t34)
+  store double %t35, double* %l8
+  %t36 = call %BlockParseResult @parse_block(%Parser %parser)
+  store %BlockParseResult %t36, %BlockParseResult* %l9
+  %t37 = load %BlockParseResult, %BlockParseResult* %l9
+  %t38 = extractvalue %BlockParseResult %t37, 1
+  store i8* %t38, i8** %l10
   store double 0.0, double* %l11
-  %t32 = insertvalue %StatementParseResult undef, i8* null, 0
-  %t33 = load double, double* %l11
-  %t34 = insertvalue %StatementParseResult %t32, i8* null, 1
-  ret %StatementParseResult %t34
+  %t39 = insertvalue %StatementParseResult undef, i8* null, 0
+  %t40 = load double, double* %l11
+  %t41 = insertvalue %StatementParseResult %t39, i8* null, 1
+  ret %StatementParseResult %t41
 }
 
 define %StatementParseResult @parse_function(%Parser %parser, i1 %starts_with_async, { %Decorator*, i64 }* %decorators) {
@@ -2638,24 +2680,43 @@ merge3:
   %t73 = call i8* @trim_text(i8* %t72)
   store i8* %t73, i8** %l9
   %t74 = load i8*, i8** %l9
-  %t75 = load %Parser, %Parser* %l0
-  %t76 = call %Parser @skip_trivia(%Parser %t75)
-  store %Parser %t76, %Parser* %l0
+  %t75 = call i64 @sailfin_runtime_string_length(i8* %t74)
+  %t76 = icmp eq i64 %t75, 0
   %t77 = load %Parser, %Parser* %l0
-  %t78 = call %Token @parser_peek_raw(%Parser %t77)
-  store %Token %t78, %Token* %l10
-  %t80 = load %Token, %Token* %l10
-  %t81 = extractvalue %Token %t80, 0
-  %t82 = load %Parser, %Parser* %l0
-  %t83 = call %Parser @parser_advance_raw(%Parser %t82)
-  store %Parser %t83, %Parser* %l0
+  %t78 = load i1, i1* %l1
+  %t79 = load %Token, %Token* %l2
+  %t80 = load %Token, %Token* %l3
+  %t81 = load i8*, i8** %l4
+  %t82 = load double, double* %l5
+  %t83 = load %Token, %Token* %l6
+  %t84 = load double, double* %l7
+  %t85 = load %CaptureResult, %CaptureResult* %l8
+  %t86 = load i8*, i8** %l9
+  br i1 %t76, label %then4, label %merge5
+then4:
+  %t87 = insertvalue %StructFieldParseResult undef, i8* null, 0
+  %t88 = insertvalue %StructFieldParseResult %t87, i8* null, 1
+  %t89 = insertvalue %StructFieldParseResult %t88, i1 0, 2
+  ret %StructFieldParseResult %t89
+merge5:
+  %t90 = load %Parser, %Parser* %l0
+  %t91 = call %Parser @skip_trivia(%Parser %t90)
+  store %Parser %t91, %Parser* %l0
+  %t92 = load %Parser, %Parser* %l0
+  %t93 = call %Token @parser_peek_raw(%Parser %t92)
+  store %Token %t93, %Token* %l10
+  %t95 = load %Token, %Token* %l10
+  %t96 = extractvalue %Token %t95, 0
+  %t97 = load %Parser, %Parser* %l0
+  %t98 = call %Parser @parser_advance_raw(%Parser %t97)
+  store %Parser %t98, %Parser* %l0
   store double 0.0, double* %l11
-  %t84 = load %Parser, %Parser* %l0
-  %t85 = insertvalue %StructFieldParseResult undef, i8* null, 0
-  %t86 = load double, double* %l11
-  %t87 = insertvalue %StructFieldParseResult %t85, i8* null, 1
-  %t88 = insertvalue %StructFieldParseResult %t87, i1 1, 2
-  ret %StructFieldParseResult %t88
+  %t99 = load %Parser, %Parser* %l0
+  %t100 = insertvalue %StructFieldParseResult undef, i8* null, 0
+  %t101 = load double, double* %l11
+  %t102 = insertvalue %StructFieldParseResult %t100, i8* null, 1
+  %t103 = insertvalue %StructFieldParseResult %t102, i1 1, 2
+  ret %StructFieldParseResult %t103
 }
 
 define %ModelPropertyParseResult @parse_model_property(%Parser %parser) {
@@ -3026,6 +3087,9 @@ entry:
   %l10 = alloca { %Token*, i64 }*
   %l11 = alloca { %Token*, i64 }*
   %l12 = alloca i8*
+  %l13 = alloca i8*
+  %l14 = alloca i8*
+  %l15 = alloca double
   %t0 = call %Parser @skip_trivia(%Parser %parser)
   store %Parser %t0, %Parser* %l0
   %t1 = load %Parser, %Parser* %l0
@@ -3100,8 +3164,10 @@ afterloop3:
   %t47 = load double, double* %l7
   br label %loop.header4
 loop.header4:
-  %t127 = phi double [ %t47, %entry ], [ %t126, %loop.latch6 ]
-  store double %t127, double* %l7
+  %t175 = phi { %TypeParameter*, i64 }* [ %t46, %entry ], [ %t173, %loop.latch6 ]
+  %t176 = phi double [ %t47, %entry ], [ %t174, %loop.latch6 ]
+  store { %TypeParameter*, i64 }* %t175, { %TypeParameter*, i64 }** %l6
+  store double %t176, double* %l7
   br label %loop.body5
 loop.body5:
   %t48 = load double, double* %l7
@@ -3201,23 +3267,97 @@ merge13:
   %t121 = call i8* @trim_text(i8* %t120)
   store i8* %t121, i8** %l12
   %t122 = load i8*, i8** %l12
+  %t123 = call i64 @sailfin_runtime_string_length(i8* %t122)
+  %t124 = icmp sgt i64 %t123, 0
+  %t125 = load %Parser, %Parser* %l0
+  %t126 = load %Token, %Token* %l1
+  %t127 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t128 = load double, double* %l3
+  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t130 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l6
+  %t131 = load double, double* %l7
+  %t132 = load { %Token*, i64 }*, { %Token*, i64 }** %l8
+  %t133 = load double, double* %l9
+  %t134 = load { %Token*, i64 }*, { %Token*, i64 }** %l10
+  %t135 = load { %Token*, i64 }*, { %Token*, i64 }** %l11
+  %t136 = load i8*, i8** %l12
+  br i1 %t124, label %then14, label %merge15
+then14:
+  store i8* null, i8** %l13
+  %t137 = load { %Token*, i64 }*, { %Token*, i64 }** %l11
+  %t138 = call i8* @tokens_to_text({ %Token*, i64 }* %t137)
+  %t139 = call i8* @trim_text(i8* %t138)
+  store i8* %t139, i8** %l14
+  %t141 = load { %Token*, i64 }*, { %Token*, i64 }** %l11
+  %t142 = load { %Token*, i64 }, { %Token*, i64 }* %t141
+  %t143 = extractvalue { %Token*, i64 } %t142, 1
+  %t144 = icmp sgt i64 %t143, 0
+  br label %logical_and_entry_140
+
+logical_and_entry_140:
+  br i1 %t144, label %logical_and_right_140, label %logical_and_merge_140
+
+logical_and_right_140:
+  %t145 = load i8*, i8** %l14
+  %t146 = call i64 @sailfin_runtime_string_length(i8* %t145)
+  %t147 = icmp sgt i64 %t146, 0
+  br label %logical_and_right_end_140
+
+logical_and_right_end_140:
+  br label %logical_and_merge_140
+
+logical_and_merge_140:
+  %t148 = phi i1 [ false, %logical_and_entry_140 ], [ %t147, %logical_and_right_end_140 ]
+  %t149 = load %Parser, %Parser* %l0
+  %t150 = load %Token, %Token* %l1
+  %t151 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t152 = load double, double* %l3
+  %t153 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t154 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l6
+  %t155 = load double, double* %l7
+  %t156 = load { %Token*, i64 }*, { %Token*, i64 }** %l8
+  %t157 = load double, double* %l9
+  %t158 = load { %Token*, i64 }*, { %Token*, i64 }** %l10
+  %t159 = load { %Token*, i64 }*, { %Token*, i64 }** %l11
+  %t160 = load i8*, i8** %l12
+  %t161 = load i8*, i8** %l13
+  %t162 = load i8*, i8** %l14
+  br i1 %t148, label %then16, label %merge17
+then16:
+  %t163 = load i8*, i8** %l14
+  %t164 = insertvalue %TypeAnnotation undef, i8* %t163, 0
+  store i8* null, i8** %l13
+  br label %merge17
+merge17:
+  %t165 = phi i8* [ null, %then16 ], [ %t161, %then14 ]
+  store i8* %t165, i8** %l13
+  %t166 = load { %Token*, i64 }*, { %Token*, i64 }** %l10
+  %t167 = call double @source_span_from_tokens({ %Token*, i64 }* %t166)
+  store double %t167, double* %l15
+  br label %merge15
+merge15:
+  %t168 = phi { %TypeParameter*, i64 }* [ null, %then14 ], [ %t130, %then10 ]
+  store { %TypeParameter*, i64 }* %t168, { %TypeParameter*, i64 }** %l6
   br label %merge11
 merge11:
-  %t123 = load double, double* %l7
-  %t124 = sitofp i64 1 to double
-  %t125 = fadd double %t123, %t124
-  store double %t125, double* %l7
+  %t169 = phi { %TypeParameter*, i64 }* [ null, %then10 ], [ %t79, %loop.body5 ]
+  store { %TypeParameter*, i64 }* %t169, { %TypeParameter*, i64 }** %l6
+  %t170 = load double, double* %l7
+  %t171 = sitofp i64 1 to double
+  %t172 = fadd double %t170, %t171
+  store double %t172, double* %l7
   br label %loop.latch6
 loop.latch6:
-  %t126 = load double, double* %l7
+  %t173 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l6
+  %t174 = load double, double* %l7
   br label %loop.header4
 afterloop7:
-  %t128 = load %Parser, %Parser* %l0
-  %t129 = insertvalue %TypeParameterParseResult undef, i8* null, 0
-  %t130 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l6
-  %t131 = bitcast { %TypeParameter*, i64 }* %t130 to { i8**, i64 }*
-  %t132 = insertvalue %TypeParameterParseResult %t129, { i8**, i64 }* %t131, 1
-  ret %TypeParameterParseResult %t132
+  %t177 = load %Parser, %Parser* %l0
+  %t178 = insertvalue %TypeParameterParseResult undef, i8* null, 0
+  %t179 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l6
+  %t180 = bitcast { %TypeParameter*, i64 }* %t179 to { i8**, i64 }*
+  %t181 = insertvalue %TypeParameterParseResult %t178, { i8**, i64 }* %t180, 1
+  ret %TypeParameterParseResult %t181
 }
 
 define %ImplementsParseResult @parse_implements_clause(%Parser %parser) {
@@ -3295,8 +3435,10 @@ merge1:
   %t45 = load double, double* %l4
   br label %loop.header2
 loop.header2:
-  %t71 = phi double [ %t45, %entry ], [ %t70, %loop.latch4 ]
-  store double %t71, double* %l4
+  %t85 = phi { %TypeAnnotation*, i64 }* [ %t43, %entry ], [ %t83, %loop.latch4 ]
+  %t86 = phi double [ %t45, %entry ], [ %t84, %loop.latch4 ]
+  store { %TypeAnnotation*, i64 }* %t85, { %TypeAnnotation*, i64 }** %l2
+  store double %t86, double* %l4
   br label %loop.body3
 loop.body3:
   %t46 = load double, double* %l4
@@ -3326,22 +3468,42 @@ merge7:
   %t65 = call i8* @trim_text(i8* %t64)
   store i8* %t65, i8** %l5
   %t66 = load i8*, i8** %l5
-  %t67 = load double, double* %l4
-  %t68 = sitofp i64 1 to double
-  %t69 = fadd double %t67, %t68
-  store double %t69, double* %l4
+  %t67 = call i64 @sailfin_runtime_string_length(i8* %t66)
+  %t68 = icmp sgt i64 %t67, 0
+  %t69 = load %Parser, %Parser* %l0
+  %t70 = load %CaptureResult, %CaptureResult* %l1
+  %t71 = load { %TypeAnnotation*, i64 }*, { %TypeAnnotation*, i64 }** %l2
+  %t72 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t73 = load double, double* %l4
+  %t74 = load i8*, i8** %l5
+  br i1 %t68, label %then8, label %merge9
+then8:
+  %t75 = load { %TypeAnnotation*, i64 }*, { %TypeAnnotation*, i64 }** %l2
+  %t76 = load i8*, i8** %l5
+  %t77 = insertvalue %TypeAnnotation undef, i8* %t76, 0
+  %t78 = call { %TypeAnnotation*, i64 }* @append_type_annotation({ %TypeAnnotation*, i64 }* %t75, %TypeAnnotation %t77)
+  store { %TypeAnnotation*, i64 }* %t78, { %TypeAnnotation*, i64 }** %l2
+  br label %merge9
+merge9:
+  %t79 = phi { %TypeAnnotation*, i64 }* [ %t78, %then8 ], [ %t71, %loop.body3 ]
+  store { %TypeAnnotation*, i64 }* %t79, { %TypeAnnotation*, i64 }** %l2
+  %t80 = load double, double* %l4
+  %t81 = sitofp i64 1 to double
+  %t82 = fadd double %t80, %t81
+  store double %t82, double* %l4
   br label %loop.latch4
 loop.latch4:
-  %t70 = load double, double* %l4
+  %t83 = load { %TypeAnnotation*, i64 }*, { %TypeAnnotation*, i64 }** %l2
+  %t84 = load double, double* %l4
   br label %loop.header2
 afterloop5:
-  %t72 = load %Parser, %Parser* %l0
-  %t73 = insertvalue %ImplementsParseResult undef, i8* null, 0
-  %t74 = load { %TypeAnnotation*, i64 }*, { %TypeAnnotation*, i64 }** %l2
-  %t75 = bitcast { %TypeAnnotation*, i64 }* %t74 to { i8**, i64 }*
-  %t76 = insertvalue %ImplementsParseResult %t73, { i8**, i64 }* %t75, 1
-  %t77 = insertvalue %ImplementsParseResult %t76, i1 1, 2
-  ret %ImplementsParseResult %t77
+  %t87 = load %Parser, %Parser* %l0
+  %t88 = insertvalue %ImplementsParseResult undef, i8* null, 0
+  %t89 = load { %TypeAnnotation*, i64 }*, { %TypeAnnotation*, i64 }** %l2
+  %t90 = bitcast { %TypeAnnotation*, i64 }* %t89 to { i8**, i64 }*
+  %t91 = insertvalue %ImplementsParseResult %t88, { i8**, i64 }* %t90, 1
+  %t92 = insertvalue %ImplementsParseResult %t91, i1 1, 2
+  ret %ImplementsParseResult %t92
 }
 
 define %ParameterParseResult @parse_single_parameter(%Parser %parser) {
@@ -6183,56 +6345,81 @@ merge3:
   %t79 = call i8* @trim_text(i8* %t78)
   store i8* %t79, i8** %l2
   %t82 = load i8*, i8** %l2
-  %t83 = load i8*, i8** %l2
-  %s84 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.84, i32 0, i32 0
-  %t85 = icmp eq i8* %t83, %s84
-  %t86 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
-  %t87 = load i8*, i8** %l2
-  br i1 %t85, label %then4, label %merge5
-then4:
-  %t88 = alloca %Expression
-  %t89 = getelementptr inbounds %Expression, %Expression* %t88, i32 0, i32 0
-  store i32 3, i32* %t89
-  %t90 = getelementptr inbounds %Expression, %Expression* %t88, i32 0, i32 1
-  %t91 = bitcast [1 x i8]* %t90 to i8*
-  %t92 = bitcast i8* %t91 to i1*
-  store i1 1, i1* %t92
-  %t93 = load %Expression, %Expression* %t88
-  ret %Expression %t93
-merge5:
+  %t83 = call i64 @sailfin_runtime_string_length(i8* %t82)
+  %t84 = icmp sge i64 %t83, 2
+  br label %logical_and_entry_81
+
+logical_and_entry_81:
+  br i1 %t84, label %logical_and_right_81, label %logical_and_merge_81
+
+logical_and_right_81:
+  %t85 = load i8*, i8** %l2
+  %t86 = getelementptr i8, i8* %t85, i64 0
+  %t87 = load i8, i8* %t86
+  %t88 = icmp eq i8 %t87, 34
+  br label %logical_and_right_end_81
+
+logical_and_right_end_81:
+  br label %logical_and_merge_81
+
+logical_and_merge_81:
+  %t89 = phi i1 [ false, %logical_and_entry_81 ], [ %t88, %logical_and_right_end_81 ]
+  br label %logical_and_entry_80
+
+logical_and_entry_80:
+  br i1 %t89, label %logical_and_right_80, label %logical_and_merge_80
+
+logical_and_right_80:
+  %t90 = load i8*, i8** %l2
+  %s91 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.91, i32 0, i32 0
+  %t92 = icmp eq i8* %t90, %s91
+  %t93 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t94 = load i8*, i8** %l2
-  %s95 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.95, i32 0, i32 0
-  %t96 = icmp eq i8* %t94, %s95
-  %t97 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
-  %t98 = load i8*, i8** %l2
-  br i1 %t96, label %then6, label %merge7
-then6:
-  %t99 = alloca %Expression
-  %t100 = getelementptr inbounds %Expression, %Expression* %t99, i32 0, i32 0
-  store i32 3, i32* %t100
-  %t101 = getelementptr inbounds %Expression, %Expression* %t99, i32 0, i32 1
-  %t102 = bitcast [1 x i8]* %t101 to i8*
-  %t103 = bitcast i8* %t102 to i1*
-  store i1 0, i1* %t103
-  %t104 = load %Expression, %Expression* %t99
-  ret %Expression %t104
-merge7:
+  br i1 %t92, label %then4, label %merge5
+then4:
+  %t95 = alloca %Expression
+  %t96 = getelementptr inbounds %Expression, %Expression* %t95, i32 0, i32 0
+  store i32 3, i32* %t96
+  %t97 = getelementptr inbounds %Expression, %Expression* %t95, i32 0, i32 1
+  %t98 = bitcast [1 x i8]* %t97 to i8*
+  %t99 = bitcast i8* %t98 to i1*
+  store i1 1, i1* %t99
+  %t100 = load %Expression, %Expression* %t95
+  ret %Expression %t100
+merge5:
+  %t101 = load i8*, i8** %l2
+  %s102 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.102, i32 0, i32 0
+  %t103 = icmp eq i8* %t101, %s102
+  %t104 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t105 = load i8*, i8** %l2
-  %t106 = call i1 @looks_like_number(i8* %t105)
-  %t107 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
-  %t108 = load i8*, i8** %l2
-  br i1 %t106, label %then8, label %merge9
+  br i1 %t103, label %then6, label %merge7
+then6:
+  %t106 = alloca %Expression
+  %t107 = getelementptr inbounds %Expression, %Expression* %t106, i32 0, i32 0
+  store i32 3, i32* %t107
+  %t108 = getelementptr inbounds %Expression, %Expression* %t106, i32 0, i32 1
+  %t109 = bitcast [1 x i8]* %t108 to i8*
+  %t110 = bitcast i8* %t109 to i1*
+  store i1 0, i1* %t110
+  %t111 = load %Expression, %Expression* %t106
+  ret %Expression %t111
+merge7:
+  %t112 = load i8*, i8** %l2
+  %t113 = call i1 @looks_like_number(i8* %t112)
+  %t114 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
+  %t115 = load i8*, i8** %l2
+  br i1 %t113, label %then8, label %merge9
 then8:
-  %t109 = alloca %Expression
-  %t110 = getelementptr inbounds %Expression, %Expression* %t109, i32 0, i32 0
-  store i32 1, i32* %t110
-  %t111 = load i8*, i8** %l2
-  %t112 = getelementptr inbounds %Expression, %Expression* %t109, i32 0, i32 1
-  %t113 = bitcast [8 x i8]* %t112 to i8*
-  %t114 = bitcast i8* %t113 to i8**
-  store i8* %t111, i8** %t114
-  %t115 = load %Expression, %Expression* %t109
-  ret %Expression %t115
+  %t116 = alloca %Expression
+  %t117 = getelementptr inbounds %Expression, %Expression* %t116, i32 0, i32 0
+  store i32 1, i32* %t117
+  %t118 = load i8*, i8** %l2
+  %t119 = getelementptr inbounds %Expression, %Expression* %t116, i32 0, i32 1
+  %t120 = bitcast [8 x i8]* %t119 to i8*
+  %t121 = bitcast i8* %t120 to i8**
+  store i8* %t118, i8** %t121
+  %t122 = load %Expression, %Expression* %t116
+  ret %Expression %t122
 merge9:
   br label %merge1
 merge1:
@@ -6244,68 +6431,83 @@ entry:
   %l0 = alloca i1
   %l1 = alloca double
   %l2 = alloca i8
+  %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t1 = icmp eq i64 %t0, 0
+  br i1 %t1, label %then0, label %merge1
+then0:
+  ret i1 0
+merge1:
   store i1 0, i1* %l0
-  %t0 = sitofp i64 0 to double
-  store double %t0, double* %l1
-  %t1 = getelementptr i8, i8* %text, i64 0
-  %t2 = load i8, i8* %t1
-  %t3 = load i1, i1* %l0
-  %t4 = load double, double* %l1
-  br label %loop.header0
-loop.header0:
-  %t32 = phi i1 [ %t3, %entry ], [ %t30, %loop.latch2 ]
-  %t33 = phi double [ %t4, %entry ], [ %t31, %loop.latch2 ]
-  store i1 %t32, i1* %l0
-  store double %t33, double* %l1
-  br label %loop.body1
-loop.body1:
-  %t5 = load double, double* %l1
+  %t2 = sitofp i64 0 to double
+  store double %t2, double* %l1
+  %t3 = getelementptr i8, i8* %text, i64 0
+  %t4 = load i8, i8* %t3
+  %t5 = load i1, i1* %l0
   %t6 = load double, double* %l1
-  %t7 = getelementptr i8, i8* %text, i64 %t6
-  %t8 = load i8, i8* %t7
-  store i8 %t8, i8* %l2
-  %t9 = load i8, i8* %l2
-  %t10 = icmp eq i8 %t9, 46
+  br label %loop.header2
+loop.header2:
+  %t39 = phi i1 [ %t5, %entry ], [ %t37, %loop.latch4 ]
+  %t40 = phi double [ %t6, %entry ], [ %t38, %loop.latch4 ]
+  store i1 %t39, i1* %l0
+  store double %t40, double* %l1
+  br label %loop.body3
+loop.body3:
+  %t7 = load double, double* %l1
+  %t8 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t9 = sitofp i64 %t8 to double
+  %t10 = fcmp oge double %t7, %t9
   %t11 = load i1, i1* %l0
   %t12 = load double, double* %l1
-  %t13 = load i8, i8* %l2
-  br i1 %t10, label %then4, label %merge5
-then4:
-  %t14 = load i1, i1* %l0
-  %t15 = load i1, i1* %l0
-  %t16 = load double, double* %l1
-  %t17 = load i8, i8* %l2
-  br i1 %t14, label %then6, label %merge7
+  br i1 %t10, label %then6, label %merge7
 then6:
-  ret i1 0
+  br label %afterloop5
 merge7:
-  store i1 1, i1* %l0
-  %t18 = load double, double* %l1
-  %t19 = sitofp i64 1 to double
-  %t20 = fadd double %t18, %t19
-  store double %t20, double* %l1
-  br label %loop.latch2
-merge5:
-  %t21 = load i8, i8* %l2
-  %t22 = call i1 @sailfin_runtime_is_decimal_digit(i8* null)
-  %t23 = xor i1 %t22, 1
-  %t24 = load i1, i1* %l0
-  %t25 = load double, double* %l1
-  %t26 = load i8, i8* %l2
-  br i1 %t23, label %then8, label %merge9
+  %t13 = load double, double* %l1
+  %t14 = getelementptr i8, i8* %text, i64 %t13
+  %t15 = load i8, i8* %t14
+  store i8 %t15, i8* %l2
+  %t16 = load i8, i8* %l2
+  %t17 = icmp eq i8 %t16, 46
+  %t18 = load i1, i1* %l0
+  %t19 = load double, double* %l1
+  %t20 = load i8, i8* %l2
+  br i1 %t17, label %then8, label %merge9
 then8:
+  %t21 = load i1, i1* %l0
+  %t22 = load i1, i1* %l0
+  %t23 = load double, double* %l1
+  %t24 = load i8, i8* %l2
+  br i1 %t21, label %then10, label %merge11
+then10:
   ret i1 0
+merge11:
+  store i1 1, i1* %l0
+  %t25 = load double, double* %l1
+  %t26 = sitofp i64 1 to double
+  %t27 = fadd double %t25, %t26
+  store double %t27, double* %l1
+  br label %loop.latch4
 merge9:
-  %t27 = load double, double* %l1
-  %t28 = sitofp i64 1 to double
-  %t29 = fadd double %t27, %t28
-  store double %t29, double* %l1
-  br label %loop.latch2
-loop.latch2:
-  %t30 = load i1, i1* %l0
-  %t31 = load double, double* %l1
-  br label %loop.header0
-afterloop3:
+  %t28 = load i8, i8* %l2
+  %t29 = call i1 @sailfin_runtime_is_decimal_digit(i8* null)
+  %t30 = xor i1 %t29, 1
+  %t31 = load i1, i1* %l0
+  %t32 = load double, double* %l1
+  %t33 = load i8, i8* %l2
+  br i1 %t30, label %then12, label %merge13
+then12:
+  ret i1 0
+merge13:
+  %t34 = load double, double* %l1
+  %t35 = sitofp i64 1 to double
+  %t36 = fadd double %t34, %t35
+  store double %t36, double* %l1
+  br label %loop.latch4
+loop.latch4:
+  %t37 = load i1, i1* %l0
+  %t38 = load double, double* %l1
+  br label %loop.header2
+afterloop5:
   ret i1 1
 }
 
@@ -8718,88 +8920,90 @@ entry:
   %l3 = alloca double
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
-  store double 0.0, double* %l1
-  %t1 = load double, double* %l0
-  %t2 = load double, double* %l1
-  br label %loop.header0
-loop.header0:
-  %t20 = phi double [ %t1, %entry ], [ %t19, %loop.latch2 ]
-  store double %t20, double* %l0
-  br label %loop.body1
-loop.body1:
+  %t1 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t2 = sitofp i64 %t1 to double
+  store double %t2, double* %l1
   %t3 = load double, double* %l0
   %t4 = load double, double* %l1
-  %t5 = fcmp oge double %t3, %t4
-  %t6 = load double, double* %l0
-  %t7 = load double, double* %l1
-  br i1 %t5, label %then4, label %merge5
+  br label %loop.header0
+loop.header0:
+  %t22 = phi double [ %t3, %entry ], [ %t21, %loop.latch2 ]
+  store double %t22, double* %l0
+  br label %loop.body1
+loop.body1:
+  %t5 = load double, double* %l0
+  %t6 = load double, double* %l1
+  %t7 = fcmp oge double %t5, %t6
+  %t8 = load double, double* %l0
+  %t9 = load double, double* %l1
+  br i1 %t7, label %then4, label %merge5
 then4:
   br label %afterloop3
 merge5:
-  %t8 = load double, double* %l0
-  %t9 = getelementptr i8, i8* %value, i64 %t8
-  %t10 = load i8, i8* %t9
-  store i8 %t10, i8* %l2
-  %t11 = load i8, i8* %l2
-  %t12 = call i1 @is_trim_whitespace(i8* null)
-  %t13 = load double, double* %l0
-  %t14 = load double, double* %l1
-  %t15 = load i8, i8* %l2
-  br i1 %t12, label %then6, label %merge7
+  %t10 = load double, double* %l0
+  %t11 = getelementptr i8, i8* %value, i64 %t10
+  %t12 = load i8, i8* %t11
+  store i8 %t12, i8* %l2
+  %t13 = load i8, i8* %l2
+  %t14 = call i1 @is_trim_whitespace(i8* null)
+  %t15 = load double, double* %l0
+  %t16 = load double, double* %l1
+  %t17 = load i8, i8* %l2
+  br i1 %t14, label %then6, label %merge7
 then6:
-  %t16 = load double, double* %l0
-  %t17 = sitofp i64 1 to double
-  %t18 = fadd double %t16, %t17
-  store double %t18, double* %l0
+  %t18 = load double, double* %l0
+  %t19 = sitofp i64 1 to double
+  %t20 = fadd double %t18, %t19
+  store double %t20, double* %l0
   br label %loop.latch2
 merge7:
   br label %afterloop3
 loop.latch2:
-  %t19 = load double, double* %l0
+  %t21 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t21 = load double, double* %l0
-  %t22 = load double, double* %l1
+  %t23 = load double, double* %l0
+  %t24 = load double, double* %l1
   br label %loop.header8
 loop.header8:
-  %t37 = phi double [ %t22, %entry ], [ %t36, %loop.latch10 ]
-  store double %t37, double* %l1
+  %t39 = phi double [ %t24, %entry ], [ %t38, %loop.latch10 ]
+  store double %t39, double* %l1
   br label %loop.body9
 loop.body9:
-  %t23 = load double, double* %l1
-  %t24 = load double, double* %l0
-  %t25 = fcmp ole double %t23, %t24
+  %t25 = load double, double* %l1
   %t26 = load double, double* %l0
-  %t27 = load double, double* %l1
-  br i1 %t25, label %then12, label %merge13
+  %t27 = fcmp ole double %t25, %t26
+  %t28 = load double, double* %l0
+  %t29 = load double, double* %l1
+  br i1 %t27, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
   store double 0.0, double* %l3
-  %t28 = load double, double* %l3
-  %t29 = call i1 @is_trim_whitespace(i8* null)
-  %t30 = load double, double* %l0
-  %t31 = load double, double* %l1
-  %t32 = load double, double* %l3
-  br i1 %t29, label %then14, label %merge15
-then14:
+  %t30 = load double, double* %l3
+  %t31 = call i1 @is_trim_whitespace(i8* null)
+  %t32 = load double, double* %l0
   %t33 = load double, double* %l1
-  %t34 = sitofp i64 1 to double
-  %t35 = fsub double %t33, %t34
-  store double %t35, double* %l1
+  %t34 = load double, double* %l3
+  br i1 %t31, label %then14, label %merge15
+then14:
+  %t35 = load double, double* %l1
+  %t36 = sitofp i64 1 to double
+  %t37 = fsub double %t35, %t36
+  store double %t37, double* %l1
   br label %loop.latch10
 merge15:
   br label %afterloop11
 loop.latch10:
-  %t36 = load double, double* %l1
+  %t38 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t38 = load double, double* %l0
-  %t39 = load double, double* %l1
-  %t40 = fptosi double %t38 to i64
-  %t41 = fptosi double %t39 to i64
-  %t42 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t40, i64 %t41)
-  ret i8* %t42
+  %t40 = load double, double* %l0
+  %t41 = load double, double* %l1
+  %t42 = fptosi double %t40 to i64
+  %t43 = fptosi double %t41 to i64
+  %t44 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t42, i64 %t43)
+  ret i8* %t44
 }
 
 define i1 @is_trim_whitespace(i8* %ch) {
@@ -8920,38 +9124,52 @@ define i1 @is_whitespace_lexeme(i8* %text) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8
-  %t0 = sitofp i64 0 to double
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  br label %loop.header0
-loop.header0:
-  %t15 = phi double [ %t1, %entry ], [ %t14, %loop.latch2 ]
-  store double %t15, double* %l0
-  br label %loop.body1
-loop.body1:
-  %t2 = load double, double* %l0
-  %t3 = load double, double* %l0
-  %t4 = getelementptr i8, i8* %text, i64 %t3
-  %t5 = load i8, i8* %t4
-  store i8 %t5, i8* %l1
-  %t6 = load i8, i8* %l1
-  %t7 = call i1 @is_trim_whitespace(i8* null)
-  %t8 = xor i1 %t7, 1
-  %t9 = load double, double* %l0
-  %t10 = load i8, i8* %l1
-  br i1 %t8, label %then4, label %merge5
-then4:
+  %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t1 = icmp eq i64 %t0, 0
+  br i1 %t1, label %then0, label %merge1
+then0:
   ret i1 0
-merge5:
-  %t11 = load double, double* %l0
-  %t12 = sitofp i64 1 to double
-  %t13 = fadd double %t11, %t12
-  store double %t13, double* %l0
-  br label %loop.latch2
-loop.latch2:
-  %t14 = load double, double* %l0
-  br label %loop.header0
-afterloop3:
+merge1:
+  %t2 = sitofp i64 0 to double
+  store double %t2, double* %l0
+  %t3 = load double, double* %l0
+  br label %loop.header2
+loop.header2:
+  %t21 = phi double [ %t3, %entry ], [ %t20, %loop.latch4 ]
+  store double %t21, double* %l0
+  br label %loop.body3
+loop.body3:
+  %t4 = load double, double* %l0
+  %t5 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t6 = sitofp i64 %t5 to double
+  %t7 = fcmp oge double %t4, %t6
+  %t8 = load double, double* %l0
+  br i1 %t7, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t9 = load double, double* %l0
+  %t10 = getelementptr i8, i8* %text, i64 %t9
+  %t11 = load i8, i8* %t10
+  store i8 %t11, i8* %l1
+  %t12 = load i8, i8* %l1
+  %t13 = call i1 @is_trim_whitespace(i8* null)
+  %t14 = xor i1 %t13, 1
+  %t15 = load double, double* %l0
+  %t16 = load i8, i8* %l1
+  br i1 %t14, label %then8, label %merge9
+then8:
+  ret i1 0
+merge9:
+  %t17 = load double, double* %l0
+  %t18 = sitofp i64 1 to double
+  %t19 = fadd double %t17, %t18
+  store double %t19, double* %l0
+  br label %loop.latch4
+loop.latch4:
+  %t20 = load double, double* %l0
+  br label %loop.header2
+afterloop5:
   ret i1 1
 }
 
@@ -9098,47 +9316,99 @@ define i8* @strip_surrounding_quotes(i8* %text) {
 entry:
   %l0 = alloca double
   %l1 = alloca double
-  %t0 = getelementptr i8, i8* %text, i64 0
-  %t1 = load i8, i8* %t0
-  %t2 = call double @char_code(i8 %t1)
-  store double %t2, double* %l0
-  store double 0.0, double* %l1
-  %t4 = load double, double* %l0
-  %t5 = sitofp i64 34 to double
-  %t6 = fcmp oeq double %t4, %t5
-  br label %logical_and_entry_3
-
-logical_and_entry_3:
-  br i1 %t6, label %logical_and_right_3, label %logical_and_merge_3
-
-logical_and_right_3:
-  %t7 = load double, double* %l1
-  %t8 = sitofp i64 34 to double
-  %t9 = fcmp oeq double %t7, %t8
-  br label %logical_and_right_end_3
-
-logical_and_right_end_3:
-  br label %logical_and_merge_3
-
-logical_and_merge_3:
-  %t10 = phi i1 [ false, %logical_and_entry_3 ], [ %t9, %logical_and_right_end_3 ]
-  %t11 = load double, double* %l0
-  %t12 = load double, double* %l1
-  br i1 %t10, label %then0, label %merge1
+  %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t1 = icmp slt i64 %t0, 2
+  br i1 %t1, label %then0, label %merge1
 then0:
-  ret i8* null
+  ret i8* %text
 merge1:
+  %t2 = getelementptr i8, i8* %text, i64 0
+  %t3 = load i8, i8* %t2
+  %t4 = call double @char_code(i8 %t3)
+  store double %t4, double* %l0
+  store double 0.0, double* %l1
+  %t6 = load double, double* %l0
+  %t7 = sitofp i64 34 to double
+  %t8 = fcmp oeq double %t6, %t7
+  br label %logical_and_entry_5
+
+logical_and_entry_5:
+  br i1 %t8, label %logical_and_right_5, label %logical_and_merge_5
+
+logical_and_right_5:
+  %t9 = load double, double* %l1
+  %t10 = sitofp i64 34 to double
+  %t11 = fcmp oeq double %t9, %t10
+  br label %logical_and_right_end_5
+
+logical_and_right_end_5:
+  br label %logical_and_merge_5
+
+logical_and_merge_5:
+  %t12 = phi i1 [ false, %logical_and_entry_5 ], [ %t11, %logical_and_right_end_5 ]
+  %t13 = load double, double* %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then2, label %merge3
+then2:
+  %t15 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t16 = sub i64 %t15, 1
+  %t17 = call i8* @sailfin_runtime_substring(i8* %text, i64 1, i64 %t16)
+  ret i8* %t17
+merge3:
   ret i8* %text
 }
 
 define i8* @normalize_test_name(i8* %text) {
 entry:
   %l0 = alloca i8*
+  %l1 = alloca double
+  %l2 = alloca double
   %t0 = call i8* @trim_text(i8* %text)
   store i8* %t0, i8** %l0
   %t1 = load i8*, i8** %l0
-  %t2 = load i8*, i8** %l0
-  ret i8* %t2
+  %t2 = call i64 @sailfin_runtime_string_length(i8* %t1)
+  %t3 = icmp sge i64 %t2, 2
+  %t4 = load i8*, i8** %l0
+  br i1 %t3, label %then0, label %merge1
+then0:
+  %t5 = load i8*, i8** %l0
+  %t6 = getelementptr i8, i8* %t5, i64 0
+  %t7 = load i8, i8* %t6
+  %t8 = call double @char_code(i8 %t7)
+  store double %t8, double* %l1
+  store double 0.0, double* %l2
+  %t10 = load double, double* %l1
+  %t11 = sitofp i64 34 to double
+  %t12 = fcmp oeq double %t10, %t11
+  br label %logical_and_entry_9
+
+logical_and_entry_9:
+  br i1 %t12, label %logical_and_right_9, label %logical_and_merge_9
+
+logical_and_right_9:
+  %t13 = load double, double* %l2
+  %t14 = sitofp i64 34 to double
+  %t15 = fcmp oeq double %t13, %t14
+  br label %logical_and_right_end_9
+
+logical_and_right_end_9:
+  br label %logical_and_merge_9
+
+logical_and_merge_9:
+  %t16 = phi i1 [ false, %logical_and_entry_9 ], [ %t15, %logical_and_right_end_9 ]
+  %t17 = load i8*, i8** %l0
+  %t18 = load double, double* %l1
+  %t19 = load double, double* %l2
+  br i1 %t16, label %then2, label %merge3
+then2:
+  %t20 = load i8*, i8** %l0
+  %t21 = call i8* @strip_surrounding_quotes(i8* %t20)
+  ret i8* %t21
+merge3:
+  br label %merge1
+merge1:
+  %t22 = load i8*, i8** %l0
+  ret i8* %t22
 }
 
 define { i8**, i64 }* @split_tokens_by_comma({ %Token*, i64 }* %tokens) {
@@ -9233,8 +9503,28 @@ afterloop3:
   %t51 = call i8* @trim_text(i8* %t50)
   store i8* %t51, i8** %l8
   %t52 = load i8*, i8** %l8
-  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t53
+  %t53 = call i64 @sailfin_runtime_string_length(i8* %t52)
+  %t54 = icmp sgt i64 %t53, 0
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t56 = load i8*, i8** %l1
+  %t57 = load double, double* %l2
+  %t58 = load double, double* %l3
+  %t59 = load double, double* %l4
+  %t60 = load double, double* %l5
+  %t61 = load double, double* %l6
+  %t62 = load i8*, i8** %l8
+  br i1 %t54, label %then6, label %merge7
+then6:
+  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t64 = load i8*, i8** %l8
+  %t65 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t63, i8* %t64)
+  store { i8**, i64 }* %t65, { i8**, i64 }** %l0
+  br label %merge7
+merge7:
+  %t66 = phi { i8**, i64 }* [ %t65, %then6 ], [ %t55, %entry ]
+  store { i8**, i64 }* %t66, { i8**, i64 }** %l0
+  %t67 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t67
 }
 
 define { i8**, i64 }* @split_token_slices_by_comma({ %Token*, i64 }* %tokens) {

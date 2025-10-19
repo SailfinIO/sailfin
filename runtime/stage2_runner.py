@@ -48,6 +48,8 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str, Sequence[type], type | None]] = {
     "sailfin_adapter_fs_read_file": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_write_file": ("io", (ctypes.c_void_p, ctypes.c_void_p), None),
     "sailfin_adapter_fs_list_directory": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
+    # String helpers
+    "sailfin_runtime_string_length": (None, (ctypes.c_void_p,), ctypes.c_longlong),
     # HTTP adapters
     "sailfin_adapter_http_get": ("net", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_http_post": ("net", (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
@@ -274,6 +276,22 @@ class Stage2Runner:
                     return 0
 
             return cfunc_type(_fs_list_directory)
+
+        elif symbol == "sailfin_runtime_string_length":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p)
+
+            def _string_length(value_ptr: ctypes.c_void_p) -> int:
+                try:
+                    if effect:
+                        _require(effect)
+                    text = _ptr_to_str(value_ptr)
+                    return len(text)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_string_length)
 
         # HTTP adapters
         elif symbol == "sailfin_adapter_http_get":

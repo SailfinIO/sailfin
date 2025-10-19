@@ -2292,6 +2292,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.length",
+        symbol: "sailfin_runtime_string_length",
+        return_type: "i64",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "is_whitespace_char",
         symbol: "sailfin_runtime_is_whitespace_char",
         return_type: "i1",
@@ -8014,6 +8021,14 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
         }
+    }
+    // Handle string length property when lowering i8* .length
+    if parse.field == "length" && base_operand.llvm_type == "i8*" {
+        let length_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let mut struct_info -> StructTypeInfo? = null;

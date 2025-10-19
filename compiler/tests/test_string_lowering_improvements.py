@@ -39,6 +39,21 @@ fn test_substring() -> string {
 
 
 @pytest.mark.stage2
+def test_string_length_property_lowering():
+    """Ensure string.length lowers to the runtime helper call."""
+    source = '''
+fn string_length(text -> string) -> int {
+    return text.length;
+}
+'''
+    result = main.compile_to_native_llvm(source)
+    assert hasattr(result, 'ir')
+    ir = result.ir
+    assert '@sailfin_runtime_string_length' in ir
+    assert 'call i64 @sailfin_runtime_string_length' in ir
+
+
+@pytest.mark.stage2
 def test_character_classification_helpers_registered():
     """Test that is_whitespace_char, is_decimal_digit, is_alpha_char are registered."""
     source = '''
