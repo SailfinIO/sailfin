@@ -162,22 +162,22 @@ entry:
   %l1 = alloca { %LayoutEnumDefinition*, i64 }*
   %l2 = alloca double
   %l3 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %LayoutStructDefinition]
+  %t1 = getelementptr [0 x %LayoutStructDefinition], [0 x %LayoutStructDefinition]* %t0, i32 0, i32 0
+  %t2 = alloca { %LayoutStructDefinition*, i64 }
+  %t3 = getelementptr { %LayoutStructDefinition*, i64 }, { %LayoutStructDefinition*, i64 }* %t2, i32 0, i32 0
+  store %LayoutStructDefinition* %t1, %LayoutStructDefinition** %t3
+  %t4 = getelementptr { %LayoutStructDefinition*, i64 }, { %LayoutStructDefinition*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %LayoutStructDefinition*, i64 }* null, { %LayoutStructDefinition*, i64 }** %l0
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  store { %LayoutStructDefinition*, i64 }* %t2, { %LayoutStructDefinition*, i64 }** %l0
+  %t5 = alloca [0 x %LayoutEnumDefinition]
+  %t6 = getelementptr [0 x %LayoutEnumDefinition], [0 x %LayoutEnumDefinition]* %t5, i32 0, i32 0
+  %t7 = alloca { %LayoutEnumDefinition*, i64 }
+  %t8 = getelementptr { %LayoutEnumDefinition*, i64 }, { %LayoutEnumDefinition*, i64 }* %t7, i32 0, i32 0
+  store %LayoutEnumDefinition* %t6, %LayoutEnumDefinition** %t8
+  %t9 = getelementptr { %LayoutEnumDefinition*, i64 }, { %LayoutEnumDefinition*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { %LayoutEnumDefinition*, i64 }* null, { %LayoutEnumDefinition*, i64 }** %l1
+  store { %LayoutEnumDefinition*, i64 }* %t7, { %LayoutEnumDefinition*, i64 }** %l1
   %t10 = sitofp i64 0 to double
   store double %t10, double* %l2
   %t11 = load { %LayoutStructDefinition*, i64 }*, { %LayoutStructDefinition*, i64 }** %l0
@@ -2429,14 +2429,14 @@ define i8* @render_native_specifiers({ %ImportSpecifier*, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -2500,14 +2500,14 @@ define i8* @render_export_specifiers({ %ExportSpecifier*, i64 }* %specifiers) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -7632,14 +7632,14 @@ then0:
   %t9 = load i8*, i8** %l0
   ret i8* %t9
 merge1:
-  %t10 = alloca [0 x double]
-  %t11 = getelementptr [0 x double], [0 x double]* %t10, i32 0, i32 0
-  %t12 = alloca { double*, i64 }
-  %t13 = getelementptr { double*, i64 }, { double*, i64 }* %t12, i32 0, i32 0
-  store double* %t11, double** %t13
-  %t14 = getelementptr { double*, i64 }, { double*, i64 }* %t12, i32 0, i32 1
+  %t10 = alloca [0 x i8*]
+  %t11 = getelementptr [0 x i8*], [0 x i8*]* %t10, i32 0, i32 0
+  %t12 = alloca { i8**, i64 }
+  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 0
+  store i8** %t11, i8*** %t13
+  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
   store i64 0, i64* %t14
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l1
   %t15 = sitofp i64 0 to double
   store double %t15, double* %l2
   %t16 = load i8*, i8** %l0
@@ -7766,14 +7766,14 @@ then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
   ret i8* %s3
 merge1:
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l0
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l1
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -7897,14 +7897,14 @@ then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
   ret i8* %s3
 merge1:
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l0
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l1
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -8012,14 +8012,14 @@ then0:
   %t4 = extractvalue %EnumVariant %variant, 0
   ret i8* %t4
 merge1:
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  %t5 = alloca [0 x i8*]
+  %t6 = getelementptr [0 x i8*], [0 x i8*]* %t5, i32 0, i32 0
+  %t7 = alloca { i8**, i64 }
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 0
+  store i8** %t6, i8*** %t8
+  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t7, { i8**, i64 }** %l0
   %t10 = sitofp i64 0 to double
   store double %t10, double* %l1
   %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -8101,14 +8101,14 @@ entry:
   %t8 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* null, i8* %struct_name)
   %t9 = call %RecordLayoutResult @calculate_record_layout(%LayoutContext %context, { %LayoutFieldInput*, i64 }* %t1, i8* %s2, i8* %struct_name, { i8**, i64 }* %t8)
   store %RecordLayoutResult %t9, %RecordLayoutResult* %l1
-  %t10 = alloca [0 x double]
-  %t11 = getelementptr [0 x double], [0 x double]* %t10, i32 0, i32 0
-  %t12 = alloca { double*, i64 }
-  %t13 = getelementptr { double*, i64 }, { double*, i64 }* %t12, i32 0, i32 0
-  store double* %t11, double** %t13
-  %t14 = getelementptr { double*, i64 }, { double*, i64 }* %t12, i32 0, i32 1
+  %t10 = alloca [0 x i8*]
+  %t11 = getelementptr [0 x i8*], [0 x i8*]* %t10, i32 0, i32 0
+  %t12 = alloca { i8**, i64 }
+  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 0
+  store i8** %t11, i8*** %t13
+  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
   store i64 0, i64* %t14
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l2
   %t15 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %s16 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.16, i32 0, i32 0
   %t17 = add i8* %s16, %struct_name
@@ -8222,14 +8222,14 @@ entry:
   %l10 = alloca double
   %l11 = alloca double
   %l12 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %LayoutEnumVariantDefinition]
+  %t1 = getelementptr [0 x %LayoutEnumVariantDefinition], [0 x %LayoutEnumVariantDefinition]* %t0, i32 0, i32 0
+  %t2 = alloca { %LayoutEnumVariantDefinition*, i64 }
+  %t3 = getelementptr { %LayoutEnumVariantDefinition*, i64 }, { %LayoutEnumVariantDefinition*, i64 }* %t2, i32 0, i32 0
+  store %LayoutEnumVariantDefinition* %t1, %LayoutEnumVariantDefinition** %t3
+  %t4 = getelementptr { %LayoutEnumVariantDefinition*, i64 }, { %LayoutEnumVariantDefinition*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %LayoutEnumVariantDefinition*, i64 }* null, { %LayoutEnumVariantDefinition*, i64 }** %l0
+  store { %LayoutEnumVariantDefinition*, i64 }* %t2, { %LayoutEnumVariantDefinition*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %LayoutEnumVariantDefinition*, i64 }*, { %LayoutEnumVariantDefinition*, i64 }** %l0
@@ -8403,14 +8403,14 @@ afterloop3:
   %t149 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* null, i8* %t148)
   %t150 = call %EnumAggregateLayout @infer_enum_aggregate_layout(%LayoutContext %context, i8* %t98, { %LayoutEnumVariantDefinition*, i64 }* %t99, { i8**, i64 }* %t149)
   store %EnumAggregateLayout %t150, %EnumAggregateLayout* %l4
-  %t151 = alloca [0 x double]
-  %t152 = getelementptr [0 x double], [0 x double]* %t151, i32 0, i32 0
-  %t153 = alloca { double*, i64 }
-  %t154 = getelementptr { double*, i64 }, { double*, i64 }* %t153, i32 0, i32 0
-  store double* %t152, double** %t154
-  %t155 = getelementptr { double*, i64 }, { double*, i64 }* %t153, i32 0, i32 1
+  %t151 = alloca [0 x i8*]
+  %t152 = getelementptr [0 x i8*], [0 x i8*]* %t151, i32 0, i32 0
+  %t153 = alloca { i8**, i64 }
+  %t154 = getelementptr { i8**, i64 }, { i8**, i64 }* %t153, i32 0, i32 0
+  store i8** %t152, i8*** %t154
+  %t155 = getelementptr { i8**, i64 }, { i8**, i64 }* %t153, i32 0, i32 1
   store i64 0, i64* %t155
-  store { i8**, i64 }* null, { i8**, i64 }** %l5
+  store { i8**, i64 }* %t153, { i8**, i64 }** %l5
   %s156 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.156, i32 0, i32 0
   %t157 = extractvalue %Statement %statement, 0
   %t158 = alloca %Statement
@@ -8659,22 +8659,22 @@ entry:
   store double %t2, double* %l2
   %t3 = load double, double* %l0
   store double %t3, double* %l3
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l4
-  %t9 = alloca [0 x double]
-  %t10 = getelementptr [0 x double], [0 x double]* %t9, i32 0, i32 0
-  %t11 = alloca { double*, i64 }
-  %t12 = getelementptr { double*, i64 }, { double*, i64 }* %t11, i32 0, i32 0
-  store double* %t10, double** %t12
-  %t13 = getelementptr { double*, i64 }, { double*, i64 }* %t11, i32 0, i32 1
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l4
+  %t9 = alloca [0 x %EnumVariantLayoutDescriptor]
+  %t10 = getelementptr [0 x %EnumVariantLayoutDescriptor], [0 x %EnumVariantLayoutDescriptor]* %t9, i32 0, i32 0
+  %t11 = alloca { %EnumVariantLayoutDescriptor*, i64 }
+  %t12 = getelementptr { %EnumVariantLayoutDescriptor*, i64 }, { %EnumVariantLayoutDescriptor*, i64 }* %t11, i32 0, i32 0
+  store %EnumVariantLayoutDescriptor* %t10, %EnumVariantLayoutDescriptor** %t12
+  %t13 = getelementptr { %EnumVariantLayoutDescriptor*, i64 }, { %EnumVariantLayoutDescriptor*, i64 }* %t11, i32 0, i32 1
   store i64 0, i64* %t13
-  store { %EnumVariantLayoutDescriptor*, i64 }* null, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  store { %EnumVariantLayoutDescriptor*, i64 }* %t11, { %EnumVariantLayoutDescriptor*, i64 }** %l5
   %t14 = sitofp i64 0 to double
   store double %t14, double* %l6
   %t15 = load double, double* %l0
@@ -8794,14 +8794,14 @@ then8:
 merge9:
   %t94 = phi double [ %t93, %then8 ], [ %t83, %loop.body1 ]
   store double %t94, double* %l2
-  %t95 = alloca [0 x double]
-  %t96 = getelementptr [0 x double], [0 x double]* %t95, i32 0, i32 0
-  %t97 = alloca { double*, i64 }
-  %t98 = getelementptr { double*, i64 }, { double*, i64 }* %t97, i32 0, i32 0
-  store double* %t96, double** %t98
-  %t99 = getelementptr { double*, i64 }, { double*, i64 }* %t97, i32 0, i32 1
+  %t95 = alloca [0 x %StructFieldLayoutDescriptor]
+  %t96 = getelementptr [0 x %StructFieldLayoutDescriptor], [0 x %StructFieldLayoutDescriptor]* %t95, i32 0, i32 0
+  %t97 = alloca { %StructFieldLayoutDescriptor*, i64 }
+  %t98 = getelementptr { %StructFieldLayoutDescriptor*, i64 }, { %StructFieldLayoutDescriptor*, i64 }* %t97, i32 0, i32 0
+  store %StructFieldLayoutDescriptor* %t96, %StructFieldLayoutDescriptor** %t98
+  %t99 = getelementptr { %StructFieldLayoutDescriptor*, i64 }, { %StructFieldLayoutDescriptor*, i64 }* %t97, i32 0, i32 1
   store i64 0, i64* %t99
-  store { %StructFieldLayoutDescriptor*, i64 }* null, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  store { %StructFieldLayoutDescriptor*, i64 }* %t97, { %StructFieldLayoutDescriptor*, i64 }** %l12
   %t100 = sitofp i64 0 to double
   store double %t100, double* %l13
   %t101 = load double, double* %l0
@@ -9016,22 +9016,22 @@ entry:
   %l8 = alloca double
   %l9 = alloca double
   %l10 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
+  %t5 = alloca [0 x %StructFieldLayoutDescriptor]
+  %t6 = getelementptr [0 x %StructFieldLayoutDescriptor], [0 x %StructFieldLayoutDescriptor]* %t5, i32 0, i32 0
+  %t7 = alloca { %StructFieldLayoutDescriptor*, i64 }
+  %t8 = getelementptr { %StructFieldLayoutDescriptor*, i64 }, { %StructFieldLayoutDescriptor*, i64 }* %t7, i32 0, i32 0
+  store %StructFieldLayoutDescriptor* %t6, %StructFieldLayoutDescriptor** %t8
+  %t9 = getelementptr { %StructFieldLayoutDescriptor*, i64 }, { %StructFieldLayoutDescriptor*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { %StructFieldLayoutDescriptor*, i64 }* null, { %StructFieldLayoutDescriptor*, i64 }** %l1
+  store { %StructFieldLayoutDescriptor*, i64 }* %t7, { %StructFieldLayoutDescriptor*, i64 }** %l1
   %t10 = sitofp i64 0 to double
   store double %t10, double* %l2
   %t11 = sitofp i64 1 to double
@@ -9238,14 +9238,14 @@ entry:
   %l5 = alloca double
   %t0 = call i8* @trim_text(i8* %type_annotation)
   store i8* %t0, i8** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %t6 = load i8*, i8** %l0
   %t7 = load i8*, i8** %l0
   %s8 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.8, i32 0, i32 0
@@ -9480,14 +9480,14 @@ entry:
   %l1 = alloca double
   %l2 = alloca %FieldDeclaration
   %l3 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %LayoutFieldInput]
+  %t1 = getelementptr [0 x %LayoutFieldInput], [0 x %LayoutFieldInput]* %t0, i32 0, i32 0
+  %t2 = alloca { %LayoutFieldInput*, i64 }
+  %t3 = getelementptr { %LayoutFieldInput*, i64 }, { %LayoutFieldInput*, i64 }* %t2, i32 0, i32 0
+  store %LayoutFieldInput* %t1, %LayoutFieldInput** %t3
+  %t4 = getelementptr { %LayoutFieldInput*, i64 }, { %LayoutFieldInput*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %LayoutFieldInput*, i64 }* null, { %LayoutFieldInput*, i64 }** %l0
+  store { %LayoutFieldInput*, i64 }* %t2, { %LayoutFieldInput*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %LayoutFieldInput*, i64 }*, { %LayoutFieldInput*, i64 }** %l0
@@ -9674,14 +9674,14 @@ entry:
 define { %CanonicalTypeLayout*, i64 }* @canonical_type_layouts() {
 entry:
   %l0 = alloca { %CanonicalTypeLayout*, i64 }*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %CanonicalTypeLayout]
+  %t1 = getelementptr [0 x %CanonicalTypeLayout], [0 x %CanonicalTypeLayout]* %t0, i32 0, i32 0
+  %t2 = alloca { %CanonicalTypeLayout*, i64 }
+  %t3 = getelementptr { %CanonicalTypeLayout*, i64 }, { %CanonicalTypeLayout*, i64 }* %t2, i32 0, i32 0
+  store %CanonicalTypeLayout* %t1, %CanonicalTypeLayout** %t3
+  %t4 = getelementptr { %CanonicalTypeLayout*, i64 }, { %CanonicalTypeLayout*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %CanonicalTypeLayout*, i64 }* null, { %CanonicalTypeLayout*, i64 }** %l0
+  store { %CanonicalTypeLayout*, i64 }* %t2, { %CanonicalTypeLayout*, i64 }** %l0
   %t5 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
   %s6 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.6, i32 0, i32 0
   %t7 = insertvalue %CanonicalTypeLayout undef, i8* %s6, 0
@@ -10834,14 +10834,14 @@ merge15:
   %t588 = icmp eq i8* %t586, %s587
   br i1 %t588, label %then16, label %merge17
 then16:
-  %t589 = alloca [0 x double]
-  %t590 = getelementptr [0 x double], [0 x double]* %t589, i32 0, i32 0
-  %t591 = alloca { double*, i64 }
-  %t592 = getelementptr { double*, i64 }, { double*, i64 }* %t591, i32 0, i32 0
-  store double* %t590, double** %t592
-  %t593 = getelementptr { double*, i64 }, { double*, i64 }* %t591, i32 0, i32 1
+  %t589 = alloca [0 x i8*]
+  %t590 = getelementptr [0 x i8*], [0 x i8*]* %t589, i32 0, i32 0
+  %t591 = alloca { i8**, i64 }
+  %t592 = getelementptr { i8**, i64 }, { i8**, i64 }* %t591, i32 0, i32 0
+  store i8** %t590, i8*** %t592
+  %t593 = getelementptr { i8**, i64 }, { i8**, i64 }* %t591, i32 0, i32 1
   store i64 0, i64* %t593
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t591, { i8**, i64 }** %l2
   %t594 = sitofp i64 0 to double
   store double %t594, double* %l3
   %t595 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11127,14 +11127,14 @@ merge27:
   %t841 = icmp eq i8* %t839, %s840
   br i1 %t841, label %then28, label %merge29
 then28:
-  %t842 = alloca [0 x double]
-  %t843 = getelementptr [0 x double], [0 x double]* %t842, i32 0, i32 0
-  %t844 = alloca { double*, i64 }
-  %t845 = getelementptr { double*, i64 }, { double*, i64 }* %t844, i32 0, i32 0
-  store double* %t843, double** %t845
-  %t846 = getelementptr { double*, i64 }, { double*, i64 }* %t844, i32 0, i32 1
+  %t842 = alloca [0 x i8*]
+  %t843 = getelementptr [0 x i8*], [0 x i8*]* %t842, i32 0, i32 0
+  %t844 = alloca { i8**, i64 }
+  %t845 = getelementptr { i8**, i64 }, { i8**, i64 }* %t844, i32 0, i32 0
+  store i8** %t843, i8*** %t845
+  %t846 = getelementptr { i8**, i64 }, { i8**, i64 }* %t844, i32 0, i32 1
   store i64 0, i64* %t846
-  store { i8**, i64 }* null, { i8**, i64 }** %l5
+  store { i8**, i64 }* %t844, { i8**, i64 }** %l5
   %t847 = sitofp i64 0 to double
   store double %t847, double* %l6
   %t848 = load { i8**, i64 }*, { i8**, i64 }** %l5
@@ -11269,14 +11269,14 @@ merge29:
   %t956 = icmp eq i8* %t954, %s955
   br i1 %t956, label %then36, label %merge37
 then36:
-  %t957 = alloca [0 x double]
-  %t958 = getelementptr [0 x double], [0 x double]* %t957, i32 0, i32 0
-  %t959 = alloca { double*, i64 }
-  %t960 = getelementptr { double*, i64 }, { double*, i64 }* %t959, i32 0, i32 0
-  store double* %t958, double** %t960
-  %t961 = getelementptr { double*, i64 }, { double*, i64 }* %t959, i32 0, i32 1
+  %t957 = alloca [0 x i8*]
+  %t958 = getelementptr [0 x i8*], [0 x i8*]* %t957, i32 0, i32 0
+  %t959 = alloca { i8**, i64 }
+  %t960 = getelementptr { i8**, i64 }, { i8**, i64 }* %t959, i32 0, i32 0
+  store i8** %t958, i8*** %t960
+  %t961 = getelementptr { i8**, i64 }, { i8**, i64 }* %t959, i32 0, i32 1
   store i64 0, i64* %t961
-  store { i8**, i64 }* null, { i8**, i64 }** %l8
+  store { i8**, i64 }* %t959, { i8**, i64 }** %l8
   %t962 = sitofp i64 0 to double
   store double %t962, double* %l9
   %t963 = load { i8**, i64 }*, { i8**, i64 }** %l8
@@ -11583,14 +11583,14 @@ entry:
   %l3 = alloca double
   %t0 = call i8* @infer_array_element_type({ %Expression*, i64 }* %elements)
   store i8* %t0, i8** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
   %t7 = load i8*, i8** %l0
@@ -12420,14 +12420,14 @@ entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
   %l2 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -12591,14 +12591,14 @@ define %NativeState @state_new(%LayoutContext %context) {
 entry:
   %t0 = call %TextBuilder @builder_new()
   %t1 = insertvalue %NativeState undef, i8* null, 0
-  %t2 = alloca [0 x double]
-  %t3 = getelementptr [0 x double], [0 x double]* %t2, i32 0, i32 0
-  %t4 = alloca { double*, i64 }
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 0
-  store double* %t3, double** %t5
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 1
+  %t2 = alloca [0 x i8*]
+  %t3 = getelementptr [0 x i8*], [0 x i8*]* %t2, i32 0, i32 0
+  %t4 = alloca { i8**, i64 }
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 0
+  store i8** %t3, i8*** %t5
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 1
   store i64 0, i64* %t6
-  %t7 = insertvalue %NativeState %t1, { i8**, i64 }* null, 1
+  %t7 = insertvalue %NativeState %t1, { i8**, i64 }* %t4, 1
   %t8 = insertvalue %NativeState %t7, i8* null, 2
   ret %NativeState %t8
 }
@@ -12903,14 +12903,14 @@ afterloop5:
 
 define %TextBuilder @builder_new() {
 entry:
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  %t5 = insertvalue %TextBuilder undef, { i8**, i64 }* null, 0
+  %t5 = insertvalue %TextBuilder undef, { i8**, i64 }* %t2, 0
   %t6 = sitofp i64 0 to double
   %t7 = insertvalue %TextBuilder %t5, double %t6, 1
   ret %TextBuilder %t7
@@ -13160,14 +13160,14 @@ then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
   ret i8* %s3
 merge1:
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l0
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l1
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0

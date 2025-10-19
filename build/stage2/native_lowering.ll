@@ -105,14 +105,14 @@ entry:
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = extractvalue %NativeModule %native_module, 0
   %t6 = call double @select_text_artifact({ i8**, i64 }* %t5)
   store double %t6, double* %l1
@@ -147,14 +147,14 @@ entry:
   %l6 = alloca %PythonFunctionEmission
   %t0 = call %PythonBuilder @builder_new()
   store %PythonBuilder %t0, %PythonBuilder* %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %t6 = load %PythonBuilder, %PythonBuilder* %l0
   %s7 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.7, i32 0, i32 0
   %t8 = call %PythonBuilder @builder_emit(%PythonBuilder %t6, i8* %s7)
@@ -163,14 +163,14 @@ entry:
   %s10 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.10, i32 0, i32 0
   %t11 = call %PythonBuilder @builder_emit(%PythonBuilder %t9, i8* %s10)
   store %PythonBuilder %t11, %PythonBuilder* %l0
-  %t12 = alloca [0 x double]
-  %t13 = getelementptr [0 x double], [0 x double]* %t12, i32 0, i32 0
-  %t14 = alloca { double*, i64 }
-  %t15 = getelementptr { double*, i64 }, { double*, i64 }* %t14, i32 0, i32 0
-  store double* %t13, double** %t15
-  %t16 = getelementptr { double*, i64 }, { double*, i64 }* %t14, i32 0, i32 1
+  %t12 = alloca [0 x i8*]
+  %t13 = getelementptr [0 x i8*], [0 x i8*]* %t12, i32 0, i32 0
+  %t14 = alloca { i8**, i64 }
+  %t15 = getelementptr { i8**, i64 }, { i8**, i64 }* %t14, i32 0, i32 0
+  store i8** %t13, i8*** %t15
+  %t16 = getelementptr { i8**, i64 }, { i8**, i64 }* %t14, i32 0, i32 1
   store i64 0, i64* %t16
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t14, { i8**, i64 }** %l2
   %t17 = load { %NativeImport*, i64 }, { %NativeImport*, i64 }* %imports
   %t18 = extractvalue { %NativeImport*, i64 } %t17, 1
   %t19 = icmp sgt i64 %t18, 0
@@ -552,14 +552,14 @@ entry:
   %l4 = alloca i8*
   %l5 = alloca i8*
   store %PythonBuilder %builder, %PythonBuilder* %l0
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l1
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l2
   %t6 = load %PythonBuilder, %PythonBuilder* %l0
@@ -798,14 +798,14 @@ then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
   ret i8* %s3
 merge1:
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l0
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l1
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -897,14 +897,14 @@ define i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* %specifie
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -997,14 +997,14 @@ entry:
   %l2 = alloca double
   %l3 = alloca %PythonStructEmission
   store %PythonBuilder %builder, %PythonBuilder* %l0
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l1
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l2
   %t6 = load %PythonBuilder, %PythonBuilder* %l0
@@ -1096,14 +1096,14 @@ entry:
   %l3 = alloca i1
   %l4 = alloca double
   %l5 = alloca { i8**, i64 }*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -1226,14 +1226,14 @@ loop.latch2:
   %t77 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t80 = alloca [0 x double]
-  %t81 = getelementptr [0 x double], [0 x double]* %t80, i32 0, i32 0
-  %t82 = alloca { double*, i64 }
-  %t83 = getelementptr { double*, i64 }, { double*, i64 }* %t82, i32 0, i32 0
-  store double* %t81, double** %t83
-  %t84 = getelementptr { double*, i64 }, { double*, i64 }* %t82, i32 0, i32 1
+  %t80 = alloca [0 x i8*]
+  %t81 = getelementptr [0 x i8*], [0 x i8*]* %t80, i32 0, i32 0
+  %t82 = alloca { i8**, i64 }
+  %t83 = getelementptr { i8**, i64 }, { i8**, i64 }* %t82, i32 0, i32 0
+  store i8** %t81, i8*** %t83
+  %t84 = getelementptr { i8**, i64 }, { i8**, i64 }* %t82, i32 0, i32 1
   store i64 0, i64* %t84
-  store { i8**, i64 }* null, { i8**, i64 }** %l5
+  store { i8**, i64 }* %t82, { i8**, i64 }** %l5
   %t85 = sitofp i64 0 to double
   store double %t85, double* %l1
   %t86 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -1388,14 +1388,14 @@ entry:
   %t9 = load %PythonBuilder, %PythonBuilder* %l1
   %t10 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t9)
   store %PythonBuilder %t10, %PythonBuilder* %l1
-  %t11 = alloca [0 x double]
-  %t12 = getelementptr [0 x double], [0 x double]* %t11, i32 0, i32 0
-  %t13 = alloca { double*, i64 }
-  %t14 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 0
-  store double* %t12, double** %t14
-  %t15 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 1
+  %t11 = alloca [0 x i8*]
+  %t12 = getelementptr [0 x i8*], [0 x i8*]* %t11, i32 0, i32 0
+  %t13 = alloca { i8**, i64 }
+  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t13, i32 0, i32 0
+  store i8** %t12, i8*** %t14
+  %t15 = getelementptr { i8**, i64 }, { i8**, i64 }* %t13, i32 0, i32 1
   store i64 0, i64* %t15
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t13, { i8**, i64 }** %l2
   %t16 = extractvalue %NativeStruct %definition, 1
   %t17 = call { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* null)
   store { i8**, i64 }* %t17, { i8**, i64 }** %l3
@@ -1778,22 +1778,22 @@ entry:
   %l3 = alloca %NativeStructField
   %l4 = alloca i8*
   %l5 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
+  %t5 = alloca [0 x i8*]
+  %t6 = getelementptr [0 x i8*], [0 x i8*]* %t5, i32 0, i32 0
+  %t7 = alloca { i8**, i64 }
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 0
+  store i8** %t6, i8*** %t8
+  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t7, { i8**, i64 }** %l1
   %t10 = sitofp i64 0 to double
   store double %t10, double* %l2
   %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -1899,14 +1899,14 @@ then0:
   %s3 = getelementptr inbounds [53 x i8], [53 x i8]* @.str.3, i32 0, i32 0
   ret i8* %s3
 merge1:
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l0
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l1
   %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -4684,14 +4684,14 @@ entry:
   %l4 = alloca i1
   %l5 = alloca i8*
   %l6 = alloca i8
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -4961,14 +4961,14 @@ entry:
   %l4 = alloca i1
   %l5 = alloca i8*
   %l6 = alloca i8
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -5468,6 +5468,17 @@ loop.latch4:
   %t25 = load double, double* %l1
   br label %loop.header2
 afterloop5:
+  %t28 = load double, double* %l0
+  %t29 = sitofp i64 2 to double
+  %t30 = frem double %t28, %t29
+  %t31 = sitofp i64 1 to double
+  %t32 = fcmp oeq double %t30, %t31
+  %t33 = load double, double* %l0
+  %t34 = load double, double* %l1
+  br i1 %t32, label %then10, label %merge11
+then10:
+  ret i1 1
+merge11:
   ret i1 0
 }
 
@@ -5969,14 +5980,14 @@ entry:
   %l9 = alloca i64
   %l10 = alloca %MatchContext
   store %PythonBuilder %builder, %PythonBuilder* %l0
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l1
   %t5 = extractvalue %NativeFunction %function, 1
   %t6 = call { i8**, i64 }* @render_python_parameters({ %NativeParameter*, i64 }* null)
   store { i8**, i64 }* %t6, { i8**, i64 }** %l2
@@ -6036,14 +6047,14 @@ then2:
 merge3:
   %t47 = sitofp i64 0 to double
   store double %t47, double* %l4
-  %t48 = alloca [0 x double]
-  %t49 = getelementptr [0 x double], [0 x double]* %t48, i32 0, i32 0
-  %t50 = alloca { double*, i64 }
-  %t51 = getelementptr { double*, i64 }, { double*, i64 }* %t50, i32 0, i32 0
-  store double* %t49, double** %t51
-  %t52 = getelementptr { double*, i64 }, { double*, i64 }* %t50, i32 0, i32 1
+  %t48 = alloca [0 x %MatchContext]
+  %t49 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t48, i32 0, i32 0
+  %t50 = alloca { %MatchContext*, i64 }
+  %t51 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t50, i32 0, i32 0
+  store %MatchContext* %t49, %MatchContext** %t51
+  %t52 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t50, i32 0, i32 1
   store i64 0, i64* %t52
-  store { %MatchContext*, i64 }* null, { %MatchContext*, i64 }** %l5
+  store { %MatchContext*, i64 }* %t50, { %MatchContext*, i64 }** %l5
   %t53 = sitofp i64 0 to double
   store double %t53, double* %l6
   %t54 = sitofp i64 0 to double
@@ -6265,14 +6276,14 @@ define { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* 
 entry:
   %l0 = alloca { %MatchContext*, i64 }*
   %l1 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %MatchContext]
+  %t1 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t0, i32 0, i32 0
+  %t2 = alloca { %MatchContext*, i64 }
+  %t3 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t2, i32 0, i32 0
+  store %MatchContext* %t1, %MatchContext** %t3
+  %t4 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %MatchContext*, i64 }* null, { %MatchContext*, i64 }** %l0
+  store { %MatchContext*, i64 }* %t2, { %MatchContext*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l0
@@ -6344,23 +6355,23 @@ entry:
   %t1 = fcmp ole double %end_index, %t0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %t2 = alloca [0 x double]
-  %t3 = getelementptr [0 x double], [0 x double]* %t2, i32 0, i32 0
-  %t4 = alloca { double*, i64 }
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 0
-  store double* %t3, double** %t5
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 1
+  %t2 = alloca [0 x %MatchContext]
+  %t3 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t2, i32 0, i32 0
+  %t4 = alloca { %MatchContext*, i64 }
+  %t5 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t4, i32 0, i32 0
+  store %MatchContext* %t3, %MatchContext** %t5
+  %t6 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t4, i32 0, i32 1
   store i64 0, i64* %t6
-  ret { %MatchContext*, i64 }* null
+  ret { %MatchContext*, i64 }* %t4
 merge1:
-  %t7 = alloca [0 x double]
-  %t8 = getelementptr [0 x double], [0 x double]* %t7, i32 0, i32 0
-  %t9 = alloca { double*, i64 }
-  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t9, i32 0, i32 0
-  store double* %t8, double** %t10
-  %t11 = getelementptr { double*, i64 }, { double*, i64 }* %t9, i32 0, i32 1
+  %t7 = alloca [0 x %MatchContext]
+  %t8 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t7, i32 0, i32 0
+  %t9 = alloca { %MatchContext*, i64 }
+  %t10 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t9, i32 0, i32 0
+  store %MatchContext* %t8, %MatchContext** %t10
+  %t11 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t9, i32 0, i32 1
   store i64 0, i64* %t11
-  store { %MatchContext*, i64 }* null, { %MatchContext*, i64 }** %l0
+  store { %MatchContext*, i64 }* %t9, { %MatchContext*, i64 }** %l0
   %t12 = sitofp i64 0 to double
   store double %t12, double* %l1
   %t13 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l0
@@ -6593,23 +6604,23 @@ entry:
   %t2 = icmp eq i64 %t1, 0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %t3 = alloca [0 x double]
-  %t4 = getelementptr [0 x double], [0 x double]* %t3, i32 0, i32 0
-  %t5 = alloca { double*, i64 }
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 0
-  store double* %t4, double** %t6
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 1
+  %t3 = alloca [0 x i8*]
+  %t4 = getelementptr [0 x i8*], [0 x i8*]* %t3, i32 0, i32 0
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t4, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
   store i64 0, i64* %t7
-  ret { i8**, i64 }* null
+  ret { i8**, i64 }* %t5
 merge1:
-  %t8 = alloca [0 x double]
-  %t9 = getelementptr [0 x double], [0 x double]* %t8, i32 0, i32 0
-  %t10 = alloca { double*, i64 }
-  %t11 = getelementptr { double*, i64 }, { double*, i64 }* %t10, i32 0, i32 0
-  store double* %t9, double** %t11
-  %t12 = getelementptr { double*, i64 }, { double*, i64 }* %t10, i32 0, i32 1
+  %t8 = alloca [0 x i8*]
+  %t9 = getelementptr [0 x i8*], [0 x i8*]* %t8, i32 0, i32 0
+  %t10 = alloca { i8**, i64 }
+  %t11 = getelementptr { i8**, i64 }, { i8**, i64 }* %t10, i32 0, i32 0
+  store i8** %t9, i8*** %t11
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %t10, i32 0, i32 1
   store i64 0, i64* %t12
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t10, { i8**, i64 }** %l0
   %t13 = sitofp i64 0 to double
   store double %t13, double* %l1
   %t14 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -6685,14 +6696,14 @@ afterloop5:
 
 define %PythonBuilder @builder_new() {
 entry:
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  %t5 = insertvalue %PythonBuilder undef, { i8**, i64 }* null, 0
+  %t5 = insertvalue %PythonBuilder undef, { i8**, i64 }* %t2, 0
   %t6 = sitofp i64 0 to double
   %t7 = insertvalue %PythonBuilder %t5, double %t6, 1
   ret %PythonBuilder %t7
@@ -6900,14 +6911,14 @@ entry:
   %t1 = load i8*, i8** %l0
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
   store i8* %s2, i8** %l1
-  %t3 = alloca [0 x double]
-  %t4 = getelementptr [0 x double], [0 x double]* %t3, i32 0, i32 0
-  %t5 = alloca { double*, i64 }
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 0
-  store double* %t4, double** %t6
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 1
+  %t3 = alloca [0 x i8*]
+  %t4 = getelementptr [0 x i8*], [0 x i8*]* %t3, i32 0, i32 0
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t4, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
   store i64 0, i64* %t7
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t5, { i8**, i64 }** %l2
   %t8 = sitofp i64 0 to double
   store double %t8, double* %l3
   %t9 = load i8*, i8** %l0

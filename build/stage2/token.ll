@@ -11,7 +11,7 @@ declare noalias i8* @malloc(i64)
 
 define %Token @eof_token(double %line, double %column) {
 entry:
-  %t0 = call double @TokenKindEndOfFile()
+  %t0 = insertvalue %TokenKind undef, i32 7, 0
   %t1 = insertvalue %Token undef, i8* null, 0
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
   %t3 = insertvalue %Token %t1, i8* %s2, 1

@@ -41,14 +41,14 @@ entry:
   %l26 = alloca i8*
   %l27 = alloca i8
   store %LexerState zeroinitializer, %LexerState* %l0
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %Token]
+  %t1 = getelementptr [0 x %Token], [0 x %Token]* %t0, i32 0, i32 0
+  %t2 = alloca { %Token*, i64 }
+  %t3 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 0
+  store %Token* %t1, %Token** %t3
+  %t4 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %Token*, i64 }* null, { %Token*, i64 }** %l1
+  store { %Token*, i64 }* %t2, { %Token*, i64 }** %l1
   %t5 = load %LexerState, %LexerState* %l0
   %t6 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   br label %loop.header0

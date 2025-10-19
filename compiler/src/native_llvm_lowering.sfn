@@ -5565,7 +5565,7 @@ fn lower_let_instruction(
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
-        let lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, "");
+        let lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -5721,7 +5721,7 @@ fn lower_expression_statement(
             let consumption = ownership_analysis.consumption;
             let mut stored_value -> string = default_return_literal(binding.llvm_type);
 
-            let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+            let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, binding.llvm_type);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
@@ -6745,7 +6745,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
     }
 
-    let multiplicative = find_top_level_operator(stripped, "*/");
+    let multiplicative = find_top_level_operator(stripped, "*/%");
     if multiplicative.success {
         return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context);
     }
@@ -6762,7 +6762,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         let first = stripped[0];
         let last = stripped[stripped.length - 1];
         if first == "[" && last == "]" {
-            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context);
+            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
         }
     }
 
@@ -7548,6 +7548,56 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if trimmed_target.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
+    // Enum variant constructors look like EnumName.VariantName() and should be converted to enum literals
+    let dot_index = index_of(trimmed_target, ".");
+    if dot_index > 0 {
+        let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
+        let variant_name = trim_text(substring(trimmed_target, dot_index + 1, trimmed_target.length));
+        
+        // Try to resolve this as an enum
+        let enum_info = resolve_enum_info_for_literal(context, enum_name);
+        if enum_info != null {
+            // This is an enum variant constructor!
+            // Convert the call into an enum literal
+            let mut fields -> StructLiteralField[] = [];
+            
+            // If there are arguments, they should map to the variant's fields
+            if arguments.length > 0 {
+                // Get the variant info to map arguments to field names
+                let variant_info = resolve_enum_variant_info(enum_info, variant_name);
+                if variant_info != null && variant_info.fields.length == arguments.length {
+                    let mut arg_index -> number = 0;
+                    loop {
+                        if arg_index >= arguments.length {
+                            break;
+                        }
+                        let field_info = variant_info.fields[arg_index];
+                        fields = append_struct_literal_field(fields, StructLiteralField {
+                            name: field_info.name,
+                            value: arguments[arg_index]
+                        });
+                        arg_index += 1;
+                    }
+                } else {
+                    // Argument count mismatch or variant not found - will be caught by lower_enum_literal
+                }
+            }
+            
+            // Create an EnumLiteralParse and lower it
+            let enum_parse = EnumLiteralParse {
+                recognized: true,
+                success: true,
+                enum_name: enum_name,
+                variant_name: variant_name,
+                fields: fields,
+                diagnostics: []
+            };
+            
+            return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "");
+        }
     }
 
     let mut current_lines = lines;
@@ -8339,11 +8389,21 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
-fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut collected_string_constants -> StringConstant[] = [];
+
+    let trimmed_expected = trim_text(expected_type);
+    let mut expected_element_type -> string = "";
+    if trimmed_expected.length > 0 {
+        expected_element_type = array_pointer_element_type(trimmed_expected);
+    }
+    let mut expected_struct_type -> string = "";
+    if expected_element_type.length > 0 {
+        expected_struct_type = array_struct_type_for_element(expected_element_type);
+    }
 
     let inner = trim_text(substring(text, 1, text.length - 1));
     let elements = split_array_elements(inner);
@@ -8351,6 +8411,9 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
 
     let mut operands -> LLVMOperand[] = [];
     let mut inferred_element_type -> string = metadata.element_type;
+    if inferred_element_type.length == 0 && expected_element_type.length > 0 {
+        inferred_element_type = expected_element_type;
+    }
     let mut index -> number = metadata.start_index;
     loop {
         if index >= elements.length {
@@ -8377,6 +8440,9 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     }
 
     if operands.length == 0 {
+        if inferred_element_type.length == 0 && expected_element_type.length > 0 {
+            inferred_element_type = expected_element_type;
+        }
         if inferred_element_type.length == 0 {
             inferred_element_type = "double";
         }
@@ -8433,7 +8499,10 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         index += 1;
     }
 
-    let struct_type = array_struct_type_for_element(element_type);
+    let mut struct_type = array_struct_type_for_element(element_type);
+    if operands.length == 0 && expected_struct_type.length > 0 {
+        struct_type = expected_struct_type;
+    }
     let struct_alloca = format_temp_name(current_temp);
     current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type);
     current_temp += 1;
@@ -9948,6 +10017,9 @@ fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
         if symbol == "/" {
             return "fdiv";
         }
+        if symbol == "%" {
+            return "frem";
+        }
     }
     if symbol == "+" {
         return "add";
@@ -9960,6 +10032,9 @@ fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
     }
     if symbol == "/" {
         return "sdiv";
+    }
+    if symbol == "%" {
+        return "srem";
     }
     return "add";
 }
@@ -10582,6 +10657,10 @@ fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> Loca
 }
 
 fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[] {
+    return values.concat([value]);
+}
+
+fn append_struct_literal_field(values -> StructLiteralField[], value -> StructLiteralField) -> StructLiteralField[] {
     return values.concat([value]);
 }
 

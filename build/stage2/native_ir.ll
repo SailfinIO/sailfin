@@ -114,62 +114,62 @@ entry:
   %l32 = alloca double
   %t0 = call { i8**, i64 }* @split_lines(i8* %text)
   store { i8**, i64 }* %t0, { i8**, i64 }** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
-  %t6 = alloca [0 x double]
-  %t7 = getelementptr [0 x double], [0 x double]* %t6, i32 0, i32 0
-  %t8 = alloca { double*, i64 }
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 0
-  store double* %t7, double** %t9
-  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
+  %t6 = alloca [0 x %NativeFunction]
+  %t7 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t6, i32 0, i32 0
+  %t8 = alloca { %NativeFunction*, i64 }
+  %t9 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t8, i32 0, i32 0
+  store %NativeFunction* %t7, %NativeFunction** %t9
+  %t10 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  store { %NativeFunction*, i64 }* null, { %NativeFunction*, i64 }** %l2
-  %t11 = alloca [0 x double]
-  %t12 = getelementptr [0 x double], [0 x double]* %t11, i32 0, i32 0
-  %t13 = alloca { double*, i64 }
-  %t14 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 0
-  store double* %t12, double** %t14
-  %t15 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 1
+  store { %NativeFunction*, i64 }* %t8, { %NativeFunction*, i64 }** %l2
+  %t11 = alloca [0 x %NativeImport]
+  %t12 = getelementptr [0 x %NativeImport], [0 x %NativeImport]* %t11, i32 0, i32 0
+  %t13 = alloca { %NativeImport*, i64 }
+  %t14 = getelementptr { %NativeImport*, i64 }, { %NativeImport*, i64 }* %t13, i32 0, i32 0
+  store %NativeImport* %t12, %NativeImport** %t14
+  %t15 = getelementptr { %NativeImport*, i64 }, { %NativeImport*, i64 }* %t13, i32 0, i32 1
   store i64 0, i64* %t15
-  store { %NativeImport*, i64 }* null, { %NativeImport*, i64 }** %l3
-  %t16 = alloca [0 x double]
-  %t17 = getelementptr [0 x double], [0 x double]* %t16, i32 0, i32 0
-  %t18 = alloca { double*, i64 }
-  %t19 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 0
-  store double* %t17, double** %t19
-  %t20 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 1
+  store { %NativeImport*, i64 }* %t13, { %NativeImport*, i64 }** %l3
+  %t16 = alloca [0 x %NativeStruct]
+  %t17 = getelementptr [0 x %NativeStruct], [0 x %NativeStruct]* %t16, i32 0, i32 0
+  %t18 = alloca { %NativeStruct*, i64 }
+  %t19 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t18, i32 0, i32 0
+  store %NativeStruct* %t17, %NativeStruct** %t19
+  %t20 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t18, i32 0, i32 1
   store i64 0, i64* %t20
-  store { %NativeStruct*, i64 }* null, { %NativeStruct*, i64 }** %l4
-  %t21 = alloca [0 x double]
-  %t22 = getelementptr [0 x double], [0 x double]* %t21, i32 0, i32 0
-  %t23 = alloca { double*, i64 }
-  %t24 = getelementptr { double*, i64 }, { double*, i64 }* %t23, i32 0, i32 0
-  store double* %t22, double** %t24
-  %t25 = getelementptr { double*, i64 }, { double*, i64 }* %t23, i32 0, i32 1
+  store { %NativeStruct*, i64 }* %t18, { %NativeStruct*, i64 }** %l4
+  %t21 = alloca [0 x %NativeInterface]
+  %t22 = getelementptr [0 x %NativeInterface], [0 x %NativeInterface]* %t21, i32 0, i32 0
+  %t23 = alloca { %NativeInterface*, i64 }
+  %t24 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t23, i32 0, i32 0
+  store %NativeInterface* %t22, %NativeInterface** %t24
+  %t25 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t23, i32 0, i32 1
   store i64 0, i64* %t25
-  store { %NativeInterface*, i64 }* null, { %NativeInterface*, i64 }** %l5
-  %t26 = alloca [0 x double]
-  %t27 = getelementptr [0 x double], [0 x double]* %t26, i32 0, i32 0
-  %t28 = alloca { double*, i64 }
-  %t29 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 0
-  store double* %t27, double** %t29
-  %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
+  store { %NativeInterface*, i64 }* %t23, { %NativeInterface*, i64 }** %l5
+  %t26 = alloca [0 x %NativeEnum]
+  %t27 = getelementptr [0 x %NativeEnum], [0 x %NativeEnum]* %t26, i32 0, i32 0
+  %t28 = alloca { %NativeEnum*, i64 }
+  %t29 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t28, i32 0, i32 0
+  store %NativeEnum* %t27, %NativeEnum** %t29
+  %t30 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t28, i32 0, i32 1
   store i64 0, i64* %t30
-  store { %NativeEnum*, i64 }* null, { %NativeEnum*, i64 }** %l6
-  %t31 = alloca [0 x double]
-  %t32 = getelementptr [0 x double], [0 x double]* %t31, i32 0, i32 0
-  %t33 = alloca { double*, i64 }
-  %t34 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 0
-  store double* %t32, double** %t34
-  %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 1
+  store { %NativeEnum*, i64 }* %t28, { %NativeEnum*, i64 }** %l6
+  %t31 = alloca [0 x %NativeBinding]
+  %t32 = getelementptr [0 x %NativeBinding], [0 x %NativeBinding]* %t31, i32 0, i32 0
+  %t33 = alloca { %NativeBinding*, i64 }
+  %t34 = getelementptr { %NativeBinding*, i64 }, { %NativeBinding*, i64 }* %t33, i32 0, i32 0
+  store %NativeBinding* %t32, %NativeBinding** %t34
+  %t35 = getelementptr { %NativeBinding*, i64 }, { %NativeBinding*, i64 }* %t33, i32 0, i32 1
   store i64 0, i64* %t35
-  store { %NativeBinding*, i64 }* null, { %NativeBinding*, i64 }** %l7
+  store { %NativeBinding*, i64 }* %t33, { %NativeBinding*, i64 }** %l7
   store i8* null, i8** %l8
   store i8* null, i8** %l9
   store i8* null, i8** %l10
@@ -1615,14 +1615,14 @@ entry:
   %l1 = alloca double
   %l2 = alloca %NativeEnumVariantLayout
   %l3 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %NativeEnumVariantLayout]
+  %t1 = getelementptr [0 x %NativeEnumVariantLayout], [0 x %NativeEnumVariantLayout]* %t0, i32 0, i32 0
+  %t2 = alloca { %NativeEnumVariantLayout*, i64 }
+  %t3 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t2, i32 0, i32 0
+  store %NativeEnumVariantLayout* %t1, %NativeEnumVariantLayout** %t3
+  %t4 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %NativeEnumVariantLayout*, i64 }* null, { %NativeEnumVariantLayout*, i64 }** %l0
+  store { %NativeEnumVariantLayout*, i64 }* %t2, { %NativeEnumVariantLayout*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l0
@@ -1868,545 +1868,446 @@ entry:
   %t1 = icmp eq i8* %line, %s0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %t2 = call double @NativeInstructionNoop()
-  %t3 = alloca [1 x double]
-  %t4 = getelementptr [1 x double], [1 x double]* %t3, i32 0, i32 0
-  %t5 = getelementptr double, double* %t4, i64 0
-  store double %t2, double* %t5
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t4, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
-  store i64 1, i64* %t8
-  %t9 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t10 = insertvalue %InstructionParseResult %t9, i1 0, 1
-  %t11 = insertvalue %InstructionParseResult %t10, i1 0, 2
-  ret %InstructionParseResult %t11
+  %t2 = insertvalue %NativeInstruction undef, i32 15, 0
+  %t3 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t4 = insertvalue %InstructionParseResult %t3, i1 0, 1
+  %t5 = insertvalue %InstructionParseResult %t4, i1 0, 2
+  ret %InstructionParseResult %t5
 merge1:
-  %s12 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.12, i32 0, i32 0
-  %t13 = call i1 @starts_with(i8* %line, i8* %s12)
-  br i1 %t13, label %then2, label %merge3
+  %s6 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.6, i32 0, i32 0
+  %t7 = call i1 @starts_with(i8* %line, i8* %s6)
+  br i1 %t7, label %then2, label %merge3
 then2:
-  %s14 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.14, i32 0, i32 0
-  %t15 = call i8* @strip_prefix(i8* %line, i8* %s14)
-  %t16 = call i8* @trim_text(i8* %t15)
-  store i8* %t16, i8** %l0
-  %t17 = alloca %NativeInstruction
-  %t18 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t17, i32 0, i32 0
-  store i32 3, i32* %t18
-  %t19 = load i8*, i8** %l0
-  %t20 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t17, i32 0, i32 1
-  %t21 = bitcast [8 x i8]* %t20 to i8*
-  %t22 = bitcast i8* %t21 to i8**
-  store i8* %t19, i8** %t22
-  %t23 = load %NativeInstruction, %NativeInstruction* %t17
-  %t24 = alloca [1 x %NativeInstruction]
-  %t25 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t24, i32 0, i32 0
-  %t26 = getelementptr %NativeInstruction, %NativeInstruction* %t25, i64 0
-  store %NativeInstruction %t23, %NativeInstruction* %t26
-  %t27 = alloca { %NativeInstruction*, i64 }
-  %t28 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t27, i32 0, i32 0
-  store %NativeInstruction* %t25, %NativeInstruction** %t28
-  %t29 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t27, i32 0, i32 1
-  store i64 1, i64* %t29
+  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.8, i32 0, i32 0
+  %t9 = call i8* @strip_prefix(i8* %line, i8* %s8)
+  %t10 = call i8* @trim_text(i8* %t9)
+  store i8* %t10, i8** %l0
+  %t11 = alloca %NativeInstruction
+  %t12 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t11, i32 0, i32 0
+  store i32 3, i32* %t12
+  %t13 = load i8*, i8** %l0
+  %t14 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t11, i32 0, i32 1
+  %t15 = bitcast [8 x i8]* %t14 to i8*
+  %t16 = bitcast i8* %t15 to i8**
+  store i8* %t13, i8** %t16
+  %t17 = load %NativeInstruction, %NativeInstruction* %t11
+  %t18 = alloca [1 x %NativeInstruction]
+  %t19 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t18, i32 0, i32 0
+  %t20 = getelementptr %NativeInstruction, %NativeInstruction* %t19, i64 0
+  store %NativeInstruction %t17, %NativeInstruction* %t20
+  %t21 = alloca { %NativeInstruction*, i64 }
+  %t22 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t21, i32 0, i32 0
+  store %NativeInstruction* %t19, %NativeInstruction** %t22
+  %t23 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t21, i32 0, i32 1
+  store i64 1, i64* %t23
+  %t24 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t25 = insertvalue %InstructionParseResult %t24, i1 0, 1
+  %t26 = insertvalue %InstructionParseResult %t25, i1 0, 2
+  ret %InstructionParseResult %t26
+merge3:
+  %s27 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.27, i32 0, i32 0
+  %t28 = icmp eq i8* %line, %s27
+  br i1 %t28, label %then4, label %merge5
+then4:
+  %t29 = insertvalue %NativeInstruction undef, i32 4, 0
   %t30 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
   %t31 = insertvalue %InstructionParseResult %t30, i1 0, 1
   %t32 = insertvalue %InstructionParseResult %t31, i1 0, 2
   ret %InstructionParseResult %t32
-merge3:
-  %s33 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.33, i32 0, i32 0
-  %t34 = icmp eq i8* %line, %s33
-  br i1 %t34, label %then4, label %merge5
-then4:
-  %t35 = call double @NativeInstructionElse()
-  %t36 = alloca [1 x double]
-  %t37 = getelementptr [1 x double], [1 x double]* %t36, i32 0, i32 0
-  %t38 = getelementptr double, double* %t37, i64 0
-  store double %t35, double* %t38
-  %t39 = alloca { double*, i64 }
-  %t40 = getelementptr { double*, i64 }, { double*, i64 }* %t39, i32 0, i32 0
-  store double* %t37, double** %t40
-  %t41 = getelementptr { double*, i64 }, { double*, i64 }* %t39, i32 0, i32 1
-  store i64 1, i64* %t41
-  %t42 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t43 = insertvalue %InstructionParseResult %t42, i1 0, 1
-  %t44 = insertvalue %InstructionParseResult %t43, i1 0, 2
-  ret %InstructionParseResult %t44
 merge5:
-  %s45 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.45, i32 0, i32 0
-  %t46 = icmp eq i8* %line, %s45
-  br i1 %t46, label %then6, label %merge7
+  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.33, i32 0, i32 0
+  %t34 = icmp eq i8* %line, %s33
+  br i1 %t34, label %then6, label %merge7
 then6:
-  %t47 = call double @NativeInstructionEndIf()
-  %t48 = alloca [1 x double]
-  %t49 = getelementptr [1 x double], [1 x double]* %t48, i32 0, i32 0
-  %t50 = getelementptr double, double* %t49, i64 0
-  store double %t47, double* %t50
-  %t51 = alloca { double*, i64 }
-  %t52 = getelementptr { double*, i64 }, { double*, i64 }* %t51, i32 0, i32 0
-  store double* %t49, double** %t52
-  %t53 = getelementptr { double*, i64 }, { double*, i64 }* %t51, i32 0, i32 1
-  store i64 1, i64* %t53
-  %t54 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t55 = insertvalue %InstructionParseResult %t54, i1 0, 1
-  %t56 = insertvalue %InstructionParseResult %t55, i1 0, 2
-  ret %InstructionParseResult %t56
+  %t35 = insertvalue %NativeInstruction undef, i32 5, 0
+  %t36 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t37 = insertvalue %InstructionParseResult %t36, i1 0, 1
+  %t38 = insertvalue %InstructionParseResult %t37, i1 0, 2
+  ret %InstructionParseResult %t38
 merge7:
-  %s57 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.57, i32 0, i32 0
-  %t58 = call i1 @starts_with(i8* %line, i8* %s57)
-  br i1 %t58, label %then8, label %merge9
+  %s39 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.39, i32 0, i32 0
+  %t40 = call i1 @starts_with(i8* %line, i8* %s39)
+  br i1 %t40, label %then8, label %merge9
 then8:
-  %s59 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.59, i32 0, i32 0
-  %t60 = call i8* @strip_prefix(i8* %line, i8* %s59)
-  %t61 = call i8* @trim_text(i8* %t60)
-  store i8* %t61, i8** %l1
-  %s62 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.62, i32 0, i32 0
-  store i8* %s62, i8** %l2
-  %t63 = load i8*, i8** %l1
-  %t64 = load i8*, i8** %l2
-  %t65 = call double @index_of(i8* %t63, i8* %t64)
-  store double %t65, double* %l3
-  %t66 = load double, double* %l3
-  %t67 = sitofp i64 0 to double
-  %t68 = fcmp oge double %t66, %t67
-  %t69 = load i8*, i8** %l1
-  %t70 = load i8*, i8** %l2
-  %t71 = load double, double* %l3
-  br i1 %t68, label %then10, label %merge11
+  %s41 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.41, i32 0, i32 0
+  %t42 = call i8* @strip_prefix(i8* %line, i8* %s41)
+  %t43 = call i8* @trim_text(i8* %t42)
+  store i8* %t43, i8** %l1
+  %s44 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.44, i32 0, i32 0
+  store i8* %s44, i8** %l2
+  %t45 = load i8*, i8** %l1
+  %t46 = load i8*, i8** %l2
+  %t47 = call double @index_of(i8* %t45, i8* %t46)
+  store double %t47, double* %l3
+  %t48 = load double, double* %l3
+  %t49 = sitofp i64 0 to double
+  %t50 = fcmp oge double %t48, %t49
+  %t51 = load i8*, i8** %l1
+  %t52 = load i8*, i8** %l2
+  %t53 = load double, double* %l3
+  br i1 %t50, label %then10, label %merge11
 then10:
-  %t72 = load i8*, i8** %l1
-  %t73 = load double, double* %l3
-  %t74 = fptosi double %t73 to i64
-  %t75 = call i8* @sailfin_runtime_substring(i8* %t72, i64 0, i64 %t74)
-  %t76 = call i8* @trim_text(i8* %t75)
-  store i8* %t76, i8** %l4
-  %t77 = load i8*, i8** %l1
-  %t78 = load double, double* %l3
-  %t79 = load i8*, i8** %l2
-  %t80 = load i8*, i8** %l1
+  %t54 = load i8*, i8** %l1
+  %t55 = load double, double* %l3
+  %t56 = fptosi double %t55 to i64
+  %t57 = call i8* @sailfin_runtime_substring(i8* %t54, i64 0, i64 %t56)
+  %t58 = call i8* @trim_text(i8* %t57)
+  store i8* %t58, i8** %l4
+  %t59 = load i8*, i8** %l1
+  %t60 = load double, double* %l3
+  %t61 = load i8*, i8** %l2
+  %t62 = load i8*, i8** %l1
   store double 0.0, double* %l5
-  %t81 = alloca %NativeInstruction
-  %t82 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t81, i32 0, i32 0
-  store i32 6, i32* %t82
-  %t83 = load i8*, i8** %l4
-  %t84 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t81, i32 0, i32 1
-  %t85 = bitcast [16 x i8]* %t84 to i8*
-  %t86 = bitcast i8* %t85 to i8**
-  store i8* %t83, i8** %t86
-  %t87 = load double, double* %l5
-  %t88 = call noalias i8* @malloc(i64 8)
-  %t89 = bitcast i8* %t88 to double*
-  store double %t87, double* %t89
-  %t90 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t81, i32 0, i32 1
-  %t91 = bitcast [16 x i8]* %t90 to i8*
-  %t92 = getelementptr inbounds i8, i8* %t91, i64 8
-  %t93 = bitcast i8* %t92 to i8**
-  store i8* %t88, i8** %t93
-  %t94 = load %NativeInstruction, %NativeInstruction* %t81
-  %t95 = alloca [1 x %NativeInstruction]
-  %t96 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t95, i32 0, i32 0
-  %t97 = getelementptr %NativeInstruction, %NativeInstruction* %t96, i64 0
-  store %NativeInstruction %t94, %NativeInstruction* %t97
-  %t98 = alloca { %NativeInstruction*, i64 }
-  %t99 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t98, i32 0, i32 0
-  store %NativeInstruction* %t96, %NativeInstruction** %t99
-  %t100 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t98, i32 0, i32 1
-  store i64 1, i64* %t100
+  %t63 = alloca %NativeInstruction
+  %t64 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t63, i32 0, i32 0
+  store i32 6, i32* %t64
+  %t65 = load i8*, i8** %l4
+  %t66 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t63, i32 0, i32 1
+  %t67 = bitcast [16 x i8]* %t66 to i8*
+  %t68 = bitcast i8* %t67 to i8**
+  store i8* %t65, i8** %t68
+  %t69 = load double, double* %l5
+  %t70 = call noalias i8* @malloc(i64 8)
+  %t71 = bitcast i8* %t70 to double*
+  store double %t69, double* %t71
+  %t72 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t63, i32 0, i32 1
+  %t73 = bitcast [16 x i8]* %t72 to i8*
+  %t74 = getelementptr inbounds i8, i8* %t73, i64 8
+  %t75 = bitcast i8* %t74 to i8**
+  store i8* %t70, i8** %t75
+  %t76 = load %NativeInstruction, %NativeInstruction* %t63
+  %t77 = alloca [1 x %NativeInstruction]
+  %t78 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t77, i32 0, i32 0
+  %t79 = getelementptr %NativeInstruction, %NativeInstruction* %t78, i64 0
+  store %NativeInstruction %t76, %NativeInstruction* %t79
+  %t80 = alloca { %NativeInstruction*, i64 }
+  %t81 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t80, i32 0, i32 0
+  store %NativeInstruction* %t78, %NativeInstruction** %t81
+  %t82 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t80, i32 0, i32 1
+  store i64 1, i64* %t82
+  %t83 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t84 = insertvalue %InstructionParseResult %t83, i1 0, 1
+  %t85 = insertvalue %InstructionParseResult %t84, i1 0, 2
+  ret %InstructionParseResult %t85
+merge11:
+  br label %merge9
+merge9:
+  %s86 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.86, i32 0, i32 0
+  %t87 = icmp eq i8* %line, %s86
+  br i1 %t87, label %then12, label %merge13
+then12:
+  %t88 = insertvalue %NativeInstruction undef, i32 7, 0
+  %t89 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t90 = insertvalue %InstructionParseResult %t89, i1 0, 1
+  %t91 = insertvalue %InstructionParseResult %t90, i1 0, 2
+  ret %InstructionParseResult %t91
+merge13:
+  %s92 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.92, i32 0, i32 0
+  %t93 = icmp eq i8* %line, %s92
+  br i1 %t93, label %then14, label %merge15
+then14:
+  %t94 = insertvalue %NativeInstruction undef, i32 8, 0
+  %t95 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t96 = insertvalue %InstructionParseResult %t95, i1 0, 1
+  %t97 = insertvalue %InstructionParseResult %t96, i1 0, 2
+  ret %InstructionParseResult %t97
+merge15:
+  %s98 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.98, i32 0, i32 0
+  %t99 = icmp eq i8* %line, %s98
+  br i1 %t99, label %then16, label %merge17
+then16:
+  %t100 = insertvalue %NativeInstruction undef, i32 9, 0
   %t101 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
   %t102 = insertvalue %InstructionParseResult %t101, i1 0, 1
   %t103 = insertvalue %InstructionParseResult %t102, i1 0, 2
   ret %InstructionParseResult %t103
-merge11:
-  br label %merge9
-merge9:
-  %s104 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.104, i32 0, i32 0
+merge17:
+  %s104 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.104, i32 0, i32 0
   %t105 = icmp eq i8* %line, %s104
-  br i1 %t105, label %then12, label %merge13
-then12:
-  %t106 = call double @NativeInstructionEndFor()
-  %t107 = alloca [1 x double]
-  %t108 = getelementptr [1 x double], [1 x double]* %t107, i32 0, i32 0
-  %t109 = getelementptr double, double* %t108, i64 0
-  store double %t106, double* %t109
-  %t110 = alloca { double*, i64 }
-  %t111 = getelementptr { double*, i64 }, { double*, i64 }* %t110, i32 0, i32 0
-  store double* %t108, double** %t111
-  %t112 = getelementptr { double*, i64 }, { double*, i64 }* %t110, i32 0, i32 1
-  store i64 1, i64* %t112
+  br i1 %t105, label %then18, label %merge19
+then18:
+  %t106 = insertvalue %NativeInstruction undef, i32 10, 0
+  %t107 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t108 = insertvalue %InstructionParseResult %t107, i1 0, 1
+  %t109 = insertvalue %InstructionParseResult %t108, i1 0, 2
+  ret %InstructionParseResult %t109
+merge19:
+  %s110 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.110, i32 0, i32 0
+  %t111 = icmp eq i8* %line, %s110
+  br i1 %t111, label %then20, label %merge21
+then20:
+  %t112 = insertvalue %NativeInstruction undef, i32 11, 0
   %t113 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
   %t114 = insertvalue %InstructionParseResult %t113, i1 0, 1
   %t115 = insertvalue %InstructionParseResult %t114, i1 0, 2
   ret %InstructionParseResult %t115
-merge13:
-  %s116 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.116, i32 0, i32 0
-  %t117 = icmp eq i8* %line, %s116
-  br i1 %t117, label %then14, label %merge15
-then14:
-  %t118 = call double @NativeInstructionLoop()
-  %t119 = alloca [1 x double]
-  %t120 = getelementptr [1 x double], [1 x double]* %t119, i32 0, i32 0
-  %t121 = getelementptr double, double* %t120, i64 0
-  store double %t118, double* %t121
-  %t122 = alloca { double*, i64 }
-  %t123 = getelementptr { double*, i64 }, { double*, i64 }* %t122, i32 0, i32 0
-  store double* %t120, double** %t123
-  %t124 = getelementptr { double*, i64 }, { double*, i64 }* %t122, i32 0, i32 1
-  store i64 1, i64* %t124
-  %t125 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t126 = insertvalue %InstructionParseResult %t125, i1 0, 1
-  %t127 = insertvalue %InstructionParseResult %t126, i1 0, 2
-  ret %InstructionParseResult %t127
-merge15:
-  %s128 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.128, i32 0, i32 0
-  %t129 = icmp eq i8* %line, %s128
-  br i1 %t129, label %then16, label %merge17
-then16:
-  %t130 = call double @NativeInstructionEndLoop()
-  %t131 = alloca [1 x double]
-  %t132 = getelementptr [1 x double], [1 x double]* %t131, i32 0, i32 0
-  %t133 = getelementptr double, double* %t132, i64 0
-  store double %t130, double* %t133
-  %t134 = alloca { double*, i64 }
-  %t135 = getelementptr { double*, i64 }, { double*, i64 }* %t134, i32 0, i32 0
-  store double* %t132, double** %t135
-  %t136 = getelementptr { double*, i64 }, { double*, i64 }* %t134, i32 0, i32 1
-  store i64 1, i64* %t136
-  %t137 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t138 = insertvalue %InstructionParseResult %t137, i1 0, 1
-  %t139 = insertvalue %InstructionParseResult %t138, i1 0, 2
-  ret %InstructionParseResult %t139
-merge17:
-  %s140 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.140, i32 0, i32 0
-  %t141 = icmp eq i8* %line, %s140
-  br i1 %t141, label %then18, label %merge19
-then18:
-  %t142 = call double @NativeInstructionBreak()
-  %t143 = alloca [1 x double]
-  %t144 = getelementptr [1 x double], [1 x double]* %t143, i32 0, i32 0
-  %t145 = getelementptr double, double* %t144, i64 0
-  store double %t142, double* %t145
-  %t146 = alloca { double*, i64 }
-  %t147 = getelementptr { double*, i64 }, { double*, i64 }* %t146, i32 0, i32 0
-  store double* %t144, double** %t147
-  %t148 = getelementptr { double*, i64 }, { double*, i64 }* %t146, i32 0, i32 1
-  store i64 1, i64* %t148
-  %t149 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t150 = insertvalue %InstructionParseResult %t149, i1 0, 1
-  %t151 = insertvalue %InstructionParseResult %t150, i1 0, 2
-  ret %InstructionParseResult %t151
-merge19:
-  %s152 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.152, i32 0, i32 0
-  %t153 = icmp eq i8* %line, %s152
-  br i1 %t153, label %then20, label %merge21
-then20:
-  %t154 = call double @NativeInstructionContinue()
-  %t155 = alloca [1 x double]
-  %t156 = getelementptr [1 x double], [1 x double]* %t155, i32 0, i32 0
-  %t157 = getelementptr double, double* %t156, i64 0
-  store double %t154, double* %t157
-  %t158 = alloca { double*, i64 }
-  %t159 = getelementptr { double*, i64 }, { double*, i64 }* %t158, i32 0, i32 0
-  store double* %t156, double** %t159
-  %t160 = getelementptr { double*, i64 }, { double*, i64 }* %t158, i32 0, i32 1
-  store i64 1, i64* %t160
-  %t161 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t162 = insertvalue %InstructionParseResult %t161, i1 0, 1
-  %t163 = insertvalue %InstructionParseResult %t162, i1 0, 2
-  ret %InstructionParseResult %t163
 merge21:
-  %s164 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.164, i32 0, i32 0
-  %t165 = call i1 @starts_with(i8* %line, i8* %s164)
-  br i1 %t165, label %then22, label %merge23
+  %s116 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.116, i32 0, i32 0
+  %t117 = call i1 @starts_with(i8* %line, i8* %s116)
+  br i1 %t117, label %then22, label %merge23
 then22:
-  %s166 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.166, i32 0, i32 0
-  %t167 = call i8* @strip_prefix(i8* %line, i8* %s166)
-  %t168 = call i8* @trim_text(i8* %t167)
-  store i8* %t168, i8** %l6
-  %t169 = alloca %NativeInstruction
-  %t170 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t169, i32 0, i32 0
-  store i32 12, i32* %t170
-  %t171 = load i8*, i8** %l6
-  %t172 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t169, i32 0, i32 1
-  %t173 = bitcast [8 x i8]* %t172 to i8*
-  %t174 = bitcast i8* %t173 to i8**
-  store i8* %t171, i8** %t174
-  %t175 = load %NativeInstruction, %NativeInstruction* %t169
-  %t176 = alloca [1 x %NativeInstruction]
-  %t177 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t176, i32 0, i32 0
-  %t178 = getelementptr %NativeInstruction, %NativeInstruction* %t177, i64 0
-  store %NativeInstruction %t175, %NativeInstruction* %t178
-  %t179 = alloca { %NativeInstruction*, i64 }
-  %t180 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t179, i32 0, i32 0
-  store %NativeInstruction* %t177, %NativeInstruction** %t180
-  %t181 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t179, i32 0, i32 1
-  store i64 1, i64* %t181
-  %t182 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t183 = insertvalue %InstructionParseResult %t182, i1 0, 1
-  %t184 = insertvalue %InstructionParseResult %t183, i1 0, 2
-  ret %InstructionParseResult %t184
+  %s118 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.118, i32 0, i32 0
+  %t119 = call i8* @strip_prefix(i8* %line, i8* %s118)
+  %t120 = call i8* @trim_text(i8* %t119)
+  store i8* %t120, i8** %l6
+  %t121 = alloca %NativeInstruction
+  %t122 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t121, i32 0, i32 0
+  store i32 12, i32* %t122
+  %t123 = load i8*, i8** %l6
+  %t124 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t121, i32 0, i32 1
+  %t125 = bitcast [8 x i8]* %t124 to i8*
+  %t126 = bitcast i8* %t125 to i8**
+  store i8* %t123, i8** %t126
+  %t127 = load %NativeInstruction, %NativeInstruction* %t121
+  %t128 = alloca [1 x %NativeInstruction]
+  %t129 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t128, i32 0, i32 0
+  %t130 = getelementptr %NativeInstruction, %NativeInstruction* %t129, i64 0
+  store %NativeInstruction %t127, %NativeInstruction* %t130
+  %t131 = alloca { %NativeInstruction*, i64 }
+  %t132 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t131, i32 0, i32 0
+  store %NativeInstruction* %t129, %NativeInstruction** %t132
+  %t133 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t131, i32 0, i32 1
+  store i64 1, i64* %t133
+  %t134 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t135 = insertvalue %InstructionParseResult %t134, i1 0, 1
+  %t136 = insertvalue %InstructionParseResult %t135, i1 0, 2
+  ret %InstructionParseResult %t136
 merge23:
-  %s185 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.185, i32 0, i32 0
-  %t186 = call i1 @starts_with(i8* %line, i8* %s185)
-  br i1 %t186, label %then24, label %merge25
+  %s137 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.137, i32 0, i32 0
+  %t138 = call i1 @starts_with(i8* %line, i8* %s137)
+  br i1 %t138, label %then24, label %merge25
 then24:
-  %t187 = call %NativeInstruction @parse_case_instruction(i8* %line)
-  %t188 = alloca [1 x %NativeInstruction]
-  %t189 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t188, i32 0, i32 0
-  %t190 = getelementptr %NativeInstruction, %NativeInstruction* %t189, i64 0
-  store %NativeInstruction %t187, %NativeInstruction* %t190
-  %t191 = alloca { %NativeInstruction*, i64 }
-  %t192 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t191, i32 0, i32 0
-  store %NativeInstruction* %t189, %NativeInstruction** %t192
-  %t193 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t191, i32 0, i32 1
-  store i64 1, i64* %t193
-  %t194 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t195 = insertvalue %InstructionParseResult %t194, i1 0, 1
-  %t196 = insertvalue %InstructionParseResult %t195, i1 0, 2
-  ret %InstructionParseResult %t196
+  %t139 = call %NativeInstruction @parse_case_instruction(i8* %line)
+  %t140 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t141 = insertvalue %InstructionParseResult %t140, i1 0, 1
+  %t142 = insertvalue %InstructionParseResult %t141, i1 0, 2
+  ret %InstructionParseResult %t142
 merge25:
-  %s197 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.197, i32 0, i32 0
-  %t198 = icmp eq i8* %line, %s197
-  br i1 %t198, label %then26, label %merge27
+  %s143 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.143, i32 0, i32 0
+  %t144 = icmp eq i8* %line, %s143
+  br i1 %t144, label %then26, label %merge27
 then26:
-  %t199 = call double @NativeInstructionEndMatch()
-  %t200 = alloca [1 x double]
-  %t201 = getelementptr [1 x double], [1 x double]* %t200, i32 0, i32 0
-  %t202 = getelementptr double, double* %t201, i64 0
-  store double %t199, double* %t202
-  %t203 = alloca { double*, i64 }
-  %t204 = getelementptr { double*, i64 }, { double*, i64 }* %t203, i32 0, i32 0
-  store double* %t201, double** %t204
-  %t205 = getelementptr { double*, i64 }, { double*, i64 }* %t203, i32 0, i32 1
-  store i64 1, i64* %t205
-  %t206 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t207 = insertvalue %InstructionParseResult %t206, i1 0, 1
-  %t208 = insertvalue %InstructionParseResult %t207, i1 0, 2
-  ret %InstructionParseResult %t208
+  %t145 = insertvalue %NativeInstruction undef, i32 14, 0
+  %t146 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t147 = insertvalue %InstructionParseResult %t146, i1 0, 1
+  %t148 = insertvalue %InstructionParseResult %t147, i1 0, 2
+  ret %InstructionParseResult %t148
 merge27:
-  %s209 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.209, i32 0, i32 0
-  %t210 = call i1 @starts_with(i8* %line, i8* %s209)
-  br i1 %t210, label %then28, label %merge29
+  %s149 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.149, i32 0, i32 0
+  %t150 = call i1 @starts_with(i8* %line, i8* %s149)
+  br i1 %t150, label %then28, label %merge29
 then28:
-  %t211 = call %NativeInstruction @parse_let_instruction(i8* %line, i8* %span, i8* %value_span)
-  %t212 = alloca [1 x %NativeInstruction]
-  %t213 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t212, i32 0, i32 0
-  %t214 = getelementptr %NativeInstruction, %NativeInstruction* %t213, i64 0
-  store %NativeInstruction %t211, %NativeInstruction* %t214
-  %t215 = alloca { %NativeInstruction*, i64 }
-  %t216 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t215, i32 0, i32 0
-  store %NativeInstruction* %t213, %NativeInstruction** %t216
-  %t217 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t215, i32 0, i32 1
-  store i64 1, i64* %t217
-  %t218 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t219 = insertvalue %InstructionParseResult %t218, i1 1, 1
-  %t220 = insertvalue %InstructionParseResult %t219, i1 1, 2
-  ret %InstructionParseResult %t220
+  %t151 = call %NativeInstruction @parse_let_instruction(i8* %line, i8* %span, i8* %value_span)
+  %t152 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t153 = insertvalue %InstructionParseResult %t152, i1 1, 1
+  %t154 = insertvalue %InstructionParseResult %t153, i1 1, 2
+  ret %InstructionParseResult %t154
 merge29:
-  %s221 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.221, i32 0, i32 0
-  %t222 = call i1 @starts_with(i8* %line, i8* %s221)
-  br i1 %t222, label %then30, label %merge31
+  %s155 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.155, i32 0, i32 0
+  %t156 = call i1 @starts_with(i8* %line, i8* %s155)
+  br i1 %t156, label %then30, label %merge31
 then30:
-  %t223 = getelementptr i8, i8* %line, i64 3
-  %t224 = load i8, i8* %t223
-  store i8 %t224, i8* %l7
-  %t226 = load i8, i8* %l7
-  %t227 = icmp eq i8 %t226, 32
-  br label %logical_or_entry_225
+  %t157 = getelementptr i8, i8* %line, i64 3
+  %t158 = load i8, i8* %t157
+  store i8 %t158, i8* %l7
+  %t160 = load i8, i8* %l7
+  %t161 = icmp eq i8 %t160, 32
+  br label %logical_or_entry_159
 
-logical_or_entry_225:
-  br i1 %t227, label %logical_or_merge_225, label %logical_or_right_225
+logical_or_entry_159:
+  br i1 %t161, label %logical_or_merge_159, label %logical_or_right_159
 
-logical_or_right_225:
-  %t228 = load i8, i8* %l7
-  %t229 = icmp eq i8 %t228, 9
-  br label %logical_or_right_end_225
+logical_or_right_159:
+  %t162 = load i8, i8* %l7
+  %t163 = icmp eq i8 %t162, 9
+  br label %logical_or_right_end_159
 
-logical_or_right_end_225:
-  br label %logical_or_merge_225
+logical_or_right_end_159:
+  br label %logical_or_merge_159
 
-logical_or_merge_225:
-  %t230 = phi i1 [ true, %logical_or_entry_225 ], [ %t229, %logical_or_right_end_225 ]
-  %t231 = load i8, i8* %l7
-  br i1 %t230, label %then32, label %merge33
+logical_or_merge_159:
+  %t164 = phi i1 [ true, %logical_or_entry_159 ], [ %t163, %logical_or_right_end_159 ]
+  %t165 = load i8, i8* %l7
+  br i1 %t164, label %then32, label %merge33
 then32:
   store double 0.0, double* %l8
-  %t232 = load double, double* %l8
-  %t233 = alloca %NativeInstruction
-  %t234 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t233, i32 0, i32 0
-  store i32 0, i32* %t234
-  %t235 = load double, double* %l8
-  %t236 = call i8* @trim_trailing_delimiters(i8* null)
-  %t237 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t233, i32 0, i32 1
-  %t238 = bitcast [16 x i8]* %t237 to i8*
-  %t239 = bitcast i8* %t238 to i8**
-  store i8* %t236, i8** %t239
-  %t240 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t233, i32 0, i32 1
-  %t241 = bitcast [16 x i8]* %t240 to i8*
-  %t242 = getelementptr inbounds i8, i8* %t241, i64 8
-  %t243 = bitcast i8* %t242 to i8**
-  store i8* %span, i8** %t243
-  %t244 = load %NativeInstruction, %NativeInstruction* %t233
-  %t245 = alloca [1 x %NativeInstruction]
-  %t246 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t245, i32 0, i32 0
-  %t247 = getelementptr %NativeInstruction, %NativeInstruction* %t246, i64 0
-  store %NativeInstruction %t244, %NativeInstruction* %t247
-  %t248 = alloca { %NativeInstruction*, i64 }
-  %t249 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t248, i32 0, i32 0
-  store %NativeInstruction* %t246, %NativeInstruction** %t249
-  %t250 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t248, i32 0, i32 1
-  store i64 1, i64* %t250
-  %t251 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t252 = insertvalue %InstructionParseResult %t251, i1 1, 1
-  %t253 = insertvalue %InstructionParseResult %t252, i1 0, 2
-  ret %InstructionParseResult %t253
+  %t166 = load double, double* %l8
+  %t167 = alloca %NativeInstruction
+  %t168 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t167, i32 0, i32 0
+  store i32 0, i32* %t168
+  %t169 = load double, double* %l8
+  %t170 = call i8* @trim_trailing_delimiters(i8* null)
+  %t171 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t167, i32 0, i32 1
+  %t172 = bitcast [16 x i8]* %t171 to i8*
+  %t173 = bitcast i8* %t172 to i8**
+  store i8* %t170, i8** %t173
+  %t174 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t167, i32 0, i32 1
+  %t175 = bitcast [16 x i8]* %t174 to i8*
+  %t176 = getelementptr inbounds i8, i8* %t175, i64 8
+  %t177 = bitcast i8* %t176 to i8**
+  store i8* %span, i8** %t177
+  %t178 = load %NativeInstruction, %NativeInstruction* %t167
+  %t179 = alloca [1 x %NativeInstruction]
+  %t180 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t179, i32 0, i32 0
+  %t181 = getelementptr %NativeInstruction, %NativeInstruction* %t180, i64 0
+  store %NativeInstruction %t178, %NativeInstruction* %t181
+  %t182 = alloca { %NativeInstruction*, i64 }
+  %t183 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t182, i32 0, i32 0
+  store %NativeInstruction* %t180, %NativeInstruction** %t183
+  %t184 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t182, i32 0, i32 1
+  store i64 1, i64* %t184
+  %t185 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t186 = insertvalue %InstructionParseResult %t185, i1 1, 1
+  %t187 = insertvalue %InstructionParseResult %t186, i1 0, 2
+  ret %InstructionParseResult %t187
 merge33:
   br label %merge31
 merge31:
-  %s254 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.254, i32 0, i32 0
-  %t255 = call i1 @starts_with(i8* %line, i8* %s254)
-  br i1 %t255, label %then34, label %merge35
+  %s188 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.188, i32 0, i32 0
+  %t189 = call i1 @starts_with(i8* %line, i8* %s188)
+  br i1 %t189, label %then34, label %merge35
 then34:
-  %s256 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.256, i32 0, i32 0
-  %t257 = call i8* @strip_prefix(i8* %line, i8* %s256)
-  %t258 = call i8* @trim_text(i8* %t257)
-  store i8* %t258, i8** %l9
+  %s190 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.190, i32 0, i32 0
+  %t191 = call i8* @strip_prefix(i8* %line, i8* %s190)
+  %t192 = call i8* @trim_text(i8* %t191)
+  store i8* %t192, i8** %l9
   store i1 0, i1* %l10
-  %t259 = load i8*, i8** %l9
-  %s260 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.260, i32 0, i32 0
-  %t261 = call i1 @starts_with(i8* %t259, i8* %s260)
-  %t262 = load i8*, i8** %l9
-  %t263 = load i1, i1* %l10
-  br i1 %t261, label %then36, label %merge37
+  %t193 = load i8*, i8** %l9
+  %s194 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.194, i32 0, i32 0
+  %t195 = call i1 @starts_with(i8* %t193, i8* %s194)
+  %t196 = load i8*, i8** %l9
+  %t197 = load i1, i1* %l10
+  br i1 %t195, label %then36, label %merge37
 then36:
   store i1 1, i1* %l10
-  %t264 = load i8*, i8** %l9
-  %s265 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.265, i32 0, i32 0
-  %t266 = call i8* @strip_prefix(i8* %t264, i8* %s265)
-  %t267 = call i8* @trim_text(i8* %t266)
-  store i8* %t267, i8** %l9
+  %t198 = load i8*, i8** %l9
+  %s199 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.199, i32 0, i32 0
+  %t200 = call i8* @strip_prefix(i8* %t198, i8* %s199)
+  %t201 = call i8* @trim_text(i8* %t200)
+  store i8* %t201, i8** %l9
   br label %merge37
 merge37:
-  %t268 = phi i1 [ 1, %then36 ], [ %t263, %then34 ]
-  %t269 = phi i8* [ %t267, %then36 ], [ %t262, %then34 ]
-  store i1 %t268, i1* %l10
-  store i8* %t269, i8** %l9
-  %t270 = load i8*, i8** %l9
-  %t271 = call %BindingComponents @parse_binding_components(i8* %t270)
-  store %BindingComponents %t271, %BindingComponents* %l11
-  %t272 = alloca %NativeInstruction
-  %t273 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 0
-  store i32 2, i32* %t273
-  %t274 = load %BindingComponents, %BindingComponents* %l11
-  %t275 = extractvalue %BindingComponents %t274, 0
-  %t276 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t277 = bitcast [48 x i8]* %t276 to i8*
-  %t278 = bitcast i8* %t277 to i8**
-  store i8* %t275, i8** %t278
-  %t279 = load i1, i1* %l10
-  %t280 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t281 = bitcast [48 x i8]* %t280 to i8*
-  %t282 = getelementptr inbounds i8, i8* %t281, i64 8
-  %t283 = bitcast i8* %t282 to i1*
-  store i1 %t279, i1* %t283
-  %t284 = load %BindingComponents, %BindingComponents* %l11
-  %t285 = extractvalue %BindingComponents %t284, 1
-  %t286 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t287 = bitcast [48 x i8]* %t286 to i8*
-  %t288 = getelementptr inbounds i8, i8* %t287, i64 16
-  %t289 = bitcast i8* %t288 to i8**
-  store i8* %t285, i8** %t289
-  %t290 = load %BindingComponents, %BindingComponents* %l11
-  %t291 = extractvalue %BindingComponents %t290, 2
-  %t292 = call double @maybe_trim_trailing(i8* %t291)
-  %t293 = call noalias i8* @malloc(i64 8)
-  %t294 = bitcast i8* %t293 to double*
-  store double %t292, double* %t294
-  %t295 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t296 = bitcast [48 x i8]* %t295 to i8*
-  %t297 = getelementptr inbounds i8, i8* %t296, i64 24
-  %t298 = bitcast i8* %t297 to i8**
-  store i8* %t293, i8** %t298
-  %t299 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t300 = bitcast [48 x i8]* %t299 to i8*
-  %t301 = getelementptr inbounds i8, i8* %t300, i64 32
-  %t302 = bitcast i8* %t301 to i8**
-  store i8* %span, i8** %t302
-  %t303 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t272, i32 0, i32 1
-  %t304 = bitcast [48 x i8]* %t303 to i8*
-  %t305 = getelementptr inbounds i8, i8* %t304, i64 40
-  %t306 = bitcast i8* %t305 to i8**
-  store i8* %value_span, i8** %t306
-  %t307 = load %NativeInstruction, %NativeInstruction* %t272
-  %t308 = alloca [1 x %NativeInstruction]
-  %t309 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t308, i32 0, i32 0
-  %t310 = getelementptr %NativeInstruction, %NativeInstruction* %t309, i64 0
-  store %NativeInstruction %t307, %NativeInstruction* %t310
-  %t311 = alloca { %NativeInstruction*, i64 }
-  %t312 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t311, i32 0, i32 0
-  store %NativeInstruction* %t309, %NativeInstruction** %t312
-  %t313 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t311, i32 0, i32 1
-  store i64 1, i64* %t313
-  %t314 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t315 = insertvalue %InstructionParseResult %t314, i1 1, 1
-  %t316 = insertvalue %InstructionParseResult %t315, i1 1, 2
-  ret %InstructionParseResult %t316
+  %t202 = phi i1 [ 1, %then36 ], [ %t197, %then34 ]
+  %t203 = phi i8* [ %t201, %then36 ], [ %t196, %then34 ]
+  store i1 %t202, i1* %l10
+  store i8* %t203, i8** %l9
+  %t204 = load i8*, i8** %l9
+  %t205 = call %BindingComponents @parse_binding_components(i8* %t204)
+  store %BindingComponents %t205, %BindingComponents* %l11
+  %t206 = alloca %NativeInstruction
+  %t207 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 0
+  store i32 2, i32* %t207
+  %t208 = load %BindingComponents, %BindingComponents* %l11
+  %t209 = extractvalue %BindingComponents %t208, 0
+  %t210 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t211 = bitcast [48 x i8]* %t210 to i8*
+  %t212 = bitcast i8* %t211 to i8**
+  store i8* %t209, i8** %t212
+  %t213 = load i1, i1* %l10
+  %t214 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t215 = bitcast [48 x i8]* %t214 to i8*
+  %t216 = getelementptr inbounds i8, i8* %t215, i64 8
+  %t217 = bitcast i8* %t216 to i1*
+  store i1 %t213, i1* %t217
+  %t218 = load %BindingComponents, %BindingComponents* %l11
+  %t219 = extractvalue %BindingComponents %t218, 1
+  %t220 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t221 = bitcast [48 x i8]* %t220 to i8*
+  %t222 = getelementptr inbounds i8, i8* %t221, i64 16
+  %t223 = bitcast i8* %t222 to i8**
+  store i8* %t219, i8** %t223
+  %t224 = load %BindingComponents, %BindingComponents* %l11
+  %t225 = extractvalue %BindingComponents %t224, 2
+  %t226 = call double @maybe_trim_trailing(i8* %t225)
+  %t227 = call noalias i8* @malloc(i64 8)
+  %t228 = bitcast i8* %t227 to double*
+  store double %t226, double* %t228
+  %t229 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t230 = bitcast [48 x i8]* %t229 to i8*
+  %t231 = getelementptr inbounds i8, i8* %t230, i64 24
+  %t232 = bitcast i8* %t231 to i8**
+  store i8* %t227, i8** %t232
+  %t233 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t234 = bitcast [48 x i8]* %t233 to i8*
+  %t235 = getelementptr inbounds i8, i8* %t234, i64 32
+  %t236 = bitcast i8* %t235 to i8**
+  store i8* %span, i8** %t236
+  %t237 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t206, i32 0, i32 1
+  %t238 = bitcast [48 x i8]* %t237 to i8*
+  %t239 = getelementptr inbounds i8, i8* %t238, i64 40
+  %t240 = bitcast i8* %t239 to i8**
+  store i8* %value_span, i8** %t240
+  %t241 = load %NativeInstruction, %NativeInstruction* %t206
+  %t242 = alloca [1 x %NativeInstruction]
+  %t243 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t242, i32 0, i32 0
+  %t244 = getelementptr %NativeInstruction, %NativeInstruction* %t243, i64 0
+  store %NativeInstruction %t241, %NativeInstruction* %t244
+  %t245 = alloca { %NativeInstruction*, i64 }
+  %t246 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t245, i32 0, i32 0
+  store %NativeInstruction* %t243, %NativeInstruction** %t246
+  %t247 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t245, i32 0, i32 1
+  store i64 1, i64* %t247
+  %t248 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t249 = insertvalue %InstructionParseResult %t248, i1 1, 1
+  %t250 = insertvalue %InstructionParseResult %t249, i1 1, 2
+  ret %InstructionParseResult %t250
 merge35:
-  %s317 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.317, i32 0, i32 0
-  %t318 = call i1 @starts_with(i8* %line, i8* %s317)
-  br i1 %t318, label %then38, label %merge39
+  %s251 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.251, i32 0, i32 0
+  %t252 = call i1 @starts_with(i8* %line, i8* %s251)
+  br i1 %t252, label %then38, label %merge39
 then38:
-  %t319 = alloca %NativeInstruction
-  %t320 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t319, i32 0, i32 0
-  store i32 1, i32* %t320
-  %s321 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.321, i32 0, i32 0
-  %t322 = call i8* @strip_prefix(i8* %line, i8* %s321)
-  %t323 = call i8* @trim_text(i8* %t322)
-  %t324 = call i8* @trim_trailing_delimiters(i8* %t323)
-  %t325 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t319, i32 0, i32 1
-  %t326 = bitcast [16 x i8]* %t325 to i8*
-  %t327 = bitcast i8* %t326 to i8**
-  store i8* %t324, i8** %t327
-  %t328 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t319, i32 0, i32 1
-  %t329 = bitcast [16 x i8]* %t328 to i8*
-  %t330 = getelementptr inbounds i8, i8* %t329, i64 8
-  %t331 = bitcast i8* %t330 to i8**
-  store i8* %span, i8** %t331
-  %t332 = load %NativeInstruction, %NativeInstruction* %t319
-  %t333 = alloca [1 x %NativeInstruction]
-  %t334 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t333, i32 0, i32 0
-  %t335 = getelementptr %NativeInstruction, %NativeInstruction* %t334, i64 0
-  store %NativeInstruction %t332, %NativeInstruction* %t335
-  %t336 = alloca { %NativeInstruction*, i64 }
-  %t337 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t336, i32 0, i32 0
-  store %NativeInstruction* %t334, %NativeInstruction** %t337
-  %t338 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t336, i32 0, i32 1
-  store i64 1, i64* %t338
-  %t339 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t340 = insertvalue %InstructionParseResult %t339, i1 1, 1
-  %t341 = insertvalue %InstructionParseResult %t340, i1 0, 2
-  ret %InstructionParseResult %t341
+  %t253 = alloca %NativeInstruction
+  %t254 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t253, i32 0, i32 0
+  store i32 1, i32* %t254
+  %s255 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.255, i32 0, i32 0
+  %t256 = call i8* @strip_prefix(i8* %line, i8* %s255)
+  %t257 = call i8* @trim_text(i8* %t256)
+  %t258 = call i8* @trim_trailing_delimiters(i8* %t257)
+  %t259 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t253, i32 0, i32 1
+  %t260 = bitcast [16 x i8]* %t259 to i8*
+  %t261 = bitcast i8* %t260 to i8**
+  store i8* %t258, i8** %t261
+  %t262 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t253, i32 0, i32 1
+  %t263 = bitcast [16 x i8]* %t262 to i8*
+  %t264 = getelementptr inbounds i8, i8* %t263, i64 8
+  %t265 = bitcast i8* %t264 to i8**
+  store i8* %span, i8** %t265
+  %t266 = load %NativeInstruction, %NativeInstruction* %t253
+  %t267 = alloca [1 x %NativeInstruction]
+  %t268 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t267, i32 0, i32 0
+  %t269 = getelementptr %NativeInstruction, %NativeInstruction* %t268, i64 0
+  store %NativeInstruction %t266, %NativeInstruction* %t269
+  %t270 = alloca { %NativeInstruction*, i64 }
+  %t271 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t270, i32 0, i32 0
+  store %NativeInstruction* %t268, %NativeInstruction** %t271
+  %t272 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t270, i32 0, i32 1
+  store i64 1, i64* %t272
+  %t273 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t274 = insertvalue %InstructionParseResult %t273, i1 1, 1
+  %t275 = insertvalue %InstructionParseResult %t274, i1 0, 2
+  ret %InstructionParseResult %t275
 merge39:
-  %t342 = alloca %NativeInstruction
-  %t343 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t342, i32 0, i32 0
-  store i32 16, i32* %t343
-  %t344 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t342, i32 0, i32 1
-  %t345 = bitcast [8 x i8]* %t344 to i8*
-  %t346 = bitcast i8* %t345 to i8**
-  store i8* %line, i8** %t346
-  %t347 = load %NativeInstruction, %NativeInstruction* %t342
-  %t348 = alloca [1 x %NativeInstruction]
-  %t349 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t348, i32 0, i32 0
-  %t350 = getelementptr %NativeInstruction, %NativeInstruction* %t349, i64 0
-  store %NativeInstruction %t347, %NativeInstruction* %t350
-  %t351 = alloca { %NativeInstruction*, i64 }
-  %t352 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t351, i32 0, i32 0
-  store %NativeInstruction* %t349, %NativeInstruction** %t352
-  %t353 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t351, i32 0, i32 1
-  store i64 1, i64* %t353
-  %t354 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
-  %t355 = insertvalue %InstructionParseResult %t354, i1 0, 1
-  %t356 = insertvalue %InstructionParseResult %t355, i1 0, 2
-  ret %InstructionParseResult %t356
+  %t276 = alloca %NativeInstruction
+  %t277 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t276, i32 0, i32 0
+  store i32 16, i32* %t277
+  %t278 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t276, i32 0, i32 1
+  %t279 = bitcast [8 x i8]* %t278 to i8*
+  %t280 = bitcast i8* %t279 to i8**
+  store i8* %line, i8** %t280
+  %t281 = load %NativeInstruction, %NativeInstruction* %t276
+  %t282 = alloca [1 x %NativeInstruction]
+  %t283 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t282, i32 0, i32 0
+  %t284 = getelementptr %NativeInstruction, %NativeInstruction* %t283, i64 0
+  store %NativeInstruction %t281, %NativeInstruction* %t284
+  %t285 = alloca { %NativeInstruction*, i64 }
+  %t286 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t285, i32 0, i32 0
+  store %NativeInstruction* %t283, %NativeInstruction** %t286
+  %t287 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t285, i32 0, i32 1
+  store i64 1, i64* %t287
+  %t288 = insertvalue %InstructionParseResult undef, { i8**, i64 }* null, 0
+  %t289 = insertvalue %InstructionParseResult %t288, i1 0, 1
+  %t290 = insertvalue %InstructionParseResult %t289, i1 0, 2
+  ret %InstructionParseResult %t290
 }
 
 define %NativeInstruction @parse_case_instruction(i8* %line) {
@@ -2495,14 +2396,14 @@ merge1:
   %t30 = load i8*, i8** %l2
   %t31 = call %CaseComponents @split_case_components(i8* %t30)
   store %CaseComponents %t31, %CaseComponents* %l4
-  %t32 = alloca [0 x double]
-  %t33 = getelementptr [0 x double], [0 x double]* %t32, i32 0, i32 0
-  %t34 = alloca { double*, i64 }
-  %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t34, i32 0, i32 0
-  store double* %t33, double** %t35
-  %t36 = getelementptr { double*, i64 }, { double*, i64 }* %t34, i32 0, i32 1
+  %t32 = alloca [0 x %NativeInstruction]
+  %t33 = getelementptr [0 x %NativeInstruction], [0 x %NativeInstruction]* %t32, i32 0, i32 0
+  %t34 = alloca { %NativeInstruction*, i64 }
+  %t35 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t34, i32 0, i32 0
+  store %NativeInstruction* %t33, %NativeInstruction** %t35
+  %t36 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t34, i32 0, i32 1
   store i64 0, i64* %t36
-  store { %NativeInstruction*, i64 }* null, { %NativeInstruction*, i64 }** %l5
+  store { %NativeInstruction*, i64 }* %t34, { %NativeInstruction*, i64 }** %l5
   %t37 = alloca %NativeInstruction
   %t38 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t37, i32 0, i32 0
   store i32 13, i32* %t38
@@ -2689,14 +2590,14 @@ entry:
   %t2 = load i8*, i8** %l0
   %t3 = call { i8**, i64 }* @split_comma_separated(i8* %t2)
   store { i8**, i64 }* %t3, { i8**, i64 }** %l1
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x %NativeImportSpecifier]
+  %t5 = getelementptr [0 x %NativeImportSpecifier], [0 x %NativeImportSpecifier]* %t4, i32 0, i32 0
+  %t6 = alloca { %NativeImportSpecifier*, i64 }
+  %t7 = getelementptr { %NativeImportSpecifier*, i64 }, { %NativeImportSpecifier*, i64 }* %t6, i32 0, i32 0
+  store %NativeImportSpecifier* %t5, %NativeImportSpecifier** %t7
+  %t8 = getelementptr { %NativeImportSpecifier*, i64 }, { %NativeImportSpecifier*, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { %NativeImportSpecifier*, i64 }* null, { %NativeImportSpecifier*, i64 }** %l2
+  store { %NativeImportSpecifier*, i64 }* %t6, { %NativeImportSpecifier*, i64 }** %l2
   %t9 = sitofp i64 0 to double
   store double %t9, double* %l3
   %t10 = load i8*, i8** %l0
@@ -2828,14 +2729,14 @@ entry:
   %l26 = alloca double
   %l27 = alloca i8*
   %l28 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = load { i8**, i64 }, { i8**, i64 }* %lines
   %t6 = extractvalue { i8**, i64 } %t5, 0
   %t7 = extractvalue { i8**, i64 } %t5, 1
@@ -2864,33 +2765,33 @@ entry:
   %t24 = extractvalue %StructHeaderParse %t23, 1
   store { i8**, i64 }* %t24, { i8**, i64 }** %l5
   %t25 = load i8*, i8** %l4
-  %t26 = alloca [0 x double]
-  %t27 = getelementptr [0 x double], [0 x double]* %t26, i32 0, i32 0
-  %t28 = alloca { double*, i64 }
-  %t29 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 0
-  store double* %t27, double** %t29
-  %t30 = getelementptr { double*, i64 }, { double*, i64 }* %t28, i32 0, i32 1
+  %t26 = alloca [0 x %NativeStructField]
+  %t27 = getelementptr [0 x %NativeStructField], [0 x %NativeStructField]* %t26, i32 0, i32 0
+  %t28 = alloca { %NativeStructField*, i64 }
+  %t29 = getelementptr { %NativeStructField*, i64 }, { %NativeStructField*, i64 }* %t28, i32 0, i32 0
+  store %NativeStructField* %t27, %NativeStructField** %t29
+  %t30 = getelementptr { %NativeStructField*, i64 }, { %NativeStructField*, i64 }* %t28, i32 0, i32 1
   store i64 0, i64* %t30
-  store { %NativeStructField*, i64 }* null, { %NativeStructField*, i64 }** %l6
-  %t31 = alloca [0 x double]
-  %t32 = getelementptr [0 x double], [0 x double]* %t31, i32 0, i32 0
-  %t33 = alloca { double*, i64 }
-  %t34 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 0
-  store double* %t32, double** %t34
-  %t35 = getelementptr { double*, i64 }, { double*, i64 }* %t33, i32 0, i32 1
+  store { %NativeStructField*, i64 }* %t28, { %NativeStructField*, i64 }** %l6
+  %t31 = alloca [0 x %NativeFunction]
+  %t32 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t31, i32 0, i32 0
+  %t33 = alloca { %NativeFunction*, i64 }
+  %t34 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t33, i32 0, i32 0
+  store %NativeFunction* %t32, %NativeFunction** %t34
+  %t35 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t33, i32 0, i32 1
   store i64 0, i64* %t35
-  store { %NativeFunction*, i64 }* null, { %NativeFunction*, i64 }** %l7
+  store { %NativeFunction*, i64 }* %t33, { %NativeFunction*, i64 }** %l7
   store i8* null, i8** %l8
   store i8* null, i8** %l9
   store i8* null, i8** %l10
-  %t36 = alloca [0 x double]
-  %t37 = getelementptr [0 x double], [0 x double]* %t36, i32 0, i32 0
-  %t38 = alloca { double*, i64 }
-  %t39 = getelementptr { double*, i64 }, { double*, i64 }* %t38, i32 0, i32 0
-  store double* %t37, double** %t39
-  %t40 = getelementptr { double*, i64 }, { double*, i64 }* %t38, i32 0, i32 1
+  %t36 = alloca [0 x %NativeStructLayoutField]
+  %t37 = getelementptr [0 x %NativeStructLayoutField], [0 x %NativeStructLayoutField]* %t36, i32 0, i32 0
+  %t38 = alloca { %NativeStructLayoutField*, i64 }
+  %t39 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t38, i32 0, i32 0
+  store %NativeStructLayoutField* %t37, %NativeStructLayoutField** %t39
+  %t40 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t38, i32 0, i32 1
   store i64 0, i64* %t40
-  store { %NativeStructLayoutField*, i64 }* null, { %NativeStructLayoutField*, i64 }** %l11
+  store { %NativeStructLayoutField*, i64 }* %t38, { %NativeStructLayoutField*, i64 }** %l11
   %t41 = sitofp i64 0 to double
   store double %t41, double* %l12
   %t42 = sitofp i64 0 to double
@@ -4067,14 +3968,14 @@ entry:
   %l6 = alloca double
   %l7 = alloca i8*
   %l8 = alloca %InterfaceSignatureParse
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = load { i8**, i64 }, { i8**, i64 }* %lines
   %t6 = extractvalue { i8**, i64 } %t5, 0
   %t7 = extractvalue { i8**, i64 } %t5, 1
@@ -4100,14 +4001,14 @@ entry:
   %t22 = extractvalue %InterfaceHeaderParse %t21, 0
   store i8* %t22, i8** %l4
   %t23 = load i8*, i8** %l4
-  %t24 = alloca [0 x double]
-  %t25 = getelementptr [0 x double], [0 x double]* %t24, i32 0, i32 0
-  %t26 = alloca { double*, i64 }
-  %t27 = getelementptr { double*, i64 }, { double*, i64 }* %t26, i32 0, i32 0
-  store double* %t25, double** %t27
-  %t28 = getelementptr { double*, i64 }, { double*, i64 }* %t26, i32 0, i32 1
+  %t24 = alloca [0 x %NativeInterfaceSignature]
+  %t25 = getelementptr [0 x %NativeInterfaceSignature], [0 x %NativeInterfaceSignature]* %t24, i32 0, i32 0
+  %t26 = alloca { %NativeInterfaceSignature*, i64 }
+  %t27 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t26, i32 0, i32 0
+  store %NativeInterfaceSignature* %t25, %NativeInterfaceSignature** %t27
+  %t28 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t26, i32 0, i32 1
   store i64 0, i64* %t28
-  store { %NativeInterfaceSignature*, i64 }* null, { %NativeInterfaceSignature*, i64 }** %l5
+  store { %NativeInterfaceSignature*, i64 }* %t26, { %NativeInterfaceSignature*, i64 }** %l5
   %t29 = sitofp i64 1 to double
   %t30 = fadd double %start_index, %t29
   store double %t30, double* %l6
@@ -4312,14 +4213,14 @@ entry:
   %t1 = load %HeaderNameParse, %HeaderNameParse* %l0
   %t2 = extractvalue %HeaderNameParse %t1, 3
   store { i8**, i64 }* %t2, { i8**, i64 }** %l1
-  %t3 = alloca [0 x double]
-  %t4 = getelementptr [0 x double], [0 x double]* %t3, i32 0, i32 0
-  %t5 = alloca { double*, i64 }
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 0
-  store double* %t4, double** %t6
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 1
+  %t3 = alloca [0 x i8*]
+  %t4 = getelementptr [0 x i8*], [0 x i8*]* %t3, i32 0, i32 0
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t4, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
   store i64 0, i64* %t7
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t5, { i8**, i64 }** %l2
   %t8 = load %HeaderNameParse, %HeaderNameParse* %l0
   %t9 = extractvalue %HeaderNameParse %t8, 2
   %t10 = load %HeaderNameParse, %HeaderNameParse* %l0
@@ -4374,14 +4275,14 @@ entry:
   %l15 = alloca double
   %l16 = alloca double
   %l17 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   store double 0.0, double* %l1
   %t5 = call i8* @trim_text(i8* %text)
   %t6 = call i8* @trim_trailing_delimiters(i8* %t5)
@@ -4502,28 +4403,28 @@ merge5:
   %t94 = fptosi double %t92 to i64
   %t95 = call i8* @sailfin_runtime_substring(i8* %t88, i64 %t93, i64 %t94)
   store i8* %t95, i8** %l10
-  %t96 = alloca [0 x double]
-  %t97 = getelementptr [0 x double], [0 x double]* %t96, i32 0, i32 0
-  %t98 = alloca { double*, i64 }
-  %t99 = getelementptr { double*, i64 }, { double*, i64 }* %t98, i32 0, i32 0
-  store double* %t97, double** %t99
-  %t100 = getelementptr { double*, i64 }, { double*, i64 }* %t98, i32 0, i32 1
+  %t96 = alloca [0 x %NativeParameter]
+  %t97 = getelementptr [0 x %NativeParameter], [0 x %NativeParameter]* %t96, i32 0, i32 0
+  %t98 = alloca { %NativeParameter*, i64 }
+  %t99 = getelementptr { %NativeParameter*, i64 }, { %NativeParameter*, i64 }* %t98, i32 0, i32 0
+  store %NativeParameter* %t97, %NativeParameter** %t99
+  %t100 = getelementptr { %NativeParameter*, i64 }, { %NativeParameter*, i64 }* %t98, i32 0, i32 1
   store i64 0, i64* %t100
-  store { %NativeParameter*, i64 }* null, { %NativeParameter*, i64 }** %l11
+  store { %NativeParameter*, i64 }* %t98, { %NativeParameter*, i64 }** %l11
   %t101 = load i8*, i8** %l10
   %t102 = call i8* @trim_text(i8* %t101)
   store i8* %t102, i8** %l12
   %t103 = load i8*, i8** %l12
   %s104 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.104, i32 0, i32 0
   store i8* %s104, i8** %l13
-  %t105 = alloca [0 x double]
-  %t106 = getelementptr [0 x double], [0 x double]* %t105, i32 0, i32 0
-  %t107 = alloca { double*, i64 }
-  %t108 = getelementptr { double*, i64 }, { double*, i64 }* %t107, i32 0, i32 0
-  store double* %t106, double** %t108
-  %t109 = getelementptr { double*, i64 }, { double*, i64 }* %t107, i32 0, i32 1
+  %t105 = alloca [0 x i8*]
+  %t106 = getelementptr [0 x i8*], [0 x i8*]* %t105, i32 0, i32 0
+  %t107 = alloca { i8**, i64 }
+  %t108 = getelementptr { i8**, i64 }, { i8**, i64 }* %t107, i32 0, i32 0
+  store i8** %t106, i8*** %t108
+  %t109 = getelementptr { i8**, i64 }, { i8**, i64 }* %t107, i32 0, i32 1
   store i64 0, i64* %t109
-  store { i8**, i64 }* null, { i8**, i64 }** %l14
+  store { i8**, i64 }* %t107, { i8**, i64 }** %l14
   %t110 = load i8*, i8** %l3
   %t111 = load double, double* %l6
   %t112 = sitofp i64 1 to double
@@ -4555,14 +4456,14 @@ entry:
   %l6 = alloca double
   %l7 = alloca i8*
   %l8 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = call i8* @trim_text(i8* %text)
   store i8* %t5, i8** %l1
   %t6 = load i8*, i8** %l1
@@ -4570,14 +4471,14 @@ entry:
   store i8* %t7, i8** %l2
   %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
   store i8* %s8, i8** %l3
-  %t9 = alloca [0 x double]
-  %t10 = getelementptr [0 x double], [0 x double]* %t9, i32 0, i32 0
-  %t11 = alloca { double*, i64 }
-  %t12 = getelementptr { double*, i64 }, { double*, i64 }* %t11, i32 0, i32 0
-  store double* %t10, double** %t12
-  %t13 = getelementptr { double*, i64 }, { double*, i64 }* %t11, i32 0, i32 1
+  %t9 = alloca [0 x i8*]
+  %t10 = getelementptr [0 x i8*], [0 x i8*]* %t9, i32 0, i32 0
+  %t11 = alloca { i8**, i64 }
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %t11, i32 0, i32 0
+  store i8** %t10, i8*** %t12
+  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* %t11, i32 0, i32 1
   store i64 0, i64* %t13
-  store { i8**, i64 }* null, { i8**, i64 }** %l4
+  store { i8**, i64 }* %t11, { i8**, i64 }** %l4
   %t14 = load i8*, i8** %l1
   store double 0.0, double* %l5
   %t15 = load double, double* %l5
@@ -4739,14 +4640,14 @@ entry:
   %l8 = alloca i8
   %l9 = alloca i8*
   %l10 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -5431,14 +5332,14 @@ entry:
   %l22 = alloca double
   %l23 = alloca double
   %l24 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = load { i8**, i64 }, { i8**, i64 }* %lines
   %t6 = extractvalue { i8**, i64 } %t5, 0
   %t7 = extractvalue { i8**, i64 } %t5, 1
@@ -5482,22 +5383,22 @@ merge1:
   %t34 = call i8* @strip_generics(i8* %t33)
   store i8* %t34, i8** %l3
   %t35 = load i8*, i8** %l3
-  %t36 = alloca [0 x double]
-  %t37 = getelementptr [0 x double], [0 x double]* %t36, i32 0, i32 0
-  %t38 = alloca { double*, i64 }
-  %t39 = getelementptr { double*, i64 }, { double*, i64 }* %t38, i32 0, i32 0
-  store double* %t37, double** %t39
-  %t40 = getelementptr { double*, i64 }, { double*, i64 }* %t38, i32 0, i32 1
+  %t36 = alloca [0 x %NativeEnumVariant]
+  %t37 = getelementptr [0 x %NativeEnumVariant], [0 x %NativeEnumVariant]* %t36, i32 0, i32 0
+  %t38 = alloca { %NativeEnumVariant*, i64 }
+  %t39 = getelementptr { %NativeEnumVariant*, i64 }, { %NativeEnumVariant*, i64 }* %t38, i32 0, i32 0
+  store %NativeEnumVariant* %t37, %NativeEnumVariant** %t39
+  %t40 = getelementptr { %NativeEnumVariant*, i64 }, { %NativeEnumVariant*, i64 }* %t38, i32 0, i32 1
   store i64 0, i64* %t40
-  store { %NativeEnumVariant*, i64 }* null, { %NativeEnumVariant*, i64 }** %l5
-  %t41 = alloca [0 x double]
-  %t42 = getelementptr [0 x double], [0 x double]* %t41, i32 0, i32 0
-  %t43 = alloca { double*, i64 }
-  %t44 = getelementptr { double*, i64 }, { double*, i64 }* %t43, i32 0, i32 0
-  store double* %t42, double** %t44
-  %t45 = getelementptr { double*, i64 }, { double*, i64 }* %t43, i32 0, i32 1
+  store { %NativeEnumVariant*, i64 }* %t38, { %NativeEnumVariant*, i64 }** %l5
+  %t41 = alloca [0 x %NativeEnumVariantLayout]
+  %t42 = getelementptr [0 x %NativeEnumVariantLayout], [0 x %NativeEnumVariantLayout]* %t41, i32 0, i32 0
+  %t43 = alloca { %NativeEnumVariantLayout*, i64 }
+  %t44 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t43, i32 0, i32 0
+  store %NativeEnumVariantLayout* %t42, %NativeEnumVariantLayout** %t44
+  %t45 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t43, i32 0, i32 1
   store i64 0, i64* %t45
-  store { %NativeEnumVariantLayout*, i64 }* null, { %NativeEnumVariantLayout*, i64 }** %l6
+  store { %NativeEnumVariantLayout*, i64 }* %t43, { %NativeEnumVariantLayout*, i64 }** %l6
   %t46 = sitofp i64 0 to double
   store double %t46, double* %l7
   %t47 = sitofp i64 0 to double
@@ -6333,14 +6234,14 @@ entry:
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca i8
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -6531,14 +6432,14 @@ entry:
   %t0 = call i8* @trim_text(i8* %text)
   %t1 = call { i8**, i64 }* @split_whitespace(i8* %t0)
   store { i8**, i64 }* %t1, { i8**, i64 }** %l0
-  %t2 = alloca [0 x double]
-  %t3 = getelementptr [0 x double], [0 x double]* %t2, i32 0, i32 0
-  %t4 = alloca { double*, i64 }
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 0
-  store double* %t3, double** %t5
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 1
+  %t2 = alloca [0 x i8*]
+  %t3 = getelementptr [0 x i8*], [0 x i8*]* %t2, i32 0, i32 0
+  %t4 = alloca { i8**, i64 }
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 0
+  store i8** %t3, i8*** %t5
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 1
   store i64 0, i64* %t6
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t4, { i8**, i64 }** %l1
   %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t8 = load { i8**, i64 }, { i8**, i64 }* %t7
   %t9 = extractvalue { i8**, i64 } %t8, 1
@@ -6938,14 +6839,14 @@ entry:
   %l21 = alloca %NativeStructLayoutField
   %t0 = call i8* @trim_text(i8* %text)
   store i8* %t0, i8** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
   %t7 = insertvalue %NativeStructLayoutField undef, i8* %s6, 0
   %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
@@ -7548,14 +7449,14 @@ entry:
   %t0 = call i8* @trim_text(i8* %text)
   %t1 = call { i8**, i64 }* @split_whitespace(i8* %t0)
   store { i8**, i64 }* %t1, { i8**, i64 }** %l0
-  %t2 = alloca [0 x double]
-  %t3 = getelementptr [0 x double], [0 x double]* %t2, i32 0, i32 0
-  %t4 = alloca { double*, i64 }
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 0
-  store double* %t3, double** %t5
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t4, i32 0, i32 1
+  %t2 = alloca [0 x i8*]
+  %t3 = getelementptr [0 x i8*], [0 x i8*]* %t2, i32 0, i32 0
+  %t4 = alloca { i8**, i64 }
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 0
+  store i8** %t3, i8*** %t5
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 1
   store i64 0, i64* %t6
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t4, { i8**, i64 }** %l1
   %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t8 = load { i8**, i64 }, { i8**, i64 }* %t7
   %t9 = extractvalue { i8**, i64 } %t8, 1
@@ -8302,14 +8203,14 @@ entry:
   %l24 = alloca %NativeEnumVariantLayout
   %t0 = call i8* @trim_text(i8* %text)
   store i8* %t0, i8** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
   %t7 = insertvalue %NativeEnumVariantLayout undef, i8* %s6, 0
   %t8 = sitofp i64 0 to double
@@ -8320,14 +8221,14 @@ entry:
   %t13 = insertvalue %NativeEnumVariantLayout %t11, double %t12, 3
   %t14 = sitofp i64 0 to double
   %t15 = insertvalue %NativeEnumVariantLayout %t13, double %t14, 4
-  %t16 = alloca [0 x double]
-  %t17 = getelementptr [0 x double], [0 x double]* %t16, i32 0, i32 0
-  %t18 = alloca { double*, i64 }
-  %t19 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 0
-  store double* %t17, double** %t19
-  %t20 = getelementptr { double*, i64 }, { double*, i64 }* %t18, i32 0, i32 1
+  %t16 = alloca [0 x i8*]
+  %t17 = getelementptr [0 x i8*], [0 x i8*]* %t16, i32 0, i32 0
+  %t18 = alloca { i8**, i64 }
+  %t19 = getelementptr { i8**, i64 }, { i8**, i64 }* %t18, i32 0, i32 0
+  store i8** %t17, i8*** %t19
+  %t20 = getelementptr { i8**, i64 }, { i8**, i64 }* %t18, i32 0, i32 1
   store i64 0, i64* %t20
-  %t21 = insertvalue %NativeEnumVariantLayout %t15, { i8**, i64 }* null, 5
+  %t21 = insertvalue %NativeEnumVariantLayout %t15, { i8**, i64 }* %t18, 5
   store %NativeEnumVariantLayout %t21, %NativeEnumVariantLayout* %l2
   %t22 = load i8*, i8** %l0
   %t23 = load i8*, i8** %l0
@@ -9038,14 +8939,14 @@ logical_and_merge_493:
   %t516 = insertvalue %NativeEnumVariantLayout %t514, double %t515, 3
   %t517 = load double, double* %l12
   %t518 = insertvalue %NativeEnumVariantLayout %t516, double %t517, 4
-  %t519 = alloca [0 x double]
-  %t520 = getelementptr [0 x double], [0 x double]* %t519, i32 0, i32 0
-  %t521 = alloca { double*, i64 }
-  %t522 = getelementptr { double*, i64 }, { double*, i64 }* %t521, i32 0, i32 0
-  store double* %t520, double** %t522
-  %t523 = getelementptr { double*, i64 }, { double*, i64 }* %t521, i32 0, i32 1
+  %t519 = alloca [0 x i8*]
+  %t520 = getelementptr [0 x i8*], [0 x i8*]* %t519, i32 0, i32 0
+  %t521 = alloca { i8**, i64 }
+  %t522 = getelementptr { i8**, i64 }, { i8**, i64 }* %t521, i32 0, i32 0
+  store i8** %t520, i8*** %t522
+  %t523 = getelementptr { i8**, i64 }, { i8**, i64 }* %t521, i32 0, i32 1
   store i64 0, i64* %t523
-  %t524 = insertvalue %NativeEnumVariantLayout %t518, { i8**, i64 }* null, 5
+  %t524 = insertvalue %NativeEnumVariantLayout %t518, { i8**, i64 }* %t521, 5
   store %NativeEnumVariantLayout %t524, %NativeEnumVariantLayout* %l24
   %t525 = load i1, i1* %l23
   %t526 = insertvalue %EnumLayoutVariantParse undef, i1 %t525, 0
@@ -9085,14 +8986,14 @@ entry:
   %l24 = alloca %NativeStructLayoutField
   %t0 = call i8* @trim_text(i8* %text)
   store i8* %t0, i8** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
   %t7 = insertvalue %NativeStructLayoutField undef, i8* %s6, 0
   %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
@@ -10141,14 +10042,14 @@ entry:
   %l5 = alloca i8
   %l6 = alloca i8*
   %l7 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -10422,14 +10323,14 @@ entry:
   %t4 = load i8*, i8** %l0
   br i1 %t3, label %then0, label %merge1
 then0:
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  %t5 = alloca [0 x i8*]
+  %t6 = getelementptr [0 x i8*], [0 x i8*]* %t5, i32 0, i32 0
+  %t7 = alloca { i8**, i64 }
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 0
+  store i8** %t6, i8*** %t8
+  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  ret { i8**, i64 }* null
+  ret { i8**, i64 }* %t7
 merge1:
   %t10 = load i8*, i8** %l0
   %t11 = call { i8**, i64 }* @split_comma_separated(i8* %t10)
@@ -10443,14 +10344,14 @@ entry:
   %l2 = alloca double
   %l3 = alloca i8
   %l4 = alloca i1
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 -1 to double
   store double %t5, double* %l1
   %t6 = sitofp i64 0 to double
@@ -10717,14 +10618,14 @@ entry:
   %l1 = alloca i8*
   %l2 = alloca double
   %l3 = alloca i8
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -10802,14 +10703,14 @@ entry:
   %l3 = alloca i8
   %l4 = alloca { i8**, i64 }*
   %l5 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -10873,14 +10774,14 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t41 = load i8*, i8** %l1
-  %t42 = alloca [0 x double]
-  %t43 = getelementptr [0 x double], [0 x double]* %t42, i32 0, i32 0
-  %t44 = alloca { double*, i64 }
-  %t45 = getelementptr { double*, i64 }, { double*, i64 }* %t44, i32 0, i32 0
-  store double* %t43, double** %t45
-  %t46 = getelementptr { double*, i64 }, { double*, i64 }* %t44, i32 0, i32 1
+  %t42 = alloca [0 x i8*]
+  %t43 = getelementptr [0 x i8*], [0 x i8*]* %t42, i32 0, i32 0
+  %t44 = alloca { i8**, i64 }
+  %t45 = getelementptr { i8**, i64 }, { i8**, i64 }* %t44, i32 0, i32 0
+  store i8** %t43, i8*** %t45
+  %t46 = getelementptr { i8**, i64 }, { i8**, i64 }* %t44, i32 0, i32 1
   store i64 0, i64* %t46
-  store { i8**, i64 }* null, { i8**, i64 }** %l4
+  store { i8**, i64 }* %t44, { i8**, i64 }** %l4
   %t47 = sitofp i64 0 to double
   store double %t47, double* %l2
   %t48 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -11134,30 +11035,30 @@ entry:
   %l32 = alloca double
   %t0 = call { i8**, i64 }* @split_lines(i8* %text)
   store { i8**, i64 }* %t0, { i8**, i64 }** %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
-  %t6 = alloca [0 x double]
-  %t7 = getelementptr [0 x double], [0 x double]* %t6, i32 0, i32 0
-  %t8 = alloca { double*, i64 }
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 0
-  store double* %t7, double** %t9
-  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
+  %t6 = alloca [0 x %NativeStruct]
+  %t7 = getelementptr [0 x %NativeStruct], [0 x %NativeStruct]* %t6, i32 0, i32 0
+  %t8 = alloca { %NativeStruct*, i64 }
+  %t9 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t8, i32 0, i32 0
+  store %NativeStruct* %t7, %NativeStruct** %t9
+  %t10 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  store { %NativeStruct*, i64 }* null, { %NativeStruct*, i64 }** %l2
-  %t11 = alloca [0 x double]
-  %t12 = getelementptr [0 x double], [0 x double]* %t11, i32 0, i32 0
-  %t13 = alloca { double*, i64 }
-  %t14 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 0
-  store double* %t12, double** %t14
-  %t15 = getelementptr { double*, i64 }, { double*, i64 }* %t13, i32 0, i32 1
+  store { %NativeStruct*, i64 }* %t8, { %NativeStruct*, i64 }** %l2
+  %t11 = alloca [0 x %NativeEnum]
+  %t12 = getelementptr [0 x %NativeEnum], [0 x %NativeEnum]* %t11, i32 0, i32 0
+  %t13 = alloca { %NativeEnum*, i64 }
+  %t14 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t13, i32 0, i32 0
+  store %NativeEnum* %t12, %NativeEnum** %t14
+  %t15 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t13, i32 0, i32 1
   store i64 0, i64* %t15
-  store { %NativeEnum*, i64 }* null, { %NativeEnum*, i64 }** %l3
+  store { %NativeEnum*, i64 }* %t13, { %NativeEnum*, i64 }** %l3
   %t16 = sitofp i64 0 to double
   store double %t16, double* %l4
   %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -11282,14 +11183,14 @@ then10:
   %t101 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l9
   br i1 %t91, label %then12, label %merge13
 then12:
-  %t102 = alloca [0 x double]
-  %t103 = getelementptr [0 x double], [0 x double]* %t102, i32 0, i32 0
-  %t104 = alloca { double*, i64 }
-  %t105 = getelementptr { double*, i64 }, { double*, i64 }* %t104, i32 0, i32 0
-  store double* %t103, double** %t105
-  %t106 = getelementptr { double*, i64 }, { double*, i64 }* %t104, i32 0, i32 1
+  %t102 = alloca [0 x %NativeStructLayoutField]
+  %t103 = getelementptr [0 x %NativeStructLayoutField], [0 x %NativeStructLayoutField]* %t102, i32 0, i32 0
+  %t104 = alloca { %NativeStructLayoutField*, i64 }
+  %t105 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t104, i32 0, i32 0
+  store %NativeStructLayoutField* %t103, %NativeStructLayoutField** %t105
+  %t106 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t104, i32 0, i32 1
   store i64 0, i64* %t106
-  store { %NativeStructLayoutField*, i64 }* null, { %NativeStructLayoutField*, i64 }** %l10
+  store { %NativeStructLayoutField*, i64 }* %t104, { %NativeStructLayoutField*, i64 }** %l10
   %t107 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l9
   %t108 = extractvalue %StructLayoutHeaderParse %t107, 1
   store i8* %t108, i8** %l11
@@ -11497,14 +11398,14 @@ then24:
   %t258 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
   br i1 %t248, label %then26, label %else27
 then26:
-  %t259 = alloca [0 x double]
-  %t260 = getelementptr [0 x double], [0 x double]* %t259, i32 0, i32 0
-  %t261 = alloca { double*, i64 }
-  %t262 = getelementptr { double*, i64 }, { double*, i64 }* %t261, i32 0, i32 0
-  store double* %t260, double** %t262
-  %t263 = getelementptr { double*, i64 }, { double*, i64 }* %t261, i32 0, i32 1
+  %t259 = alloca [0 x %NativeEnumVariantLayout]
+  %t260 = getelementptr [0 x %NativeEnumVariantLayout], [0 x %NativeEnumVariantLayout]* %t259, i32 0, i32 0
+  %t261 = alloca { %NativeEnumVariantLayout*, i64 }
+  %t262 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t261, i32 0, i32 0
+  store %NativeEnumVariantLayout* %t260, %NativeEnumVariantLayout** %t262
+  %t263 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t261, i32 0, i32 1
   store i64 0, i64* %t263
-  store { %NativeEnumVariantLayout*, i64 }* null, { %NativeEnumVariantLayout*, i64 }** %l20
+  store { %NativeEnumVariantLayout*, i64 }* %t261, { %NativeEnumVariantLayout*, i64 }** %l20
   %t264 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
   %t265 = extractvalue %EnumLayoutHeaderParse %t264, 1
   store i8* %t265, i8** %l21
@@ -12092,14 +11993,14 @@ entry:
   %l2 = alloca double
   %l3 = alloca double
   %l4 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = sitofp i64 0 to double

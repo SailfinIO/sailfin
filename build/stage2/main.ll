@@ -212,14 +212,14 @@ entry:
   %t2 = extractvalue %EmitNativeResult %t1, 0
   %t3 = call double @lower_to_python(i8* %t2)
   store double %t3, double* %l1
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l2
   %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
   %t10 = extractvalue %EmitNativeResult %t9, 1
   %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
@@ -303,14 +303,14 @@ entry:
   %t2 = extractvalue %EmitNativeResult %t1, 0
   %t3 = call double @lower_to_llvm(i8* %t2)
   store double %t3, double* %l1
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l2
   %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
   %t10 = extractvalue %EmitNativeResult %t9, 1
   %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
@@ -392,14 +392,14 @@ entry:
   %t2 = extractvalue %EmitNativeResult %t1, 0
   %t3 = call double @lower_to_llvm(i8* %t2)
   store double %t3, double* %l1
-  %t4 = alloca [0 x double]
-  %t5 = getelementptr [0 x double], [0 x double]* %t4, i32 0, i32 0
-  %t6 = alloca { double*, i64 }
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 0
-  store double* %t5, double** %t7
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t6, i32 0, i32 1
+  %t4 = alloca [0 x i8*]
+  %t5 = getelementptr [0 x i8*], [0 x i8*]* %t4, i32 0, i32 0
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t5, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l2
   %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
   %t10 = extractvalue %EmitNativeResult %t9, 1
   %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
@@ -488,22 +488,22 @@ entry:
   %l2 = alloca i64
   %l3 = alloca i8*
   %l4 = alloca %ModuleCompilationResult
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %CompiledModule]
+  %t1 = getelementptr [0 x %CompiledModule], [0 x %CompiledModule]* %t0, i32 0, i32 0
+  %t2 = alloca { %CompiledModule*, i64 }
+  %t3 = getelementptr { %CompiledModule*, i64 }, { %CompiledModule*, i64 }* %t2, i32 0, i32 0
+  store %CompiledModule* %t1, %CompiledModule** %t3
+  %t4 = getelementptr { %CompiledModule*, i64 }, { %CompiledModule*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %CompiledModule*, i64 }* null, { %CompiledModule*, i64 }** %l0
-  %t5 = alloca [0 x double]
-  %t6 = getelementptr [0 x double], [0 x double]* %t5, i32 0, i32 0
-  %t7 = alloca { double*, i64 }
-  %t8 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 0
-  store double* %t6, double** %t8
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t7, i32 0, i32 1
+  store { %CompiledModule*, i64 }* %t2, { %CompiledModule*, i64 }** %l0
+  %t5 = alloca [0 x %ModuleDiagnostics]
+  %t6 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t5, i32 0, i32 0
+  %t7 = alloca { %ModuleDiagnostics*, i64 }
+  %t8 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t7, i32 0, i32 0
+  store %ModuleDiagnostics* %t6, %ModuleDiagnostics** %t8
+  %t9 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t7, i32 0, i32 1
   store i64 0, i64* %t9
-  store { %ModuleDiagnostics*, i64 }* null, { %ModuleDiagnostics*, i64 }** %l1
+  store { %ModuleDiagnostics*, i64 }* %t7, { %ModuleDiagnostics*, i64 }** %l1
   %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %sources, i32 0, i32 1
   %t11 = load i64, i64* %t10
   %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* %sources, i32 0, i32 0
@@ -655,14 +655,14 @@ then0:
   %t41 = insertvalue %ModuleCompilationResult %t30, { i8**, i64 }* null, 1
   ret %ModuleCompilationResult %t41
 merge1:
-  %t42 = alloca [0 x double]
-  %t43 = getelementptr [0 x double], [0 x double]* %t42, i32 0, i32 0
-  %t44 = alloca { double*, i64 }
-  %t45 = getelementptr { double*, i64 }, { double*, i64 }* %t44, i32 0, i32 0
-  store double* %t43, double** %t45
-  %t46 = getelementptr { double*, i64 }, { double*, i64 }* %t44, i32 0, i32 1
+  %t42 = alloca [0 x %ModuleDiagnostics]
+  %t43 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t42, i32 0, i32 0
+  %t44 = alloca { %ModuleDiagnostics*, i64 }
+  %t45 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t44, i32 0, i32 0
+  store %ModuleDiagnostics* %t43, %ModuleDiagnostics** %t45
+  %t46 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t44, i32 0, i32 1
   store i64 0, i64* %t46
-  store { %ModuleDiagnostics*, i64 }* null, { %ModuleDiagnostics*, i64 }** %l8
+  store { %ModuleDiagnostics*, i64 }* %t44, { %ModuleDiagnostics*, i64 }** %l8
   %t47 = load { i8**, i64 }*, { i8**, i64 }** %l5
   %t48 = load { i8**, i64 }, { i8**, i64 }* %t47
   %t49 = extractvalue { i8**, i64 } %t48, 1
@@ -719,14 +719,14 @@ then0:
 merge1:
   %t12 = phi double [ %t11, %then0 ], [ %t10, %entry ]
   store double %t12, double* %l1
-  %t13 = alloca [0 x double]
-  %t14 = getelementptr [0 x double], [0 x double]* %t13, i32 0, i32 0
-  %t15 = alloca { double*, i64 }
-  %t16 = getelementptr { double*, i64 }, { double*, i64 }* %t15, i32 0, i32 0
-  store double* %t14, double** %t16
-  %t17 = getelementptr { double*, i64 }, { double*, i64 }* %t15, i32 0, i32 1
+  %t13 = alloca [0 x i8*]
+  %t14 = getelementptr [0 x i8*], [0 x i8*]* %t13, i32 0, i32 0
+  %t15 = alloca { i8**, i64 }
+  %t16 = getelementptr { i8**, i64 }, { i8**, i64 }* %t15, i32 0, i32 0
+  store i8** %t14, i8*** %t16
+  %t17 = getelementptr { i8**, i64 }, { i8**, i64 }* %t15, i32 0, i32 1
   store i64 0, i64* %t17
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
+  store { i8**, i64 }* %t15, { i8**, i64 }** %l2
   %t18 = sitofp i64 0 to double
   store double %t18, double* %l3
   %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -970,14 +970,14 @@ then0:
   %t2 = extractvalue %Diagnostic %entry, 1
   ret i8* %t2
 merge1:
-  %t3 = alloca [0 x double]
-  %t4 = getelementptr [0 x double], [0 x double]* %t3, i32 0, i32 0
-  %t5 = alloca { double*, i64 }
-  %t6 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 0
-  store double* %t4, double** %t6
-  %t7 = getelementptr { double*, i64 }, { double*, i64 }* %t5, i32 0, i32 1
+  %t3 = alloca [0 x i8*]
+  %t4 = getelementptr [0 x i8*], [0 x i8*]* %t3, i32 0, i32 0
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t4, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
   store i64 0, i64* %t7
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t5, { i8**, i64 }** %l0
   %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t9 = extractvalue %Diagnostic %entry, 1
   %t10 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t8, i8* %t9)
@@ -1128,14 +1128,14 @@ entry:
   %l1 = alloca i8*
   %l2 = alloca double
   %l3 = alloca i8
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
@@ -1613,22 +1613,22 @@ merge17:
 
 define %NativeModule @empty_native_module() {
 entry:
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  %t5 = insertvalue %NativeModule undef, { i8**, i64 }* null, 0
-  %t6 = alloca [0 x double]
-  %t7 = getelementptr [0 x double], [0 x double]* %t6, i32 0, i32 0
-  %t8 = alloca { double*, i64 }
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 0
-  store double* %t7, double** %t9
-  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
+  %t5 = insertvalue %NativeModule undef, { i8**, i64 }* %t2, 0
+  %t6 = alloca [0 x i8*]
+  %t7 = getelementptr [0 x i8*], [0 x i8*]* %t6, i32 0, i32 0
+  %t8 = alloca { i8**, i64 }
+  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* %t8, i32 0, i32 0
+  store i8** %t7, i8*** %t9
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  %t11 = insertvalue %NativeModule %t5, { i8**, i64 }* null, 1
+  %t11 = insertvalue %NativeModule %t5, { i8**, i64 }* %t8, 1
   %t12 = sitofp i64 0 to double
   %t13 = insertvalue %NativeModule %t11, double %t12, 2
   ret %NativeModule %t13

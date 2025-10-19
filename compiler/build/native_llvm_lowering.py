@@ -3629,7 +3629,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     if instruction.value == None  or  len(instruction.value) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`")
     else:
-        lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, "")
+        lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, llvm_type)
         diagnostics = (diagnostics) + (lowered.diagnostics)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
@@ -3717,7 +3717,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
             assignment_ownership = ownership_analysis.ownership
             consumption = ownership_analysis.consumption
             stored_value = default_return_literal(binding.llvm_type)
-            lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+            lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, binding.llvm_type)
             diagnostics = (diagnostics) + (lowered.diagnostics)
             string_constants = lowered.string_constants
             current_lines = lowered.lines
@@ -4425,7 +4425,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     additive = find_top_level_operator(stripped, "+-")
     if additive.success:
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context)
-    multiplicative = find_top_level_operator(stripped, "*/")
+    multiplicative = find_top_level_operator(stripped, "*/%")
     if multiplicative.success:
         return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context)
     call_index = find_call_site(stripped)
@@ -4438,7 +4438,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         first = stripped[0]
         last = stripped[len(stripped) - 1]
         if first == "["  and  last == "]":
-            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context)
+            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type)
     enum_parse = parse_enum_literal(stripped)
     if enum_parse.recognized  and  enum_parse.success:
         enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name)
@@ -4972,6 +4972,27 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     if len(trimmed_target) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: call target missing")
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
+    dot_index = index_of(trimmed_target, ".")
+    if dot_index > 0:
+        enum_name = trim_text(substring(trimmed_target, 0, dot_index))
+        variant_name = trim_text(substring(trimmed_target, dot_index + 1, len(trimmed_target)))
+        enum_info = resolve_enum_info_for_literal(context, enum_name)
+        if enum_info != None:
+            fields = []
+            if len(arguments) > 0:
+                variant_info = resolve_enum_variant_info(enum_info, variant_name)
+                if variant_info != None  and  len(variant_info.fields) == len(arguments):
+                    arg_index = 0
+                    while True:
+                        if arg_index >= len(arguments):
+                            break
+                        field_info = variant_info.fields[arg_index]
+                        fields = append_struct_literal_field(fields, StructLiteralField(name=field_info.name, value=arguments[arg_index]))
+                        arg_index += 1
+                else:
+                    pass
+            enum_parse = EnumLiteralParse(recognized=True, success=True, enum_name=enum_name, variant_name=variant_name, fields=fields, diagnostics=[])
+            return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "")
     current_lines = lines
     current_temp = temp_index
     operands = []
@@ -5526,16 +5547,25 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`")
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
 
-def lower_array_literal(text, bindings, locals, temp_index, lines, functions, context):
+def lower_array_literal(text, bindings, locals, temp_index, lines, functions, context, expected_type):
     diagnostics = []
     current_lines = lines
     current_temp = temp_index
     collected_string_constants = []
+    trimmed_expected = trim_text(expected_type)
+    expected_element_type = ""
+    if len(trimmed_expected) > 0:
+        expected_element_type = array_pointer_element_type(trimmed_expected)
+    expected_struct_type = ""
+    if len(expected_element_type) > 0:
+        expected_struct_type = array_struct_type_for_element(expected_element_type)
     inner = trim_text(substring(text, 1, len(text) - 1))
     elements = split_array_elements(inner)
     metadata = parse_array_literal_metadata(elements, context)
     operands = []
     inferred_element_type = metadata.element_type
+    if len(inferred_element_type) == 0  and  len(expected_element_type) > 0:
+        inferred_element_type = expected_element_type
     index = metadata.start_index
     while True:
         if index >= len(elements):
@@ -5557,6 +5587,8 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type)
         index += 1
     if len(operands) == 0:
+        if len(inferred_element_type) == 0  and  len(expected_element_type) > 0:
+            inferred_element_type = expected_element_type
         if len(inferred_element_type) == 0:
             inferred_element_type = "double"
     if len(inferred_element_type) == 0:
@@ -5598,6 +5630,8 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         current_lines = append_string(current_lines, "  store " + element_type + " " + operands[index].value + ", " + element_type + "* " + element_pointer)
         index += 1
     struct_type = array_struct_type_for_element(element_type)
+    if len(operands) == 0  and  len(expected_struct_type) > 0:
+        struct_type = expected_struct_type
     struct_alloca = format_temp_name(current_temp)
     current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type)
     current_temp += 1
@@ -6709,6 +6743,8 @@ def operation_name_for_symbol(symbol, llvm_type):
             return "fmul"
         if symbol == "/":
             return "fdiv"
+        if symbol == "%":
+            return "frem"
     if symbol == "+":
         return "add"
     if symbol == "-":
@@ -6717,6 +6753,8 @@ def operation_name_for_symbol(symbol, llvm_type):
         return "mul"
     if symbol == "/":
         return "sdiv"
+    if symbol == "%":
+        return "srem"
     return "add"
 
 def format_temp_name(index):
@@ -7161,6 +7199,9 @@ def append_local_binding(values, value):
     return (values) + ([value])
 
 def append_llvm_operand(values, value):
+    return (values) + ([value])
+
+def append_struct_literal_field(values, value):
     return (values) + ([value])
 
 def replace_llvm_operand(values, index, value):

@@ -155,3 +155,27 @@ fn count_points(points -> Point[]) -> int {
     # Should extract length from struct array
     assert 'extractvalue' in ir_content
     assert 'i64' in ir_content
+
+
+@pytest.mark.unit
+def test_native_llvm_struct_array_literal_annotation(compile_stage2):
+    """Empty struct array literals should respect their annotated element type."""
+    source = """
+struct Pair {
+    left -> number;
+    right -> number;
+}
+
+fn make_pairs() -> Pair[] {
+    let pairs -> Pair[] = [];
+    return pairs;
+}
+"""
+    result = compile_stage2(source)
+
+    assert result is not None
+    assert hasattr(result, 'ir')
+
+    ir_content = result.ir
+    # The emitted IR should allocate the Pair array shape rather than falling back to double
+    assert '{ %Pair*, i64 }' in ir_content

@@ -189,14 +189,14 @@ entry:
   %l1 = alloca double
   %l2 = alloca %Decorator
   %l3 = alloca { %DecoratorArgumentInfo*, i64 }*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %DecoratorInfo]
+  %t1 = getelementptr [0 x %DecoratorInfo], [0 x %DecoratorInfo]* %t0, i32 0, i32 0
+  %t2 = alloca { %DecoratorInfo*, i64 }
+  %t3 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t2, i32 0, i32 0
+  store %DecoratorInfo* %t1, %DecoratorInfo** %t3
+  %t4 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %DecoratorInfo*, i64 }* null, { %DecoratorInfo*, i64 }** %l0
+  store { %DecoratorInfo*, i64 }* %t2, { %DecoratorInfo*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
@@ -253,14 +253,14 @@ entry:
   %l1 = alloca double
   %l2 = alloca %DecoratorArgument
   %l3 = alloca %LiteralValue
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %DecoratorArgumentInfo]
+  %t1 = getelementptr [0 x %DecoratorArgumentInfo], [0 x %DecoratorArgumentInfo]* %t0, i32 0, i32 0
+  %t2 = alloca { %DecoratorArgumentInfo*, i64 }
+  %t3 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t2, i32 0, i32 0
+  store %DecoratorArgumentInfo* %t1, %DecoratorArgumentInfo** %t3
+  %t4 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %DecoratorArgumentInfo*, i64 }* null, { %DecoratorArgumentInfo*, i64 }** %l0
+  store { %DecoratorArgumentInfo*, i64 }* %t2, { %DecoratorArgumentInfo*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
@@ -600,8 +600,8 @@ merge5:
   %t261 = icmp eq i8* %t259, %s260
   br i1 %t261, label %then6, label %merge7
 then6:
-  %t262 = call double @LiteralValueNull()
-  ret %LiteralValue zeroinitializer
+  %t262 = insertvalue %LiteralValue undef, i32 3, 0
+  ret %LiteralValue %t262
 merge7:
   %t263 = extractvalue %Expression %expr, 0
   %t264 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -738,8 +738,8 @@ then16:
 merge17:
   br label %merge9
 merge9:
-  %t367 = call double @LiteralValueUnsupported()
-  ret %LiteralValue zeroinitializer
+  %t367 = insertvalue %LiteralValue undef, i32 4, 0
+  ret %LiteralValue %t367
 }
 
 define { %DecoratorInfo*, i64 }* @evaluate_statement_decorators(%Statement %statement) {
@@ -1116,14 +1116,14 @@ then2:
   %t361 = call { %DecoratorInfo*, i64 }* @evaluate_decorators({ %Decorator*, i64 }* null)
   ret { %DecoratorInfo*, i64 }* %t361
 merge3:
-  %t362 = alloca [0 x double]
-  %t363 = getelementptr [0 x double], [0 x double]* %t362, i32 0, i32 0
-  %t364 = alloca { double*, i64 }
-  %t365 = getelementptr { double*, i64 }, { double*, i64 }* %t364, i32 0, i32 0
-  store double* %t363, double** %t365
-  %t366 = getelementptr { double*, i64 }, { double*, i64 }* %t364, i32 0, i32 1
+  %t362 = alloca [0 x %DecoratorInfo]
+  %t363 = getelementptr [0 x %DecoratorInfo], [0 x %DecoratorInfo]* %t362, i32 0, i32 0
+  %t364 = alloca { %DecoratorInfo*, i64 }
+  %t365 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t364, i32 0, i32 0
+  store %DecoratorInfo* %t363, %DecoratorInfo** %t365
+  %t366 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t364, i32 0, i32 1
   store i64 0, i64* %t366
-  ret { %DecoratorInfo*, i64 }* null
+  ret { %DecoratorInfo*, i64 }* %t364
 }
 
 define i8* @trim_whitespace(i8* %value) {
@@ -1499,14 +1499,14 @@ define { i8**, i64 }* @clone_effects({ i8**, i64 }* %effects) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { i8**, i64 }* null, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0

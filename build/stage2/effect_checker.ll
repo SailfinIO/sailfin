@@ -68,14 +68,14 @@ entry:
   %l0 = alloca { %EffectViolation*, i64 }*
   %l1 = alloca double
   %l2 = alloca i8*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %EffectViolation]
+  %t1 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t0, i32 0, i32 0
+  %t2 = alloca { %EffectViolation*, i64 }
+  %t3 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t2, i32 0, i32 0
+  store %EffectViolation* %t1, %EffectViolation** %t3
+  %t4 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %EffectViolation*, i64 }* null, { %EffectViolation*, i64 }** %l0
+  store { %EffectViolation*, i64 }* %t2, { %EffectViolation*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
@@ -1338,14 +1338,14 @@ merge7:
   %t1159 = icmp eq i8* %t1157, %s1158
   br i1 %t1159, label %then8, label %merge9
 then8:
-  %t1160 = alloca [0 x double]
-  %t1161 = getelementptr [0 x double], [0 x double]* %t1160, i32 0, i32 0
-  %t1162 = alloca { double*, i64 }
-  %t1163 = getelementptr { double*, i64 }, { double*, i64 }* %t1162, i32 0, i32 0
-  store double* %t1161, double** %t1163
-  %t1164 = getelementptr { double*, i64 }, { double*, i64 }* %t1162, i32 0, i32 1
+  %t1160 = alloca [0 x %EffectViolation]
+  %t1161 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t1160, i32 0, i32 0
+  %t1162 = alloca { %EffectViolation*, i64 }
+  %t1163 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t1162, i32 0, i32 0
+  store %EffectViolation* %t1161, %EffectViolation** %t1163
+  %t1164 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t1162, i32 0, i32 1
   store i64 0, i64* %t1164
-  store { %EffectViolation*, i64 }* null, { %EffectViolation*, i64 }** %l6
+  store { %EffectViolation*, i64 }* %t1162, { %EffectViolation*, i64 }** %l6
   %t1165 = sitofp i64 0 to double
   store double %t1165, double* %l7
   %t1166 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l6
@@ -1461,14 +1461,14 @@ afterloop13:
   %t1255 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l6
   ret { %EffectViolation*, i64 }* %t1255
 merge9:
-  %t1256 = alloca [0 x double]
-  %t1257 = getelementptr [0 x double], [0 x double]* %t1256, i32 0, i32 0
-  %t1258 = alloca { double*, i64 }
-  %t1259 = getelementptr { double*, i64 }, { double*, i64 }* %t1258, i32 0, i32 0
-  store double* %t1257, double** %t1259
-  %t1260 = getelementptr { double*, i64 }, { double*, i64 }* %t1258, i32 0, i32 1
+  %t1256 = alloca [0 x %EffectViolation]
+  %t1257 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t1256, i32 0, i32 0
+  %t1258 = alloca { %EffectViolation*, i64 }
+  %t1259 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t1258, i32 0, i32 0
+  store %EffectViolation* %t1257, %EffectViolation** %t1259
+  %t1260 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t1258, i32 0, i32 1
   store i64 0, i64* %t1260
-  ret { %EffectViolation*, i64 }* null
+  ret { %EffectViolation*, i64 }* %t1258
 }
 
 define { %EffectViolation*, i64 }* @analyze_routine(%FunctionSignature %signature, %Block %body, { %Decorator*, i64 }* %decorators, i8* %name) {
@@ -1488,14 +1488,14 @@ entry:
   %l12 = alloca { %EffectViolation*, i64 }*
   %t0 = call double @evaluate_decorators({ %Decorator*, i64 }* %decorators)
   store double %t0, double* %l0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x i8*]
+  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
+  %t3 = alloca { i8**, i64 }
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
+  store i8** %t2, i8*** %t4
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
   %t7 = load double, double* %l0
@@ -1591,22 +1591,22 @@ merge11:
   store { i8**, i64 }* %t63, { i8**, i64 }** %l1
   %t64 = call { %EffectRequirement*, i64 }* @required_effects(%Block %body)
   store { %EffectRequirement*, i64 }* %t64, { %EffectRequirement*, i64 }** %l6
-  %t65 = alloca [0 x double]
-  %t66 = getelementptr [0 x double], [0 x double]* %t65, i32 0, i32 0
-  %t67 = alloca { double*, i64 }
-  %t68 = getelementptr { double*, i64 }, { double*, i64 }* %t67, i32 0, i32 0
-  store double* %t66, double** %t68
-  %t69 = getelementptr { double*, i64 }, { double*, i64 }* %t67, i32 0, i32 1
+  %t65 = alloca [0 x i8*]
+  %t66 = getelementptr [0 x i8*], [0 x i8*]* %t65, i32 0, i32 0
+  %t67 = alloca { i8**, i64 }
+  %t68 = getelementptr { i8**, i64 }, { i8**, i64 }* %t67, i32 0, i32 0
+  store i8** %t66, i8*** %t68
+  %t69 = getelementptr { i8**, i64 }, { i8**, i64 }* %t67, i32 0, i32 1
   store i64 0, i64* %t69
-  store { i8**, i64 }* null, { i8**, i64 }** %l7
-  %t70 = alloca [0 x double]
-  %t71 = getelementptr [0 x double], [0 x double]* %t70, i32 0, i32 0
-  %t72 = alloca { double*, i64 }
-  %t73 = getelementptr { double*, i64 }, { double*, i64 }* %t72, i32 0, i32 0
-  store double* %t71, double** %t73
-  %t74 = getelementptr { double*, i64 }, { double*, i64 }* %t72, i32 0, i32 1
+  store { i8**, i64 }* %t67, { i8**, i64 }** %l7
+  %t70 = alloca [0 x %EffectRequirement]
+  %t71 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t70, i32 0, i32 0
+  %t72 = alloca { %EffectRequirement*, i64 }
+  %t73 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t72, i32 0, i32 0
+  store %EffectRequirement* %t71, %EffectRequirement** %t73
+  %t74 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t72, i32 0, i32 1
   store i64 0, i64* %t74
-  store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l8
+  store { %EffectRequirement*, i64 }* %t72, { %EffectRequirement*, i64 }** %l8
   %t75 = sitofp i64 0 to double
   store double %t75, double* %l9
   %t76 = load double, double* %l0
@@ -1773,23 +1773,23 @@ afterloop15:
   %t190 = load double, double* %l9
   br i1 %t181, label %then24, label %merge25
 then24:
-  %t191 = alloca [0 x double]
-  %t192 = getelementptr [0 x double], [0 x double]* %t191, i32 0, i32 0
-  %t193 = alloca { double*, i64 }
-  %t194 = getelementptr { double*, i64 }, { double*, i64 }* %t193, i32 0, i32 0
-  store double* %t192, double** %t194
-  %t195 = getelementptr { double*, i64 }, { double*, i64 }* %t193, i32 0, i32 1
+  %t191 = alloca [0 x %EffectViolation]
+  %t192 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t191, i32 0, i32 0
+  %t193 = alloca { %EffectViolation*, i64 }
+  %t194 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t193, i32 0, i32 0
+  store %EffectViolation* %t192, %EffectViolation** %t194
+  %t195 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t193, i32 0, i32 1
   store i64 0, i64* %t195
-  ret { %EffectViolation*, i64 }* null
+  ret { %EffectViolation*, i64 }* %t193
 merge25:
-  %t196 = alloca [0 x double]
-  %t197 = getelementptr [0 x double], [0 x double]* %t196, i32 0, i32 0
-  %t198 = alloca { double*, i64 }
-  %t199 = getelementptr { double*, i64 }, { double*, i64 }* %t198, i32 0, i32 0
-  store double* %t197, double** %t199
-  %t200 = getelementptr { double*, i64 }, { double*, i64 }* %t198, i32 0, i32 1
+  %t196 = alloca [0 x %EffectViolation]
+  %t197 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t196, i32 0, i32 0
+  %t198 = alloca { %EffectViolation*, i64 }
+  %t199 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t198, i32 0, i32 0
+  store %EffectViolation* %t197, %EffectViolation** %t199
+  %t200 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t198, i32 0, i32 1
   store i64 0, i64* %t200
-  store { %EffectViolation*, i64 }* null, { %EffectViolation*, i64 }** %l12
+  store { %EffectViolation*, i64 }* %t198, { %EffectViolation*, i64 }** %l12
   %t201 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
   ret { %EffectViolation*, i64 }* %t201
 }
@@ -3709,14 +3709,14 @@ merge39:
   %t1712 = icmp eq i8* %t1710, %s1711
   br i1 %t1712, label %then40, label %merge41
 then40:
-  %t1713 = alloca [0 x double]
-  %t1714 = getelementptr [0 x double], [0 x double]* %t1713, i32 0, i32 0
-  %t1715 = alloca { double*, i64 }
-  %t1716 = getelementptr { double*, i64 }, { double*, i64 }* %t1715, i32 0, i32 0
-  store double* %t1714, double** %t1716
-  %t1717 = getelementptr { double*, i64 }, { double*, i64 }* %t1715, i32 0, i32 1
+  %t1713 = alloca [0 x %EffectRequirement]
+  %t1714 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t1713, i32 0, i32 0
+  %t1715 = alloca { %EffectRequirement*, i64 }
+  %t1716 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1715, i32 0, i32 0
+  store %EffectRequirement* %t1714, %EffectRequirement** %t1716
+  %t1717 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1715, i32 0, i32 1
   store i64 0, i64* %t1717
-  store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l8
+  store { %EffectRequirement*, i64 }* %t1715, { %EffectRequirement*, i64 }** %l8
   %t1718 = sitofp i64 0 to double
   store double %t1718, double* %l9
   %t1719 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
@@ -3857,14 +3857,14 @@ merge41:
   %t1834 = icmp eq i8* %t1832, %s1833
   br i1 %t1834, label %then48, label %merge49
 then48:
-  %t1835 = alloca [0 x double]
-  %t1836 = getelementptr [0 x double], [0 x double]* %t1835, i32 0, i32 0
-  %t1837 = alloca { double*, i64 }
-  %t1838 = getelementptr { double*, i64 }, { double*, i64 }* %t1837, i32 0, i32 0
-  store double* %t1836, double** %t1838
-  %t1839 = getelementptr { double*, i64 }, { double*, i64 }* %t1837, i32 0, i32 1
+  %t1835 = alloca [0 x %EffectRequirement]
+  %t1836 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t1835, i32 0, i32 0
+  %t1837 = alloca { %EffectRequirement*, i64 }
+  %t1838 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1837, i32 0, i32 0
+  store %EffectRequirement* %t1836, %EffectRequirement** %t1838
+  %t1839 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1837, i32 0, i32 1
   store i64 0, i64* %t1839
-  store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l10
+  store { %EffectRequirement*, i64 }* %t1837, { %EffectRequirement*, i64 }** %l10
   %t1840 = sitofp i64 0 to double
   store double %t1840, double* %l11
   %t1841 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l10
@@ -4017,27 +4017,27 @@ then56:
   %t1965 = call { %EffectRequirement*, i64 }* @collect_effects_from_tokens({ %Token*, i64 }* null)
   ret { %EffectRequirement*, i64 }* %t1965
 merge57:
-  %t1966 = alloca [0 x double]
-  %t1967 = getelementptr [0 x double], [0 x double]* %t1966, i32 0, i32 0
-  %t1968 = alloca { double*, i64 }
-  %t1969 = getelementptr { double*, i64 }, { double*, i64 }* %t1968, i32 0, i32 0
-  store double* %t1967, double** %t1969
-  %t1970 = getelementptr { double*, i64 }, { double*, i64 }* %t1968, i32 0, i32 1
+  %t1966 = alloca [0 x %EffectRequirement]
+  %t1967 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t1966, i32 0, i32 0
+  %t1968 = alloca { %EffectRequirement*, i64 }
+  %t1969 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1968, i32 0, i32 0
+  store %EffectRequirement* %t1967, %EffectRequirement** %t1969
+  %t1970 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t1968, i32 0, i32 1
   store i64 0, i64* %t1970
-  ret { %EffectRequirement*, i64 }* null
+  ret { %EffectRequirement*, i64 }* %t1968
 }
 
 define { %EffectRequirement*, i64 }* @collect_effects_from_else_branch(%ElseBranch %branch) {
 entry:
   %l0 = alloca { %EffectRequirement*, i64 }*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %EffectRequirement]
+  %t1 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t0, i32 0, i32 0
+  %t2 = alloca { %EffectRequirement*, i64 }
+  %t3 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t2, i32 0, i32 0
+  store %EffectRequirement* %t1, %EffectRequirement** %t3
+  %t4 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l0
+  store { %EffectRequirement*, i64 }* %t2, { %EffectRequirement*, i64 }** %l0
   %t5 = extractvalue %ElseBranch %branch, 1
   %t6 = icmp ne i8* %t5, null
   %t7 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
@@ -4104,36 +4104,36 @@ entry:
   %t0 = icmp eq i8* %expression, null
   br i1 %t0, label %then0, label %merge1
 then0:
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %EffectRequirement]
+  %t2 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t1, i32 0, i32 0
+  %t3 = alloca { %EffectRequirement*, i64 }
+  %t4 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t3, i32 0, i32 0
+  store %EffectRequirement* %t2, %EffectRequirement** %t4
+  %t5 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  ret { %EffectRequirement*, i64 }* null
+  ret { %EffectRequirement*, i64 }* %t3
 merge1:
-  %t6 = alloca [0 x double]
-  %t7 = getelementptr [0 x double], [0 x double]* %t6, i32 0, i32 0
-  %t8 = alloca { double*, i64 }
-  %t9 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 0
-  store double* %t7, double** %t9
-  %t10 = getelementptr { double*, i64 }, { double*, i64 }* %t8, i32 0, i32 1
+  %t6 = alloca [0 x %EffectRequirement]
+  %t7 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t6, i32 0, i32 0
+  %t8 = alloca { %EffectRequirement*, i64 }
+  %t9 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t8, i32 0, i32 0
+  store %EffectRequirement* %t7, %EffectRequirement** %t9
+  %t10 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t8, i32 0, i32 1
   store i64 0, i64* %t10
-  ret { %EffectRequirement*, i64 }* null
+  ret { %EffectRequirement*, i64 }* %t8
 }
 
 define { %EffectRequirement*, i64 }* @collect_effects_from_tokens({ %Token*, i64 }* %tokens) {
 entry:
   %l0 = alloca { %EffectRequirement*, i64 }*
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %EffectRequirement]
+  %t1 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t0, i32 0, i32 0
+  %t2 = alloca { %EffectRequirement*, i64 }
+  %t3 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t2, i32 0, i32 0
+  store %EffectRequirement* %t1, %EffectRequirement** %t3
+  %t4 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %EffectRequirement*, i64 }* null, { %EffectRequirement*, i64 }** %l0
+  store { %EffectRequirement*, i64 }* %t2, { %EffectRequirement*, i64 }** %l0
   %t5 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l0
   %t6 = call { %EffectRequirement*, i64 }* @append_prompt_effect({ %EffectRequirement*, i64 }* %t5, { %Token*, i64 }* %tokens)
   store { %EffectRequirement*, i64 }* %t6, { %EffectRequirement*, i64 }** %l0
@@ -4387,14 +4387,14 @@ entry:
   %l0 = alloca { %Token*, i64 }*
   %l1 = alloca double
   %l2 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %Token]
+  %t1 = getelementptr [0 x %Token], [0 x %Token]* %t0, i32 0, i32 0
+  %t2 = alloca { %Token*, i64 }
+  %t3 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 0
+  store %Token* %t1, %Token** %t3
+  %t4 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %Token*, i64 }* null, { %Token*, i64 }** %l0
+  store { %Token*, i64 }* %t2, { %Token*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
@@ -4512,14 +4512,14 @@ entry:
   %l0 = alloca { %Token*, i64 }*
   %l1 = alloca double
   %l2 = alloca double
-  %t0 = alloca [0 x double]
-  %t1 = getelementptr [0 x double], [0 x double]* %t0, i32 0, i32 0
-  %t2 = alloca { double*, i64 }
-  %t3 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 0
-  store double* %t1, double** %t3
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t2, i32 0, i32 1
+  %t0 = alloca [0 x %Token]
+  %t1 = getelementptr [0 x %Token], [0 x %Token]* %t0, i32 0, i32 0
+  %t2 = alloca { %Token*, i64 }
+  %t3 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 0
+  store %Token* %t1, %Token** %t3
+  %t4 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
-  store { %Token*, i64 }* null, { %Token*, i64 }** %l0
+  store { %Token*, i64 }* %t2, { %Token*, i64 }** %l0
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l1
   %t6 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
