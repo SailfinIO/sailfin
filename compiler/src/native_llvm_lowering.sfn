@@ -7637,6 +7637,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut operands -> LLVMOperand[] = [];
     let mut injected_argument_count -> number = 0;
     let mut method_operand -> LLVMOperand? = null;
+    let mut helper_descriptor -> RuntimeHelperDescriptor? = null;
 
     let method_parse = parse_member_access(trimmed_target);
     if method_parse.success {
@@ -7673,22 +7674,27 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
         } else {
-            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered_self.diagnostics);
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
-            current_lines = lowered_self.lines;
-            current_temp = lowered_self.temp_index;
-            if lowered_self.operand != null {
-                let base_operand = lowered_self.operand;
-                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
-                if array_element_type.length > 0 && method_parse.field == "concat" {
-                    method_operand = base_operand;
-                    trimmed_target = "concat";
-                    injected_argument_count = 1;
-                }
+            let helper_candidate = find_runtime_helper(trimmed_target);
+            if helper_candidate != null {
+                helper_descriptor = helper_candidate;
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                current_lines = lowered_self.lines;
+                current_temp = lowered_self.temp_index;
+                if lowered_self.operand != null {
+                    let base_operand = lowered_self.operand;
+                    let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                    if array_element_type.length > 0 && method_parse.field == "concat" {
+                        method_operand = base_operand;
+                        trimmed_target = "concat";
+                        injected_argument_count = 1;
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                }
             }
         }
     }
@@ -7774,7 +7780,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
     
     let function_entry = find_function_by_name(functions, trimmed_target);
-    let helper_descriptor = find_runtime_helper(trimmed_target);
+    if helper_descriptor == null {
+        helper_descriptor = find_runtime_helper(trimmed_target);
+    }
     if !is_trait_dispatch {
         if function_entry != null {
             llvm_return = map_return_type(context, function_entry.return_type);
@@ -7784,8 +7792,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             }
             expected_params = collect_parameter_types(context, function_entry.parameters);
         } else if helper_descriptor != null {
-            llvm_return = helper_descriptor.return_type;
-            expected_params = helper_descriptor.parameter_types;
+            let descriptor = helper_descriptor;
+            llvm_return = descriptor.return_type;
+            expected_params = descriptor.parameter_types;
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
         }

@@ -1303,7 +1303,10 @@ def parse_type_parameter_clause(parser):
                 if len(bound_tokens) > 0  and  len(bound_text) > 0:
                     bound = TypeAnnotation(text=bound_text)
                 name_span = source_span_from_tokens(name_tokens)
-                parameters = append_type_parameter( parameters, TypeParameter(name=name_text, bound=bound, span=name_span), )
+                parameters = append_type_parameter(
+parameters,
+TypeParameter(name=name_text, bound=bound, span=name_span),
+)
         index += 1
     return TypeParameterParseResult(parser=current, parameters=parameters)
 

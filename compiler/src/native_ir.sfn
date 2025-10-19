@@ -182,6 +182,19 @@ struct InstructionParseResult {
     value_span_consumed -> boolean;
 }
 
+struct InstructionGatherResult {
+    text -> string;
+    lines_consumed -> number;
+}
+
+struct InstructionDepthState {
+    paren_depth -> number;
+    bracket_depth -> number;
+    brace_depth -> number;
+    in_string -> boolean;
+    escaping -> boolean;
+}
+
 struct StructParseResult {
     definition -> NativeStruct?;
     next_index -> number;
@@ -500,7 +513,10 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
-        let instruction_result = parse_instruction(line, pending_span, pending_value_span);
+    let gather = gather_instruction(lines, index);
+    line = gather.text;
+    index += gather.lines_consumed;
+    let instruction_result = parse_instruction(line, pending_span, pending_value_span);
         let instructions = instruction_result.instructions;
         if instruction_result.span_consumed {
             pending_span = null;
@@ -711,6 +727,162 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
         return_type: return_type,
         effects: effects,
         instructions: function.instructions,
+    };
+}
+
+fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGatherResult {
+    if start_index >= lines.length {
+        return InstructionGatherResult { text: "", lines_consumed: 0 };
+    }
+    let first_line = trim_text(lines[start_index]);
+    if first_line.length == 0 {
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    }
+    if !instruction_supports_multiline(first_line) {
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    }
+
+    let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line);
+    if !instruction_requires_continuation(state) {
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    }
+
+    let mut combined -> string = first_line;
+    let mut consumed -> number = 0;
+    let mut index = start_index + 1;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let continuation = trim_text(lines[index]);
+        // Preserve structure for downstream parsing by keeping newline separators.
+        if continuation.length == 0 {
+            combined = combined + "\n";
+        } else {
+            combined = combined + "\n" + continuation;
+            state = update_instruction_depth_state(state, continuation);
+        }
+        consumed += 1;
+        index += 1;
+        if !instruction_requires_continuation(state) {
+            break;
+        }
+    }
+    let normalized = trim_text(combined);
+    return InstructionGatherResult { text: normalized, lines_consumed: consumed };
+}
+
+fn instruction_supports_multiline(line -> string) -> boolean {
+    if starts_with(line, "eval ") {
+        return true;
+    }
+    if starts_with(line, "ret ") {
+        return true;
+    }
+    return false;
+}
+
+fn instruction_requires_continuation(state -> InstructionDepthState) -> boolean {
+    if state.in_string {
+        return true;
+    }
+    if state.paren_depth > 0 {
+        return true;
+    }
+    if state.bracket_depth > 0 {
+        return true;
+    }
+    if state.brace_depth > 0 {
+        return true;
+    }
+    return false;
+}
+
+fn initial_instruction_depth_state() -> InstructionDepthState {
+    return InstructionDepthState { paren_depth: 0, bracket_depth: 0, brace_depth: 0, in_string: false, escaping: false };
+}
+
+fn update_instruction_depth_state(state -> InstructionDepthState, text -> string) -> InstructionDepthState {
+    let mut paren_depth = state.paren_depth;
+    let mut bracket_depth = state.bracket_depth;
+    let mut brace_depth = state.brace_depth;
+    let mut in_string = state.in_string;
+    let mut escaping = state.escaping;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_string {
+            if escaping {
+                escaping = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return InstructionDepthState {
+        paren_depth: paren_depth,
+        bracket_depth: bracket_depth,
+        brace_depth: brace_depth,
+        in_string: in_string,
+        escaping: escaping,
     };
 }
 

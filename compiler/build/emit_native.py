@@ -362,7 +362,10 @@ def emit_test(state, statement):
     if len(statement.effects) > 0:
         header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
     current = state_emit_line(current, header)
-    current = emit_signature_metadata( current, FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=None) )
+    current = emit_signature_metadata(
+current,
+FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=None)
+)
     current = state_push_indent(current)
     current = emit_block(current, statement.body)
     current = state_pop_indent(current)

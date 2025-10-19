@@ -5073,16 +5073,70 @@ forbody7:
   %t69 = load double, double* %l6
   %t70 = load double, double* %l6
   store double 0.0, double* %l7
-  %t71 = load double, double* %l6
+  %t71 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l3
+  %t72 = extractvalue %Statement %statement, 0
+  %t73 = alloca %Statement
+  store %Statement %statement, %Statement* %t73
+  %t74 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t75 = bitcast [48 x i8]* %t74 to i8*
+  %t76 = bitcast i8* %t75 to i8**
+  %t77 = load i8*, i8** %t76
+  %t78 = icmp eq i32 %t72, 2
+  %t79 = select i1 %t78, i8* %t77, i8* null
+  %t80 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t81 = bitcast [48 x i8]* %t80 to i8*
+  %t82 = bitcast i8* %t81 to i8**
+  %t83 = load i8*, i8** %t82
+  %t84 = icmp eq i32 %t72, 3
+  %t85 = select i1 %t84, i8* %t83, i8* %t79
+  %t86 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t87 = bitcast [40 x i8]* %t86 to i8*
+  %t88 = bitcast i8* %t87 to i8**
+  %t89 = load i8*, i8** %t88
+  %t90 = icmp eq i32 %t72, 6
+  %t91 = select i1 %t90, i8* %t89, i8* %t85
+  %t92 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t93 = bitcast [56 x i8]* %t92 to i8*
+  %t94 = bitcast i8* %t93 to i8**
+  %t95 = load i8*, i8** %t94
+  %t96 = icmp eq i32 %t72, 8
+  %t97 = select i1 %t96, i8* %t95, i8* %t91
+  %t98 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t99 = bitcast [40 x i8]* %t98 to i8*
+  %t100 = bitcast i8* %t99 to i8**
+  %t101 = load i8*, i8** %t100
+  %t102 = icmp eq i32 %t72, 9
+  %t103 = select i1 %t102, i8* %t101, i8* %t97
+  %t104 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t105 = bitcast [40 x i8]* %t104 to i8*
+  %t106 = bitcast i8* %t105 to i8**
+  %t107 = load i8*, i8** %t106
+  %t108 = icmp eq i32 %t72, 10
+  %t109 = select i1 %t108, i8* %t107, i8* %t103
+  %t110 = getelementptr inbounds %Statement, %Statement* %t73, i32 0, i32 1
+  %t111 = bitcast [40 x i8]* %t110 to i8*
+  %t112 = bitcast i8* %t111 to i8**
+  %t113 = load i8*, i8** %t112
+  %t114 = icmp eq i32 %t72, 11
+  %t115 = select i1 %t114, i8* %t113, i8* %t109
+  %t116 = load double, double* %l6
+  %t117 = load i8*, i8** %l5
+  %t118 = call { %Diagnostic*, i64 }* @validate_interface_annotation(i8* %t115, %Statement zeroinitializer, %TypeAnnotation zeroinitializer)
+  %t119 = bitcast { %Diagnostic*, i64 }* %t71 to { i8**, i64 }*
+  %t120 = bitcast { %Diagnostic*, i64 }* %t118 to { i8**, i64 }*
+  %t121 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t119, { i8**, i64 }* %t120)
+  %t122 = bitcast { i8**, i64 }* %t121 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t122, { %Diagnostic*, i64 }** %l3
+  %t123 = load double, double* %l6
   br label %forinc8
 forinc8:
-  %t72 = load i64, i64* %l4
-  %t73 = add i64 %t72, 1
-  store i64 %t73, i64* %l4
+  %t124 = load i64, i64* %l4
+  %t125 = add i64 %t124, 1
+  store i64 %t125, i64* %l4
   br label %for6
 afterfor9:
-  %t74 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l3
-  ret { %Diagnostic*, i64 }* %t74
+  %t126 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l3
+  ret { %Diagnostic*, i64 }* %t126
 }
 
 define { %Diagnostic*, i64 }* @check_struct_fields({ %FieldDeclaration*, i64 }* %fields) {
@@ -5136,36 +5190,58 @@ forbody1:
   %t27 = load i8*, i8** %l4
   br i1 %t23, label %then4, label %else5
 then4:
+  %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t29 = load i8*, i8** %l4
+  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.30, i32 0, i32 0
+  %t31 = load i8*, i8** %l4
+  %t32 = load %FieldDeclaration, %FieldDeclaration* %l3
+  %t33 = extractvalue %FieldDeclaration %t32, 3
+  %t34 = call double @token_from_name(i8* %t31, i8* %t33)
+  %t35 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %t29, i8* %s30, i8* null)
+  %t36 = alloca [1 x %Diagnostic]
+  %t37 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t36, i32 0, i32 0
+  %t38 = getelementptr %Diagnostic, %Diagnostic* %t37, i64 0
+  store %Diagnostic %t35, %Diagnostic* %t38
+  %t39 = alloca { %Diagnostic*, i64 }
+  %t40 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 0
+  store %Diagnostic* %t37, %Diagnostic** %t40
+  %t41 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 1
+  store i64 1, i64* %t41
+  %t42 = bitcast { %Diagnostic*, i64 }* %t28 to { i8**, i64 }*
+  %t43 = bitcast { %Diagnostic*, i64 }* %t39 to { i8**, i64 }*
+  %t44 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t43)
+  %t45 = bitcast { i8**, i64 }* %t44 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t45, { %Diagnostic*, i64 }** %l1
   br label %merge6
 else5:
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t29 = load i8*, i8** %l4
-  %t30 = alloca [1 x i8*]
-  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
-  %t32 = getelementptr i8*, i8** %t31, i64 0
-  store i8* %t29, i8** %t32
-  %t33 = alloca { i8**, i64 }
-  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
-  store i8** %t31, i8*** %t34
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t33)
-  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t47 = load i8*, i8** %l4
+  %t48 = alloca [1 x i8*]
+  %t49 = getelementptr [1 x i8*], [1 x i8*]* %t48, i32 0, i32 0
+  %t50 = getelementptr i8*, i8** %t49, i64 0
+  store i8* %t47, i8** %t50
+  %t51 = alloca { i8**, i64 }
+  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 0
+  store i8** %t49, i8*** %t52
+  %t53 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 1
+  store i64 1, i64* %t53
+  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t46, { i8**, i64 }* %t51)
+  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t37 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t25, %else5 ]
-  %t38 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t36, %else5 ]
-  store { %Diagnostic*, i64 }* %t37, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t38, { i8**, i64 }** %l0
+  %t55 = phi { %Diagnostic*, i64 }* [ %t45, %then4 ], [ %t25, %else5 ]
+  %t56 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t54, %else5 ]
+  store { %Diagnostic*, i64 }* %t55, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t56, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t39 = load i64, i64* %l2
-  %t40 = add i64 %t39, 1
-  store i64 %t40, i64* %l2
+  %t57 = load i64, i64* %l2
+  %t58 = add i64 %t57, 1
+  store i64 %t58, i64* %l2
   br label %for0
 afterfor3:
-  %t41 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t41
+  %t59 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t59
 }
 
 define { %Diagnostic*, i64 }* @validate_interface_annotation(i8* %struct_name, %Statement %interface_definition, %TypeAnnotation %annotation) {
@@ -5986,37 +6062,43 @@ forbody1:
   %t35 = load double, double* %l4
   br i1 %t31, label %then4, label %else5
 then4:
+  %t36 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t37 = load double, double* %l4
+  %s38 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.38, i32 0, i32 0
+  %t39 = load double, double* %l4
+  %t40 = load %MethodDeclaration, %MethodDeclaration* %l3
+  %t41 = extractvalue %MethodDeclaration %t40, 0
   br label %merge6
 else5:
-  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t37 = load double, double* %l4
-  %t38 = alloca [1 x double]
-  %t39 = getelementptr [1 x double], [1 x double]* %t38, i32 0, i32 0
-  %t40 = getelementptr double, double* %t39, i64 0
-  store double %t37, double* %t40
-  %t41 = alloca { double*, i64 }
-  %t42 = getelementptr { double*, i64 }, { double*, i64 }* %t41, i32 0, i32 0
-  store double* %t39, double** %t42
-  %t43 = getelementptr { double*, i64 }, { double*, i64 }* %t41, i32 0, i32 1
-  store i64 1, i64* %t43
-  %t44 = bitcast { double*, i64 }* %t41 to { i8**, i64 }*
-  %t45 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t36, { i8**, i64 }* %t44)
-  store { i8**, i64 }* %t45, { i8**, i64 }** %l0
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t43 = load double, double* %l4
+  %t44 = alloca [1 x double]
+  %t45 = getelementptr [1 x double], [1 x double]* %t44, i32 0, i32 0
+  %t46 = getelementptr double, double* %t45, i64 0
+  store double %t43, double* %t46
+  %t47 = alloca { double*, i64 }
+  %t48 = getelementptr { double*, i64 }, { double*, i64 }* %t47, i32 0, i32 0
+  store double* %t45, double** %t48
+  %t49 = getelementptr { double*, i64 }, { double*, i64 }* %t47, i32 0, i32 1
+  store i64 1, i64* %t49
+  %t50 = bitcast { double*, i64 }* %t47 to { i8**, i64 }*
+  %t51 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t50)
+  store { i8**, i64 }* %t51, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t46 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t33, %else5 ]
-  %t47 = phi { i8**, i64 }* [ %t32, %then4 ], [ %t45, %else5 ]
-  store { %Diagnostic*, i64 }* %t46, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t47, { i8**, i64 }** %l0
+  %t52 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t33, %else5 ]
+  %t53 = phi { i8**, i64 }* [ %t32, %then4 ], [ %t51, %else5 ]
+  store { %Diagnostic*, i64 }* %t52, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t53, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t48 = load i64, i64* %l2
-  %t49 = add i64 %t48, 1
-  store i64 %t49, i64* %l2
+  %t54 = load i64, i64* %l2
+  %t55 = add i64 %t54, 1
+  store i64 %t55, i64* %l2
   br label %for0
 afterfor3:
-  %t50 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t50
+  %t56 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t56
 }
 
 define { %Diagnostic*, i64 }* @check_enum_variants({ %EnumVariant*, i64 }* %variants) {
@@ -6070,36 +6152,58 @@ forbody1:
   %t27 = load i8*, i8** %l4
   br i1 %t23, label %then4, label %else5
 then4:
+  %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t29 = load i8*, i8** %l4
+  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.30, i32 0, i32 0
+  %t31 = load i8*, i8** %l4
+  %t32 = load %EnumVariant, %EnumVariant* %l3
+  %t33 = extractvalue %EnumVariant %t32, 2
+  %t34 = call double @token_from_name(i8* %t31, i8* %t33)
+  %t35 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %t29, i8* %s30, i8* null)
+  %t36 = alloca [1 x %Diagnostic]
+  %t37 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t36, i32 0, i32 0
+  %t38 = getelementptr %Diagnostic, %Diagnostic* %t37, i64 0
+  store %Diagnostic %t35, %Diagnostic* %t38
+  %t39 = alloca { %Diagnostic*, i64 }
+  %t40 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 0
+  store %Diagnostic* %t37, %Diagnostic** %t40
+  %t41 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 1
+  store i64 1, i64* %t41
+  %t42 = bitcast { %Diagnostic*, i64 }* %t28 to { i8**, i64 }*
+  %t43 = bitcast { %Diagnostic*, i64 }* %t39 to { i8**, i64 }*
+  %t44 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t43)
+  %t45 = bitcast { i8**, i64 }* %t44 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t45, { %Diagnostic*, i64 }** %l1
   br label %merge6
 else5:
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t29 = load i8*, i8** %l4
-  %t30 = alloca [1 x i8*]
-  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
-  %t32 = getelementptr i8*, i8** %t31, i64 0
-  store i8* %t29, i8** %t32
-  %t33 = alloca { i8**, i64 }
-  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
-  store i8** %t31, i8*** %t34
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t33)
-  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t47 = load i8*, i8** %l4
+  %t48 = alloca [1 x i8*]
+  %t49 = getelementptr [1 x i8*], [1 x i8*]* %t48, i32 0, i32 0
+  %t50 = getelementptr i8*, i8** %t49, i64 0
+  store i8* %t47, i8** %t50
+  %t51 = alloca { i8**, i64 }
+  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 0
+  store i8** %t49, i8*** %t52
+  %t53 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 1
+  store i64 1, i64* %t53
+  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t46, { i8**, i64 }* %t51)
+  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t37 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t25, %else5 ]
-  %t38 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t36, %else5 ]
-  store { %Diagnostic*, i64 }* %t37, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t38, { i8**, i64 }** %l0
+  %t55 = phi { %Diagnostic*, i64 }* [ %t45, %then4 ], [ %t25, %else5 ]
+  %t56 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t54, %else5 ]
+  store { %Diagnostic*, i64 }* %t55, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t56, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t39 = load i64, i64* %l2
-  %t40 = add i64 %t39, 1
-  store i64 %t40, i64* %l2
+  %t57 = load i64, i64* %l2
+  %t58 = add i64 %t57, 1
+  store i64 %t58, i64* %l2
   br label %for0
 afterfor3:
-  %t41 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t41
+  %t59 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t59
 }
 
 define { %Diagnostic*, i64 }* @check_interface_members({ %FunctionSignature*, i64 }* %members) {
@@ -6161,36 +6265,58 @@ forbody1:
   %t34 = load i8*, i8** %l4
   br i1 %t30, label %then4, label %else5
 then4:
+  %t35 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t36 = load i8*, i8** %l4
+  %s37 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.37, i32 0, i32 0
+  %t38 = load i8*, i8** %l4
+  %t39 = load %FunctionSignature, %FunctionSignature* %l3
+  %t40 = extractvalue %FunctionSignature %t39, 6
+  %t41 = call double @token_from_name(i8* %t38, i8* %t40)
+  %t42 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %t36, i8* %s37, i8* null)
+  %t43 = alloca [1 x %Diagnostic]
+  %t44 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t43, i32 0, i32 0
+  %t45 = getelementptr %Diagnostic, %Diagnostic* %t44, i64 0
+  store %Diagnostic %t42, %Diagnostic* %t45
+  %t46 = alloca { %Diagnostic*, i64 }
+  %t47 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t46, i32 0, i32 0
+  store %Diagnostic* %t44, %Diagnostic** %t47
+  %t48 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t46, i32 0, i32 1
+  store i64 1, i64* %t48
+  %t49 = bitcast { %Diagnostic*, i64 }* %t35 to { i8**, i64 }*
+  %t50 = bitcast { %Diagnostic*, i64 }* %t46 to { i8**, i64 }*
+  %t51 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t49, { i8**, i64 }* %t50)
+  %t52 = bitcast { i8**, i64 }* %t51 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t52, { %Diagnostic*, i64 }** %l1
   br label %merge6
 else5:
-  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t36 = load i8*, i8** %l4
-  %t37 = alloca [1 x i8*]
-  %t38 = getelementptr [1 x i8*], [1 x i8*]* %t37, i32 0, i32 0
-  %t39 = getelementptr i8*, i8** %t38, i64 0
-  store i8* %t36, i8** %t39
-  %t40 = alloca { i8**, i64 }
-  %t41 = getelementptr { i8**, i64 }, { i8**, i64 }* %t40, i32 0, i32 0
-  store i8** %t38, i8*** %t41
-  %t42 = getelementptr { i8**, i64 }, { i8**, i64 }* %t40, i32 0, i32 1
-  store i64 1, i64* %t42
-  %t43 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t35, { i8**, i64 }* %t40)
-  store { i8**, i64 }* %t43, { i8**, i64 }** %l0
+  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t54 = load i8*, i8** %l4
+  %t55 = alloca [1 x i8*]
+  %t56 = getelementptr [1 x i8*], [1 x i8*]* %t55, i32 0, i32 0
+  %t57 = getelementptr i8*, i8** %t56, i64 0
+  store i8* %t54, i8** %t57
+  %t58 = alloca { i8**, i64 }
+  %t59 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 0
+  store i8** %t56, i8*** %t59
+  %t60 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 1
+  store i64 1, i64* %t60
+  %t61 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t53, { i8**, i64 }* %t58)
+  store { i8**, i64 }* %t61, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t44 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t32, %else5 ]
-  %t45 = phi { i8**, i64 }* [ %t31, %then4 ], [ %t43, %else5 ]
-  store { %Diagnostic*, i64 }* %t44, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t45, { i8**, i64 }** %l0
+  %t62 = phi { %Diagnostic*, i64 }* [ %t52, %then4 ], [ %t32, %else5 ]
+  %t63 = phi { i8**, i64 }* [ %t31, %then4 ], [ %t61, %else5 ]
+  store { %Diagnostic*, i64 }* %t62, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t63, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t46 = load i64, i64* %l2
-  %t47 = add i64 %t46, 1
-  store i64 %t47, i64* %l2
+  %t64 = load i64, i64* %l2
+  %t65 = add i64 %t64, 1
+  store i64 %t65, i64* %l2
   br label %for0
 afterfor3:
-  %t48 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t48
+  %t66 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t66
 }
 
 define { %Diagnostic*, i64 }* @check_model_properties({ %ModelProperty*, i64 }* %properties) {
@@ -6244,36 +6370,58 @@ forbody1:
   %t27 = load i8*, i8** %l4
   br i1 %t23, label %then4, label %else5
 then4:
+  %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t29 = load i8*, i8** %l4
+  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.30, i32 0, i32 0
+  %t31 = load i8*, i8** %l4
+  %t32 = load %ModelProperty, %ModelProperty* %l3
+  %t33 = extractvalue %ModelProperty %t32, 2
+  %t34 = call double @token_from_name(i8* %t31, i8* %t33)
+  %t35 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %t29, i8* %s30, i8* null)
+  %t36 = alloca [1 x %Diagnostic]
+  %t37 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t36, i32 0, i32 0
+  %t38 = getelementptr %Diagnostic, %Diagnostic* %t37, i64 0
+  store %Diagnostic %t35, %Diagnostic* %t38
+  %t39 = alloca { %Diagnostic*, i64 }
+  %t40 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 0
+  store %Diagnostic* %t37, %Diagnostic** %t40
+  %t41 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 1
+  store i64 1, i64* %t41
+  %t42 = bitcast { %Diagnostic*, i64 }* %t28 to { i8**, i64 }*
+  %t43 = bitcast { %Diagnostic*, i64 }* %t39 to { i8**, i64 }*
+  %t44 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t43)
+  %t45 = bitcast { i8**, i64 }* %t44 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t45, { %Diagnostic*, i64 }** %l1
   br label %merge6
 else5:
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t29 = load i8*, i8** %l4
-  %t30 = alloca [1 x i8*]
-  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
-  %t32 = getelementptr i8*, i8** %t31, i64 0
-  store i8* %t29, i8** %t32
-  %t33 = alloca { i8**, i64 }
-  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
-  store i8** %t31, i8*** %t34
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t33)
-  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t47 = load i8*, i8** %l4
+  %t48 = alloca [1 x i8*]
+  %t49 = getelementptr [1 x i8*], [1 x i8*]* %t48, i32 0, i32 0
+  %t50 = getelementptr i8*, i8** %t49, i64 0
+  store i8* %t47, i8** %t50
+  %t51 = alloca { i8**, i64 }
+  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 0
+  store i8** %t49, i8*** %t52
+  %t53 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 1
+  store i64 1, i64* %t53
+  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t46, { i8**, i64 }* %t51)
+  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t37 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t25, %else5 ]
-  %t38 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t36, %else5 ]
-  store { %Diagnostic*, i64 }* %t37, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t38, { i8**, i64 }** %l0
+  %t55 = phi { %Diagnostic*, i64 }* [ %t45, %then4 ], [ %t25, %else5 ]
+  %t56 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t54, %else5 ]
+  store { %Diagnostic*, i64 }* %t55, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t56, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t39 = load i64, i64* %l2
-  %t40 = add i64 %t39, 1
-  store i64 %t40, i64* %l2
+  %t57 = load i64, i64* %l2
+  %t58 = add i64 %t57, 1
+  store i64 %t58, i64* %l2
   br label %for0
 afterfor3:
-  %t41 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t41
+  %t59 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t59
 }
 
 define { %Diagnostic*, i64 }* @check_function_signature(%FunctionSignature %signature) {
@@ -6335,36 +6483,58 @@ forbody1:
   %t27 = load i8*, i8** %l4
   br i1 %t23, label %then4, label %else5
 then4:
+  %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t29 = load i8*, i8** %l4
+  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.30, i32 0, i32 0
+  %t31 = load i8*, i8** %l4
+  %t32 = load %TypeParameter, %TypeParameter* %l3
+  %t33 = extractvalue %TypeParameter %t32, 2
+  %t34 = call double @token_from_name(i8* %t31, i8* %t33)
+  %t35 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %t29, i8* %s30, i8* null)
+  %t36 = alloca [1 x %Diagnostic]
+  %t37 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t36, i32 0, i32 0
+  %t38 = getelementptr %Diagnostic, %Diagnostic* %t37, i64 0
+  store %Diagnostic %t35, %Diagnostic* %t38
+  %t39 = alloca { %Diagnostic*, i64 }
+  %t40 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 0
+  store %Diagnostic* %t37, %Diagnostic** %t40
+  %t41 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t39, i32 0, i32 1
+  store i64 1, i64* %t41
+  %t42 = bitcast { %Diagnostic*, i64 }* %t28 to { i8**, i64 }*
+  %t43 = bitcast { %Diagnostic*, i64 }* %t39 to { i8**, i64 }*
+  %t44 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t43)
+  %t45 = bitcast { i8**, i64 }* %t44 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t45, { %Diagnostic*, i64 }** %l1
   br label %merge6
 else5:
-  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t29 = load i8*, i8** %l4
-  %t30 = alloca [1 x i8*]
-  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
-  %t32 = getelementptr i8*, i8** %t31, i64 0
-  store i8* %t29, i8** %t32
-  %t33 = alloca { i8**, i64 }
-  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
-  store i8** %t31, i8*** %t34
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t33)
-  store { i8**, i64 }* %t36, { i8**, i64 }** %l0
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t47 = load i8*, i8** %l4
+  %t48 = alloca [1 x i8*]
+  %t49 = getelementptr [1 x i8*], [1 x i8*]* %t48, i32 0, i32 0
+  %t50 = getelementptr i8*, i8** %t49, i64 0
+  store i8* %t47, i8** %t50
+  %t51 = alloca { i8**, i64 }
+  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 0
+  store i8** %t49, i8*** %t52
+  %t53 = getelementptr { i8**, i64 }, { i8**, i64 }* %t51, i32 0, i32 1
+  store i64 1, i64* %t53
+  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t46, { i8**, i64 }* %t51)
+  store { i8**, i64 }* %t54, { i8**, i64 }** %l0
   br label %merge6
 merge6:
-  %t37 = phi { %Diagnostic*, i64 }* [ null, %then4 ], [ %t25, %else5 ]
-  %t38 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t36, %else5 ]
-  store { %Diagnostic*, i64 }* %t37, { %Diagnostic*, i64 }** %l1
-  store { i8**, i64 }* %t38, { i8**, i64 }** %l0
+  %t55 = phi { %Diagnostic*, i64 }* [ %t45, %then4 ], [ %t25, %else5 ]
+  %t56 = phi { i8**, i64 }* [ %t24, %then4 ], [ %t54, %else5 ]
+  store { %Diagnostic*, i64 }* %t55, { %Diagnostic*, i64 }** %l1
+  store { i8**, i64 }* %t56, { i8**, i64 }** %l0
   br label %forinc2
 forinc2:
-  %t39 = load i64, i64* %l2
-  %t40 = add i64 %t39, 1
-  store i64 %t40, i64* %l2
+  %t57 = load i64, i64* %l2
+  %t58 = add i64 %t57, 1
+  store i64 %t58, i64* %l2
   br label %for0
 afterfor3:
-  %t41 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t41
+  %t59 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t59
 }
 
 define { %Diagnostic*, i64 }* @build_effect_diagnostics(%Program %program) {
@@ -6393,10 +6563,10 @@ entry:
   %t9 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t37 = phi { %Diagnostic*, i64 }* [ %t8, %entry ], [ %t35, %loop.latch2 ]
-  %t38 = phi double [ %t9, %entry ], [ %t36, %loop.latch2 ]
-  store { %Diagnostic*, i64 }* %t37, { %Diagnostic*, i64 }** %l1
-  store double %t38, double* %l2
+  %t57 = phi { %Diagnostic*, i64 }* [ %t8, %entry ], [ %t55, %loop.latch2 ]
+  %t58 = phi double [ %t9, %entry ], [ %t56, %loop.latch2 ]
+  store { %Diagnostic*, i64 }* %t57, { %Diagnostic*, i64 }** %l1
+  store double %t58, double* %l2
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l2
@@ -6413,10 +6583,10 @@ loop.body1:
   %t19 = load double, double* %l4
   br label %loop.header4
 loop.header4:
-  %t30 = phi { %Diagnostic*, i64 }* [ %t16, %loop.body1 ], [ %t28, %loop.latch6 ]
-  %t31 = phi double [ %t19, %loop.body1 ], [ %t29, %loop.latch6 ]
-  store { %Diagnostic*, i64 }* %t30, { %Diagnostic*, i64 }** %l1
-  store double %t31, double* %l4
+  %t50 = phi { %Diagnostic*, i64 }* [ %t16, %loop.body1 ], [ %t48, %loop.latch6 ]
+  %t51 = phi double [ %t19, %loop.body1 ], [ %t49, %loop.latch6 ]
+  store { %Diagnostic*, i64 }* %t50, { %Diagnostic*, i64 }** %l1
+  store double %t51, double* %l4
   br label %loop.body5
 loop.body5:
   %t20 = load double, double* %l4
@@ -6426,28 +6596,52 @@ loop.body5:
   %t23 = load double, double* %l3
   %t24 = load double, double* %l5
   store double 0.0, double* %l6
-  %t25 = load double, double* %l4
-  %t26 = sitofp i64 1 to double
-  %t27 = fadd double %t25, %t26
-  store double %t27, double* %l4
+  %t25 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %s26 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.26, i32 0, i32 0
+  %t27 = insertvalue %Diagnostic undef, i8* %s26, 0
+  %t28 = load double, double* %l3
+  %t29 = load double, double* %l5
+  %t30 = load double, double* %l6
+  %t31 = insertvalue %Diagnostic %t27, i8* null, 1
+  %t32 = load double, double* %l6
+  %t33 = call double @requirement_primary_token(i8* null)
+  %t34 = insertvalue %Diagnostic %t31, i8* null, 2
+  %t35 = alloca [1 x %Diagnostic]
+  %t36 = getelementptr [1 x %Diagnostic], [1 x %Diagnostic]* %t35, i32 0, i32 0
+  %t37 = getelementptr %Diagnostic, %Diagnostic* %t36, i64 0
+  store %Diagnostic %t34, %Diagnostic* %t37
+  %t38 = alloca { %Diagnostic*, i64 }
+  %t39 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t38, i32 0, i32 0
+  store %Diagnostic* %t36, %Diagnostic** %t39
+  %t40 = getelementptr { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t38, i32 0, i32 1
+  store i64 1, i64* %t40
+  %t41 = bitcast { %Diagnostic*, i64 }* %t25 to { i8**, i64 }*
+  %t42 = bitcast { %Diagnostic*, i64 }* %t38 to { i8**, i64 }*
+  %t43 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t41, { i8**, i64 }* %t42)
+  %t44 = bitcast { i8**, i64 }* %t43 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t44, { %Diagnostic*, i64 }** %l1
+  %t45 = load double, double* %l4
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  store double %t47, double* %l4
   br label %loop.latch6
 loop.latch6:
-  %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %t29 = load double, double* %l4
+  %t48 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t49 = load double, double* %l4
   br label %loop.header4
 afterloop7:
-  %t32 = load double, double* %l2
-  %t33 = sitofp i64 1 to double
-  %t34 = fadd double %t32, %t33
-  store double %t34, double* %l2
+  %t52 = load double, double* %l2
+  %t53 = sitofp i64 1 to double
+  %t54 = fadd double %t52, %t53
+  store double %t54, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t35 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %t36 = load double, double* %l2
+  %t55 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t56 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t39 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t39
+  %t59 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t59
 }
 
 define i8* @format_effect_message(i8* %routine_name, i8* %effect, i8* %requirement) {

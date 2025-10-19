@@ -117,6 +117,17 @@
 .layout field span_consumed type=boolean offset=8 size=1 align=1
 .layout field value_span_consumed type=boolean offset=9 size=1 align=1
 
+.layout struct name=InstructionGatherResult size=16 align=8
+.layout field text type=string offset=0 size=8 align=8
+.layout field lines_consumed type=number offset=8 size=8 align=8
+
+.layout struct name=InstructionDepthState size=32 align=8
+.layout field paren_depth type=number offset=0 size=8 align=8
+.layout field bracket_depth type=number offset=8 size=8 align=8
+.layout field brace_depth type=number offset=16 size=8 align=8
+.layout field in_string type=boolean offset=24 size=1 align=1
+.layout field escaping type=boolean offset=25 size=1 align=1
+
 .layout struct name=StructParseResult size=24 align=8
 .layout field definition type=NativeStruct? offset=0 size=8 align=8
 .layout field next_index type=number offset=8 size=8 align=8

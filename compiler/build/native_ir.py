@@ -235,6 +235,25 @@ class InstructionParseResult:
     def __repr__(self):
         return runtime.struct_repr('InstructionParseResult', [runtime.struct_field('instructions', self.instructions), runtime.struct_field('span_consumed', self.span_consumed), runtime.struct_field('value_span_consumed', self.value_span_consumed)])
 
+class InstructionGatherResult:
+    def __init__(self, text, lines_consumed):
+        self.text = text
+        self.lines_consumed = lines_consumed
+
+    def __repr__(self):
+        return runtime.struct_repr('InstructionGatherResult', [runtime.struct_field('text', self.text), runtime.struct_field('lines_consumed', self.lines_consumed)])
+
+class InstructionDepthState:
+    def __init__(self, paren_depth, bracket_depth, brace_depth, in_string, escaping):
+        self.paren_depth = paren_depth
+        self.bracket_depth = bracket_depth
+        self.brace_depth = brace_depth
+        self.in_string = in_string
+        self.escaping = escaping
+
+    def __repr__(self):
+        return runtime.struct_repr('InstructionDepthState', [runtime.struct_field('paren_depth', self.paren_depth), runtime.struct_field('bracket_depth', self.bracket_depth), runtime.struct_field('brace_depth', self.brace_depth), runtime.struct_field('in_string', self.in_string), runtime.struct_field('escaping', self.escaping)])
+
 class StructParseResult:
     def __init__(self, next_index, diagnostics, definition=None):
         self.definition = definition
@@ -551,6 +570,9 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
             index += 1
             continue
+        gather = gather_instruction(lines, index)
+        line = gather.text
+        index += gather.lines_consumed
         instruction_result = parse_instruction(line, pending_span, pending_value_span)
         instructions = instruction_result.instructions
         if instruction_result.span_consumed:
@@ -686,6 +708,115 @@ def apply_meta(function, entry):
 
 def update_function_meta(function, return_type, effects):
     return NativeFunction(name=function.name, parameters=function.parameters, return_type=return_type, effects=effects, instructions=function.instructions)
+
+def gather_instruction(lines, start_index):
+    if start_index >= len(lines):
+        return InstructionGatherResult(text="", lines_consumed=0)
+    first_line = trim_text(lines[start_index])
+    if len(first_line) == 0:
+        return InstructionGatherResult(text=first_line, lines_consumed=0)
+    if not instruction_supports_multiline(first_line):
+        return InstructionGatherResult(text=first_line, lines_consumed=0)
+    state = update_instruction_depth_state(initial_instruction_depth_state(), first_line)
+    if not instruction_requires_continuation(state):
+        return InstructionGatherResult(text=first_line, lines_consumed=0)
+    combined = first_line
+    consumed = 0
+    index = start_index + 1
+    while True:
+        if index >= len(lines):
+            break
+        continuation = trim_text(lines[index])
+        if len(continuation) == 0:
+            combined = combined + "\n"
+        else:
+            combined = combined + "\n" + continuation
+            state = update_instruction_depth_state(state, continuation)
+        consumed += 1
+        index += 1
+        if not instruction_requires_continuation(state):
+            break
+    normalized = trim_text(combined)
+    return InstructionGatherResult(text=normalized, lines_consumed=consumed)
+
+def instruction_supports_multiline(line):
+    if starts_with(line, "eval "):
+        return True
+    if starts_with(line, "ret "):
+        return True
+    return False
+
+def instruction_requires_continuation(state):
+    if state.in_string:
+        return True
+    if state.paren_depth > 0:
+        return True
+    if state.bracket_depth > 0:
+        return True
+    if state.brace_depth > 0:
+        return True
+    return False
+
+def initial_instruction_depth_state():
+    return InstructionDepthState(paren_depth=0, bracket_depth=0, brace_depth=0, in_string=False, escaping=False)
+
+def update_instruction_depth_state(state, text):
+    paren_depth = state.paren_depth
+    bracket_depth = state.bracket_depth
+    brace_depth = state.brace_depth
+    in_string = state.in_string
+    escaping = state.escaping
+    index = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if in_string:
+            if escaping:
+                escaping = False
+                index += 1
+                continue
+            if ch == "\\":
+                escaping = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            index += 1
+            continue
+        if ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+            index += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if ch == "{":
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        index += 1
+    return InstructionDepthState(paren_depth=paren_depth, bracket_depth=bracket_depth, brace_depth=brace_depth, in_string=in_string, escaping=escaping)
 
 def parse_instruction(line, span, value_span):
     if line == "noop":

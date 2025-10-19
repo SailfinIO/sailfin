@@ -73,7 +73,10 @@ def analyze_statement(statement):
                 break
             method = statement.methods[index]
             qualified = statement.name + "." + method.signature.name
-            issues = append_violations( issues, analyze_routine(method.signature, method.body, method.decorators, qualified) )
+            issues = append_violations(
+issues,
+analyze_routine(method.signature, method.body, method.decorators, qualified)
+)
             index += 1
         return issues
     return []
@@ -121,7 +124,10 @@ def analyze_routine(signature, body, decorators, name):
     if len(missing) == 0:
         return []
     result = []
-    result = append_violation( result, EffectViolation(routine_name=name, missing_effects=missing, requirements=missing_requirements) )
+    result = append_violation(
+result,
+EffectViolation(routine_name=name, missing_effects=missing, requirements=missing_requirements)
+)
     return result
 
 def required_effects(body):
@@ -140,7 +146,10 @@ def collect_effects_from_block(block):
 def collect_effects_from_statement(statement):
     if statement.variant == "PromptStatement":
         required = collect_effects_from_block(statement.body)
-        required = append_requirement( required, EffectRequirement(effect="model", origin=statement.keyword_token, description="prompt \"" + statement.channel + "\"") )
+        required = append_requirement(
+required,
+EffectRequirement(effect="model", origin=statement.keyword_token, description="prompt \"" + statement.channel + "\"")
+)
         return required
     if statement.variant == "WithStatement":
         required = collect_effects_from_block(statement.body)
@@ -316,10 +325,16 @@ def append_prompt_effect(requirements, tokens):
                     description = "prompt " + channel_token.lexeme
                     brace_index = next_non_trivia(tokens, channel_index + 1)
                     if brace_index != -1  and  is_symbol_token(tokens[brace_index], "{"):
-                        result = append_requirement( result, EffectRequirement(effect="model", origin=token, description=description) )
+                        result = append_requirement(
+result,
+EffectRequirement(effect="model", origin=token, description=description)
+)
                         index += 1
                         continue
-            result = append_requirement( result, EffectRequirement(effect="model", origin=token, description=description) )
+            result = append_requirement(
+result,
+EffectRequirement(effect="model", origin=token, description=description)
+)
         index += 1
     return result
 
@@ -330,7 +345,10 @@ def append_identifier_dot_effect(requirements, tokens, identifier, effect, descr
     while True:
         if index >= len(matches):
             break
-        result = append_requirement( result, EffectRequirement(effect=effect, origin=matches[index], description=description) )
+        result = append_requirement(
+result,
+EffectRequirement(effect=effect, origin=matches[index], description=description)
+)
         index += 1
     return result
 
@@ -341,7 +359,10 @@ def append_identifier_call_effect(requirements, tokens, identifier, effect, desc
     while True:
         if index >= len(matches):
             break
-        result = append_requirement( result, EffectRequirement(effect=effect, origin=matches[index], description=description) )
+        result = append_requirement(
+result,
+EffectRequirement(effect=effect, origin=matches[index], description=description)
+)
         index += 1
     return result
 

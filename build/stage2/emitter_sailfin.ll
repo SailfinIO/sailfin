@@ -70,76 +70,77 @@ entry:
   %t3 = call %TextBuilder @builder_emit_blank(%TextBuilder %t2)
   store %TextBuilder %t3, %TextBuilder* %l0
   %t4 = load %TextBuilder, %TextBuilder* %l0
-  %t5 = call %TextBuilder @builder_emit_blank(%TextBuilder %t4)
-  store %TextBuilder %t5, %TextBuilder* %l0
-  %t6 = sitofp i64 0 to double
-  store double %t6, double* %l1
-  %t7 = load %TextBuilder, %TextBuilder* %l0
-  %t8 = load double, double* %l1
+  %t5 = load %TextBuilder, %TextBuilder* %l0
+  %t6 = call %TextBuilder @builder_emit_blank(%TextBuilder %t5)
+  store %TextBuilder %t6, %TextBuilder* %l0
+  %t7 = sitofp i64 0 to double
+  store double %t7, double* %l1
+  %t8 = load %TextBuilder, %TextBuilder* %l0
+  %t9 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi %TextBuilder [ %t7, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t8, %entry ], [ %t44, %loop.latch2 ]
-  store %TextBuilder %t45, %TextBuilder* %l0
-  store double %t46, double* %l1
+  %t46 = phi %TextBuilder [ %t8, %entry ], [ %t44, %loop.latch2 ]
+  %t47 = phi double [ %t9, %entry ], [ %t45, %loop.latch2 ]
+  store %TextBuilder %t46, %TextBuilder* %l0
+  store double %t47, double* %l1
   br label %loop.body1
 loop.body1:
-  %t9 = load double, double* %l1
-  %t10 = extractvalue %Program %program, 0
-  %t11 = load { i8**, i64 }, { i8**, i64 }* %t10
-  %t12 = extractvalue { i8**, i64 } %t11, 1
-  %t13 = sitofp i64 %t12 to double
-  %t14 = fcmp oge double %t9, %t13
-  %t15 = load %TextBuilder, %TextBuilder* %l0
-  %t16 = load double, double* %l1
-  br i1 %t14, label %then4, label %merge5
+  %t10 = load double, double* %l1
+  %t11 = extractvalue %Program %program, 0
+  %t12 = load { i8**, i64 }, { i8**, i64 }* %t11
+  %t13 = extractvalue { i8**, i64 } %t12, 1
+  %t14 = sitofp i64 %t13 to double
+  %t15 = fcmp oge double %t10, %t14
+  %t16 = load %TextBuilder, %TextBuilder* %l0
+  %t17 = load double, double* %l1
+  br i1 %t15, label %then4, label %merge5
 then4:
   br label %afterloop3
 merge5:
-  %t17 = load %TextBuilder, %TextBuilder* %l0
-  %t18 = extractvalue %Program %program, 0
-  %t19 = load double, double* %l1
-  %t20 = load { i8**, i64 }, { i8**, i64 }* %t18
-  %t21 = extractvalue { i8**, i64 } %t20, 0
-  %t22 = extractvalue { i8**, i64 } %t20, 1
-  %t23 = icmp uge i64 %t19, %t22
-  ; bounds check: %t23 (if true, out of bounds)
-  %t24 = getelementptr i8*, i8** %t21, i64 %t19
-  %t25 = load i8*, i8** %t24
-  %t26 = call %TextBuilder @emit_statement(%TextBuilder %t17, %Statement zeroinitializer)
-  store %TextBuilder %t26, %TextBuilder* %l0
-  %t27 = load double, double* %l1
-  %t28 = sitofp i64 1 to double
-  %t29 = fadd double %t27, %t28
-  %t30 = extractvalue %Program %program, 0
-  %t31 = load { i8**, i64 }, { i8**, i64 }* %t30
-  %t32 = extractvalue { i8**, i64 } %t31, 1
-  %t33 = sitofp i64 %t32 to double
-  %t34 = fcmp olt double %t29, %t33
-  %t35 = load %TextBuilder, %TextBuilder* %l0
-  %t36 = load double, double* %l1
-  br i1 %t34, label %then6, label %merge7
+  %t18 = load %TextBuilder, %TextBuilder* %l0
+  %t19 = extractvalue %Program %program, 0
+  %t20 = load double, double* %l1
+  %t21 = load { i8**, i64 }, { i8**, i64 }* %t19
+  %t22 = extractvalue { i8**, i64 } %t21, 0
+  %t23 = extractvalue { i8**, i64 } %t21, 1
+  %t24 = icmp uge i64 %t20, %t23
+  ; bounds check: %t24 (if true, out of bounds)
+  %t25 = getelementptr i8*, i8** %t22, i64 %t20
+  %t26 = load i8*, i8** %t25
+  %t27 = call %TextBuilder @emit_statement(%TextBuilder %t18, %Statement zeroinitializer)
+  store %TextBuilder %t27, %TextBuilder* %l0
+  %t28 = load double, double* %l1
+  %t29 = sitofp i64 1 to double
+  %t30 = fadd double %t28, %t29
+  %t31 = extractvalue %Program %program, 0
+  %t32 = load { i8**, i64 }, { i8**, i64 }* %t31
+  %t33 = extractvalue { i8**, i64 } %t32, 1
+  %t34 = sitofp i64 %t33 to double
+  %t35 = fcmp olt double %t30, %t34
+  %t36 = load %TextBuilder, %TextBuilder* %l0
+  %t37 = load double, double* %l1
+  br i1 %t35, label %then6, label %merge7
 then6:
-  %t37 = load %TextBuilder, %TextBuilder* %l0
-  %t38 = call %TextBuilder @builder_emit_blank(%TextBuilder %t37)
-  store %TextBuilder %t38, %TextBuilder* %l0
+  %t38 = load %TextBuilder, %TextBuilder* %l0
+  %t39 = call %TextBuilder @builder_emit_blank(%TextBuilder %t38)
+  store %TextBuilder %t39, %TextBuilder* %l0
   br label %merge7
 merge7:
-  %t39 = phi %TextBuilder [ %t38, %then6 ], [ %t35, %loop.body1 ]
-  store %TextBuilder %t39, %TextBuilder* %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t40 = phi %TextBuilder [ %t39, %then6 ], [ %t36, %loop.body1 ]
+  store %TextBuilder %t40, %TextBuilder* %l0
+  %t41 = load double, double* %l1
+  %t42 = sitofp i64 1 to double
+  %t43 = fadd double %t41, %t42
+  store double %t43, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load %TextBuilder, %TextBuilder* %l0
-  %t44 = load double, double* %l1
+  %t44 = load %TextBuilder, %TextBuilder* %l0
+  %t45 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load %TextBuilder, %TextBuilder* %l0
-  %t48 = call i8* @builder_to_string(%TextBuilder %t47)
-  ret i8* %t48
+  %t48 = load %TextBuilder, %TextBuilder* %l0
+  %t49 = call i8* @builder_to_string(%TextBuilder %t48)
+  ret i8* %t49
 }
 
 define %TextBuilder @emit_statement(%TextBuilder %builder, %Statement %statement) {

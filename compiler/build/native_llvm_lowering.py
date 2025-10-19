@@ -2142,7 +2142,26 @@ def emit_function(function, functions, effects, context):
     return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=body.string_constants)
 
 def emit_body(function, llvm_return, bindings, functions, context):
-    lowered = lower_instruction_range( function, 0, len(function.instructions), llvm_return, bindings, [], [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(function.name), 0, "entry" )
+    lowered = lower_instruction_range(
+function,
+0,
+len(function.instructions),
+llvm_return,
+bindings,
+[],
+[],
+[],
+0,
+0,
+0,
+0,
+functions,
+[],
+context,
+format_root_scope_id(function.name),
+0,
+"entry"
+)
     diagnostics = lowered.diagnostics
     lines = []
     lines = (lines) + (lowered.allocas)
@@ -2278,7 +2297,26 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     break
                 else:
                     if instruction.variant == "If":
-                        lowered = lower_if_instruction( function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, current_label )
+                        lowered = lower_if_instruction(
+function,
+index,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+current_lines,
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+current_loop_stack,
+end,
+context,
+scope_id,
+scope_depth,
+current_label
+)
                         diagnostics = (diagnostics) + (lowered.diagnostics)
                         collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
                         current_lines = lowered.lines
@@ -2297,7 +2335,26 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                         continue
                     else:
                         if instruction.variant == "Loop":
-                            lowered = lower_loop_instruction( function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, current_label )
+                            lowered = lower_loop_instruction(
+function,
+index,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+current_lines,
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+current_loop_stack,
+end,
+context,
+scope_id,
+scope_depth,
+current_label
+)
                             diagnostics = (diagnostics) + (lowered.diagnostics)
                             collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
                             current_lines = lowered.lines
@@ -2316,7 +2373,26 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             continue
                         else:
                             if instruction.variant == "Match":
-                                lowered = lower_match_instruction( function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, current_label )
+                                lowered = lower_match_instruction(
+function,
+index,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+current_lines,
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+current_loop_stack,
+end,
+context,
+scope_id,
+scope_depth,
+current_label
+)
                                 diagnostics = (diagnostics) + (lowered.diagnostics)
                                 collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
                                 current_lines = lowered.lines
@@ -2365,7 +2441,26 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                                                 break
                                             else:
                                                 if instruction.variant == "For":
-                                                    lowered = lower_for_instruction( function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, current_label )
+                                                    lowered = lower_for_instruction(
+function,
+index,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+current_lines,
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+current_loop_stack,
+end,
+context,
+scope_id,
+scope_depth,
+current_label
+)
                                                     diagnostics = (diagnostics) + (lowered.diagnostics)
                                                     collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
                                                     current_lines = lowered.lines
@@ -2520,7 +2615,26 @@ def lower_loop_instruction(function, start_index, llvm_return, bindings, locals,
     base_allocas = current_allocas
     base_local_id = current_next_local
     body_scope_id = make_child_scope_id(scope_id, body_label)
-    body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, stacked, context, body_scope_id, scope_depth + 1, body_label )
+    body_result = lower_instruction_range(
+function,
+structure.body_start,
+structure.body_end,
+llvm_return,
+current_bindings,
+base_locals,
+base_allocas,
+[],
+current_temp,
+current_block_counter,
+base_local_id,
+current_next_region,
+functions,
+stacked,
+context,
+body_scope_id,
+scope_depth + 1,
+body_label
+)
     diagnostics = (diagnostics) + (body_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
     current_allocas = body_result.allocas
@@ -2775,7 +2889,26 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
         loop_context = LoopContext(break_label=loop_exit_label, continue_label=loop_increment_label)
         stacked = append_loop_context(loop_stack, loop_context)
         body_locals = append_local_binding(current_locals, iteration_binding)
-        body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, context, loop_body_scope_id, scope_depth + 1, loop_body_label )
+        body_result = lower_instruction_range(
+function,
+structure.body_start,
+structure.body_end,
+llvm_return,
+current_bindings,
+body_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+stacked,
+context,
+loop_body_scope_id,
+scope_depth + 1,
+loop_body_label
+)
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
         current_lines = (current_lines) + (body_result.lines)
@@ -2883,7 +3016,26 @@ def lower_for_instruction(function, start_index, llvm_return, bindings, locals, 
     element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label)
     iteration_binding = LocalBinding(name=raw_target, pointer=iteration_pointer, llvm_type=element_type, type_annotation="", ownership=None, consumed=False, scope_id=element_loop_scope_id, scope_depth=scope_depth + 1)
     body_locals = append_local_binding(current_locals, iteration_binding)
-    body_result = lower_instruction_range( function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, context, element_loop_scope_id, scope_depth + 1, loop_body_label )
+    body_result = lower_instruction_range(
+function,
+structure.body_start,
+structure.body_end,
+llvm_return,
+current_bindings,
+body_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+stacked,
+context,
+element_loop_scope_id,
+scope_depth + 1,
+loop_body_label
+)
     diagnostics = (diagnostics) + (body_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
     current_lines = (current_lines) + (body_result.lines)
@@ -3045,7 +3197,17 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         if index + 1 < len(structure.cases):
             failure_target = test_labels[index + 1]
         current_lines = append_string(current_lines, test_labels[index] + ":")
-        lowered_condition = lower_match_case_condition( function.name, subject_operand, case, bindings, current_locals, current_temp, current_lines, functions, context )
+        lowered_condition = lower_match_case_condition(
+function.name,
+subject_operand,
+case,
+bindings,
+current_locals,
+current_temp,
+current_lines,
+functions,
+context
+)
         diagnostics = (diagnostics) + (lowered_condition.diagnostics)
         current_lines = lowered_condition.lines
         current_temp = lowered_condition.temp_index
@@ -3100,7 +3262,26 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
                 base_locals = (base_locals) + ([LocalBinding(name=field_binding.field_name, pointer=local_alloca_temp, llvm_type=field_binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
                 base_local_id += 1
                 binding_idx += 1
-        body_result = lower_instruction_range( function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1, body_labels[index] )
+        body_result = lower_instruction_range(
+function,
+case.body_start,
+case.body_end,
+llvm_return,
+bindings,
+base_locals,
+base_allocas,
+[],
+current_temp,
+current_block_counter,
+base_local_id,
+current_next_region,
+functions,
+loop_stack,
+context,
+make_child_scope_id(scope_id, body_labels[index]),
+scope_depth + 1,
+body_labels[index]
+)
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
         current_lines = (current_lines) + (body_result.lines)
@@ -3112,7 +3293,10 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         current_next_region = body_result.next_lifetime_region_id
         collected_mutations = (collected_mutations) + (body_result.mutations)
         collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants)
-        arm_mutations_list = append_match_arm_mutations( arm_mutations_list, MatchArmMutations(mutations=body_result.mutations, label=body_labels[index], terminated=body_result.terminated) )
+        arm_mutations_list = append_match_arm_mutations(
+arm_mutations_list,
+MatchArmMutations(mutations=body_result.mutations, label=body_labels[index], terminated=body_result.terminated)
+)
         if not body_result.terminated:
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings)
             current_lines = append_string(current_lines, "  br label %" + merge_label)
@@ -3123,7 +3307,13 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     terminated = all_terminated  and  has_unconditional_default
     if not terminated:
         current_lines = append_string(current_lines, merge_label + ":")
-        phi_result = emit_phi_merges_for_match( arm_mutations_list, current_locals, preloaded_locals, current_lines, current_temp )
+        phi_result = emit_phi_merges_for_match(
+arm_mutations_list,
+current_locals,
+preloaded_locals,
+current_lines,
+current_temp
+)
         current_lines = phi_result.lines
         current_temp = phi_result.temp_index
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations, string_constants=[])
@@ -3492,7 +3682,16 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     collected_mutations = []
     structure = collect_if_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
-    condition = lower_condition_to_i1( function.name, function.instructions[start_index].condition, bindings, current_locals, current_temp, current_lines, functions, context )
+    condition = lower_condition_to_i1(
+function.name,
+function.instructions[start_index].condition,
+bindings,
+current_locals,
+current_temp,
+current_lines,
+functions,
+context
+)
     diagnostics = (diagnostics) + (condition.diagnostics)
     current_lines = condition.lines
     current_temp = condition.temp_index
@@ -3534,7 +3733,26 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     base_block_counter = current_block_counter
     current_lines = append_string(current_lines, then_label + ":")
     then_scope_id = make_child_scope_id(scope_id, then_label)
-    then_result = lower_instruction_range( function, structure.then_start, structure.then_end, llvm_return, bindings, base_locals, base_allocas, [], base_temp, base_block_counter, base_local_id, current_next_region, functions, loop_stack, context, then_scope_id, scope_depth + 1, then_label )
+    then_result = lower_instruction_range(
+function,
+structure.then_start,
+structure.then_end,
+llvm_return,
+bindings,
+base_locals,
+base_allocas,
+[],
+base_temp,
+base_block_counter,
+base_local_id,
+current_next_region,
+functions,
+loop_stack,
+context,
+then_scope_id,
+scope_depth + 1,
+then_label
+)
     diagnostics = (diagnostics) + (then_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (then_result.lifetime_regions)
     current_allocas = then_result.allocas
@@ -3556,7 +3774,26 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     if structure.has_else:
         current_lines = append_string(current_lines, else_label + ":")
         else_scope_id = make_child_scope_id(scope_id, else_label)
-        else_result = lower_instruction_range( function, structure.else_start, structure.else_end, llvm_return, bindings, base_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, else_scope_id, scope_depth + 1, else_label )
+        else_result = lower_instruction_range(
+function,
+structure.else_start,
+structure.else_end,
+llvm_return,
+bindings,
+base_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+loop_stack,
+context,
+else_scope_id,
+scope_depth + 1,
+else_label
+)
         diagnostics = (diagnostics) + (else_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (else_result.lifetime_regions)
         current_allocas = else_result.allocas
@@ -3580,12 +3817,31 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
         current_lines = append_string(current_lines, merge_label + ":")
         if structure.has_else:
             if not then_terminated  or  not else_terminated  and  len(collected_mutations) > 0:
-                phi_result = emit_phi_merges_for_if_else( then_mutations, else_mutations, base_locals, preloaded_locals, then_label, else_label, then_terminated, else_terminated, current_lines, current_temp )
+                phi_result = emit_phi_merges_for_if_else(
+then_mutations,
+else_mutations,
+base_locals,
+preloaded_locals,
+then_label,
+else_label,
+then_terminated,
+else_terminated,
+current_lines,
+current_temp
+)
                 current_lines = phi_result.lines
                 current_temp = phi_result.temp_index
         else:
             if not then_terminated  and  len(collected_mutations) > 0:
-                phi_result = emit_phi_merges_for_straight_if( collected_mutations, base_locals, preloaded_locals, current_label, then_label, current_lines, current_temp )
+                phi_result = emit_phi_merges_for_straight_if(
+collected_mutations,
+base_locals,
+preloaded_locals,
+current_label,
+then_label,
+current_lines,
+current_temp
+)
                 current_lines = phi_result.lines
                 current_temp = phi_result.temp_index
     current_locals = base_locals
@@ -5016,6 +5272,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     operands = []
     injected_argument_count = 0
     method_operand = None
+    helper_descriptor = None
     method_parse = parse_member_access(trimmed_target)
     if method_parse.success:
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
@@ -5048,21 +5305,25 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
             else:
-                lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
-                diagnostics = (diagnostics) + (lowered_self.diagnostics)
-                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
-                current_lines = lowered_self.lines
-                current_temp = lowered_self.temp_index
-                if lowered_self.operand != None:
-                    base_operand = lowered_self.operand
-                    array_element_type = array_pointer_element_type(base_operand.llvm_type)
-                    if len(array_element_type) > 0  and  method_parse.field == "concat":
-                        method_operand = base_operand
-                        trimmed_target = "concat"
-                        injected_argument_count = 1
+                helper_candidate = find_runtime_helper(trimmed_target)
+                if helper_candidate != None:
+                    helper_descriptor = helper_candidate
                 else:
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
-                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                    lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
+                    diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
+                    current_lines = lowered_self.lines
+                    current_temp = lowered_self.temp_index
+                    if lowered_self.operand != None:
+                        base_operand = lowered_self.operand
+                        array_element_type = array_pointer_element_type(base_operand.llvm_type)
+                        if len(array_element_type) > 0  and  method_parse.field == "concat":
+                            method_operand = base_operand
+                            trimmed_target = "concat"
+                            injected_argument_count = 1
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index = 0
     while True:
         if index >= len(arguments):
@@ -5120,7 +5381,8 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                         break
                     sig_idx += 1
     function_entry = find_function_by_name(functions, trimmed_target)
-    helper_descriptor = find_runtime_helper(trimmed_target)
+    if helper_descriptor == None:
+        helper_descriptor = find_runtime_helper(trimmed_target)
     if not is_trait_dispatch:
         if function_entry != None:
             llvm_return = map_return_type(context, function_entry.return_type)
@@ -5130,8 +5392,9 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             expected_params = collect_parameter_types(context, function_entry.parameters)
         else:
             if helper_descriptor != None:
-                llvm_return = helper_descriptor.return_type
-                expected_params = helper_descriptor.parameter_types
+                descriptor = helper_descriptor
+                llvm_return = descriptor.return_type
+                expected_params = descriptor.parameter_types
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
     if function_entry != None  and  injected_argument_count == 1:

@@ -204,10 +204,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t31 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t29, %loop.latch2 ]
-  %t32 = phi double [ %t7, %entry ], [ %t30, %loop.latch2 ]
-  store { %DecoratorInfo*, i64 }* %t31, { %DecoratorInfo*, i64 }** %l0
-  store double %t32, double* %l1
+  %t39 = phi { %DecoratorInfo*, i64 }* [ %t6, %entry ], [ %t37, %loop.latch2 ]
+  %t40 = phi double [ %t7, %entry ], [ %t38, %loop.latch2 ]
+  store { %DecoratorInfo*, i64 }* %t39, { %DecoratorInfo*, i64 }** %l0
+  store double %t40, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -235,18 +235,27 @@ merge5:
   %t24 = bitcast { i8**, i64 }* %t23 to { %DecoratorArgument*, i64 }*
   %t25 = call { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments({ %DecoratorArgument*, i64 }* %t24)
   store { %DecoratorArgumentInfo*, i64 }* %t25, { %DecoratorArgumentInfo*, i64 }** %l3
-  %t26 = load double, double* %l1
-  %t27 = sitofp i64 1 to double
-  %t28 = fadd double %t26, %t27
-  store double %t28, double* %l1
+  %t26 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  %t27 = load %Decorator, %Decorator* %l2
+  %t28 = extractvalue %Decorator %t27, 0
+  %t29 = insertvalue %DecoratorInfo undef, i8* %t28, 0
+  %t30 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l3
+  %t31 = bitcast { %DecoratorArgumentInfo*, i64 }* %t30 to { i8**, i64 }*
+  %t32 = insertvalue %DecoratorInfo %t29, { i8**, i64 }* %t31, 1
+  %t33 = call { %DecoratorInfo*, i64 }* @append_decorator_info({ %DecoratorInfo*, i64 }* %t26, %DecoratorInfo %t32)
+  store { %DecoratorInfo*, i64 }* %t33, { %DecoratorInfo*, i64 }** %l0
+  %t34 = load double, double* %l1
+  %t35 = sitofp i64 1 to double
+  %t36 = fadd double %t34, %t35
+  store double %t36, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t29 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  %t30 = load double, double* %l1
+  %t37 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  %t38 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t33 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  ret { %DecoratorInfo*, i64 }* %t33
+  %t41 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  ret { %DecoratorInfo*, i64 }* %t41
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments({ %DecoratorArgument*, i64 }* %arguments) {
@@ -269,10 +278,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t30 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t28, %loop.latch2 ]
-  %t31 = phi double [ %t7, %entry ], [ %t29, %loop.latch2 ]
-  store { %DecoratorArgumentInfo*, i64 }* %t30, { %DecoratorArgumentInfo*, i64 }** %l0
-  store double %t31, double* %l1
+  %t37 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t35, %loop.latch2 ]
+  %t38 = phi double [ %t7, %entry ], [ %t36, %loop.latch2 ]
+  store { %DecoratorArgumentInfo*, i64 }* %t37, { %DecoratorArgumentInfo*, i64 }** %l0
+  store double %t38, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -299,18 +308,26 @@ merge5:
   %t23 = extractvalue %DecoratorArgument %t22, 1
   %t24 = call %LiteralValue @evaluate_expression(%Expression zeroinitializer)
   store %LiteralValue %t24, %LiteralValue* %l3
-  %t25 = load double, double* %l1
-  %t26 = sitofp i64 1 to double
-  %t27 = fadd double %t25, %t26
-  store double %t27, double* %l1
+  %t25 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t26 = load %DecoratorArgument, %DecoratorArgument* %l2
+  %t27 = extractvalue %DecoratorArgument %t26, 0
+  %t28 = insertvalue %DecoratorArgumentInfo undef, i8* %t27, 0
+  %t29 = load %LiteralValue, %LiteralValue* %l3
+  %t30 = insertvalue %DecoratorArgumentInfo %t28, i8* null, 1
+  %t31 = call { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %t25, %DecoratorArgumentInfo %t30)
+  store { %DecoratorArgumentInfo*, i64 }* %t31, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t32 = load double, double* %l1
+  %t33 = sitofp i64 1 to double
+  %t34 = fadd double %t32, %t33
+  store double %t34, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t28 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  %t29 = load double, double* %l1
+  %t35 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t36 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t32 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  ret { %DecoratorArgumentInfo*, i64 }* %t32
+  %t39 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  ret { %DecoratorArgumentInfo*, i64 }* %t39
 }
 
 define %LiteralValue @evaluate_expression(%Expression %expr) {
@@ -1496,11 +1513,10 @@ entry:
   store %DecoratorInfo* %t1, %DecoratorInfo** %t4
   %t5 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = bitcast { %DecoratorInfo*, i64 }* %collection to { i8**, i64 }*
-  %t7 = bitcast { %DecoratorInfo*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %DecoratorInfo*, i64 }*
-  ret { %DecoratorInfo*, i64 }* %t9
+  %t6 = bitcast { %DecoratorInfo*, i64 }* %t3 to { i8**, i64 }*
+  %t7 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6)
+  %t8 = bitcast { i8**, i64 }* %t7 to { %DecoratorInfo*, i64 }*
+  ret { %DecoratorInfo*, i64 }* %t8
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %collection, %DecoratorArgumentInfo %item) {
@@ -1514,11 +1530,10 @@ entry:
   store %DecoratorArgumentInfo* %t1, %DecoratorArgumentInfo** %t4
   %t5 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = bitcast { %DecoratorArgumentInfo*, i64 }* %collection to { i8**, i64 }*
-  %t7 = bitcast { %DecoratorArgumentInfo*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %DecoratorArgumentInfo*, i64 }*
-  ret { %DecoratorArgumentInfo*, i64 }* %t9
+  %t6 = bitcast { %DecoratorArgumentInfo*, i64 }* %t3 to { i8**, i64 }*
+  %t7 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6)
+  %t8 = bitcast { i8**, i64 }* %t7 to { %DecoratorArgumentInfo*, i64 }*
+  ret { %DecoratorArgumentInfo*, i64 }* %t8
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %collection, i8* %item) {
@@ -1532,7 +1547,7 @@ entry:
   store i8** %t1, i8*** %t4
   %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %collection, { i8**, i64 }* %t3)
+  %t6 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t3)
   ret { i8**, i64 }* %t6
 }
 
