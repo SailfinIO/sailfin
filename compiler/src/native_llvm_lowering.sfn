@@ -1587,6 +1587,24 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
                     }
                 }
             }
+        } else {
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand != null {
+                let base_operand = lowered_self.operand;
+                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                if array_element_type.length > 0 && method_parse.field == "concat" {
+                    method_operand = base_operand;
+                    trimmed_target = "concat";
+                    injected_argument_count = 1;
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
         }
     }
 
@@ -2305,6 +2323,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "concat",
+        symbol: "sailfin_runtime_concat",
+        return_type: "{ i8**, i64 }*",
+        parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "collection.concat",
         symbol: "sailfin_runtime_concat",
         return_type: "{ i8**, i64 }*",
         parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
@@ -7640,6 +7665,24 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
+        } else {
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand != null {
+                let base_operand = lowered_self.operand;
+                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                if array_element_type.length > 0 && method_parse.field == "concat" {
+                    method_operand = base_operand;
+                    trimmed_target = "concat";
+                    injected_argument_count = 1;
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
         }
     }
 
@@ -9492,6 +9535,18 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp);
         let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+    // Handle array struct pointer variance: allow bitcast between pointers whose layouts match
+    if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
+        let source_element = array_pointer_element_type(operand.llvm_type);
+        let target_element = array_pointer_element_type(target_type);
+        if source_element.length > 0 && target_element.length > 0 {
+            // Both are array structs; emit bitcast between pointer types
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type);
+            let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`");
     return CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };

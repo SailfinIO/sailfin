@@ -153,7 +153,6 @@ declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 
 declare noalias i8* @malloc(i64)
 
-@.str.0 = private unnamed_addr constant [27 x i8] c"Sailfin compiler (stage 0)\00"
 @.str.1 = private unnamed_addr constant [13 x i8] c"[typecheck] \00"
 @.str.40 = private unnamed_addr constant [3 x i8] c" |\00"
 @.str.47 = private unnamed_addr constant [1 x i8] c"\00"
@@ -163,6 +162,7 @@ declare noalias i8* @malloc(i64)
 @.str.7 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.9 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.11 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.0 = private unnamed_addr constant [26 x i8] c"def needs_python_fallback\00"
 @.str.8 = private unnamed_addr constant [13 x i8] c"return False\00"
 @.str.4 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.3 = private unnamed_addr constant [1 x i8] c"\00"
@@ -220,74 +220,64 @@ entry:
   %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
   store { i8**, i64 }* %t6, { i8**, i64 }** %l2
-  %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t10 = extractvalue %EmitNativeResult %t9, 1
-  %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
-  %t12 = load double, double* %l1
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t10 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t11 = extractvalue %EmitNativeResult %t10, 1
+  %t12 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t9, { i8**, i64 }* %t11)
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l2
   %t13 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t14 = load { i8**, i64 }, { i8**, i64 }* %t13
-  %t15 = extractvalue { i8**, i64 } %t14, 1
-  %t16 = icmp sgt i64 %t15, 0
-  %t17 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t18 = load double, double* %l1
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  br i1 %t16, label %then0, label %merge1
+  %t14 = load double, double* %l1
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %t15
+  %t17 = extractvalue { i8**, i64 } %t16, 1
+  %t18 = icmp sgt i64 %t17, 0
+  %t19 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t20 = load double, double* %l1
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  br i1 %t18, label %then0, label %merge1
 then0:
-  %t20 = sitofp i64 0 to double
-  store double %t20, double* %l3
-  %t21 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t22 = load double, double* %l1
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t24 = load double, double* %l3
+  %t22 = sitofp i64 0 to double
+  store double %t22, double* %l3
+  %t23 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t24 = load double, double* %l1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t26 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t49 = phi double [ %t24, %then0 ], [ %t48, %loop.latch4 ]
-  store double %t49, double* %l3
+  %t41 = phi double [ %t26, %then0 ], [ %t40, %loop.latch4 ]
+  store double %t41, double* %l3
   br label %loop.body3
 loop.body3:
-  %t25 = load double, double* %l3
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t27 = load { i8**, i64 }, { i8**, i64 }* %t26
-  %t28 = extractvalue { i8**, i64 } %t27, 1
-  %t29 = sitofp i64 %t28 to double
-  %t30 = fcmp oge double %t25, %t29
-  %t31 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t32 = load double, double* %l1
-  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t34 = load double, double* %l3
-  br i1 %t30, label %then6, label %merge7
+  %t27 = load double, double* %l3
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t29 = load { i8**, i64 }, { i8**, i64 }* %t28
+  %t30 = extractvalue { i8**, i64 } %t29, 1
+  %t31 = sitofp i64 %t30 to double
+  %t32 = fcmp oge double %t27, %t31
+  %t33 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t34 = load double, double* %l1
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t36 = load double, double* %l3
+  br i1 %t32, label %then6, label %merge7
 then6:
   br label %afterloop5
 merge7:
-  %s35 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.35, i32 0, i32 0
-  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t37 = load double, double* %l3
-  %t38 = load { i8**, i64 }, { i8**, i64 }* %t36
-  %t39 = extractvalue { i8**, i64 } %t38, 0
-  %t40 = extractvalue { i8**, i64 } %t38, 1
-  %t41 = icmp uge i64 %t37, %t40
-  ; bounds check: %t41 (if true, out of bounds)
-  %t42 = getelementptr i8*, i8** %t39, i64 %t37
-  %t43 = load i8*, i8** %t42
-  %t44 = add i8* %s35, %t43
-  call void @sailfin_runtime_print_warn(i8* %t44)
-  %t45 = load double, double* %l3
-  %t46 = sitofp i64 1 to double
-  %t47 = fadd double %t45, %t46
-  store double %t47, double* %l3
+  %t38 = sitofp i64 1 to double
+  %t39 = fadd double %t37, %t38
+  store double %t39, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t48 = load double, double* %l3
+  %t40 = load double, double* %l3
   br label %loop.header2
 afterloop5:
   br label %merge1
 merge1:
-  %t50 = load double, double* %l1
-  %t51 = insertvalue %LoweredPythonResult undef, i8* null, 0
-  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t53 = insertvalue %LoweredPythonResult %t51, { i8**, i64 }* %t52, 1
-  ret %LoweredPythonResult %t53
+  %t42 = load double, double* %l1
+  %t43 = insertvalue %LoweredPythonResult undef, i8* null, 0
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t45 = insertvalue %LoweredPythonResult %t43, { i8**, i64 }* %t44, 1
+  ret %LoweredPythonResult %t45
 }
 
 ; fn compile_to_native_llvm effects: ![io]
@@ -311,72 +301,74 @@ entry:
   %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
   store { i8**, i64 }* %t6, { i8**, i64 }** %l2
-  %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t10 = extractvalue %EmitNativeResult %t9, 1
-  %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
-  %t12 = load double, double* %l1
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t10 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t11 = extractvalue %EmitNativeResult %t10, 1
+  %t12 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t9, { i8**, i64 }* %t11)
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l2
   %t13 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t14 = load { i8**, i64 }, { i8**, i64 }* %t13
-  %t15 = extractvalue { i8**, i64 } %t14, 1
-  %t16 = icmp sgt i64 %t15, 0
-  %t17 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t18 = load double, double* %l1
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  br i1 %t16, label %then0, label %merge1
+  %t14 = load double, double* %l1
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %t15
+  %t17 = extractvalue { i8**, i64 } %t16, 1
+  %t18 = icmp sgt i64 %t17, 0
+  %t19 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t20 = load double, double* %l1
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  br i1 %t18, label %then0, label %merge1
 then0:
-  %t20 = sitofp i64 0 to double
-  store double %t20, double* %l3
-  %t21 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t22 = load double, double* %l1
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t24 = load double, double* %l3
+  %t22 = sitofp i64 0 to double
+  store double %t22, double* %l3
+  %t23 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t24 = load double, double* %l1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t26 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t39 = phi double [ %t24, %then0 ], [ %t38, %loop.latch4 ]
-  store double %t39, double* %l3
+  %t41 = phi double [ %t26, %then0 ], [ %t40, %loop.latch4 ]
+  store double %t41, double* %l3
   br label %loop.body3
 loop.body3:
-  %t25 = load double, double* %l3
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t27 = load { i8**, i64 }, { i8**, i64 }* %t26
-  %t28 = extractvalue { i8**, i64 } %t27, 1
-  %t29 = sitofp i64 %t28 to double
-  %t30 = fcmp oge double %t25, %t29
-  %t31 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t32 = load double, double* %l1
-  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t34 = load double, double* %l3
-  br i1 %t30, label %then6, label %merge7
+  %t27 = load double, double* %l3
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t29 = load { i8**, i64 }, { i8**, i64 }* %t28
+  %t30 = extractvalue { i8**, i64 } %t29, 1
+  %t31 = sitofp i64 %t30 to double
+  %t32 = fcmp oge double %t27, %t31
+  %t33 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t34 = load double, double* %l1
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t36 = load double, double* %l3
+  br i1 %t32, label %then6, label %merge7
 then6:
   br label %afterloop5
 merge7:
-  %t35 = load double, double* %l3
-  %t36 = sitofp i64 1 to double
-  %t37 = fadd double %t35, %t36
-  store double %t37, double* %l3
+  %t37 = load double, double* %l3
+  %t38 = sitofp i64 1 to double
+  %t39 = fadd double %t37, %t38
+  store double %t39, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t38 = load double, double* %l3
+  %t40 = load double, double* %l3
   br label %loop.header2
 afterloop5:
   br label %merge1
 merge1:
-  %t40 = load double, double* %l1
-  %t41 = insertvalue %LoweredLLVMResult undef, i8* null, 0
-  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t43 = insertvalue %LoweredLLVMResult %t41, { i8**, i64 }* %t42, 1
-  %t44 = load double, double* %l1
-  %t45 = insertvalue %LoweredLLVMResult %t43, i8* null, 2
+  %t42 = load double, double* %l1
+  %t43 = insertvalue %LoweredLLVMResult undef, i8* null, 0
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t45 = insertvalue %LoweredLLVMResult %t43, { i8**, i64 }* %t44, 1
   %t46 = load double, double* %l1
-  %t47 = insertvalue %LoweredLLVMResult %t45, { i8**, i64 }* null, 3
+  %t47 = insertvalue %LoweredLLVMResult %t45, i8* null, 2
   %t48 = load double, double* %l1
-  %t49 = insertvalue %LoweredLLVMResult %t47, { i8**, i64 }* null, 4
+  %t49 = insertvalue %LoweredLLVMResult %t47, { i8**, i64 }* null, 3
   %t50 = load double, double* %l1
-  %t51 = insertvalue %LoweredLLVMResult %t49, i8* null, 5
+  %t51 = insertvalue %LoweredLLVMResult %t49, { i8**, i64 }* null, 4
   %t52 = load double, double* %l1
-  %t53 = insertvalue %LoweredLLVMResult %t51, { i8**, i64 }* null, 6
-  ret %LoweredLLVMResult %t53
+  %t53 = insertvalue %LoweredLLVMResult %t51, i8* null, 5
+  %t54 = load double, double* %l1
+  %t55 = insertvalue %LoweredLLVMResult %t53, { i8**, i64 }* null, 6
+  ret %LoweredLLVMResult %t55
 }
 
 ; fn compile_to_native_llvm_full effects: ![io]
@@ -400,83 +392,83 @@ entry:
   %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
   store i64 0, i64* %t8
   store { i8**, i64 }* %t6, { i8**, i64 }** %l2
-  %t9 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t10 = extractvalue %EmitNativeResult %t9, 1
-  %t11 = call double @combinedconcat({ i8**, i64 }* %t10)
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
-  %t12 = load double, double* %l1
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t10 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t11 = extractvalue %EmitNativeResult %t10, 1
+  %t12 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t9, { i8**, i64 }* %t11)
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l2
   %t13 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t14 = load { i8**, i64 }, { i8**, i64 }* %t13
-  %t15 = extractvalue { i8**, i64 } %t14, 1
-  %t16 = icmp sgt i64 %t15, 0
-  %t17 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t18 = load double, double* %l1
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  br i1 %t16, label %then0, label %merge1
+  %t14 = load double, double* %l1
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t16 = load { i8**, i64 }, { i8**, i64 }* %t15
+  %t17 = extractvalue { i8**, i64 } %t16, 1
+  %t18 = icmp sgt i64 %t17, 0
+  %t19 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t20 = load double, double* %l1
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  br i1 %t18, label %then0, label %merge1
 then0:
-  %t20 = sitofp i64 0 to double
-  store double %t20, double* %l3
-  %t21 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t22 = load double, double* %l1
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t24 = load double, double* %l3
+  %t22 = sitofp i64 0 to double
+  store double %t22, double* %l3
+  %t23 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t24 = load double, double* %l1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t26 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t39 = phi double [ %t24, %then0 ], [ %t38, %loop.latch4 ]
-  store double %t39, double* %l3
+  %t41 = phi double [ %t26, %then0 ], [ %t40, %loop.latch4 ]
+  store double %t41, double* %l3
   br label %loop.body3
 loop.body3:
-  %t25 = load double, double* %l3
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t27 = load { i8**, i64 }, { i8**, i64 }* %t26
-  %t28 = extractvalue { i8**, i64 } %t27, 1
-  %t29 = sitofp i64 %t28 to double
-  %t30 = fcmp oge double %t25, %t29
-  %t31 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t32 = load double, double* %l1
-  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t34 = load double, double* %l3
-  br i1 %t30, label %then6, label %merge7
+  %t27 = load double, double* %l3
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t29 = load { i8**, i64 }, { i8**, i64 }* %t28
+  %t30 = extractvalue { i8**, i64 } %t29, 1
+  %t31 = sitofp i64 %t30 to double
+  %t32 = fcmp oge double %t27, %t31
+  %t33 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t34 = load double, double* %l1
+  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t36 = load double, double* %l3
+  br i1 %t32, label %then6, label %merge7
 then6:
   br label %afterloop5
 merge7:
-  %t35 = load double, double* %l3
-  %t36 = sitofp i64 1 to double
-  %t37 = fadd double %t35, %t36
-  store double %t37, double* %l3
+  %t37 = load double, double* %l3
+  %t38 = sitofp i64 1 to double
+  %t39 = fadd double %t37, %t38
+  store double %t39, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t38 = load double, double* %l3
+  %t40 = load double, double* %l3
   br label %loop.header2
 afterloop5:
   br label %merge1
 merge1:
-  %t40 = load double, double* %l1
-  %t41 = insertvalue %LoweredLLVMResult undef, i8* null, 0
-  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t43 = insertvalue %LoweredLLVMResult %t41, { i8**, i64 }* %t42, 1
-  %t44 = load double, double* %l1
-  %t45 = insertvalue %LoweredLLVMResult %t43, i8* null, 2
+  %t42 = load double, double* %l1
+  %t43 = insertvalue %LoweredLLVMResult undef, i8* null, 0
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t45 = insertvalue %LoweredLLVMResult %t43, { i8**, i64 }* %t44, 1
   %t46 = load double, double* %l1
-  %t47 = insertvalue %LoweredLLVMResult %t45, { i8**, i64 }* null, 3
+  %t47 = insertvalue %LoweredLLVMResult %t45, i8* null, 2
   %t48 = load double, double* %l1
-  %t49 = insertvalue %LoweredLLVMResult %t47, { i8**, i64 }* null, 4
+  %t49 = insertvalue %LoweredLLVMResult %t47, { i8**, i64 }* null, 3
   %t50 = load double, double* %l1
-  %t51 = insertvalue %LoweredLLVMResult %t49, i8* null, 5
+  %t51 = insertvalue %LoweredLLVMResult %t49, { i8**, i64 }* null, 4
   %t52 = load double, double* %l1
-  %t53 = insertvalue %LoweredLLVMResult %t51, { i8**, i64 }* null, 6
-  %t54 = insertvalue %LLVMCompilationResult undef, i8* null, 0
-  %t55 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t56 = extractvalue %EmitNativeResult %t55, 0
-  %t57 = insertvalue %LLVMCompilationResult %t54, i8* %t56, 1
-  ret %LLVMCompilationResult %t57
+  %t53 = insertvalue %LoweredLLVMResult %t51, i8* null, 5
+  %t54 = load double, double* %l1
+  %t55 = insertvalue %LoweredLLVMResult %t53, { i8**, i64 }* null, 6
+  %t56 = insertvalue %LLVMCompilationResult undef, i8* null, 0
+  %t57 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t58 = extractvalue %EmitNativeResult %t57, 0
+  %t59 = insertvalue %LLVMCompilationResult %t56, i8* %t58, 1
+  ret %LLVMCompilationResult %t59
 }
 
 ; fn main effects: ![io]
 define void @main() {
 entry:
-  %s0 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.0, i32 0, i32 0
-  call void @sailfin_runtime_print_info(i8* %s0)
   ret void
 }
 
@@ -532,54 +524,62 @@ forbody1:
   %t27 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
   br i1 %t23, label %then4, label %merge5
 then4:
-  %t28 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
-  %t29 = extractvalue %ModuleCompilationResult %t28, 0
-  %t30 = alloca [1 x i8*]
-  %t31 = getelementptr [1 x i8*], [1 x i8*]* %t30, i32 0, i32 0
-  %t32 = getelementptr i8*, i8** %t31, i64 0
-  store i8* %t29, i8** %t32
-  %t33 = alloca { i8**, i64 }
-  %t34 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 0
-  store i8** %t31, i8*** %t34
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = call double @modulesconcat({ i8**, i64 }* %t33)
-  store { %CompiledModule*, i64 }* null, { %CompiledModule*, i64 }** %l0
+  %t28 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
+  %t29 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  %t30 = extractvalue %ModuleCompilationResult %t29, 0
+  %t31 = alloca [1 x i8*]
+  %t32 = getelementptr [1 x i8*], [1 x i8*]* %t31, i32 0, i32 0
+  %t33 = getelementptr i8*, i8** %t32, i64 0
+  store i8* %t30, i8** %t33
+  %t34 = alloca { i8**, i64 }
+  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 0
+  store i8** %t32, i8*** %t35
+  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 1
+  store i64 1, i64* %t36
+  %t37 = bitcast { %CompiledModule*, i64 }* %t28 to { i8**, i64 }*
+  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t37, { i8**, i64 }* %t34)
+  %t39 = bitcast { i8**, i64 }* %t38 to { %CompiledModule*, i64 }*
+  store { %CompiledModule*, i64 }* %t39, { %CompiledModule*, i64 }** %l0
   br label %merge5
 merge5:
-  %t37 = phi { %CompiledModule*, i64 }* [ null, %then4 ], [ %t24, %forbody1 ]
-  store { %CompiledModule*, i64 }* %t37, { %CompiledModule*, i64 }** %l0
-  %t38 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
-  %t39 = extractvalue %ModuleCompilationResult %t38, 1
-  %t40 = load { i8**, i64 }, { i8**, i64 }* %t39
-  %t41 = extractvalue { i8**, i64 } %t40, 1
-  %t42 = icmp sgt i64 %t41, 0
-  %t43 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
-  %t44 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t45 = load i8*, i8** %l3
-  %t46 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
-  br i1 %t42, label %then6, label %merge7
+  %t40 = phi { %CompiledModule*, i64 }* [ %t39, %then4 ], [ %t24, %forbody1 ]
+  store { %CompiledModule*, i64 }* %t40, { %CompiledModule*, i64 }** %l0
+  %t41 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  %t42 = extractvalue %ModuleCompilationResult %t41, 1
+  %t43 = load { i8**, i64 }, { i8**, i64 }* %t42
+  %t44 = extractvalue { i8**, i64 } %t43, 1
+  %t45 = icmp sgt i64 %t44, 0
+  %t46 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
+  %t47 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t48 = load i8*, i8** %l3
+  %t49 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  br i1 %t45, label %then6, label %merge7
 then6:
-  %t47 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
-  %t48 = extractvalue %ModuleCompilationResult %t47, 1
-  %t49 = call double @diagnosticsconcat({ i8**, i64 }* %t48)
-  store { %ModuleDiagnostics*, i64 }* null, { %ModuleDiagnostics*, i64 }** %l1
+  %t50 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t51 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
+  %t52 = extractvalue %ModuleCompilationResult %t51, 1
+  %t53 = bitcast { %ModuleDiagnostics*, i64 }* %t50 to { i8**, i64 }*
+  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t53, { i8**, i64 }* %t52)
+  %t55 = bitcast { i8**, i64 }* %t54 to { %ModuleDiagnostics*, i64 }*
+  store { %ModuleDiagnostics*, i64 }* %t55, { %ModuleDiagnostics*, i64 }** %l1
   br label %merge7
 merge7:
-  %t50 = phi { %ModuleDiagnostics*, i64 }* [ null, %then6 ], [ %t44, %forbody1 ]
-  store { %ModuleDiagnostics*, i64 }* %t50, { %ModuleDiagnostics*, i64 }** %l1
+  %t56 = phi { %ModuleDiagnostics*, i64 }* [ %t55, %then6 ], [ %t47, %forbody1 ]
+  store { %ModuleDiagnostics*, i64 }* %t56, { %ModuleDiagnostics*, i64 }** %l1
   br label %forinc2
 forinc2:
-  %t51 = load i64, i64* %l2
-  %t52 = add i64 %t51, 1
-  store i64 %t52, i64* %l2
+  %t57 = load i64, i64* %l2
+  %t58 = add i64 %t57, 1
+  store i64 %t58, i64* %l2
   br label %for0
 afterfor3:
-  %t53 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
-  %t54 = insertvalue %ProjectCompilation undef, { i8**, i64 }* null, 0
-  %t55 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t56 = insertvalue %ProjectCompilation %t54, { i8**, i64 }* null, 1
-  ret %ProjectCompilation %t56
+  %t59 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
+  %t60 = bitcast { %CompiledModule*, i64 }* %t59 to { i8**, i64 }*
+  %t61 = insertvalue %ProjectCompilation undef, { i8**, i64 }* %t60, 0
+  %t62 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t63 = bitcast { %ModuleDiagnostics*, i64 }* %t62 to { i8**, i64 }*
+  %t64 = insertvalue %ProjectCompilation %t61, { i8**, i64 }* %t63, 1
+  ret %ProjectCompilation %t64
 }
 
 ; fn compile_source_at_path effects: ![io]
@@ -594,38 +594,38 @@ entry:
   %l6 = alloca double
   %l7 = alloca i1
   %l8 = alloca { %ModuleDiagnostics*, i64 }*
-  %t0 = call double @fsreadFile(i8* %source_path)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = call double @parse_program(double %t1)
-  store double %t2, double* %l1
-  %t3 = load double, double* %l1
-  %t4 = call double @typecheck_program(double %t3)
-  store double %t4, double* %l2
-  %t5 = load double, double* %l2
-  %t6 = load double, double* %l1
-  %t7 = call double @emit_native(double %t6)
-  store double %t7, double* %l3
-  %t8 = load double, double* %l3
+  store double 0.0, double* %l0
+  %t0 = load double, double* %l0
+  %t1 = call double @parse_program(double %t0)
+  store double %t1, double* %l1
+  %t2 = load double, double* %l1
+  %t3 = call double @typecheck_program(double %t2)
+  store double %t3, double* %l2
+  %t4 = load double, double* %l2
+  %t5 = load double, double* %l1
+  %t6 = call double @emit_native(double %t5)
+  store double %t6, double* %l3
+  %t7 = load double, double* %l3
   store double 0.0, double* %l4
-  %t9 = load double, double* %l4
+  %t8 = load double, double* %l3
   store { i8**, i64 }* null, { i8**, i64 }** %l5
-  %t10 = load double, double* %l4
+  %t9 = load double, double* %l4
   store double 0.0, double* %l6
-  %t11 = load double, double* %l6
-  %t12 = call i1 @needs_python_fallback(i8* null)
-  store i1 %t12, i1* %l7
-  %t13 = load i1, i1* %l7
-  %t14 = load double, double* %l0
-  %t15 = load double, double* %l1
-  %t16 = load double, double* %l2
-  %t17 = load double, double* %l3
-  %t18 = load double, double* %l4
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t20 = load double, double* %l6
-  %t21 = load i1, i1* %l7
-  br i1 %t13, label %then0, label %merge1
+  %t10 = load double, double* %l6
+  %t11 = call i1 @needs_python_fallback(i8* null)
+  store i1 %t11, i1* %l7
+  %t12 = load i1, i1* %l7
+  %t13 = load double, double* %l0
+  %t14 = load double, double* %l1
+  %t15 = load double, double* %l2
+  %t16 = load double, double* %l3
+  %t17 = load double, double* %l4
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t19 = load double, double* %l6
+  %t20 = load i1, i1* %l7
+  br i1 %t12, label %then0, label %merge1
 then0:
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l5
   %s22 = getelementptr inbounds [86 x i8], [86 x i8]* @.str.22, i32 0, i32 0
   %t23 = alloca [1 x i8*]
   %t24 = getelementptr [1 x i8*], [1 x i8*]* %t23, i32 0, i32 0
@@ -636,8 +636,8 @@ then0:
   store i8** %t24, i8*** %t27
   %t28 = getelementptr { i8**, i64 }, { i8**, i64 }* %t26, i32 0, i32 1
   store i64 1, i64* %t28
-  %t29 = call double @messagesconcat({ i8**, i64 }* %t26)
-  store { i8**, i64 }* null, { i8**, i64 }** %l5
+  %t29 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t21, { i8**, i64 }* %t26)
+  store { i8**, i64 }* %t29, { i8**, i64 }** %l5
   %t30 = insertvalue %ModuleCompilationResult undef, i8* null, 0
   %t31 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
   %t32 = load { i8**, i64 }*, { i8**, i64 }** %l5
@@ -652,43 +652,45 @@ then0:
   store %ModuleDiagnostics* %t36, %ModuleDiagnostics** %t39
   %t40 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t38, i32 0, i32 1
   store i64 1, i64* %t40
-  %t41 = insertvalue %ModuleCompilationResult %t30, { i8**, i64 }* null, 1
-  ret %ModuleCompilationResult %t41
+  %t41 = bitcast { %ModuleDiagnostics*, i64 }* %t38 to { i8**, i64 }*
+  %t42 = insertvalue %ModuleCompilationResult %t30, { i8**, i64 }* %t41, 1
+  ret %ModuleCompilationResult %t42
 merge1:
-  %t42 = alloca [0 x %ModuleDiagnostics]
-  %t43 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t42, i32 0, i32 0
-  %t44 = alloca { %ModuleDiagnostics*, i64 }
-  %t45 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t44, i32 0, i32 0
-  store %ModuleDiagnostics* %t43, %ModuleDiagnostics** %t45
-  %t46 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t44, i32 0, i32 1
-  store i64 0, i64* %t46
-  store { %ModuleDiagnostics*, i64 }* %t44, { %ModuleDiagnostics*, i64 }** %l8
-  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t48 = load { i8**, i64 }, { i8**, i64 }* %t47
-  %t49 = extractvalue { i8**, i64 } %t48, 1
-  %t50 = icmp sgt i64 %t49, 0
-  %t51 = load double, double* %l0
-  %t52 = load double, double* %l1
-  %t53 = load double, double* %l2
-  %t54 = load double, double* %l3
-  %t55 = load double, double* %l4
-  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t57 = load double, double* %l6
-  %t58 = load i1, i1* %l7
-  %t59 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  br i1 %t50, label %then2, label %merge3
+  %t43 = alloca [0 x %ModuleDiagnostics]
+  %t44 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t43, i32 0, i32 0
+  %t45 = alloca { %ModuleDiagnostics*, i64 }
+  %t46 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t45, i32 0, i32 0
+  store %ModuleDiagnostics* %t44, %ModuleDiagnostics** %t46
+  %t47 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t45, i32 0, i32 1
+  store i64 0, i64* %t47
+  store { %ModuleDiagnostics*, i64 }* %t45, { %ModuleDiagnostics*, i64 }** %l8
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t49 = load { i8**, i64 }, { i8**, i64 }* %t48
+  %t50 = extractvalue { i8**, i64 } %t49, 1
+  %t51 = icmp sgt i64 %t50, 0
+  %t52 = load double, double* %l0
+  %t53 = load double, double* %l1
+  %t54 = load double, double* %l2
+  %t55 = load double, double* %l3
+  %t56 = load double, double* %l4
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t58 = load double, double* %l6
+  %t59 = load i1, i1* %l7
+  %t60 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  br i1 %t51, label %then2, label %merge3
 then2:
   br label %merge3
 merge3:
-  %t60 = phi { %ModuleDiagnostics*, i64 }* [ null, %then2 ], [ %t59, %entry ]
-  store { %ModuleDiagnostics*, i64 }* %t60, { %ModuleDiagnostics*, i64 }** %l8
-  %t61 = insertvalue %CompiledModule undef, i8* %source_path, 0
-  %t62 = load double, double* %l6
-  %t63 = insertvalue %CompiledModule %t61, i8* null, 1
-  %t64 = insertvalue %ModuleCompilationResult undef, i8* null, 0
-  %t65 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  %t66 = insertvalue %ModuleCompilationResult %t64, { i8**, i64 }* null, 1
-  ret %ModuleCompilationResult %t66
+  %t61 = phi { %ModuleDiagnostics*, i64 }* [ null, %then2 ], [ %t60, %entry ]
+  store { %ModuleDiagnostics*, i64 }* %t61, { %ModuleDiagnostics*, i64 }** %l8
+  %t62 = insertvalue %CompiledModule undef, i8* %source_path, 0
+  %t63 = load double, double* %l6
+  %t64 = insertvalue %CompiledModule %t62, i8* null, 1
+  %t65 = insertvalue %ModuleCompilationResult undef, i8* null, 0
+  %t66 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t67 = bitcast { %ModuleDiagnostics*, i64 }* %t66 to { i8**, i64 }*
+  %t68 = insertvalue %ModuleCompilationResult %t65, { i8**, i64 }* %t67, 1
+  ret %ModuleCompilationResult %t68
 }
 
 define { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %entries, i8* %source) {
@@ -808,8 +810,8 @@ entry:
   %t7 = load double, double* %l3
   br label %loop.header0
 loop.header0:
-  %t101 = phi double [ %t7, %entry ], [ %t100, %loop.latch2 ]
-  store double %t101, double* %l3
+  %t81 = phi double [ %t7, %entry ], [ %t80, %loop.latch2 ]
+  store double %t81, double* %l3
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l3
@@ -851,100 +853,76 @@ merge5:
   %t37 = load { i8**, i64 }*, { i8**, i64 }** %l5
   br i1 %t31, label %then6, label %merge7
 then6:
-  %t38 = load i8*, i8** %l1
-  call void @sailfin_runtime_print_error(i8* %t38)
-  %t39 = load double, double* %l3
-  %t40 = sitofp i64 1 to double
-  %t41 = fadd double %t39, %t40
-  store double %t41, double* %l3
+  %t38 = load double, double* %l3
+  %t39 = sitofp i64 1 to double
+  %t40 = fadd double %t38, %t39
+  store double %t40, double* %l3
   br label %loop.latch2
 merge7:
-  %t42 = sitofp i64 0 to double
-  store double %t42, double* %l6
-  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t44 = load i8*, i8** %l1
-  %t45 = load double, double* %l2
-  %t46 = load double, double* %l3
-  %t47 = load i8*, i8** %l4
-  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t49 = load double, double* %l6
+  %t41 = sitofp i64 0 to double
+  store double %t41, double* %l6
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t43 = load i8*, i8** %l1
+  %t44 = load double, double* %l2
+  %t45 = load double, double* %l3
+  %t46 = load i8*, i8** %l4
+  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t48 = load double, double* %l6
   br label %loop.header8
 loop.header8:
-  %t96 = phi double [ %t49, %loop.body1 ], [ %t95, %loop.latch10 ]
-  store double %t96, double* %l6
+  %t76 = phi double [ %t48, %loop.body1 ], [ %t75, %loop.latch10 ]
+  store double %t76, double* %l6
   br label %loop.body9
 loop.body9:
-  %t50 = load double, double* %l6
-  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t52 = load { i8**, i64 }, { i8**, i64 }* %t51
-  %t53 = extractvalue { i8**, i64 } %t52, 1
-  %t54 = sitofp i64 %t53 to double
-  %t55 = fcmp oge double %t50, %t54
-  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t57 = load i8*, i8** %l1
-  %t58 = load double, double* %l2
-  %t59 = load double, double* %l3
-  %t60 = load i8*, i8** %l4
-  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t62 = load double, double* %l6
-  br i1 %t55, label %then12, label %merge13
+  %t49 = load double, double* %l6
+  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t51 = load { i8**, i64 }, { i8**, i64 }* %t50
+  %t52 = extractvalue { i8**, i64 } %t51, 1
+  %t53 = sitofp i64 %t52 to double
+  %t54 = fcmp oge double %t49, %t53
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t56 = load i8*, i8** %l1
+  %t57 = load double, double* %l2
+  %t58 = load double, double* %l3
+  %t59 = load i8*, i8** %l4
+  %t60 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t61 = load double, double* %l6
+  br i1 %t54, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t63 = load double, double* %l6
-  %t64 = sitofp i64 0 to double
-  %t65 = fcmp oeq double %t63, %t64
-  %t66 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t67 = load i8*, i8** %l1
-  %t68 = load double, double* %l2
-  %t69 = load double, double* %l3
-  %t70 = load i8*, i8** %l4
-  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t72 = load double, double* %l6
-  br i1 %t65, label %then14, label %else15
+  %t62 = load double, double* %l6
+  %t63 = sitofp i64 0 to double
+  %t64 = fcmp oeq double %t62, %t63
+  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t66 = load i8*, i8** %l1
+  %t67 = load double, double* %l2
+  %t68 = load double, double* %l3
+  %t69 = load i8*, i8** %l4
+  %t70 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t71 = load double, double* %l6
+  br i1 %t64, label %then14, label %else15
 then14:
-  %t73 = load i8*, i8** %l1
-  %t74 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t75 = load double, double* %l6
-  %t76 = load { i8**, i64 }, { i8**, i64 }* %t74
-  %t77 = extractvalue { i8**, i64 } %t76, 0
-  %t78 = extractvalue { i8**, i64 } %t76, 1
-  %t79 = icmp uge i64 %t75, %t78
-  ; bounds check: %t79 (if true, out of bounds)
-  %t80 = getelementptr i8*, i8** %t77, i64 %t75
-  %t81 = load i8*, i8** %t80
-  %t82 = add i8* %t73, %t81
-  call void @sailfin_runtime_print_error(i8* %t82)
   br label %merge16
 else15:
-  %t83 = load double, double* %l2
-  %t84 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t85 = load double, double* %l6
-  %t86 = load { i8**, i64 }, { i8**, i64 }* %t84
-  %t87 = extractvalue { i8**, i64 } %t86, 0
-  %t88 = extractvalue { i8**, i64 } %t86, 1
-  %t89 = icmp uge i64 %t85, %t88
-  ; bounds check: %t89 (if true, out of bounds)
-  %t90 = getelementptr i8*, i8** %t87, i64 %t85
-  %t91 = load i8*, i8** %t90
   br label %merge16
 merge16:
-  %t92 = load double, double* %l6
-  %t93 = sitofp i64 1 to double
-  %t94 = fadd double %t92, %t93
-  store double %t94, double* %l6
+  %t72 = load double, double* %l6
+  %t73 = sitofp i64 1 to double
+  %t74 = fadd double %t72, %t73
+  store double %t74, double* %l6
   br label %loop.latch10
 loop.latch10:
-  %t95 = load double, double* %l6
+  %t75 = load double, double* %l6
   br label %loop.header8
 afterloop11:
-  %t97 = load double, double* %l3
-  %t98 = sitofp i64 1 to double
-  %t99 = fadd double %t97, %t98
-  store double %t99, double* %l3
+  %t77 = load double, double* %l3
+  %t78 = sitofp i64 1 to double
+  %t79 = fadd double %t77, %t78
+  store double %t79, double* %l3
   br label %loop.latch2
 loop.latch2:
-  %t100 = load double, double* %l3
+  %t80 = load double, double* %l3
   br label %loop.header0
 afterloop3:
   ret void
@@ -1462,8 +1440,8 @@ entry:
   store i8** %t1, i8*** %t4
   %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = call double @valuesconcat({ i8**, i64 }* %t3)
-  ret { i8**, i64 }* null
+  %t6 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %values, { i8**, i64 }* %t3)
+  ret { i8**, i64 }* %t6
 }
 
 define i8* @number_to_string(double %value) {

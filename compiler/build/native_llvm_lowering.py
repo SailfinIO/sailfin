@@ -1489,6 +1489,22 @@ def resolve_struct_info_for_literal(context, type_name):
                 if len(tail_base) > 0:
                     if not string_array_contains(candidates, tail_base):
                         candidates = append_string(candidates, tail_base)
+        else:
+            lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
+            diagnostics = (diagnostics) + (lowered_self.diagnostics)
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
+            current_lines = lowered_self.lines
+            current_temp = lowered_self.temp_index
+            if lowered_self.operand != None:
+                base_operand = lowered_self.operand
+                array_element_type = array_pointer_element_type(base_operand.llvm_type)
+                if len(array_element_type) > 0  and  method_parse.field == "concat":
+                    method_operand = base_operand
+                    trimmed_target = "concat"
+                    injected_argument_count = 1
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index = 0
     while True:
         if index >= len(candidates):
@@ -1858,6 +1874,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_alpha_char", symbol="sailfin_runtime_is_alpha_char", return_type="i1", parameter_types=["i8"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="collection.concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     return descriptors
 
@@ -5029,6 +5046,22 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 else:
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            else:
+                lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
+                diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
+                current_lines = lowered_self.lines
+                current_temp = lowered_self.temp_index
+                if lowered_self.operand != None:
+                    base_operand = lowered_self.operand
+                    array_element_type = array_pointer_element_type(base_operand.llvm_type)
+                    if len(array_element_type) > 0  and  method_parse.field == "concat":
+                        method_operand = base_operand
+                        trimmed_target = "concat"
+                        injected_argument_count = 1
+                else:
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index = 0
     while True:
         if index >= len(arguments):
@@ -6363,6 +6396,14 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp)
         coerced = LLVMOperand(llvm_type="i8", value=char_value_temp)
         return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
+    if ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
+        source_element = array_pointer_element_type(operand.llvm_type)
+        target_element = array_pointer_element_type(target_type)
+        if len(source_element) > 0  and  len(target_element) > 0:
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
+            coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
     return CoercionResult(lines=current_lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
 

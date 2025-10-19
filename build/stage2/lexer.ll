@@ -786,8 +786,11 @@ entry:
   store %Token* %t1, %Token** %t4
   %t5 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = call double @tokensconcat({ %Token*, i64 }* %t3)
-  ret { %Token*, i64 }* null
+  %t6 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
+  %t7 = bitcast { %Token*, i64 }* %t3 to { i8**, i64 }*
+  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
+  %t9 = bitcast { i8**, i64 }* %t8 to { %Token*, i64 }*
+  ret { %Token*, i64 }* %t9
 }
 
 define i8* @peek_next_char(%LexerState %state) {

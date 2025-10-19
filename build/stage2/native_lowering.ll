@@ -87,16 +87,17 @@ declare noalias i8* @malloc(i64)
 @.str.34 = private unnamed_addr constant [36 x i8] c"array_filter = runtime.array_filter\00"
 @.str.37 = private unnamed_addr constant [36 x i8] c"array_reduce = runtime.array_reduce\00"
 @.str.3 = private unnamed_addr constant [42 x i8] c" = runtime.enum_type('\22 + enum_name + \22')\00"
+@.str.14 = private unnamed_addr constant [6 x i8] c"from \00"
+@.str.17 = private unnamed_addr constant [9 x i8] c" import \00"
 @.str.119 = private unnamed_addr constant [12 x i8] c"__all__ = [\00"
 @.str.2 = private unnamed_addr constant [7 x i8] c"class \00"
-@.str.18 = private unnamed_addr constant [18 x i8] c"def __init__(self\00"
-@.str.97 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
+@.str.98 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
 @.str.39 = private unnamed_addr constant [96 x i8] c"return runtime.struct_repr('\22 + class_name + \22', [\22 + join_with_separator(rendered, \22, \22) + \22])\00"
 @.str.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.67 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.5 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.8 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.11 = private unnamed_addr constant [49 x i8] c"(\22 + join_with_separator(parameters, \22, \22) + \22):\00"
+@.str.12 = private unnamed_addr constant [49 x i8] c"(\22 + join_with_separator(parameters, \22, \22) + \22):\00"
 
 define %LoweredPythonResult @lower_to_python(%NativeModule %native_module) {
 entry:
@@ -119,21 +120,23 @@ entry:
   %t7 = load double, double* %l1
   %t8 = load double, double* %l1
   store double 0.0, double* %l2
-  %t9 = load double, double* %l2
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load double, double* %l2
   %t11 = load double, double* %l2
   %t12 = load double, double* %l2
   %t13 = load double, double* %l2
   %t14 = load double, double* %l2
+  %t15 = load double, double* %l2
   store double 0.0, double* %l3
-  %t15 = load double, double* %l3
-  %t16 = load double, double* %l3
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t17 = load double, double* %l3
+  %t18 = load double, double* %l3
   store double 0.0, double* %l4
-  %t17 = load double, double* %l4
-  %t18 = insertvalue %LoweredPythonResult undef, i8* null, 0
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t20 = insertvalue %LoweredPythonResult %t18, { i8**, i64 }* %t19, 1
-  ret %LoweredPythonResult %t20
+  %t19 = load double, double* %l4
+  %t20 = insertvalue %LoweredPythonResult undef, i8* null, 0
+  %t21 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t22 = insertvalue %LoweredPythonResult %t20, { i8**, i64 }* %t21, 1
+  ret %LoweredPythonResult %t22
 }
 
 define %PythonModuleEmission @emit_python_module({ %NativeFunction*, i64 }* %functions, { %NativeImport*, i64 }* %imports, { %NativeStruct*, i64 }* %structs, { %NativeEnum*, i64 }* %enums, { %NativeBinding*, i64 }* %bindings) {
@@ -262,128 +265,130 @@ then6:
   %t72 = load %PythonStructEmission, %PythonStructEmission* %l4
   %t73 = extractvalue %PythonStructEmission %t72, 0
   store %PythonBuilder zeroinitializer, %PythonBuilder* %l0
-  %t74 = load %PythonStructEmission, %PythonStructEmission* %l4
-  %t75 = extractvalue %PythonStructEmission %t74, 1
-  %t76 = call double @diagnosticsconcat({ i8**, i64 }* %t75)
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
+  %t74 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t75 = load %PythonStructEmission, %PythonStructEmission* %l4
+  %t76 = extractvalue %PythonStructEmission %t75, 1
+  %t77 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t74, { i8**, i64 }* %t76)
+  store { i8**, i64 }* %t77, { i8**, i64 }** %l1
   br label %merge7
 merge7:
-  %t77 = phi %PythonBuilder [ %t69, %then6 ], [ %t65, %entry ]
-  %t78 = phi %PythonBuilder [ zeroinitializer, %then6 ], [ %t65, %entry ]
-  %t79 = phi { i8**, i64 }* [ null, %then6 ], [ %t66, %entry ]
-  store %PythonBuilder %t77, %PythonBuilder* %l0
+  %t78 = phi %PythonBuilder [ %t69, %then6 ], [ %t65, %entry ]
+  %t79 = phi %PythonBuilder [ zeroinitializer, %then6 ], [ %t65, %entry ]
+  %t80 = phi { i8**, i64 }* [ %t77, %then6 ], [ %t66, %entry ]
   store %PythonBuilder %t78, %PythonBuilder* %l0
-  store { i8**, i64 }* %t79, { i8**, i64 }** %l1
-  %t80 = load %PythonBuilder, %PythonBuilder* %l0
-  %t81 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t80)
-  store %PythonBuilder %t81, %PythonBuilder* %l0
-  %t82 = sitofp i64 0 to double
-  store double %t82, double* %l5
-  %t83 = load %PythonBuilder, %PythonBuilder* %l0
-  %t84 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t85 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t86 = load double, double* %l5
+  store %PythonBuilder %t79, %PythonBuilder* %l0
+  store { i8**, i64 }* %t80, { i8**, i64 }** %l1
+  %t81 = load %PythonBuilder, %PythonBuilder* %l0
+  %t82 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t81)
+  store %PythonBuilder %t82, %PythonBuilder* %l0
+  %t83 = sitofp i64 0 to double
+  store double %t83, double* %l5
+  %t84 = load %PythonBuilder, %PythonBuilder* %l0
+  %t85 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t86 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t87 = load double, double* %l5
   br label %loop.header8
 loop.header8:
-  %t131 = phi %PythonBuilder [ %t83, %entry ], [ %t128, %loop.latch10 ]
-  %t132 = phi { i8**, i64 }* [ %t84, %entry ], [ %t129, %loop.latch10 ]
-  %t133 = phi double [ %t86, %entry ], [ %t130, %loop.latch10 ]
-  store %PythonBuilder %t131, %PythonBuilder* %l0
-  store { i8**, i64 }* %t132, { i8**, i64 }** %l1
-  store double %t133, double* %l5
+  %t133 = phi %PythonBuilder [ %t84, %entry ], [ %t130, %loop.latch10 ]
+  %t134 = phi { i8**, i64 }* [ %t85, %entry ], [ %t131, %loop.latch10 ]
+  %t135 = phi double [ %t87, %entry ], [ %t132, %loop.latch10 ]
+  store %PythonBuilder %t133, %PythonBuilder* %l0
+  store { i8**, i64 }* %t134, { i8**, i64 }** %l1
+  store double %t135, double* %l5
   br label %loop.body9
 loop.body9:
-  %t87 = load double, double* %l5
-  %t88 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
-  %t89 = extractvalue { %NativeFunction*, i64 } %t88, 1
-  %t90 = sitofp i64 %t89 to double
-  %t91 = fcmp oge double %t87, %t90
-  %t92 = load %PythonBuilder, %PythonBuilder* %l0
-  %t93 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t95 = load double, double* %l5
-  br i1 %t91, label %then12, label %merge13
+  %t88 = load double, double* %l5
+  %t89 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
+  %t90 = extractvalue { %NativeFunction*, i64 } %t89, 1
+  %t91 = sitofp i64 %t90 to double
+  %t92 = fcmp oge double %t88, %t91
+  %t93 = load %PythonBuilder, %PythonBuilder* %l0
+  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t96 = load double, double* %l5
+  br i1 %t92, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t96 = load %PythonBuilder, %PythonBuilder* %l0
-  %t97 = load double, double* %l5
-  %t98 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
-  %t99 = extractvalue { %NativeFunction*, i64 } %t98, 0
-  %t100 = extractvalue { %NativeFunction*, i64 } %t98, 1
-  %t101 = icmp uge i64 %t97, %t100
-  ; bounds check: %t101 (if true, out of bounds)
-  %t102 = getelementptr %NativeFunction, %NativeFunction* %t99, i64 %t97
-  %t103 = load %NativeFunction, %NativeFunction* %t102
-  %t104 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t96, %NativeFunction %t103)
-  store %PythonFunctionEmission %t104, %PythonFunctionEmission* %l6
-  %t105 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
-  %t106 = extractvalue %PythonFunctionEmission %t105, 0
+  %t97 = load %PythonBuilder, %PythonBuilder* %l0
+  %t98 = load double, double* %l5
+  %t99 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
+  %t100 = extractvalue { %NativeFunction*, i64 } %t99, 0
+  %t101 = extractvalue { %NativeFunction*, i64 } %t99, 1
+  %t102 = icmp uge i64 %t98, %t101
+  ; bounds check: %t102 (if true, out of bounds)
+  %t103 = getelementptr %NativeFunction, %NativeFunction* %t100, i64 %t98
+  %t104 = load %NativeFunction, %NativeFunction* %t103
+  %t105 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t97, %NativeFunction %t104)
+  store %PythonFunctionEmission %t105, %PythonFunctionEmission* %l6
+  %t106 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
+  %t107 = extractvalue %PythonFunctionEmission %t106, 0
   store %PythonBuilder zeroinitializer, %PythonBuilder* %l0
-  %t107 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
-  %t108 = extractvalue %PythonFunctionEmission %t107, 1
-  %t109 = call double @diagnosticsconcat({ i8**, i64 }* %t108)
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
-  %t110 = load double, double* %l5
-  %t111 = sitofp i64 1 to double
-  %t112 = fadd double %t110, %t111
-  %t113 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
-  %t114 = extractvalue { %NativeFunction*, i64 } %t113, 1
-  %t115 = sitofp i64 %t114 to double
-  %t116 = fcmp olt double %t112, %t115
-  %t117 = load %PythonBuilder, %PythonBuilder* %l0
-  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t120 = load double, double* %l5
-  %t121 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
-  br i1 %t116, label %then14, label %merge15
+  %t108 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t109 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
+  %t110 = extractvalue %PythonFunctionEmission %t109, 1
+  %t111 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t108, { i8**, i64 }* %t110)
+  store { i8**, i64 }* %t111, { i8**, i64 }** %l1
+  %t112 = load double, double* %l5
+  %t113 = sitofp i64 1 to double
+  %t114 = fadd double %t112, %t113
+  %t115 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %functions
+  %t116 = extractvalue { %NativeFunction*, i64 } %t115, 1
+  %t117 = sitofp i64 %t116 to double
+  %t118 = fcmp olt double %t114, %t117
+  %t119 = load %PythonBuilder, %PythonBuilder* %l0
+  %t120 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t121 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t122 = load double, double* %l5
+  %t123 = load %PythonFunctionEmission, %PythonFunctionEmission* %l6
+  br i1 %t118, label %then14, label %merge15
 then14:
-  %t122 = load %PythonBuilder, %PythonBuilder* %l0
-  %t123 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t122)
-  store %PythonBuilder %t123, %PythonBuilder* %l0
+  %t124 = load %PythonBuilder, %PythonBuilder* %l0
+  %t125 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t124)
+  store %PythonBuilder %t125, %PythonBuilder* %l0
   br label %merge15
 merge15:
-  %t124 = phi %PythonBuilder [ %t123, %then14 ], [ %t117, %loop.body9 ]
-  store %PythonBuilder %t124, %PythonBuilder* %l0
-  %t125 = load double, double* %l5
-  %t126 = sitofp i64 1 to double
-  %t127 = fadd double %t125, %t126
-  store double %t127, double* %l5
+  %t126 = phi %PythonBuilder [ %t125, %then14 ], [ %t119, %loop.body9 ]
+  store %PythonBuilder %t126, %PythonBuilder* %l0
+  %t127 = load double, double* %l5
+  %t128 = sitofp i64 1 to double
+  %t129 = fadd double %t127, %t128
+  store double %t129, double* %l5
   br label %loop.latch10
 loop.latch10:
-  %t128 = load %PythonBuilder, %PythonBuilder* %l0
-  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t130 = load double, double* %l5
+  %t130 = load %PythonBuilder, %PythonBuilder* %l0
+  %t131 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t132 = load double, double* %l5
   br label %loop.header8
 afterloop11:
-  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t135 = load { i8**, i64 }, { i8**, i64 }* %t134
-  %t136 = extractvalue { i8**, i64 } %t135, 1
-  %t137 = icmp sgt i64 %t136, 0
-  %t138 = load %PythonBuilder, %PythonBuilder* %l0
-  %t139 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t140 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t141 = load double, double* %l5
-  br i1 %t137, label %then16, label %merge17
+  %t136 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t137 = load { i8**, i64 }, { i8**, i64 }* %t136
+  %t138 = extractvalue { i8**, i64 } %t137, 1
+  %t139 = icmp sgt i64 %t138, 0
+  %t140 = load %PythonBuilder, %PythonBuilder* %l0
+  %t141 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t142 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t143 = load double, double* %l5
+  br i1 %t139, label %then16, label %merge17
 then16:
-  %t142 = load %PythonBuilder, %PythonBuilder* %l0
-  %t143 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t142)
-  store %PythonBuilder %t143, %PythonBuilder* %l0
   %t144 = load %PythonBuilder, %PythonBuilder* %l0
-  %t145 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t146 = call %PythonBuilder @emit_export_list(%PythonBuilder %t144, { i8**, i64 }* %t145)
-  store %PythonBuilder %t146, %PythonBuilder* %l0
+  %t145 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t144)
+  store %PythonBuilder %t145, %PythonBuilder* %l0
+  %t146 = load %PythonBuilder, %PythonBuilder* %l0
+  %t147 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t148 = call %PythonBuilder @emit_export_list(%PythonBuilder %t146, { i8**, i64 }* %t147)
+  store %PythonBuilder %t148, %PythonBuilder* %l0
   br label %merge17
 merge17:
-  %t147 = phi %PythonBuilder [ %t143, %then16 ], [ %t138, %entry ]
-  %t148 = phi %PythonBuilder [ %t146, %then16 ], [ %t138, %entry ]
-  store %PythonBuilder %t147, %PythonBuilder* %l0
-  store %PythonBuilder %t148, %PythonBuilder* %l0
-  %t149 = load %PythonBuilder, %PythonBuilder* %l0
-  %t150 = insertvalue %PythonModuleEmission undef, i8* null, 0
-  %t151 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t152 = insertvalue %PythonModuleEmission %t150, { i8**, i64 }* %t151, 1
-  ret %PythonModuleEmission %t152
+  %t149 = phi %PythonBuilder [ %t145, %then16 ], [ %t140, %entry ]
+  %t150 = phi %PythonBuilder [ %t148, %then16 ], [ %t140, %entry ]
+  store %PythonBuilder %t149, %PythonBuilder* %l0
+  store %PythonBuilder %t150, %PythonBuilder* %l0
+  %t151 = load %PythonBuilder, %PythonBuilder* %l0
+  %t152 = insertvalue %PythonModuleEmission undef, i8* null, 0
+  %t153 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t154 = insertvalue %PythonModuleEmission %t152, { i8**, i64 }* %t153, 1
+  ret %PythonModuleEmission %t154
 }
 
 define %PythonBuilder @emit_runtime_aliases(%PythonBuilder %builder) {
@@ -567,10 +572,10 @@ entry:
   %t8 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t49 = phi { i8**, i64 }* [ %t7, %entry ], [ %t47, %loop.latch2 ]
-  %t50 = phi double [ %t8, %entry ], [ %t48, %loop.latch2 ]
-  store { i8**, i64 }* %t49, { i8**, i64 }** %l1
-  store double %t50, double* %l2
+  %t50 = phi { i8**, i64 }* [ %t7, %entry ], [ %t48, %loop.latch2 ]
+  %t51 = phi double [ %t8, %entry ], [ %t49, %loop.latch2 ]
+  store { i8**, i64 }* %t50, { i8**, i64 }** %l1
+  store double %t51, double* %l2
   br label %loop.body1
 loop.body1:
   %t9 = load double, double* %l2
@@ -607,36 +612,37 @@ then6:
   %t32 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t33 = load %NativeImport, %NativeImport* %l3
   %t34 = extractvalue %NativeImport %t33, 2
-  %t35 = call { i8**, i64 }* @collect_export_names({ i8**, i64 }* %t32, { %NativeImportSpecifier*, i64 }* null)
-  store { i8**, i64 }* %t35, { i8**, i64 }** %l1
-  %t36 = load %NativeImport, %NativeImport* %l3
-  %t37 = extractvalue %NativeImport %t36, 1
-  %t38 = call i8* @trim_text(i8* %t37)
-  store i8* %t38, i8** %l4
-  %t39 = load i8*, i8** %l4
+  %t35 = bitcast { i8**, i64 }* %t34 to { %NativeImportSpecifier*, i64 }*
+  %t36 = call { i8**, i64 }* @collect_export_names({ i8**, i64 }* %t32, { %NativeImportSpecifier*, i64 }* %t35)
+  store { i8**, i64 }* %t36, { i8**, i64 }** %l1
+  %t37 = load %NativeImport, %NativeImport* %l3
+  %t38 = extractvalue %NativeImport %t37, 1
+  %t39 = call i8* @trim_text(i8* %t38)
+  store i8* %t39, i8** %l4
+  %t40 = load i8*, i8** %l4
   br label %merge7
 merge7:
-  %t40 = phi { i8**, i64 }* [ %t35, %then6 ], [ %t29, %loop.body1 ]
-  store { i8**, i64 }* %t40, { i8**, i64 }** %l1
-  %t41 = load %NativeImport, %NativeImport* %l3
-  %t42 = call i8* @render_python_import(%NativeImport %t41)
-  store i8* %t42, i8** %l5
-  %t43 = load i8*, i8** %l5
-  %t44 = load double, double* %l2
-  %t45 = sitofp i64 1 to double
-  %t46 = fadd double %t44, %t45
-  store double %t46, double* %l2
+  %t41 = phi { i8**, i64 }* [ %t36, %then6 ], [ %t29, %loop.body1 ]
+  store { i8**, i64 }* %t41, { i8**, i64 }** %l1
+  %t42 = load %NativeImport, %NativeImport* %l3
+  %t43 = call i8* @render_python_import(%NativeImport %t42)
+  store i8* %t43, i8** %l5
+  %t44 = load i8*, i8** %l5
+  %t45 = load double, double* %l2
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  store double %t47, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t48 = load double, double* %l2
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t49 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t51 = load %PythonBuilder, %PythonBuilder* %l0
-  %t52 = insertvalue %PythonImportEmission undef, i8* null, 0
-  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t54 = insertvalue %PythonImportEmission %t52, { i8**, i64 }* %t53, 1
-  ret %PythonImportEmission %t54
+  %t52 = load %PythonBuilder, %PythonBuilder* %l0
+  %t53 = insertvalue %PythonImportEmission undef, i8* null, 0
+  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t55 = insertvalue %PythonImportEmission %t53, { i8**, i64 }* %t54, 1
+  ret %PythonImportEmission %t55
 }
 
 define %PythonBuilder @emit_enum_definitions(%PythonBuilder %builder, { %NativeEnum*, i64 }* %enums) {
@@ -881,16 +887,17 @@ then0:
   ret i8* %t10
 merge1:
   %t11 = extractvalue %NativeImport %entry, 2
-  %t12 = call i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* null)
-  store i8* %t12, i8** %l1
-  %s13 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.13, i32 0, i32 0
-  %t14 = load i8*, i8** %l0
-  %t15 = add i8* %s13, %t14
-  %s16 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.16, i32 0, i32 0
-  %t17 = add i8* %t15, %s16
-  %t18 = load i8*, i8** %l1
-  %t19 = add i8* %t17, %t18
-  ret i8* %t19
+  %t12 = bitcast { i8**, i64 }* %t11 to { %NativeImportSpecifier*, i64 }*
+  %t13 = call i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* %t12)
+  store i8* %t13, i8** %l1
+  %s14 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.14, i32 0, i32 0
+  %t15 = load i8*, i8** %l0
+  %t16 = add i8* %s14, %t15
+  %s17 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.17, i32 0, i32 0
+  %t18 = add i8* %t16, %s17
+  %t19 = load i8*, i8** %l1
+  %t20 = add i8* %t18, %t19
+  ret i8* %t20
 }
 
 define i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* %specifiers) {
@@ -1012,12 +1019,12 @@ entry:
   %t8 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t51 = phi %PythonBuilder [ %t6, %entry ], [ %t48, %loop.latch2 ]
-  %t52 = phi { i8**, i64 }* [ %t7, %entry ], [ %t49, %loop.latch2 ]
-  %t53 = phi double [ %t8, %entry ], [ %t50, %loop.latch2 ]
-  store %PythonBuilder %t51, %PythonBuilder* %l0
-  store { i8**, i64 }* %t52, { i8**, i64 }** %l1
-  store double %t53, double* %l2
+  %t52 = phi %PythonBuilder [ %t6, %entry ], [ %t49, %loop.latch2 ]
+  %t53 = phi { i8**, i64 }* [ %t7, %entry ], [ %t50, %loop.latch2 ]
+  %t54 = phi double [ %t8, %entry ], [ %t51, %loop.latch2 ]
+  store %PythonBuilder %t52, %PythonBuilder* %l0
+  store { i8**, i64 }* %t53, { i8**, i64 }** %l1
+  store double %t54, double* %l2
   br label %loop.body1
 loop.body1:
   %t9 = load double, double* %l2
@@ -1046,46 +1053,47 @@ merge5:
   %t26 = load %PythonStructEmission, %PythonStructEmission* %l3
   %t27 = extractvalue %PythonStructEmission %t26, 0
   store %PythonBuilder zeroinitializer, %PythonBuilder* %l0
-  %t28 = load %PythonStructEmission, %PythonStructEmission* %l3
-  %t29 = extractvalue %PythonStructEmission %t28, 1
-  %t30 = call double @diagnosticsconcat({ i8**, i64 }* %t29)
-  store { i8**, i64 }* null, { i8**, i64 }** %l1
-  %t31 = load double, double* %l2
-  %t32 = sitofp i64 1 to double
-  %t33 = fadd double %t31, %t32
-  %t34 = load { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %structs
-  %t35 = extractvalue { %NativeStruct*, i64 } %t34, 1
-  %t36 = sitofp i64 %t35 to double
-  %t37 = fcmp olt double %t33, %t36
-  %t38 = load %PythonBuilder, %PythonBuilder* %l0
-  %t39 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t40 = load double, double* %l2
-  %t41 = load %PythonStructEmission, %PythonStructEmission* %l3
-  br i1 %t37, label %then6, label %merge7
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t29 = load %PythonStructEmission, %PythonStructEmission* %l3
+  %t30 = extractvalue %PythonStructEmission %t29, 1
+  %t31 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t30)
+  store { i8**, i64 }* %t31, { i8**, i64 }** %l1
+  %t32 = load double, double* %l2
+  %t33 = sitofp i64 1 to double
+  %t34 = fadd double %t32, %t33
+  %t35 = load { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %structs
+  %t36 = extractvalue { %NativeStruct*, i64 } %t35, 1
+  %t37 = sitofp i64 %t36 to double
+  %t38 = fcmp olt double %t34, %t37
+  %t39 = load %PythonBuilder, %PythonBuilder* %l0
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t41 = load double, double* %l2
+  %t42 = load %PythonStructEmission, %PythonStructEmission* %l3
+  br i1 %t38, label %then6, label %merge7
 then6:
-  %t42 = load %PythonBuilder, %PythonBuilder* %l0
-  %t43 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t42)
-  store %PythonBuilder %t43, %PythonBuilder* %l0
+  %t43 = load %PythonBuilder, %PythonBuilder* %l0
+  %t44 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t43)
+  store %PythonBuilder %t44, %PythonBuilder* %l0
   br label %merge7
 merge7:
-  %t44 = phi %PythonBuilder [ %t43, %then6 ], [ %t38, %loop.body1 ]
-  store %PythonBuilder %t44, %PythonBuilder* %l0
-  %t45 = load double, double* %l2
-  %t46 = sitofp i64 1 to double
-  %t47 = fadd double %t45, %t46
-  store double %t47, double* %l2
+  %t45 = phi %PythonBuilder [ %t44, %then6 ], [ %t39, %loop.body1 ]
+  store %PythonBuilder %t45, %PythonBuilder* %l0
+  %t46 = load double, double* %l2
+  %t47 = sitofp i64 1 to double
+  %t48 = fadd double %t46, %t47
+  store double %t48, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t48 = load %PythonBuilder, %PythonBuilder* %l0
-  %t49 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t50 = load double, double* %l2
+  %t49 = load %PythonBuilder, %PythonBuilder* %l0
+  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t51 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t54 = load %PythonBuilder, %PythonBuilder* %l0
-  %t55 = insertvalue %PythonStructEmission undef, i8* null, 0
-  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t57 = insertvalue %PythonStructEmission %t55, { i8**, i64 }* %t56, 1
-  ret %PythonStructEmission %t57
+  %t55 = load %PythonBuilder, %PythonBuilder* %l0
+  %t56 = insertvalue %PythonStructEmission undef, i8* null, 0
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t58 = insertvalue %PythonStructEmission %t56, { i8**, i64 }* %t57, 1
+  ret %PythonStructEmission %t58
 }
 
 define %PythonBuilder @emit_export_list(%PythonBuilder %builder, { i8**, i64 }* %exports) {
@@ -1397,233 +1405,233 @@ entry:
   store i64 0, i64* %t15
   store { i8**, i64 }* %t13, { i8**, i64 }** %l2
   %t16 = extractvalue %NativeStruct %definition, 1
-  %t17 = call { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* null)
-  store { i8**, i64 }* %t17, { i8**, i64 }** %l3
-  %s18 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.18, i32 0, i32 0
-  store i8* %s18, i8** %l4
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t20 = load { i8**, i64 }, { i8**, i64 }* %t19
-  %t21 = extractvalue { i8**, i64 } %t20, 1
-  %t22 = icmp sgt i64 %t21, 0
-  %t23 = load i8*, i8** %l0
-  %t24 = load %PythonBuilder, %PythonBuilder* %l1
-  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t27 = load i8*, i8** %l4
-  br i1 %t22, label %then0, label %merge1
-then0:
+  %t17 = bitcast { i8**, i64 }* %t16 to { %NativeStructField*, i64 }*
+  %t18 = call { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* %t17)
+  store { i8**, i64 }* %t18, { i8**, i64 }** %l3
+  %s19 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.19, i32 0, i32 0
+  store i8* %s19, i8** %l4
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t21 = load { i8**, i64 }, { i8**, i64 }* %t20
+  %t22 = extractvalue { i8**, i64 } %t21, 1
+  %t23 = icmp sgt i64 %t22, 0
+  %t24 = load i8*, i8** %l0
+  %t25 = load %PythonBuilder, %PythonBuilder* %l1
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t28 = load i8*, i8** %l4
-  %s29 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.29, i32 0, i32 0
-  %t30 = add i8* %t28, %s29
-  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  br i1 %t23, label %then0, label %merge1
+then0:
+  %t29 = load i8*, i8** %l4
+  %s30 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.30, i32 0, i32 0
+  %t31 = add i8* %t29, %s30
+  %t32 = load { i8**, i64 }*, { i8**, i64 }** %l3
   br label %merge1
 merge1:
-  %t32 = phi i8* [ null, %then0 ], [ %t27, %entry ]
-  store i8* %t32, i8** %l4
-  %t33 = load %PythonBuilder, %PythonBuilder* %l1
-  %t34 = load i8*, i8** %l4
-  %t35 = getelementptr i8, i8* %t34, i64 0
-  %t36 = load i8, i8* %t35
-  %t37 = add i8 %t36, 58
-  %t38 = call %PythonBuilder @builder_emit(%PythonBuilder %t33, i8* null)
-  store %PythonBuilder %t38, %PythonBuilder* %l1
-  %t39 = load %PythonBuilder, %PythonBuilder* %l1
-  %t40 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t39)
-  store %PythonBuilder %t40, %PythonBuilder* %l1
-  %t41 = extractvalue %NativeStruct %definition, 1
-  %t42 = load { i8**, i64 }, { i8**, i64 }* %t41
-  %t43 = extractvalue { i8**, i64 } %t42, 1
-  %t44 = icmp eq i64 %t43, 0
-  %t45 = load i8*, i8** %l0
-  %t46 = load %PythonBuilder, %PythonBuilder* %l1
-  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t49 = load i8*, i8** %l4
-  br i1 %t44, label %then2, label %else3
+  %t33 = phi i8* [ null, %then0 ], [ %t28, %entry ]
+  store i8* %t33, i8** %l4
+  %t34 = load %PythonBuilder, %PythonBuilder* %l1
+  %t35 = load i8*, i8** %l4
+  %t36 = getelementptr i8, i8* %t35, i64 0
+  %t37 = load i8, i8* %t36
+  %t38 = add i8 %t37, 58
+  %t39 = call %PythonBuilder @builder_emit(%PythonBuilder %t34, i8* null)
+  store %PythonBuilder %t39, %PythonBuilder* %l1
+  %t40 = load %PythonBuilder, %PythonBuilder* %l1
+  %t41 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t40)
+  store %PythonBuilder %t41, %PythonBuilder* %l1
+  %t42 = extractvalue %NativeStruct %definition, 1
+  %t43 = load { i8**, i64 }, { i8**, i64 }* %t42
+  %t44 = extractvalue { i8**, i64 } %t43, 1
+  %t45 = icmp eq i64 %t44, 0
+  %t46 = load i8*, i8** %l0
+  %t47 = load %PythonBuilder, %PythonBuilder* %l1
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t49 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t50 = load i8*, i8** %l4
+  br i1 %t45, label %then2, label %else3
 then2:
-  %t50 = load %PythonBuilder, %PythonBuilder* %l1
-  %s51 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.51, i32 0, i32 0
-  %t52 = call %PythonBuilder @builder_emit(%PythonBuilder %t50, i8* %s51)
-  store %PythonBuilder %t52, %PythonBuilder* %l1
+  %t51 = load %PythonBuilder, %PythonBuilder* %l1
+  %s52 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.52, i32 0, i32 0
+  %t53 = call %PythonBuilder @builder_emit(%PythonBuilder %t51, i8* %s52)
+  store %PythonBuilder %t53, %PythonBuilder* %l1
   br label %merge4
 else3:
-  %t53 = sitofp i64 0 to double
-  store double %t53, double* %l5
-  %t54 = load i8*, i8** %l0
-  %t55 = load %PythonBuilder, %PythonBuilder* %l1
-  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t58 = load i8*, i8** %l4
-  %t59 = load double, double* %l5
+  %t54 = sitofp i64 0 to double
+  store double %t54, double* %l5
+  %t55 = load i8*, i8** %l0
+  %t56 = load %PythonBuilder, %PythonBuilder* %l1
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t59 = load i8*, i8** %l4
+  %t60 = load double, double* %l5
   br label %loop.header5
 loop.header5:
-  %t89 = phi %PythonBuilder [ %t55, %else3 ], [ %t87, %loop.latch7 ]
-  %t90 = phi double [ %t59, %else3 ], [ %t88, %loop.latch7 ]
-  store %PythonBuilder %t89, %PythonBuilder* %l1
-  store double %t90, double* %l5
+  %t90 = phi %PythonBuilder [ %t56, %else3 ], [ %t88, %loop.latch7 ]
+  %t91 = phi double [ %t60, %else3 ], [ %t89, %loop.latch7 ]
+  store %PythonBuilder %t90, %PythonBuilder* %l1
+  store double %t91, double* %l5
   br label %loop.body6
 loop.body6:
-  %t60 = load double, double* %l5
-  %t61 = extractvalue %NativeStruct %definition, 1
-  %t62 = load { i8**, i64 }, { i8**, i64 }* %t61
-  %t63 = extractvalue { i8**, i64 } %t62, 1
-  %t64 = sitofp i64 %t63 to double
-  %t65 = fcmp oge double %t60, %t64
-  %t66 = load i8*, i8** %l0
-  %t67 = load %PythonBuilder, %PythonBuilder* %l1
-  %t68 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t70 = load i8*, i8** %l4
-  %t71 = load double, double* %l5
-  br i1 %t65, label %then9, label %merge10
+  %t61 = load double, double* %l5
+  %t62 = extractvalue %NativeStruct %definition, 1
+  %t63 = load { i8**, i64 }, { i8**, i64 }* %t62
+  %t64 = extractvalue { i8**, i64 } %t63, 1
+  %t65 = sitofp i64 %t64 to double
+  %t66 = fcmp oge double %t61, %t65
+  %t67 = load i8*, i8** %l0
+  %t68 = load %PythonBuilder, %PythonBuilder* %l1
+  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t70 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t71 = load i8*, i8** %l4
+  %t72 = load double, double* %l5
+  br i1 %t66, label %then9, label %merge10
 then9:
   br label %afterloop8
 merge10:
-  %t72 = extractvalue %NativeStruct %definition, 1
-  %t73 = load double, double* %l5
-  %t74 = load { i8**, i64 }, { i8**, i64 }* %t72
-  %t75 = extractvalue { i8**, i64 } %t74, 0
-  %t76 = extractvalue { i8**, i64 } %t74, 1
-  %t77 = icmp uge i64 %t73, %t76
-  ; bounds check: %t77 (if true, out of bounds)
-  %t78 = getelementptr i8*, i8** %t75, i64 %t73
-  %t79 = load i8*, i8** %t78
-  store i8* %t79, i8** %l6
-  %t80 = load i8*, i8** %l6
+  %t73 = extractvalue %NativeStruct %definition, 1
+  %t74 = load double, double* %l5
+  %t75 = load { i8**, i64 }, { i8**, i64 }* %t73
+  %t76 = extractvalue { i8**, i64 } %t75, 0
+  %t77 = extractvalue { i8**, i64 } %t75, 1
+  %t78 = icmp uge i64 %t74, %t77
+  ; bounds check: %t78 (if true, out of bounds)
+  %t79 = getelementptr i8*, i8** %t76, i64 %t74
+  %t80 = load i8*, i8** %t79
+  store i8* %t80, i8** %l6
+  %t81 = load i8*, i8** %l6
   store double 0.0, double* %l7
-  %t81 = load %PythonBuilder, %PythonBuilder* %l1
-  %s82 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.82, i32 0, i32 0
-  %t83 = load double, double* %l7
-  %t84 = load double, double* %l5
-  %t85 = sitofp i64 1 to double
-  %t86 = fadd double %t84, %t85
-  store double %t86, double* %l5
+  %t82 = load %PythonBuilder, %PythonBuilder* %l1
+  %s83 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.83, i32 0, i32 0
+  %t84 = load double, double* %l7
+  %t85 = load double, double* %l5
+  %t86 = sitofp i64 1 to double
+  %t87 = fadd double %t85, %t86
+  store double %t87, double* %l5
   br label %loop.latch7
 loop.latch7:
-  %t87 = load %PythonBuilder, %PythonBuilder* %l1
-  %t88 = load double, double* %l5
+  %t88 = load %PythonBuilder, %PythonBuilder* %l1
+  %t89 = load double, double* %l5
   br label %loop.header5
 afterloop8:
   br label %merge4
 merge4:
-  %t91 = phi %PythonBuilder [ %t52, %then2 ], [ zeroinitializer, %else3 ]
-  store %PythonBuilder %t91, %PythonBuilder* %l1
-  %t92 = load %PythonBuilder, %PythonBuilder* %l1
-  %t93 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t92)
-  store %PythonBuilder %t93, %PythonBuilder* %l1
-  %t94 = load %PythonBuilder, %PythonBuilder* %l1
-  %t95 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t94)
-  store %PythonBuilder %t95, %PythonBuilder* %l1
-  %t96 = load %PythonBuilder, %PythonBuilder* %l1
-  %s97 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.97, i32 0, i32 0
-  %t98 = call %PythonBuilder @builder_emit(%PythonBuilder %t96, i8* %s97)
-  store %PythonBuilder %t98, %PythonBuilder* %l1
-  %t99 = load %PythonBuilder, %PythonBuilder* %l1
-  %t100 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t99)
-  store %PythonBuilder %t100, %PythonBuilder* %l1
-  %t101 = load i8*, i8** %l0
-  %t102 = extractvalue %NativeStruct %definition, 1
-  %t103 = call i8* @render_struct_repr_fields(i8* %t101, { %NativeStructField*, i64 }* null)
-  store i8* %t103, i8** %l8
-  %t104 = load %PythonBuilder, %PythonBuilder* %l1
-  %t105 = load i8*, i8** %l8
-  %t106 = call %PythonBuilder @builder_emit(%PythonBuilder %t104, i8* %t105)
-  store %PythonBuilder %t106, %PythonBuilder* %l1
-  %t107 = load %PythonBuilder, %PythonBuilder* %l1
-  %t108 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t107)
+  %t92 = phi %PythonBuilder [ %t53, %then2 ], [ zeroinitializer, %else3 ]
+  store %PythonBuilder %t92, %PythonBuilder* %l1
+  %t93 = load %PythonBuilder, %PythonBuilder* %l1
+  %t94 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t93)
+  store %PythonBuilder %t94, %PythonBuilder* %l1
+  %t95 = load %PythonBuilder, %PythonBuilder* %l1
+  %t96 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t95)
+  store %PythonBuilder %t96, %PythonBuilder* %l1
+  %t97 = load %PythonBuilder, %PythonBuilder* %l1
+  %s98 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.98, i32 0, i32 0
+  %t99 = call %PythonBuilder @builder_emit(%PythonBuilder %t97, i8* %s98)
+  store %PythonBuilder %t99, %PythonBuilder* %l1
+  %t100 = load %PythonBuilder, %PythonBuilder* %l1
+  %t101 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t100)
+  store %PythonBuilder %t101, %PythonBuilder* %l1
+  %t102 = load i8*, i8** %l0
+  %t103 = extractvalue %NativeStruct %definition, 1
+  %t104 = bitcast { i8**, i64 }* %t103 to { %NativeStructField*, i64 }*
+  %t105 = call i8* @render_struct_repr_fields(i8* %t102, { %NativeStructField*, i64 }* %t104)
+  store i8* %t105, i8** %l8
+  %t106 = load %PythonBuilder, %PythonBuilder* %l1
+  %t107 = load i8*, i8** %l8
+  %t108 = call %PythonBuilder @builder_emit(%PythonBuilder %t106, i8* %t107)
   store %PythonBuilder %t108, %PythonBuilder* %l1
-  %t109 = load i8*, i8** %l0
-  %s110 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.110, i32 0, i32 0
-  %t111 = icmp eq i8* %t109, %s110
-  %t112 = load i8*, i8** %l0
-  %t113 = load %PythonBuilder, %PythonBuilder* %l1
-  %t114 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t115 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t116 = load i8*, i8** %l4
-  %t117 = load i8*, i8** %l8
-  br i1 %t111, label %then11, label %merge12
+  %t109 = load %PythonBuilder, %PythonBuilder* %l1
+  %t110 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t109)
+  store %PythonBuilder %t110, %PythonBuilder* %l1
+  %t111 = load i8*, i8** %l0
+  %s112 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.112, i32 0, i32 0
+  %t113 = icmp eq i8* %t111, %s112
+  %t114 = load i8*, i8** %l0
+  %t115 = load %PythonBuilder, %PythonBuilder* %l1
+  %t116 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t118 = load i8*, i8** %l4
+  %t119 = load i8*, i8** %l8
+  br i1 %t113, label %then11, label %merge12
 then11:
-  %t118 = load %PythonBuilder, %PythonBuilder* %l1
-  %t119 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t118)
-  store %PythonBuilder %t119, %PythonBuilder* %l1
   %t120 = load %PythonBuilder, %PythonBuilder* %l1
-  %s121 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.121, i32 0, i32 0
-  %t122 = call %PythonBuilder @builder_emit(%PythonBuilder %t120, i8* %s121)
-  store %PythonBuilder %t122, %PythonBuilder* %l1
-  %t123 = load %PythonBuilder, %PythonBuilder* %l1
-  %t124 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t123)
+  %t121 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t120)
+  store %PythonBuilder %t121, %PythonBuilder* %l1
+  %t122 = load %PythonBuilder, %PythonBuilder* %l1
+  %s123 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.123, i32 0, i32 0
+  %t124 = call %PythonBuilder @builder_emit(%PythonBuilder %t122, i8* %s123)
   store %PythonBuilder %t124, %PythonBuilder* %l1
   %t125 = load %PythonBuilder, %PythonBuilder* %l1
-  %s126 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.126, i32 0, i32 0
-  %t127 = call %PythonBuilder @builder_emit(%PythonBuilder %t125, i8* %s126)
-  store %PythonBuilder %t127, %PythonBuilder* %l1
-  %t128 = load %PythonBuilder, %PythonBuilder* %l1
-  %s129 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.129, i32 0, i32 0
-  %t130 = call %PythonBuilder @builder_emit(%PythonBuilder %t128, i8* %s129)
-  store %PythonBuilder %t130, %PythonBuilder* %l1
-  %t131 = load %PythonBuilder, %PythonBuilder* %l1
-  %t132 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t131)
+  %t126 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t125)
+  store %PythonBuilder %t126, %PythonBuilder* %l1
+  %t127 = load %PythonBuilder, %PythonBuilder* %l1
+  %s128 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.128, i32 0, i32 0
+  %t129 = call %PythonBuilder @builder_emit(%PythonBuilder %t127, i8* %s128)
+  store %PythonBuilder %t129, %PythonBuilder* %l1
+  %t130 = load %PythonBuilder, %PythonBuilder* %l1
+  %s131 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.131, i32 0, i32 0
+  %t132 = call %PythonBuilder @builder_emit(%PythonBuilder %t130, i8* %s131)
   store %PythonBuilder %t132, %PythonBuilder* %l1
   %t133 = load %PythonBuilder, %PythonBuilder* %l1
-  %t134 = load %PythonBuilder, %PythonBuilder* %l1
-  %t135 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t134)
-  store %PythonBuilder %t135, %PythonBuilder* %l1
+  %t134 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t133)
+  store %PythonBuilder %t134, %PythonBuilder* %l1
+  %t135 = load %PythonBuilder, %PythonBuilder* %l1
   %t136 = load %PythonBuilder, %PythonBuilder* %l1
-  %s137 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.137, i32 0, i32 0
-  %t138 = call %PythonBuilder @builder_emit(%PythonBuilder %t136, i8* %s137)
-  store %PythonBuilder %t138, %PythonBuilder* %l1
-  %t139 = load %PythonBuilder, %PythonBuilder* %l1
-  %t140 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t139)
+  %t137 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t136)
+  store %PythonBuilder %t137, %PythonBuilder* %l1
+  %t138 = load %PythonBuilder, %PythonBuilder* %l1
+  %s139 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.139, i32 0, i32 0
+  %t140 = call %PythonBuilder @builder_emit(%PythonBuilder %t138, i8* %s139)
   store %PythonBuilder %t140, %PythonBuilder* %l1
   %t141 = load %PythonBuilder, %PythonBuilder* %l1
-  %s142 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.142, i32 0, i32 0
-  %t143 = call %PythonBuilder @builder_emit(%PythonBuilder %t141, i8* %s142)
-  store %PythonBuilder %t143, %PythonBuilder* %l1
-  %t144 = load %PythonBuilder, %PythonBuilder* %l1
-  %t145 = load %PythonBuilder, %PythonBuilder* %l1
-  %t146 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t145)
-  store %PythonBuilder %t146, %PythonBuilder* %l1
+  %t142 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t141)
+  store %PythonBuilder %t142, %PythonBuilder* %l1
+  %t143 = load %PythonBuilder, %PythonBuilder* %l1
+  %s144 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.144, i32 0, i32 0
+  %t145 = call %PythonBuilder @builder_emit(%PythonBuilder %t143, i8* %s144)
+  store %PythonBuilder %t145, %PythonBuilder* %l1
+  %t146 = load %PythonBuilder, %PythonBuilder* %l1
   %t147 = load %PythonBuilder, %PythonBuilder* %l1
-  %s148 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.148, i32 0, i32 0
-  %t149 = call %PythonBuilder @builder_emit(%PythonBuilder %t147, i8* %s148)
-  store %PythonBuilder %t149, %PythonBuilder* %l1
-  %t150 = load %PythonBuilder, %PythonBuilder* %l1
-  %t151 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t150)
+  %t148 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t147)
+  store %PythonBuilder %t148, %PythonBuilder* %l1
+  %t149 = load %PythonBuilder, %PythonBuilder* %l1
+  %s150 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.150, i32 0, i32 0
+  %t151 = call %PythonBuilder @builder_emit(%PythonBuilder %t149, i8* %s150)
   store %PythonBuilder %t151, %PythonBuilder* %l1
   %t152 = load %PythonBuilder, %PythonBuilder* %l1
-  %t153 = load %PythonBuilder, %PythonBuilder* %l1
-  %t154 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t153)
-  store %PythonBuilder %t154, %PythonBuilder* %l1
+  %t153 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t152)
+  store %PythonBuilder %t153, %PythonBuilder* %l1
+  %t154 = load %PythonBuilder, %PythonBuilder* %l1
   %t155 = load %PythonBuilder, %PythonBuilder* %l1
-  %s156 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.156, i32 0, i32 0
-  %t157 = call %PythonBuilder @builder_emit(%PythonBuilder %t155, i8* %s156)
-  store %PythonBuilder %t157, %PythonBuilder* %l1
-  %t158 = load %PythonBuilder, %PythonBuilder* %l1
-  %t159 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t158)
+  %t156 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t155)
+  store %PythonBuilder %t156, %PythonBuilder* %l1
+  %t157 = load %PythonBuilder, %PythonBuilder* %l1
+  %s158 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.158, i32 0, i32 0
+  %t159 = call %PythonBuilder @builder_emit(%PythonBuilder %t157, i8* %s158)
   store %PythonBuilder %t159, %PythonBuilder* %l1
+  %t160 = load %PythonBuilder, %PythonBuilder* %l1
+  %t161 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t160)
+  store %PythonBuilder %t161, %PythonBuilder* %l1
   br label %merge12
 merge12:
-  %t160 = phi %PythonBuilder [ %t119, %then11 ], [ %t113, %entry ]
-  %t161 = phi %PythonBuilder [ %t122, %then11 ], [ %t113, %entry ]
-  %t162 = phi %PythonBuilder [ %t124, %then11 ], [ %t113, %entry ]
-  %t163 = phi %PythonBuilder [ %t127, %then11 ], [ %t113, %entry ]
-  %t164 = phi %PythonBuilder [ %t130, %then11 ], [ %t113, %entry ]
-  %t165 = phi %PythonBuilder [ %t132, %then11 ], [ %t113, %entry ]
-  %t166 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t113, %entry ]
-  %t167 = phi %PythonBuilder [ %t135, %then11 ], [ %t113, %entry ]
-  %t168 = phi %PythonBuilder [ %t138, %then11 ], [ %t113, %entry ]
-  %t169 = phi %PythonBuilder [ %t140, %then11 ], [ %t113, %entry ]
-  %t170 = phi %PythonBuilder [ %t143, %then11 ], [ %t113, %entry ]
-  %t171 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t113, %entry ]
-  %t172 = phi %PythonBuilder [ %t146, %then11 ], [ %t113, %entry ]
-  %t173 = phi %PythonBuilder [ %t149, %then11 ], [ %t113, %entry ]
-  %t174 = phi %PythonBuilder [ %t151, %then11 ], [ %t113, %entry ]
-  %t175 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t113, %entry ]
-  %t176 = phi %PythonBuilder [ %t154, %then11 ], [ %t113, %entry ]
-  %t177 = phi %PythonBuilder [ %t157, %then11 ], [ %t113, %entry ]
-  %t178 = phi %PythonBuilder [ %t159, %then11 ], [ %t113, %entry ]
-  store %PythonBuilder %t160, %PythonBuilder* %l1
-  store %PythonBuilder %t161, %PythonBuilder* %l1
+  %t162 = phi %PythonBuilder [ %t121, %then11 ], [ %t115, %entry ]
+  %t163 = phi %PythonBuilder [ %t124, %then11 ], [ %t115, %entry ]
+  %t164 = phi %PythonBuilder [ %t126, %then11 ], [ %t115, %entry ]
+  %t165 = phi %PythonBuilder [ %t129, %then11 ], [ %t115, %entry ]
+  %t166 = phi %PythonBuilder [ %t132, %then11 ], [ %t115, %entry ]
+  %t167 = phi %PythonBuilder [ %t134, %then11 ], [ %t115, %entry ]
+  %t168 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t115, %entry ]
+  %t169 = phi %PythonBuilder [ %t137, %then11 ], [ %t115, %entry ]
+  %t170 = phi %PythonBuilder [ %t140, %then11 ], [ %t115, %entry ]
+  %t171 = phi %PythonBuilder [ %t142, %then11 ], [ %t115, %entry ]
+  %t172 = phi %PythonBuilder [ %t145, %then11 ], [ %t115, %entry ]
+  %t173 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t115, %entry ]
+  %t174 = phi %PythonBuilder [ %t148, %then11 ], [ %t115, %entry ]
+  %t175 = phi %PythonBuilder [ %t151, %then11 ], [ %t115, %entry ]
+  %t176 = phi %PythonBuilder [ %t153, %then11 ], [ %t115, %entry ]
+  %t177 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t115, %entry ]
+  %t178 = phi %PythonBuilder [ %t156, %then11 ], [ %t115, %entry ]
+  %t179 = phi %PythonBuilder [ %t159, %then11 ], [ %t115, %entry ]
+  %t180 = phi %PythonBuilder [ %t161, %then11 ], [ %t115, %entry ]
   store %PythonBuilder %t162, %PythonBuilder* %l1
   store %PythonBuilder %t163, %PythonBuilder* %l1
   store %PythonBuilder %t164, %PythonBuilder* %l1
@@ -1641,133 +1649,136 @@ merge12:
   store %PythonBuilder %t176, %PythonBuilder* %l1
   store %PythonBuilder %t177, %PythonBuilder* %l1
   store %PythonBuilder %t178, %PythonBuilder* %l1
-  %t179 = extractvalue %NativeStruct %definition, 2
-  %t180 = load { i8**, i64 }, { i8**, i64 }* %t179
-  %t181 = extractvalue { i8**, i64 } %t180, 1
-  %t182 = icmp sgt i64 %t181, 0
-  %t183 = load i8*, i8** %l0
-  %t184 = load %PythonBuilder, %PythonBuilder* %l1
-  %t185 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t186 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t187 = load i8*, i8** %l4
-  %t188 = load i8*, i8** %l8
-  br i1 %t182, label %then13, label %merge14
+  store %PythonBuilder %t179, %PythonBuilder* %l1
+  store %PythonBuilder %t180, %PythonBuilder* %l1
+  %t181 = extractvalue %NativeStruct %definition, 2
+  %t182 = load { i8**, i64 }, { i8**, i64 }* %t181
+  %t183 = extractvalue { i8**, i64 } %t182, 1
+  %t184 = icmp sgt i64 %t183, 0
+  %t185 = load i8*, i8** %l0
+  %t186 = load %PythonBuilder, %PythonBuilder* %l1
+  %t187 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t188 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t189 = load i8*, i8** %l4
+  %t190 = load i8*, i8** %l8
+  br i1 %t184, label %then13, label %merge14
 then13:
-  %t189 = load %PythonBuilder, %PythonBuilder* %l1
-  %t190 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t189)
-  store %PythonBuilder %t190, %PythonBuilder* %l1
-  %t191 = sitofp i64 0 to double
-  store double %t191, double* %l9
-  %t192 = load i8*, i8** %l0
-  %t193 = load %PythonBuilder, %PythonBuilder* %l1
-  %t194 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t195 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t196 = load i8*, i8** %l4
-  %t197 = load i8*, i8** %l8
-  %t198 = load double, double* %l9
+  %t191 = load %PythonBuilder, %PythonBuilder* %l1
+  %t192 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t191)
+  store %PythonBuilder %t192, %PythonBuilder* %l1
+  %t193 = sitofp i64 0 to double
+  store double %t193, double* %l9
+  %t194 = load i8*, i8** %l0
+  %t195 = load %PythonBuilder, %PythonBuilder* %l1
+  %t196 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t197 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t198 = load i8*, i8** %l4
+  %t199 = load i8*, i8** %l8
+  %t200 = load double, double* %l9
   br label %loop.header15
 loop.header15:
-  %t254 = phi %PythonBuilder [ %t193, %then13 ], [ %t251, %loop.latch17 ]
-  %t255 = phi { i8**, i64 }* [ %t194, %then13 ], [ %t252, %loop.latch17 ]
-  %t256 = phi double [ %t198, %then13 ], [ %t253, %loop.latch17 ]
-  store %PythonBuilder %t254, %PythonBuilder* %l1
-  store { i8**, i64 }* %t255, { i8**, i64 }** %l2
-  store double %t256, double* %l9
+  %t257 = phi %PythonBuilder [ %t195, %then13 ], [ %t254, %loop.latch17 ]
+  %t258 = phi { i8**, i64 }* [ %t196, %then13 ], [ %t255, %loop.latch17 ]
+  %t259 = phi double [ %t200, %then13 ], [ %t256, %loop.latch17 ]
+  store %PythonBuilder %t257, %PythonBuilder* %l1
+  store { i8**, i64 }* %t258, { i8**, i64 }** %l2
+  store double %t259, double* %l9
   br label %loop.body16
 loop.body16:
-  %t199 = load double, double* %l9
-  %t200 = extractvalue %NativeStruct %definition, 2
-  %t201 = load { i8**, i64 }, { i8**, i64 }* %t200
-  %t202 = extractvalue { i8**, i64 } %t201, 1
-  %t203 = sitofp i64 %t202 to double
-  %t204 = fcmp oge double %t199, %t203
-  %t205 = load i8*, i8** %l0
-  %t206 = load %PythonBuilder, %PythonBuilder* %l1
-  %t207 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t208 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t209 = load i8*, i8** %l4
-  %t210 = load i8*, i8** %l8
-  %t211 = load double, double* %l9
-  br i1 %t204, label %then19, label %merge20
+  %t201 = load double, double* %l9
+  %t202 = extractvalue %NativeStruct %definition, 2
+  %t203 = load { i8**, i64 }, { i8**, i64 }* %t202
+  %t204 = extractvalue { i8**, i64 } %t203, 1
+  %t205 = sitofp i64 %t204 to double
+  %t206 = fcmp oge double %t201, %t205
+  %t207 = load i8*, i8** %l0
+  %t208 = load %PythonBuilder, %PythonBuilder* %l1
+  %t209 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t210 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t211 = load i8*, i8** %l4
+  %t212 = load i8*, i8** %l8
+  %t213 = load double, double* %l9
+  br i1 %t206, label %then19, label %merge20
 then19:
   br label %afterloop18
 merge20:
-  %t212 = extractvalue %NativeStruct %definition, 2
-  %t213 = load double, double* %l9
-  %t214 = load { i8**, i64 }, { i8**, i64 }* %t212
-  %t215 = extractvalue { i8**, i64 } %t214, 0
-  %t216 = extractvalue { i8**, i64 } %t214, 1
-  %t217 = icmp uge i64 %t213, %t216
-  ; bounds check: %t217 (if true, out of bounds)
-  %t218 = getelementptr i8*, i8** %t215, i64 %t213
-  %t219 = load i8*, i8** %t218
-  store i8* %t219, i8** %l10
-  %t220 = load %PythonBuilder, %PythonBuilder* %l1
-  %t221 = load i8*, i8** %l10
-  %t222 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t220, %NativeFunction zeroinitializer)
-  store %PythonFunctionEmission %t222, %PythonFunctionEmission* %l11
-  %t223 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  %t224 = extractvalue %PythonFunctionEmission %t223, 0
-  store %PythonBuilder zeroinitializer, %PythonBuilder* %l1
+  %t214 = extractvalue %NativeStruct %definition, 2
+  %t215 = load double, double* %l9
+  %t216 = load { i8**, i64 }, { i8**, i64 }* %t214
+  %t217 = extractvalue { i8**, i64 } %t216, 0
+  %t218 = extractvalue { i8**, i64 } %t216, 1
+  %t219 = icmp uge i64 %t215, %t218
+  ; bounds check: %t219 (if true, out of bounds)
+  %t220 = getelementptr i8*, i8** %t217, i64 %t215
+  %t221 = load i8*, i8** %t220
+  store i8* %t221, i8** %l10
+  %t222 = load %PythonBuilder, %PythonBuilder* %l1
+  %t223 = load i8*, i8** %l10
+  %t224 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t222, %NativeFunction zeroinitializer)
+  store %PythonFunctionEmission %t224, %PythonFunctionEmission* %l11
   %t225 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  %t226 = extractvalue %PythonFunctionEmission %t225, 1
-  %t227 = call double @diagnosticsconcat({ i8**, i64 }* %t226)
-  store { i8**, i64 }* null, { i8**, i64 }** %l2
-  %t228 = load double, double* %l9
-  %t229 = sitofp i64 1 to double
-  %t230 = fadd double %t228, %t229
-  %t231 = extractvalue %NativeStruct %definition, 2
-  %t232 = load { i8**, i64 }, { i8**, i64 }* %t231
-  %t233 = extractvalue { i8**, i64 } %t232, 1
-  %t234 = sitofp i64 %t233 to double
-  %t235 = fcmp olt double %t230, %t234
-  %t236 = load i8*, i8** %l0
-  %t237 = load %PythonBuilder, %PythonBuilder* %l1
-  %t238 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t239 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t240 = load i8*, i8** %l4
-  %t241 = load i8*, i8** %l8
-  %t242 = load double, double* %l9
-  %t243 = load i8*, i8** %l10
-  %t244 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  br i1 %t235, label %then21, label %merge22
+  %t226 = extractvalue %PythonFunctionEmission %t225, 0
+  store %PythonBuilder zeroinitializer, %PythonBuilder* %l1
+  %t227 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t228 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
+  %t229 = extractvalue %PythonFunctionEmission %t228, 1
+  %t230 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t227, { i8**, i64 }* %t229)
+  store { i8**, i64 }* %t230, { i8**, i64 }** %l2
+  %t231 = load double, double* %l9
+  %t232 = sitofp i64 1 to double
+  %t233 = fadd double %t231, %t232
+  %t234 = extractvalue %NativeStruct %definition, 2
+  %t235 = load { i8**, i64 }, { i8**, i64 }* %t234
+  %t236 = extractvalue { i8**, i64 } %t235, 1
+  %t237 = sitofp i64 %t236 to double
+  %t238 = fcmp olt double %t233, %t237
+  %t239 = load i8*, i8** %l0
+  %t240 = load %PythonBuilder, %PythonBuilder* %l1
+  %t241 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t242 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t243 = load i8*, i8** %l4
+  %t244 = load i8*, i8** %l8
+  %t245 = load double, double* %l9
+  %t246 = load i8*, i8** %l10
+  %t247 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
+  br i1 %t238, label %then21, label %merge22
 then21:
-  %t245 = load %PythonBuilder, %PythonBuilder* %l1
-  %t246 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t245)
-  store %PythonBuilder %t246, %PythonBuilder* %l1
+  %t248 = load %PythonBuilder, %PythonBuilder* %l1
+  %t249 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t248)
+  store %PythonBuilder %t249, %PythonBuilder* %l1
   br label %merge22
 merge22:
-  %t247 = phi %PythonBuilder [ %t246, %then21 ], [ %t237, %loop.body16 ]
-  store %PythonBuilder %t247, %PythonBuilder* %l1
-  %t248 = load double, double* %l9
-  %t249 = sitofp i64 1 to double
-  %t250 = fadd double %t248, %t249
-  store double %t250, double* %l9
+  %t250 = phi %PythonBuilder [ %t249, %then21 ], [ %t240, %loop.body16 ]
+  store %PythonBuilder %t250, %PythonBuilder* %l1
+  %t251 = load double, double* %l9
+  %t252 = sitofp i64 1 to double
+  %t253 = fadd double %t251, %t252
+  store double %t253, double* %l9
   br label %loop.latch17
 loop.latch17:
-  %t251 = load %PythonBuilder, %PythonBuilder* %l1
-  %t252 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t253 = load double, double* %l9
+  %t254 = load %PythonBuilder, %PythonBuilder* %l1
+  %t255 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t256 = load double, double* %l9
   br label %loop.header15
 afterloop18:
   br label %merge14
 merge14:
-  %t257 = phi %PythonBuilder [ %t190, %then13 ], [ %t184, %entry ]
-  %t258 = phi %PythonBuilder [ zeroinitializer, %then13 ], [ %t184, %entry ]
-  %t259 = phi { i8**, i64 }* [ null, %then13 ], [ %t185, %entry ]
-  %t260 = phi %PythonBuilder [ %t246, %then13 ], [ %t184, %entry ]
-  store %PythonBuilder %t257, %PythonBuilder* %l1
-  store %PythonBuilder %t258, %PythonBuilder* %l1
-  store { i8**, i64 }* %t259, { i8**, i64 }** %l2
+  %t260 = phi %PythonBuilder [ %t192, %then13 ], [ %t186, %entry ]
+  %t261 = phi %PythonBuilder [ zeroinitializer, %then13 ], [ %t186, %entry ]
+  %t262 = phi { i8**, i64 }* [ %t230, %then13 ], [ %t187, %entry ]
+  %t263 = phi %PythonBuilder [ %t249, %then13 ], [ %t186, %entry ]
   store %PythonBuilder %t260, %PythonBuilder* %l1
-  %t261 = load %PythonBuilder, %PythonBuilder* %l1
-  %t262 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t261)
-  store %PythonBuilder %t262, %PythonBuilder* %l1
-  %t263 = load %PythonBuilder, %PythonBuilder* %l1
-  %t264 = insertvalue %PythonStructEmission undef, i8* null, 0
-  %t265 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t266 = insertvalue %PythonStructEmission %t264, { i8**, i64 }* %t265, 1
-  ret %PythonStructEmission %t266
+  store %PythonBuilder %t261, %PythonBuilder* %l1
+  store { i8**, i64 }* %t262, { i8**, i64 }** %l2
+  store %PythonBuilder %t263, %PythonBuilder* %l1
+  %t264 = load %PythonBuilder, %PythonBuilder* %l1
+  %t265 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t264)
+  store %PythonBuilder %t265, %PythonBuilder* %l1
+  %t266 = load %PythonBuilder, %PythonBuilder* %l1
+  %t267 = insertvalue %PythonStructEmission undef, i8* null, 0
+  %t268 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t269 = insertvalue %PythonStructEmission %t267, { i8**, i64 }* %t268, 1
+  ret %PythonStructEmission %t269
 }
 
 define { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* %fields) {
@@ -1880,9 +1891,10 @@ loop.latch2:
   %t59 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t64 = call double @requiredconcat({ i8**, i64 }* %t63)
-  ret { i8**, i64 }* null
+  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t64 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t65 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t63, { i8**, i64 }* %t64)
+  ret { i8**, i64 }* %t65
 }
 
 define i8* @render_struct_repr_fields(i8* %class_name, { %NativeStructField*, i64 }* %fields) {
@@ -5989,272 +6001,273 @@ entry:
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l1
   %t5 = extractvalue %NativeFunction %function, 1
-  %t6 = call { i8**, i64 }* @render_python_parameters({ %NativeParameter*, i64 }* null)
-  store { i8**, i64 }* %t6, { i8**, i64 }** %l2
-  %s7 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.7, i32 0, i32 0
-  %t8 = extractvalue %NativeFunction %function, 0
-  %t9 = call i8* @sanitize_identifier(i8* %t8)
-  %t10 = add i8* %s7, %t9
-  %s11 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.11, i32 0, i32 0
-  %t12 = add i8* %t10, %s11
-  store i8* %t12, i8** %l3
-  %t13 = load %PythonBuilder, %PythonBuilder* %l0
-  %t14 = load i8*, i8** %l3
-  %t15 = call %PythonBuilder @builder_emit(%PythonBuilder %t13, i8* %t14)
-  store %PythonBuilder %t15, %PythonBuilder* %l0
-  %t16 = load %PythonBuilder, %PythonBuilder* %l0
-  %t17 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t16)
-  store %PythonBuilder %t17, %PythonBuilder* %l0
-  %t18 = extractvalue %NativeFunction %function, 3
-  %t19 = load { i8**, i64 }, { i8**, i64 }* %t18
-  %t20 = extractvalue { i8**, i64 } %t19, 1
-  %t21 = icmp sgt i64 %t20, 0
-  %t22 = load %PythonBuilder, %PythonBuilder* %l0
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t25 = load i8*, i8** %l3
-  br i1 %t21, label %then0, label %merge1
+  %t6 = bitcast { i8**, i64 }* %t5 to { %NativeParameter*, i64 }*
+  %t7 = call { i8**, i64 }* @render_python_parameters({ %NativeParameter*, i64 }* %t6)
+  store { i8**, i64 }* %t7, { i8**, i64 }** %l2
+  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.8, i32 0, i32 0
+  %t9 = extractvalue %NativeFunction %function, 0
+  %t10 = call i8* @sanitize_identifier(i8* %t9)
+  %t11 = add i8* %s8, %t10
+  %s12 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.12, i32 0, i32 0
+  %t13 = add i8* %t11, %s12
+  store i8* %t13, i8** %l3
+  %t14 = load %PythonBuilder, %PythonBuilder* %l0
+  %t15 = load i8*, i8** %l3
+  %t16 = call %PythonBuilder @builder_emit(%PythonBuilder %t14, i8* %t15)
+  store %PythonBuilder %t16, %PythonBuilder* %l0
+  %t17 = load %PythonBuilder, %PythonBuilder* %l0
+  %t18 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t17)
+  store %PythonBuilder %t18, %PythonBuilder* %l0
+  %t19 = extractvalue %NativeFunction %function, 3
+  %t20 = load { i8**, i64 }, { i8**, i64 }* %t19
+  %t21 = extractvalue { i8**, i64 } %t20, 1
+  %t22 = icmp sgt i64 %t21, 0
+  %t23 = load %PythonBuilder, %PythonBuilder* %l0
+  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t26 = load i8*, i8** %l3
+  br i1 %t22, label %then0, label %merge1
 then0:
-  %t26 = load %PythonBuilder, %PythonBuilder* %l0
-  %s27 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.27, i32 0, i32 0
-  %t28 = extractvalue %NativeFunction %function, 3
+  %t27 = load %PythonBuilder, %PythonBuilder* %l0
+  %s28 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.28, i32 0, i32 0
+  %t29 = extractvalue %NativeFunction %function, 3
   br label %merge1
 merge1:
-  %t29 = phi %PythonBuilder [ zeroinitializer, %then0 ], [ %t22, %entry ]
-  store %PythonBuilder %t29, %PythonBuilder* %l0
-  %t30 = extractvalue %NativeFunction %function, 4
-  %t31 = load { i8**, i64 }, { i8**, i64 }* %t30
-  %t32 = extractvalue { i8**, i64 } %t31, 1
-  %t33 = icmp eq i64 %t32, 0
-  %t34 = load %PythonBuilder, %PythonBuilder* %l0
-  %t35 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t37 = load i8*, i8** %l3
-  br i1 %t33, label %then2, label %merge3
+  %t30 = phi %PythonBuilder [ zeroinitializer, %then0 ], [ %t23, %entry ]
+  store %PythonBuilder %t30, %PythonBuilder* %l0
+  %t31 = extractvalue %NativeFunction %function, 4
+  %t32 = load { i8**, i64 }, { i8**, i64 }* %t31
+  %t33 = extractvalue { i8**, i64 } %t32, 1
+  %t34 = icmp eq i64 %t33, 0
+  %t35 = load %PythonBuilder, %PythonBuilder* %l0
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t38 = load i8*, i8** %l3
+  br i1 %t34, label %then2, label %merge3
 then2:
-  %t38 = load %PythonBuilder, %PythonBuilder* %l0
-  %s39 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.39, i32 0, i32 0
-  %t40 = call %PythonBuilder @builder_emit(%PythonBuilder %t38, i8* %s39)
-  store %PythonBuilder %t40, %PythonBuilder* %l0
-  %t41 = load %PythonBuilder, %PythonBuilder* %l0
-  %t42 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t41)
-  store %PythonBuilder %t42, %PythonBuilder* %l0
-  %t43 = load %PythonBuilder, %PythonBuilder* %l0
-  %t44 = insertvalue %PythonFunctionEmission undef, i8* null, 0
-  %t45 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t46 = insertvalue %PythonFunctionEmission %t44, { i8**, i64 }* %t45, 1
-  ret %PythonFunctionEmission %t46
+  %t39 = load %PythonBuilder, %PythonBuilder* %l0
+  %s40 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.40, i32 0, i32 0
+  %t41 = call %PythonBuilder @builder_emit(%PythonBuilder %t39, i8* %s40)
+  store %PythonBuilder %t41, %PythonBuilder* %l0
+  %t42 = load %PythonBuilder, %PythonBuilder* %l0
+  %t43 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t42)
+  store %PythonBuilder %t43, %PythonBuilder* %l0
+  %t44 = load %PythonBuilder, %PythonBuilder* %l0
+  %t45 = insertvalue %PythonFunctionEmission undef, i8* null, 0
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t47 = insertvalue %PythonFunctionEmission %t45, { i8**, i64 }* %t46, 1
+  ret %PythonFunctionEmission %t47
 merge3:
-  %t47 = sitofp i64 0 to double
-  store double %t47, double* %l4
-  %t48 = alloca [0 x %MatchContext]
-  %t49 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t48, i32 0, i32 0
-  %t50 = alloca { %MatchContext*, i64 }
-  %t51 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t50, i32 0, i32 0
-  store %MatchContext* %t49, %MatchContext** %t51
-  %t52 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t50, i32 0, i32 1
-  store i64 0, i64* %t52
-  store { %MatchContext*, i64 }* %t50, { %MatchContext*, i64 }** %l5
-  %t53 = sitofp i64 0 to double
-  store double %t53, double* %l6
+  %t48 = sitofp i64 0 to double
+  store double %t48, double* %l4
+  %t49 = alloca [0 x %MatchContext]
+  %t50 = getelementptr [0 x %MatchContext], [0 x %MatchContext]* %t49, i32 0, i32 0
+  %t51 = alloca { %MatchContext*, i64 }
+  %t52 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t51, i32 0, i32 0
+  store %MatchContext* %t50, %MatchContext** %t52
+  %t53 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t51, i32 0, i32 1
+  store i64 0, i64* %t53
+  store { %MatchContext*, i64 }* %t51, { %MatchContext*, i64 }** %l5
   %t54 = sitofp i64 0 to double
-  store double %t54, double* %l7
-  %t55 = load %PythonBuilder, %PythonBuilder* %l0
-  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t58 = load i8*, i8** %l3
-  %t59 = load double, double* %l4
-  %t60 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t61 = load double, double* %l6
-  %t62 = load double, double* %l7
+  store double %t54, double* %l6
+  %t55 = sitofp i64 0 to double
+  store double %t55, double* %l7
+  %t56 = load %PythonBuilder, %PythonBuilder* %l0
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t59 = load i8*, i8** %l3
+  %t60 = load double, double* %l4
+  %t61 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t62 = load double, double* %l6
+  %t63 = load double, double* %l7
   br label %loop.header4
 loop.header4:
-  %t90 = phi double [ %t62, %entry ], [ %t89, %loop.latch6 ]
-  store double %t90, double* %l7
+  %t91 = phi double [ %t63, %entry ], [ %t90, %loop.latch6 ]
+  store double %t91, double* %l7
   br label %loop.body5
 loop.body5:
-  %t63 = load double, double* %l7
-  %t64 = extractvalue %NativeFunction %function, 4
-  %t65 = load { i8**, i64 }, { i8**, i64 }* %t64
-  %t66 = extractvalue { i8**, i64 } %t65, 1
-  %t67 = sitofp i64 %t66 to double
-  %t68 = fcmp oge double %t63, %t67
-  %t69 = load %PythonBuilder, %PythonBuilder* %l0
-  %t70 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t72 = load i8*, i8** %l3
-  %t73 = load double, double* %l4
-  %t74 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t75 = load double, double* %l6
-  %t76 = load double, double* %l7
-  br i1 %t68, label %then8, label %merge9
+  %t64 = load double, double* %l7
+  %t65 = extractvalue %NativeFunction %function, 4
+  %t66 = load { i8**, i64 }, { i8**, i64 }* %t65
+  %t67 = extractvalue { i8**, i64 } %t66, 1
+  %t68 = sitofp i64 %t67 to double
+  %t69 = fcmp oge double %t64, %t68
+  %t70 = load %PythonBuilder, %PythonBuilder* %l0
+  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t72 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t73 = load i8*, i8** %l3
+  %t74 = load double, double* %l4
+  %t75 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t76 = load double, double* %l6
+  %t77 = load double, double* %l7
+  br i1 %t69, label %then8, label %merge9
 then8:
   br label %afterloop7
 merge9:
-  %t77 = extractvalue %NativeFunction %function, 4
-  %t78 = load double, double* %l7
-  %t79 = load { i8**, i64 }, { i8**, i64 }* %t77
-  %t80 = extractvalue { i8**, i64 } %t79, 0
-  %t81 = extractvalue { i8**, i64 } %t79, 1
-  %t82 = icmp uge i64 %t78, %t81
-  ; bounds check: %t82 (if true, out of bounds)
-  %t83 = getelementptr i8*, i8** %t80, i64 %t78
-  %t84 = load i8*, i8** %t83
-  store i8* %t84, i8** %l8
-  %t85 = load i8*, i8** %l8
-  %t86 = load double, double* %l7
-  %t87 = sitofp i64 1 to double
-  %t88 = fadd double %t86, %t87
-  store double %t88, double* %l7
+  %t78 = extractvalue %NativeFunction %function, 4
+  %t79 = load double, double* %l7
+  %t80 = load { i8**, i64 }, { i8**, i64 }* %t78
+  %t81 = extractvalue { i8**, i64 } %t80, 0
+  %t82 = extractvalue { i8**, i64 } %t80, 1
+  %t83 = icmp uge i64 %t79, %t82
+  ; bounds check: %t83 (if true, out of bounds)
+  %t84 = getelementptr i8*, i8** %t81, i64 %t79
+  %t85 = load i8*, i8** %t84
+  store i8* %t85, i8** %l8
+  %t86 = load i8*, i8** %l8
+  %t87 = load double, double* %l7
+  %t88 = sitofp i64 1 to double
+  %t89 = fadd double %t87, %t88
+  store double %t89, double* %l7
   br label %loop.latch6
 loop.latch6:
-  %t89 = load double, double* %l7
+  %t90 = load double, double* %l7
   br label %loop.header4
 afterloop7:
-  %t91 = load %PythonBuilder, %PythonBuilder* %l0
-  %t92 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t93 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t94 = load i8*, i8** %l3
-  %t95 = load double, double* %l4
-  %t96 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t97 = load double, double* %l6
-  %t98 = load double, double* %l7
+  %t92 = load %PythonBuilder, %PythonBuilder* %l0
+  %t93 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t95 = load i8*, i8** %l3
+  %t96 = load double, double* %l4
+  %t97 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t98 = load double, double* %l6
+  %t99 = load double, double* %l7
   br label %loop.header10
 loop.header10:
-  %t149 = phi %PythonBuilder [ %t91, %entry ], [ %t146, %loop.latch12 ]
-  %t150 = phi { i8**, i64 }* [ %t92, %entry ], [ %t147, %loop.latch12 ]
-  %t151 = phi { %MatchContext*, i64 }* [ %t96, %entry ], [ %t148, %loop.latch12 ]
-  store %PythonBuilder %t149, %PythonBuilder* %l0
-  store { i8**, i64 }* %t150, { i8**, i64 }** %l1
-  store { %MatchContext*, i64 }* %t151, { %MatchContext*, i64 }** %l5
+  %t150 = phi %PythonBuilder [ %t92, %entry ], [ %t147, %loop.latch12 ]
+  %t151 = phi { i8**, i64 }* [ %t93, %entry ], [ %t148, %loop.latch12 ]
+  %t152 = phi { %MatchContext*, i64 }* [ %t97, %entry ], [ %t149, %loop.latch12 ]
+  store %PythonBuilder %t150, %PythonBuilder* %l0
+  store { i8**, i64 }* %t151, { i8**, i64 }** %l1
+  store { %MatchContext*, i64 }* %t152, { %MatchContext*, i64 }** %l5
   br label %loop.body11
 loop.body11:
-  %t99 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t100 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t99
-  %t101 = extractvalue { %MatchContext*, i64 } %t100, 1
-  %t102 = icmp eq i64 %t101, 0
-  %t103 = load %PythonBuilder, %PythonBuilder* %l0
-  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t106 = load i8*, i8** %l3
-  %t107 = load double, double* %l4
-  %t108 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t109 = load double, double* %l6
-  %t110 = load double, double* %l7
-  br i1 %t102, label %then14, label %merge15
+  %t100 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t101 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t100
+  %t102 = extractvalue { %MatchContext*, i64 } %t101, 1
+  %t103 = icmp eq i64 %t102, 0
+  %t104 = load %PythonBuilder, %PythonBuilder* %l0
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t106 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t107 = load i8*, i8** %l3
+  %t108 = load double, double* %l4
+  %t109 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t110 = load double, double* %l6
+  %t111 = load double, double* %l7
+  br i1 %t103, label %then14, label %merge15
 then14:
   br label %afterloop13
 merge15:
-  %t111 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t112 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t111
-  %t113 = extractvalue { %MatchContext*, i64 } %t112, 1
-  %t114 = sub i64 %t113, 1
-  store i64 %t114, i64* %l9
-  %t115 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t116 = load i64, i64* %l9
-  %t117 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t115
-  %t118 = extractvalue { %MatchContext*, i64 } %t117, 0
-  %t119 = extractvalue { %MatchContext*, i64 } %t117, 1
-  %t120 = icmp uge i64 %t116, %t119
-  ; bounds check: %t120 (if true, out of bounds)
-  %t121 = getelementptr %MatchContext, %MatchContext* %t118, i64 %t116
-  %t122 = load %MatchContext, %MatchContext* %t121
-  store %MatchContext %t122, %MatchContext* %l10
-  %t123 = load %MatchContext, %MatchContext* %l10
-  %t124 = extractvalue %MatchContext %t123, 2
-  %t125 = load %PythonBuilder, %PythonBuilder* %l0
-  %t126 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t127 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t128 = load i8*, i8** %l3
-  %t129 = load double, double* %l4
-  %t130 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t131 = load double, double* %l6
-  %t132 = load double, double* %l7
-  %t133 = load i64, i64* %l9
-  %t134 = load %MatchContext, %MatchContext* %l10
-  br i1 %t124, label %then16, label %merge17
+  %t112 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t113 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t112
+  %t114 = extractvalue { %MatchContext*, i64 } %t113, 1
+  %t115 = sub i64 %t114, 1
+  store i64 %t115, i64* %l9
+  %t116 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t117 = load i64, i64* %l9
+  %t118 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t116
+  %t119 = extractvalue { %MatchContext*, i64 } %t118, 0
+  %t120 = extractvalue { %MatchContext*, i64 } %t118, 1
+  %t121 = icmp uge i64 %t117, %t120
+  ; bounds check: %t121 (if true, out of bounds)
+  %t122 = getelementptr %MatchContext, %MatchContext* %t119, i64 %t117
+  %t123 = load %MatchContext, %MatchContext* %t122
+  store %MatchContext %t123, %MatchContext* %l10
+  %t124 = load %MatchContext, %MatchContext* %l10
+  %t125 = extractvalue %MatchContext %t124, 2
+  %t126 = load %PythonBuilder, %PythonBuilder* %l0
+  %t127 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t128 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t129 = load i8*, i8** %l3
+  %t130 = load double, double* %l4
+  %t131 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t132 = load double, double* %l6
+  %t133 = load double, double* %l7
+  %t134 = load i64, i64* %l9
+  %t135 = load %MatchContext, %MatchContext* %l10
+  br i1 %t125, label %then16, label %merge17
 then16:
-  %t135 = load %PythonBuilder, %PythonBuilder* %l0
-  %t136 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t135)
-  store %PythonBuilder %t136, %PythonBuilder* %l0
+  %t136 = load %PythonBuilder, %PythonBuilder* %l0
+  %t137 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t136)
+  store %PythonBuilder %t137, %PythonBuilder* %l0
   br label %merge17
 merge17:
-  %t137 = phi %PythonBuilder [ %t136, %then16 ], [ %t125, %loop.body11 ]
-  store %PythonBuilder %t137, %PythonBuilder* %l0
-  %t138 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t139 = extractvalue %NativeFunction %function, 0
-  %s140 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.140, i32 0, i32 0
-  %t141 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t138, i8* %t139, i8* %s140)
-  store { i8**, i64 }* %t141, { i8**, i64 }** %l1
-  %t142 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t143 = load i64, i64* %l9
-  %t144 = sitofp i64 %t143 to double
-  %t145 = call { %MatchContext*, i64 }* @truncate_match_contexts({ %MatchContext*, i64 }* %t142, double %t144)
-  store { %MatchContext*, i64 }* %t145, { %MatchContext*, i64 }** %l5
+  %t138 = phi %PythonBuilder [ %t137, %then16 ], [ %t126, %loop.body11 ]
+  store %PythonBuilder %t138, %PythonBuilder* %l0
+  %t139 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t140 = extractvalue %NativeFunction %function, 0
+  %s141 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.141, i32 0, i32 0
+  %t142 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t139, i8* %t140, i8* %s141)
+  store { i8**, i64 }* %t142, { i8**, i64 }** %l1
+  %t143 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t144 = load i64, i64* %l9
+  %t145 = sitofp i64 %t144 to double
+  %t146 = call { %MatchContext*, i64 }* @truncate_match_contexts({ %MatchContext*, i64 }* %t143, double %t145)
+  store { %MatchContext*, i64 }* %t146, { %MatchContext*, i64 }** %l5
   br label %loop.latch12
 loop.latch12:
-  %t146 = load %PythonBuilder, %PythonBuilder* %l0
-  %t147 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t148 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t147 = load %PythonBuilder, %PythonBuilder* %l0
+  %t148 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t149 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
   br label %loop.header10
 afterloop13:
-  %t152 = load %PythonBuilder, %PythonBuilder* %l0
-  %t153 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t154 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t155 = load i8*, i8** %l3
-  %t156 = load double, double* %l4
-  %t157 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t158 = load double, double* %l6
-  %t159 = load double, double* %l7
+  %t153 = load %PythonBuilder, %PythonBuilder* %l0
+  %t154 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t155 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t156 = load i8*, i8** %l3
+  %t157 = load double, double* %l4
+  %t158 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t159 = load double, double* %l6
+  %t160 = load double, double* %l7
   br label %loop.header18
 loop.header18:
-  %t181 = phi %PythonBuilder [ %t152, %entry ], [ %t178, %loop.latch20 ]
-  %t182 = phi double [ %t156, %entry ], [ %t179, %loop.latch20 ]
-  %t183 = phi { i8**, i64 }* [ %t153, %entry ], [ %t180, %loop.latch20 ]
-  store %PythonBuilder %t181, %PythonBuilder* %l0
-  store double %t182, double* %l4
-  store { i8**, i64 }* %t183, { i8**, i64 }** %l1
+  %t182 = phi %PythonBuilder [ %t153, %entry ], [ %t179, %loop.latch20 ]
+  %t183 = phi double [ %t157, %entry ], [ %t180, %loop.latch20 ]
+  %t184 = phi { i8**, i64 }* [ %t154, %entry ], [ %t181, %loop.latch20 ]
+  store %PythonBuilder %t182, %PythonBuilder* %l0
+  store double %t183, double* %l4
+  store { i8**, i64 }* %t184, { i8**, i64 }** %l1
   br label %loop.body19
 loop.body19:
-  %t160 = load double, double* %l4
-  %t161 = sitofp i64 0 to double
-  %t162 = fcmp ole double %t160, %t161
-  %t163 = load %PythonBuilder, %PythonBuilder* %l0
-  %t164 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t165 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t166 = load i8*, i8** %l3
-  %t167 = load double, double* %l4
-  %t168 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t169 = load double, double* %l6
-  %t170 = load double, double* %l7
-  br i1 %t162, label %then22, label %merge23
+  %t161 = load double, double* %l4
+  %t162 = sitofp i64 0 to double
+  %t163 = fcmp ole double %t161, %t162
+  %t164 = load %PythonBuilder, %PythonBuilder* %l0
+  %t165 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t166 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t167 = load i8*, i8** %l3
+  %t168 = load double, double* %l4
+  %t169 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t170 = load double, double* %l6
+  %t171 = load double, double* %l7
+  br i1 %t163, label %then22, label %merge23
 then22:
   br label %afterloop21
 merge23:
-  %t171 = load %PythonBuilder, %PythonBuilder* %l0
-  %t172 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t171)
-  store %PythonBuilder %t172, %PythonBuilder* %l0
-  %t173 = load double, double* %l4
-  %t174 = sitofp i64 1 to double
-  %t175 = fsub double %t173, %t174
-  store double %t175, double* %l4
-  %t176 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t177 = extractvalue %NativeFunction %function, 0
+  %t172 = load %PythonBuilder, %PythonBuilder* %l0
+  %t173 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t172)
+  store %PythonBuilder %t173, %PythonBuilder* %l0
+  %t174 = load double, double* %l4
+  %t175 = sitofp i64 1 to double
+  %t176 = fsub double %t174, %t175
+  store double %t176, double* %l4
+  %t177 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t178 = extractvalue %NativeFunction %function, 0
   br label %loop.latch20
 loop.latch20:
-  %t178 = load %PythonBuilder, %PythonBuilder* %l0
-  %t179 = load double, double* %l4
-  %t180 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t179 = load %PythonBuilder, %PythonBuilder* %l0
+  %t180 = load double, double* %l4
+  %t181 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %loop.header18
 afterloop21:
-  %t184 = load %PythonBuilder, %PythonBuilder* %l0
-  %t185 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t184)
-  store %PythonBuilder %t185, %PythonBuilder* %l0
-  %t186 = load %PythonBuilder, %PythonBuilder* %l0
-  %t187 = insertvalue %PythonFunctionEmission undef, i8* null, 0
-  %t188 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t189 = insertvalue %PythonFunctionEmission %t187, { i8**, i64 }* %t188, 1
-  ret %PythonFunctionEmission %t189
+  %t185 = load %PythonBuilder, %PythonBuilder* %l0
+  %t186 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t185)
+  store %PythonBuilder %t186, %PythonBuilder* %l0
+  %t187 = load %PythonBuilder, %PythonBuilder* %l0
+  %t188 = insertvalue %PythonFunctionEmission undef, i8* null, 0
+  %t189 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t190 = insertvalue %PythonFunctionEmission %t188, { i8**, i64 }* %t189, 1
+  ret %PythonFunctionEmission %t190
 }
 
 define { %MatchContext*, i64 }* @append_match_context({ %MatchContext*, i64 }* %values, %MatchContext %value) {
@@ -6268,8 +6281,11 @@ entry:
   store %MatchContext* %t1, %MatchContext** %t4
   %t5 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = call double @valuesconcat({ %MatchContext*, i64 }* %t3)
-  ret { %MatchContext*, i64 }* null
+  %t6 = bitcast { %MatchContext*, i64 }* %values to { i8**, i64 }*
+  %t7 = bitcast { %MatchContext*, i64 }* %t3 to { i8**, i64 }*
+  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
+  %t9 = bitcast { i8**, i64 }* %t8 to { %MatchContext*, i64 }*
+  ret { %MatchContext*, i64 }* %t9
 }
 
 define { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* %values, double %index, %MatchContext %replacement) {
@@ -7442,8 +7458,8 @@ entry:
   store i8** %t1, i8*** %t4
   %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
   store i64 1, i64* %t5
-  %t6 = call double @valuesconcat({ i8**, i64 }* %t3)
-  ret { i8**, i64 }* null
+  %t6 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %values, { i8**, i64 }* %t3)
+  ret { i8**, i64 }* %t6
 }
 
 define double @add(double %a, double %b) {

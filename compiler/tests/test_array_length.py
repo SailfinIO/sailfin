@@ -158,6 +158,25 @@ fn count_points(points -> Point[]) -> int {
 
 
 @pytest.mark.unit
+def test_native_llvm_array_concat_method(compile_stage2):
+    """Array.concat should keep the receiver as the first runtime argument."""
+    source = """
+fn push(items -> number[]) -> number[] {
+    return items.concat([1.0]);
+}
+"""
+    result = compile_stage2(source)
+
+    assert result is not None
+    assert hasattr(result, 'ir')
+
+    ir_content = result.ir
+    assert '@sailfin_runtime_concat(' in ir_content
+    assert '@sailfin_runtime_concat({ i8**, i64 }*' in ir_content
+    assert ', { i8**, i64 }*' in ir_content
+
+
+@pytest.mark.unit
 def test_native_llvm_struct_array_literal_annotation(compile_stage2):
     """Empty struct array literals should respect their annotated element type."""
     source = """
