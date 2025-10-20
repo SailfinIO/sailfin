@@ -8349,7 +8349,18 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     }
     
     let index_operand = index_result.operand;
-    
+
+    // Ensure the index is materialized as i64 for downstream GEP math
+    let index_coercion = coerce_operand_to_type(index_operand, "i64", current_temp, current_lines);
+    diagnostics = diagnostics.concat(index_coercion.diagnostics);
+    current_lines = index_coercion.lines;
+    current_temp = index_coercion.temp_index;
+    if index_coercion.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce index expression to i64");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    let coerced_index = index_coercion.operand;
+
     // Determine if we're indexing into a heap-allocated array { element_type*, i64 }* or string i8*
     let array_type = base_operand.llvm_type;
     let mut element_type -> string = "";
@@ -8399,47 +8410,42 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     }
     
     // For heap arrays, we need to extract the data pointer and length, then bounds check
-    if is_heap_array || is_string {
+    if is_heap_array {
         let mut data_ptr -> string = "";
         let mut length_value -> string = "";
         
-        if is_heap_array {
-            // Load the array struct value from the pointer
-            // base_operand.value is something like %values with type { double*, i64 }*
-            // We need to load it to get the struct value
-            let array_struct_type = strip_pointer_suffix(array_type);
-            let loaded_array = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
-            current_temp += 1;
-            
-            // Extract data pointer (field 0) from the loaded struct value
-            let data_ptr_extracted = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
-            current_temp += 1;
-            data_ptr = data_ptr_extracted;
-            
-            // Extract length (field 1) from the loaded struct value
-            let length_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
-            current_temp += 1;
-            length_value = length_temp;
-            
-            // Bounds check: if index >= length, trap
-            let bounds_check = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + index_operand.value + ", " + length_value);
-            current_temp += 1;
-            
-            // For now, we'll skip the actual trap and just emit a comment
-            // TODO: Implement proper trap/error handling
-            current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
-        } else {
-            // For strings, we don't have a stored length, so just use the pointer directly
-            data_ptr = base_operand.value;
-        }
+        // Load the array struct value from the pointer
+        // base_operand.value is something like %values with type { double*, i64 }*
+        // We need to load it to get the struct value
+        let array_struct_type = strip_pointer_suffix(array_type);
+        let loaded_array = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
+        current_temp += 1;
         
+        // Extract data pointer (field 0) from the loaded struct value
+        let data_ptr_extracted = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
+        current_temp += 1;
+        data_ptr = data_ptr_extracted;
+        
+        // Extract length (field 1) from the loaded struct value
+        let length_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
+        current_temp += 1;
+        length_value = length_temp;
+        
+        // Bounds check: if index >= length, trap
+        let bounds_check = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
+        current_temp += 1;
+        
+        // For now, we'll skip the actual trap and just emit a comment
+        // TODO: Implement proper trap/error handling
+        current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
+
         // Compute element address using getelementptr
         let element_ptr = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + index_operand.value);
+        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value);
         current_temp += 1;
         
         // Load the element value
@@ -8448,6 +8454,16 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         current_temp += 1;
         
         let operand = LLVMOperand { llvm_type: element_type, value: element_value };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    } else if is_string {
+        // Strings are lowered as contiguous UTF-8 bytes (i8*), so address and materialize the requested code unit.
+        let char_pointer = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + char_pointer + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value);
+        current_temp += 1;
+        let loaded_char = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + loaded_char + " = load i8, i8* " + char_pointer);
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: "i8", value: loaded_char };
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     

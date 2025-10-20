@@ -5788,6 +5788,14 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
         diagnostics = append_string(diagnostics, "llvm lowering: index expression produced no value")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index_operand = index_result.operand
+    index_coercion = coerce_operand_to_type(index_operand, "i64", current_temp, current_lines)
+    diagnostics = (diagnostics) + (index_coercion.diagnostics)
+    current_lines = index_coercion.lines
+    current_temp = index_coercion.temp_index
+    if index_coercion.operand == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce index expression to i64")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    coerced_index = index_coercion.operand
     array_type = base_operand.llvm_type
     element_type = ""
     is_heap_array = False
@@ -5817,36 +5825,43 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
     if len(element_type) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
-    if is_heap_array  or  is_string:
+    if is_heap_array:
         data_ptr = ""
         length_value = ""
-        if is_heap_array:
-            array_struct_type = strip_pointer_suffix(array_type)
-            loaded_array = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value)
-            current_temp += 1
-            data_ptr_extracted = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0")
-            current_temp += 1
-            data_ptr = data_ptr_extracted
-            length_temp = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1")
-            current_temp += 1
-            length_value = length_temp
-            bounds_check = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + index_operand.value + ", " + length_value)
-            current_temp += 1
-            current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)")
-        else:
-            data_ptr = base_operand.value
+        array_struct_type = strip_pointer_suffix(array_type)
+        loaded_array = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value)
+        current_temp += 1
+        data_ptr_extracted = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0")
+        current_temp += 1
+        data_ptr = data_ptr_extracted
+        length_temp = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1")
+        current_temp += 1
+        length_value = length_temp
+        bounds_check = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)")
         element_ptr = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + index_operand.value)
+        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value)
         current_temp += 1
         element_value = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr)
         current_temp += 1
         operand = LLVMOperand(llvm_type=element_type, value=element_value)
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+    else:
+        if is_string:
+            char_pointer = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + char_pointer + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value)
+            current_temp += 1
+            loaded_char = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + loaded_char + " = load i8, i8* " + char_pointer)
+            current_temp += 1
+            operand = LLVMOperand(llvm_type="i8", value=loaded_char)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`")
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
 

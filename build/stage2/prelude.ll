@@ -2175,10 +2175,10 @@ merge3:
   %t26 = load i8*, i8** %l4
   br label %loop.header4
 loop.header4:
-  %t47 = phi i8* [ %t26, %entry ], [ %t45, %loop.latch6 ]
-  %t48 = phi double [ %t25, %entry ], [ %t46, %loop.latch6 ]
-  store i8* %t47, i8** %l4
-  store double %t48, double* %l3
+  %t48 = phi i8* [ %t26, %entry ], [ %t46, %loop.latch6 ]
+  %t49 = phi double [ %t25, %entry ], [ %t47, %loop.latch6 ]
+  store i8* %t48, i8** %l4
+  store double %t49, double* %l3
   br label %loop.body5
 loop.body5:
   %t27 = load double, double* %l3
@@ -2195,24 +2195,25 @@ then8:
 merge9:
   %t35 = load i8*, i8** %l4
   %t36 = load double, double* %l3
-  %t37 = getelementptr i8, i8* %text, i64 %t36
-  %t38 = load i8, i8* %t37
-  %t39 = getelementptr i8, i8* %t35, i64 0
-  %t40 = load i8, i8* %t39
-  %t41 = add i8 %t40, %t38
+  %t37 = fptosi double %t36 to i64
+  %t38 = getelementptr i8, i8* %text, i64 %t37
+  %t39 = load i8, i8* %t38
+  %t40 = getelementptr i8, i8* %t35, i64 0
+  %t41 = load i8, i8* %t40
+  %t42 = add i8 %t41, %t39
   store i8* null, i8** %l4
-  %t42 = load double, double* %l3
-  %t43 = sitofp i64 1 to double
-  %t44 = fadd double %t42, %t43
-  store double %t44, double* %l3
+  %t43 = load double, double* %l3
+  %t44 = sitofp i64 1 to double
+  %t45 = fadd double %t43, %t44
+  store double %t45, double* %l3
   br label %loop.latch6
 loop.latch6:
-  %t45 = load i8*, i8** %l4
-  %t46 = load double, double* %l3
+  %t46 = load i8*, i8** %l4
+  %t47 = load double, double* %l3
   br label %loop.header4
 afterloop7:
-  %t49 = load i8*, i8** %l4
-  ret i8* %t49
+  %t50 = load i8*, i8** %l4
+  ret i8* %t50
 }
 
 define double @find_char(i8* %text, i8* %character, double %start) {
@@ -2346,8 +2347,8 @@ merge7:
   %t62 = load double, double* %l4
   br label %loop.header16
 loop.header16:
-  %t87 = phi double [ %t62, %entry ], [ %t86, %loop.latch18 ]
-  store double %t87, double* %l4
+  %t88 = phi double [ %t62, %entry ], [ %t87, %loop.latch18 ]
+  store double %t88, double* %l4
   br label %loop.body17
 loop.body17:
   %t63 = load double, double* %l4
@@ -2363,32 +2364,33 @@ then20:
   br label %afterloop19
 merge21:
   %t71 = load double, double* %l4
-  %t72 = getelementptr i8, i8* %text, i64 %t71
-  %t73 = load i8, i8* %t72
-  %t74 = load i8*, i8** %l2
-  %t75 = getelementptr i8, i8* %t74, i64 0
-  %t76 = load i8, i8* %t75
-  %t77 = icmp eq i8 %t73, %t76
-  %t78 = load i64, i64* %l0
-  %t79 = load double, double* %l1
-  %t80 = load i8*, i8** %l2
-  %t81 = load double, double* %l4
-  br i1 %t77, label %then22, label %merge23
-then22:
+  %t72 = fptosi double %t71 to i64
+  %t73 = getelementptr i8, i8* %text, i64 %t72
+  %t74 = load i8, i8* %t73
+  %t75 = load i8*, i8** %l2
+  %t76 = getelementptr i8, i8* %t75, i64 0
+  %t77 = load i8, i8* %t76
+  %t78 = icmp eq i8 %t74, %t77
+  %t79 = load i64, i64* %l0
+  %t80 = load double, double* %l1
+  %t81 = load i8*, i8** %l2
   %t82 = load double, double* %l4
-  ret double %t82
-merge23:
+  br i1 %t78, label %then22, label %merge23
+then22:
   %t83 = load double, double* %l4
-  %t84 = sitofp i64 1 to double
-  %t85 = fadd double %t83, %t84
-  store double %t85, double* %l4
+  ret double %t83
+merge23:
+  %t84 = load double, double* %l4
+  %t85 = sitofp i64 1 to double
+  %t86 = fadd double %t84, %t85
+  store double %t86, double* %l4
   br label %loop.latch18
 loop.latch18:
-  %t86 = load double, double* %l4
+  %t87 = load double, double* %l4
   br label %loop.header16
 afterloop19:
-  %t88 = sitofp i64 -1 to double
-  ret double %t88
+  %t89 = sitofp i64 -1 to double
+  ret double %t89
 }
 
 define void @match_exhaustive_failed(i8* %value) {
@@ -3627,14 +3629,15 @@ then2:
   ret i8* %s10
 merge3:
   %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t12 = load { i8**, i64 }, { i8**, i64 }* %t11
-  %t13 = extractvalue { i8**, i64 } %t12, 0
-  %t14 = extractvalue { i8**, i64 } %t12, 1
-  %t15 = icmp uge i64 %index, %t14
-  ; bounds check: %t15 (if true, out of bounds)
-  %t16 = getelementptr i8*, i8** %t13, i64 %index
-  %t17 = load i8*, i8** %t16
-  ret i8* %t17
+  %t12 = fptosi double %index to i64
+  %t13 = load { i8**, i64 }, { i8**, i64 }* %t11
+  %t14 = extractvalue { i8**, i64 } %t13, 0
+  %t15 = extractvalue { i8**, i64 } %t13, 1
+  %t16 = icmp uge i64 %t12, %t15
+  ; bounds check: %t16 (if true, out of bounds)
+  %t17 = getelementptr i8*, i8** %t14, i64 %t12
+  %t18 = load i8*, i8** %t17
+  ret i8* %t18
 }
 
 define double @add(double %a, double %b) {

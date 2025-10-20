@@ -138,9 +138,9 @@ def trim_whitespace(value):
 def looks_like_quoted_string(text):
     if len(text) < 2:
         return False
-    if text[0] != "\"":
+    if text[0] != 34:
         return False
-    if text[len(text) - 1] != "\"":
+    if text[len(text) - 1] != 34:
         return False
     return True
 
@@ -149,7 +149,7 @@ def looks_like_number(text):
         return False
     has_decimal = False
     index = 0
-    if text[0] == "-":
+    if text[0] == 45:
         if len(text) == 1:
             return False
         index = 1
@@ -157,7 +157,7 @@ def looks_like_number(text):
         if index >= len(text):
             break
         ch = text[index]
-        if ch == ".":
+        if ch == 46:
             if has_decimal:
                 return False
             has_decimal = True
@@ -169,7 +169,7 @@ def looks_like_number(text):
     return True
 
 def is_decimal_digit(ch):
-    return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
+    return ch >= 48  and  ch <= 57
 
 def append_decorator_info(collection, item):
     return (collection) + ([item])
@@ -201,7 +201,7 @@ def contains_effect(effects, effect):
     return False
 
 def is_whitespace_char(ch):
-    return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"
+    return ch == 32  or  ch == 9  or  ch == 10  or  ch == 13
 
 def slice_text(text, start, end):
     return substring(text, start, end)

@@ -76,10 +76,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi { %ModuleDiagnostics*, i64 }* [ %t6, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t7, %entry ], [ %t44, %loop.latch2 ]
-  store { %ModuleDiagnostics*, i64 }* %t45, { %ModuleDiagnostics*, i64 }** %l0
-  store double %t46, double* %l1
+  %t46 = phi { %ModuleDiagnostics*, i64 }* [ %t6, %entry ], [ %t44, %loop.latch2 ]
+  %t47 = phi double [ %t7, %entry ], [ %t45, %loop.latch2 ]
+  store { %ModuleDiagnostics*, i64 }* %t46, { %ModuleDiagnostics*, i64 }** %l0
+  store double %t47, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -94,53 +94,54 @@ then4:
   br label %afterloop3
 merge5:
   %t15 = load double, double* %l1
-  %t16 = load { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %entries
-  %t17 = extractvalue { %ModuleDiagnostics*, i64 } %t16, 0
-  %t18 = extractvalue { %ModuleDiagnostics*, i64 } %t16, 1
-  %t19 = icmp uge i64 %t15, %t18
-  ; bounds check: %t19 (if true, out of bounds)
-  %t20 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t17, i64 %t15
-  %t21 = load %ModuleDiagnostics, %ModuleDiagnostics* %t20
-  store %ModuleDiagnostics %t21, %ModuleDiagnostics* %l2
-  %t22 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
-  %t23 = extractvalue %ModuleDiagnostics %t22, 2
-  %t24 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t25 = load double, double* %l1
-  %t26 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
-  br i1 %t23, label %then6, label %merge7
+  %t16 = fptosi double %t15 to i64
+  %t17 = load { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %entries
+  %t18 = extractvalue { %ModuleDiagnostics*, i64 } %t17, 0
+  %t19 = extractvalue { %ModuleDiagnostics*, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t18, i64 %t16
+  %t22 = load %ModuleDiagnostics, %ModuleDiagnostics* %t21
+  store %ModuleDiagnostics %t22, %ModuleDiagnostics* %l2
+  %t23 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
+  %t24 = extractvalue %ModuleDiagnostics %t23, 2
+  %t25 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t26 = load double, double* %l1
+  %t27 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
+  br i1 %t24, label %then6, label %merge7
 then6:
-  %t27 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t28 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
-  %t29 = alloca [1 x %ModuleDiagnostics]
-  %t30 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t29, i32 0, i32 0
-  %t31 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t30, i64 0
-  store %ModuleDiagnostics %t28, %ModuleDiagnostics* %t31
-  %t32 = alloca { %ModuleDiagnostics*, i64 }
-  %t33 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t32, i32 0, i32 0
-  store %ModuleDiagnostics* %t30, %ModuleDiagnostics** %t33
-  %t34 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t32, i32 0, i32 1
-  store i64 1, i64* %t34
-  %t35 = bitcast { %ModuleDiagnostics*, i64 }* %t27 to { i8**, i64 }*
-  %t36 = bitcast { %ModuleDiagnostics*, i64 }* %t32 to { i8**, i64 }*
-  %t37 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t35, { i8**, i64 }* %t36)
-  %t38 = bitcast { i8**, i64 }* %t37 to { %ModuleDiagnostics*, i64 }*
-  store { %ModuleDiagnostics*, i64 }* %t38, { %ModuleDiagnostics*, i64 }** %l0
+  %t28 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t29 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
+  %t30 = alloca [1 x %ModuleDiagnostics]
+  %t31 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t30, i32 0, i32 0
+  %t32 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t31, i64 0
+  store %ModuleDiagnostics %t29, %ModuleDiagnostics* %t32
+  %t33 = alloca { %ModuleDiagnostics*, i64 }
+  %t34 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t33, i32 0, i32 0
+  store %ModuleDiagnostics* %t31, %ModuleDiagnostics** %t34
+  %t35 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t33, i32 0, i32 1
+  store i64 1, i64* %t35
+  %t36 = bitcast { %ModuleDiagnostics*, i64 }* %t28 to { i8**, i64 }*
+  %t37 = bitcast { %ModuleDiagnostics*, i64 }* %t33 to { i8**, i64 }*
+  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t36, { i8**, i64 }* %t37)
+  %t39 = bitcast { i8**, i64 }* %t38 to { %ModuleDiagnostics*, i64 }*
+  store { %ModuleDiagnostics*, i64 }* %t39, { %ModuleDiagnostics*, i64 }** %l0
   br label %merge7
 merge7:
-  %t39 = phi { %ModuleDiagnostics*, i64 }* [ %t38, %then6 ], [ %t24, %loop.body1 ]
-  store { %ModuleDiagnostics*, i64 }* %t39, { %ModuleDiagnostics*, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t40 = phi { %ModuleDiagnostics*, i64 }* [ %t39, %then6 ], [ %t25, %loop.body1 ]
+  store { %ModuleDiagnostics*, i64 }* %t40, { %ModuleDiagnostics*, i64 }** %l0
+  %t41 = load double, double* %l1
+  %t42 = sitofp i64 1 to double
+  %t43 = fadd double %t41, %t42
+  store double %t43, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t44 = load double, double* %l1
+  %t44 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t45 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  ret { %ModuleDiagnostics*, i64 }* %t47
+  %t48 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  ret { %ModuleDiagnostics*, i64 }* %t48
 }
 
 define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, %ProjectCompilation %compilation) {
@@ -162,10 +163,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi { i8**, i64 }* [ %t6, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t7, %entry ], [ %t44, %loop.latch2 ]
-  store { i8**, i64 }* %t45, { i8**, i64 }** %l0
-  store double %t46, double* %l1
+  %t46 = phi { i8**, i64 }* [ %t6, %entry ], [ %t44, %loop.latch2 ]
+  %t47 = phi double [ %t7, %entry ], [ %t45, %loop.latch2 ]
+  store { i8**, i64 }* %t46, { i8**, i64 }** %l0
+  store double %t47, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -180,53 +181,54 @@ then4:
   br label %afterloop3
 merge5:
   %t15 = load double, double* %l1
-  %t16 = load { i8**, i64 }, { i8**, i64 }* %sources
-  %t17 = extractvalue { i8**, i64 } %t16, 0
-  %t18 = extractvalue { i8**, i64 } %t16, 1
-  %t19 = icmp uge i64 %t15, %t18
-  ; bounds check: %t19 (if true, out of bounds)
-  %t20 = getelementptr i8*, i8** %t17, i64 %t15
-  %t21 = load i8*, i8** %t20
-  store i8* %t21, i8** %l2
-  %t22 = load i8*, i8** %l2
-  %t23 = extractvalue %ProjectCompilation %compilation, 0
-  %t24 = bitcast { i8**, i64 }* %t23 to { %CompiledModule*, i64 }*
-  %t25 = call i1 @module_present(i8* %t22, { %CompiledModule*, i64 }* %t24)
-  %t26 = xor i1 %t25, 1
-  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t28 = load double, double* %l1
-  %t29 = load i8*, i8** %l2
-  br i1 %t26, label %then6, label %merge7
+  %t16 = fptosi double %t15 to i64
+  %t17 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t18 = extractvalue { i8**, i64 } %t17, 0
+  %t19 = extractvalue { i8**, i64 } %t17, 1
+  %t20 = icmp uge i64 %t16, %t19
+  ; bounds check: %t20 (if true, out of bounds)
+  %t21 = getelementptr i8*, i8** %t18, i64 %t16
+  %t22 = load i8*, i8** %t21
+  store i8* %t22, i8** %l2
+  %t23 = load i8*, i8** %l2
+  %t24 = extractvalue %ProjectCompilation %compilation, 0
+  %t25 = bitcast { i8**, i64 }* %t24 to { %CompiledModule*, i64 }*
+  %t26 = call i1 @module_present(i8* %t23, { %CompiledModule*, i64 }* %t25)
+  %t27 = xor i1 %t26, 1
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t29 = load double, double* %l1
+  %t30 = load i8*, i8** %l2
+  br i1 %t27, label %then6, label %merge7
 then6:
-  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t31 = load i8*, i8** %l2
-  %t32 = alloca [1 x i8*]
-  %t33 = getelementptr [1 x i8*], [1 x i8*]* %t32, i32 0, i32 0
-  %t34 = getelementptr i8*, i8** %t33, i64 0
-  store i8* %t31, i8** %t34
-  %t35 = alloca { i8**, i64 }
-  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 0
-  store i8** %t33, i8*** %t36
-  %t37 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 1
-  store i64 1, i64* %t37
-  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t30, { i8**, i64 }* %t35)
-  store { i8**, i64 }* %t38, { i8**, i64 }** %l0
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t32 = load i8*, i8** %l2
+  %t33 = alloca [1 x i8*]
+  %t34 = getelementptr [1 x i8*], [1 x i8*]* %t33, i32 0, i32 0
+  %t35 = getelementptr i8*, i8** %t34, i64 0
+  store i8* %t32, i8** %t35
+  %t36 = alloca { i8**, i64 }
+  %t37 = getelementptr { i8**, i64 }, { i8**, i64 }* %t36, i32 0, i32 0
+  store i8** %t34, i8*** %t37
+  %t38 = getelementptr { i8**, i64 }, { i8**, i64 }* %t36, i32 0, i32 1
+  store i64 1, i64* %t38
+  %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t31, { i8**, i64 }* %t36)
+  store { i8**, i64 }* %t39, { i8**, i64 }** %l0
   br label %merge7
 merge7:
-  %t39 = phi { i8**, i64 }* [ %t38, %then6 ], [ %t27, %loop.body1 ]
-  store { i8**, i64 }* %t39, { i8**, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t40 = phi { i8**, i64 }* [ %t39, %then6 ], [ %t28, %loop.body1 ]
+  store { i8**, i64 }* %t40, { i8**, i64 }** %l0
+  %t41 = load double, double* %l1
+  %t42 = sitofp i64 1 to double
+  %t43 = fadd double %t41, %t42
+  store double %t43, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t44 = load double, double* %l1
+  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t45 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t47
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t48
 }
 
 define i1 @module_present(i8* %target, { %CompiledModule*, i64 }* %modules) {
@@ -237,8 +239,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t22 = phi double [ %t1, %entry ], [ %t21, %loop.latch2 ]
-  store double %t22, double* %l0
+  %t23 = phi double [ %t1, %entry ], [ %t22, %loop.latch2 ]
+  store double %t23, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -252,27 +254,28 @@ then4:
   br label %afterloop3
 merge5:
   %t8 = load double, double* %l0
-  %t9 = load { %CompiledModule*, i64 }, { %CompiledModule*, i64 }* %modules
-  %t10 = extractvalue { %CompiledModule*, i64 } %t9, 0
-  %t11 = extractvalue { %CompiledModule*, i64 } %t9, 1
-  %t12 = icmp uge i64 %t8, %t11
-  ; bounds check: %t12 (if true, out of bounds)
-  %t13 = getelementptr %CompiledModule, %CompiledModule* %t10, i64 %t8
-  %t14 = load %CompiledModule, %CompiledModule* %t13
-  %t15 = extractvalue %CompiledModule %t14, 0
-  %t16 = icmp eq i8* %t15, %target
-  %t17 = load double, double* %l0
-  br i1 %t16, label %then6, label %merge7
+  %t9 = fptosi double %t8 to i64
+  %t10 = load { %CompiledModule*, i64 }, { %CompiledModule*, i64 }* %modules
+  %t11 = extractvalue { %CompiledModule*, i64 } %t10, 0
+  %t12 = extractvalue { %CompiledModule*, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr %CompiledModule, %CompiledModule* %t11, i64 %t9
+  %t15 = load %CompiledModule, %CompiledModule* %t14
+  %t16 = extractvalue %CompiledModule %t15, 0
+  %t17 = icmp eq i8* %t16, %target
+  %t18 = load double, double* %l0
+  br i1 %t17, label %then6, label %merge7
 then6:
   ret i1 1
 merge7:
-  %t18 = load double, double* %l0
-  %t19 = sitofp i64 1 to double
-  %t20 = fadd double %t18, %t19
-  store double %t20, double* %l0
+  %t19 = load double, double* %l0
+  %t20 = sitofp i64 1 to double
+  %t21 = fadd double %t19, %t20
+  store double %t21, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t21 = load double, double* %l0
+  %t22 = load double, double* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0
