@@ -325,7 +325,8 @@ def parse_tokens(tokens):
         parser = skip_trivia(parser)
     return Program(statements=statements)
 
-def parse_statement(parser):
+def parse_statement(initial_parser):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     decorator_result = parse_decorators(parser)
@@ -389,7 +390,8 @@ def parse_statement(parser):
         return parse_unknown(original)
     return parse_unknown(parser)
 
-def parse_import(parser):
+def parse_import(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "import")
     specifier_result = parse_specifier_list(parser)
@@ -408,7 +410,8 @@ def parse_import(parser):
     statement = runtime.enum_instantiate(Statement, 'ImportDeclaration', [runtime.enum_field('specifiers', import_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_export(parser):
+def parse_export(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "export")
     specifier_result = parse_specifier_list(parser)
@@ -427,7 +430,8 @@ def parse_export(parser):
     statement = runtime.enum_instantiate(Statement, 'ExportDeclaration', [runtime.enum_field('specifiers', export_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_variable(parser):
+def parse_variable(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     statement_tokens = []
     let_token = parser_peek_raw(parser)
@@ -489,7 +493,8 @@ def parse_variable(parser):
     statement = runtime.enum_instantiate(Statement, 'VariableDeclaration', [runtime.enum_field('name', name), runtime.enum_field('mutable', mutable_flag), runtime.enum_field('type_annotation', type_annotation), runtime.enum_field('initializer', initializer), runtime.enum_field('span', span), runtime.enum_field('initializer_span', initializer_span)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_specifier_list(parser):
+def parse_specifier_list(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_symbol(parser, "{")
     specifiers = []
@@ -547,7 +552,8 @@ def build_export_specifiers(values):
         index += 1
     return result
 
-def parse_struct(parser, decorators):
+def parse_struct(initial_parser, decorators):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "struct")
     parser = skip_trivia(parser)
@@ -595,7 +601,8 @@ def parse_struct(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'StructDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('implements_types', implements_types), runtime.enum_field('fields', fields), runtime.enum_field('methods', methods), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_type_alias(parser, decorators):
+def parse_type_alias(initial_parser, decorators):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "type")
@@ -626,7 +633,8 @@ def parse_type_alias(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'TypeAliasDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('aliased_type', aliased_type), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_interface(parser, decorators):
+def parse_interface(initial_parser, decorators):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "interface")
@@ -667,7 +675,8 @@ def parse_interface(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'InterfaceDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('type_parameters', type_parameters), runtime.enum_field('members', members), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_enum(parser, decorators):
+def parse_enum(initial_parser, decorators):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "enum")
@@ -850,7 +859,8 @@ def skip_trailing_comma(parser):
         current = parser_advance_raw(current)
     return current
 
-def parse_model(parser, decorators):
+def parse_model(initial_parser, decorators):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "model")
@@ -900,7 +910,8 @@ def parse_model(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'ModelDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('model_type', model_type), runtime.enum_field('properties', properties), runtime.enum_field('effects', effects), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_pipeline(parser, decorators):
+def parse_pipeline(initial_parser, decorators):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "pipeline")
     parser = skip_trivia(parser)
@@ -938,7 +949,8 @@ def parse_pipeline(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'PipelineDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_tool(parser, decorators):
+def parse_tool(initial_parser, decorators):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "tool")
     parser = skip_trivia(parser)
@@ -973,7 +985,8 @@ def parse_tool(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'ToolDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_test(parser, decorators):
+def parse_test(initial_parser, decorators):
+    parser = initial_parser
     original = parser
     parser = skip_trivia(parser)
     parser = consume_keyword(parser, "test")
@@ -995,7 +1008,8 @@ def parse_test(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'TestDeclaration', [runtime.enum_field('name', name), runtime.enum_field('name_span', name_span), runtime.enum_field('body', body), runtime.enum_field('effects', inferred_effects), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_function(parser, starts_with_async, decorators):
+def parse_function(initial_parser, starts_with_async, decorators):
+    parser = initial_parser
     parser = skip_trivia(parser)
     is_async = False
     if starts_with_async:
@@ -1047,7 +1061,8 @@ def parse_function(parser, starts_with_async, decorators):
     statement = runtime.enum_instantiate(Statement, 'FunctionDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 
-def parse_parameter_list(parser):
+def parse_parameter_list(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     parameters = []
     token = parser_peek_raw(parser)
@@ -1330,7 +1345,8 @@ def parse_implements_clause(parser):
         index += 1
     return ImplementsParseResult(parser=current, types=implements_types, found=True)
 
-def parse_single_parameter(parser):
+def parse_single_parameter(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     tokens_ref = parser.tokens
     start_index = parser.index
@@ -1367,7 +1383,8 @@ def parse_single_parameter(parser):
     parameter = Parameter(name=name, type_annotation=type_annotation, default_value=default_value, mutable=is_mutable, span=span)
     return ParameterParseResult(parser=parser, parameter=parameter)
 
-def parse_effect_list(parser):
+def parse_effect_list(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
     if token.kind.variant != "Symbol"  or  token.kind.value != "!":
@@ -1397,7 +1414,8 @@ def parse_effect_list(parser):
         parser = skip_trivia(parser)
     return EffectParseResult(parser=parser, effects=effects)
 
-def parse_block(parser):
+def parse_block(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
     if token.kind.variant != "Symbol"  or  token.kind.value != "{":
@@ -1851,7 +1869,8 @@ def parse_expression_statement(parser, decorators):
     statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
-def parse_unknown(parser):
+def parse_unknown(initial_parser):
+    parser = initial_parser
     parser = skip_trivia(parser)
     tokens = []
     current = parser
@@ -1927,14 +1946,16 @@ def parser_advance_raw(parser):
         return parser
     return Parser(tokens=parser.tokens, index=parser.index + 1)
 
-def consume_keyword(parser, keyword):
+def consume_keyword(initial_parser, keyword):
+    parser = initial_parser
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
     if identifier_matches(token, keyword):
         return parser_advance_raw(parser)
     return parser
 
-def consume_symbol(parser, symbol):
+def consume_symbol(initial_parser, symbol):
+    parser = initial_parser
     parser = skip_trivia(parser)
     token = parser_peek_raw(parser)
     if token.kind.variant == "Symbol"  and  token.kind.value == symbol:

@@ -242,7 +242,8 @@ fn parse_tokens(tokens -> Token[]) -> Program {
     return Program { statements: statements };
 }
 
-fn parse_statement(parser -> Parser) -> StatementParseResult {
+fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
 
@@ -338,7 +339,8 @@ fn parse_statement(parser -> Parser) -> StatementParseResult {
     return parse_unknown(parser);
 }
 
-fn parse_import(parser -> Parser) -> StatementParseResult {
+fn parse_import(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "import");
     let specifier_result = parse_specifier_list(parser);
@@ -366,7 +368,8 @@ fn parse_import(parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_export(parser -> Parser) -> StatementParseResult {
+fn parse_export(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "export");
     let specifier_result = parse_specifier_list(parser);
@@ -394,7 +397,8 @@ fn parse_export(parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_variable(parser -> Parser) -> StatementParseResult {
+fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut statement_tokens -> Token[] = [];
     let let_token = parser_peek_raw(parser);
@@ -481,7 +485,8 @@ fn parse_variable(parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_specifier_list(parser -> Parser) -> SpecifierListParseResult {
+fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "{");
 
@@ -556,7 +561,8 @@ fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
     return result;
 }
 
-fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "struct");
 
@@ -632,7 +638,8 @@ fn parse_struct(parser -> Parser, decorators -> Decorator[]) -> StatementParseRe
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_type_alias(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "type");
@@ -680,7 +687,8 @@ fn parse_type_alias(parser -> Parser, decorators -> Decorator[]) -> StatementPar
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_interface(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "interface");
@@ -742,7 +750,8 @@ fn parse_interface(parser -> Parser, decorators -> Decorator[]) -> StatementPars
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_enum(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "enum");
@@ -1029,7 +1038,8 @@ fn skip_trailing_comma(parser -> Parser) -> Parser {
     return current;
 }
 
-fn parse_model(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "model");
@@ -1103,7 +1113,8 @@ fn parse_model(parser -> Parser, decorators -> Decorator[]) -> StatementParseRes
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_pipeline(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "pipeline");
 
@@ -1164,7 +1175,8 @@ fn parse_pipeline(parser -> Parser, decorators -> Decorator[]) -> StatementParse
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_tool(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "tool");
 
@@ -1220,7 +1232,8 @@ fn parse_tool(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_test(parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_test(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "test");
@@ -1255,7 +1268,8 @@ fn parse_test(parser -> Parser, decorators -> Decorator[]) -> StatementParseResu
 }
 
 
-fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
+fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut is_async = false;
     if starts_with_async {
@@ -1334,7 +1348,8 @@ fn parse_function(parser -> Parser, starts_with_async -> boolean, decorators -> 
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_parameter_list(parser -> Parser) -> ParameterListParseResult {
+fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut parameters -> Parameter[] = [];
 
@@ -1743,7 +1758,8 @@ fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
     };
 }
 
-fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
+fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let tokens_ref = parser.tokens;
     let start_index = parser.index;
@@ -1797,7 +1813,8 @@ fn parse_single_parameter(parser -> Parser) -> ParameterParseResult {
     return ParameterParseResult { parser: parser, parameter: parameter };
 }
 
-fn parse_effect_list(parser -> Parser) -> EffectParseResult {
+fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if token.kind.variant != "Symbol" || token.kind.value != "!" {
@@ -1836,7 +1853,8 @@ fn parse_effect_list(parser -> Parser) -> EffectParseResult {
     return EffectParseResult { parser: parser, effects: effects };
 }
 
-fn parse_block(parser -> Parser) -> BlockParseResult {
+fn parse_block(initial_parser -> Parser) -> BlockParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if token.kind.variant != "Symbol" || token.kind.value != "{" {
@@ -2559,7 +2577,8 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     };
 }
 
-fn parse_unknown(parser -> Parser) -> StatementParseResult {
+fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut tokens -> Token[] = [];
     let mut current = parser;
@@ -2665,7 +2684,8 @@ fn parser_advance_raw(parser -> Parser) -> Parser {
     };
 }
 
-fn consume_keyword(parser -> Parser, keyword -> string) -> Parser {
+fn consume_keyword(initial_parser -> Parser, keyword -> string) -> Parser {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if identifier_matches(token, keyword) {
@@ -2674,7 +2694,8 @@ fn consume_keyword(parser -> Parser, keyword -> string) -> Parser {
     return parser;
 }
 
-fn consume_symbol(parser -> Parser, symbol -> string) -> Parser {
+fn consume_symbol(initial_parser -> Parser, symbol -> string) -> Parser {
+    let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if token.kind.variant == "Symbol" && token.kind.value == symbol {
