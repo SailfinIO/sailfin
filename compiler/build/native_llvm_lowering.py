@@ -5990,7 +5990,17 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         if index >= len(operands):
             break
         operand = operands[index]
-        coerced = coerce_operand_to_type(operand, element_type, current_temp, current_lines)
+        prepared_operand = operand
+        if ends_with_pointer_suffix(element_type)  and  not ends_with_pointer_suffix(operand.llvm_type):
+            boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context)
+            diagnostics = (diagnostics) + (boxed.diagnostics)
+            current_lines = boxed.lines
+            current_temp = boxed.temp_index
+            if boxed.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be boxed to `" + element_type + "`")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            prepared_operand = boxed.operand
+        coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines)
         diagnostics = (diagnostics) + (coerced.diagnostics)
         current_lines = coerced.lines
         current_temp = coerced.temp_index

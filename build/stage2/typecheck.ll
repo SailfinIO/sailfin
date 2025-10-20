@@ -7021,23 +7021,36 @@ then0:
   %t2 = insertvalue %ScopeResult undef, { %SymbolEntry**, i64 }* %t1, 0
   %t3 = call double @token_from_name(i8* %name, i8* %span)
   %t4 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, i8* null)
-  %t5 = insertvalue %ScopeResult %t2, { %Diagnostic**, i64 }* null, 1
-  ret %ScopeResult %t5
+  %t5 = call noalias i8* @malloc(i64 24)
+  %t6 = bitcast i8* %t5 to %Diagnostic*
+  store %Diagnostic %t4, %Diagnostic* %t6
+  %t7 = bitcast i8* %t5 to %Diagnostic*
+  %t8 = alloca [1 x %Diagnostic*]
+  %t9 = getelementptr [1 x %Diagnostic*], [1 x %Diagnostic*]* %t8, i32 0, i32 0
+  %t10 = getelementptr %Diagnostic*, %Diagnostic** %t9, i64 0
+  store %Diagnostic* %t7, %Diagnostic** %t10
+  %t11 = alloca { %Diagnostic**, i64 }
+  %t12 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t11, i32 0, i32 0
+  store %Diagnostic** %t9, %Diagnostic*** %t12
+  %t13 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t11, i32 0, i32 1
+  store i64 1, i64* %t13
+  %t14 = insertvalue %ScopeResult %t2, { %Diagnostic**, i64 }* %t11, 1
+  ret %ScopeResult %t14
 merge1:
-  %t6 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, i8* %span)
-  store { %SymbolEntry*, i64 }* %t6, { %SymbolEntry*, i64 }** %l0
-  %t7 = load { %SymbolEntry*, i64 }*, { %SymbolEntry*, i64 }** %l0
-  %t8 = bitcast { %SymbolEntry*, i64 }* %t7 to { %SymbolEntry**, i64 }*
-  %t9 = insertvalue %ScopeResult undef, { %SymbolEntry**, i64 }* %t8, 0
-  %t10 = alloca [0 x %Diagnostic*]
-  %t11 = getelementptr [0 x %Diagnostic*], [0 x %Diagnostic*]* %t10, i32 0, i32 0
-  %t12 = alloca { %Diagnostic**, i64 }
-  %t13 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t12, i32 0, i32 0
-  store %Diagnostic** %t11, %Diagnostic*** %t13
-  %t14 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t12, i32 0, i32 1
-  store i64 0, i64* %t14
-  %t15 = insertvalue %ScopeResult %t9, { %Diagnostic**, i64 }* %t12, 1
-  ret %ScopeResult %t15
+  %t15 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %bindings, i8* %name, i8* %kind, i8* %span)
+  store { %SymbolEntry*, i64 }* %t15, { %SymbolEntry*, i64 }** %l0
+  %t16 = load { %SymbolEntry*, i64 }*, { %SymbolEntry*, i64 }** %l0
+  %t17 = bitcast { %SymbolEntry*, i64 }* %t16 to { %SymbolEntry**, i64 }*
+  %t18 = insertvalue %ScopeResult undef, { %SymbolEntry**, i64 }* %t17, 0
+  %t19 = alloca [0 x %Diagnostic*]
+  %t20 = getelementptr [0 x %Diagnostic*], [0 x %Diagnostic*]* %t19, i32 0, i32 0
+  %t21 = alloca { %Diagnostic**, i64 }
+  %t22 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t21, i32 0, i32 0
+  store %Diagnostic** %t20, %Diagnostic*** %t22
+  %t23 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t21, i32 0, i32 1
+  store i64 0, i64* %t23
+  %t24 = insertvalue %ScopeResult %t18, { %Diagnostic**, i64 }* %t21, 1
+  ret %ScopeResult %t24
 }
 
 define %SymbolCollectionResult @register_symbol(i8* %name, i8* %kind, i8* %span, { %SymbolEntry*, i64 }* %existing) {
@@ -7049,21 +7062,34 @@ then0:
   %t2 = insertvalue %SymbolCollectionResult undef, { %SymbolEntry**, i64 }* %t1, 0
   %t3 = call double @token_from_name(i8* %name, i8* %span)
   %t4 = call %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, i8* null)
-  %t5 = insertvalue %SymbolCollectionResult %t2, { %Diagnostic**, i64 }* null, 1
-  ret %SymbolCollectionResult %t5
-merge1:
-  %t6 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %existing, i8* %name, i8* %kind, i8* %span)
-  %t7 = bitcast { %SymbolEntry*, i64 }* %t6 to { %SymbolEntry**, i64 }*
-  %t8 = insertvalue %SymbolCollectionResult undef, { %SymbolEntry**, i64 }* %t7, 0
-  %t9 = alloca [0 x %Diagnostic*]
-  %t10 = getelementptr [0 x %Diagnostic*], [0 x %Diagnostic*]* %t9, i32 0, i32 0
+  %t5 = call noalias i8* @malloc(i64 24)
+  %t6 = bitcast i8* %t5 to %Diagnostic*
+  store %Diagnostic %t4, %Diagnostic* %t6
+  %t7 = bitcast i8* %t5 to %Diagnostic*
+  %t8 = alloca [1 x %Diagnostic*]
+  %t9 = getelementptr [1 x %Diagnostic*], [1 x %Diagnostic*]* %t8, i32 0, i32 0
+  %t10 = getelementptr %Diagnostic*, %Diagnostic** %t9, i64 0
+  store %Diagnostic* %t7, %Diagnostic** %t10
   %t11 = alloca { %Diagnostic**, i64 }
   %t12 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t11, i32 0, i32 0
-  store %Diagnostic** %t10, %Diagnostic*** %t12
+  store %Diagnostic** %t9, %Diagnostic*** %t12
   %t13 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t11, i32 0, i32 1
-  store i64 0, i64* %t13
-  %t14 = insertvalue %SymbolCollectionResult %t8, { %Diagnostic**, i64 }* %t11, 1
+  store i64 1, i64* %t13
+  %t14 = insertvalue %SymbolCollectionResult %t2, { %Diagnostic**, i64 }* %t11, 1
   ret %SymbolCollectionResult %t14
+merge1:
+  %t15 = call { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %existing, i8* %name, i8* %kind, i8* %span)
+  %t16 = bitcast { %SymbolEntry*, i64 }* %t15 to { %SymbolEntry**, i64 }*
+  %t17 = insertvalue %SymbolCollectionResult undef, { %SymbolEntry**, i64 }* %t16, 0
+  %t18 = alloca [0 x %Diagnostic*]
+  %t19 = getelementptr [0 x %Diagnostic*], [0 x %Diagnostic*]* %t18, i32 0, i32 0
+  %t20 = alloca { %Diagnostic**, i64 }
+  %t21 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t20, i32 0, i32 0
+  store %Diagnostic** %t19, %Diagnostic*** %t21
+  %t22 = getelementptr { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t20, i32 0, i32 1
+  store i64 0, i64* %t22
+  %t23 = insertvalue %SymbolCollectionResult %t17, { %Diagnostic**, i64 }* %t20, 1
+  ret %SymbolCollectionResult %t23
 }
 
 define { %SymbolEntry*, i64 }* @append_symbol({ %SymbolEntry*, i64 }* %symbols, i8* %name, i8* %kind, i8* %span) {

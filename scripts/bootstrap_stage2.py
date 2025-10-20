@@ -13,7 +13,7 @@ import pathlib
 import re
 import sys
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -278,6 +278,12 @@ def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
     if manifest_path.exists():
         return manifest_path.read_text(encoding="utf-8")
 
+    if "/" in module_name:
+        fallback = module_name.split("/")[-1]
+        fallback_path = output_dir / f"{fallback}.layout-manifest"
+        if fallback_path.exists():
+            return fallback_path.read_text(encoding="utf-8")
+
     return ""
 
 
@@ -326,83 +332,110 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     compiled_modules: List[pathlib.Path] = []
     aggregator = DiagnosticAggregator()
 
-    # Compile each source file to LLVM
-    for source_path in all_sources:
-        if debug:
-            print(f"[stage2-bootstrap] compiling {source_path.name}...")
+    has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
+    has_manifest = hasattr(
+        stage1_main, "compile_to_native_llvm_with_manifests")
 
+    source_cache: Dict[pathlib.Path, str] = {}
+    import_cache: Dict[pathlib.Path, List[str]] = {}
+    first_pass_results: Dict[pathlib.Path, Any] = {}
+
+    if debug:
+        print("[stage2-bootstrap] first pass: collecting layout manifests...")
+
+    for source_path in all_sources:
         try:
             source = source_path.read_text(encoding="utf-8")
+            source_cache[source_path] = source
+            imports = extract_import_paths(source)
+            import_cache[source_path] = imports
 
-            # Extract imports and load their layout manifests for cross-module type resolution
-            import_paths = extract_import_paths(source)
-            manifest_contents = []
-            for import_path in import_paths:
-                manifest_content = load_manifest_for_import(
-                    import_path, output_dir)
-                if manifest_content:
-                    manifest_contents.append(manifest_content)
-                    if debug:
-                        print(
-                            f"[stage2-bootstrap]   loaded manifest for {import_path}")
+            if debug:
+                print(f"[stage2-bootstrap]   preparing {source_path.name}")
 
-            # First compile to get the native_module (for manifest generation)
-            # Then use manifest-aware LLVM lowering if manifests are available
-            native_module = None
-            if hasattr(stage1_main, "compile_to_native_llvm_full"):
-                # If we have manifests and the manifest-aware function, compile with manifests
-                if hasattr(stage1_main, "compile_to_native_llvm_with_manifests") and manifest_contents:
-                    # Get the native module first for manifest extraction
-                    full_result = stage1_main.compile_to_native_llvm_full(
-                        source)
-                    native_module = full_result.native_module
-
-                    # Now recompile with manifests for better type resolution
-                    result = stage1_main.compile_to_native_llvm_with_manifests(
-                        source, manifest_contents)
-                else:
-                    # No manifests available yet, use standard compilation
-                    full_result = stage1_main.compile_to_native_llvm_full(
-                        source)
-                    result = full_result.llvm
-                    native_module = full_result.native_module
+            if has_full:
+                full_result = stage1_main.compile_to_native_llvm_full(source)
+                first_pass_results[source_path] = full_result
+                native_module = getattr(full_result, "native_module", None)
+                if native_module is not None and hasattr(native_module, "artifacts"):
+                    for artifact in native_module.artifacts:
+                        if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
+                            manifest_path = output_dir / \
+                                source_path.with_suffix(
+                                    ".layout-manifest").name
+                            manifest_content = getattr(
+                                artifact, "contents", "")
+                            manifest_path.write_text(
+                                manifest_content, encoding="utf-8")
+                            if debug:
+                                rel_path = manifest_path.relative_to(REPO_ROOT)
+                                print(
+                                    f"[stage2-bootstrap]     wrote {rel_path}")
             else:
-                result = stage1_main.compile_to_native_llvm(source)
+                lowered = stage1_main.compile_to_native_llvm(source)
+                first_pass_results[source_path] = lowered
 
-            # Check for diagnostics
+        except Exception as exc:
+            raise Stage2BootstrapError(
+                f"failed to compile {source_path.name}: {exc}"
+            ) from exc
+
+    if debug:
+        print("[stage2-bootstrap] second pass: lowering with manifests...")
+
+    for source_path in all_sources:
+        try:
+            source = source_cache[source_path]
+            import_paths = import_cache.get(source_path, [])
+
+            manifest_contents: List[str] = []
+            if has_manifest:
+                for import_path in import_paths:
+                    manifest_content = load_manifest_for_import(
+                        import_path, output_dir)
+                    if manifest_content:
+                        manifest_contents.append(manifest_content)
+                        if debug:
+                            print(
+                                f"[stage2-bootstrap]   using manifest for {import_path}")
+
+            result = None
+            native_module = None
+
+            if has_manifest and manifest_contents:
+                result = stage1_main.compile_to_native_llvm_with_manifests(
+                    source, manifest_contents)
+            else:
+                cached = first_pass_results[source_path]
+                if has_full:
+                    full_result = cached
+                    result = full_result.llvm
+                    native_module = getattr(full_result, "native_module", None)
+                else:
+                    result = cached
+
             diagnostics = getattr(result, "diagnostics", [])
             if diagnostics:
                 for diag in diagnostics:
-                    # Count as fatal only if it's a real error, not a warning about unsupported LLVM features
-                    is_llvm_warning = "llvm lowering:" in str(
-                        diag).lower() and not str(diag).startswith("fatal:")
-                    is_fatal = not is_llvm_warning and "error" in str(
-                        diag).lower()
-
-                    # Add to aggregator
-                    aggregator.add_diagnostic(
-                        source_path.name, str(diag), is_fatal)
-
-                    # Print if not in quiet mode
+                    text = str(diag)
+                    is_llvm_warning = "llvm lowering:" in text.lower() and not text.startswith("fatal:")
+                    is_fatal = not is_llvm_warning and "error" in text.lower()
+                    aggregator.add_diagnostic(source_path.name, text, is_fatal)
                     if not quiet:
                         severity = "warn" if is_llvm_warning else (
                             "error" if is_fatal else "warn")
                         print(
                             f"[stage2-bootstrap][{severity}] {source_path.name}: {diag}")
 
-            # Extract LLVM IR
             ir = getattr(result, "ir", None)
             if ir is None:
                 raise Stage2BootstrapError(
                     f"no LLVM IR generated for {source_path.name}")
 
-            # Write LLVM IR to output directory
             output_path = output_dir / source_path.with_suffix(".ll").name
             output_path.write_text(ir, encoding="utf-8")
             compiled_modules.append(output_path)
 
-            # Also extract and save layout manifest if available
-            # The manifest contains struct/enum layout information needed for cross-module type resolution
             if native_module is not None and hasattr(native_module, "artifacts"):
                 for artifact in native_module.artifacts:
                     if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
@@ -412,12 +445,13 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                         manifest_path.write_text(
                             manifest_content, encoding="utf-8")
                         if debug:
+                            rel_path = manifest_path.relative_to(REPO_ROOT)
                             print(
-                                f"[stage2-bootstrap]   -> {manifest_path.relative_to(REPO_ROOT)}")
+                                f"[stage2-bootstrap]     refreshed {rel_path}")
 
             if debug:
-                print(
-                    f"[stage2-bootstrap]   -> {output_path.relative_to(REPO_ROOT)}")
+                rel_ir = output_path.relative_to(REPO_ROOT)
+                print(f"[stage2-bootstrap]   -> {rel_ir}")
 
         except Exception as exc:
             raise Stage2BootstrapError(

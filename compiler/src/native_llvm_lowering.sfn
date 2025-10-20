@@ -8651,7 +8651,19 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             break;
         }
         let operand = operands[index];
-        let coerced = coerce_operand_to_type(operand, element_type, current_temp, current_lines);
+        let mut prepared_operand = operand;
+        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) {
+            let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
+            diagnostics = diagnostics.concat(boxed.diagnostics);
+            current_lines = boxed.lines;
+            current_temp = boxed.temp_index;
+            if boxed.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be boxed to `" + element_type + "`");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            prepared_operand = boxed.operand;
+        }
+        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines);
         diagnostics = diagnostics.concat(coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
