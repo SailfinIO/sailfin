@@ -12,7 +12,12 @@
       "Bash(make test-stage2:*)",
       "Bash(tee:*)",
       "Read(//private/tmp/sailfin_enum_test/**)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(grep:*)",
+      "Bash(sed:*)",
+      "Bash(make test-unit:*)",
+      "Bash(python -c:*)",
+      "Bash(make clean-stage1:*)"
     ],
     "deny": [],
     "ask": []

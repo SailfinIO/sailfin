@@ -14,8 +14,8 @@
 .layout payload NumberLiteral.value type=string offset=8 size=8 align=8
 .layout variant StringLiteral tag=2 offset=8 size=8 align=8
 .layout payload StringLiteral.value type=string offset=8 size=8 align=8
-.layout variant BooleanLiteral tag=3 offset=4 size=1 align=1
-.layout payload BooleanLiteral.value type=boolean offset=4 size=1 align=1
+.layout variant BooleanLiteral tag=3 offset=8 size=8 align=8
+.layout payload BooleanLiteral.value type=string offset=8 size=8 align=8
 .layout variant Symbol tag=4 offset=8 size=8 align=8
 .layout payload Symbol.value type=string offset=8 size=8 align=8
 .layout variant Whitespace tag=5 offset=4 size=0 align=1

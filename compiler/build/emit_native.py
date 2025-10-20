@@ -1108,9 +1108,7 @@ def format_expression(expression):
     if expression.variant == "NumberLiteral":
         return expression.value
     if expression.variant == "BooleanLiteral":
-        if expression.value:
-            return "true"
-        return "false"
+        return expression.value
     if expression.variant == "NullLiteral":
         return "null"
     if expression.variant == "StringLiteral":

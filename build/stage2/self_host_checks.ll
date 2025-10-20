@@ -22,7 +22,7 @@ entry:
   %t1 = load double, double* %l0
   store double 0.0, double* %l1
   %t2 = load double, double* %l0
-  %t3 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, %ProjectCompilation zeroinitializer)
+  %t3 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, i8* null)
   store { i8**, i64 }* %t3, { i8**, i64 }** %l2
   store i1 1, i1* %l3
   %t4 = load double, double* %l1

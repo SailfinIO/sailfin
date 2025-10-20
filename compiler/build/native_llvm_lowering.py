@@ -2042,7 +2042,6 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_alpha_char", symbol="sailfin_runtime_is_alpha_char", return_type="i1", parameter_types=["i8"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="collection.concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     return descriptors
 
@@ -5602,7 +5601,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 current_temp = coerced.temp_index
                 if coerced.operand == None:
                     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
-                    placeholder = LLVMOperand(llvm_type=target_type, value=default_return_literal(target_type))
+                    placeholder = LLVMOperand(llvm_type="i8*", value="null")
                     coerced_operands = append_llvm_operand(coerced_operands, placeholder)
                 else:
                     coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
@@ -6776,7 +6775,7 @@ def comparison_predicate_for_symbol(symbol, llvm_type):
         if symbol == ">=":
             return "icmp sge"
         return ""
-    if llvm_type == "i8*":
+    if ends_with_pointer_suffix(llvm_type):
         if symbol == "==":
             return "icmp eq"
         if symbol == "!=":

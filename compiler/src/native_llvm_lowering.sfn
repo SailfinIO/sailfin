@@ -2578,13 +2578,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
         effects: [],
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "collection.concat",
-        symbol: "sailfin_runtime_concat",
-        return_type: "{ i8**, i64 }*",
-        parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
-        effects: [],
-    });
     
     // Generic field accessor for opaque imported types
     // Takes object pointer and field name, returns field value as i8*
@@ -8089,7 +8082,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             current_temp = coerced.temp_index;
             if coerced.operand == null {
                 diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
-                let placeholder = LLVMOperand { llvm_type: target_type, value: default_return_literal(target_type) };
+                // Use i8* null as universal placeholder instead of type-specific defaults to reduce cascade errors
+                let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
                 coerced_operands = append_llvm_operand(coerced_operands, placeholder);
             } else {
                 coerced_operands = append_llvm_operand(coerced_operands, coerced.operand);
@@ -9716,8 +9710,8 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         }
         return "";
     }
-    // Support string pointer (i8*) comparisons for equality checks
-    if llvm_type == "i8*" {
+    // Support pointer comparisons for equality checks (i8*, struct pointers, etc.)
+    if ends_with_pointer_suffix(llvm_type) {
         if symbol == "==" {
             return "icmp eq";
         }

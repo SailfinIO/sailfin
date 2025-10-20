@@ -22,7 +22,7 @@ import { substring } from "./string_utils";
 
 enum LiteralValue {
     String { value -> string },
-    Boolean { value -> boolean },
+    Boolean { value -> string },
     Number { value -> string },
     Null,
     Unsupported,
@@ -121,10 +121,10 @@ fn evaluate_expression(expr -> Expression) -> LiteralValue {
             return LiteralValue.String { value: literal };
         }
         if text == "true" {
-            return LiteralValue.Boolean { value: true };
+            return LiteralValue.Boolean { value: "true" };
         }
         if text == "false" {
-            return LiteralValue.Boolean { value: false };
+            return LiteralValue.Boolean { value: "false" };
         }
         if looks_like_number(text) {
             return LiteralValue.Number { value: text };

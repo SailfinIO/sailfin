@@ -9686,7 +9686,7 @@ merge94:
   %t1748 = load i64, i64* %l30
   %t1749 = load double, double* %l33
   %t1750 = sitofp i64 %t1748 to double
-  %t1751 = call { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* %t1747, double %t1750, %MatchContext zeroinitializer)
+  %t1751 = call { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* %t1747, double %t1750, i8* null)
   store { %MatchContext*, i64 }* %t1751, { %MatchContext*, i64 }** %l5
   br label %merge87
 merge87:

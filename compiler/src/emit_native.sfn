@@ -1381,10 +1381,7 @@ fn format_expression(expression -> Expression) -> string {
         return expression.value;
     }
     if expression.variant == "BooleanLiteral" {
-        if expression.value {
-            return "true";
-        }
-        return "false";
+        return expression.value;
     }
     if expression.variant == "NullLiteral" {
         return "null";

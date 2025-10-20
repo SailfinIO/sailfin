@@ -2886,9 +2886,9 @@ fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
             let literal = strip_surrounding_quotes(raw_text);
             expr = Expression.StringLiteral { value: literal };
         } else if raw_text == "true" {
-            expr = Expression.BooleanLiteral { value: true };
+            expr = Expression.BooleanLiteral { value: "true" };
         } else if raw_text == "false" {
-            expr = Expression.BooleanLiteral { value: false };
+            expr = Expression.BooleanLiteral { value: "false" };
         } else if looks_like_number(raw_text) {
             expr = Expression.NumberLiteral { value: raw_text };
         }
@@ -2917,10 +2917,10 @@ fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression {
             return Expression.StringLiteral { value: literal };
         }
         if raw_text == "true" {
-            return Expression.BooleanLiteral { value: true };
+            return Expression.BooleanLiteral { value: "true" };
         }
         if raw_text == "false" {
-            return Expression.BooleanLiteral { value: false };
+            return Expression.BooleanLiteral { value: "false" };
         }
         if looks_like_number(raw_text) {
             return Expression.NumberLiteral { value: raw_text };
@@ -3163,10 +3163,10 @@ fn expression_from_single_token(token -> Token) -> Expression? {
     if token.kind.variant == "Identifier" {
         let value = identifier_text(token);
         if value == "true" {
-            return Expression.BooleanLiteral { value: true };
+            return Expression.BooleanLiteral { value: "true" };
         }
         if value == "false" {
-            return Expression.BooleanLiteral { value: false };
+            return Expression.BooleanLiteral { value: "false" };
         }
         if value == "null" {
             return Expression.NullLiteral();
@@ -3576,14 +3576,14 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
         if name == "true" {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
-                expression: Expression.BooleanLiteral { value: true },
+                expression: Expression.BooleanLiteral { value: "true" },
                 success: true,
             };
         }
         if name == "false" {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
-                expression: Expression.BooleanLiteral { value: false },
+                expression: Expression.BooleanLiteral { value: "false" },
                 success: true,
             };
         }

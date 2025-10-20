@@ -2082,10 +2082,10 @@ def parse_decorator_argument(tokens):
             expr = runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         else:
             if raw_text == "true":
-                expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', True)])
+                expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "true")])
             else:
                 if raw_text == "false":
-                    expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', False)])
+                    expr = runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "false")])
                 else:
                     if looks_like_number(raw_text):
                         expr = runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', raw_text)])
@@ -2107,9 +2107,9 @@ def normalize_expression(tokens, expr):
             literal = strip_surrounding_quotes(raw_text)
             return runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         if raw_text == "true":
-            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', True)])
+            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "true")])
         if raw_text == "false":
-            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', False)])
+            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "false")])
         if looks_like_number(raw_text):
             return runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', raw_text)])
     return expr
@@ -2285,9 +2285,9 @@ def expression_from_single_token(token):
     if token.kind.variant == "Identifier":
         value = identifier_text(token)
         if value == "true":
-            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', True)])
+            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "true")])
         if value == "false":
-            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', False)])
+            return runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "false")])
         if value == "null":
             return Expression.NullLiteral()
         return runtime.enum_instantiate(Expression, 'Identifier', [runtime.enum_field('name', value)])
@@ -2546,9 +2546,9 @@ def parse_primary_expression(state):
     if token.kind.variant == "Identifier":
         name = identifier_text(token)
         if name == "true":
-            return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', True)]), success=True)
+            return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "true")]), success=True)
         if name == "false":
-            return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', False)]), success=True)
+            return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'BooleanLiteral', [runtime.enum_field('value', "false")]), success=True)
         if name == "null":
             return ExpressionParseResult(state=expression_tokens_advance(state), expression=Expression.NullLiteral(), success=True)
         return ExpressionParseResult(state=expression_tokens_advance(state), expression=runtime.enum_instantiate(Expression, 'Identifier', [runtime.enum_field('name', name)]), success=True)

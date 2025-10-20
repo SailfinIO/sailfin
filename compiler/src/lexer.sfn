@@ -252,9 +252,8 @@ fn lex(source -> string) -> Token[] {
             }
             let value = slice(state.source, start, state.index);
             if value == "true" || value == "false" {
-                let bool_value = value == "true";
                 tokens = append(tokens, Token {
-                    kind: TokenKind.BooleanLiteral { value: bool_value },
+                    kind: TokenKind.BooleanLiteral { value: value },
                     lexeme: value,
                     line: start_line,
                     column: start_column,

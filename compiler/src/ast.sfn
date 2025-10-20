@@ -37,7 +37,7 @@ enum Expression {
     Identifier { name -> string },
     NumberLiteral { value -> string },
     StringLiteral { value -> string },
-    BooleanLiteral { value -> boolean },
+    BooleanLiteral { value -> string },
     NullLiteral,
     Unary { operator -> string, operand -> Expression },
     Binary { operator -> string, left -> Expression, right -> Expression },
