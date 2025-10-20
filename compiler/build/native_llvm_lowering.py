@@ -735,32 +735,12 @@ class LoadLocalResult:
 
 def load_imported_layout_manifests(imports):
     # effects: io
-    manifests = []
-    index = 0
-    while True:
-        if index >= len(imports):
-            break
-        import_entry = imports[index]
-        module_path = import_entry.module
-        manifest_name = ""
-        if starts_with(module_path, "./"):
-            manifest_name = substring(module_path, 2, len(module_path)) + ".layout-manifest"
-        else:
-            if starts_with(module_path, "../"):
-                index += 1
-                continue
-            else:
-                manifest_name = module_path + ".layout-manifest"
-        manifest_path = "build/stage2/" + manifest_name
-        file_exists = fs.exists(manifest_path)
-        if file_exists:
-            manifest_content = fs.readFile(manifest_path)
-            parsed = parse_layout_manifest(manifest_content)
-            manifests = (manifests) + ([parsed])
-        index += 1
-    return manifests
+    return []
 
 def lower_to_llvm(native_module):
+    return lower_to_llvm_with_manifests(native_module, [])
+
+def lower_to_llvm_with_manifests(native_module, imported_manifests):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
@@ -768,7 +748,6 @@ def lower_to_llvm(native_module):
         return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=[])
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
-    imported_manifests = load_imported_layout_manifests(parse.imports)
     trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
     type_build = build_type_context_with_imports(parse.structs, parse.enums, parse.interfaces, imported_manifests)
     diagnostics = (diagnostics) + (type_build.diagnostics)
@@ -6681,6 +6660,29 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp)
         coerced = LLVMOperand(llvm_type="i8", value=char_value_temp)
         return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i8*"  and  operand.llvm_type == "i8":
+        alloca_temp = format_temp_name(temp_index)
+        char_ptr = format_temp_name(temp_index + 1)
+        null_ptr = format_temp_name(temp_index + 2)
+        result_ptr = format_temp_name(temp_index + 3)
+        current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca [2 x i8], align 1")
+        current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0")
+        current_lines = append_string(current_lines, "  store i8 " + operand.value + ", i8* " + char_ptr)
+        current_lines = append_string(current_lines, "  " + null_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 1")
+        current_lines = append_string(current_lines, "  store i8 0, i8* " + null_ptr)
+        current_lines = append_string(current_lines, "  " + result_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0")
+        coerced = LLVMOperand(llvm_type="i8*", value=result_ptr)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 4, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i8*"  and  ends_with_pointer_suffix(operand.llvm_type):
+        temp_name = format_temp_name(temp_index)
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*")
+        coerced = LLVMOperand(llvm_type="i8*", value=temp_name)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if operand.llvm_type == "i8*"  and  ends_with_pointer_suffix(target_type):
+        temp_name = format_temp_name(temp_index)
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target_type)
+        coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     if ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
         source_element = array_pointer_element_type(operand.llvm_type)
         target_element = array_pointer_element_type(target_type)
@@ -6689,6 +6691,10 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
             current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
             coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        temp_name = format_temp_name(temp_index)
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
+        coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
     return CoercionResult(lines=current_lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
 
@@ -6932,11 +6938,48 @@ def split_call_arguments(text):
     paren_depth = 0
     bracket_depth = 0
     brace_depth = 0
+    in_single = False
+    in_double = False
+    escape = False
     index = 0
     while True:
         if index >= len(text):
             break
         ch = text[index]
+        if in_double:
+            current = current + ch
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            current = current + ch
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            current = current + ch
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            current = current + ch
+            index += 1
+            continue
         if ch == "(":
             paren_depth += 1
             current = current + ch

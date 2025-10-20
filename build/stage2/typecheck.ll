@@ -5827,8 +5827,8 @@ entry:
   %t4 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t21 = phi double [ %t3, %entry ], [ %t20, %loop.latch2 ]
-  store double %t21, double* %l0
+  %t25 = phi double [ %t3, %entry ], [ %t24, %loop.latch2 ]
+  store double %t25, double* %l0
   br label %loop.body1
 loop.body1:
   %t5 = load double, double* %l0
@@ -5844,34 +5844,40 @@ merge5:
   %t11 = fptosi double %t10 to i64
   %t12 = getelementptr i8, i8* %value, i64 %t11
   %t13 = load i8, i8* %t12
-  %t14 = call i1 @is_whitespace(i8* null)
-  %t15 = load double, double* %l0
-  %t16 = load double, double* %l1
-  br i1 %t14, label %then6, label %merge7
+  %t14 = alloca [2 x i8], align 1
+  %t15 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 0
+  store i8 %t13, i8* %t15
+  %t16 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 1
+  store i8 0, i8* %t16
+  %t17 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 0
+  %t18 = call i1 @is_whitespace(i8* %t17)
+  %t19 = load double, double* %l0
+  %t20 = load double, double* %l1
+  br i1 %t18, label %then6, label %merge7
 then6:
-  %t17 = load double, double* %l0
-  %t18 = sitofp i64 1 to double
-  %t19 = fadd double %t17, %t18
-  store double %t19, double* %l0
+  %t21 = load double, double* %l0
+  %t22 = sitofp i64 1 to double
+  %t23 = fadd double %t21, %t22
+  store double %t23, double* %l0
   br label %loop.latch2
 merge7:
   br label %afterloop3
 loop.latch2:
-  %t20 = load double, double* %l0
+  %t24 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t22 = load double, double* %l0
-  %t23 = load double, double* %l1
+  %t26 = load double, double* %l0
+  %t27 = load double, double* %l1
   br label %loop.header8
 loop.header8:
   br label %loop.body9
 loop.body9:
-  %t24 = load double, double* %l1
-  %t25 = load double, double* %l0
-  %t26 = fcmp ole double %t24, %t25
-  %t27 = load double, double* %l0
   %t28 = load double, double* %l1
-  br i1 %t26, label %then12, label %merge13
+  %t29 = load double, double* %l0
+  %t30 = fcmp ole double %t28, %t29
+  %t31 = load double, double* %l0
+  %t32 = load double, double* %l1
+  br i1 %t30, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
@@ -5879,10 +5885,10 @@ merge13:
 loop.latch10:
   br label %loop.header8
 afterloop11:
-  %t29 = load double, double* %l0
-  %t30 = load double, double* %l1
-  %t31 = call i8* @slice_text(i8* %value, double %t29, double %t30)
-  ret i8* %t31
+  %t33 = load double, double* %l0
+  %t34 = load double, double* %l1
+  %t35 = call i8* @slice_text(i8* %value, double %t33, double %t34)
+  ret i8* %t35
 }
 
 define i8* @slice_text(i8* %value, double %start, double %end) {
@@ -5915,10 +5921,10 @@ merge5:
   %t9 = load double, double* %l1
   br label %loop.header6
 loop.header6:
-  %t27 = phi i8* [ %t8, %entry ], [ %t25, %loop.latch8 ]
-  %t28 = phi double [ %t9, %entry ], [ %t26, %loop.latch8 ]
-  store i8* %t27, i8** %l0
-  store double %t28, double* %l1
+  %t31 = phi i8* [ %t8, %entry ], [ %t29, %loop.latch8 ]
+  %t32 = phi double [ %t9, %entry ], [ %t30, %loop.latch8 ]
+  store i8* %t31, i8** %l0
+  store double %t32, double* %l1
   br label %loop.body7
 loop.body7:
   %t10 = load double, double* %l1
@@ -5937,19 +5943,25 @@ merge11:
   %t19 = getelementptr i8, i8* %t14, i64 0
   %t20 = load i8, i8* %t19
   %t21 = add i8 %t20, %t18
-  store i8* null, i8** %l0
-  %t22 = load double, double* %l1
-  %t23 = sitofp i64 1 to double
-  %t24 = fadd double %t22, %t23
-  store double %t24, double* %l1
+  %t22 = alloca [2 x i8], align 1
+  %t23 = getelementptr [2 x i8], [2 x i8]* %t22, i32 0, i32 0
+  store i8 %t21, i8* %t23
+  %t24 = getelementptr [2 x i8], [2 x i8]* %t22, i32 0, i32 1
+  store i8 0, i8* %t24
+  %t25 = getelementptr [2 x i8], [2 x i8]* %t22, i32 0, i32 0
+  store i8* %t25, i8** %l0
+  %t26 = load double, double* %l1
+  %t27 = sitofp i64 1 to double
+  %t28 = fadd double %t26, %t27
+  store double %t28, double* %l1
   br label %loop.latch8
 loop.latch8:
-  %t25 = load i8*, i8** %l0
-  %t26 = load double, double* %l1
+  %t29 = load i8*, i8** %l0
+  %t30 = load double, double* %l1
   br label %loop.header6
 afterloop9:
-  %t29 = load i8*, i8** %l0
-  ret i8* %t29
+  %t33 = load i8*, i8** %l0
+  ret i8* %t33
 }
 
 define i1 @is_whitespace(i8* %ch) {
@@ -6688,7 +6700,13 @@ merge1:
   %t25 = add i8 %t21, %t24
   store i8 %t25, i8* %l0
   %t26 = load i8, i8* %l0
-  ret i8* null
+  %t27 = alloca [2 x i8], align 1
+  %t28 = getelementptr [2 x i8], [2 x i8]* %t27, i32 0, i32 0
+  store i8 %t26, i8* %t28
+  %t29 = getelementptr [2 x i8], [2 x i8]* %t27, i32 0, i32 1
+  store i8 0, i8* %t29
+  %t30 = getelementptr [2 x i8], [2 x i8]* %t27, i32 0, i32 0
+  ret i8* %t30
 }
 
 define i1 @contains_string({ i8**, i64 }* %items, i8* %candidate) {

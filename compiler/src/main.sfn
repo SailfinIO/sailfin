@@ -5,7 +5,8 @@ import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
-import { lower_to_llvm, LoweredLLVMResult } from "./native_llvm_lowering";
+import { lower_to_llvm, lower_to_llvm_with_manifests, LoweredLLVMResult } from "./native_llvm_lowering";
+import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { typecheck_program } from "./typecheck";
 
 struct CompiledModule {
@@ -133,6 +134,47 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
             string_constants: lowered.string_constants,
         },
         native_module: native_result.module,
+    };
+}
+
+// Version that accepts pre-loaded layout manifests for cross-module type resolution
+fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io] {
+    let native_result = compile_to_native(source);
+    
+    // Parse the manifest contents into LayoutManifest structs
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let parsed = parse_layout_manifest(manifest_contents[manifest_index]);
+        manifests = manifests.concat([parsed]);
+        manifest_index += 1;
+    }
+    
+    let lowered = lower_to_llvm_with_manifests(native_result.module, manifests);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResult {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
     };
 }
 

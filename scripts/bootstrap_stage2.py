@@ -13,7 +13,7 @@ import pathlib
 import re
 import sys
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -195,6 +195,92 @@ class DiagnosticAggregator:
         print(f"\n[stage2-bootstrap] detailed report saved to {output_path}")
 
 
+def extract_import_paths(source: str) -> List[str]:
+    """Extract import module paths from Sailfin source code.
+
+    Handles both single-line and multiline import statements so we can
+    gather the layout manifests required for cross-module lowering.
+    """
+
+    def _extract_path(import_statement: str) -> Optional[str]:
+        statement = import_statement.strip()
+        if " from " in statement:
+            _, remainder = statement.split(" from ", 1)
+        else:
+            parts = statement.split()
+            remainder = parts[1] if len(parts) > 1 else ""
+
+        remainder = remainder.strip()
+        if remainder.endswith(";"):
+            remainder = remainder[:-1].strip()
+        if remainder.startswith(("'", '"')):
+            quote = remainder[0]
+            end_quote = remainder.find(quote, 1)
+            if end_quote > 0:
+                return remainder[1:end_quote]
+        return None
+
+    import_paths: List[str] = []
+    current: List[str] = []
+    collecting = False
+
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+        if not collecting:
+            if line.startswith("import "):
+                current = [line]
+                collecting = True
+                if line.endswith(";"):
+                    collected = " ".join(current)
+                    collecting = False
+                    module = _extract_path(collected)
+                    if module and module not in import_paths:
+                        import_paths.append(module)
+                continue
+        else:
+            current.append(line)
+            if line.endswith(";"):
+                collected = " ".join(current)
+                collecting = False
+                module = _extract_path(collected)
+                if module and module not in import_paths:
+                    import_paths.append(module)
+                current = []
+
+    return import_paths
+
+
+def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
+    """Load a layout manifest for an imported module.
+
+    Args:
+        import_path: Import path like "./ast" or "../runtime/prelude"
+        output_dir: Directory containing compiled manifests
+
+    Returns:
+        Manifest content as string, or empty string if not found
+    """
+    # Convert import path to manifest filename
+    # "./ast" -> "ast.layout-manifest"
+    # "../runtime/prelude" -> "prelude.layout-manifest"
+
+    if import_path.startswith("./"):
+        module_name = import_path[2:]
+    elif import_path.startswith("../"):
+        # Extract just the module name from parent imports
+        parts = import_path.split("/")
+        module_name = parts[-1] if parts else import_path
+    else:
+        module_name = import_path
+
+    manifest_path = output_dir / f"{module_name}.layout-manifest"
+
+    if manifest_path.exists():
+        return manifest_path.read_text(encoding="utf-8")
+
+    return ""
+
+
 def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                                quiet: bool = False) -> Tuple[List[pathlib.Path], DiagnosticAggregator]:
     """Compile all compiler sources to Stage2 LLVM artifacts.
@@ -247,14 +333,41 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
 
         try:
             source = source_path.read_text(encoding="utf-8")
-            # Try the new function that returns both LLVM and native_module
+
+            # Extract imports and load their layout manifests for cross-module type resolution
+            import_paths = extract_import_paths(source)
+            manifest_contents = []
+            for import_path in import_paths:
+                manifest_content = load_manifest_for_import(
+                    import_path, output_dir)
+                if manifest_content:
+                    manifest_contents.append(manifest_content)
+                    if debug:
+                        print(
+                            f"[stage2-bootstrap]   loaded manifest for {import_path}")
+
+            # First compile to get the native_module (for manifest generation)
+            # Then use manifest-aware LLVM lowering if manifests are available
+            native_module = None
             if hasattr(stage1_main, "compile_to_native_llvm_full"):
-                full_result = stage1_main.compile_to_native_llvm_full(source)
-                result = full_result.llvm
-                native_module = full_result.native_module
+                # If we have manifests and the manifest-aware function, compile with manifests
+                if hasattr(stage1_main, "compile_to_native_llvm_with_manifests") and manifest_contents:
+                    # Get the native module first for manifest extraction
+                    full_result = stage1_main.compile_to_native_llvm_full(
+                        source)
+                    native_module = full_result.native_module
+
+                    # Now recompile with manifests for better type resolution
+                    result = stage1_main.compile_to_native_llvm_with_manifests(
+                        source, manifest_contents)
+                else:
+                    # No manifests available yet, use standard compilation
+                    full_result = stage1_main.compile_to_native_llvm_full(
+                        source)
+                    result = full_result.llvm
+                    native_module = full_result.native_module
             else:
                 result = stage1_main.compile_to_native_llvm(source)
-                native_module = None
 
             # Check for diagnostics
             diagnostics = getattr(result, "diagnostics", [])
