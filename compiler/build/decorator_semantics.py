@@ -128,7 +128,8 @@ def trim_whitespace(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        look_index = end - 1
+        ch = value[look_index]
         if is_whitespace_char(ch):
             end -= 1
             continue
@@ -138,9 +139,12 @@ def trim_whitespace(value):
 def looks_like_quoted_string(text):
     if len(text) < 2:
         return False
-    if text[0] != 34:
+    first = text[0]
+    if first != 34:
         return False
-    if text[len(text) - 1] != 34:
+    last_index = len(text) - 1
+    last = text[last_index]
+    if last != 34:
         return False
     return True
 
@@ -149,7 +153,8 @@ def looks_like_number(text):
         return False
     has_decimal = False
     index = 0
-    if text[0] == 45:
+    first = text[0]
+    if first == 45:
         if len(text) == 1:
             return False
         index = 1

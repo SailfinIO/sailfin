@@ -689,7 +689,7 @@ def is_struct_literal_type_candidate(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = substring(text, index, index + 1)
         if ch == ".":
             index += 1
             continue
@@ -703,9 +703,10 @@ def lower_array_literal_expression(expression, depth):
     trimmed = trim_text(expression)
     if len(trimmed) < 2:
         return None
-    if trimmed[0] != "[":
+    if substring(trimmed, 0, 1) != "[":
         return None
-    if trimmed[len(trimmed) - 1] != "]":
+    closing_index = len(trimmed) - 1
+    if substring(trimmed, closing_index, closing_index + 1) != "]":
         return None
     inner = substring(trimmed, 1, len(trimmed) - 1)
     entries = split_array_entries(inner)
@@ -780,7 +781,7 @@ def rewrite_struct_literals_inline(expression, depth):
         while True:
             if type_end <= 0:
                 break
-            prev = current[type_end - 1]
+            prev = substring(current, type_end - 1, type_end)
             if is_whitespace_char(prev):
                 type_end -= 1
                 continue
@@ -789,7 +790,7 @@ def rewrite_struct_literals_inline(expression, depth):
         while True:
             if type_start <= 0:
                 break
-            candidate_char = current[type_start - 1]
+            candidate_char = substring(current, type_start - 1, type_start)
             if candidate_char == ".":
                 type_start -= 1
                 continue
@@ -805,7 +806,7 @@ def rewrite_struct_literals_inline(expression, depth):
             search_start = open_index + 1
             continue
         if type_start > 0:
-            prefix_char = current[type_start - 1]
+            prefix_char = substring(current, type_start - 1, type_start)
             if is_identifier_char(prefix_char)  or  prefix_char == ".":
                 search_start = open_index + 1
                 continue
@@ -875,7 +876,7 @@ def rewrite_logical_operators(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = substring(expression, index, index + 1)
         if ch == "'"  or  ch == "\"":
             literal_end = skip_string_literal(expression, index)
             result = result + substring(expression, index, literal_end)
@@ -883,21 +884,21 @@ def rewrite_logical_operators(expression):
             continue
         if ch == "&":
             if index + 1 < len(expression):
-                next = expression[index + 1]
+                next = substring(expression, index + 1, index + 2)
                 if next == "&":
                     result = result + " and "
                     index += 2
                     continue
         if ch == "|":
             if index + 1 < len(expression):
-                next = expression[index + 1]
+                next = substring(expression, index + 1, index + 2)
                 if next == "|":
                     result = result + " or "
                     index += 2
                     continue
         if ch == "!":
             if index + 1 < len(expression):
-                next = expression[index + 1]
+                next = substring(expression, index + 1, index + 2)
                 if next == "=":
                     result = result + "!="
                     index += 2
@@ -917,7 +918,7 @@ def rewrite_literal_tokens(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = substring(expression, index, index + 1)
         if ch == "'"  or  ch == "\"":
             literal_end = skip_string_literal(expression, index)
             result = result + substring(expression, index, literal_end)
@@ -929,7 +930,7 @@ def rewrite_literal_tokens(expression):
                 index += 1
                 if index >= len(expression):
                     break
-                next = expression[index]
+                next = substring(expression, index, index + 1)
                 if not is_identifier_char(next):
                     break
             token = substring(expression, start, index)
@@ -958,23 +959,15 @@ def rewrite_push_calls(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = substring(expression, index, index + 1)
         if ch == "'"  or  ch == "\"":
             literal_end = skip_string_literal(expression, index)
             result = result + substring(expression, index, literal_end)
             index = literal_end
             continue
         if index + len(target) <= len(expression):
-            matches = True
-            offset = 0
-            while True:
-                if offset >= len(target):
-                    break
-                if expression[index + offset] != target[offset]:
-                    matches = False
-                    break
-                offset += 1
-            if matches:
+            slice = substring(expression, index, index + len(target))
+            if slice == target:
                 result = result + replacement
                 index += len(target)
                 continue
@@ -1029,7 +1022,7 @@ def extract_object_span(text, dot_index):
     while True:
         if index < 0:
             break
-        ch = text[index]
+        ch = substring(text, index, index + 1)
         if ch == "]":
             square_depth += 1
             index -= 1
@@ -1066,14 +1059,14 @@ def extract_object_span(text, dot_index):
 def extract_parenthesized_span(text, open_index):
     if open_index >= len(text):
         return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
-    if text[open_index] != "(":
+    if substring(text, open_index, open_index + 1) != "(":
         return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
     index = open_index + 1
     depth = 1
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = substring(text, index, index + 1)
         if ch == "(":
             depth += 1
         else:
@@ -1090,12 +1083,12 @@ def extract_parenthesized_span(text, open_index):
     return ExtractedSpan(value="", start=open_index, end=open_index, success=False)
 
 def skip_string_literal(text, quote_index):
-    quote = text[quote_index]
+    quote = substring(text, quote_index, quote_index + 1)
     index = quote_index + 1
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = substring(text, index, index + 1)
         if ch == "\\":
             index += 2
             continue
@@ -1860,7 +1853,7 @@ def trim_text(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
+        ch = substring(value, start, start + 1)
         if ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t":
             start += 1
             continue
@@ -1868,7 +1861,8 @@ def trim_text(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        look_index = end - 1
+        ch = substring(value, look_index, look_index + 1)
         if ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t":
             end -= 1
             continue

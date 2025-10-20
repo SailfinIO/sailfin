@@ -807,7 +807,7 @@ fn is_struct_literal_type_candidate(text -> string) -> boolean {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "." {
             index += 1;
             continue;
@@ -826,10 +826,11 @@ fn lower_array_literal_expression(expression -> string, depth -> number) -> stri
     if trimmed.length < 2 {
         return null;
     }
-    if trimmed[0] != "[" {
+    if substring(trimmed, 0, 1) != "[" {
         return null;
     }
-    if trimmed[trimmed.length - 1] != "]" {
+    let closing_index = trimmed.length - 1;
+    if substring(trimmed, closing_index, closing_index + 1) != "]" {
         return null;
     }
     let inner = substring(trimmed, 1, trimmed.length - 1);
@@ -927,7 +928,7 @@ fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> stri
             if type_end <= 0 {
                 break;
             }
-            let prev = current[type_end - 1];
+            let prev = substring(current, type_end - 1, type_end);
             if is_whitespace_char(prev) {
                 type_end -= 1;
                 continue;
@@ -939,7 +940,7 @@ fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> stri
             if type_start <= 0 {
                 break;
             }
-            let candidate_char = current[type_start - 1];
+            let candidate_char = substring(current, type_start - 1, type_start);
             if candidate_char == "." {
                 type_start -= 1;
                 continue;
@@ -960,7 +961,7 @@ fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> stri
             continue;
         }
         if type_start > 0 {
-            let prefix_char = current[type_start - 1];
+            let prefix_char = substring(current, type_start - 1, type_start);
             if is_identifier_char(prefix_char) || prefix_char == "." {
                 search_start = open_index + 1;
                 continue;
@@ -1051,7 +1052,7 @@ fn rewrite_logical_operators(expression -> string) -> string {
         if index >= expression.length {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if ch == "'" || ch == "\"" {
             let literal_end = skip_string_literal(expression, index);
             result = result + substring(expression, index, literal_end);
@@ -1060,7 +1061,7 @@ fn rewrite_logical_operators(expression -> string) -> string {
         }
         if ch == "&" {
             if index + 1 < expression.length {
-                let next = expression[index + 1];
+                let next = substring(expression, index + 1, index + 2);
                 if next == "&" {
                     result = result + " and ";
                     index += 2;
@@ -1070,7 +1071,7 @@ fn rewrite_logical_operators(expression -> string) -> string {
         }
         if ch == "|" {
             if index + 1 < expression.length {
-                let next = expression[index + 1];
+                let next = substring(expression, index + 1, index + 2);
                 if next == "|" {
                     result = result + " or ";
                     index += 2;
@@ -1080,7 +1081,7 @@ fn rewrite_logical_operators(expression -> string) -> string {
         }
         if ch == "!" {
             if index + 1 < expression.length {
-                let next = expression[index + 1];
+                let next = substring(expression, index + 1, index + 2);
                 if next == "=" {
                     result = result + "!=";
                     index += 2;
@@ -1107,7 +1108,7 @@ fn rewrite_literal_tokens(expression -> string) -> string {
         if index >= expression.length {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if ch == "'" || ch == "\"" {
             let literal_end = skip_string_literal(expression, index);
             result = result + substring(expression, index, literal_end);
@@ -1121,7 +1122,7 @@ fn rewrite_literal_tokens(expression -> string) -> string {
                 if index >= expression.length {
                     break;
                 }
-                let next = expression[index];
+                let next = substring(expression, index, index + 1);
                 if !is_identifier_char(next) {
                     break;
                 }
@@ -1156,7 +1157,7 @@ fn rewrite_push_calls(expression -> string) -> string {
         if index >= expression.length {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if ch == "'" || ch == "\"" {
             let literal_end = skip_string_literal(expression, index);
             result = result + substring(expression, index, literal_end);
@@ -1164,19 +1165,8 @@ fn rewrite_push_calls(expression -> string) -> string {
             continue;
         }
         if index + target.length <= expression.length {
-            let mut matches -> boolean = true;
-            let mut offset -> number = 0;
-            loop {
-                if offset >= target.length {
-                    break;
-                }
-                if expression[index + offset] != target[offset] {
-                    matches = false;
-                    break;
-                }
-                offset += 1;
-            }
-            if matches {
+            let slice = substring(expression, index, index + target.length);
+            if slice == target {
                 result = result + replacement;
                 index += target.length;
                 continue;
@@ -1247,7 +1237,7 @@ fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan {
         if index < 0 {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "]" {
             square_depth += 1;
             index -= 1;
@@ -1296,7 +1286,7 @@ fn extract_parenthesized_span(text -> string, open_index -> number) -> Extracted
     if open_index >= text.length {
         return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
     }
-    if text[open_index] != "(" {
+    if substring(text, open_index, open_index + 1) != "(" {
         return ExtractedSpan { value: "", start: open_index, end: open_index, success: false };
     }
     let mut index -> number = open_index + 1;
@@ -1305,7 +1295,7 @@ fn extract_parenthesized_span(text -> string, open_index -> number) -> Extracted
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "(" {
             depth += 1;
         } else if ch == ")" {
@@ -1324,13 +1314,13 @@ fn extract_parenthesized_span(text -> string, open_index -> number) -> Extracted
 }
 
 fn skip_string_literal(text -> string, quote_index -> number) -> number {
-    let quote = text[quote_index];
+    let quote = substring(text, quote_index, quote_index + 1);
     let mut index -> number = quote_index + 1;
     loop {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "\\" {
             index += 2;
             continue;
@@ -2295,7 +2285,7 @@ fn trim_text(value -> string) -> string {
         if start >= end {
             break;
         }
-        let ch = value[start];
+        let ch = substring(value, start, start + 1);
         if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
             start += 1;
             continue;
@@ -2306,7 +2296,8 @@ fn trim_text(value -> string) -> string {
         if end <= start {
             break;
         }
-        let ch = value[end - 1];
+        let look_index = end - 1;
+        let ch = substring(value, look_index, look_index + 1);
         if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
             end -= 1;
             continue;

@@ -163,7 +163,8 @@ fn trim_whitespace(value -> string) -> string {
         if end <= start {
             break;
         }
-        let ch -> int = value[end - 1];
+        let look_index = end - 1;
+        let ch -> int = value[look_index];
         if is_whitespace_char(ch) {
             end -= 1;
             continue;
@@ -178,10 +179,13 @@ fn looks_like_quoted_string(text -> string) -> boolean {
     if text.length < 2 {
         return false;
     }
-    if text[0] != 34 {
+    let first -> int = text[0];
+    if first != 34 {
         return false;
     }
-    if text[text.length - 1] != 34 {
+    let last_index = text.length - 1;
+    let last -> int = text[last_index];
+    if last != 34 {
         return false;
     }
     return true;
@@ -193,7 +197,8 @@ fn looks_like_number(text -> string) -> boolean {
     }
     let mut has_decimal -> boolean = false;
     let mut index -> number = 0;
-    if text[0] == 45 {
+    let first -> int = text[0];
+    if first == 45 {
         if text.length == 1 {
             return false;
         }
@@ -203,7 +208,7 @@ fn looks_like_number(text -> string) -> boolean {
         if index >= text.length {
             break;
         }
-        let ch -> int = text[index];
+    let ch -> int = text[index];
         if ch == 46 {
             if has_decimal {
                 return false;
