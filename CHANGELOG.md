@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.55 (2025-10-20)
+
+### Bug Fixes
+
+- Work on stage2 parity
+  ([`0c67039`](https://github.com/SailfinIO/sailfin/commit/0c670398cb1064b1546c4526f591ab5788078306))
+
+- Work on stage2 parity
+  ([`731144c`](https://github.com/SailfinIO/sailfin/commit/731144c6b3ac1594c5ff9ed80b298e874c720fe0))
+
+- Work on stage2 parity
+  ([`1aec47f`](https://github.com/SailfinIO/sailfin/commit/1aec47f6b63060a0bce2eab635481f2845d29c3d))
+
+- Work on stage2 parity
+  ([`da493dd`](https://github.com/SailfinIO/sailfin/commit/da493dd8a572e8e821cb18824cb7b85499c65a5f))
+
+- Work on stage2 parity
+  ([`271fd47`](https://github.com/SailfinIO/sailfin/commit/271fd47ab3aa3264f62701a31b4c906555b75939))
+
+- Work on stage2 parity
+  ([`c96ba4c`](https://github.com/SailfinIO/sailfin/commit/c96ba4c673b4744ce6aa1b7a096f04dcb01f2dc5))
+
+- Work on stage2 parity
+  ([`2fa6797`](https://github.com/SailfinIO/sailfin/commit/2fa6797324300e3fca96302a3ad391c51a7a6e6c))
+
+
 ## v0.1.1-alpha.54 (2025-10-20)
 
 ### Bug Fixes
