@@ -6873,35 +6873,80 @@ def strip_enclosing_parentheses(expression):
 
 def find_top_level_operator(expression, operators):
     depth = 0
-    index = len(expression)
+    index = 0
+    in_string = False
+    escape_next = False
+    candidate_index = -1
+    candidate_symbol = ""
     while True:
-        if index <= 0:
+        if index >= len(expression):
             break
-        index -= 1
         ch = expression[index]
-        if ch == ")":
-            depth += 1
+        if in_string:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
             continue
         if ch == "(":
+            depth += 1
+            index += 1
+            continue
+        if ch == ")":
             if depth > 0:
                 depth -= 1
-                continue
-        if depth > 0:
+            index += 1
             continue
-        if contains_char(operators, ch):
+        if depth == 0  and  contains_char(operators, ch):
             if ch == "-":
-                if not is_binary_minus(expression, index):
-                    continue
-            return OperatorMatch(index=index, symbol=substring(expression, index, index + 1), success=True)
+                if is_binary_minus(expression, index):
+                    candidate_index = index
+                    candidate_symbol = substring(expression, index, index + 1)
+            else:
+                candidate_index = index
+                candidate_symbol = substring(expression, index, index + 1)
+        index += 1
+    if candidate_index >= 0:
+        return OperatorMatch(index=candidate_index, symbol=candidate_symbol, success=True)
     return OperatorMatch(index=-1, symbol="", success=False)
 
 def find_comparison_operator(expression):
     depth = 0
     index = 0
+    in_string = False
+    escape_next = False
     while True:
         if index >= len(expression):
             break
         ch = expression[index]
+        if in_string:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
+            continue
         if ch == "(":
             depth += 1
             index += 1
@@ -6925,45 +6970,83 @@ def find_comparison_operator(expression):
 
 def find_logical_operator(expression):
     depth = 0
-    index = len(expression)
+    index = 0
+    in_string = False
+    escape_next = False
     while True:
-        if index <= 1:
+        if index + 1 >= len(expression):
             break
-        index -= 1
         ch = expression[index]
-        if ch == ")":
-            depth += 1
+        if in_string:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
             continue
         if ch == "(":
+            depth += 1
+            index += 1
+            continue
+        if ch == ")":
             if depth > 0:
                 depth -= 1
-                continue
-        if depth > 0:
+            index += 1
             continue
-        if index + 1 < len(expression):
+        if depth == 0:
             two = substring(expression, index, index + 2)
             if two == "||":
                 return OperatorMatch(index=index, symbol="||", success=True)
-    index = len(expression)
+        index += 1
     depth = 0
+    index = 0
+    in_string = False
+    escape_next = False
     while True:
-        if index <= 1:
+        if index + 1 >= len(expression):
             break
-        index -= 1
         ch = expression[index]
-        if ch == ")":
-            depth += 1
+        if in_string:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
             continue
         if ch == "(":
+            depth += 1
+            index += 1
+            continue
+        if ch == ")":
             if depth > 0:
                 depth -= 1
-                continue
-        if depth > 0:
+            index += 1
             continue
-        if index + 1 < len(expression):
+        if depth == 0:
             two = substring(expression, index, index + 2)
             if two == "&&":
                 return OperatorMatch(index=index, symbol="&&", success=True)
+        index += 1
     return OperatorMatch(index=-1, symbol="", success=False)
 
 def contains_char(set, ch):

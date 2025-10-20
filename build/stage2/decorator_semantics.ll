@@ -91,37 +91,37 @@ merge5:
   %t22 = getelementptr %DecoratorInfo, %DecoratorInfo* %t19, i64 %t17
   %t23 = load %DecoratorInfo, %DecoratorInfo* %t22
   store %DecoratorInfo %t23, %DecoratorInfo* %l3
-  %t26 = load %DecoratorInfo, %DecoratorInfo* %l3
-  %t27 = extractvalue %DecoratorInfo %t26, 0
-  %s28 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.28, i32 0, i32 0
-  %t29 = icmp eq i8* %t27, %s28
-  br label %logical_or_entry_25
+  %t25 = load %DecoratorInfo, %DecoratorInfo* %l3
+  %t26 = extractvalue %DecoratorInfo %t25, 0
+  %s27 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.27, i32 0, i32 0
+  %t28 = icmp eq i8* %t26, %s27
+  br label %logical_or_entry_24
 
-logical_or_entry_25:
-  br i1 %t29, label %logical_or_merge_25, label %logical_or_right_25
+logical_or_entry_24:
+  br i1 %t28, label %logical_or_merge_24, label %logical_or_right_24
 
-logical_or_right_25:
+logical_or_right_24:
   %t30 = load %DecoratorInfo, %DecoratorInfo* %l3
   %t31 = extractvalue %DecoratorInfo %t30, 0
   %s32 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.32, i32 0, i32 0
   %t33 = icmp eq i8* %t31, %s32
-  br label %logical_or_right_end_25
+  br label %logical_or_entry_29
 
-logical_or_right_end_25:
-  br label %logical_or_merge_25
+logical_or_entry_29:
+  br i1 %t33, label %logical_or_merge_29, label %logical_or_right_29
 
-logical_or_merge_25:
-  %t34 = phi i1 [ true, %logical_or_entry_25 ], [ %t33, %logical_or_right_end_25 ]
-  br label %logical_or_entry_24
+logical_or_right_29:
+  %t34 = load %DecoratorInfo, %DecoratorInfo* %l3
+  %t35 = extractvalue %DecoratorInfo %t34, 0
+  %s36 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.36, i32 0, i32 0
+  %t37 = icmp eq i8* %t35, %s36
+  br label %logical_or_right_end_29
 
-logical_or_entry_24:
-  br i1 %t34, label %logical_or_merge_24, label %logical_or_right_24
+logical_or_right_end_29:
+  br label %logical_or_merge_29
 
-logical_or_right_24:
-  %t35 = load %DecoratorInfo, %DecoratorInfo* %l3
-  %t36 = extractvalue %DecoratorInfo %t35, 0
-  %s37 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.37, i32 0, i32 0
-  %t38 = icmp eq i8* %t36, %s37
+logical_or_merge_29:
+  %t38 = phi i1 [ true, %logical_or_entry_29 ], [ %t37, %logical_or_right_end_29 ]
   br label %logical_or_right_end_24
 
 logical_or_right_end_24:
@@ -1603,42 +1603,42 @@ afterloop3:
 
 define i1 @is_whitespace_char(i64 %ch) {
 entry:
-  %t3 = icmp eq i64 %ch, 32
+  %t1 = icmp eq i64 %ch, 32
+  br label %logical_or_entry_0
+
+logical_or_entry_0:
+  br i1 %t1, label %logical_or_merge_0, label %logical_or_right_0
+
+logical_or_right_0:
+  %t3 = icmp eq i64 %ch, 9
   br label %logical_or_entry_2
 
 logical_or_entry_2:
   br i1 %t3, label %logical_or_merge_2, label %logical_or_right_2
 
 logical_or_right_2:
-  %t4 = icmp eq i64 %ch, 9
+  %t5 = icmp eq i64 %ch, 10
+  br label %logical_or_entry_4
+
+logical_or_entry_4:
+  br i1 %t5, label %logical_or_merge_4, label %logical_or_right_4
+
+logical_or_right_4:
+  %t6 = icmp eq i64 %ch, 13
+  br label %logical_or_right_end_4
+
+logical_or_right_end_4:
+  br label %logical_or_merge_4
+
+logical_or_merge_4:
+  %t7 = phi i1 [ true, %logical_or_entry_4 ], [ %t6, %logical_or_right_end_4 ]
   br label %logical_or_right_end_2
 
 logical_or_right_end_2:
   br label %logical_or_merge_2
 
 logical_or_merge_2:
-  %t5 = phi i1 [ true, %logical_or_entry_2 ], [ %t4, %logical_or_right_end_2 ]
-  br label %logical_or_entry_1
-
-logical_or_entry_1:
-  br i1 %t5, label %logical_or_merge_1, label %logical_or_right_1
-
-logical_or_right_1:
-  %t6 = icmp eq i64 %ch, 10
-  br label %logical_or_right_end_1
-
-logical_or_right_end_1:
-  br label %logical_or_merge_1
-
-logical_or_merge_1:
-  %t7 = phi i1 [ true, %logical_or_entry_1 ], [ %t6, %logical_or_right_end_1 ]
-  br label %logical_or_entry_0
-
-logical_or_entry_0:
-  br i1 %t7, label %logical_or_merge_0, label %logical_or_right_0
-
-logical_or_right_0:
-  %t8 = icmp eq i64 %ch, 13
+  %t8 = phi i1 [ true, %logical_or_entry_2 ], [ %t7, %logical_or_right_end_2 ]
   br label %logical_or_right_end_0
 
 logical_or_right_end_0:

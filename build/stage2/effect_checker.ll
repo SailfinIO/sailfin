@@ -1695,8 +1695,8 @@ afterloop3:
   %t42 = load double, double* %l4
   br label %loop.header6
 loop.header6:
-  %t55 = phi double [ %t42, %entry ], [ %t54, %loop.latch8 ]
-  store double %t55, double* %l4
+  %t54 = phi double [ %t42, %entry ], [ %t53, %loop.latch8 ]
+  store double %t54, double* %l4
   br label %loop.body7
 loop.body7:
   %t43 = load double, double* %l4
@@ -1705,245 +1705,245 @@ loop.body7:
   %t46 = load double, double* %l4
   %t47 = fptosi double %t46 to i64
   store double 0.0, double* %l5
-  %t50 = load double, double* %l5
-  %t51 = load double, double* %l4
-  %t52 = sitofp i64 1 to double
-  %t53 = fadd double %t51, %t52
-  store double %t53, double* %l4
+  %t49 = load double, double* %l5
+  %t50 = load double, double* %l4
+  %t51 = sitofp i64 1 to double
+  %t52 = fadd double %t50, %t51
+  store double %t52, double* %l4
   br label %loop.latch8
 loop.latch8:
-  %t54 = load double, double* %l4
+  %t53 = load double, double* %l4
   br label %loop.header6
 afterloop9:
-  %t56 = load i1, i1* %l3
-  %t57 = load double, double* %l0
-  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t59 = load double, double* %l2
-  %t60 = load i1, i1* %l3
-  %t61 = load double, double* %l4
-  br i1 %t56, label %then10, label %merge11
+  %t55 = load i1, i1* %l3
+  %t56 = load double, double* %l0
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t58 = load double, double* %l2
+  %t59 = load i1, i1* %l3
+  %t60 = load double, double* %l4
+  br i1 %t55, label %then10, label %merge11
 then10:
-  %t62 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.63, i32 0, i32 0
-  %t64 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t62, i8* %s63)
-  store { i8**, i64 }* %t64, { i8**, i64 }** %l1
+  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s62 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.62, i32 0, i32 0
+  %t63 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t61, i8* %s62)
+  store { i8**, i64 }* %t63, { i8**, i64 }** %l1
   br label %merge11
 merge11:
-  %t65 = phi { i8**, i64 }* [ %t64, %then10 ], [ %t58, %entry ]
-  store { i8**, i64 }* %t65, { i8**, i64 }** %l1
-  %t66 = call { %EffectRequirement*, i64 }* @required_effects(%Block %body)
-  store { %EffectRequirement*, i64 }* %t66, { %EffectRequirement*, i64 }** %l6
-  %t67 = alloca [0 x i8*]
-  %t68 = getelementptr [0 x i8*], [0 x i8*]* %t67, i32 0, i32 0
-  %t69 = alloca { i8**, i64 }
-  %t70 = getelementptr { i8**, i64 }, { i8**, i64 }* %t69, i32 0, i32 0
-  store i8** %t68, i8*** %t70
-  %t71 = getelementptr { i8**, i64 }, { i8**, i64 }* %t69, i32 0, i32 1
-  store i64 0, i64* %t71
-  store { i8**, i64 }* %t69, { i8**, i64 }** %l7
-  %t72 = alloca [0 x %EffectRequirement]
-  %t73 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t72, i32 0, i32 0
-  %t74 = alloca { %EffectRequirement*, i64 }
-  %t75 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t74, i32 0, i32 0
-  store %EffectRequirement* %t73, %EffectRequirement** %t75
-  %t76 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t74, i32 0, i32 1
-  store i64 0, i64* %t76
-  store { %EffectRequirement*, i64 }* %t74, { %EffectRequirement*, i64 }** %l8
-  %t77 = sitofp i64 0 to double
-  store double %t77, double* %l9
-  %t78 = load double, double* %l0
-  %t79 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t80 = load double, double* %l2
-  %t81 = load i1, i1* %l3
-  %t82 = load double, double* %l4
-  %t83 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t84 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t85 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t86 = load double, double* %l9
+  %t64 = phi { i8**, i64 }* [ %t63, %then10 ], [ %t57, %entry ]
+  store { i8**, i64 }* %t64, { i8**, i64 }** %l1
+  %t65 = call { %EffectRequirement*, i64 }* @required_effects(%Block %body)
+  store { %EffectRequirement*, i64 }* %t65, { %EffectRequirement*, i64 }** %l6
+  %t66 = alloca [0 x i8*]
+  %t67 = getelementptr [0 x i8*], [0 x i8*]* %t66, i32 0, i32 0
+  %t68 = alloca { i8**, i64 }
+  %t69 = getelementptr { i8**, i64 }, { i8**, i64 }* %t68, i32 0, i32 0
+  store i8** %t67, i8*** %t69
+  %t70 = getelementptr { i8**, i64 }, { i8**, i64 }* %t68, i32 0, i32 1
+  store i64 0, i64* %t70
+  store { i8**, i64 }* %t68, { i8**, i64 }** %l7
+  %t71 = alloca [0 x %EffectRequirement]
+  %t72 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* %t71, i32 0, i32 0
+  %t73 = alloca { %EffectRequirement*, i64 }
+  %t74 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t73, i32 0, i32 0
+  store %EffectRequirement* %t72, %EffectRequirement** %t74
+  %t75 = getelementptr { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t73, i32 0, i32 1
+  store i64 0, i64* %t75
+  store { %EffectRequirement*, i64 }* %t73, { %EffectRequirement*, i64 }** %l8
+  %t76 = sitofp i64 0 to double
+  store double %t76, double* %l9
+  %t77 = load double, double* %l0
+  %t78 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t79 = load double, double* %l2
+  %t80 = load i1, i1* %l3
+  %t81 = load double, double* %l4
+  %t82 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t83 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t84 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t85 = load double, double* %l9
   br label %loop.header12
 loop.header12:
-  %t178 = phi double [ %t86, %entry ], [ %t175, %loop.latch14 ]
-  %t179 = phi { i8**, i64 }* [ %t84, %entry ], [ %t176, %loop.latch14 ]
-  %t180 = phi { %EffectRequirement*, i64 }* [ %t85, %entry ], [ %t177, %loop.latch14 ]
-  store double %t178, double* %l9
-  store { i8**, i64 }* %t179, { i8**, i64 }** %l7
-  store { %EffectRequirement*, i64 }* %t180, { %EffectRequirement*, i64 }** %l8
+  %t177 = phi double [ %t85, %entry ], [ %t174, %loop.latch14 ]
+  %t178 = phi { i8**, i64 }* [ %t83, %entry ], [ %t175, %loop.latch14 ]
+  %t179 = phi { %EffectRequirement*, i64 }* [ %t84, %entry ], [ %t176, %loop.latch14 ]
+  store double %t177, double* %l9
+  store { i8**, i64 }* %t178, { i8**, i64 }** %l7
+  store { %EffectRequirement*, i64 }* %t179, { %EffectRequirement*, i64 }** %l8
   br label %loop.body13
 loop.body13:
-  %t87 = load double, double* %l9
-  %t88 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t89 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t88
-  %t90 = extractvalue { %EffectRequirement*, i64 } %t89, 1
-  %t91 = sitofp i64 %t90 to double
-  %t92 = fcmp oge double %t87, %t91
-  %t93 = load double, double* %l0
-  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t95 = load double, double* %l2
-  %t96 = load i1, i1* %l3
-  %t97 = load double, double* %l4
-  %t98 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t100 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t101 = load double, double* %l9
-  br i1 %t92, label %then16, label %merge17
+  %t86 = load double, double* %l9
+  %t87 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t88 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t87
+  %t89 = extractvalue { %EffectRequirement*, i64 } %t88, 1
+  %t90 = sitofp i64 %t89 to double
+  %t91 = fcmp oge double %t86, %t90
+  %t92 = load double, double* %l0
+  %t93 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t94 = load double, double* %l2
+  %t95 = load i1, i1* %l3
+  %t96 = load double, double* %l4
+  %t97 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t98 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t99 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t100 = load double, double* %l9
+  br i1 %t91, label %then16, label %merge17
 then16:
   br label %afterloop15
 merge17:
-  %t102 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t103 = load double, double* %l9
-  %t104 = fptosi double %t103 to i64
-  %t105 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t102
-  %t106 = extractvalue { %EffectRequirement*, i64 } %t105, 0
-  %t107 = extractvalue { %EffectRequirement*, i64 } %t105, 1
-  %t108 = icmp uge i64 %t104, %t107
-  ; bounds check: %t108 (if true, out of bounds)
-  %t109 = getelementptr %EffectRequirement, %EffectRequirement* %t106, i64 %t104
-  %t110 = load %EffectRequirement, %EffectRequirement* %t109
-  store %EffectRequirement %t110, %EffectRequirement* %l10
-  %t111 = load %EffectRequirement, %EffectRequirement* %l10
-  %t112 = extractvalue %EffectRequirement %t111, 0
-  store i8* %t112, i8** %l11
-  %t114 = load i8*, i8** %l11
-  %s115 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.115, i32 0, i32 0
-  %t116 = icmp eq i8* %t114, %s115
-  br label %logical_and_entry_113
+  %t101 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t102 = load double, double* %l9
+  %t103 = fptosi double %t102 to i64
+  %t104 = load { %EffectRequirement*, i64 }, { %EffectRequirement*, i64 }* %t101
+  %t105 = extractvalue { %EffectRequirement*, i64 } %t104, 0
+  %t106 = extractvalue { %EffectRequirement*, i64 } %t104, 1
+  %t107 = icmp uge i64 %t103, %t106
+  ; bounds check: %t107 (if true, out of bounds)
+  %t108 = getelementptr %EffectRequirement, %EffectRequirement* %t105, i64 %t103
+  %t109 = load %EffectRequirement, %EffectRequirement* %t108
+  store %EffectRequirement %t109, %EffectRequirement* %l10
+  %t110 = load %EffectRequirement, %EffectRequirement* %l10
+  %t111 = extractvalue %EffectRequirement %t110, 0
+  store i8* %t111, i8** %l11
+  %t113 = load i8*, i8** %l11
+  %s114 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.114, i32 0, i32 0
+  %t115 = icmp eq i8* %t113, %s114
+  br label %logical_and_entry_112
 
-logical_and_entry_113:
-  br i1 %t116, label %logical_and_right_113, label %logical_and_merge_113
+logical_and_entry_112:
+  br i1 %t115, label %logical_and_right_112, label %logical_and_merge_112
 
-logical_and_right_113:
-  %t117 = load i1, i1* %l3
-  br label %logical_and_right_end_113
+logical_and_right_112:
+  %t116 = load i1, i1* %l3
+  br label %logical_and_right_end_112
 
-logical_and_right_end_113:
-  br label %logical_and_merge_113
+logical_and_right_end_112:
+  br label %logical_and_merge_112
 
-logical_and_merge_113:
-  %t118 = phi i1 [ false, %logical_and_entry_113 ], [ %t117, %logical_and_right_end_113 ]
-  %t119 = load double, double* %l0
-  %t120 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t121 = load double, double* %l2
-  %t122 = load i1, i1* %l3
-  %t123 = load double, double* %l4
-  %t124 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t125 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t126 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t127 = load double, double* %l9
-  %t128 = load %EffectRequirement, %EffectRequirement* %l10
-  %t129 = load i8*, i8** %l11
-  br i1 %t118, label %then18, label %merge19
+logical_and_merge_112:
+  %t117 = phi i1 [ false, %logical_and_entry_112 ], [ %t116, %logical_and_right_end_112 ]
+  %t118 = load double, double* %l0
+  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t120 = load double, double* %l2
+  %t121 = load i1, i1* %l3
+  %t122 = load double, double* %l4
+  %t123 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t124 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t125 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t126 = load double, double* %l9
+  %t127 = load %EffectRequirement, %EffectRequirement* %l10
+  %t128 = load i8*, i8** %l11
+  br i1 %t117, label %then18, label %merge19
 then18:
-  %t130 = load double, double* %l9
-  %t131 = sitofp i64 1 to double
-  %t132 = fadd double %t130, %t131
-  store double %t132, double* %l9
+  %t129 = load double, double* %l9
+  %t130 = sitofp i64 1 to double
+  %t131 = fadd double %t129, %t130
+  store double %t131, double* %l9
   br label %loop.latch14
 merge19:
-  %t133 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t134 = load i8*, i8** %l11
-  %t135 = call i1 @contains_effect({ i8**, i64 }* %t133, i8* %t134)
-  %t136 = load double, double* %l0
-  %t137 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t138 = load double, double* %l2
-  %t139 = load i1, i1* %l3
-  %t140 = load double, double* %l4
-  %t141 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t142 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t143 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t144 = load double, double* %l9
-  %t145 = load %EffectRequirement, %EffectRequirement* %l10
-  %t146 = load i8*, i8** %l11
-  br i1 %t135, label %then20, label %merge21
+  %t132 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t133 = load i8*, i8** %l11
+  %t134 = call i1 @contains_effect({ i8**, i64 }* %t132, i8* %t133)
+  %t135 = load double, double* %l0
+  %t136 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t137 = load double, double* %l2
+  %t138 = load i1, i1* %l3
+  %t139 = load double, double* %l4
+  %t140 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t141 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t142 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t143 = load double, double* %l9
+  %t144 = load %EffectRequirement, %EffectRequirement* %l10
+  %t145 = load i8*, i8** %l11
+  br i1 %t134, label %then20, label %merge21
 then20:
-  %t147 = load double, double* %l9
-  %t148 = sitofp i64 1 to double
-  %t149 = fadd double %t147, %t148
-  store double %t149, double* %l9
+  %t146 = load double, double* %l9
+  %t147 = sitofp i64 1 to double
+  %t148 = fadd double %t146, %t147
+  store double %t148, double* %l9
   br label %loop.latch14
 merge21:
-  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t151 = load i8*, i8** %l11
-  %t152 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t150, i8* %t151)
-  store { i8**, i64 }* %t152, { i8**, i64 }** %l7
-  %t153 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t154 = load i8*, i8** %l11
-  %t155 = call i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t153, i8* %t154)
-  %t156 = xor i1 %t155, 1
-  %t157 = load double, double* %l0
-  %t158 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t159 = load double, double* %l2
-  %t160 = load i1, i1* %l3
-  %t161 = load double, double* %l4
-  %t162 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t163 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t164 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t165 = load double, double* %l9
-  %t166 = load %EffectRequirement, %EffectRequirement* %l10
-  %t167 = load i8*, i8** %l11
-  br i1 %t156, label %then22, label %merge23
+  %t149 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t150 = load i8*, i8** %l11
+  %t151 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t149, i8* %t150)
+  store { i8**, i64 }* %t151, { i8**, i64 }** %l7
+  %t152 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t153 = load i8*, i8** %l11
+  %t154 = call i1 @contains_requirement_for_effect({ %EffectRequirement*, i64 }* %t152, i8* %t153)
+  %t155 = xor i1 %t154, 1
+  %t156 = load double, double* %l0
+  %t157 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t158 = load double, double* %l2
+  %t159 = load i1, i1* %l3
+  %t160 = load double, double* %l4
+  %t161 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t162 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t163 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t164 = load double, double* %l9
+  %t165 = load %EffectRequirement, %EffectRequirement* %l10
+  %t166 = load i8*, i8** %l11
+  br i1 %t155, label %then22, label %merge23
 then22:
-  %t168 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t169 = load %EffectRequirement, %EffectRequirement* %l10
-  %t170 = call { %EffectRequirement*, i64 }* @append_requirement({ %EffectRequirement*, i64 }* %t168, %EffectRequirement %t169)
-  store { %EffectRequirement*, i64 }* %t170, { %EffectRequirement*, i64 }** %l8
+  %t167 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t168 = load %EffectRequirement, %EffectRequirement* %l10
+  %t169 = call { %EffectRequirement*, i64 }* @append_requirement({ %EffectRequirement*, i64 }* %t167, %EffectRequirement %t168)
+  store { %EffectRequirement*, i64 }* %t169, { %EffectRequirement*, i64 }** %l8
   br label %merge23
 merge23:
-  %t171 = phi { %EffectRequirement*, i64 }* [ %t170, %then22 ], [ %t164, %loop.body13 ]
-  store { %EffectRequirement*, i64 }* %t171, { %EffectRequirement*, i64 }** %l8
-  %t172 = load double, double* %l9
-  %t173 = sitofp i64 1 to double
-  %t174 = fadd double %t172, %t173
-  store double %t174, double* %l9
+  %t170 = phi { %EffectRequirement*, i64 }* [ %t169, %then22 ], [ %t163, %loop.body13 ]
+  store { %EffectRequirement*, i64 }* %t170, { %EffectRequirement*, i64 }** %l8
+  %t171 = load double, double* %l9
+  %t172 = sitofp i64 1 to double
+  %t173 = fadd double %t171, %t172
+  store double %t173, double* %l9
   br label %loop.latch14
 loop.latch14:
-  %t175 = load double, double* %l9
-  %t176 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t177 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t174 = load double, double* %l9
+  %t175 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t176 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
   br label %loop.header12
 afterloop15:
-  %t181 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t182 = load { i8**, i64 }, { i8**, i64 }* %t181
-  %t183 = extractvalue { i8**, i64 } %t182, 1
-  %t184 = icmp eq i64 %t183, 0
-  %t185 = load double, double* %l0
-  %t186 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t187 = load double, double* %l2
-  %t188 = load i1, i1* %l3
-  %t189 = load double, double* %l4
-  %t190 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
-  %t191 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t192 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t193 = load double, double* %l9
-  br i1 %t184, label %then24, label %merge25
+  %t180 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t181 = load { i8**, i64 }, { i8**, i64 }* %t180
+  %t182 = extractvalue { i8**, i64 } %t181, 1
+  %t183 = icmp eq i64 %t182, 0
+  %t184 = load double, double* %l0
+  %t185 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t186 = load double, double* %l2
+  %t187 = load i1, i1* %l3
+  %t188 = load double, double* %l4
+  %t189 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l6
+  %t190 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t191 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t192 = load double, double* %l9
+  br i1 %t183, label %then24, label %merge25
 then24:
-  %t194 = alloca [0 x %EffectViolation]
-  %t195 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t194, i32 0, i32 0
-  %t196 = alloca { %EffectViolation*, i64 }
-  %t197 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t196, i32 0, i32 0
-  store %EffectViolation* %t195, %EffectViolation** %t197
-  %t198 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t196, i32 0, i32 1
-  store i64 0, i64* %t198
-  ret { %EffectViolation*, i64 }* %t196
+  %t193 = alloca [0 x %EffectViolation]
+  %t194 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t193, i32 0, i32 0
+  %t195 = alloca { %EffectViolation*, i64 }
+  %t196 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t195, i32 0, i32 0
+  store %EffectViolation* %t194, %EffectViolation** %t196
+  %t197 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t195, i32 0, i32 1
+  store i64 0, i64* %t197
+  ret { %EffectViolation*, i64 }* %t195
 merge25:
-  %t199 = alloca [0 x %EffectViolation]
-  %t200 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t199, i32 0, i32 0
-  %t201 = alloca { %EffectViolation*, i64 }
-  %t202 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t201, i32 0, i32 0
-  store %EffectViolation* %t200, %EffectViolation** %t202
-  %t203 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t201, i32 0, i32 1
-  store i64 0, i64* %t203
-  store { %EffectViolation*, i64 }* %t201, { %EffectViolation*, i64 }** %l12
-  %t204 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
-  %t205 = insertvalue %EffectViolation undef, i8* %name, 0
-  %t206 = load { i8**, i64 }*, { i8**, i64 }** %l7
-  %t207 = insertvalue %EffectViolation %t205, { i8**, i64 }* %t206, 1
-  %t208 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
-  %t209 = bitcast { %EffectRequirement*, i64 }* %t208 to { %EffectRequirement**, i64 }*
-  %t210 = insertvalue %EffectViolation %t207, { %EffectRequirement**, i64 }* %t209, 2
-  %t211 = call { %EffectViolation*, i64 }* @append_violation({ %EffectViolation*, i64 }* %t204, %EffectViolation %t210)
-  store { %EffectViolation*, i64 }* %t211, { %EffectViolation*, i64 }** %l12
-  %t212 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
-  ret { %EffectViolation*, i64 }* %t212
+  %t198 = alloca [0 x %EffectViolation]
+  %t199 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* %t198, i32 0, i32 0
+  %t200 = alloca { %EffectViolation*, i64 }
+  %t201 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t200, i32 0, i32 0
+  store %EffectViolation* %t199, %EffectViolation** %t201
+  %t202 = getelementptr { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t200, i32 0, i32 1
+  store i64 0, i64* %t202
+  store { %EffectViolation*, i64 }* %t200, { %EffectViolation*, i64 }** %l12
+  %t203 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
+  %t204 = insertvalue %EffectViolation undef, i8* %name, 0
+  %t205 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t206 = insertvalue %EffectViolation %t204, { i8**, i64 }* %t205, 1
+  %t207 = load { %EffectRequirement*, i64 }*, { %EffectRequirement*, i64 }** %l8
+  %t208 = bitcast { %EffectRequirement*, i64 }* %t207 to { %EffectRequirement**, i64 }*
+  %t209 = insertvalue %EffectViolation %t206, { %EffectRequirement**, i64 }* %t208, 2
+  %t210 = call { %EffectViolation*, i64 }* @append_violation({ %EffectViolation*, i64 }* %t203, %EffectViolation %t209)
+  store { %EffectViolation*, i64 }* %t210, { %EffectViolation*, i64 }** %l12
+  %t211 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l12
+  ret { %EffectViolation*, i64 }* %t211
 }
 
 define { %EffectRequirement*, i64 }* @required_effects(%Block %body) {

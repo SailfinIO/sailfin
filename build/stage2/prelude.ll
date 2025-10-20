@@ -16,6 +16,7 @@ declare noalias i8* @malloc(i64)
 @.str.5 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.19 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.35 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
+@.str.138 = private unnamed_addr constant [6 x i8] c"utf-8\00"
 
 ; fn sleep effects: ![clock]
 define void @sleep(double %milliseconds) {
@@ -491,13 +492,16 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t48 = load i8, i8* %l0
-  %t49 = alloca [2 x i8], align 1
-  %t50 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
-  store i8 %t48, i8* %t50
-  %t51 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 1
-  store i8 0, i8* %t51
-  %t52 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
-  ret i8* %t52
+  %t49 = add i8 %t48, 41
+  store i8 %t49, i8* %l0
+  %t50 = load i8, i8* %l0
+  %t51 = alloca [2 x i8], align 1
+  %t52 = getelementptr [2 x i8], [2 x i8]* %t51, i32 0, i32 0
+  store i8 %t50, i8* %t52
+  %t53 = getelementptr [2 x i8], [2 x i8]* %t51, i32 0, i32 1
+  store i8 0, i8* %t53
+  %t54 = getelementptr [2 x i8], [2 x i8]* %t51, i32 0, i32 0
+  ret i8* %t54
 }
 
 define i8* @to_debug_string(i8* %value) {
@@ -709,54 +713,54 @@ merge5:
   %t9 = sitofp i64 %t8 to double
   %t10 = call i8* @char_at(i8* %value, double %t9)
   store i8* %t10, i8** %l2
-  %t14 = load i8*, i8** %l2
-  %t15 = getelementptr i8, i8* %t14, i64 0
-  %t16 = load i8, i8* %t15
-  %t17 = icmp eq i8 %t16, 32
-  br label %logical_or_entry_13
-
-logical_or_entry_13:
-  br i1 %t17, label %logical_or_merge_13, label %logical_or_right_13
-
-logical_or_right_13:
-  %t18 = load i8*, i8** %l2
-  %t19 = getelementptr i8, i8* %t18, i64 0
-  %t20 = load i8, i8* %t19
-  %t21 = icmp eq i8 %t20, 10
-  br label %logical_or_right_end_13
-
-logical_or_right_end_13:
-  br label %logical_or_merge_13
-
-logical_or_merge_13:
-  %t22 = phi i1 [ true, %logical_or_entry_13 ], [ %t21, %logical_or_right_end_13 ]
-  br label %logical_or_entry_12
-
-logical_or_entry_12:
-  br i1 %t22, label %logical_or_merge_12, label %logical_or_right_12
-
-logical_or_right_12:
-  %t23 = load i8*, i8** %l2
-  %t24 = getelementptr i8, i8* %t23, i64 0
-  %t25 = load i8, i8* %t24
-  %t26 = icmp eq i8 %t25, 9
-  br label %logical_or_right_end_12
-
-logical_or_right_end_12:
-  br label %logical_or_merge_12
-
-logical_or_merge_12:
-  %t27 = phi i1 [ true, %logical_or_entry_12 ], [ %t26, %logical_or_right_end_12 ]
+  %t12 = load i8*, i8** %l2
+  %t13 = getelementptr i8, i8* %t12, i64 0
+  %t14 = load i8, i8* %t13
+  %t15 = icmp eq i8 %t14, 32
   br label %logical_or_entry_11
 
 logical_or_entry_11:
-  br i1 %t27, label %logical_or_merge_11, label %logical_or_right_11
+  br i1 %t15, label %logical_or_merge_11, label %logical_or_right_11
 
 logical_or_right_11:
-  %t28 = load i8*, i8** %l2
-  %t29 = getelementptr i8, i8* %t28, i64 0
-  %t30 = load i8, i8* %t29
-  %t31 = icmp eq i8 %t30, 13
+  %t17 = load i8*, i8** %l2
+  %t18 = getelementptr i8, i8* %t17, i64 0
+  %t19 = load i8, i8* %t18
+  %t20 = icmp eq i8 %t19, 10
+  br label %logical_or_entry_16
+
+logical_or_entry_16:
+  br i1 %t20, label %logical_or_merge_16, label %logical_or_right_16
+
+logical_or_right_16:
+  %t22 = load i8*, i8** %l2
+  %t23 = getelementptr i8, i8* %t22, i64 0
+  %t24 = load i8, i8* %t23
+  %t25 = icmp eq i8 %t24, 9
+  br label %logical_or_entry_21
+
+logical_or_entry_21:
+  br i1 %t25, label %logical_or_merge_21, label %logical_or_right_21
+
+logical_or_right_21:
+  %t26 = load i8*, i8** %l2
+  %t27 = getelementptr i8, i8* %t26, i64 0
+  %t28 = load i8, i8* %t27
+  %t29 = icmp eq i8 %t28, 13
+  br label %logical_or_right_end_21
+
+logical_or_right_end_21:
+  br label %logical_or_merge_21
+
+logical_or_merge_21:
+  %t30 = phi i1 [ true, %logical_or_entry_21 ], [ %t29, %logical_or_right_end_21 ]
+  br label %logical_or_right_end_16
+
+logical_or_right_end_16:
+  br label %logical_or_merge_16
+
+logical_or_merge_16:
+  %t31 = phi i1 [ true, %logical_or_entry_16 ], [ %t30, %logical_or_right_end_16 ]
   br label %logical_or_right_end_11
 
 logical_or_right_end_11:
@@ -801,54 +805,54 @@ merge13:
   %t49 = sitofp i64 %t48 to double
   %t50 = call i8* @char_at(i8* %value, double %t49)
   store i8* %t50, i8** %l3
-  %t54 = load i8*, i8** %l3
-  %t55 = getelementptr i8, i8* %t54, i64 0
-  %t56 = load i8, i8* %t55
-  %t57 = icmp eq i8 %t56, 32
-  br label %logical_or_entry_53
-
-logical_or_entry_53:
-  br i1 %t57, label %logical_or_merge_53, label %logical_or_right_53
-
-logical_or_right_53:
-  %t58 = load i8*, i8** %l3
-  %t59 = getelementptr i8, i8* %t58, i64 0
-  %t60 = load i8, i8* %t59
-  %t61 = icmp eq i8 %t60, 10
-  br label %logical_or_right_end_53
-
-logical_or_right_end_53:
-  br label %logical_or_merge_53
-
-logical_or_merge_53:
-  %t62 = phi i1 [ true, %logical_or_entry_53 ], [ %t61, %logical_or_right_end_53 ]
-  br label %logical_or_entry_52
-
-logical_or_entry_52:
-  br i1 %t62, label %logical_or_merge_52, label %logical_or_right_52
-
-logical_or_right_52:
-  %t63 = load i8*, i8** %l3
-  %t64 = getelementptr i8, i8* %t63, i64 0
-  %t65 = load i8, i8* %t64
-  %t66 = icmp eq i8 %t65, 9
-  br label %logical_or_right_end_52
-
-logical_or_right_end_52:
-  br label %logical_or_merge_52
-
-logical_or_merge_52:
-  %t67 = phi i1 [ true, %logical_or_entry_52 ], [ %t66, %logical_or_right_end_52 ]
+  %t52 = load i8*, i8** %l3
+  %t53 = getelementptr i8, i8* %t52, i64 0
+  %t54 = load i8, i8* %t53
+  %t55 = icmp eq i8 %t54, 32
   br label %logical_or_entry_51
 
 logical_or_entry_51:
-  br i1 %t67, label %logical_or_merge_51, label %logical_or_right_51
+  br i1 %t55, label %logical_or_merge_51, label %logical_or_right_51
 
 logical_or_right_51:
-  %t68 = load i8*, i8** %l3
-  %t69 = getelementptr i8, i8* %t68, i64 0
-  %t70 = load i8, i8* %t69
-  %t71 = icmp eq i8 %t70, 13
+  %t57 = load i8*, i8** %l3
+  %t58 = getelementptr i8, i8* %t57, i64 0
+  %t59 = load i8, i8* %t58
+  %t60 = icmp eq i8 %t59, 10
+  br label %logical_or_entry_56
+
+logical_or_entry_56:
+  br i1 %t60, label %logical_or_merge_56, label %logical_or_right_56
+
+logical_or_right_56:
+  %t62 = load i8*, i8** %l3
+  %t63 = getelementptr i8, i8* %t62, i64 0
+  %t64 = load i8, i8* %t63
+  %t65 = icmp eq i8 %t64, 9
+  br label %logical_or_entry_61
+
+logical_or_entry_61:
+  br i1 %t65, label %logical_or_merge_61, label %logical_or_right_61
+
+logical_or_right_61:
+  %t66 = load i8*, i8** %l3
+  %t67 = getelementptr i8, i8* %t66, i64 0
+  %t68 = load i8, i8* %t67
+  %t69 = icmp eq i8 %t68, 13
+  br label %logical_or_right_end_61
+
+logical_or_right_end_61:
+  br label %logical_or_merge_61
+
+logical_or_merge_61:
+  %t70 = phi i1 [ true, %logical_or_entry_61 ], [ %t69, %logical_or_right_end_61 ]
+  br label %logical_or_right_end_56
+
+logical_or_right_end_56:
+  br label %logical_or_merge_56
+
+logical_or_merge_56:
+  %t71 = phi i1 [ true, %logical_or_entry_56 ], [ %t70, %logical_or_right_end_56 ]
   br label %logical_or_right_end_51
 
 logical_or_right_end_51:
@@ -1037,10 +1041,14 @@ merge1:
   %t12 = load i64, i64* %l5
   br label %loop.header2
 loop.header2:
-  %t94 = phi i64 [ %t10, %entry ], [ %t92, %loop.latch4 ]
-  %t95 = phi i64 [ %t9, %entry ], [ %t93, %loop.latch4 ]
-  store i64 %t94, i64* %l3
-  store i64 %t95, i64* %l2
+  %t177 = phi i64 [ %t10, %entry ], [ %t173, %loop.latch4 ]
+  %t178 = phi i64 [ %t11, %entry ], [ %t174, %loop.latch4 ]
+  %t179 = phi i64 [ %t12, %entry ], [ %t175, %loop.latch4 ]
+  %t180 = phi i64 [ %t9, %entry ], [ %t176, %loop.latch4 ]
+  store i64 %t177, i64* %l3
+  store i64 %t178, i64* %l4
+  store i64 %t179, i64* %l5
+  store i64 %t180, i64* %l2
   br label %loop.body3
 loop.body3:
   %t13 = load i64, i64* %l2
@@ -1114,86 +1122,215 @@ merge15:
   br label %merge13
 else12:
   %t63 = load i8*, i8** %l6
+  %t64 = getelementptr i8, i8* %t63, i64 0
+  %t65 = load i8, i8* %t64
+  %t66 = icmp eq i8 %t65, 60
+  %t67 = load i8*, i8** %l0
+  %t68 = load i8*, i8** %l1
+  %t69 = load i64, i64* %l2
+  %t70 = load i64, i64* %l3
+  %t71 = load i64, i64* %l4
+  %t72 = load i64, i64* %l5
+  %t73 = load i8*, i8** %l6
+  br i1 %t66, label %then16, label %else17
+then16:
+  %t74 = load i64, i64* %l4
+  %t75 = add i64 %t74, 1
+  store i64 %t75, i64* %l4
+  br label %merge18
+else17:
+  %t76 = load i8*, i8** %l6
+  %t77 = getelementptr i8, i8* %t76, i64 0
+  %t78 = load i8, i8* %t77
+  %t79 = icmp eq i8 %t78, 62
+  %t80 = load i8*, i8** %l0
+  %t81 = load i8*, i8** %l1
+  %t82 = load i64, i64* %l2
+  %t83 = load i64, i64* %l3
+  %t84 = load i64, i64* %l4
+  %t85 = load i64, i64* %l5
+  %t86 = load i8*, i8** %l6
+  br i1 %t79, label %then19, label %else20
+then19:
+  %t87 = load i64, i64* %l4
+  %t88 = icmp sgt i64 %t87, 0
+  %t89 = load i8*, i8** %l0
+  %t90 = load i8*, i8** %l1
+  %t91 = load i64, i64* %l2
+  %t92 = load i64, i64* %l3
+  %t93 = load i64, i64* %l4
+  %t94 = load i64, i64* %l5
+  %t95 = load i8*, i8** %l6
+  br i1 %t88, label %then22, label %merge23
+then22:
+  %t96 = load i64, i64* %l4
+  %t97 = sub i64 %t96, 1
+  store i64 %t97, i64* %l4
+  br label %merge23
+merge23:
+  %t98 = phi i64 [ %t97, %then22 ], [ %t93, %then19 ]
+  store i64 %t98, i64* %l4
+  br label %merge21
+else20:
+  %t99 = load i8*, i8** %l6
+  %t100 = getelementptr i8, i8* %t99, i64 0
+  %t101 = load i8, i8* %t100
+  %t102 = icmp eq i8 %t101, 91
+  %t103 = load i8*, i8** %l0
+  %t104 = load i8*, i8** %l1
+  %t105 = load i64, i64* %l2
+  %t106 = load i64, i64* %l3
+  %t107 = load i64, i64* %l4
+  %t108 = load i64, i64* %l5
+  %t109 = load i8*, i8** %l6
+  br i1 %t102, label %then24, label %else25
+then24:
+  %t110 = load i64, i64* %l5
+  %t111 = add i64 %t110, 1
+  store i64 %t111, i64* %l5
+  br label %merge26
+else25:
+  %t112 = load i8*, i8** %l6
+  %t113 = getelementptr i8, i8* %t112, i64 0
+  %t114 = load i8, i8* %t113
+  %t115 = icmp eq i8 %t114, 93
+  %t116 = load i8*, i8** %l0
+  %t117 = load i8*, i8** %l1
+  %t118 = load i64, i64* %l2
+  %t119 = load i64, i64* %l3
+  %t120 = load i64, i64* %l4
+  %t121 = load i64, i64* %l5
+  %t122 = load i8*, i8** %l6
+  br i1 %t115, label %then27, label %merge28
+then27:
+  %t123 = load i64, i64* %l5
+  %t124 = icmp sgt i64 %t123, 0
+  %t125 = load i8*, i8** %l0
+  %t126 = load i8*, i8** %l1
+  %t127 = load i64, i64* %l2
+  %t128 = load i64, i64* %l3
+  %t129 = load i64, i64* %l4
+  %t130 = load i64, i64* %l5
+  %t131 = load i8*, i8** %l6
+  br i1 %t124, label %then29, label %merge30
+then29:
+  %t132 = load i64, i64* %l5
+  %t133 = sub i64 %t132, 1
+  store i64 %t133, i64* %l5
+  br label %merge30
+merge30:
+  %t134 = phi i64 [ %t133, %then29 ], [ %t130, %then27 ]
+  store i64 %t134, i64* %l5
+  br label %merge28
+merge28:
+  %t135 = phi i64 [ %t133, %then27 ], [ %t121, %else25 ]
+  store i64 %t135, i64* %l5
+  br label %merge26
+merge26:
+  %t136 = phi i64 [ %t111, %then24 ], [ %t133, %else25 ]
+  store i64 %t136, i64* %l5
+  br label %merge21
+merge21:
+  %t137 = phi i64 [ %t97, %then19 ], [ %t84, %else20 ]
+  %t138 = phi i64 [ %t85, %then19 ], [ %t111, %else20 ]
+  store i64 %t137, i64* %l4
+  store i64 %t138, i64* %l5
+  br label %merge18
+merge18:
+  %t139 = phi i64 [ %t75, %then16 ], [ %t97, %else17 ]
+  %t140 = phi i64 [ %t72, %then16 ], [ %t111, %else17 ]
+  store i64 %t139, i64* %l4
+  store i64 %t140, i64* %l5
   br label %merge13
 merge13:
-  %t64 = phi i64 [ %t61, %then11 ], [ %t47, %else12 ]
-  store i64 %t64, i64* %l3
+  %t141 = phi i64 [ %t61, %then11 ], [ %t47, %else12 ]
+  %t142 = phi i64 [ %t48, %then11 ], [ %t75, %else12 ]
+  %t143 = phi i64 [ %t49, %then11 ], [ %t111, %else12 ]
+  store i64 %t141, i64* %l3
+  store i64 %t142, i64* %l4
+  store i64 %t143, i64* %l5
   br label %merge10
 merge10:
-  %t65 = phi i64 [ %t39, %then8 ], [ %t61, %else9 ]
-  store i64 %t65, i64* %l3
-  %t69 = load i8*, i8** %l6
-  %t70 = load i8*, i8** %l1
-  %t71 = icmp eq i8* %t69, %t70
-  br label %logical_and_entry_68
+  %t144 = phi i64 [ %t39, %then8 ], [ %t61, %else9 ]
+  %t145 = phi i64 [ %t35, %then8 ], [ %t75, %else9 ]
+  %t146 = phi i64 [ %t36, %then8 ], [ %t111, %else9 ]
+  store i64 %t144, i64* %l3
+  store i64 %t145, i64* %l4
+  store i64 %t146, i64* %l5
+  %t148 = load i8*, i8** %l6
+  %t149 = load i8*, i8** %l1
+  %t150 = icmp eq i8* %t148, %t149
+  br label %logical_and_entry_147
 
-logical_and_entry_68:
-  br i1 %t71, label %logical_and_right_68, label %logical_and_merge_68
+logical_and_entry_147:
+  br i1 %t150, label %logical_and_right_147, label %logical_and_merge_147
 
-logical_and_right_68:
-  %t72 = load i64, i64* %l3
-  %t73 = icmp eq i64 %t72, 0
-  br label %logical_and_right_end_68
+logical_and_right_147:
+  %t152 = load i64, i64* %l3
+  %t153 = icmp eq i64 %t152, 0
+  br label %logical_and_entry_151
 
-logical_and_right_end_68:
-  br label %logical_and_merge_68
+logical_and_entry_151:
+  br i1 %t153, label %logical_and_right_151, label %logical_and_merge_151
 
-logical_and_merge_68:
-  %t74 = phi i1 [ false, %logical_and_entry_68 ], [ %t73, %logical_and_right_end_68 ]
-  br label %logical_and_entry_67
+logical_and_right_151:
+  %t155 = load i64, i64* %l4
+  %t156 = icmp eq i64 %t155, 0
+  br label %logical_and_entry_154
 
-logical_and_entry_67:
-  br i1 %t74, label %logical_and_right_67, label %logical_and_merge_67
+logical_and_entry_154:
+  br i1 %t156, label %logical_and_right_154, label %logical_and_merge_154
 
-logical_and_right_67:
-  %t75 = load i64, i64* %l4
-  %t76 = icmp eq i64 %t75, 0
-  br label %logical_and_right_end_67
+logical_and_right_154:
+  %t157 = load i64, i64* %l5
+  %t158 = icmp eq i64 %t157, 0
+  br label %logical_and_right_end_154
 
-logical_and_right_end_67:
-  br label %logical_and_merge_67
+logical_and_right_end_154:
+  br label %logical_and_merge_154
 
-logical_and_merge_67:
-  %t77 = phi i1 [ false, %logical_and_entry_67 ], [ %t76, %logical_and_right_end_67 ]
-  br label %logical_and_entry_66
+logical_and_merge_154:
+  %t159 = phi i1 [ false, %logical_and_entry_154 ], [ %t158, %logical_and_right_end_154 ]
+  br label %logical_and_right_end_151
 
-logical_and_entry_66:
-  br i1 %t77, label %logical_and_right_66, label %logical_and_merge_66
+logical_and_right_end_151:
+  br label %logical_and_merge_151
 
-logical_and_right_66:
-  %t78 = load i64, i64* %l5
-  %t79 = icmp eq i64 %t78, 0
-  br label %logical_and_right_end_66
+logical_and_merge_151:
+  %t160 = phi i1 [ false, %logical_and_entry_151 ], [ %t159, %logical_and_right_end_151 ]
+  br label %logical_and_right_end_147
 
-logical_and_right_end_66:
-  br label %logical_and_merge_66
+logical_and_right_end_147:
+  br label %logical_and_merge_147
 
-logical_and_merge_66:
-  %t80 = phi i1 [ false, %logical_and_entry_66 ], [ %t79, %logical_and_right_end_66 ]
-  %t81 = load i8*, i8** %l0
-  %t82 = load i8*, i8** %l1
-  %t83 = load i64, i64* %l2
-  %t84 = load i64, i64* %l3
-  %t85 = load i64, i64* %l4
-  %t86 = load i64, i64* %l5
-  %t87 = load i8*, i8** %l6
-  br i1 %t80, label %then16, label %merge17
-then16:
-  %t88 = load i64, i64* %l2
-  %t89 = sitofp i64 %t88 to double
-  ret double %t89
-merge17:
-  %t90 = load i64, i64* %l2
-  %t91 = add i64 %t90, 1
-  store i64 %t91, i64* %l2
+logical_and_merge_147:
+  %t161 = phi i1 [ false, %logical_and_entry_147 ], [ %t160, %logical_and_right_end_147 ]
+  %t162 = load i8*, i8** %l0
+  %t163 = load i8*, i8** %l1
+  %t164 = load i64, i64* %l2
+  %t165 = load i64, i64* %l3
+  %t166 = load i64, i64* %l4
+  %t167 = load i64, i64* %l5
+  %t168 = load i8*, i8** %l6
+  br i1 %t161, label %then31, label %merge32
+then31:
+  %t169 = load i64, i64* %l2
+  %t170 = sitofp i64 %t169 to double
+  ret double %t170
+merge32:
+  %t171 = load i64, i64* %l2
+  %t172 = add i64 %t171, 1
+  store i64 %t172, i64* %l2
   br label %loop.latch4
 loop.latch4:
-  %t92 = load i64, i64* %l3
-  %t93 = load i64, i64* %l2
+  %t173 = load i64, i64* %l3
+  %t174 = load i64, i64* %l4
+  %t175 = load i64, i64* %l5
+  %t176 = load i64, i64* %l2
   br label %loop.header2
 afterloop5:
-  %t96 = sitofp i64 -1 to double
-  ret double %t96
+  %t181 = sitofp i64 -1 to double
+  ret double %t181
 }
 
 define i8* @descriptor_strip_outer_parens(i8* %value) {
@@ -1480,14 +1617,18 @@ merge1:
   %t25 = load i8*, i8** %l7
   br label %loop.header2
 loop.header2:
-  %t137 = phi i64 [ %t22, %entry ], [ %t133, %loop.latch4 ]
-  %t138 = phi { i8**, i64 }* [ %t19, %entry ], [ %t134, %loop.latch4 ]
-  %t139 = phi i64 [ %t20, %entry ], [ %t135, %loop.latch4 ]
-  %t140 = phi i64 [ %t21, %entry ], [ %t136, %loop.latch4 ]
-  store i64 %t137, i64* %l4
-  store { i8**, i64 }* %t138, { i8**, i64 }** %l1
-  store i64 %t139, i64* %l2
-  store i64 %t140, i64* %l3
+  %t232 = phi i64 [ %t22, %entry ], [ %t226, %loop.latch4 ]
+  %t233 = phi i64 [ %t23, %entry ], [ %t227, %loop.latch4 ]
+  %t234 = phi i64 [ %t24, %entry ], [ %t228, %loop.latch4 ]
+  %t235 = phi { i8**, i64 }* [ %t19, %entry ], [ %t229, %loop.latch4 ]
+  %t236 = phi i64 [ %t20, %entry ], [ %t230, %loop.latch4 ]
+  %t237 = phi i64 [ %t21, %entry ], [ %t231, %loop.latch4 ]
+  store i64 %t232, i64* %l4
+  store i64 %t233, i64* %l5
+  store i64 %t234, i64* %l6
+  store { i8**, i64 }* %t235, { i8**, i64 }** %l1
+  store i64 %t236, i64* %l2
+  store i64 %t237, i64* %l3
   br label %loop.body3
 loop.body3:
   %t26 = load i64, i64* %l3
@@ -1569,176 +1710,317 @@ merge15:
   br label %merge13
 else12:
   %t84 = load i8*, i8** %l8
+  %t85 = getelementptr i8, i8* %t84, i64 0
+  %t86 = load i8, i8* %t85
+  %t87 = icmp eq i8 %t86, 60
+  %t88 = load i8*, i8** %l0
+  %t89 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t90 = load i64, i64* %l2
+  %t91 = load i64, i64* %l3
+  %t92 = load i64, i64* %l4
+  %t93 = load i64, i64* %l5
+  %t94 = load i64, i64* %l6
+  %t95 = load i8*, i8** %l7
+  %t96 = load i8*, i8** %l8
+  br i1 %t87, label %then16, label %else17
+then16:
+  %t97 = load i64, i64* %l5
+  %t98 = add i64 %t97, 1
+  store i64 %t98, i64* %l5
+  br label %merge18
+else17:
+  %t99 = load i8*, i8** %l8
+  %t100 = getelementptr i8, i8* %t99, i64 0
+  %t101 = load i8, i8* %t100
+  %t102 = icmp eq i8 %t101, 62
+  %t103 = load i8*, i8** %l0
+  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t105 = load i64, i64* %l2
+  %t106 = load i64, i64* %l3
+  %t107 = load i64, i64* %l4
+  %t108 = load i64, i64* %l5
+  %t109 = load i64, i64* %l6
+  %t110 = load i8*, i8** %l7
+  %t111 = load i8*, i8** %l8
+  br i1 %t102, label %then19, label %else20
+then19:
+  %t112 = load i64, i64* %l5
+  %t113 = icmp sgt i64 %t112, 0
+  %t114 = load i8*, i8** %l0
+  %t115 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t116 = load i64, i64* %l2
+  %t117 = load i64, i64* %l3
+  %t118 = load i64, i64* %l4
+  %t119 = load i64, i64* %l5
+  %t120 = load i64, i64* %l6
+  %t121 = load i8*, i8** %l7
+  %t122 = load i8*, i8** %l8
+  br i1 %t113, label %then22, label %merge23
+then22:
+  %t123 = load i64, i64* %l5
+  %t124 = sub i64 %t123, 1
+  store i64 %t124, i64* %l5
+  br label %merge23
+merge23:
+  %t125 = phi i64 [ %t124, %then22 ], [ %t119, %then19 ]
+  store i64 %t125, i64* %l5
+  br label %merge21
+else20:
+  %t126 = load i8*, i8** %l8
+  %t127 = getelementptr i8, i8* %t126, i64 0
+  %t128 = load i8, i8* %t127
+  %t129 = icmp eq i8 %t128, 91
+  %t130 = load i8*, i8** %l0
+  %t131 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t132 = load i64, i64* %l2
+  %t133 = load i64, i64* %l3
+  %t134 = load i64, i64* %l4
+  %t135 = load i64, i64* %l5
+  %t136 = load i64, i64* %l6
+  %t137 = load i8*, i8** %l7
+  %t138 = load i8*, i8** %l8
+  br i1 %t129, label %then24, label %else25
+then24:
+  %t139 = load i64, i64* %l6
+  %t140 = add i64 %t139, 1
+  store i64 %t140, i64* %l6
+  br label %merge26
+else25:
+  %t141 = load i8*, i8** %l8
+  %t142 = getelementptr i8, i8* %t141, i64 0
+  %t143 = load i8, i8* %t142
+  %t144 = icmp eq i8 %t143, 93
+  %t145 = load i8*, i8** %l0
+  %t146 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t147 = load i64, i64* %l2
+  %t148 = load i64, i64* %l3
+  %t149 = load i64, i64* %l4
+  %t150 = load i64, i64* %l5
+  %t151 = load i64, i64* %l6
+  %t152 = load i8*, i8** %l7
+  %t153 = load i8*, i8** %l8
+  br i1 %t144, label %then27, label %merge28
+then27:
+  %t154 = load i64, i64* %l6
+  %t155 = icmp sgt i64 %t154, 0
+  %t156 = load i8*, i8** %l0
+  %t157 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t158 = load i64, i64* %l2
+  %t159 = load i64, i64* %l3
+  %t160 = load i64, i64* %l4
+  %t161 = load i64, i64* %l5
+  %t162 = load i64, i64* %l6
+  %t163 = load i8*, i8** %l7
+  %t164 = load i8*, i8** %l8
+  br i1 %t155, label %then29, label %merge30
+then29:
+  %t165 = load i64, i64* %l6
+  %t166 = sub i64 %t165, 1
+  store i64 %t166, i64* %l6
+  br label %merge30
+merge30:
+  %t167 = phi i64 [ %t166, %then29 ], [ %t162, %then27 ]
+  store i64 %t167, i64* %l6
+  br label %merge28
+merge28:
+  %t168 = phi i64 [ %t166, %then27 ], [ %t151, %else25 ]
+  store i64 %t168, i64* %l6
+  br label %merge26
+merge26:
+  %t169 = phi i64 [ %t140, %then24 ], [ %t166, %else25 ]
+  store i64 %t169, i64* %l6
+  br label %merge21
+merge21:
+  %t170 = phi i64 [ %t124, %then19 ], [ %t108, %else20 ]
+  %t171 = phi i64 [ %t109, %then19 ], [ %t140, %else20 ]
+  store i64 %t170, i64* %l5
+  store i64 %t171, i64* %l6
+  br label %merge18
+merge18:
+  %t172 = phi i64 [ %t98, %then16 ], [ %t124, %else17 ]
+  %t173 = phi i64 [ %t94, %then16 ], [ %t140, %else17 ]
+  store i64 %t172, i64* %l5
+  store i64 %t173, i64* %l6
   br label %merge13
 merge13:
-  %t85 = phi i64 [ %t82, %then11 ], [ %t65, %else12 ]
-  store i64 %t85, i64* %l4
+  %t174 = phi i64 [ %t82, %then11 ], [ %t65, %else12 ]
+  %t175 = phi i64 [ %t66, %then11 ], [ %t98, %else12 ]
+  %t176 = phi i64 [ %t67, %then11 ], [ %t140, %else12 ]
+  store i64 %t174, i64* %l4
+  store i64 %t175, i64* %l5
+  store i64 %t176, i64* %l6
   br label %merge10
 merge10:
-  %t86 = phi i64 [ %t56, %then8 ], [ %t82, %else9 ]
-  store i64 %t86, i64* %l4
-  %t90 = load i8*, i8** %l8
-  %t91 = load i8*, i8** %l7
-  %t92 = icmp eq i8* %t90, %t91
-  br label %logical_and_entry_89
+  %t177 = phi i64 [ %t56, %then8 ], [ %t82, %else9 ]
+  %t178 = phi i64 [ %t51, %then8 ], [ %t98, %else9 ]
+  %t179 = phi i64 [ %t52, %then8 ], [ %t140, %else9 ]
+  store i64 %t177, i64* %l4
+  store i64 %t178, i64* %l5
+  store i64 %t179, i64* %l6
+  %t181 = load i8*, i8** %l8
+  %t182 = load i8*, i8** %l7
+  %t183 = icmp eq i8* %t181, %t182
+  br label %logical_and_entry_180
 
-logical_and_entry_89:
-  br i1 %t92, label %logical_and_right_89, label %logical_and_merge_89
+logical_and_entry_180:
+  br i1 %t183, label %logical_and_right_180, label %logical_and_merge_180
 
-logical_and_right_89:
-  %t93 = load i64, i64* %l4
-  %t94 = icmp eq i64 %t93, 0
-  br label %logical_and_right_end_89
+logical_and_right_180:
+  %t185 = load i64, i64* %l4
+  %t186 = icmp eq i64 %t185, 0
+  br label %logical_and_entry_184
 
-logical_and_right_end_89:
-  br label %logical_and_merge_89
+logical_and_entry_184:
+  br i1 %t186, label %logical_and_right_184, label %logical_and_merge_184
 
-logical_and_merge_89:
-  %t95 = phi i1 [ false, %logical_and_entry_89 ], [ %t94, %logical_and_right_end_89 ]
-  br label %logical_and_entry_88
+logical_and_right_184:
+  %t188 = load i64, i64* %l5
+  %t189 = icmp eq i64 %t188, 0
+  br label %logical_and_entry_187
 
-logical_and_entry_88:
-  br i1 %t95, label %logical_and_right_88, label %logical_and_merge_88
+logical_and_entry_187:
+  br i1 %t189, label %logical_and_right_187, label %logical_and_merge_187
 
-logical_and_right_88:
-  %t96 = load i64, i64* %l5
-  %t97 = icmp eq i64 %t96, 0
-  br label %logical_and_right_end_88
+logical_and_right_187:
+  %t190 = load i64, i64* %l6
+  %t191 = icmp eq i64 %t190, 0
+  br label %logical_and_right_end_187
 
-logical_and_right_end_88:
-  br label %logical_and_merge_88
+logical_and_right_end_187:
+  br label %logical_and_merge_187
 
-logical_and_merge_88:
-  %t98 = phi i1 [ false, %logical_and_entry_88 ], [ %t97, %logical_and_right_end_88 ]
-  br label %logical_and_entry_87
+logical_and_merge_187:
+  %t192 = phi i1 [ false, %logical_and_entry_187 ], [ %t191, %logical_and_right_end_187 ]
+  br label %logical_and_right_end_184
 
-logical_and_entry_87:
-  br i1 %t98, label %logical_and_right_87, label %logical_and_merge_87
+logical_and_right_end_184:
+  br label %logical_and_merge_184
 
-logical_and_right_87:
-  %t99 = load i64, i64* %l6
-  %t100 = icmp eq i64 %t99, 0
-  br label %logical_and_right_end_87
+logical_and_merge_184:
+  %t193 = phi i1 [ false, %logical_and_entry_184 ], [ %t192, %logical_and_right_end_184 ]
+  br label %logical_and_right_end_180
 
-logical_and_right_end_87:
-  br label %logical_and_merge_87
+logical_and_right_end_180:
+  br label %logical_and_merge_180
 
-logical_and_merge_87:
-  %t101 = phi i1 [ false, %logical_and_entry_87 ], [ %t100, %logical_and_right_end_87 ]
-  %t102 = load i8*, i8** %l0
-  %t103 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t104 = load i64, i64* %l2
-  %t105 = load i64, i64* %l3
-  %t106 = load i64, i64* %l4
-  %t107 = load i64, i64* %l5
-  %t108 = load i64, i64* %l6
-  %t109 = load i8*, i8** %l7
-  %t110 = load i8*, i8** %l8
-  br i1 %t101, label %then16, label %merge17
-then16:
-  %t111 = load i8*, i8** %l0
-  %t112 = load i64, i64* %l2
-  %t113 = load i64, i64* %l3
-  %t114 = sitofp i64 %t112 to double
-  %t115 = sitofp i64 %t113 to double
-  %t116 = call i8* @sailfin_runtime_substring(i8* %t111, double %t114, double %t115)
-  store i8* %t116, i8** %l9
-  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t118 = load i8*, i8** %l9
-  %t119 = call i8* @descriptor_trim(i8* %t118)
-  %t120 = alloca [1 x i8*]
-  %t121 = getelementptr [1 x i8*], [1 x i8*]* %t120, i32 0, i32 0
-  %t122 = getelementptr i8*, i8** %t121, i64 0
-  store i8* %t119, i8** %t122
-  %t123 = alloca { i8**, i64 }
-  %t124 = getelementptr { i8**, i64 }, { i8**, i64 }* %t123, i32 0, i32 0
-  store i8** %t121, i8*** %t124
-  %t125 = getelementptr { i8**, i64 }, { i8**, i64 }* %t123, i32 0, i32 1
-  store i64 1, i64* %t125
-  %t126 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t117, { i8**, i64 }* %t123)
-  store { i8**, i64 }* %t126, { i8**, i64 }** %l1
-  %t127 = load i64, i64* %l3
-  %t128 = add i64 %t127, 1
-  store i64 %t128, i64* %l2
-  br label %merge17
-merge17:
-  %t129 = phi { i8**, i64 }* [ %t126, %then16 ], [ %t103, %loop.body3 ]
-  %t130 = phi i64 [ %t128, %then16 ], [ %t104, %loop.body3 ]
-  store { i8**, i64 }* %t129, { i8**, i64 }** %l1
-  store i64 %t130, i64* %l2
-  %t131 = load i64, i64* %l3
-  %t132 = add i64 %t131, 1
-  store i64 %t132, i64* %l3
+logical_and_merge_180:
+  %t194 = phi i1 [ false, %logical_and_entry_180 ], [ %t193, %logical_and_right_end_180 ]
+  %t195 = load i8*, i8** %l0
+  %t196 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t197 = load i64, i64* %l2
+  %t198 = load i64, i64* %l3
+  %t199 = load i64, i64* %l4
+  %t200 = load i64, i64* %l5
+  %t201 = load i64, i64* %l6
+  %t202 = load i8*, i8** %l7
+  %t203 = load i8*, i8** %l8
+  br i1 %t194, label %then31, label %merge32
+then31:
+  %t204 = load i8*, i8** %l0
+  %t205 = load i64, i64* %l2
+  %t206 = load i64, i64* %l3
+  %t207 = sitofp i64 %t205 to double
+  %t208 = sitofp i64 %t206 to double
+  %t209 = call i8* @sailfin_runtime_substring(i8* %t204, double %t207, double %t208)
+  store i8* %t209, i8** %l9
+  %t210 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t211 = load i8*, i8** %l9
+  %t212 = call i8* @descriptor_trim(i8* %t211)
+  %t213 = alloca [1 x i8*]
+  %t214 = getelementptr [1 x i8*], [1 x i8*]* %t213, i32 0, i32 0
+  %t215 = getelementptr i8*, i8** %t214, i64 0
+  store i8* %t212, i8** %t215
+  %t216 = alloca { i8**, i64 }
+  %t217 = getelementptr { i8**, i64 }, { i8**, i64 }* %t216, i32 0, i32 0
+  store i8** %t214, i8*** %t217
+  %t218 = getelementptr { i8**, i64 }, { i8**, i64 }* %t216, i32 0, i32 1
+  store i64 1, i64* %t218
+  %t219 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t210, { i8**, i64 }* %t216)
+  store { i8**, i64 }* %t219, { i8**, i64 }** %l1
+  %t220 = load i64, i64* %l3
+  %t221 = add i64 %t220, 1
+  store i64 %t221, i64* %l2
+  br label %merge32
+merge32:
+  %t222 = phi { i8**, i64 }* [ %t219, %then31 ], [ %t196, %loop.body3 ]
+  %t223 = phi i64 [ %t221, %then31 ], [ %t197, %loop.body3 ]
+  store { i8**, i64 }* %t222, { i8**, i64 }** %l1
+  store i64 %t223, i64* %l2
+  %t224 = load i64, i64* %l3
+  %t225 = add i64 %t224, 1
+  store i64 %t225, i64* %l3
   br label %loop.latch4
 loop.latch4:
-  %t133 = load i64, i64* %l4
-  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t135 = load i64, i64* %l2
-  %t136 = load i64, i64* %l3
+  %t226 = load i64, i64* %l4
+  %t227 = load i64, i64* %l5
+  %t228 = load i64, i64* %l6
+  %t229 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t230 = load i64, i64* %l2
+  %t231 = load i64, i64* %l3
   br label %loop.header2
 afterloop5:
-  %t141 = load i8*, i8** %l0
-  %t142 = load i64, i64* %l2
-  %t143 = load i8*, i8** %l0
-  %t144 = call i64 @sailfin_runtime_string_length(i8* %t143)
-  %t145 = sitofp i64 %t142 to double
-  %t146 = sitofp i64 %t144 to double
-  %t147 = call i8* @sailfin_runtime_substring(i8* %t141, double %t145, double %t146)
-  store i8* %t147, i8** %l10
-  %t148 = load i8*, i8** %l10
-  %t149 = call i8* @descriptor_trim(i8* %t148)
-  store i8* %t149, i8** %l11
-  %t151 = load i8*, i8** %l11
-  %t152 = call i64 @sailfin_runtime_string_length(i8* %t151)
-  %t153 = icmp sgt i64 %t152, 0
-  br label %logical_or_entry_150
+  %t238 = load i8*, i8** %l0
+  %t239 = load i64, i64* %l2
+  %t240 = load i8*, i8** %l0
+  %t241 = call i64 @sailfin_runtime_string_length(i8* %t240)
+  %t242 = sitofp i64 %t239 to double
+  %t243 = sitofp i64 %t241 to double
+  %t244 = call i8* @sailfin_runtime_substring(i8* %t238, double %t242, double %t243)
+  store i8* %t244, i8** %l10
+  %t245 = load i8*, i8** %l10
+  %t246 = call i8* @descriptor_trim(i8* %t245)
+  store i8* %t246, i8** %l11
+  %t248 = load i8*, i8** %l11
+  %t249 = call i64 @sailfin_runtime_string_length(i8* %t248)
+  %t250 = icmp sgt i64 %t249, 0
+  br label %logical_or_entry_247
 
-logical_or_entry_150:
-  br i1 %t153, label %logical_or_merge_150, label %logical_or_right_150
+logical_or_entry_247:
+  br i1 %t250, label %logical_or_merge_247, label %logical_or_right_247
 
-logical_or_right_150:
-  %t154 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t155 = load { i8**, i64 }, { i8**, i64 }* %t154
-  %t156 = extractvalue { i8**, i64 } %t155, 1
-  %t157 = icmp eq i64 %t156, 0
-  br label %logical_or_right_end_150
+logical_or_right_247:
+  %t251 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t252 = load { i8**, i64 }, { i8**, i64 }* %t251
+  %t253 = extractvalue { i8**, i64 } %t252, 1
+  %t254 = icmp eq i64 %t253, 0
+  br label %logical_or_right_end_247
 
-logical_or_right_end_150:
-  br label %logical_or_merge_150
+logical_or_right_end_247:
+  br label %logical_or_merge_247
 
-logical_or_merge_150:
-  %t158 = phi i1 [ true, %logical_or_entry_150 ], [ %t157, %logical_or_right_end_150 ]
-  %t159 = load i8*, i8** %l0
-  %t160 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t161 = load i64, i64* %l2
-  %t162 = load i64, i64* %l3
-  %t163 = load i64, i64* %l4
-  %t164 = load i64, i64* %l5
-  %t165 = load i64, i64* %l6
-  %t166 = load i8*, i8** %l7
-  %t167 = load i8*, i8** %l10
-  %t168 = load i8*, i8** %l11
-  br i1 %t158, label %then18, label %merge19
-then18:
-  %t169 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t170 = load i8*, i8** %l11
-  %t171 = alloca [1 x i8*]
-  %t172 = getelementptr [1 x i8*], [1 x i8*]* %t171, i32 0, i32 0
-  %t173 = getelementptr i8*, i8** %t172, i64 0
-  store i8* %t170, i8** %t173
-  %t174 = alloca { i8**, i64 }
-  %t175 = getelementptr { i8**, i64 }, { i8**, i64 }* %t174, i32 0, i32 0
-  store i8** %t172, i8*** %t175
-  %t176 = getelementptr { i8**, i64 }, { i8**, i64 }* %t174, i32 0, i32 1
-  store i64 1, i64* %t176
-  %t177 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t169, { i8**, i64 }* %t174)
-  store { i8**, i64 }* %t177, { i8**, i64 }** %l1
-  br label %merge19
-merge19:
-  %t178 = phi { i8**, i64 }* [ %t177, %then18 ], [ %t160, %entry ]
-  store { i8**, i64 }* %t178, { i8**, i64 }** %l1
-  %t179 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  ret { i8**, i64 }* %t179
+logical_or_merge_247:
+  %t255 = phi i1 [ true, %logical_or_entry_247 ], [ %t254, %logical_or_right_end_247 ]
+  %t256 = load i8*, i8** %l0
+  %t257 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t258 = load i64, i64* %l2
+  %t259 = load i64, i64* %l3
+  %t260 = load i64, i64* %l4
+  %t261 = load i64, i64* %l5
+  %t262 = load i64, i64* %l6
+  %t263 = load i8*, i8** %l7
+  %t264 = load i8*, i8** %l10
+  %t265 = load i8*, i8** %l11
+  br i1 %t255, label %then33, label %merge34
+then33:
+  %t266 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t267 = load i8*, i8** %l11
+  %t268 = alloca [1 x i8*]
+  %t269 = getelementptr [1 x i8*], [1 x i8*]* %t268, i32 0, i32 0
+  %t270 = getelementptr i8*, i8** %t269, i64 0
+  store i8* %t267, i8** %t270
+  %t271 = alloca { i8**, i64 }
+  %t272 = getelementptr { i8**, i64 }, { i8**, i64 }* %t271, i32 0, i32 0
+  store i8** %t269, i8*** %t272
+  %t273 = getelementptr { i8**, i64 }, { i8**, i64 }* %t271, i32 0, i32 1
+  store i64 1, i64* %t273
+  %t274 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t266, { i8**, i64 }* %t271)
+  store { i8**, i64 }* %t274, { i8**, i64 }** %l1
+  br label %merge34
+merge34:
+  %t275 = phi { i8**, i64 }* [ %t274, %then33 ], [ %t257, %entry ]
+  store { i8**, i64 }* %t275, { i8**, i64 }** %l1
+  %t276 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  ret { i8**, i64 }* %t276
 }
 
 define { %TypeDescriptor*, i64 }* @parse_descriptor_list({ i8**, i64 }* %parts) {
@@ -1970,116 +2252,123 @@ then10:
   ret %TypeDescriptor %t92
 merge11:
   %t93 = load i8*, i8** %l0
-  store double 0.0, double* %l7
-  %t94 = load i8*, i8** %l0
-  store i8* %t94, i8** %l8
-  %t95 = load double, double* %l7
-  %t96 = sitofp i64 0 to double
-  %t97 = fcmp oge double %t95, %t96
-  %t98 = load i8*, i8** %l0
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t100 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t101 = load double, double* %l7
-  %t102 = load i8*, i8** %l8
-  br i1 %t97, label %then12, label %merge13
-then12:
+  %t94 = alloca [2 x i8], align 1
+  %t95 = getelementptr [2 x i8], [2 x i8]* %t94, i32 0, i32 0
+  store i8 60, i8* %t95
+  %t96 = getelementptr [2 x i8], [2 x i8]* %t94, i32 0, i32 1
+  store i8 0, i8* %t96
+  %t97 = getelementptr [2 x i8], [2 x i8]* %t94, i32 0, i32 0
+  %t98 = call double @descriptor_find_top_level(i8* %t93, i8* %t97)
+  store double %t98, double* %l7
+  %t99 = load i8*, i8** %l0
+  store i8* %t99, i8** %l8
+  %t100 = load double, double* %l7
+  %t101 = sitofp i64 0 to double
+  %t102 = fcmp oge double %t100, %t101
   %t103 = load i8*, i8** %l0
-  %t104 = load double, double* %l7
-  %t105 = sitofp i64 0 to double
-  %t106 = call i8* @sailfin_runtime_substring(i8* %t103, double %t105, double %t104)
-  %t107 = call i8* @descriptor_trim(i8* %t106)
-  store i8* %t107, i8** %l8
+  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t106 = load double, double* %l7
+  %t107 = load i8*, i8** %l8
+  br i1 %t102, label %then12, label %merge13
+then12:
+  %t108 = load i8*, i8** %l0
+  %t109 = load double, double* %l7
+  %t110 = sitofp i64 0 to double
+  %t111 = call i8* @sailfin_runtime_substring(i8* %t108, double %t110, double %t109)
+  %t112 = call i8* @descriptor_trim(i8* %t111)
+  store i8* %t112, i8** %l8
   br label %merge13
 merge13:
-  %t108 = phi i8* [ %t107, %then12 ], [ %t102, %entry ]
-  store i8* %t108, i8** %l8
-  %t109 = load i8*, i8** %l8
-  %s110 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.110, i32 0, i32 0
-  %t111 = call i1 @string_starts_with(i8* %t109, i8* %s110)
-  %t112 = load i8*, i8** %l0
-  %t113 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t114 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t115 = load double, double* %l7
-  %t116 = load i8*, i8** %l8
-  br i1 %t111, label %then14, label %merge15
+  %t113 = phi i8* [ %t112, %then12 ], [ %t107, %entry ]
+  store i8* %t113, i8** %l8
+  %t114 = load i8*, i8** %l8
+  %s115 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.115, i32 0, i32 0
+  %t116 = call i1 @string_starts_with(i8* %t114, i8* %s115)
+  %t117 = load i8*, i8** %l0
+  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t120 = load double, double* %l7
+  %t121 = load i8*, i8** %l8
+  br i1 %t116, label %then14, label %merge15
 then14:
-  %t117 = load i8*, i8** %l8
-  %t118 = load i8*, i8** %l8
-  %t119 = call i64 @sailfin_runtime_string_length(i8* %t118)
-  %t120 = sitofp i64 8 to double
-  %t121 = sitofp i64 %t119 to double
-  %t122 = call i8* @sailfin_runtime_substring(i8* %t117, double %t120, double %t121)
-  %t123 = call i8* @descriptor_trim(i8* %t122)
-  store i8* %t123, i8** %l8
+  %t122 = load i8*, i8** %l8
+  %t123 = load i8*, i8** %l8
+  %t124 = call i64 @sailfin_runtime_string_length(i8* %t123)
+  %t125 = sitofp i64 8 to double
+  %t126 = sitofp i64 %t124 to double
+  %t127 = call i8* @sailfin_runtime_substring(i8* %t122, double %t125, double %t126)
+  %t128 = call i8* @descriptor_trim(i8* %t127)
+  store i8* %t128, i8** %l8
   br label %merge15
 merge15:
-  %t124 = phi i8* [ %t123, %then14 ], [ %t116, %entry ]
-  store i8* %t124, i8** %l8
-  %t128 = load i8*, i8** %l8
-  %s129 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.129, i32 0, i32 0
-  %t130 = icmp eq i8* %t128, %s129
-  br label %logical_or_entry_127
-
-logical_or_entry_127:
-  br i1 %t130, label %logical_or_merge_127, label %logical_or_right_127
-
-logical_or_right_127:
+  %t129 = phi i8* [ %t128, %then14 ], [ %t121, %entry ]
+  store i8* %t129, i8** %l8
   %t131 = load i8*, i8** %l8
   %s132 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.132, i32 0, i32 0
   %t133 = icmp eq i8* %t131, %s132
-  br label %logical_or_right_end_127
+  br label %logical_or_entry_130
 
-logical_or_right_end_127:
-  br label %logical_or_merge_127
+logical_or_entry_130:
+  br i1 %t133, label %logical_or_merge_130, label %logical_or_right_130
 
-logical_or_merge_127:
-  %t134 = phi i1 [ true, %logical_or_entry_127 ], [ %t133, %logical_or_right_end_127 ]
-  br label %logical_or_entry_126
-
-logical_or_entry_126:
-  br i1 %t134, label %logical_or_merge_126, label %logical_or_right_126
-
-logical_or_right_126:
+logical_or_right_130:
   %t135 = load i8*, i8** %l8
-  %s136 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.136, i32 0, i32 0
+  %s136 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.136, i32 0, i32 0
   %t137 = icmp eq i8* %t135, %s136
-  br label %logical_or_right_end_126
+  br label %logical_or_entry_134
 
-logical_or_right_end_126:
-  br label %logical_or_merge_126
+logical_or_entry_134:
+  br i1 %t137, label %logical_or_merge_134, label %logical_or_right_134
 
-logical_or_merge_126:
-  %t138 = phi i1 [ true, %logical_or_entry_126 ], [ %t137, %logical_or_right_end_126 ]
-  br label %logical_or_entry_125
-
-logical_or_entry_125:
-  br i1 %t138, label %logical_or_merge_125, label %logical_or_right_125
-
-logical_or_right_125:
+logical_or_right_134:
   %t139 = load i8*, i8** %l8
-  %s140 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.140, i32 0, i32 0
+  %s140 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.140, i32 0, i32 0
   %t141 = icmp eq i8* %t139, %s140
-  br label %logical_or_right_end_125
+  br label %logical_or_entry_138
 
-logical_or_right_end_125:
-  br label %logical_or_merge_125
+logical_or_entry_138:
+  br i1 %t141, label %logical_or_merge_138, label %logical_or_right_138
 
-logical_or_merge_125:
-  %t142 = phi i1 [ true, %logical_or_entry_125 ], [ %t141, %logical_or_right_end_125 ]
-  %t143 = load i8*, i8** %l0
-  %t144 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t145 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t146 = load double, double* %l7
-  %t147 = load i8*, i8** %l8
-  br i1 %t142, label %then16, label %merge17
+logical_or_right_138:
+  %t142 = load i8*, i8** %l8
+  %s143 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.143, i32 0, i32 0
+  %t144 = icmp eq i8* %t142, %s143
+  br label %logical_or_right_end_138
+
+logical_or_right_end_138:
+  br label %logical_or_merge_138
+
+logical_or_merge_138:
+  %t145 = phi i1 [ true, %logical_or_entry_138 ], [ %t144, %logical_or_right_end_138 ]
+  br label %logical_or_right_end_134
+
+logical_or_right_end_134:
+  br label %logical_or_merge_134
+
+logical_or_merge_134:
+  %t146 = phi i1 [ true, %logical_or_entry_134 ], [ %t145, %logical_or_right_end_134 ]
+  br label %logical_or_right_end_130
+
+logical_or_right_end_130:
+  br label %logical_or_merge_130
+
+logical_or_merge_130:
+  %t147 = phi i1 [ true, %logical_or_entry_130 ], [ %t146, %logical_or_right_end_130 ]
+  %t148 = load i8*, i8** %l0
+  %t149 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t151 = load double, double* %l7
+  %t152 = load i8*, i8** %l8
+  br i1 %t147, label %then16, label %merge17
 then16:
-  %t148 = load i8*, i8** %l8
-  %t149 = call %TypeDescriptor @type_descriptor_primitive(i8* %t148)
-  ret %TypeDescriptor %t149
+  %t153 = load i8*, i8** %l8
+  %t154 = call %TypeDescriptor @type_descriptor_primitive(i8* %t153)
+  ret %TypeDescriptor %t154
 merge17:
-  %t150 = load i8*, i8** %l8
-  %t151 = call %TypeDescriptor @type_descriptor_named(i8* %t150)
-  ret %TypeDescriptor %t151
+  %t155 = load i8*, i8** %l8
+  %t156 = call %TypeDescriptor @type_descriptor_named(i8* %t155)
+  ret %TypeDescriptor %t156
 }
 
 define i1 @check_type_primitive(i8* %value, i8* %name) {
@@ -2604,8 +2893,9 @@ afterloop19:
 
 define void @match_exhaustive_failed(i8* %value) {
 entry:
-  %l0 = alloca double
-  store double 0.0, double* %l0
+  %l0 = alloca i8*
+  %s0 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.0, i32 0, i32 0
+  store i8* %s0, i8** %l0
   ret void
 }
 
@@ -2812,316 +3102,318 @@ then20:
   ret double %t136
 merge21:
   %t137 = load i8*, i8** %l0
-  store double 0.0, double* %l7
-  %t138 = load double, double* %l7
+  %s138 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.138, i32 0, i32 0
+  %t139 = call double @chencode(i8* %s138)
+  store double %t139, double* %l7
+  %t140 = load double, double* %l7
   store double 0.0, double* %l8
-  %t139 = load double, double* %l8
-  %t140 = sitofp i64 0 to double
-  %t141 = fcmp oeq double %t139, %t140
-  %t142 = load i8*, i8** %l0
-  %t143 = load i8*, i8** %l1
-  %t144 = load double, double* %l2
-  %t145 = load i8*, i8** %l3
-  %t146 = load double, double* %l4
-  %t147 = load i8*, i8** %l5
-  %t148 = load double, double* %l6
-  %t149 = load double, double* %l7
-  %t150 = load double, double* %l8
-  br i1 %t141, label %then22, label %merge23
-then22:
-  %t151 = sitofp i64 -1 to double
-  ret double %t151
-merge23:
+  %t141 = load double, double* %l8
+  %t142 = sitofp i64 0 to double
+  %t143 = fcmp oeq double %t141, %t142
+  %t144 = load i8*, i8** %l0
+  %t145 = load i8*, i8** %l1
+  %t146 = load double, double* %l2
+  %t147 = load i8*, i8** %l3
+  %t148 = load double, double* %l4
+  %t149 = load i8*, i8** %l5
+  %t150 = load double, double* %l6
+  %t151 = load double, double* %l7
   %t152 = load double, double* %l8
-  %t153 = sitofp i64 4 to double
-  %t154 = fcmp ogt double %t152, %t153
-  %t155 = load i8*, i8** %l0
-  %t156 = load i8*, i8** %l1
-  %t157 = load double, double* %l2
-  %t158 = load i8*, i8** %l3
-  %t159 = load double, double* %l4
-  %t160 = load i8*, i8** %l5
-  %t161 = load double, double* %l6
-  %t162 = load double, double* %l7
-  %t163 = load double, double* %l8
-  br i1 %t154, label %then24, label %merge25
+  br i1 %t143, label %then22, label %merge23
+then22:
+  %t153 = sitofp i64 -1 to double
+  ret double %t153
+merge23:
+  %t154 = load double, double* %l8
+  %t155 = sitofp i64 4 to double
+  %t156 = fcmp ogt double %t154, %t155
+  %t157 = load i8*, i8** %l0
+  %t158 = load i8*, i8** %l1
+  %t159 = load double, double* %l2
+  %t160 = load i8*, i8** %l3
+  %t161 = load double, double* %l4
+  %t162 = load i8*, i8** %l5
+  %t163 = load double, double* %l6
+  %t164 = load double, double* %l7
+  %t165 = load double, double* %l8
+  br i1 %t156, label %then24, label %merge25
 then24:
-  %t164 = sitofp i64 -1 to double
-  ret double %t164
+  %t166 = sitofp i64 -1 to double
+  ret double %t166
 merge25:
   store i64 0, i64* %l9
   store i64 0, i64* %l10
-  %t165 = load i8*, i8** %l0
-  %t166 = load i8*, i8** %l1
-  %t167 = load double, double* %l2
-  %t168 = load i8*, i8** %l3
-  %t169 = load double, double* %l4
-  %t170 = load i8*, i8** %l5
-  %t171 = load double, double* %l6
-  %t172 = load double, double* %l7
-  %t173 = load double, double* %l8
-  %t174 = load i64, i64* %l9
-  %t175 = load i64, i64* %l10
+  %t167 = load i8*, i8** %l0
+  %t168 = load i8*, i8** %l1
+  %t169 = load double, double* %l2
+  %t170 = load i8*, i8** %l3
+  %t171 = load double, double* %l4
+  %t172 = load i8*, i8** %l5
+  %t173 = load double, double* %l6
+  %t174 = load double, double* %l7
+  %t175 = load double, double* %l8
+  %t176 = load i64, i64* %l9
+  %t177 = load i64, i64* %l10
   br label %loop.header26
 loop.header26:
-  %t332 = phi i64 [ %t175, %entry ], [ %t330, %loop.latch28 ]
-  %t333 = phi i64 [ %t174, %entry ], [ %t331, %loop.latch28 ]
-  store i64 %t332, i64* %l10
-  store i64 %t333, i64* %l9
+  %t334 = phi i64 [ %t177, %entry ], [ %t332, %loop.latch28 ]
+  %t335 = phi i64 [ %t176, %entry ], [ %t333, %loop.latch28 ]
+  store i64 %t334, i64* %l10
+  store i64 %t335, i64* %l9
   br label %loop.body27
 loop.body27:
-  %t176 = load i64, i64* %l9
-  %t177 = load double, double* %l8
-  %t178 = sitofp i64 %t176 to double
-  %t179 = fcmp oge double %t178, %t177
-  %t180 = load i8*, i8** %l0
-  %t181 = load i8*, i8** %l1
-  %t182 = load double, double* %l2
-  %t183 = load i8*, i8** %l3
-  %t184 = load double, double* %l4
-  %t185 = load i8*, i8** %l5
-  %t186 = load double, double* %l6
-  %t187 = load double, double* %l7
-  %t188 = load double, double* %l8
-  %t189 = load i64, i64* %l9
-  %t190 = load i64, i64* %l10
-  br i1 %t179, label %then30, label %merge31
+  %t178 = load i64, i64* %l9
+  %t179 = load double, double* %l8
+  %t180 = sitofp i64 %t178 to double
+  %t181 = fcmp oge double %t180, %t179
+  %t182 = load i8*, i8** %l0
+  %t183 = load i8*, i8** %l1
+  %t184 = load double, double* %l2
+  %t185 = load i8*, i8** %l3
+  %t186 = load double, double* %l4
+  %t187 = load i8*, i8** %l5
+  %t188 = load double, double* %l6
+  %t189 = load double, double* %l7
+  %t190 = load double, double* %l8
+  %t191 = load i64, i64* %l9
+  %t192 = load i64, i64* %l10
+  br i1 %t181, label %then30, label %merge31
 then30:
   br label %afterloop29
 merge31:
-  %t191 = load double, double* %l7
-  %t192 = load i64, i64* %l9
+  %t193 = load double, double* %l7
+  %t194 = load i64, i64* %l9
   store double 0.0, double* %l11
-  %t193 = load i64, i64* %l9
-  %t194 = icmp eq i64 %t193, 0
-  %t195 = load i8*, i8** %l0
-  %t196 = load i8*, i8** %l1
-  %t197 = load double, double* %l2
-  %t198 = load i8*, i8** %l3
-  %t199 = load double, double* %l4
-  %t200 = load i8*, i8** %l5
-  %t201 = load double, double* %l6
-  %t202 = load double, double* %l7
-  %t203 = load double, double* %l8
-  %t204 = load i64, i64* %l9
-  %t205 = load i64, i64* %l10
-  %t206 = load double, double* %l11
-  br i1 %t194, label %then32, label %else33
+  %t195 = load i64, i64* %l9
+  %t196 = icmp eq i64 %t195, 0
+  %t197 = load i8*, i8** %l0
+  %t198 = load i8*, i8** %l1
+  %t199 = load double, double* %l2
+  %t200 = load i8*, i8** %l3
+  %t201 = load double, double* %l4
+  %t202 = load i8*, i8** %l5
+  %t203 = load double, double* %l6
+  %t204 = load double, double* %l7
+  %t205 = load double, double* %l8
+  %t206 = load i64, i64* %l9
+  %t207 = load i64, i64* %l10
+  %t208 = load double, double* %l11
+  br i1 %t196, label %then32, label %else33
 then32:
-  %t207 = load double, double* %l11
-  %t208 = sitofp i64 128 to double
-  %t209 = fcmp olt double %t207, %t208
-  %t210 = load i8*, i8** %l0
-  %t211 = load i8*, i8** %l1
-  %t212 = load double, double* %l2
-  %t213 = load i8*, i8** %l3
-  %t214 = load double, double* %l4
-  %t215 = load i8*, i8** %l5
-  %t216 = load double, double* %l6
-  %t217 = load double, double* %l7
-  %t218 = load double, double* %l8
-  %t219 = load i64, i64* %l9
-  %t220 = load i64, i64* %l10
-  %t221 = load double, double* %l11
-  br i1 %t209, label %then35, label %merge36
+  %t209 = load double, double* %l11
+  %t210 = sitofp i64 128 to double
+  %t211 = fcmp olt double %t209, %t210
+  %t212 = load i8*, i8** %l0
+  %t213 = load i8*, i8** %l1
+  %t214 = load double, double* %l2
+  %t215 = load i8*, i8** %l3
+  %t216 = load double, double* %l4
+  %t217 = load i8*, i8** %l5
+  %t218 = load double, double* %l6
+  %t219 = load double, double* %l7
+  %t220 = load double, double* %l8
+  %t221 = load i64, i64* %l9
+  %t222 = load i64, i64* %l10
+  %t223 = load double, double* %l11
+  br i1 %t211, label %then35, label %merge36
 then35:
-  %t222 = load double, double* %l11
-  ret double %t222
-merge36:
   %t224 = load double, double* %l11
-  %t225 = sitofp i64 192 to double
-  %t226 = fcmp oge double %t224, %t225
-  br label %logical_and_entry_223
+  ret double %t224
+merge36:
+  %t226 = load double, double* %l11
+  %t227 = sitofp i64 192 to double
+  %t228 = fcmp oge double %t226, %t227
+  br label %logical_and_entry_225
 
-logical_and_entry_223:
-  br i1 %t226, label %logical_and_right_223, label %logical_and_merge_223
+logical_and_entry_225:
+  br i1 %t228, label %logical_and_right_225, label %logical_and_merge_225
 
-logical_and_right_223:
-  %t227 = load double, double* %l11
-  %t228 = sitofp i64 223 to double
-  %t229 = fcmp ole double %t227, %t228
-  br label %logical_and_right_end_223
+logical_and_right_225:
+  %t229 = load double, double* %l11
+  %t230 = sitofp i64 223 to double
+  %t231 = fcmp ole double %t229, %t230
+  br label %logical_and_right_end_225
 
-logical_and_right_end_223:
-  br label %logical_and_merge_223
+logical_and_right_end_225:
+  br label %logical_and_merge_225
 
-logical_and_merge_223:
-  %t230 = phi i1 [ false, %logical_and_entry_223 ], [ %t229, %logical_and_right_end_223 ]
-  %t231 = load i8*, i8** %l0
-  %t232 = load i8*, i8** %l1
-  %t233 = load double, double* %l2
-  %t234 = load i8*, i8** %l3
-  %t235 = load double, double* %l4
-  %t236 = load i8*, i8** %l5
-  %t237 = load double, double* %l6
-  %t238 = load double, double* %l7
-  %t239 = load double, double* %l8
-  %t240 = load i64, i64* %l9
-  %t241 = load i64, i64* %l10
-  %t242 = load double, double* %l11
-  br i1 %t230, label %then37, label %else38
+logical_and_merge_225:
+  %t232 = phi i1 [ false, %logical_and_entry_225 ], [ %t231, %logical_and_right_end_225 ]
+  %t233 = load i8*, i8** %l0
+  %t234 = load i8*, i8** %l1
+  %t235 = load double, double* %l2
+  %t236 = load i8*, i8** %l3
+  %t237 = load double, double* %l4
+  %t238 = load i8*, i8** %l5
+  %t239 = load double, double* %l6
+  %t240 = load double, double* %l7
+  %t241 = load double, double* %l8
+  %t242 = load i64, i64* %l9
+  %t243 = load i64, i64* %l10
+  %t244 = load double, double* %l11
+  br i1 %t232, label %then37, label %else38
 then37:
-  %t243 = load double, double* %l11
-  %t244 = sitofp i64 192 to double
-  %t245 = fsub double %t243, %t244
-  %t246 = fptosi double %t245 to i64
-  store i64 %t246, i64* %l10
+  %t245 = load double, double* %l11
+  %t246 = sitofp i64 192 to double
+  %t247 = fsub double %t245, %t246
+  %t248 = fptosi double %t247 to i64
+  store i64 %t248, i64* %l10
   br label %merge39
 else38:
-  %t248 = load double, double* %l11
-  %t249 = sitofp i64 224 to double
-  %t250 = fcmp oge double %t248, %t249
-  br label %logical_and_entry_247
+  %t250 = load double, double* %l11
+  %t251 = sitofp i64 224 to double
+  %t252 = fcmp oge double %t250, %t251
+  br label %logical_and_entry_249
 
-logical_and_entry_247:
-  br i1 %t250, label %logical_and_right_247, label %logical_and_merge_247
+logical_and_entry_249:
+  br i1 %t252, label %logical_and_right_249, label %logical_and_merge_249
 
-logical_and_right_247:
-  %t251 = load double, double* %l11
-  %t252 = sitofp i64 239 to double
-  %t253 = fcmp ole double %t251, %t252
-  br label %logical_and_right_end_247
+logical_and_right_249:
+  %t253 = load double, double* %l11
+  %t254 = sitofp i64 239 to double
+  %t255 = fcmp ole double %t253, %t254
+  br label %logical_and_right_end_249
 
-logical_and_right_end_247:
-  br label %logical_and_merge_247
+logical_and_right_end_249:
+  br label %logical_and_merge_249
 
-logical_and_merge_247:
-  %t254 = phi i1 [ false, %logical_and_entry_247 ], [ %t253, %logical_and_right_end_247 ]
-  %t255 = load i8*, i8** %l0
-  %t256 = load i8*, i8** %l1
-  %t257 = load double, double* %l2
-  %t258 = load i8*, i8** %l3
-  %t259 = load double, double* %l4
-  %t260 = load i8*, i8** %l5
-  %t261 = load double, double* %l6
-  %t262 = load double, double* %l7
-  %t263 = load double, double* %l8
-  %t264 = load i64, i64* %l9
-  %t265 = load i64, i64* %l10
-  %t266 = load double, double* %l11
-  br i1 %t254, label %then40, label %else41
+logical_and_merge_249:
+  %t256 = phi i1 [ false, %logical_and_entry_249 ], [ %t255, %logical_and_right_end_249 ]
+  %t257 = load i8*, i8** %l0
+  %t258 = load i8*, i8** %l1
+  %t259 = load double, double* %l2
+  %t260 = load i8*, i8** %l3
+  %t261 = load double, double* %l4
+  %t262 = load i8*, i8** %l5
+  %t263 = load double, double* %l6
+  %t264 = load double, double* %l7
+  %t265 = load double, double* %l8
+  %t266 = load i64, i64* %l9
+  %t267 = load i64, i64* %l10
+  %t268 = load double, double* %l11
+  br i1 %t256, label %then40, label %else41
 then40:
-  %t267 = load double, double* %l11
-  %t268 = sitofp i64 224 to double
-  %t269 = fsub double %t267, %t268
-  %t270 = fptosi double %t269 to i64
-  store i64 %t270, i64* %l10
+  %t269 = load double, double* %l11
+  %t270 = sitofp i64 224 to double
+  %t271 = fsub double %t269, %t270
+  %t272 = fptosi double %t271 to i64
+  store i64 %t272, i64* %l10
   br label %merge42
 else41:
-  %t272 = load double, double* %l11
-  %t273 = sitofp i64 240 to double
-  %t274 = fcmp oge double %t272, %t273
-  br label %logical_and_entry_271
+  %t274 = load double, double* %l11
+  %t275 = sitofp i64 240 to double
+  %t276 = fcmp oge double %t274, %t275
+  br label %logical_and_entry_273
 
-logical_and_entry_271:
-  br i1 %t274, label %logical_and_right_271, label %logical_and_merge_271
+logical_and_entry_273:
+  br i1 %t276, label %logical_and_right_273, label %logical_and_merge_273
 
-logical_and_right_271:
-  %t275 = load double, double* %l11
-  %t276 = sitofp i64 247 to double
-  %t277 = fcmp ole double %t275, %t276
-  br label %logical_and_right_end_271
+logical_and_right_273:
+  %t277 = load double, double* %l11
+  %t278 = sitofp i64 247 to double
+  %t279 = fcmp ole double %t277, %t278
+  br label %logical_and_right_end_273
 
-logical_and_right_end_271:
-  br label %logical_and_merge_271
+logical_and_right_end_273:
+  br label %logical_and_merge_273
 
-logical_and_merge_271:
-  %t278 = phi i1 [ false, %logical_and_entry_271 ], [ %t277, %logical_and_right_end_271 ]
-  %t279 = load i8*, i8** %l0
-  %t280 = load i8*, i8** %l1
-  %t281 = load double, double* %l2
-  %t282 = load i8*, i8** %l3
-  %t283 = load double, double* %l4
-  %t284 = load i8*, i8** %l5
-  %t285 = load double, double* %l6
-  %t286 = load double, double* %l7
-  %t287 = load double, double* %l8
-  %t288 = load i64, i64* %l9
-  %t289 = load i64, i64* %l10
-  %t290 = load double, double* %l11
-  br i1 %t278, label %then43, label %else44
+logical_and_merge_273:
+  %t280 = phi i1 [ false, %logical_and_entry_273 ], [ %t279, %logical_and_right_end_273 ]
+  %t281 = load i8*, i8** %l0
+  %t282 = load i8*, i8** %l1
+  %t283 = load double, double* %l2
+  %t284 = load i8*, i8** %l3
+  %t285 = load double, double* %l4
+  %t286 = load i8*, i8** %l5
+  %t287 = load double, double* %l6
+  %t288 = load double, double* %l7
+  %t289 = load double, double* %l8
+  %t290 = load i64, i64* %l9
+  %t291 = load i64, i64* %l10
+  %t292 = load double, double* %l11
+  br i1 %t280, label %then43, label %else44
 then43:
-  %t291 = load double, double* %l11
-  %t292 = sitofp i64 240 to double
-  %t293 = fsub double %t291, %t292
-  %t294 = fptosi double %t293 to i64
-  store i64 %t294, i64* %l10
+  %t293 = load double, double* %l11
+  %t294 = sitofp i64 240 to double
+  %t295 = fsub double %t293, %t294
+  %t296 = fptosi double %t295 to i64
+  store i64 %t296, i64* %l10
   br label %merge45
 else44:
-  %t295 = sitofp i64 -1 to double
-  ret double %t295
+  %t297 = sitofp i64 -1 to double
+  ret double %t297
 merge45:
   br label %merge42
 merge42:
-  %t296 = phi i64 [ %t270, %then40 ], [ %t294, %else41 ]
-  store i64 %t296, i64* %l10
+  %t298 = phi i64 [ %t272, %then40 ], [ %t296, %else41 ]
+  store i64 %t298, i64* %l10
   br label %merge39
 merge39:
-  %t297 = phi i64 [ %t246, %then37 ], [ %t270, %else38 ]
-  store i64 %t297, i64* %l10
+  %t299 = phi i64 [ %t248, %then37 ], [ %t272, %else38 ]
+  store i64 %t299, i64* %l10
   br label %merge34
 else33:
-  %t299 = load double, double* %l11
-  %t300 = sitofp i64 128 to double
-  %t301 = fcmp olt double %t299, %t300
-  br label %logical_or_entry_298
+  %t301 = load double, double* %l11
+  %t302 = sitofp i64 128 to double
+  %t303 = fcmp olt double %t301, %t302
+  br label %logical_or_entry_300
 
-logical_or_entry_298:
-  br i1 %t301, label %logical_or_merge_298, label %logical_or_right_298
+logical_or_entry_300:
+  br i1 %t303, label %logical_or_merge_300, label %logical_or_right_300
 
-logical_or_right_298:
-  %t302 = load double, double* %l11
-  %t303 = sitofp i64 191 to double
-  %t304 = fcmp ogt double %t302, %t303
-  br label %logical_or_right_end_298
+logical_or_right_300:
+  %t304 = load double, double* %l11
+  %t305 = sitofp i64 191 to double
+  %t306 = fcmp ogt double %t304, %t305
+  br label %logical_or_right_end_300
 
-logical_or_right_end_298:
-  br label %logical_or_merge_298
+logical_or_right_end_300:
+  br label %logical_or_merge_300
 
-logical_or_merge_298:
-  %t305 = phi i1 [ true, %logical_or_entry_298 ], [ %t304, %logical_or_right_end_298 ]
-  %t306 = load i8*, i8** %l0
-  %t307 = load i8*, i8** %l1
-  %t308 = load double, double* %l2
-  %t309 = load i8*, i8** %l3
-  %t310 = load double, double* %l4
-  %t311 = load i8*, i8** %l5
-  %t312 = load double, double* %l6
-  %t313 = load double, double* %l7
-  %t314 = load double, double* %l8
-  %t315 = load i64, i64* %l9
-  %t316 = load i64, i64* %l10
-  %t317 = load double, double* %l11
-  br i1 %t305, label %then46, label %merge47
+logical_or_merge_300:
+  %t307 = phi i1 [ true, %logical_or_entry_300 ], [ %t306, %logical_or_right_end_300 ]
+  %t308 = load i8*, i8** %l0
+  %t309 = load i8*, i8** %l1
+  %t310 = load double, double* %l2
+  %t311 = load i8*, i8** %l3
+  %t312 = load double, double* %l4
+  %t313 = load i8*, i8** %l5
+  %t314 = load double, double* %l6
+  %t315 = load double, double* %l7
+  %t316 = load double, double* %l8
+  %t317 = load i64, i64* %l9
+  %t318 = load i64, i64* %l10
+  %t319 = load double, double* %l11
+  br i1 %t307, label %then46, label %merge47
 then46:
-  %t318 = sitofp i64 -1 to double
-  ret double %t318
+  %t320 = sitofp i64 -1 to double
+  ret double %t320
 merge47:
-  %t319 = load i64, i64* %l10
-  %t320 = mul i64 %t319, 64
-  %t321 = load double, double* %l11
-  %t322 = sitofp i64 128 to double
-  %t323 = fsub double %t321, %t322
-  %t324 = sitofp i64 %t320 to double
-  %t325 = fadd double %t324, %t323
-  %t326 = fptosi double %t325 to i64
-  store i64 %t326, i64* %l10
+  %t321 = load i64, i64* %l10
+  %t322 = mul i64 %t321, 64
+  %t323 = load double, double* %l11
+  %t324 = sitofp i64 128 to double
+  %t325 = fsub double %t323, %t324
+  %t326 = sitofp i64 %t322 to double
+  %t327 = fadd double %t326, %t325
+  %t328 = fptosi double %t327 to i64
+  store i64 %t328, i64* %l10
   br label %merge34
 merge34:
-  %t327 = phi i64 [ %t246, %then32 ], [ %t326, %else33 ]
-  store i64 %t327, i64* %l10
-  %t328 = load i64, i64* %l9
-  %t329 = add i64 %t328, 1
-  store i64 %t329, i64* %l9
+  %t329 = phi i64 [ %t248, %then32 ], [ %t328, %else33 ]
+  store i64 %t329, i64* %l10
+  %t330 = load i64, i64* %l9
+  %t331 = add i64 %t330, 1
+  store i64 %t331, i64* %l9
   br label %loop.latch28
 loop.latch28:
-  %t330 = load i64, i64* %l10
-  %t331 = load i64, i64* %l9
+  %t332 = load i64, i64* %l10
+  %t333 = load i64, i64* %l9
   br label %loop.header26
 afterloop29:
-  %t334 = load i64, i64* %l10
-  %t335 = sitofp i64 %t334 to double
-  ret double %t335
+  %t336 = load i64, i64* %l10
+  %t337 = sitofp i64 %t336 to double
+  ret double %t337
 }
 
 define i1 @is_regional_indicator(double %codepoint) {
@@ -3502,30 +3794,30 @@ then19:
   store i1 0, i1* %l12
   br label %merge21
 else20:
-  %t118 = load i1, i1* %l11
-  br label %logical_and_entry_117
-
-logical_and_entry_117:
-  br i1 %t118, label %logical_and_right_117, label %logical_and_merge_117
-
-logical_and_right_117:
-  %t119 = load i1, i1* %l4
-  br label %logical_and_right_end_117
-
-logical_and_right_end_117:
-  br label %logical_and_merge_117
-
-logical_and_merge_117:
-  %t120 = phi i1 [ false, %logical_and_entry_117 ], [ %t119, %logical_and_right_end_117 ]
+  %t117 = load i1, i1* %l11
   br label %logical_and_entry_116
 
 logical_and_entry_116:
-  br i1 %t120, label %logical_and_right_116, label %logical_and_merge_116
+  br i1 %t117, label %logical_and_right_116, label %logical_and_merge_116
 
 logical_and_right_116:
-  %t121 = load i64, i64* %l5
-  %t122 = srem i64 %t121, 2
-  %t123 = icmp eq i64 %t122, 1
+  %t119 = load i1, i1* %l4
+  br label %logical_and_entry_118
+
+logical_and_entry_118:
+  br i1 %t119, label %logical_and_right_118, label %logical_and_merge_118
+
+logical_and_right_118:
+  %t120 = load i64, i64* %l5
+  %t121 = srem i64 %t120, 2
+  %t122 = icmp eq i64 %t121, 1
+  br label %logical_and_right_end_118
+
+logical_and_right_end_118:
+  br label %logical_and_merge_118
+
+logical_and_merge_118:
+  %t123 = phi i1 [ false, %logical_and_entry_118 ], [ %t122, %logical_and_right_end_118 ]
   br label %logical_and_right_end_116
 
 logical_and_right_end_116:

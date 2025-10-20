@@ -9878,34 +9878,65 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
 
 fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch {
     let mut depth -> number = 0;
-    let mut index -> number = expression.length;
+    let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escape_next -> boolean = false;
+    let mut candidate_index -> number = -1;
+    let mut candidate_symbol -> string = "";
     loop {
-        if index <= 0 {
+        if index >= expression.length {
             break;
         }
-        index -= 1;
         let ch = expression[index];
-        if ch == ")" {
-            depth += 1;
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
             continue;
         }
         if ch == "(" {
-            if depth > 0 {
-                depth -= 1;
-                continue;
-            }
-        }
-        if depth > 0 {
+            depth += 1;
+            index += 1;
             continue;
         }
-        if contains_char(operators, ch) {
-            if ch == "-" {
-                if !is_binary_minus(expression, index) {
-                    continue;
-                }
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
             }
-            return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
+            index += 1;
+            continue;
         }
+        if depth == 0 && contains_char(operators, ch) {
+            if ch == "-" {
+                if is_binary_minus(expression, index) {
+                    candidate_index = index;
+                    candidate_symbol = substring(expression, index, index + 1);
+                }
+            } else {
+                candidate_index = index;
+                candidate_symbol = substring(expression, index, index + 1);
+            }
+        }
+        index += 1;
+    }
+    if candidate_index >= 0 {
+        return OperatorMatch { index: candidate_index, symbol: candidate_symbol, success: true };
     }
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
@@ -9913,11 +9944,35 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
 fn find_comparison_operator(expression -> string) -> OperatorMatch {
     let mut depth -> number = 0;
     let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escape_next -> boolean = false;
     loop {
         if index >= expression.length {
             break;
         }
         let ch = expression[index];
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
         if ch == "(" {
             depth += 1;
             index += 1;
@@ -9950,62 +10005,108 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
 
 fn find_logical_operator(expression -> string) -> OperatorMatch {
     let mut depth -> number = 0;
-    let mut index -> number = expression.length;
-    // Scan right-to-left for || (lowest precedence)
+    let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escape_next -> boolean = false;
+
     loop {
-        if index <= 1 {
+        if index + 1 >= expression.length {
             break;
         }
-        index -= 1;
         let ch = expression[index];
-        if ch == ")" {
-            depth += 1;
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
             continue;
         }
         if ch == "(" {
-            if depth > 0 {
-                depth -= 1;
-                continue;
-            }
-        }
-        if depth > 0 {
+            depth += 1;
+            index += 1;
             continue;
         }
-        if index + 1 < expression.length {
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
             let two = substring(expression, index, index + 2);
             if two == "||" {
                 return OperatorMatch { index: index, symbol: "||", success: true };
             }
         }
+        index += 1;
     }
-    // Reset and scan for && (higher precedence)
-    index = expression.length;
+
     depth = 0;
+    index = 0;
+    in_string = false;
+    escape_next = false;
     loop {
-        if index <= 1 {
+        if index + 1 >= expression.length {
             break;
         }
-        index -= 1;
         let ch = expression[index];
-        if ch == ")" {
-            depth += 1;
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
             continue;
         }
         if ch == "(" {
-            if depth > 0 {
-                depth -= 1;
-                continue;
-            }
-        }
-        if depth > 0 {
+            depth += 1;
+            index += 1;
             continue;
         }
-        if index + 1 < expression.length {
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
             let two = substring(expression, index, index + 2);
             if two == "&&" {
                 return OperatorMatch { index: index, symbol: "&&", success: true };
             }
         }
+        index += 1;
     }
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
