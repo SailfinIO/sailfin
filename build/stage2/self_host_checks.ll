@@ -6,7 +6,7 @@ source_filename = "sailfin"
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
 %ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics**, i64 }* }
 %ProjectCompilation = type { { %CompiledModule**, i64 }*, { %ModuleDiagnostics**, i64 }* }
-%LLVMCompilationResult = type { %LoweredLLVMResult*, %NativeModule* }
+%LLVMCompilationResult = type { %LoweredLLVMResult, %NativeModule }
 
 declare noalias i8* @malloc(i64)
 

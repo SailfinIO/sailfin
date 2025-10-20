@@ -4,7 +4,7 @@ source_filename = "sailfin"
 %EnumField = type { i8*, i8* }
 %EnumVariantDefinition = type { i8*, { i8**, i64 }* }
 %EnumType = type { i8*, { %EnumVariantDefinition**, i64 }* }
-%EnumInstance = type { %EnumType*, i8*, { %EnumField**, i64 }* }
+%EnumInstance = type { %EnumType, i8*, { %EnumField**, i64 }* }
 %StructField = type { i8*, i8* }
 %TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
 
@@ -396,7 +396,7 @@ entry:
   %t1 = load double, double* %l0
   %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(i8* null, { %EnumField*, i64 }* %provided)
   store { %EnumField*, i64 }* %t2, { %EnumField*, i64 }** %l1
-  %t3 = insertvalue %EnumInstance undef, %EnumType* null, 0
+  %t3 = insertvalue %EnumInstance undef, %EnumType %enum_type, 0
   %t4 = insertvalue %EnumInstance %t3, i8* %variant_name, 1
   %t5 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
   %t6 = bitcast { %EnumField*, i64 }* %t5 to { %EnumField**, i64 }*

@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
 from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, sanitize_symbol
 
 print = runtime.console
 sleep = runtime.sleep
@@ -1021,6 +1021,14 @@ def build_type_context(structs, enums, interfaces):
             if len(llvm_field_type) == 0:
                 diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`")
                 llvm_field_type = "i8*"
+            else:
+                if ends_with_pointer_suffix(llvm_field_type):
+                    layout_base_type = layout_annotation_base_type(layout_field.type_annotation)
+                    references_self_type = layout_base_type == definition.name
+                    if layout_annotation_represents_user_value(layout_field.type_annotation)  and  not references_self_type:
+                        stripped = strip_pointer_suffix(llvm_field_type)
+                        if len(stripped) > 0:
+                            llvm_field_type = stripped
             fields = append_struct_field_info(fields, StructFieldInfo(name=layout_field.name, llvm_type=llvm_field_type, index=field_index, offset=layout_field.offset))
             field_index += 1
         align_value = layout.align
@@ -1058,6 +1066,14 @@ def build_type_context(structs, enums, interfaces):
                 if len(llvm_variant_field_type) == 0:
                     diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`")
                     llvm_variant_field_type = "i8*"
+                else:
+                    if ends_with_pointer_suffix(llvm_variant_field_type):
+                        variant_base_type = layout_annotation_base_type(variant_field.type_annotation)
+                        references_declaring_enum = variant_base_type == enum_def.name
+                        if layout_annotation_represents_user_value(variant_field.type_annotation)  and  not references_declaring_enum:
+                            stripped_variant = strip_pointer_suffix(llvm_variant_field_type)
+                            if len(stripped_variant) > 0:
+                                llvm_variant_field_type = stripped_variant
                 variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, index=variant_field_index, offset=variant_field.offset))
                 variant_field_index += 1
             variants = append_enum_variant_info(variants, EnumVariantInfo(name=variant_layout.name, tag=variant_layout.tag, offset=variant_layout.offset, size=variant_layout.size, align=variant_layout.align, fields=variant_fields))
@@ -1373,6 +1389,85 @@ def map_struct_field_annotation(annotation):
     if result == "void":
         return ""
     return result
+
+def layout_annotation_requires_pointer(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return False
+    normalized = unwrap_move_wrapper(trimmed)
+    if len(normalized) == 0:
+        return False
+    if starts_with(normalized, "mut "):
+        remainder = trim_text(substring(normalized, 4, len(normalized)))
+        if len(remainder) == 0:
+            return False
+        return layout_annotation_requires_pointer(remainder)
+    if len(normalized) > 0:
+        first = normalized[0]
+        if first == "&":
+            return True
+    if len(normalized) > 0:
+        last = normalized[len(normalized) - 1]
+        if last == "?":
+            return True
+    if len(normalized) > 2:
+        suffix = substring(normalized, len(normalized) - 2, len(normalized))
+        if suffix == "[]":
+            return True
+    return False
+
+def layout_annotation_base_type(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    normalized = unwrap_move_wrapper(trimmed)
+    if len(normalized) == 0:
+        return ""
+    if starts_with(normalized, "mut "):
+        remainder = trim_text(substring(normalized, 4, len(normalized)))
+        return layout_annotation_base_type(remainder)
+    if len(normalized) > 0:
+        first = normalized[0]
+        if first == "&":
+            inner_reference = trim_text(substring(normalized, 1, len(normalized)))
+            return layout_annotation_base_type(inner_reference)
+    if len(normalized) > 0:
+        last = normalized[len(normalized) - 1]
+        if last == "?":
+            inner_optional = trim_text(substring(normalized, 0, len(normalized) - 1))
+            return layout_annotation_base_type(inner_optional)
+    if len(normalized) > 2:
+        suffix = substring(normalized, len(normalized) - 2, len(normalized))
+        if suffix == "[]":
+            element = trim_text(substring(normalized, 0, len(normalized) - 2))
+            return layout_annotation_base_type(element)
+    return normalized
+
+def layout_annotation_represents_user_value(annotation):
+    if layout_annotation_requires_pointer(annotation):
+        return False
+    base = layout_annotation_base_type(annotation)
+    if len(base) == 0:
+        return False
+    if base == "number":
+        return False
+    if base == "boolean"  or  base == "bool":
+        return False
+    if base == "int"  or  base == "i64":
+        return False
+    if base == "i32":
+        return False
+    if base == "string":
+        return False
+    if base == "void":
+        return False
+    if contains_text(base, "<"):
+        return False
+    if contains_text(base, ">"):
+        return False
+    if looks_like_user_type(base):
+        return True
+    return False
 
 def find_struct_info_by_name(context, name):
     index = 0
@@ -7863,38 +7958,12 @@ def number_to_string(value):
         remaining = quotient
     return output
 
-def sanitize_symbol(name):
-    result = ""
-    index = 0
-    while True:
-        if index >= len(name):
-            break
-        ch = name[index]
-        if is_symbol_char(ch):
-            result = result + ch
-        index += 1
-    if len(result) == 0:
-        return "anon"
-    return result
-
-def is_digit_char(ch):
-    return index_of("0123456789", ch) != -1
-
-def is_symbol_char(ch):
-    if ch == "_":
-        return True
-    code = char_code(ch)
-    if code >= char_code("a")  and  code <= char_code("z"):
-        return True
-    if code >= char_code("A")  and  code <= char_code("Z"):
-        return True
-    if code >= char_code("0")  and  code <= char_code("9"):
-        return True
-    return False
-
 def lower_char_code(code):
-    if code >= char_code("A")  and  code <= char_code("Z"):
-        return code + char_code("a") - char_code("A")
+    upper_a = char_code("A")
+    upper_z = char_code("Z")
+    if code >= upper_a  and  code <= upper_z:
+        lower_a = char_code("a")
+        return code + lower_a - upper_a
     return code
 
 def matches_case_insensitive(value, expected):
@@ -7904,8 +7973,10 @@ def matches_case_insensitive(value, expected):
     while True:
         if index >= len(value):
             break
-        value_code = lower_char_code(char_code(value[index]))
-        expected_code = lower_char_code(char_code(expected[index]))
+        value_ch = substring(value, index, index + 1)
+        expected_ch = substring(expected, index, index + 1)
+        value_code = lower_char_code(char_code(value_ch))
+        expected_code = lower_char_code(char_code(expected_ch))
         if value_code != expected_code:
             return False
         index += 1
@@ -7922,6 +7993,11 @@ def is_boolean_literal(text):
 def is_null_literal(text):
     trimmed = trim_text(text)
     if matches_case_insensitive(trimmed, "null"):
+        return True
+    return False
+
+def is_digit_char(ch):
+    if index_of("0123456789", ch) >= 0:
         return True
     return False
 

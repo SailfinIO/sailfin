@@ -28,4 +28,46 @@ def char_at(value, index):
         return ""
     return substring(value, index, index + 1)
 
-__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at"]
+def is_symbol_char(ch):
+    if len(ch) == 0:
+        return False
+    if ch == "_":
+        return True
+    code = char_code(ch)
+    lower_a = char_code("a")
+    lower_z = char_code("z")
+    if code >= lower_a  and  code <= lower_z:
+        return True
+    upper_a = char_code("A")
+    upper_z = char_code("Z")
+    if code >= upper_a  and  code <= upper_z:
+        return True
+    zero = char_code("0")
+    nine = char_code("9")
+    if code >= zero  and  code <= nine:
+        return True
+    return False
+
+def sanitize_symbol(name):
+    if len(name) == 0:
+        return "_"
+    result = ""
+    index = 0
+    while True:
+        if index >= len(name):
+            break
+        ch = name[index]
+        if is_symbol_char(ch):
+            result = result + ch
+        index += 1
+    if len(result) == 0:
+        return "_"
+    first = result[0]
+    first_code = char_code(first)
+    zero = char_code("0")
+    nine = char_code("9")
+    if first_code >= zero  and  first_code <= nine:
+        result = "_" + result
+    return result
+
+__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol"]

@@ -18,4 +18,59 @@ fn char_at(value -> string, index -> number) -> string {
 	return substring(value, index, index + 1);
 }
 
-export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at };
+fn is_symbol_char(ch -> string) -> boolean {
+	if ch.length == 0 {
+		return false;
+	}
+	if ch == "_" {
+		return true;
+	}
+	let code = char_code(ch);
+	let lower_a = char_code("a");
+	let lower_z = char_code("z");
+	if code >= lower_a && code <= lower_z {
+		return true;
+	}
+	let upper_a = char_code("A");
+	let upper_z = char_code("Z");
+	if code >= upper_a && code <= upper_z {
+		return true;
+	}
+	let zero = char_code("0");
+	let nine = char_code("9");
+	if code >= zero && code <= nine {
+		return true;
+	}
+	return false;
+}
+
+fn sanitize_symbol(name -> string) -> string {
+	if name.length == 0 {
+		return "_";
+	}
+	let mut result -> string = "";
+	let mut index -> number = 0;
+	loop {
+		if index >= name.length {
+			break;
+		}
+		let ch = name[index];
+		if is_symbol_char(ch) {
+			result = result + ch;
+		}
+		index += 1;
+	}
+	if result.length == 0 {
+		return "_";
+	}
+	let first = result[0];
+	let first_code = char_code(first);
+	let zero = char_code("0");
+	let nine = char_code("9");
+	if first_code >= zero && first_code <= nine {
+		result = "_" + result;
+	}
+	return result;
+}
+
+export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol };

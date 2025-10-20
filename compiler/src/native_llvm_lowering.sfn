@@ -6,7 +6,7 @@
 
 import { NativeModule } from "./emit_native";
 import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
-import { substring, char_code } from "./string_utils";
+import { substring, char_code, sanitize_symbol } from "./string_utils";
 
 struct TraitImplementationDescriptor {
     struct_name -> string;
@@ -915,6 +915,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             if llvm_field_type.length == 0 {
                 diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
+            } else if ends_with_pointer_suffix(llvm_field_type) {
+                let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
+                let references_self_type = layout_base_type == definition.name;
+                if layout_annotation_represents_user_value(layout_field.type_annotation) && !references_self_type {
+                    let stripped = strip_pointer_suffix(llvm_field_type);
+                    if stripped.length > 0 {
+                        llvm_field_type = stripped;
+                    }
+                }
             }
             fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, index: field_index, offset: layout_field.offset });
             field_index += 1;
@@ -961,6 +970,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 if llvm_variant_field_type.length == 0 {
                     diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
+                } else if ends_with_pointer_suffix(llvm_variant_field_type) {
+                    let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
+                    let references_declaring_enum = variant_base_type == enum_def.name;
+                    if layout_annotation_represents_user_value(variant_field.type_annotation) && !references_declaring_enum {
+                        let stripped_variant = strip_pointer_suffix(llvm_variant_field_type);
+                        if stripped_variant.length > 0 {
+                            llvm_variant_field_type = stripped_variant;
+                        }
+                    }
                 }
                 variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, index: variant_field_index, offset: variant_field.offset });
                 variant_field_index += 1;
@@ -1432,6 +1450,118 @@ fn map_struct_field_annotation(annotation -> string) -> string {
         return "";
     }
     return result;
+}
+
+fn layout_annotation_requires_pointer(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 {
+        return false;
+    }
+    if starts_with(normalized, "mut ") {
+        let remainder = trim_text(substring(normalized, 4, normalized.length));
+        if remainder.length == 0 {
+            return false;
+        }
+        return layout_annotation_requires_pointer(remainder);
+    }
+    if normalized.length > 0 {
+        let first = normalized[0];
+        if first == "&" {
+            return true;
+        }
+    }
+    if normalized.length > 0 {
+        let last = normalized[normalized.length - 1];
+        if last == "?" {
+            return true;
+        }
+    }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn layout_annotation_base_type(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 {
+        return "";
+    }
+    if starts_with(normalized, "mut ") {
+        let remainder = trim_text(substring(normalized, 4, normalized.length));
+        return layout_annotation_base_type(remainder);
+    }
+    if normalized.length > 0 {
+        let first = normalized[0];
+        if first == "&" {
+            let inner_reference = trim_text(substring(normalized, 1, normalized.length));
+            return layout_annotation_base_type(inner_reference);
+        }
+    }
+    if normalized.length > 0 {
+        let last = normalized[normalized.length - 1];
+        if last == "?" {
+            let inner_optional = trim_text(substring(normalized, 0, normalized.length - 1));
+            return layout_annotation_base_type(inner_optional);
+        }
+    }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" {
+            let element = trim_text(substring(normalized, 0, normalized.length - 2));
+            return layout_annotation_base_type(element);
+        }
+    }
+    return normalized;
+}
+
+fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
+    if layout_annotation_requires_pointer(annotation) {
+        return false;
+    }
+    let base = layout_annotation_base_type(annotation);
+    if base.length == 0 {
+        return false;
+    }
+    if base == "number" {
+        return false;
+    }
+    if base == "boolean" || base == "bool" {
+        return false;
+    }
+    if base == "int" || base == "i64" {
+        return false;
+    }
+    if base == "i32" {
+        return false;
+    }
+    if base == "string" {
+        return false;
+    }
+    if base == "void" {
+        return false;
+    }
+    if contains_text(base, "<") {
+        return false;
+    }
+    if contains_text(base, ">") {
+        return false;
+    }
+    if looks_like_user_type(base) {
+        return true;
+    }
+    return false;
 }
 
 fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {
@@ -11205,49 +11335,12 @@ fn number_to_string(value -> number) -> string {
     return output;
 }
 
-fn sanitize_symbol(name -> string) -> string {
-    let mut result -> string = "";
-    let mut index -> number = 0;
-    loop {
-        if index >= name.length {
-            break;
-        }
-        let ch = name[index];
-        if is_symbol_char(ch) {
-            result = result + ch;
-        }
-        index += 1;
-    }
-    if result.length == 0 {
-        return "anon";
-    }
-    return result;
-}
-
-fn is_digit_char(ch -> string) -> boolean {
-    return index_of("0123456789", ch) != -1;
-}
-
-fn is_symbol_char(ch -> string) -> boolean {
-    if ch == "_" {
-        return true;
-    }
-    let code = char_code(ch);
-    if code >= char_code("a") && code <= char_code("z") {
-        return true;
-    }
-    if code >= char_code("A") && code <= char_code("Z") {
-        return true;
-    }
-    if code >= char_code("0") && code <= char_code("9") {
-        return true;
-    }
-    return false;
-}
-
 fn lower_char_code(code -> number) -> number {
-    if code >= char_code("A") && code <= char_code("Z") {
-        return code + (char_code("a") - char_code("A"));
+    let upper_a = char_code("A");
+    let upper_z = char_code("Z");
+    if code >= upper_a && code <= upper_z {
+        let lower_a = char_code("a");
+        return code + (lower_a - upper_a);
     }
     return code;
 }
@@ -11261,8 +11354,10 @@ fn matches_case_insensitive(value -> string, expected -> string) -> boolean {
         if index >= value.length {
             break;
         }
-        let value_code = lower_char_code(char_code(value[index]));
-        let expected_code = lower_char_code(char_code(expected[index]));
+        let value_ch = substring(value, index, index + 1);
+        let expected_ch = substring(expected, index, index + 1);
+        let value_code = lower_char_code(char_code(value_ch));
+        let expected_code = lower_char_code(char_code(expected_ch));
         if value_code != expected_code {
             return false;
         }
@@ -11285,6 +11380,13 @@ fn is_boolean_literal(text -> string) -> boolean {
 fn is_null_literal(text -> string) -> boolean {
     let trimmed = trim_text(text);
     if matches_case_insensitive(trimmed, "null") {
+        return true;
+    }
+    return false;
+}
+
+fn is_digit_char(ch -> string) -> boolean {
+    if index_of("0123456789", ch) >= 0 {
         return true;
     }
     return false;

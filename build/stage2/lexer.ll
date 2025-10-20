@@ -2,7 +2,7 @@
 source_filename = "sailfin"
 
 %LexerState = type { i8*, double, double, double }
-%Token = type { %TokenKind*, i8*, double, double }
+%Token = type { %TokenKind, i8*, double, double }
 
 %TokenKind = type { i32, [8 x i8] }
 
@@ -217,7 +217,7 @@ afterloop11:
   store i8* %t102, i8** %l6
   %t103 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t104 = insertvalue %TokenKind undef, i32 5, 0
-  %t105 = insertvalue %Token undef, %TokenKind* null, 0
+  %t105 = insertvalue %Token undef, %TokenKind %t104, 0
   %t106 = load i8*, i8** %l6
   %t107 = insertvalue %Token %t105, i8* %t106, 1
   %t108 = load double, double* %l4
@@ -344,7 +344,7 @@ merge26:
   store double %t190, double* %l15
   %t191 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t192 = insertvalue %TokenKind undef, i32 6, 0
-  %t193 = insertvalue %Token undef, %TokenKind* null, 0
+  %t193 = insertvalue %Token undef, %TokenKind %t192, 0
   %t194 = load i8*, i8** %l14
   %t195 = insertvalue %Token %t193, i8* %t194, 1
   %t196 = load double, double* %l9
@@ -472,7 +472,7 @@ afterloop32:
   store i8* %t276, i8** %l19
   %t277 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t278 = insertvalue %TokenKind undef, i32 6, 0
-  %t279 = insertvalue %Token undef, %TokenKind* null, 0
+  %t279 = insertvalue %Token undef, %TokenKind %t278, 0
   %t280 = load i8*, i8** %l19
   %t281 = insertvalue %Token %t279, i8* %t280, 1
   %t282 = load double, double* %l17
@@ -713,7 +713,7 @@ afterloop45:
   %t428 = bitcast i8* %t427 to i8**
   store i8* %t425, i8** %t428
   %t429 = load %TokenKind, %TokenKind* %t423
-  %t430 = insertvalue %Token undef, %TokenKind* null, 0
+  %t430 = insertvalue %Token undef, %TokenKind %t429, 0
   %t431 = load i8*, i8** %l26
   %t432 = insertvalue %Token %t430, i8* %t431, 1
   %t433 = load double, double* %l21
@@ -945,7 +945,7 @@ merge69:
   %t586 = bitcast i8* %t585 to i8**
   store i8* %t583, i8** %t586
   %t587 = load %TokenKind, %TokenKind* %t581
-  %t588 = insertvalue %Token undef, %TokenKind* null, 0
+  %t588 = insertvalue %Token undef, %TokenKind %t587, 0
   %t589 = load i8*, i8** %l31
   %t590 = insertvalue %Token %t588, i8* %t589, 1
   %t591 = load double, double* %l28
@@ -1083,7 +1083,7 @@ then90:
   %t679 = bitcast i8* %t678 to i1*
   store i1 %t676, i1* %t679
   %t680 = load %TokenKind, %TokenKind* %t674
-  %t681 = insertvalue %Token undef, %TokenKind* null, 0
+  %t681 = insertvalue %Token undef, %TokenKind %t680, 0
   %t682 = load i8*, i8** %l35
   %t683 = insertvalue %Token %t681, i8* %t682, 1
   %t684 = load double, double* %l33
@@ -1104,7 +1104,7 @@ else91:
   %t695 = bitcast i8* %t694 to i8**
   store i8* %t692, i8** %t695
   %t696 = load %TokenKind, %TokenKind* %t690
-  %t697 = insertvalue %Token undef, %TokenKind* null, 0
+  %t697 = insertvalue %Token undef, %TokenKind %t696, 0
   %t698 = load i8*, i8** %l35
   %t699 = insertvalue %Token %t697, i8* %t698, 1
   %t700 = load double, double* %l33
@@ -1180,7 +1180,7 @@ then95:
   %t750 = bitcast i8* %t749 to i8**
   store i8* %t746, i8** %t750
   %t751 = load %TokenKind, %TokenKind* %t743
-  %t752 = insertvalue %Token undef, %TokenKind* null, 0
+  %t752 = insertvalue %Token undef, %TokenKind %t751, 0
   %t753 = load i8, i8* %l39
   %t754 = alloca [2 x i8], align 1
   %t755 = getelementptr [2 x i8], [2 x i8]* %t754, i32 0, i32 0
@@ -1231,7 +1231,7 @@ merge99:
   %t783 = bitcast i8* %t782 to i8**
   store i8* %t779, i8** %t783
   %t784 = load %TokenKind, %TokenKind* %t776
-  %t785 = insertvalue %Token undef, %TokenKind* null, 0
+  %t785 = insertvalue %Token undef, %TokenKind %t784, 0
   %t786 = load i8, i8* %l39
   %t787 = alloca [2 x i8], align 1
   %t788 = getelementptr [2 x i8], [2 x i8]* %t787, i32 0, i32 0

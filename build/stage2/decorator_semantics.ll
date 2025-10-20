@@ -1,7 +1,7 @@
 ; ModuleID = 'sailfin'
 source_filename = "sailfin"
 
-%DecoratorArgumentInfo = type { i8*, %LiteralValue* }
+%DecoratorArgumentInfo = type { i8*, %LiteralValue }
 %DecoratorInfo = type { i8*, { %DecoratorArgumentInfo**, i64 }* }
 %Program = type { { %Statement**, i64 }* }
 %TypeAnnotation = type { i8* }
@@ -9,25 +9,25 @@ source_filename = "sailfin"
 %Block = type { { %Token**, i64 }*, i8*, { %Statement**, i64 }* }
 %SourceSpan = type { double, double, double, double }
 %Parameter = type { i8*, %TypeAnnotation*, %Expression*, i1, %SourceSpan* }
-%WithClause = type { %Expression* }
-%ObjectField = type { i8*, %Expression* }
+%WithClause = type { %Expression }
+%ObjectField = type { i8*, %Expression }
 %ElseBranch = type { %Statement*, %Block* }
-%ForClause = type { %Expression*, %Expression*, { %Token**, i64 }* }
-%MatchCase = type { %Expression*, %Expression*, %Block* }
-%ModelProperty = type { i8*, %Expression*, %SourceSpan* }
-%FieldDeclaration = type { i8*, %TypeAnnotation*, i1, %SourceSpan* }
-%MethodDeclaration = type { %FunctionSignature*, %Block*, { %Decorator**, i64 }* }
+%ForClause = type { %Expression, %Expression, { %Token**, i64 }* }
+%MatchCase = type { %Expression, %Expression*, %Block }
+%ModelProperty = type { i8*, %Expression, %SourceSpan* }
+%FieldDeclaration = type { i8*, %TypeAnnotation, i1, %SourceSpan* }
+%MethodDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
 %EnumVariant = type { i8*, { %FieldDeclaration**, i64 }*, %SourceSpan* }
 %FunctionSignature = type { i8*, i1, { %Parameter**, i64 }*, %TypeAnnotation*, { i8**, i64 }*, { %TypeParameter**, i64 }*, %SourceSpan* }
-%PipelineDeclaration = type { %FunctionSignature*, %Block*, { %Decorator**, i64 }* }
-%ToolDeclaration = type { %FunctionSignature*, %Block*, { %Decorator**, i64 }* }
-%TestDeclaration = type { i8*, %Block*, { i8**, i64 }*, { %Decorator**, i64 }* }
-%ModelDeclaration = type { i8*, %TypeAnnotation*, { %ModelProperty**, i64 }*, { i8**, i64 }*, { %Decorator**, i64 }* }
+%PipelineDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
+%ToolDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
+%TestDeclaration = type { i8*, %Block, { i8**, i64 }*, { %Decorator**, i64 }* }
+%ModelDeclaration = type { i8*, %TypeAnnotation, { %ModelProperty**, i64 }*, { i8**, i64 }*, { %Decorator**, i64 }* }
 %Decorator = type { i8*, { %DecoratorArgument**, i64 }* }
-%DecoratorArgument = type { i8*, %Expression* }
+%DecoratorArgument = type { i8*, %Expression }
 %ImportSpecifier = type { i8*, i8* }
 %ExportSpecifier = type { i8*, i8* }
-%Token = type { %TokenKind*, i8*, double, double }
+%Token = type { %TokenKind, i8*, double, double }
 
 %LiteralValue = type { i32, [8 x i8] }
 %Expression = type { i32, [24 x i8] }
@@ -280,10 +280,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t39 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t37, %loop.latch2 ]
-  %t40 = phi double [ %t7, %entry ], [ %t38, %loop.latch2 ]
-  store { %DecoratorArgumentInfo*, i64 }* %t39, { %DecoratorArgumentInfo*, i64 }** %l0
-  store double %t40, double* %l1
+  %t38 = phi { %DecoratorArgumentInfo*, i64 }* [ %t6, %entry ], [ %t36, %loop.latch2 ]
+  %t39 = phi double [ %t7, %entry ], [ %t37, %loop.latch2 ]
+  store { %DecoratorArgumentInfo*, i64 }* %t38, { %DecoratorArgumentInfo*, i64 }** %l0
+  store double %t39, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -309,29 +309,28 @@ merge5:
   store %DecoratorArgument %t22, %DecoratorArgument* %l2
   %t23 = load %DecoratorArgument, %DecoratorArgument* %l2
   %t24 = extractvalue %DecoratorArgument %t23, 1
-  %t25 = load %Expression, %Expression* %t24
-  %t26 = call %LiteralValue @evaluate_expression(%Expression %t25)
-  store %LiteralValue %t26, %LiteralValue* %l3
-  %t27 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  %t28 = load %DecoratorArgument, %DecoratorArgument* %l2
-  %t29 = extractvalue %DecoratorArgument %t28, 0
-  %t30 = insertvalue %DecoratorArgumentInfo undef, i8* %t29, 0
-  %t31 = load %LiteralValue, %LiteralValue* %l3
-  %t32 = insertvalue %DecoratorArgumentInfo %t30, %LiteralValue* null, 1
-  %t33 = call { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %t27, %DecoratorArgumentInfo %t32)
-  store { %DecoratorArgumentInfo*, i64 }* %t33, { %DecoratorArgumentInfo*, i64 }** %l0
-  %t34 = load double, double* %l1
-  %t35 = sitofp i64 1 to double
-  %t36 = fadd double %t34, %t35
-  store double %t36, double* %l1
+  %t25 = call %LiteralValue @evaluate_expression(%Expression %t24)
+  store %LiteralValue %t25, %LiteralValue* %l3
+  %t26 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t27 = load %DecoratorArgument, %DecoratorArgument* %l2
+  %t28 = extractvalue %DecoratorArgument %t27, 0
+  %t29 = insertvalue %DecoratorArgumentInfo undef, i8* %t28, 0
+  %t30 = load %LiteralValue, %LiteralValue* %l3
+  %t31 = insertvalue %DecoratorArgumentInfo %t29, %LiteralValue %t30, 1
+  %t32 = call { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %t26, %DecoratorArgumentInfo %t31)
+  store { %DecoratorArgumentInfo*, i64 }* %t32, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t33 = load double, double* %l1
+  %t34 = sitofp i64 1 to double
+  %t35 = fadd double %t33, %t34
+  store double %t35, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t37 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  %t38 = load double, double* %l1
+  %t36 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  %t37 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t41 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  ret { %DecoratorArgumentInfo*, i64 }* %t41
+  %t40 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  ret { %DecoratorArgumentInfo*, i64 }* %t40
 }
 
 define %LiteralValue @evaluate_expression(%Expression %expr) {
