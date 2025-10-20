@@ -15927,12 +15927,13 @@ then2:
   store %Expression %expression, %Expression* %t105
   %t106 = getelementptr inbounds %Expression, %Expression* %t105, i32 0, i32 1
   %t107 = bitcast [16 x i8]* %t106 to i8*
-  %t108 = bitcast i8* %t107 to %Expression*
-  %t109 = load %Expression, %Expression* %t108
+  %t108 = bitcast i8* %t107 to %Expression**
+  %t109 = load %Expression*, %Expression** %t108
   %t110 = icmp eq i32 %t104, 7
-  %t111 = select i1 %t110, %Expression %t109, %Expression zeroinitializer
-  %t112 = call i1 @expression_is_struct_target(%Expression %t111)
-  ret i1 %t112
+  %t111 = select i1 %t110, %Expression* %t109, %Expression* null
+  %t112 = load %Expression, %Expression* %t111
+  %t113 = call i1 @expression_is_struct_target(%Expression %t112)
+  ret i1 %t113
 merge3:
   ret i1 0
 }
@@ -16075,56 +16076,57 @@ then2:
   store %Expression %expression, %Expression* %t121
   %t122 = getelementptr inbounds %Expression, %Expression* %t121, i32 0, i32 1
   %t123 = bitcast [16 x i8]* %t122 to i8*
-  %t124 = bitcast i8* %t123 to %Expression*
-  %t125 = load %Expression, %Expression* %t124
+  %t124 = bitcast i8* %t123 to %Expression**
+  %t125 = load %Expression*, %Expression** %t124
   %t126 = icmp eq i32 %t120, 7
-  %t127 = select i1 %t126, %Expression %t125, %Expression zeroinitializer
-  %t128 = call %StructTypeNameResult @collect_struct_type_name(%Expression %t127)
-  store %StructTypeNameResult %t128, %StructTypeNameResult* %l0
-  %t129 = load %StructTypeNameResult, %StructTypeNameResult* %l0
-  %t130 = extractvalue %StructTypeNameResult %t129, 1
-  %t131 = xor i1 %t130, 1
-  %t132 = load %StructTypeNameResult, %StructTypeNameResult* %l0
-  br i1 %t131, label %then4, label %merge5
+  %t127 = select i1 %t126, %Expression* %t125, %Expression* null
+  %t128 = load %Expression, %Expression* %t127
+  %t129 = call %StructTypeNameResult @collect_struct_type_name(%Expression %t128)
+  store %StructTypeNameResult %t129, %StructTypeNameResult* %l0
+  %t130 = load %StructTypeNameResult, %StructTypeNameResult* %l0
+  %t131 = extractvalue %StructTypeNameResult %t130, 1
+  %t132 = xor i1 %t131, 1
+  %t133 = load %StructTypeNameResult, %StructTypeNameResult* %l0
+  br i1 %t132, label %then4, label %merge5
 then4:
-  %t133 = alloca [0 x i8*]
-  %t134 = getelementptr [0 x i8*], [0 x i8*]* %t133, i32 0, i32 0
-  %t135 = alloca { i8**, i64 }
-  %t136 = getelementptr { i8**, i64 }, { i8**, i64 }* %t135, i32 0, i32 0
-  store i8** %t134, i8*** %t136
-  %t137 = getelementptr { i8**, i64 }, { i8**, i64 }* %t135, i32 0, i32 1
-  store i64 0, i64* %t137
-  %t138 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t135, 0
-  %t139 = insertvalue %StructTypeNameResult %t138, i1 0, 1
-  ret %StructTypeNameResult %t139
+  %t134 = alloca [0 x i8*]
+  %t135 = getelementptr [0 x i8*], [0 x i8*]* %t134, i32 0, i32 0
+  %t136 = alloca { i8**, i64 }
+  %t137 = getelementptr { i8**, i64 }, { i8**, i64 }* %t136, i32 0, i32 0
+  store i8** %t135, i8*** %t137
+  %t138 = getelementptr { i8**, i64 }, { i8**, i64 }* %t136, i32 0, i32 1
+  store i64 0, i64* %t138
+  %t139 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t136, 0
+  %t140 = insertvalue %StructTypeNameResult %t139, i1 0, 1
+  ret %StructTypeNameResult %t140
 merge5:
-  %t140 = load %StructTypeNameResult, %StructTypeNameResult* %l0
-  %t141 = extractvalue %StructTypeNameResult %t140, 0
-  %t142 = extractvalue %Expression %expression, 0
-  %t143 = alloca %Expression
-  store %Expression %expression, %Expression* %t143
-  %t144 = getelementptr inbounds %Expression, %Expression* %t143, i32 0, i32 1
-  %t145 = bitcast [16 x i8]* %t144 to i8*
-  %t146 = getelementptr inbounds i8, i8* %t145, i64 8
-  %t147 = bitcast i8* %t146 to i8**
-  %t148 = load i8*, i8** %t147
-  %t149 = icmp eq i32 %t142, 7
-  %t150 = select i1 %t149, i8* %t148, i8* null
-  %t151 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t141, i8* %t150)
-  %t152 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t151, 0
-  %t153 = insertvalue %StructTypeNameResult %t152, i1 1, 1
-  ret %StructTypeNameResult %t153
+  %t141 = load %StructTypeNameResult, %StructTypeNameResult* %l0
+  %t142 = extractvalue %StructTypeNameResult %t141, 0
+  %t143 = extractvalue %Expression %expression, 0
+  %t144 = alloca %Expression
+  store %Expression %expression, %Expression* %t144
+  %t145 = getelementptr inbounds %Expression, %Expression* %t144, i32 0, i32 1
+  %t146 = bitcast [16 x i8]* %t145 to i8*
+  %t147 = getelementptr inbounds i8, i8* %t146, i64 8
+  %t148 = bitcast i8* %t147 to i8**
+  %t149 = load i8*, i8** %t148
+  %t150 = icmp eq i32 %t143, 7
+  %t151 = select i1 %t150, i8* %t149, i8* null
+  %t152 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t142, i8* %t151)
+  %t153 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t152, 0
+  %t154 = insertvalue %StructTypeNameResult %t153, i1 1, 1
+  ret %StructTypeNameResult %t154
 merge3:
-  %t154 = alloca [0 x i8*]
-  %t155 = getelementptr [0 x i8*], [0 x i8*]* %t154, i32 0, i32 0
-  %t156 = alloca { i8**, i64 }
-  %t157 = getelementptr { i8**, i64 }, { i8**, i64 }* %t156, i32 0, i32 0
-  store i8** %t155, i8*** %t157
-  %t158 = getelementptr { i8**, i64 }, { i8**, i64 }* %t156, i32 0, i32 1
-  store i64 0, i64* %t158
-  %t159 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t156, 0
-  %t160 = insertvalue %StructTypeNameResult %t159, i1 0, 1
-  ret %StructTypeNameResult %t160
+  %t155 = alloca [0 x i8*]
+  %t156 = getelementptr [0 x i8*], [0 x i8*]* %t155, i32 0, i32 0
+  %t157 = alloca { i8**, i64 }
+  %t158 = getelementptr { i8**, i64 }, { i8**, i64 }* %t157, i32 0, i32 0
+  store i8** %t156, i8*** %t158
+  %t159 = getelementptr { i8**, i64 }, { i8**, i64 }* %t157, i32 0, i32 1
+  store i64 0, i64* %t159
+  %t160 = insertvalue %StructTypeNameResult undef, { i8**, i64 }* %t157, 0
+  %t161 = insertvalue %StructTypeNameResult %t160, i1 0, 1
+  ret %StructTypeNameResult %t161
 }
 
 define double @binary_precedence(i8* %op) {

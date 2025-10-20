@@ -175,7 +175,7 @@ declare noalias i8* @malloc(i64)
 @.str.60 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.77 = private unnamed_addr constant [11 x i8] c"[#element:\00"
 @.str.80 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.529 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.532 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.361 = private unnamed_addr constant [23 x i8] c"module.layout-manifest\00"
 @.str.363 = private unnamed_addr constant [24 x i8] c"sailfin-layout-manifest\00"
 
@@ -11274,1122 +11274,1131 @@ then10:
   %t354 = getelementptr inbounds %Expression, %Expression* %t353, i32 0, i32 1
   %t355 = bitcast [16 x i8]* %t354 to i8*
   %t356 = getelementptr inbounds i8, i8* %t355, i64 8
-  %t357 = bitcast i8* %t356 to %Expression*
-  %t358 = load %Expression, %Expression* %t357
+  %t357 = bitcast i8* %t356 to %Expression**
+  %t358 = load %Expression*, %Expression** %t357
   %t359 = icmp eq i32 %t352, 5
-  %t360 = select i1 %t359, %Expression %t358, %Expression zeroinitializer
-  %t361 = call i8* @format_expression(%Expression %t360)
-  %t362 = add i8* %t351, %t361
-  ret i8* %t362
+  %t360 = select i1 %t359, %Expression* %t358, %Expression* null
+  %t361 = load %Expression, %Expression* %t360
+  %t362 = call i8* @format_expression(%Expression %t361)
+  %t363 = add i8* %t351, %t362
+  ret i8* %t363
 merge11:
-  %t363 = extractvalue %Expression %expression, 0
-  %t364 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t365 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t366 = icmp eq i32 %t363, 0
-  %t367 = select i1 %t366, i8* %t365, i8* %t364
-  %t368 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t369 = icmp eq i32 %t363, 1
-  %t370 = select i1 %t369, i8* %t368, i8* %t367
-  %t371 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t372 = icmp eq i32 %t363, 2
-  %t373 = select i1 %t372, i8* %t371, i8* %t370
-  %t374 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t375 = icmp eq i32 %t363, 3
-  %t376 = select i1 %t375, i8* %t374, i8* %t373
-  %t377 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t378 = icmp eq i32 %t363, 4
-  %t379 = select i1 %t378, i8* %t377, i8* %t376
-  %t380 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t381 = icmp eq i32 %t363, 5
-  %t382 = select i1 %t381, i8* %t380, i8* %t379
-  %t383 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t384 = icmp eq i32 %t363, 6
-  %t385 = select i1 %t384, i8* %t383, i8* %t382
-  %t386 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t387 = icmp eq i32 %t363, 7
-  %t388 = select i1 %t387, i8* %t386, i8* %t385
-  %t389 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t390 = icmp eq i32 %t363, 8
-  %t391 = select i1 %t390, i8* %t389, i8* %t388
-  %t392 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t393 = icmp eq i32 %t363, 9
-  %t394 = select i1 %t393, i8* %t392, i8* %t391
-  %t395 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t396 = icmp eq i32 %t363, 10
-  %t397 = select i1 %t396, i8* %t395, i8* %t394
-  %t398 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t399 = icmp eq i32 %t363, 11
-  %t400 = select i1 %t399, i8* %t398, i8* %t397
-  %t401 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t402 = icmp eq i32 %t363, 12
-  %t403 = select i1 %t402, i8* %t401, i8* %t400
-  %t404 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t405 = icmp eq i32 %t363, 13
-  %t406 = select i1 %t405, i8* %t404, i8* %t403
-  %t407 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t408 = icmp eq i32 %t363, 14
-  %t409 = select i1 %t408, i8* %t407, i8* %t406
-  %t410 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t411 = icmp eq i32 %t363, 15
-  %t412 = select i1 %t411, i8* %t410, i8* %t409
-  %s413 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.413, i32 0, i32 0
-  %t414 = icmp eq i8* %t412, %s413
-  br i1 %t414, label %then12, label %merge13
+  %t364 = extractvalue %Expression %expression, 0
+  %t365 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t366 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t367 = icmp eq i32 %t364, 0
+  %t368 = select i1 %t367, i8* %t366, i8* %t365
+  %t369 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t370 = icmp eq i32 %t364, 1
+  %t371 = select i1 %t370, i8* %t369, i8* %t368
+  %t372 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t373 = icmp eq i32 %t364, 2
+  %t374 = select i1 %t373, i8* %t372, i8* %t371
+  %t375 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t376 = icmp eq i32 %t364, 3
+  %t377 = select i1 %t376, i8* %t375, i8* %t374
+  %t378 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t379 = icmp eq i32 %t364, 4
+  %t380 = select i1 %t379, i8* %t378, i8* %t377
+  %t381 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t382 = icmp eq i32 %t364, 5
+  %t383 = select i1 %t382, i8* %t381, i8* %t380
+  %t384 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t385 = icmp eq i32 %t364, 6
+  %t386 = select i1 %t385, i8* %t384, i8* %t383
+  %t387 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t388 = icmp eq i32 %t364, 7
+  %t389 = select i1 %t388, i8* %t387, i8* %t386
+  %t390 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t391 = icmp eq i32 %t364, 8
+  %t392 = select i1 %t391, i8* %t390, i8* %t389
+  %t393 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t394 = icmp eq i32 %t364, 9
+  %t395 = select i1 %t394, i8* %t393, i8* %t392
+  %t396 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t397 = icmp eq i32 %t364, 10
+  %t398 = select i1 %t397, i8* %t396, i8* %t395
+  %t399 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t400 = icmp eq i32 %t364, 11
+  %t401 = select i1 %t400, i8* %t399, i8* %t398
+  %t402 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t403 = icmp eq i32 %t364, 12
+  %t404 = select i1 %t403, i8* %t402, i8* %t401
+  %t405 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t406 = icmp eq i32 %t364, 13
+  %t407 = select i1 %t406, i8* %t405, i8* %t404
+  %t408 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t409 = icmp eq i32 %t364, 14
+  %t410 = select i1 %t409, i8* %t408, i8* %t407
+  %t411 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t412 = icmp eq i32 %t364, 15
+  %t413 = select i1 %t412, i8* %t411, i8* %t410
+  %s414 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.414, i32 0, i32 0
+  %t415 = icmp eq i8* %t413, %s414
+  br i1 %t415, label %then12, label %merge13
 then12:
-  %t415 = extractvalue %Expression %expression, 0
-  %t416 = alloca %Expression
-  store %Expression %expression, %Expression* %t416
-  %t417 = getelementptr inbounds %Expression, %Expression* %t416, i32 0, i32 1
-  %t418 = bitcast [24 x i8]* %t417 to i8*
-  %t419 = getelementptr inbounds i8, i8* %t418, i64 8
-  %t420 = bitcast i8* %t419 to %Expression*
-  %t421 = load %Expression, %Expression* %t420
-  %t422 = icmp eq i32 %t415, 6
-  %t423 = select i1 %t422, %Expression %t421, %Expression zeroinitializer
-  %t424 = call i8* @format_expression(%Expression %t423)
-  store i8* %t424, i8** %l0
-  %t425 = extractvalue %Expression %expression, 0
-  %t426 = alloca %Expression
-  store %Expression %expression, %Expression* %t426
-  %t427 = getelementptr inbounds %Expression, %Expression* %t426, i32 0, i32 1
-  %t428 = bitcast [24 x i8]* %t427 to i8*
-  %t429 = getelementptr inbounds i8, i8* %t428, i64 16
-  %t430 = bitcast i8* %t429 to %Expression*
-  %t431 = load %Expression, %Expression* %t430
-  %t432 = icmp eq i32 %t425, 6
-  %t433 = select i1 %t432, %Expression %t431, %Expression zeroinitializer
-  %t434 = call i8* @format_expression(%Expression %t433)
-  store i8* %t434, i8** %l1
-  %t435 = load i8*, i8** %l0
-  %t436 = load i8, i8* %t435
-  %t437 = add i8 %t436, 32
-  %t438 = extractvalue %Expression %expression, 0
-  %t439 = alloca %Expression
-  store %Expression %expression, %Expression* %t439
-  %t440 = getelementptr inbounds %Expression, %Expression* %t439, i32 0, i32 1
-  %t441 = bitcast [16 x i8]* %t440 to i8*
-  %t442 = bitcast i8* %t441 to i8**
-  %t443 = load i8*, i8** %t442
-  %t444 = icmp eq i32 %t438, 5
-  %t445 = select i1 %t444, i8* %t443, i8* null
-  %t446 = getelementptr inbounds %Expression, %Expression* %t439, i32 0, i32 1
-  %t447 = bitcast [24 x i8]* %t446 to i8*
-  %t448 = bitcast i8* %t447 to i8**
-  %t449 = load i8*, i8** %t448
-  %t450 = icmp eq i32 %t438, 6
-  %t451 = select i1 %t450, i8* %t449, i8* %t445
-  %t452 = load i8, i8* %t451
-  %t453 = add i8 %t437, %t452
-  %t454 = add i8 %t453, 32
-  %t455 = load i8*, i8** %l1
-  %t456 = load i8, i8* %t455
-  %t457 = add i8 %t454, %t456
-  %t458 = alloca [2 x i8], align 1
-  %t459 = getelementptr [2 x i8], [2 x i8]* %t458, i32 0, i32 0
-  store i8 %t457, i8* %t459
-  %t460 = getelementptr [2 x i8], [2 x i8]* %t458, i32 0, i32 1
-  store i8 0, i8* %t460
-  %t461 = getelementptr [2 x i8], [2 x i8]* %t458, i32 0, i32 0
-  ret i8* %t461
+  %t416 = extractvalue %Expression %expression, 0
+  %t417 = alloca %Expression
+  store %Expression %expression, %Expression* %t417
+  %t418 = getelementptr inbounds %Expression, %Expression* %t417, i32 0, i32 1
+  %t419 = bitcast [24 x i8]* %t418 to i8*
+  %t420 = getelementptr inbounds i8, i8* %t419, i64 8
+  %t421 = bitcast i8* %t420 to %Expression**
+  %t422 = load %Expression*, %Expression** %t421
+  %t423 = icmp eq i32 %t416, 6
+  %t424 = select i1 %t423, %Expression* %t422, %Expression* null
+  %t425 = load %Expression, %Expression* %t424
+  %t426 = call i8* @format_expression(%Expression %t425)
+  store i8* %t426, i8** %l0
+  %t427 = extractvalue %Expression %expression, 0
+  %t428 = alloca %Expression
+  store %Expression %expression, %Expression* %t428
+  %t429 = getelementptr inbounds %Expression, %Expression* %t428, i32 0, i32 1
+  %t430 = bitcast [24 x i8]* %t429 to i8*
+  %t431 = getelementptr inbounds i8, i8* %t430, i64 16
+  %t432 = bitcast i8* %t431 to %Expression**
+  %t433 = load %Expression*, %Expression** %t432
+  %t434 = icmp eq i32 %t427, 6
+  %t435 = select i1 %t434, %Expression* %t433, %Expression* null
+  %t436 = load %Expression, %Expression* %t435
+  %t437 = call i8* @format_expression(%Expression %t436)
+  store i8* %t437, i8** %l1
+  %t438 = load i8*, i8** %l0
+  %t439 = load i8, i8* %t438
+  %t440 = add i8 %t439, 32
+  %t441 = extractvalue %Expression %expression, 0
+  %t442 = alloca %Expression
+  store %Expression %expression, %Expression* %t442
+  %t443 = getelementptr inbounds %Expression, %Expression* %t442, i32 0, i32 1
+  %t444 = bitcast [16 x i8]* %t443 to i8*
+  %t445 = bitcast i8* %t444 to i8**
+  %t446 = load i8*, i8** %t445
+  %t447 = icmp eq i32 %t441, 5
+  %t448 = select i1 %t447, i8* %t446, i8* null
+  %t449 = getelementptr inbounds %Expression, %Expression* %t442, i32 0, i32 1
+  %t450 = bitcast [24 x i8]* %t449 to i8*
+  %t451 = bitcast i8* %t450 to i8**
+  %t452 = load i8*, i8** %t451
+  %t453 = icmp eq i32 %t441, 6
+  %t454 = select i1 %t453, i8* %t452, i8* %t448
+  %t455 = load i8, i8* %t454
+  %t456 = add i8 %t440, %t455
+  %t457 = add i8 %t456, 32
+  %t458 = load i8*, i8** %l1
+  %t459 = load i8, i8* %t458
+  %t460 = add i8 %t457, %t459
+  %t461 = alloca [2 x i8], align 1
+  %t462 = getelementptr [2 x i8], [2 x i8]* %t461, i32 0, i32 0
+  store i8 %t460, i8* %t462
+  %t463 = getelementptr [2 x i8], [2 x i8]* %t461, i32 0, i32 1
+  store i8 0, i8* %t463
+  %t464 = getelementptr [2 x i8], [2 x i8]* %t461, i32 0, i32 0
+  ret i8* %t464
 merge13:
-  %t462 = extractvalue %Expression %expression, 0
-  %t463 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t464 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t465 = icmp eq i32 %t462, 0
-  %t466 = select i1 %t465, i8* %t464, i8* %t463
-  %t467 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t468 = icmp eq i32 %t462, 1
+  %t465 = extractvalue %Expression %expression, 0
+  %t466 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t467 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t468 = icmp eq i32 %t465, 0
   %t469 = select i1 %t468, i8* %t467, i8* %t466
-  %t470 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t471 = icmp eq i32 %t462, 2
+  %t470 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t471 = icmp eq i32 %t465, 1
   %t472 = select i1 %t471, i8* %t470, i8* %t469
-  %t473 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t474 = icmp eq i32 %t462, 3
+  %t473 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t474 = icmp eq i32 %t465, 2
   %t475 = select i1 %t474, i8* %t473, i8* %t472
-  %t476 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t477 = icmp eq i32 %t462, 4
+  %t476 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t477 = icmp eq i32 %t465, 3
   %t478 = select i1 %t477, i8* %t476, i8* %t475
-  %t479 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t480 = icmp eq i32 %t462, 5
+  %t479 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t480 = icmp eq i32 %t465, 4
   %t481 = select i1 %t480, i8* %t479, i8* %t478
-  %t482 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t483 = icmp eq i32 %t462, 6
+  %t482 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t483 = icmp eq i32 %t465, 5
   %t484 = select i1 %t483, i8* %t482, i8* %t481
-  %t485 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t486 = icmp eq i32 %t462, 7
+  %t485 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t486 = icmp eq i32 %t465, 6
   %t487 = select i1 %t486, i8* %t485, i8* %t484
-  %t488 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t489 = icmp eq i32 %t462, 8
+  %t488 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t489 = icmp eq i32 %t465, 7
   %t490 = select i1 %t489, i8* %t488, i8* %t487
-  %t491 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t492 = icmp eq i32 %t462, 9
+  %t491 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t492 = icmp eq i32 %t465, 8
   %t493 = select i1 %t492, i8* %t491, i8* %t490
-  %t494 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t495 = icmp eq i32 %t462, 10
+  %t494 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t495 = icmp eq i32 %t465, 9
   %t496 = select i1 %t495, i8* %t494, i8* %t493
-  %t497 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t498 = icmp eq i32 %t462, 11
+  %t497 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t498 = icmp eq i32 %t465, 10
   %t499 = select i1 %t498, i8* %t497, i8* %t496
-  %t500 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t501 = icmp eq i32 %t462, 12
+  %t500 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t501 = icmp eq i32 %t465, 11
   %t502 = select i1 %t501, i8* %t500, i8* %t499
-  %t503 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t504 = icmp eq i32 %t462, 13
+  %t503 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t504 = icmp eq i32 %t465, 12
   %t505 = select i1 %t504, i8* %t503, i8* %t502
-  %t506 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t507 = icmp eq i32 %t462, 14
+  %t506 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t507 = icmp eq i32 %t465, 13
   %t508 = select i1 %t507, i8* %t506, i8* %t505
-  %t509 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t510 = icmp eq i32 %t462, 15
+  %t509 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t510 = icmp eq i32 %t465, 14
   %t511 = select i1 %t510, i8* %t509, i8* %t508
-  %s512 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.512, i32 0, i32 0
-  %t513 = icmp eq i8* %t511, %s512
-  br i1 %t513, label %then14, label %merge15
+  %t512 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t513 = icmp eq i32 %t465, 15
+  %t514 = select i1 %t513, i8* %t512, i8* %t511
+  %s515 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.515, i32 0, i32 0
+  %t516 = icmp eq i8* %t514, %s515
+  br i1 %t516, label %then14, label %merge15
 then14:
-  %t514 = extractvalue %Expression %expression, 0
-  %t515 = alloca %Expression
-  store %Expression %expression, %Expression* %t515
-  %t516 = getelementptr inbounds %Expression, %Expression* %t515, i32 0, i32 1
-  %t517 = bitcast [16 x i8]* %t516 to i8*
-  %t518 = bitcast i8* %t517 to %Expression*
-  %t519 = load %Expression, %Expression* %t518
-  %t520 = icmp eq i32 %t514, 7
-  %t521 = select i1 %t520, %Expression %t519, %Expression zeroinitializer
-  %t522 = call i8* @format_expression(%Expression %t521)
-  %t523 = load i8, i8* %t522
-  %t524 = add i8 %t523, 46
-  %t525 = extractvalue %Expression %expression, 0
-  %t526 = alloca %Expression
-  store %Expression %expression, %Expression* %t526
-  %t527 = getelementptr inbounds %Expression, %Expression* %t526, i32 0, i32 1
-  %t528 = bitcast [16 x i8]* %t527 to i8*
-  %t529 = getelementptr inbounds i8, i8* %t528, i64 8
-  %t530 = bitcast i8* %t529 to i8**
-  %t531 = load i8*, i8** %t530
-  %t532 = icmp eq i32 %t525, 7
-  %t533 = select i1 %t532, i8* %t531, i8* null
-  %t534 = load i8, i8* %t533
-  %t535 = add i8 %t524, %t534
-  %t536 = alloca [2 x i8], align 1
-  %t537 = getelementptr [2 x i8], [2 x i8]* %t536, i32 0, i32 0
-  store i8 %t535, i8* %t537
-  %t538 = getelementptr [2 x i8], [2 x i8]* %t536, i32 0, i32 1
-  store i8 0, i8* %t538
-  %t539 = getelementptr [2 x i8], [2 x i8]* %t536, i32 0, i32 0
-  ret i8* %t539
+  %t517 = extractvalue %Expression %expression, 0
+  %t518 = alloca %Expression
+  store %Expression %expression, %Expression* %t518
+  %t519 = getelementptr inbounds %Expression, %Expression* %t518, i32 0, i32 1
+  %t520 = bitcast [16 x i8]* %t519 to i8*
+  %t521 = bitcast i8* %t520 to %Expression**
+  %t522 = load %Expression*, %Expression** %t521
+  %t523 = icmp eq i32 %t517, 7
+  %t524 = select i1 %t523, %Expression* %t522, %Expression* null
+  %t525 = load %Expression, %Expression* %t524
+  %t526 = call i8* @format_expression(%Expression %t525)
+  %t527 = load i8, i8* %t526
+  %t528 = add i8 %t527, 46
+  %t529 = extractvalue %Expression %expression, 0
+  %t530 = alloca %Expression
+  store %Expression %expression, %Expression* %t530
+  %t531 = getelementptr inbounds %Expression, %Expression* %t530, i32 0, i32 1
+  %t532 = bitcast [16 x i8]* %t531 to i8*
+  %t533 = getelementptr inbounds i8, i8* %t532, i64 8
+  %t534 = bitcast i8* %t533 to i8**
+  %t535 = load i8*, i8** %t534
+  %t536 = icmp eq i32 %t529, 7
+  %t537 = select i1 %t536, i8* %t535, i8* null
+  %t538 = load i8, i8* %t537
+  %t539 = add i8 %t528, %t538
+  %t540 = alloca [2 x i8], align 1
+  %t541 = getelementptr [2 x i8], [2 x i8]* %t540, i32 0, i32 0
+  store i8 %t539, i8* %t541
+  %t542 = getelementptr [2 x i8], [2 x i8]* %t540, i32 0, i32 1
+  store i8 0, i8* %t542
+  %t543 = getelementptr [2 x i8], [2 x i8]* %t540, i32 0, i32 0
+  ret i8* %t543
 merge15:
-  %t540 = extractvalue %Expression %expression, 0
-  %t541 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t542 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t543 = icmp eq i32 %t540, 0
-  %t544 = select i1 %t543, i8* %t542, i8* %t541
-  %t545 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t546 = icmp eq i32 %t540, 1
-  %t547 = select i1 %t546, i8* %t545, i8* %t544
-  %t548 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t549 = icmp eq i32 %t540, 2
-  %t550 = select i1 %t549, i8* %t548, i8* %t547
-  %t551 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t552 = icmp eq i32 %t540, 3
-  %t553 = select i1 %t552, i8* %t551, i8* %t550
-  %t554 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t555 = icmp eq i32 %t540, 4
-  %t556 = select i1 %t555, i8* %t554, i8* %t553
-  %t557 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t558 = icmp eq i32 %t540, 5
-  %t559 = select i1 %t558, i8* %t557, i8* %t556
-  %t560 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t561 = icmp eq i32 %t540, 6
-  %t562 = select i1 %t561, i8* %t560, i8* %t559
-  %t563 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t564 = icmp eq i32 %t540, 7
-  %t565 = select i1 %t564, i8* %t563, i8* %t562
-  %t566 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t567 = icmp eq i32 %t540, 8
-  %t568 = select i1 %t567, i8* %t566, i8* %t565
-  %t569 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t570 = icmp eq i32 %t540, 9
-  %t571 = select i1 %t570, i8* %t569, i8* %t568
-  %t572 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t573 = icmp eq i32 %t540, 10
-  %t574 = select i1 %t573, i8* %t572, i8* %t571
-  %t575 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t576 = icmp eq i32 %t540, 11
-  %t577 = select i1 %t576, i8* %t575, i8* %t574
-  %t578 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t579 = icmp eq i32 %t540, 12
-  %t580 = select i1 %t579, i8* %t578, i8* %t577
-  %t581 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t582 = icmp eq i32 %t540, 13
-  %t583 = select i1 %t582, i8* %t581, i8* %t580
-  %t584 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t585 = icmp eq i32 %t540, 14
-  %t586 = select i1 %t585, i8* %t584, i8* %t583
-  %t587 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t588 = icmp eq i32 %t540, 15
-  %t589 = select i1 %t588, i8* %t587, i8* %t586
-  %s590 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.590, i32 0, i32 0
-  %t591 = icmp eq i8* %t589, %s590
-  br i1 %t591, label %then16, label %merge17
+  %t544 = extractvalue %Expression %expression, 0
+  %t545 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t546 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t547 = icmp eq i32 %t544, 0
+  %t548 = select i1 %t547, i8* %t546, i8* %t545
+  %t549 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t550 = icmp eq i32 %t544, 1
+  %t551 = select i1 %t550, i8* %t549, i8* %t548
+  %t552 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t553 = icmp eq i32 %t544, 2
+  %t554 = select i1 %t553, i8* %t552, i8* %t551
+  %t555 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t556 = icmp eq i32 %t544, 3
+  %t557 = select i1 %t556, i8* %t555, i8* %t554
+  %t558 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t559 = icmp eq i32 %t544, 4
+  %t560 = select i1 %t559, i8* %t558, i8* %t557
+  %t561 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t562 = icmp eq i32 %t544, 5
+  %t563 = select i1 %t562, i8* %t561, i8* %t560
+  %t564 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t565 = icmp eq i32 %t544, 6
+  %t566 = select i1 %t565, i8* %t564, i8* %t563
+  %t567 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t568 = icmp eq i32 %t544, 7
+  %t569 = select i1 %t568, i8* %t567, i8* %t566
+  %t570 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t571 = icmp eq i32 %t544, 8
+  %t572 = select i1 %t571, i8* %t570, i8* %t569
+  %t573 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t574 = icmp eq i32 %t544, 9
+  %t575 = select i1 %t574, i8* %t573, i8* %t572
+  %t576 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t577 = icmp eq i32 %t544, 10
+  %t578 = select i1 %t577, i8* %t576, i8* %t575
+  %t579 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t580 = icmp eq i32 %t544, 11
+  %t581 = select i1 %t580, i8* %t579, i8* %t578
+  %t582 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t583 = icmp eq i32 %t544, 12
+  %t584 = select i1 %t583, i8* %t582, i8* %t581
+  %t585 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t586 = icmp eq i32 %t544, 13
+  %t587 = select i1 %t586, i8* %t585, i8* %t584
+  %t588 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t589 = icmp eq i32 %t544, 14
+  %t590 = select i1 %t589, i8* %t588, i8* %t587
+  %t591 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t592 = icmp eq i32 %t544, 15
+  %t593 = select i1 %t592, i8* %t591, i8* %t590
+  %s594 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.594, i32 0, i32 0
+  %t595 = icmp eq i8* %t593, %s594
+  br i1 %t595, label %then16, label %merge17
 then16:
-  %t592 = alloca [0 x i8*]
-  %t593 = getelementptr [0 x i8*], [0 x i8*]* %t592, i32 0, i32 0
-  %t594 = alloca { i8**, i64 }
-  %t595 = getelementptr { i8**, i64 }, { i8**, i64 }* %t594, i32 0, i32 0
-  store i8** %t593, i8*** %t595
-  %t596 = getelementptr { i8**, i64 }, { i8**, i64 }* %t594, i32 0, i32 1
-  store i64 0, i64* %t596
-  store { i8**, i64 }* %t594, { i8**, i64 }** %l2
-  %t597 = sitofp i64 0 to double
-  store double %t597, double* %l3
-  %t598 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t599 = load double, double* %l3
+  %t596 = alloca [0 x i8*]
+  %t597 = getelementptr [0 x i8*], [0 x i8*]* %t596, i32 0, i32 0
+  %t598 = alloca { i8**, i64 }
+  %t599 = getelementptr { i8**, i64 }, { i8**, i64 }* %t598, i32 0, i32 0
+  store i8** %t597, i8*** %t599
+  %t600 = getelementptr { i8**, i64 }, { i8**, i64 }* %t598, i32 0, i32 1
+  store i64 0, i64* %t600
+  store { i8**, i64 }* %t598, { i8**, i64 }** %l2
+  %t601 = sitofp i64 0 to double
+  store double %t601, double* %l3
+  %t602 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t603 = load double, double* %l3
   br label %loop.header18
 loop.header18:
-  %t642 = phi { i8**, i64 }* [ %t598, %then16 ], [ %t640, %loop.latch20 ]
-  %t643 = phi double [ %t599, %then16 ], [ %t641, %loop.latch20 ]
-  store { i8**, i64 }* %t642, { i8**, i64 }** %l2
-  store double %t643, double* %l3
+  %t646 = phi { i8**, i64 }* [ %t602, %then16 ], [ %t644, %loop.latch20 ]
+  %t647 = phi double [ %t603, %then16 ], [ %t645, %loop.latch20 ]
+  store { i8**, i64 }* %t646, { i8**, i64 }** %l2
+  store double %t647, double* %l3
   br label %loop.body19
 loop.body19:
-  %t600 = load double, double* %l3
-  %t601 = extractvalue %Expression %expression, 0
-  %t602 = alloca %Expression
-  store %Expression %expression, %Expression* %t602
-  %t603 = getelementptr inbounds %Expression, %Expression* %t602, i32 0, i32 1
-  %t604 = bitcast [16 x i8]* %t603 to i8*
-  %t605 = getelementptr inbounds i8, i8* %t604, i64 8
-  %t606 = bitcast i8* %t605 to { %Expression**, i64 }**
-  %t607 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t606
-  %t608 = icmp eq i32 %t601, 8
-  %t609 = select i1 %t608, { %Expression**, i64 }* %t607, { %Expression**, i64 }* null
-  %t610 = load { %Expression**, i64 }, { %Expression**, i64 }* %t609
-  %t611 = extractvalue { %Expression**, i64 } %t610, 1
-  %t612 = sitofp i64 %t611 to double
-  %t613 = fcmp oge double %t600, %t612
-  %t614 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t615 = load double, double* %l3
-  br i1 %t613, label %then22, label %merge23
+  %t604 = load double, double* %l3
+  %t605 = extractvalue %Expression %expression, 0
+  %t606 = alloca %Expression
+  store %Expression %expression, %Expression* %t606
+  %t607 = getelementptr inbounds %Expression, %Expression* %t606, i32 0, i32 1
+  %t608 = bitcast [16 x i8]* %t607 to i8*
+  %t609 = getelementptr inbounds i8, i8* %t608, i64 8
+  %t610 = bitcast i8* %t609 to { %Expression**, i64 }**
+  %t611 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t610
+  %t612 = icmp eq i32 %t605, 8
+  %t613 = select i1 %t612, { %Expression**, i64 }* %t611, { %Expression**, i64 }* null
+  %t614 = load { %Expression**, i64 }, { %Expression**, i64 }* %t613
+  %t615 = extractvalue { %Expression**, i64 } %t614, 1
+  %t616 = sitofp i64 %t615 to double
+  %t617 = fcmp oge double %t604, %t616
+  %t618 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t619 = load double, double* %l3
+  br i1 %t617, label %then22, label %merge23
 then22:
   br label %afterloop21
 merge23:
-  %t616 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t617 = extractvalue %Expression %expression, 0
-  %t618 = alloca %Expression
-  store %Expression %expression, %Expression* %t618
-  %t619 = getelementptr inbounds %Expression, %Expression* %t618, i32 0, i32 1
-  %t620 = bitcast [16 x i8]* %t619 to i8*
-  %t621 = getelementptr inbounds i8, i8* %t620, i64 8
-  %t622 = bitcast i8* %t621 to { %Expression**, i64 }**
-  %t623 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t622
-  %t624 = icmp eq i32 %t617, 8
-  %t625 = select i1 %t624, { %Expression**, i64 }* %t623, { %Expression**, i64 }* null
-  %t626 = load double, double* %l3
-  %t627 = fptosi double %t626 to i64
-  %t628 = load { %Expression**, i64 }, { %Expression**, i64 }* %t625
-  %t629 = extractvalue { %Expression**, i64 } %t628, 0
-  %t630 = extractvalue { %Expression**, i64 } %t628, 1
-  %t631 = icmp uge i64 %t627, %t630
-  ; bounds check: %t631 (if true, out of bounds)
-  %t632 = getelementptr %Expression*, %Expression** %t629, i64 %t627
-  %t633 = load %Expression*, %Expression** %t632
-  %t634 = load %Expression, %Expression* %t633
-  %t635 = call i8* @format_expression(%Expression %t634)
-  %t636 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t616, i8* %t635)
-  store { i8**, i64 }* %t636, { i8**, i64 }** %l2
-  %t637 = load double, double* %l3
-  %t638 = sitofp i64 1 to double
-  %t639 = fadd double %t637, %t638
-  store double %t639, double* %l3
+  %t620 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t621 = extractvalue %Expression %expression, 0
+  %t622 = alloca %Expression
+  store %Expression %expression, %Expression* %t622
+  %t623 = getelementptr inbounds %Expression, %Expression* %t622, i32 0, i32 1
+  %t624 = bitcast [16 x i8]* %t623 to i8*
+  %t625 = getelementptr inbounds i8, i8* %t624, i64 8
+  %t626 = bitcast i8* %t625 to { %Expression**, i64 }**
+  %t627 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t626
+  %t628 = icmp eq i32 %t621, 8
+  %t629 = select i1 %t628, { %Expression**, i64 }* %t627, { %Expression**, i64 }* null
+  %t630 = load double, double* %l3
+  %t631 = fptosi double %t630 to i64
+  %t632 = load { %Expression**, i64 }, { %Expression**, i64 }* %t629
+  %t633 = extractvalue { %Expression**, i64 } %t632, 0
+  %t634 = extractvalue { %Expression**, i64 } %t632, 1
+  %t635 = icmp uge i64 %t631, %t634
+  ; bounds check: %t635 (if true, out of bounds)
+  %t636 = getelementptr %Expression*, %Expression** %t633, i64 %t631
+  %t637 = load %Expression*, %Expression** %t636
+  %t638 = load %Expression, %Expression* %t637
+  %t639 = call i8* @format_expression(%Expression %t638)
+  %t640 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t620, i8* %t639)
+  store { i8**, i64 }* %t640, { i8**, i64 }** %l2
+  %t641 = load double, double* %l3
+  %t642 = sitofp i64 1 to double
+  %t643 = fadd double %t641, %t642
+  store double %t643, double* %l3
   br label %loop.latch20
 loop.latch20:
-  %t640 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t641 = load double, double* %l3
+  %t644 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t645 = load double, double* %l3
   br label %loop.header18
 afterloop21:
-  %t644 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %s645 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.645, i32 0, i32 0
-  %t646 = call i8* @join_with_separator({ i8**, i64 }* %t644, i8* %s645)
-  store i8* %t646, i8** %l4
-  %t647 = extractvalue %Expression %expression, 0
-  %t648 = alloca %Expression
-  store %Expression %expression, %Expression* %t648
-  %t649 = getelementptr inbounds %Expression, %Expression* %t648, i32 0, i32 1
-  %t650 = bitcast [16 x i8]* %t649 to i8*
-  %t651 = bitcast i8* %t650 to %Expression*
-  %t652 = load %Expression, %Expression* %t651
-  %t653 = icmp eq i32 %t647, 8
-  %t654 = select i1 %t653, %Expression %t652, %Expression zeroinitializer
-  %t655 = call i8* @format_expression(%Expression %t654)
-  %t656 = load i8, i8* %t655
-  %t657 = add i8 %t656, 40
-  %t658 = load i8*, i8** %l4
-  %t659 = load i8, i8* %t658
-  %t660 = add i8 %t657, %t659
-  %t661 = add i8 %t660, 41
-  %t662 = alloca [2 x i8], align 1
-  %t663 = getelementptr [2 x i8], [2 x i8]* %t662, i32 0, i32 0
-  store i8 %t661, i8* %t663
-  %t664 = getelementptr [2 x i8], [2 x i8]* %t662, i32 0, i32 1
-  store i8 0, i8* %t664
-  %t665 = getelementptr [2 x i8], [2 x i8]* %t662, i32 0, i32 0
-  ret i8* %t665
+  %t648 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %s649 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.649, i32 0, i32 0
+  %t650 = call i8* @join_with_separator({ i8**, i64 }* %t648, i8* %s649)
+  store i8* %t650, i8** %l4
+  %t651 = extractvalue %Expression %expression, 0
+  %t652 = alloca %Expression
+  store %Expression %expression, %Expression* %t652
+  %t653 = getelementptr inbounds %Expression, %Expression* %t652, i32 0, i32 1
+  %t654 = bitcast [16 x i8]* %t653 to i8*
+  %t655 = bitcast i8* %t654 to %Expression**
+  %t656 = load %Expression*, %Expression** %t655
+  %t657 = icmp eq i32 %t651, 8
+  %t658 = select i1 %t657, %Expression* %t656, %Expression* null
+  %t659 = load %Expression, %Expression* %t658
+  %t660 = call i8* @format_expression(%Expression %t659)
+  %t661 = load i8, i8* %t660
+  %t662 = add i8 %t661, 40
+  %t663 = load i8*, i8** %l4
+  %t664 = load i8, i8* %t663
+  %t665 = add i8 %t662, %t664
+  %t666 = add i8 %t665, 41
+  %t667 = alloca [2 x i8], align 1
+  %t668 = getelementptr [2 x i8], [2 x i8]* %t667, i32 0, i32 0
+  store i8 %t666, i8* %t668
+  %t669 = getelementptr [2 x i8], [2 x i8]* %t667, i32 0, i32 1
+  store i8 0, i8* %t669
+  %t670 = getelementptr [2 x i8], [2 x i8]* %t667, i32 0, i32 0
+  ret i8* %t670
 merge17:
-  %t666 = extractvalue %Expression %expression, 0
-  %t667 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t668 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t669 = icmp eq i32 %t666, 0
-  %t670 = select i1 %t669, i8* %t668, i8* %t667
-  %t671 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t672 = icmp eq i32 %t666, 1
-  %t673 = select i1 %t672, i8* %t671, i8* %t670
-  %t674 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t675 = icmp eq i32 %t666, 2
-  %t676 = select i1 %t675, i8* %t674, i8* %t673
-  %t677 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t678 = icmp eq i32 %t666, 3
-  %t679 = select i1 %t678, i8* %t677, i8* %t676
-  %t680 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t681 = icmp eq i32 %t666, 4
-  %t682 = select i1 %t681, i8* %t680, i8* %t679
-  %t683 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t684 = icmp eq i32 %t666, 5
-  %t685 = select i1 %t684, i8* %t683, i8* %t682
-  %t686 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t687 = icmp eq i32 %t666, 6
-  %t688 = select i1 %t687, i8* %t686, i8* %t685
-  %t689 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t690 = icmp eq i32 %t666, 7
-  %t691 = select i1 %t690, i8* %t689, i8* %t688
-  %t692 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t693 = icmp eq i32 %t666, 8
-  %t694 = select i1 %t693, i8* %t692, i8* %t691
-  %t695 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t696 = icmp eq i32 %t666, 9
-  %t697 = select i1 %t696, i8* %t695, i8* %t694
-  %t698 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t699 = icmp eq i32 %t666, 10
-  %t700 = select i1 %t699, i8* %t698, i8* %t697
-  %t701 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t702 = icmp eq i32 %t666, 11
-  %t703 = select i1 %t702, i8* %t701, i8* %t700
-  %t704 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t705 = icmp eq i32 %t666, 12
-  %t706 = select i1 %t705, i8* %t704, i8* %t703
-  %t707 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t708 = icmp eq i32 %t666, 13
-  %t709 = select i1 %t708, i8* %t707, i8* %t706
-  %t710 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t711 = icmp eq i32 %t666, 14
-  %t712 = select i1 %t711, i8* %t710, i8* %t709
-  %t713 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t714 = icmp eq i32 %t666, 15
-  %t715 = select i1 %t714, i8* %t713, i8* %t712
-  %s716 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.716, i32 0, i32 0
-  %t717 = icmp eq i8* %t715, %s716
-  br i1 %t717, label %then24, label %merge25
+  %t671 = extractvalue %Expression %expression, 0
+  %t672 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t673 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t674 = icmp eq i32 %t671, 0
+  %t675 = select i1 %t674, i8* %t673, i8* %t672
+  %t676 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t677 = icmp eq i32 %t671, 1
+  %t678 = select i1 %t677, i8* %t676, i8* %t675
+  %t679 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t680 = icmp eq i32 %t671, 2
+  %t681 = select i1 %t680, i8* %t679, i8* %t678
+  %t682 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t683 = icmp eq i32 %t671, 3
+  %t684 = select i1 %t683, i8* %t682, i8* %t681
+  %t685 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t686 = icmp eq i32 %t671, 4
+  %t687 = select i1 %t686, i8* %t685, i8* %t684
+  %t688 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t689 = icmp eq i32 %t671, 5
+  %t690 = select i1 %t689, i8* %t688, i8* %t687
+  %t691 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t692 = icmp eq i32 %t671, 6
+  %t693 = select i1 %t692, i8* %t691, i8* %t690
+  %t694 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t695 = icmp eq i32 %t671, 7
+  %t696 = select i1 %t695, i8* %t694, i8* %t693
+  %t697 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t698 = icmp eq i32 %t671, 8
+  %t699 = select i1 %t698, i8* %t697, i8* %t696
+  %t700 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t701 = icmp eq i32 %t671, 9
+  %t702 = select i1 %t701, i8* %t700, i8* %t699
+  %t703 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t704 = icmp eq i32 %t671, 10
+  %t705 = select i1 %t704, i8* %t703, i8* %t702
+  %t706 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t707 = icmp eq i32 %t671, 11
+  %t708 = select i1 %t707, i8* %t706, i8* %t705
+  %t709 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t710 = icmp eq i32 %t671, 12
+  %t711 = select i1 %t710, i8* %t709, i8* %t708
+  %t712 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t713 = icmp eq i32 %t671, 13
+  %t714 = select i1 %t713, i8* %t712, i8* %t711
+  %t715 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t716 = icmp eq i32 %t671, 14
+  %t717 = select i1 %t716, i8* %t715, i8* %t714
+  %t718 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t719 = icmp eq i32 %t671, 15
+  %t720 = select i1 %t719, i8* %t718, i8* %t717
+  %s721 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.721, i32 0, i32 0
+  %t722 = icmp eq i8* %t720, %s721
+  br i1 %t722, label %then24, label %merge25
 then24:
-  %t718 = extractvalue %Expression %expression, 0
-  %t719 = alloca %Expression
-  store %Expression %expression, %Expression* %t719
-  %t720 = getelementptr inbounds %Expression, %Expression* %t719, i32 0, i32 1
-  %t721 = bitcast [16 x i8]* %t720 to i8*
-  %t722 = bitcast i8* %t721 to %Expression*
-  %t723 = load %Expression, %Expression* %t722
-  %t724 = icmp eq i32 %t718, 9
-  %t725 = select i1 %t724, %Expression %t723, %Expression zeroinitializer
-  %t726 = call i8* @format_expression(%Expression %t725)
-  %t727 = load i8, i8* %t726
-  %t728 = add i8 %t727, 91
-  %t729 = extractvalue %Expression %expression, 0
-  %t730 = alloca %Expression
-  store %Expression %expression, %Expression* %t730
-  %t731 = getelementptr inbounds %Expression, %Expression* %t730, i32 0, i32 1
-  %t732 = bitcast [16 x i8]* %t731 to i8*
-  %t733 = getelementptr inbounds i8, i8* %t732, i64 8
-  %t734 = bitcast i8* %t733 to %Expression*
-  %t735 = load %Expression, %Expression* %t734
-  %t736 = icmp eq i32 %t729, 9
-  %t737 = select i1 %t736, %Expression %t735, %Expression zeroinitializer
-  %t738 = call i8* @format_expression(%Expression %t737)
-  %t739 = load i8, i8* %t738
-  %t740 = add i8 %t728, %t739
-  %t741 = add i8 %t740, 93
-  %t742 = alloca [2 x i8], align 1
-  %t743 = getelementptr [2 x i8], [2 x i8]* %t742, i32 0, i32 0
-  store i8 %t741, i8* %t743
-  %t744 = getelementptr [2 x i8], [2 x i8]* %t742, i32 0, i32 1
-  store i8 0, i8* %t744
-  %t745 = getelementptr [2 x i8], [2 x i8]* %t742, i32 0, i32 0
-  ret i8* %t745
+  %t723 = extractvalue %Expression %expression, 0
+  %t724 = alloca %Expression
+  store %Expression %expression, %Expression* %t724
+  %t725 = getelementptr inbounds %Expression, %Expression* %t724, i32 0, i32 1
+  %t726 = bitcast [16 x i8]* %t725 to i8*
+  %t727 = bitcast i8* %t726 to %Expression**
+  %t728 = load %Expression*, %Expression** %t727
+  %t729 = icmp eq i32 %t723, 9
+  %t730 = select i1 %t729, %Expression* %t728, %Expression* null
+  %t731 = load %Expression, %Expression* %t730
+  %t732 = call i8* @format_expression(%Expression %t731)
+  %t733 = load i8, i8* %t732
+  %t734 = add i8 %t733, 91
+  %t735 = extractvalue %Expression %expression, 0
+  %t736 = alloca %Expression
+  store %Expression %expression, %Expression* %t736
+  %t737 = getelementptr inbounds %Expression, %Expression* %t736, i32 0, i32 1
+  %t738 = bitcast [16 x i8]* %t737 to i8*
+  %t739 = getelementptr inbounds i8, i8* %t738, i64 8
+  %t740 = bitcast i8* %t739 to %Expression**
+  %t741 = load %Expression*, %Expression** %t740
+  %t742 = icmp eq i32 %t735, 9
+  %t743 = select i1 %t742, %Expression* %t741, %Expression* null
+  %t744 = load %Expression, %Expression* %t743
+  %t745 = call i8* @format_expression(%Expression %t744)
+  %t746 = load i8, i8* %t745
+  %t747 = add i8 %t734, %t746
+  %t748 = add i8 %t747, 93
+  %t749 = alloca [2 x i8], align 1
+  %t750 = getelementptr [2 x i8], [2 x i8]* %t749, i32 0, i32 0
+  store i8 %t748, i8* %t750
+  %t751 = getelementptr [2 x i8], [2 x i8]* %t749, i32 0, i32 1
+  store i8 0, i8* %t751
+  %t752 = getelementptr [2 x i8], [2 x i8]* %t749, i32 0, i32 0
+  ret i8* %t752
 merge25:
-  %t746 = extractvalue %Expression %expression, 0
-  %t747 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t748 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t749 = icmp eq i32 %t746, 0
-  %t750 = select i1 %t749, i8* %t748, i8* %t747
-  %t751 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t752 = icmp eq i32 %t746, 1
-  %t753 = select i1 %t752, i8* %t751, i8* %t750
-  %t754 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t755 = icmp eq i32 %t746, 2
-  %t756 = select i1 %t755, i8* %t754, i8* %t753
-  %t757 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t758 = icmp eq i32 %t746, 3
-  %t759 = select i1 %t758, i8* %t757, i8* %t756
-  %t760 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t761 = icmp eq i32 %t746, 4
-  %t762 = select i1 %t761, i8* %t760, i8* %t759
-  %t763 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t764 = icmp eq i32 %t746, 5
-  %t765 = select i1 %t764, i8* %t763, i8* %t762
-  %t766 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t767 = icmp eq i32 %t746, 6
-  %t768 = select i1 %t767, i8* %t766, i8* %t765
-  %t769 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t770 = icmp eq i32 %t746, 7
-  %t771 = select i1 %t770, i8* %t769, i8* %t768
-  %t772 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t773 = icmp eq i32 %t746, 8
-  %t774 = select i1 %t773, i8* %t772, i8* %t771
-  %t775 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t776 = icmp eq i32 %t746, 9
-  %t777 = select i1 %t776, i8* %t775, i8* %t774
-  %t778 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t779 = icmp eq i32 %t746, 10
-  %t780 = select i1 %t779, i8* %t778, i8* %t777
-  %t781 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t782 = icmp eq i32 %t746, 11
-  %t783 = select i1 %t782, i8* %t781, i8* %t780
-  %t784 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t785 = icmp eq i32 %t746, 12
-  %t786 = select i1 %t785, i8* %t784, i8* %t783
-  %t787 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t788 = icmp eq i32 %t746, 13
-  %t789 = select i1 %t788, i8* %t787, i8* %t786
-  %t790 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t791 = icmp eq i32 %t746, 14
-  %t792 = select i1 %t791, i8* %t790, i8* %t789
-  %t793 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t794 = icmp eq i32 %t746, 15
-  %t795 = select i1 %t794, i8* %t793, i8* %t792
-  %s796 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.796, i32 0, i32 0
-  %t797 = icmp eq i8* %t795, %s796
-  br i1 %t797, label %then26, label %merge27
+  %t753 = extractvalue %Expression %expression, 0
+  %t754 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t755 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t756 = icmp eq i32 %t753, 0
+  %t757 = select i1 %t756, i8* %t755, i8* %t754
+  %t758 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t759 = icmp eq i32 %t753, 1
+  %t760 = select i1 %t759, i8* %t758, i8* %t757
+  %t761 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t762 = icmp eq i32 %t753, 2
+  %t763 = select i1 %t762, i8* %t761, i8* %t760
+  %t764 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t765 = icmp eq i32 %t753, 3
+  %t766 = select i1 %t765, i8* %t764, i8* %t763
+  %t767 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t768 = icmp eq i32 %t753, 4
+  %t769 = select i1 %t768, i8* %t767, i8* %t766
+  %t770 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t771 = icmp eq i32 %t753, 5
+  %t772 = select i1 %t771, i8* %t770, i8* %t769
+  %t773 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t774 = icmp eq i32 %t753, 6
+  %t775 = select i1 %t774, i8* %t773, i8* %t772
+  %t776 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t777 = icmp eq i32 %t753, 7
+  %t778 = select i1 %t777, i8* %t776, i8* %t775
+  %t779 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t780 = icmp eq i32 %t753, 8
+  %t781 = select i1 %t780, i8* %t779, i8* %t778
+  %t782 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t783 = icmp eq i32 %t753, 9
+  %t784 = select i1 %t783, i8* %t782, i8* %t781
+  %t785 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t786 = icmp eq i32 %t753, 10
+  %t787 = select i1 %t786, i8* %t785, i8* %t784
+  %t788 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t789 = icmp eq i32 %t753, 11
+  %t790 = select i1 %t789, i8* %t788, i8* %t787
+  %t791 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t792 = icmp eq i32 %t753, 12
+  %t793 = select i1 %t792, i8* %t791, i8* %t790
+  %t794 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t795 = icmp eq i32 %t753, 13
+  %t796 = select i1 %t795, i8* %t794, i8* %t793
+  %t797 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t798 = icmp eq i32 %t753, 14
+  %t799 = select i1 %t798, i8* %t797, i8* %t796
+  %t800 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t801 = icmp eq i32 %t753, 15
+  %t802 = select i1 %t801, i8* %t800, i8* %t799
+  %s803 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.803, i32 0, i32 0
+  %t804 = icmp eq i8* %t802, %s803
+  br i1 %t804, label %then26, label %merge27
 then26:
-  %t798 = extractvalue %Expression %expression, 0
-  %t799 = alloca %Expression
-  store %Expression %expression, %Expression* %t799
-  %t800 = getelementptr inbounds %Expression, %Expression* %t799, i32 0, i32 1
-  %t801 = bitcast [8 x i8]* %t800 to i8*
-  %t802 = bitcast i8* %t801 to { %Expression**, i64 }**
-  %t803 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t802
-  %t804 = icmp eq i32 %t798, 10
-  %t805 = select i1 %t804, { %Expression**, i64 }* %t803, { %Expression**, i64 }* null
-  %t806 = bitcast { %Expression**, i64 }* %t805 to { %Expression*, i64 }*
-  %t807 = call i8* @format_array_expression({ %Expression*, i64 }* %t806)
-  ret i8* %t807
+  %t805 = extractvalue %Expression %expression, 0
+  %t806 = alloca %Expression
+  store %Expression %expression, %Expression* %t806
+  %t807 = getelementptr inbounds %Expression, %Expression* %t806, i32 0, i32 1
+  %t808 = bitcast [8 x i8]* %t807 to i8*
+  %t809 = bitcast i8* %t808 to { %Expression**, i64 }**
+  %t810 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t809
+  %t811 = icmp eq i32 %t805, 10
+  %t812 = select i1 %t811, { %Expression**, i64 }* %t810, { %Expression**, i64 }* null
+  %t813 = bitcast { %Expression**, i64 }* %t812 to { %Expression*, i64 }*
+  %t814 = call i8* @format_array_expression({ %Expression*, i64 }* %t813)
+  ret i8* %t814
 merge27:
-  %t808 = extractvalue %Expression %expression, 0
-  %t809 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t810 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t811 = icmp eq i32 %t808, 0
-  %t812 = select i1 %t811, i8* %t810, i8* %t809
-  %t813 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t814 = icmp eq i32 %t808, 1
-  %t815 = select i1 %t814, i8* %t813, i8* %t812
-  %t816 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t817 = icmp eq i32 %t808, 2
-  %t818 = select i1 %t817, i8* %t816, i8* %t815
-  %t819 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t820 = icmp eq i32 %t808, 3
-  %t821 = select i1 %t820, i8* %t819, i8* %t818
-  %t822 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t823 = icmp eq i32 %t808, 4
-  %t824 = select i1 %t823, i8* %t822, i8* %t821
-  %t825 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t826 = icmp eq i32 %t808, 5
-  %t827 = select i1 %t826, i8* %t825, i8* %t824
-  %t828 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t829 = icmp eq i32 %t808, 6
-  %t830 = select i1 %t829, i8* %t828, i8* %t827
-  %t831 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t832 = icmp eq i32 %t808, 7
-  %t833 = select i1 %t832, i8* %t831, i8* %t830
-  %t834 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t835 = icmp eq i32 %t808, 8
-  %t836 = select i1 %t835, i8* %t834, i8* %t833
-  %t837 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t838 = icmp eq i32 %t808, 9
-  %t839 = select i1 %t838, i8* %t837, i8* %t836
-  %t840 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t841 = icmp eq i32 %t808, 10
-  %t842 = select i1 %t841, i8* %t840, i8* %t839
-  %t843 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t844 = icmp eq i32 %t808, 11
-  %t845 = select i1 %t844, i8* %t843, i8* %t842
-  %t846 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t847 = icmp eq i32 %t808, 12
-  %t848 = select i1 %t847, i8* %t846, i8* %t845
-  %t849 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t850 = icmp eq i32 %t808, 13
-  %t851 = select i1 %t850, i8* %t849, i8* %t848
-  %t852 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t853 = icmp eq i32 %t808, 14
-  %t854 = select i1 %t853, i8* %t852, i8* %t851
-  %t855 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t856 = icmp eq i32 %t808, 15
-  %t857 = select i1 %t856, i8* %t855, i8* %t854
-  %s858 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.858, i32 0, i32 0
-  %t859 = icmp eq i8* %t857, %s858
-  br i1 %t859, label %then28, label %merge29
+  %t815 = extractvalue %Expression %expression, 0
+  %t816 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t817 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t818 = icmp eq i32 %t815, 0
+  %t819 = select i1 %t818, i8* %t817, i8* %t816
+  %t820 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t821 = icmp eq i32 %t815, 1
+  %t822 = select i1 %t821, i8* %t820, i8* %t819
+  %t823 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t824 = icmp eq i32 %t815, 2
+  %t825 = select i1 %t824, i8* %t823, i8* %t822
+  %t826 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t827 = icmp eq i32 %t815, 3
+  %t828 = select i1 %t827, i8* %t826, i8* %t825
+  %t829 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t830 = icmp eq i32 %t815, 4
+  %t831 = select i1 %t830, i8* %t829, i8* %t828
+  %t832 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t833 = icmp eq i32 %t815, 5
+  %t834 = select i1 %t833, i8* %t832, i8* %t831
+  %t835 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t836 = icmp eq i32 %t815, 6
+  %t837 = select i1 %t836, i8* %t835, i8* %t834
+  %t838 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t839 = icmp eq i32 %t815, 7
+  %t840 = select i1 %t839, i8* %t838, i8* %t837
+  %t841 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t842 = icmp eq i32 %t815, 8
+  %t843 = select i1 %t842, i8* %t841, i8* %t840
+  %t844 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t845 = icmp eq i32 %t815, 9
+  %t846 = select i1 %t845, i8* %t844, i8* %t843
+  %t847 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t848 = icmp eq i32 %t815, 10
+  %t849 = select i1 %t848, i8* %t847, i8* %t846
+  %t850 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t851 = icmp eq i32 %t815, 11
+  %t852 = select i1 %t851, i8* %t850, i8* %t849
+  %t853 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t854 = icmp eq i32 %t815, 12
+  %t855 = select i1 %t854, i8* %t853, i8* %t852
+  %t856 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t857 = icmp eq i32 %t815, 13
+  %t858 = select i1 %t857, i8* %t856, i8* %t855
+  %t859 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t860 = icmp eq i32 %t815, 14
+  %t861 = select i1 %t860, i8* %t859, i8* %t858
+  %t862 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t863 = icmp eq i32 %t815, 15
+  %t864 = select i1 %t863, i8* %t862, i8* %t861
+  %s865 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.865, i32 0, i32 0
+  %t866 = icmp eq i8* %t864, %s865
+  br i1 %t866, label %then28, label %merge29
 then28:
-  %t860 = alloca [0 x i8*]
-  %t861 = getelementptr [0 x i8*], [0 x i8*]* %t860, i32 0, i32 0
-  %t862 = alloca { i8**, i64 }
-  %t863 = getelementptr { i8**, i64 }, { i8**, i64 }* %t862, i32 0, i32 0
-  store i8** %t861, i8*** %t863
-  %t864 = getelementptr { i8**, i64 }, { i8**, i64 }* %t862, i32 0, i32 1
-  store i64 0, i64* %t864
-  store { i8**, i64 }* %t862, { i8**, i64 }** %l5
-  %t865 = sitofp i64 0 to double
-  store double %t865, double* %l6
-  %t866 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t867 = load double, double* %l6
+  %t867 = alloca [0 x i8*]
+  %t868 = getelementptr [0 x i8*], [0 x i8*]* %t867, i32 0, i32 0
+  %t869 = alloca { i8**, i64 }
+  %t870 = getelementptr { i8**, i64 }, { i8**, i64 }* %t869, i32 0, i32 0
+  store i8** %t868, i8*** %t870
+  %t871 = getelementptr { i8**, i64 }, { i8**, i64 }* %t869, i32 0, i32 1
+  store i64 0, i64* %t871
+  store { i8**, i64 }* %t869, { i8**, i64 }** %l5
+  %t872 = sitofp i64 0 to double
+  store double %t872, double* %l6
+  %t873 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t874 = load double, double* %l6
   br label %loop.header30
 loop.header30:
-  %t930 = phi { i8**, i64 }* [ %t866, %then28 ], [ %t928, %loop.latch32 ]
-  %t931 = phi double [ %t867, %then28 ], [ %t929, %loop.latch32 ]
-  store { i8**, i64 }* %t930, { i8**, i64 }** %l5
-  store double %t931, double* %l6
+  %t937 = phi { i8**, i64 }* [ %t873, %then28 ], [ %t935, %loop.latch32 ]
+  %t938 = phi double [ %t874, %then28 ], [ %t936, %loop.latch32 ]
+  store { i8**, i64 }* %t937, { i8**, i64 }** %l5
+  store double %t938, double* %l6
   br label %loop.body31
 loop.body31:
-  %t868 = load double, double* %l6
-  %t869 = extractvalue %Expression %expression, 0
-  %t870 = alloca %Expression
-  store %Expression %expression, %Expression* %t870
-  %t871 = getelementptr inbounds %Expression, %Expression* %t870, i32 0, i32 1
-  %t872 = bitcast [8 x i8]* %t871 to i8*
-  %t873 = bitcast i8* %t872 to { %ObjectField**, i64 }**
-  %t874 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t873
-  %t875 = icmp eq i32 %t869, 11
-  %t876 = select i1 %t875, { %ObjectField**, i64 }* %t874, { %ObjectField**, i64 }* null
-  %t877 = getelementptr inbounds %Expression, %Expression* %t870, i32 0, i32 1
-  %t878 = bitcast [16 x i8]* %t877 to i8*
-  %t879 = getelementptr inbounds i8, i8* %t878, i64 8
+  %t875 = load double, double* %l6
+  %t876 = extractvalue %Expression %expression, 0
+  %t877 = alloca %Expression
+  store %Expression %expression, %Expression* %t877
+  %t878 = getelementptr inbounds %Expression, %Expression* %t877, i32 0, i32 1
+  %t879 = bitcast [8 x i8]* %t878 to i8*
   %t880 = bitcast i8* %t879 to { %ObjectField**, i64 }**
   %t881 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t880
-  %t882 = icmp eq i32 %t869, 12
-  %t883 = select i1 %t882, { %ObjectField**, i64 }* %t881, { %ObjectField**, i64 }* %t876
-  %t884 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t883
-  %t885 = extractvalue { %ObjectField**, i64 } %t884, 1
-  %t886 = sitofp i64 %t885 to double
-  %t887 = fcmp oge double %t868, %t886
-  %t888 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t889 = load double, double* %l6
-  br i1 %t887, label %then34, label %merge35
+  %t882 = icmp eq i32 %t876, 11
+  %t883 = select i1 %t882, { %ObjectField**, i64 }* %t881, { %ObjectField**, i64 }* null
+  %t884 = getelementptr inbounds %Expression, %Expression* %t877, i32 0, i32 1
+  %t885 = bitcast [16 x i8]* %t884 to i8*
+  %t886 = getelementptr inbounds i8, i8* %t885, i64 8
+  %t887 = bitcast i8* %t886 to { %ObjectField**, i64 }**
+  %t888 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t887
+  %t889 = icmp eq i32 %t876, 12
+  %t890 = select i1 %t889, { %ObjectField**, i64 }* %t888, { %ObjectField**, i64 }* %t883
+  %t891 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t890
+  %t892 = extractvalue { %ObjectField**, i64 } %t891, 1
+  %t893 = sitofp i64 %t892 to double
+  %t894 = fcmp oge double %t875, %t893
+  %t895 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t896 = load double, double* %l6
+  br i1 %t894, label %then34, label %merge35
 then34:
   br label %afterloop33
 merge35:
-  %t890 = extractvalue %Expression %expression, 0
-  %t891 = alloca %Expression
-  store %Expression %expression, %Expression* %t891
-  %t892 = getelementptr inbounds %Expression, %Expression* %t891, i32 0, i32 1
-  %t893 = bitcast [8 x i8]* %t892 to i8*
-  %t894 = bitcast i8* %t893 to { %ObjectField**, i64 }**
-  %t895 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t894
-  %t896 = icmp eq i32 %t890, 11
-  %t897 = select i1 %t896, { %ObjectField**, i64 }* %t895, { %ObjectField**, i64 }* null
-  %t898 = getelementptr inbounds %Expression, %Expression* %t891, i32 0, i32 1
-  %t899 = bitcast [16 x i8]* %t898 to i8*
-  %t900 = getelementptr inbounds i8, i8* %t899, i64 8
+  %t897 = extractvalue %Expression %expression, 0
+  %t898 = alloca %Expression
+  store %Expression %expression, %Expression* %t898
+  %t899 = getelementptr inbounds %Expression, %Expression* %t898, i32 0, i32 1
+  %t900 = bitcast [8 x i8]* %t899 to i8*
   %t901 = bitcast i8* %t900 to { %ObjectField**, i64 }**
   %t902 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t901
-  %t903 = icmp eq i32 %t890, 12
-  %t904 = select i1 %t903, { %ObjectField**, i64 }* %t902, { %ObjectField**, i64 }* %t897
-  %t905 = load double, double* %l6
-  %t906 = fptosi double %t905 to i64
-  %t907 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t904
-  %t908 = extractvalue { %ObjectField**, i64 } %t907, 0
-  %t909 = extractvalue { %ObjectField**, i64 } %t907, 1
-  %t910 = icmp uge i64 %t906, %t909
-  ; bounds check: %t910 (if true, out of bounds)
-  %t911 = getelementptr %ObjectField*, %ObjectField** %t908, i64 %t906
-  %t912 = load %ObjectField*, %ObjectField** %t911
-  store %ObjectField* %t912, %ObjectField** %l7
-  %t913 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t914 = load %ObjectField*, %ObjectField** %l7
-  %t915 = getelementptr %ObjectField, %ObjectField* %t914, i32 0, i32 0
-  %t916 = load i8*, i8** %t915
-  %s917 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.917, i32 0, i32 0
-  %t918 = add i8* %t916, %s917
-  %t919 = load %ObjectField*, %ObjectField** %l7
-  %t920 = getelementptr %ObjectField, %ObjectField* %t919, i32 0, i32 1
-  %t921 = load %Expression, %Expression* %t920
-  %t922 = call i8* @format_expression(%Expression %t921)
-  %t923 = add i8* %t918, %t922
-  %t924 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t913, i8* %t923)
-  store { i8**, i64 }* %t924, { i8**, i64 }** %l5
-  %t925 = load double, double* %l6
-  %t926 = sitofp i64 1 to double
-  %t927 = fadd double %t925, %t926
-  store double %t927, double* %l6
+  %t903 = icmp eq i32 %t897, 11
+  %t904 = select i1 %t903, { %ObjectField**, i64 }* %t902, { %ObjectField**, i64 }* null
+  %t905 = getelementptr inbounds %Expression, %Expression* %t898, i32 0, i32 1
+  %t906 = bitcast [16 x i8]* %t905 to i8*
+  %t907 = getelementptr inbounds i8, i8* %t906, i64 8
+  %t908 = bitcast i8* %t907 to { %ObjectField**, i64 }**
+  %t909 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t908
+  %t910 = icmp eq i32 %t897, 12
+  %t911 = select i1 %t910, { %ObjectField**, i64 }* %t909, { %ObjectField**, i64 }* %t904
+  %t912 = load double, double* %l6
+  %t913 = fptosi double %t912 to i64
+  %t914 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t911
+  %t915 = extractvalue { %ObjectField**, i64 } %t914, 0
+  %t916 = extractvalue { %ObjectField**, i64 } %t914, 1
+  %t917 = icmp uge i64 %t913, %t916
+  ; bounds check: %t917 (if true, out of bounds)
+  %t918 = getelementptr %ObjectField*, %ObjectField** %t915, i64 %t913
+  %t919 = load %ObjectField*, %ObjectField** %t918
+  store %ObjectField* %t919, %ObjectField** %l7
+  %t920 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t921 = load %ObjectField*, %ObjectField** %l7
+  %t922 = getelementptr %ObjectField, %ObjectField* %t921, i32 0, i32 0
+  %t923 = load i8*, i8** %t922
+  %s924 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.924, i32 0, i32 0
+  %t925 = add i8* %t923, %s924
+  %t926 = load %ObjectField*, %ObjectField** %l7
+  %t927 = getelementptr %ObjectField, %ObjectField* %t926, i32 0, i32 1
+  %t928 = load %Expression, %Expression* %t927
+  %t929 = call i8* @format_expression(%Expression %t928)
+  %t930 = add i8* %t925, %t929
+  %t931 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t920, i8* %t930)
+  store { i8**, i64 }* %t931, { i8**, i64 }** %l5
+  %t932 = load double, double* %l6
+  %t933 = sitofp i64 1 to double
+  %t934 = fadd double %t932, %t933
+  store double %t934, double* %l6
   br label %loop.latch32
 loop.latch32:
-  %t928 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t929 = load double, double* %l6
+  %t935 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t936 = load double, double* %l6
   br label %loop.header30
 afterloop33:
-  %s932 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.932, i32 0, i32 0
-  %t933 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %s934 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.934, i32 0, i32 0
-  %t935 = call i8* @join_with_separator({ i8**, i64 }* %t933, i8* %s934)
-  %t936 = add i8* %s932, %t935
-  %s937 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.937, i32 0, i32 0
-  %t938 = add i8* %t936, %s937
-  ret i8* %t938
+  %s939 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.939, i32 0, i32 0
+  %t940 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %s941 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.941, i32 0, i32 0
+  %t942 = call i8* @join_with_separator({ i8**, i64 }* %t940, i8* %s941)
+  %t943 = add i8* %s939, %t942
+  %s944 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.944, i32 0, i32 0
+  %t945 = add i8* %t943, %s944
+  ret i8* %t945
 merge29:
-  %t939 = extractvalue %Expression %expression, 0
-  %t940 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t941 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t942 = icmp eq i32 %t939, 0
-  %t943 = select i1 %t942, i8* %t941, i8* %t940
-  %t944 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t945 = icmp eq i32 %t939, 1
-  %t946 = select i1 %t945, i8* %t944, i8* %t943
-  %t947 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t948 = icmp eq i32 %t939, 2
-  %t949 = select i1 %t948, i8* %t947, i8* %t946
-  %t950 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t951 = icmp eq i32 %t939, 3
-  %t952 = select i1 %t951, i8* %t950, i8* %t949
-  %t953 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t954 = icmp eq i32 %t939, 4
-  %t955 = select i1 %t954, i8* %t953, i8* %t952
-  %t956 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t957 = icmp eq i32 %t939, 5
-  %t958 = select i1 %t957, i8* %t956, i8* %t955
-  %t959 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t960 = icmp eq i32 %t939, 6
-  %t961 = select i1 %t960, i8* %t959, i8* %t958
-  %t962 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t963 = icmp eq i32 %t939, 7
-  %t964 = select i1 %t963, i8* %t962, i8* %t961
-  %t965 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t966 = icmp eq i32 %t939, 8
-  %t967 = select i1 %t966, i8* %t965, i8* %t964
-  %t968 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t969 = icmp eq i32 %t939, 9
-  %t970 = select i1 %t969, i8* %t968, i8* %t967
-  %t971 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t972 = icmp eq i32 %t939, 10
-  %t973 = select i1 %t972, i8* %t971, i8* %t970
-  %t974 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t975 = icmp eq i32 %t939, 11
-  %t976 = select i1 %t975, i8* %t974, i8* %t973
-  %t977 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t978 = icmp eq i32 %t939, 12
-  %t979 = select i1 %t978, i8* %t977, i8* %t976
-  %t980 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t981 = icmp eq i32 %t939, 13
-  %t982 = select i1 %t981, i8* %t980, i8* %t979
-  %t983 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t984 = icmp eq i32 %t939, 14
-  %t985 = select i1 %t984, i8* %t983, i8* %t982
-  %t986 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t987 = icmp eq i32 %t939, 15
-  %t988 = select i1 %t987, i8* %t986, i8* %t985
-  %s989 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.989, i32 0, i32 0
-  %t990 = icmp eq i8* %t988, %s989
-  br i1 %t990, label %then36, label %merge37
+  %t946 = extractvalue %Expression %expression, 0
+  %t947 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t948 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t949 = icmp eq i32 %t946, 0
+  %t950 = select i1 %t949, i8* %t948, i8* %t947
+  %t951 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t952 = icmp eq i32 %t946, 1
+  %t953 = select i1 %t952, i8* %t951, i8* %t950
+  %t954 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t955 = icmp eq i32 %t946, 2
+  %t956 = select i1 %t955, i8* %t954, i8* %t953
+  %t957 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t958 = icmp eq i32 %t946, 3
+  %t959 = select i1 %t958, i8* %t957, i8* %t956
+  %t960 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t961 = icmp eq i32 %t946, 4
+  %t962 = select i1 %t961, i8* %t960, i8* %t959
+  %t963 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t964 = icmp eq i32 %t946, 5
+  %t965 = select i1 %t964, i8* %t963, i8* %t962
+  %t966 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t967 = icmp eq i32 %t946, 6
+  %t968 = select i1 %t967, i8* %t966, i8* %t965
+  %t969 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t970 = icmp eq i32 %t946, 7
+  %t971 = select i1 %t970, i8* %t969, i8* %t968
+  %t972 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t973 = icmp eq i32 %t946, 8
+  %t974 = select i1 %t973, i8* %t972, i8* %t971
+  %t975 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t976 = icmp eq i32 %t946, 9
+  %t977 = select i1 %t976, i8* %t975, i8* %t974
+  %t978 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t979 = icmp eq i32 %t946, 10
+  %t980 = select i1 %t979, i8* %t978, i8* %t977
+  %t981 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t982 = icmp eq i32 %t946, 11
+  %t983 = select i1 %t982, i8* %t981, i8* %t980
+  %t984 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t985 = icmp eq i32 %t946, 12
+  %t986 = select i1 %t985, i8* %t984, i8* %t983
+  %t987 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t988 = icmp eq i32 %t946, 13
+  %t989 = select i1 %t988, i8* %t987, i8* %t986
+  %t990 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t991 = icmp eq i32 %t946, 14
+  %t992 = select i1 %t991, i8* %t990, i8* %t989
+  %t993 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t994 = icmp eq i32 %t946, 15
+  %t995 = select i1 %t994, i8* %t993, i8* %t992
+  %s996 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.996, i32 0, i32 0
+  %t997 = icmp eq i8* %t995, %s996
+  br i1 %t997, label %then36, label %merge37
 then36:
-  %t991 = alloca [0 x i8*]
-  %t992 = getelementptr [0 x i8*], [0 x i8*]* %t991, i32 0, i32 0
-  %t993 = alloca { i8**, i64 }
-  %t994 = getelementptr { i8**, i64 }, { i8**, i64 }* %t993, i32 0, i32 0
-  store i8** %t992, i8*** %t994
-  %t995 = getelementptr { i8**, i64 }, { i8**, i64 }* %t993, i32 0, i32 1
-  store i64 0, i64* %t995
-  store { i8**, i64 }* %t993, { i8**, i64 }** %l8
-  %t996 = sitofp i64 0 to double
-  store double %t996, double* %l9
-  %t997 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t998 = load double, double* %l9
+  %t998 = alloca [0 x i8*]
+  %t999 = getelementptr [0 x i8*], [0 x i8*]* %t998, i32 0, i32 0
+  %t1000 = alloca { i8**, i64 }
+  %t1001 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1000, i32 0, i32 0
+  store i8** %t999, i8*** %t1001
+  %t1002 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1000, i32 0, i32 1
+  store i64 0, i64* %t1002
+  store { i8**, i64 }* %t1000, { i8**, i64 }** %l8
+  %t1003 = sitofp i64 0 to double
+  store double %t1003, double* %l9
+  %t1004 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t1005 = load double, double* %l9
   br label %loop.header38
 loop.header38:
-  %t1061 = phi { i8**, i64 }* [ %t997, %then36 ], [ %t1059, %loop.latch40 ]
-  %t1062 = phi double [ %t998, %then36 ], [ %t1060, %loop.latch40 ]
-  store { i8**, i64 }* %t1061, { i8**, i64 }** %l8
-  store double %t1062, double* %l9
+  %t1068 = phi { i8**, i64 }* [ %t1004, %then36 ], [ %t1066, %loop.latch40 ]
+  %t1069 = phi double [ %t1005, %then36 ], [ %t1067, %loop.latch40 ]
+  store { i8**, i64 }* %t1068, { i8**, i64 }** %l8
+  store double %t1069, double* %l9
   br label %loop.body39
 loop.body39:
-  %t999 = load double, double* %l9
-  %t1000 = extractvalue %Expression %expression, 0
-  %t1001 = alloca %Expression
-  store %Expression %expression, %Expression* %t1001
-  %t1002 = getelementptr inbounds %Expression, %Expression* %t1001, i32 0, i32 1
-  %t1003 = bitcast [8 x i8]* %t1002 to i8*
-  %t1004 = bitcast i8* %t1003 to { %ObjectField**, i64 }**
-  %t1005 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1004
-  %t1006 = icmp eq i32 %t1000, 11
-  %t1007 = select i1 %t1006, { %ObjectField**, i64 }* %t1005, { %ObjectField**, i64 }* null
-  %t1008 = getelementptr inbounds %Expression, %Expression* %t1001, i32 0, i32 1
-  %t1009 = bitcast [16 x i8]* %t1008 to i8*
-  %t1010 = getelementptr inbounds i8, i8* %t1009, i64 8
+  %t1006 = load double, double* %l9
+  %t1007 = extractvalue %Expression %expression, 0
+  %t1008 = alloca %Expression
+  store %Expression %expression, %Expression* %t1008
+  %t1009 = getelementptr inbounds %Expression, %Expression* %t1008, i32 0, i32 1
+  %t1010 = bitcast [8 x i8]* %t1009 to i8*
   %t1011 = bitcast i8* %t1010 to { %ObjectField**, i64 }**
   %t1012 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1011
-  %t1013 = icmp eq i32 %t1000, 12
-  %t1014 = select i1 %t1013, { %ObjectField**, i64 }* %t1012, { %ObjectField**, i64 }* %t1007
-  %t1015 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t1014
-  %t1016 = extractvalue { %ObjectField**, i64 } %t1015, 1
-  %t1017 = sitofp i64 %t1016 to double
-  %t1018 = fcmp oge double %t999, %t1017
-  %t1019 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t1020 = load double, double* %l9
-  br i1 %t1018, label %then42, label %merge43
+  %t1013 = icmp eq i32 %t1007, 11
+  %t1014 = select i1 %t1013, { %ObjectField**, i64 }* %t1012, { %ObjectField**, i64 }* null
+  %t1015 = getelementptr inbounds %Expression, %Expression* %t1008, i32 0, i32 1
+  %t1016 = bitcast [16 x i8]* %t1015 to i8*
+  %t1017 = getelementptr inbounds i8, i8* %t1016, i64 8
+  %t1018 = bitcast i8* %t1017 to { %ObjectField**, i64 }**
+  %t1019 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1018
+  %t1020 = icmp eq i32 %t1007, 12
+  %t1021 = select i1 %t1020, { %ObjectField**, i64 }* %t1019, { %ObjectField**, i64 }* %t1014
+  %t1022 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t1021
+  %t1023 = extractvalue { %ObjectField**, i64 } %t1022, 1
+  %t1024 = sitofp i64 %t1023 to double
+  %t1025 = fcmp oge double %t1006, %t1024
+  %t1026 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t1027 = load double, double* %l9
+  br i1 %t1025, label %then42, label %merge43
 then42:
   br label %afterloop41
 merge43:
-  %t1021 = extractvalue %Expression %expression, 0
-  %t1022 = alloca %Expression
-  store %Expression %expression, %Expression* %t1022
-  %t1023 = getelementptr inbounds %Expression, %Expression* %t1022, i32 0, i32 1
-  %t1024 = bitcast [8 x i8]* %t1023 to i8*
-  %t1025 = bitcast i8* %t1024 to { %ObjectField**, i64 }**
-  %t1026 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1025
-  %t1027 = icmp eq i32 %t1021, 11
-  %t1028 = select i1 %t1027, { %ObjectField**, i64 }* %t1026, { %ObjectField**, i64 }* null
-  %t1029 = getelementptr inbounds %Expression, %Expression* %t1022, i32 0, i32 1
-  %t1030 = bitcast [16 x i8]* %t1029 to i8*
-  %t1031 = getelementptr inbounds i8, i8* %t1030, i64 8
+  %t1028 = extractvalue %Expression %expression, 0
+  %t1029 = alloca %Expression
+  store %Expression %expression, %Expression* %t1029
+  %t1030 = getelementptr inbounds %Expression, %Expression* %t1029, i32 0, i32 1
+  %t1031 = bitcast [8 x i8]* %t1030 to i8*
   %t1032 = bitcast i8* %t1031 to { %ObjectField**, i64 }**
   %t1033 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1032
-  %t1034 = icmp eq i32 %t1021, 12
-  %t1035 = select i1 %t1034, { %ObjectField**, i64 }* %t1033, { %ObjectField**, i64 }* %t1028
-  %t1036 = load double, double* %l9
-  %t1037 = fptosi double %t1036 to i64
-  %t1038 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t1035
-  %t1039 = extractvalue { %ObjectField**, i64 } %t1038, 0
-  %t1040 = extractvalue { %ObjectField**, i64 } %t1038, 1
-  %t1041 = icmp uge i64 %t1037, %t1040
-  ; bounds check: %t1041 (if true, out of bounds)
-  %t1042 = getelementptr %ObjectField*, %ObjectField** %t1039, i64 %t1037
-  %t1043 = load %ObjectField*, %ObjectField** %t1042
-  store %ObjectField* %t1043, %ObjectField** %l10
-  %t1044 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t1045 = load %ObjectField*, %ObjectField** %l10
-  %t1046 = getelementptr %ObjectField, %ObjectField* %t1045, i32 0, i32 0
-  %t1047 = load i8*, i8** %t1046
-  %s1048 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1048, i32 0, i32 0
-  %t1049 = add i8* %t1047, %s1048
-  %t1050 = load %ObjectField*, %ObjectField** %l10
-  %t1051 = getelementptr %ObjectField, %ObjectField* %t1050, i32 0, i32 1
-  %t1052 = load %Expression, %Expression* %t1051
-  %t1053 = call i8* @format_expression(%Expression %t1052)
-  %t1054 = add i8* %t1049, %t1053
-  %t1055 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1044, i8* %t1054)
-  store { i8**, i64 }* %t1055, { i8**, i64 }** %l8
-  %t1056 = load double, double* %l9
-  %t1057 = sitofp i64 1 to double
-  %t1058 = fadd double %t1056, %t1057
-  store double %t1058, double* %l9
+  %t1034 = icmp eq i32 %t1028, 11
+  %t1035 = select i1 %t1034, { %ObjectField**, i64 }* %t1033, { %ObjectField**, i64 }* null
+  %t1036 = getelementptr inbounds %Expression, %Expression* %t1029, i32 0, i32 1
+  %t1037 = bitcast [16 x i8]* %t1036 to i8*
+  %t1038 = getelementptr inbounds i8, i8* %t1037, i64 8
+  %t1039 = bitcast i8* %t1038 to { %ObjectField**, i64 }**
+  %t1040 = load { %ObjectField**, i64 }*, { %ObjectField**, i64 }** %t1039
+  %t1041 = icmp eq i32 %t1028, 12
+  %t1042 = select i1 %t1041, { %ObjectField**, i64 }* %t1040, { %ObjectField**, i64 }* %t1035
+  %t1043 = load double, double* %l9
+  %t1044 = fptosi double %t1043 to i64
+  %t1045 = load { %ObjectField**, i64 }, { %ObjectField**, i64 }* %t1042
+  %t1046 = extractvalue { %ObjectField**, i64 } %t1045, 0
+  %t1047 = extractvalue { %ObjectField**, i64 } %t1045, 1
+  %t1048 = icmp uge i64 %t1044, %t1047
+  ; bounds check: %t1048 (if true, out of bounds)
+  %t1049 = getelementptr %ObjectField*, %ObjectField** %t1046, i64 %t1044
+  %t1050 = load %ObjectField*, %ObjectField** %t1049
+  store %ObjectField* %t1050, %ObjectField** %l10
+  %t1051 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t1052 = load %ObjectField*, %ObjectField** %l10
+  %t1053 = getelementptr %ObjectField, %ObjectField* %t1052, i32 0, i32 0
+  %t1054 = load i8*, i8** %t1053
+  %s1055 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1055, i32 0, i32 0
+  %t1056 = add i8* %t1054, %s1055
+  %t1057 = load %ObjectField*, %ObjectField** %l10
+  %t1058 = getelementptr %ObjectField, %ObjectField* %t1057, i32 0, i32 1
+  %t1059 = load %Expression, %Expression* %t1058
+  %t1060 = call i8* @format_expression(%Expression %t1059)
+  %t1061 = add i8* %t1056, %t1060
+  %t1062 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1051, i8* %t1061)
+  store { i8**, i64 }* %t1062, { i8**, i64 }** %l8
+  %t1063 = load double, double* %l9
+  %t1064 = sitofp i64 1 to double
+  %t1065 = fadd double %t1063, %t1064
+  store double %t1065, double* %l9
   br label %loop.latch40
 loop.latch40:
-  %t1059 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %t1060 = load double, double* %l9
+  %t1066 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %t1067 = load double, double* %l9
   br label %loop.header38
 afterloop41:
-  %t1063 = extractvalue %Expression %expression, 0
-  %t1064 = alloca %Expression
-  store %Expression %expression, %Expression* %t1064
-  %t1065 = getelementptr inbounds %Expression, %Expression* %t1064, i32 0, i32 1
-  %t1066 = bitcast [16 x i8]* %t1065 to i8*
-  %t1067 = bitcast i8* %t1066 to { i8**, i64 }**
-  %t1068 = load { i8**, i64 }*, { i8**, i64 }** %t1067
-  %t1069 = icmp eq i32 %t1063, 12
-  %t1070 = select i1 %t1069, { i8**, i64 }* %t1068, { i8**, i64 }* null
-  %t1071 = alloca [2 x i8], align 1
-  %t1072 = getelementptr [2 x i8], [2 x i8]* %t1071, i32 0, i32 0
-  store i8 46, i8* %t1072
-  %t1073 = getelementptr [2 x i8], [2 x i8]* %t1071, i32 0, i32 1
-  store i8 0, i8* %t1073
-  %t1074 = getelementptr [2 x i8], [2 x i8]* %t1071, i32 0, i32 0
-  %t1075 = call i8* @join_with_separator({ i8**, i64 }* %t1070, i8* %t1074)
-  store i8* %t1075, i8** %l11
-  %t1076 = load i8*, i8** %l11
-  %s1077 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1077, i32 0, i32 0
-  %t1078 = add i8* %t1076, %s1077
-  %t1079 = load { i8**, i64 }*, { i8**, i64 }** %l8
-  %s1080 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1080, i32 0, i32 0
-  %t1081 = call i8* @join_with_separator({ i8**, i64 }* %t1079, i8* %s1080)
-  %t1082 = add i8* %t1078, %t1081
-  %s1083 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1083, i32 0, i32 0
-  %t1084 = add i8* %t1082, %s1083
-  ret i8* %t1084
+  %t1070 = extractvalue %Expression %expression, 0
+  %t1071 = alloca %Expression
+  store %Expression %expression, %Expression* %t1071
+  %t1072 = getelementptr inbounds %Expression, %Expression* %t1071, i32 0, i32 1
+  %t1073 = bitcast [16 x i8]* %t1072 to i8*
+  %t1074 = bitcast i8* %t1073 to { i8**, i64 }**
+  %t1075 = load { i8**, i64 }*, { i8**, i64 }** %t1074
+  %t1076 = icmp eq i32 %t1070, 12
+  %t1077 = select i1 %t1076, { i8**, i64 }* %t1075, { i8**, i64 }* null
+  %t1078 = alloca [2 x i8], align 1
+  %t1079 = getelementptr [2 x i8], [2 x i8]* %t1078, i32 0, i32 0
+  store i8 46, i8* %t1079
+  %t1080 = getelementptr [2 x i8], [2 x i8]* %t1078, i32 0, i32 1
+  store i8 0, i8* %t1080
+  %t1081 = getelementptr [2 x i8], [2 x i8]* %t1078, i32 0, i32 0
+  %t1082 = call i8* @join_with_separator({ i8**, i64 }* %t1077, i8* %t1081)
+  store i8* %t1082, i8** %l11
+  %t1083 = load i8*, i8** %l11
+  %s1084 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1084, i32 0, i32 0
+  %t1085 = add i8* %t1083, %s1084
+  %t1086 = load { i8**, i64 }*, { i8**, i64 }** %l8
+  %s1087 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1087, i32 0, i32 0
+  %t1088 = call i8* @join_with_separator({ i8**, i64 }* %t1086, i8* %s1087)
+  %t1089 = add i8* %t1085, %t1088
+  %s1090 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1090, i32 0, i32 0
+  %t1091 = add i8* %t1089, %s1090
+  ret i8* %t1091
 merge37:
-  %t1085 = extractvalue %Expression %expression, 0
-  %t1086 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t1087 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t1088 = icmp eq i32 %t1085, 0
-  %t1089 = select i1 %t1088, i8* %t1087, i8* %t1086
-  %t1090 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t1091 = icmp eq i32 %t1085, 1
-  %t1092 = select i1 %t1091, i8* %t1090, i8* %t1089
-  %t1093 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t1094 = icmp eq i32 %t1085, 2
-  %t1095 = select i1 %t1094, i8* %t1093, i8* %t1092
-  %t1096 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t1097 = icmp eq i32 %t1085, 3
-  %t1098 = select i1 %t1097, i8* %t1096, i8* %t1095
-  %t1099 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t1100 = icmp eq i32 %t1085, 4
-  %t1101 = select i1 %t1100, i8* %t1099, i8* %t1098
-  %t1102 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t1103 = icmp eq i32 %t1085, 5
-  %t1104 = select i1 %t1103, i8* %t1102, i8* %t1101
-  %t1105 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t1106 = icmp eq i32 %t1085, 6
-  %t1107 = select i1 %t1106, i8* %t1105, i8* %t1104
-  %t1108 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t1109 = icmp eq i32 %t1085, 7
-  %t1110 = select i1 %t1109, i8* %t1108, i8* %t1107
-  %t1111 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t1112 = icmp eq i32 %t1085, 8
-  %t1113 = select i1 %t1112, i8* %t1111, i8* %t1110
-  %t1114 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t1115 = icmp eq i32 %t1085, 9
-  %t1116 = select i1 %t1115, i8* %t1114, i8* %t1113
-  %t1117 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t1118 = icmp eq i32 %t1085, 10
-  %t1119 = select i1 %t1118, i8* %t1117, i8* %t1116
-  %t1120 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t1121 = icmp eq i32 %t1085, 11
-  %t1122 = select i1 %t1121, i8* %t1120, i8* %t1119
-  %t1123 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t1124 = icmp eq i32 %t1085, 12
-  %t1125 = select i1 %t1124, i8* %t1123, i8* %t1122
-  %t1126 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t1127 = icmp eq i32 %t1085, 13
-  %t1128 = select i1 %t1127, i8* %t1126, i8* %t1125
-  %t1129 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t1130 = icmp eq i32 %t1085, 14
-  %t1131 = select i1 %t1130, i8* %t1129, i8* %t1128
-  %t1132 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t1133 = icmp eq i32 %t1085, 15
-  %t1134 = select i1 %t1133, i8* %t1132, i8* %t1131
-  %s1135 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1135, i32 0, i32 0
-  %t1136 = icmp eq i8* %t1134, %s1135
-  br i1 %t1136, label %then44, label %merge45
+  %t1092 = extractvalue %Expression %expression, 0
+  %t1093 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t1094 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t1095 = icmp eq i32 %t1092, 0
+  %t1096 = select i1 %t1095, i8* %t1094, i8* %t1093
+  %t1097 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t1098 = icmp eq i32 %t1092, 1
+  %t1099 = select i1 %t1098, i8* %t1097, i8* %t1096
+  %t1100 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t1101 = icmp eq i32 %t1092, 2
+  %t1102 = select i1 %t1101, i8* %t1100, i8* %t1099
+  %t1103 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t1104 = icmp eq i32 %t1092, 3
+  %t1105 = select i1 %t1104, i8* %t1103, i8* %t1102
+  %t1106 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t1107 = icmp eq i32 %t1092, 4
+  %t1108 = select i1 %t1107, i8* %t1106, i8* %t1105
+  %t1109 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t1110 = icmp eq i32 %t1092, 5
+  %t1111 = select i1 %t1110, i8* %t1109, i8* %t1108
+  %t1112 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t1113 = icmp eq i32 %t1092, 6
+  %t1114 = select i1 %t1113, i8* %t1112, i8* %t1111
+  %t1115 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t1116 = icmp eq i32 %t1092, 7
+  %t1117 = select i1 %t1116, i8* %t1115, i8* %t1114
+  %t1118 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t1119 = icmp eq i32 %t1092, 8
+  %t1120 = select i1 %t1119, i8* %t1118, i8* %t1117
+  %t1121 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t1122 = icmp eq i32 %t1092, 9
+  %t1123 = select i1 %t1122, i8* %t1121, i8* %t1120
+  %t1124 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t1125 = icmp eq i32 %t1092, 10
+  %t1126 = select i1 %t1125, i8* %t1124, i8* %t1123
+  %t1127 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t1128 = icmp eq i32 %t1092, 11
+  %t1129 = select i1 %t1128, i8* %t1127, i8* %t1126
+  %t1130 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t1131 = icmp eq i32 %t1092, 12
+  %t1132 = select i1 %t1131, i8* %t1130, i8* %t1129
+  %t1133 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t1134 = icmp eq i32 %t1092, 13
+  %t1135 = select i1 %t1134, i8* %t1133, i8* %t1132
+  %t1136 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t1137 = icmp eq i32 %t1092, 14
+  %t1138 = select i1 %t1137, i8* %t1136, i8* %t1135
+  %t1139 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t1140 = icmp eq i32 %t1092, 15
+  %t1141 = select i1 %t1140, i8* %t1139, i8* %t1138
+  %s1142 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1142, i32 0, i32 0
+  %t1143 = icmp eq i8* %t1141, %s1142
+  br i1 %t1143, label %then44, label %merge45
 then44:
-  %t1137 = extractvalue %Expression %expression, 0
-  %t1138 = alloca %Expression
-  store %Expression %expression, %Expression* %t1138
-  %t1139 = getelementptr inbounds %Expression, %Expression* %t1138, i32 0, i32 1
-  %t1140 = bitcast [16 x i8]* %t1139 to i8*
-  %t1141 = bitcast i8* %t1140 to %Expression*
-  %t1142 = load %Expression, %Expression* %t1141
-  %t1143 = icmp eq i32 %t1137, 14
-  %t1144 = select i1 %t1143, %Expression %t1142, %Expression zeroinitializer
-  %t1145 = call i8* @format_expression(%Expression %t1144)
-  %s1146 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1146, i32 0, i32 0
-  %t1147 = add i8* %t1145, %s1146
-  %t1148 = extractvalue %Expression %expression, 0
-  %t1149 = alloca %Expression
-  store %Expression %expression, %Expression* %t1149
-  %t1150 = getelementptr inbounds %Expression, %Expression* %t1149, i32 0, i32 1
-  %t1151 = bitcast [16 x i8]* %t1150 to i8*
-  %t1152 = getelementptr inbounds i8, i8* %t1151, i64 8
-  %t1153 = bitcast i8* %t1152 to %Expression*
-  %t1154 = load %Expression, %Expression* %t1153
-  %t1155 = icmp eq i32 %t1148, 14
-  %t1156 = select i1 %t1155, %Expression %t1154, %Expression zeroinitializer
-  %t1157 = call i8* @format_expression(%Expression %t1156)
-  %t1158 = add i8* %t1147, %t1157
-  ret i8* %t1158
+  %t1144 = extractvalue %Expression %expression, 0
+  %t1145 = alloca %Expression
+  store %Expression %expression, %Expression* %t1145
+  %t1146 = getelementptr inbounds %Expression, %Expression* %t1145, i32 0, i32 1
+  %t1147 = bitcast [16 x i8]* %t1146 to i8*
+  %t1148 = bitcast i8* %t1147 to %Expression**
+  %t1149 = load %Expression*, %Expression** %t1148
+  %t1150 = icmp eq i32 %t1144, 14
+  %t1151 = select i1 %t1150, %Expression* %t1149, %Expression* null
+  %t1152 = load %Expression, %Expression* %t1151
+  %t1153 = call i8* @format_expression(%Expression %t1152)
+  %s1154 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1154, i32 0, i32 0
+  %t1155 = add i8* %t1153, %s1154
+  %t1156 = extractvalue %Expression %expression, 0
+  %t1157 = alloca %Expression
+  store %Expression %expression, %Expression* %t1157
+  %t1158 = getelementptr inbounds %Expression, %Expression* %t1157, i32 0, i32 1
+  %t1159 = bitcast [16 x i8]* %t1158 to i8*
+  %t1160 = getelementptr inbounds i8, i8* %t1159, i64 8
+  %t1161 = bitcast i8* %t1160 to %Expression**
+  %t1162 = load %Expression*, %Expression** %t1161
+  %t1163 = icmp eq i32 %t1156, 14
+  %t1164 = select i1 %t1163, %Expression* %t1162, %Expression* null
+  %t1165 = load %Expression, %Expression* %t1164
+  %t1166 = call i8* @format_expression(%Expression %t1165)
+  %t1167 = add i8* %t1155, %t1166
+  ret i8* %t1167
 merge45:
-  %t1159 = extractvalue %Expression %expression, 0
-  %t1160 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t1161 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t1162 = icmp eq i32 %t1159, 0
-  %t1163 = select i1 %t1162, i8* %t1161, i8* %t1160
-  %t1164 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t1165 = icmp eq i32 %t1159, 1
-  %t1166 = select i1 %t1165, i8* %t1164, i8* %t1163
-  %t1167 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t1168 = icmp eq i32 %t1159, 2
-  %t1169 = select i1 %t1168, i8* %t1167, i8* %t1166
-  %t1170 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t1171 = icmp eq i32 %t1159, 3
+  %t1168 = extractvalue %Expression %expression, 0
+  %t1169 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t1170 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t1171 = icmp eq i32 %t1168, 0
   %t1172 = select i1 %t1171, i8* %t1170, i8* %t1169
-  %t1173 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t1174 = icmp eq i32 %t1159, 4
+  %t1173 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t1174 = icmp eq i32 %t1168, 1
   %t1175 = select i1 %t1174, i8* %t1173, i8* %t1172
-  %t1176 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t1177 = icmp eq i32 %t1159, 5
+  %t1176 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t1177 = icmp eq i32 %t1168, 2
   %t1178 = select i1 %t1177, i8* %t1176, i8* %t1175
-  %t1179 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t1180 = icmp eq i32 %t1159, 6
+  %t1179 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t1180 = icmp eq i32 %t1168, 3
   %t1181 = select i1 %t1180, i8* %t1179, i8* %t1178
-  %t1182 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t1183 = icmp eq i32 %t1159, 7
+  %t1182 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t1183 = icmp eq i32 %t1168, 4
   %t1184 = select i1 %t1183, i8* %t1182, i8* %t1181
-  %t1185 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t1186 = icmp eq i32 %t1159, 8
+  %t1185 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t1186 = icmp eq i32 %t1168, 5
   %t1187 = select i1 %t1186, i8* %t1185, i8* %t1184
-  %t1188 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t1189 = icmp eq i32 %t1159, 9
+  %t1188 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t1189 = icmp eq i32 %t1168, 6
   %t1190 = select i1 %t1189, i8* %t1188, i8* %t1187
-  %t1191 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t1192 = icmp eq i32 %t1159, 10
+  %t1191 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t1192 = icmp eq i32 %t1168, 7
   %t1193 = select i1 %t1192, i8* %t1191, i8* %t1190
-  %t1194 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t1195 = icmp eq i32 %t1159, 11
+  %t1194 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t1195 = icmp eq i32 %t1168, 8
   %t1196 = select i1 %t1195, i8* %t1194, i8* %t1193
-  %t1197 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t1198 = icmp eq i32 %t1159, 12
+  %t1197 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t1198 = icmp eq i32 %t1168, 9
   %t1199 = select i1 %t1198, i8* %t1197, i8* %t1196
-  %t1200 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t1201 = icmp eq i32 %t1159, 13
+  %t1200 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t1201 = icmp eq i32 %t1168, 10
   %t1202 = select i1 %t1201, i8* %t1200, i8* %t1199
-  %t1203 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t1204 = icmp eq i32 %t1159, 14
+  %t1203 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t1204 = icmp eq i32 %t1168, 11
   %t1205 = select i1 %t1204, i8* %t1203, i8* %t1202
-  %t1206 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t1207 = icmp eq i32 %t1159, 15
+  %t1206 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t1207 = icmp eq i32 %t1168, 12
   %t1208 = select i1 %t1207, i8* %t1206, i8* %t1205
-  %s1209 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1209, i32 0, i32 0
-  %t1210 = icmp eq i8* %t1208, %s1209
-  br i1 %t1210, label %then46, label %merge47
+  %t1209 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t1210 = icmp eq i32 %t1168, 13
+  %t1211 = select i1 %t1210, i8* %t1209, i8* %t1208
+  %t1212 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t1213 = icmp eq i32 %t1168, 14
+  %t1214 = select i1 %t1213, i8* %t1212, i8* %t1211
+  %t1215 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t1216 = icmp eq i32 %t1168, 15
+  %t1217 = select i1 %t1216, i8* %t1215, i8* %t1214
+  %s1218 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1218, i32 0, i32 0
+  %t1219 = icmp eq i8* %t1217, %s1218
+  br i1 %t1219, label %then46, label %merge47
 then46:
-  %s1211 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1211, i32 0, i32 0
-  ret i8* %s1211
+  %s1220 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1220, i32 0, i32 0
+  ret i8* %s1220
 merge47:
-  %t1212 = extractvalue %Expression %expression, 0
-  %t1213 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t1214 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t1215 = icmp eq i32 %t1212, 0
-  %t1216 = select i1 %t1215, i8* %t1214, i8* %t1213
-  %t1217 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t1218 = icmp eq i32 %t1212, 1
-  %t1219 = select i1 %t1218, i8* %t1217, i8* %t1216
-  %t1220 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t1221 = icmp eq i32 %t1212, 2
-  %t1222 = select i1 %t1221, i8* %t1220, i8* %t1219
-  %t1223 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t1224 = icmp eq i32 %t1212, 3
+  %t1221 = extractvalue %Expression %expression, 0
+  %t1222 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t1223 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t1224 = icmp eq i32 %t1221, 0
   %t1225 = select i1 %t1224, i8* %t1223, i8* %t1222
-  %t1226 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t1227 = icmp eq i32 %t1212, 4
+  %t1226 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t1227 = icmp eq i32 %t1221, 1
   %t1228 = select i1 %t1227, i8* %t1226, i8* %t1225
-  %t1229 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t1230 = icmp eq i32 %t1212, 5
+  %t1229 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t1230 = icmp eq i32 %t1221, 2
   %t1231 = select i1 %t1230, i8* %t1229, i8* %t1228
-  %t1232 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t1233 = icmp eq i32 %t1212, 6
+  %t1232 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t1233 = icmp eq i32 %t1221, 3
   %t1234 = select i1 %t1233, i8* %t1232, i8* %t1231
-  %t1235 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t1236 = icmp eq i32 %t1212, 7
+  %t1235 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t1236 = icmp eq i32 %t1221, 4
   %t1237 = select i1 %t1236, i8* %t1235, i8* %t1234
-  %t1238 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t1239 = icmp eq i32 %t1212, 8
+  %t1238 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t1239 = icmp eq i32 %t1221, 5
   %t1240 = select i1 %t1239, i8* %t1238, i8* %t1237
-  %t1241 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t1242 = icmp eq i32 %t1212, 9
+  %t1241 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t1242 = icmp eq i32 %t1221, 6
   %t1243 = select i1 %t1242, i8* %t1241, i8* %t1240
-  %t1244 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t1245 = icmp eq i32 %t1212, 10
+  %t1244 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t1245 = icmp eq i32 %t1221, 7
   %t1246 = select i1 %t1245, i8* %t1244, i8* %t1243
-  %t1247 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t1248 = icmp eq i32 %t1212, 11
+  %t1247 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t1248 = icmp eq i32 %t1221, 8
   %t1249 = select i1 %t1248, i8* %t1247, i8* %t1246
-  %t1250 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t1251 = icmp eq i32 %t1212, 12
+  %t1250 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t1251 = icmp eq i32 %t1221, 9
   %t1252 = select i1 %t1251, i8* %t1250, i8* %t1249
-  %t1253 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t1254 = icmp eq i32 %t1212, 13
+  %t1253 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t1254 = icmp eq i32 %t1221, 10
   %t1255 = select i1 %t1254, i8* %t1253, i8* %t1252
-  %t1256 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t1257 = icmp eq i32 %t1212, 14
+  %t1256 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t1257 = icmp eq i32 %t1221, 11
   %t1258 = select i1 %t1257, i8* %t1256, i8* %t1255
-  %t1259 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t1260 = icmp eq i32 %t1212, 15
+  %t1259 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t1260 = icmp eq i32 %t1221, 12
   %t1261 = select i1 %t1260, i8* %t1259, i8* %t1258
-  %s1262 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1262, i32 0, i32 0
-  %t1263 = icmp eq i8* %t1261, %s1262
-  br i1 %t1263, label %then48, label %merge49
+  %t1262 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t1263 = icmp eq i32 %t1221, 13
+  %t1264 = select i1 %t1263, i8* %t1262, i8* %t1261
+  %t1265 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t1266 = icmp eq i32 %t1221, 14
+  %t1267 = select i1 %t1266, i8* %t1265, i8* %t1264
+  %t1268 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t1269 = icmp eq i32 %t1221, 15
+  %t1270 = select i1 %t1269, i8* %t1268, i8* %t1267
+  %s1271 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1271, i32 0, i32 0
+  %t1272 = icmp eq i8* %t1270, %s1271
+  br i1 %t1272, label %then48, label %merge49
 then48:
-  %t1264 = extractvalue %Expression %expression, 0
-  %t1265 = alloca %Expression
-  store %Expression %expression, %Expression* %t1265
-  %t1266 = getelementptr inbounds %Expression, %Expression* %t1265, i32 0, i32 1
-  %t1267 = bitcast [8 x i8]* %t1266 to i8*
-  %t1268 = bitcast i8* %t1267 to i8**
-  %t1269 = load i8*, i8** %t1268
-  %t1270 = icmp eq i32 %t1264, 15
-  %t1271 = select i1 %t1270, i8* %t1269, i8* null
-  %t1272 = call i8* @trim_text(i8* %t1271)
-  ret i8* %t1272
-merge49:
   %t1273 = extractvalue %Expression %expression, 0
-  %t1274 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t1275 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t1276 = icmp eq i32 %t1273, 0
-  %t1277 = select i1 %t1276, i8* %t1275, i8* %t1274
-  %t1278 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t1279 = icmp eq i32 %t1273, 1
-  %t1280 = select i1 %t1279, i8* %t1278, i8* %t1277
-  %t1281 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t1282 = icmp eq i32 %t1273, 2
-  %t1283 = select i1 %t1282, i8* %t1281, i8* %t1280
-  %t1284 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t1285 = icmp eq i32 %t1273, 3
+  %t1274 = alloca %Expression
+  store %Expression %expression, %Expression* %t1274
+  %t1275 = getelementptr inbounds %Expression, %Expression* %t1274, i32 0, i32 1
+  %t1276 = bitcast [8 x i8]* %t1275 to i8*
+  %t1277 = bitcast i8* %t1276 to i8**
+  %t1278 = load i8*, i8** %t1277
+  %t1279 = icmp eq i32 %t1273, 15
+  %t1280 = select i1 %t1279, i8* %t1278, i8* null
+  %t1281 = call i8* @trim_text(i8* %t1280)
+  ret i8* %t1281
+merge49:
+  %t1282 = extractvalue %Expression %expression, 0
+  %t1283 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t1284 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t1285 = icmp eq i32 %t1282, 0
   %t1286 = select i1 %t1285, i8* %t1284, i8* %t1283
-  %t1287 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t1288 = icmp eq i32 %t1273, 4
+  %t1287 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t1288 = icmp eq i32 %t1282, 1
   %t1289 = select i1 %t1288, i8* %t1287, i8* %t1286
-  %t1290 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t1291 = icmp eq i32 %t1273, 5
+  %t1290 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t1291 = icmp eq i32 %t1282, 2
   %t1292 = select i1 %t1291, i8* %t1290, i8* %t1289
-  %t1293 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t1294 = icmp eq i32 %t1273, 6
+  %t1293 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t1294 = icmp eq i32 %t1282, 3
   %t1295 = select i1 %t1294, i8* %t1293, i8* %t1292
-  %t1296 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t1297 = icmp eq i32 %t1273, 7
+  %t1296 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t1297 = icmp eq i32 %t1282, 4
   %t1298 = select i1 %t1297, i8* %t1296, i8* %t1295
-  %t1299 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t1300 = icmp eq i32 %t1273, 8
+  %t1299 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t1300 = icmp eq i32 %t1282, 5
   %t1301 = select i1 %t1300, i8* %t1299, i8* %t1298
-  %t1302 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t1303 = icmp eq i32 %t1273, 9
+  %t1302 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t1303 = icmp eq i32 %t1282, 6
   %t1304 = select i1 %t1303, i8* %t1302, i8* %t1301
-  %t1305 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t1306 = icmp eq i32 %t1273, 10
+  %t1305 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t1306 = icmp eq i32 %t1282, 7
   %t1307 = select i1 %t1306, i8* %t1305, i8* %t1304
-  %t1308 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t1309 = icmp eq i32 %t1273, 11
+  %t1308 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t1309 = icmp eq i32 %t1282, 8
   %t1310 = select i1 %t1309, i8* %t1308, i8* %t1307
-  %t1311 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t1312 = icmp eq i32 %t1273, 12
+  %t1311 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t1312 = icmp eq i32 %t1282, 9
   %t1313 = select i1 %t1312, i8* %t1311, i8* %t1310
-  %t1314 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t1315 = icmp eq i32 %t1273, 13
+  %t1314 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t1315 = icmp eq i32 %t1282, 10
   %t1316 = select i1 %t1315, i8* %t1314, i8* %t1313
-  %t1317 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t1318 = icmp eq i32 %t1273, 14
+  %t1317 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t1318 = icmp eq i32 %t1282, 11
   %t1319 = select i1 %t1318, i8* %t1317, i8* %t1316
-  %t1320 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t1321 = icmp eq i32 %t1273, 15
+  %t1320 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t1321 = icmp eq i32 %t1282, 12
   %t1322 = select i1 %t1321, i8* %t1320, i8* %t1319
-  %t1323 = load i8, i8* %t1322
-  %t1324 = add i8 60, %t1323
-  %t1325 = add i8 %t1324, 62
-  %t1326 = alloca [2 x i8], align 1
-  %t1327 = getelementptr [2 x i8], [2 x i8]* %t1326, i32 0, i32 0
-  store i8 %t1325, i8* %t1327
-  %t1328 = getelementptr [2 x i8], [2 x i8]* %t1326, i32 0, i32 1
-  store i8 0, i8* %t1328
-  %t1329 = getelementptr [2 x i8], [2 x i8]* %t1326, i32 0, i32 0
-  ret i8* %t1329
+  %t1323 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t1324 = icmp eq i32 %t1282, 13
+  %t1325 = select i1 %t1324, i8* %t1323, i8* %t1322
+  %t1326 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t1327 = icmp eq i32 %t1282, 14
+  %t1328 = select i1 %t1327, i8* %t1326, i8* %t1325
+  %t1329 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t1330 = icmp eq i32 %t1282, 15
+  %t1331 = select i1 %t1330, i8* %t1329, i8* %t1328
+  %t1332 = load i8, i8* %t1331
+  %t1333 = add i8 60, %t1332
+  %t1334 = add i8 %t1333, 62
+  %t1335 = alloca [2 x i8], align 1
+  %t1336 = getelementptr [2 x i8], [2 x i8]* %t1335, i32 0, i32 0
+  store i8 %t1334, i8* %t1336
+  %t1337 = getelementptr [2 x i8], [2 x i8]* %t1335, i32 0, i32 1
+  store i8 0, i8* %t1337
+  %t1338 = getelementptr [2 x i8], [2 x i8]* %t1335, i32 0, i32 0
+  ret i8* %t1338
 }
 
 define i8* @format_array_expression({ %Expression*, i64 }* %elements) {
@@ -12987,244 +12996,246 @@ then12:
   store %Expression %expression, %Expression* %t314
   %t315 = getelementptr inbounds %Expression, %Expression* %t314, i32 0, i32 1
   %t316 = bitcast [16 x i8]* %t315 to i8*
-  %t317 = bitcast i8* %t316 to %Expression*
-  %t318 = load %Expression, %Expression* %t317
+  %t317 = bitcast i8* %t316 to %Expression**
+  %t318 = load %Expression*, %Expression** %t317
   %t319 = icmp eq i32 %t313, 7
-  %t320 = select i1 %t319, %Expression %t318, %Expression zeroinitializer
-  %t321 = extractvalue %Expression %t320, 0
-  %t322 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t323 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t324 = icmp eq i32 %t321, 0
-  %t325 = select i1 %t324, i8* %t323, i8* %t322
-  %t326 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t327 = icmp eq i32 %t321, 1
-  %t328 = select i1 %t327, i8* %t326, i8* %t325
-  %t329 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t330 = icmp eq i32 %t321, 2
-  %t331 = select i1 %t330, i8* %t329, i8* %t328
-  %t332 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t333 = icmp eq i32 %t321, 3
-  %t334 = select i1 %t333, i8* %t332, i8* %t331
-  %t335 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t336 = icmp eq i32 %t321, 4
-  %t337 = select i1 %t336, i8* %t335, i8* %t334
-  %t338 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t339 = icmp eq i32 %t321, 5
-  %t340 = select i1 %t339, i8* %t338, i8* %t337
-  %t341 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t342 = icmp eq i32 %t321, 6
-  %t343 = select i1 %t342, i8* %t341, i8* %t340
-  %t344 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t345 = icmp eq i32 %t321, 7
-  %t346 = select i1 %t345, i8* %t344, i8* %t343
-  %t347 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t348 = icmp eq i32 %t321, 8
-  %t349 = select i1 %t348, i8* %t347, i8* %t346
-  %t350 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t351 = icmp eq i32 %t321, 9
-  %t352 = select i1 %t351, i8* %t350, i8* %t349
-  %t353 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t354 = icmp eq i32 %t321, 10
-  %t355 = select i1 %t354, i8* %t353, i8* %t352
-  %t356 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t357 = icmp eq i32 %t321, 11
-  %t358 = select i1 %t357, i8* %t356, i8* %t355
-  %t359 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t360 = icmp eq i32 %t321, 12
-  %t361 = select i1 %t360, i8* %t359, i8* %t358
-  %t362 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t363 = icmp eq i32 %t321, 13
-  %t364 = select i1 %t363, i8* %t362, i8* %t361
-  %t365 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t366 = icmp eq i32 %t321, 14
-  %t367 = select i1 %t366, i8* %t365, i8* %t364
-  %t368 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t369 = icmp eq i32 %t321, 15
-  %t370 = select i1 %t369, i8* %t368, i8* %t367
-  %s371 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.371, i32 0, i32 0
-  %t372 = icmp eq i8* %t370, %s371
-  br i1 %t372, label %then14, label %merge15
+  %t320 = select i1 %t319, %Expression* %t318, %Expression* null
+  %t321 = getelementptr inbounds %Expression, %Expression* %t320, i32 0, i32 0
+  %t322 = load i32, i32* %t321
+  %t323 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t324 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t325 = icmp eq i32 %t322, 0
+  %t326 = select i1 %t325, i8* %t324, i8* %t323
+  %t327 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t328 = icmp eq i32 %t322, 1
+  %t329 = select i1 %t328, i8* %t327, i8* %t326
+  %t330 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t331 = icmp eq i32 %t322, 2
+  %t332 = select i1 %t331, i8* %t330, i8* %t329
+  %t333 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t334 = icmp eq i32 %t322, 3
+  %t335 = select i1 %t334, i8* %t333, i8* %t332
+  %t336 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t337 = icmp eq i32 %t322, 4
+  %t338 = select i1 %t337, i8* %t336, i8* %t335
+  %t339 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t340 = icmp eq i32 %t322, 5
+  %t341 = select i1 %t340, i8* %t339, i8* %t338
+  %t342 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t343 = icmp eq i32 %t322, 6
+  %t344 = select i1 %t343, i8* %t342, i8* %t341
+  %t345 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t346 = icmp eq i32 %t322, 7
+  %t347 = select i1 %t346, i8* %t345, i8* %t344
+  %t348 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t349 = icmp eq i32 %t322, 8
+  %t350 = select i1 %t349, i8* %t348, i8* %t347
+  %t351 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t352 = icmp eq i32 %t322, 9
+  %t353 = select i1 %t352, i8* %t351, i8* %t350
+  %t354 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t355 = icmp eq i32 %t322, 10
+  %t356 = select i1 %t355, i8* %t354, i8* %t353
+  %t357 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t358 = icmp eq i32 %t322, 11
+  %t359 = select i1 %t358, i8* %t357, i8* %t356
+  %t360 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t361 = icmp eq i32 %t322, 12
+  %t362 = select i1 %t361, i8* %t360, i8* %t359
+  %t363 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t364 = icmp eq i32 %t322, 13
+  %t365 = select i1 %t364, i8* %t363, i8* %t362
+  %t366 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t367 = icmp eq i32 %t322, 14
+  %t368 = select i1 %t367, i8* %t366, i8* %t365
+  %t369 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t370 = icmp eq i32 %t322, 15
+  %t371 = select i1 %t370, i8* %t369, i8* %t368
+  %s372 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.372, i32 0, i32 0
+  %t373 = icmp eq i8* %t371, %s372
+  br i1 %t373, label %then14, label %merge15
 then14:
-  %t373 = extractvalue %Expression %expression, 0
-  %t374 = alloca %Expression
-  store %Expression %expression, %Expression* %t374
-  %t375 = getelementptr inbounds %Expression, %Expression* %t374, i32 0, i32 1
-  %t376 = bitcast [16 x i8]* %t375 to i8*
-  %t377 = bitcast i8* %t376 to %Expression*
-  %t378 = load %Expression, %Expression* %t377
-  %t379 = icmp eq i32 %t373, 7
-  %t380 = select i1 %t379, %Expression %t378, %Expression zeroinitializer
-  %t381 = extractvalue %Expression %t380, 0
-  %t382 = alloca %Expression
-  store %Expression %t380, %Expression* %t382
-  %t383 = getelementptr inbounds %Expression, %Expression* %t382, i32 0, i32 1
-  %t384 = bitcast [8 x i8]* %t383 to i8*
-  %t385 = bitcast i8* %t384 to i8**
-  %t386 = load i8*, i8** %t385
-  %t387 = icmp eq i32 %t381, 0
-  %t388 = select i1 %t387, i8* %t386, i8* null
-  ret i8* %t388
+  %t374 = extractvalue %Expression %expression, 0
+  %t375 = alloca %Expression
+  store %Expression %expression, %Expression* %t375
+  %t376 = getelementptr inbounds %Expression, %Expression* %t375, i32 0, i32 1
+  %t377 = bitcast [16 x i8]* %t376 to i8*
+  %t378 = bitcast i8* %t377 to %Expression**
+  %t379 = load %Expression*, %Expression** %t378
+  %t380 = icmp eq i32 %t374, 7
+  %t381 = select i1 %t380, %Expression* %t379, %Expression* null
+  %t382 = getelementptr inbounds %Expression, %Expression* %t381, i32 0, i32 0
+  %t383 = load i32, i32* %t382
+  %t384 = getelementptr inbounds %Expression, %Expression* %t381, i32 0, i32 1
+  %t385 = bitcast [8 x i8]* %t384 to i8*
+  %t386 = bitcast i8* %t385 to i8**
+  %t387 = load i8*, i8** %t386
+  %t388 = icmp eq i32 %t383, 0
+  %t389 = select i1 %t388, i8* %t387, i8* null
+  ret i8* %t389
 merge15:
-  %t389 = extractvalue %Expression %expression, 0
-  %t390 = alloca %Expression
-  store %Expression %expression, %Expression* %t390
-  %t391 = getelementptr inbounds %Expression, %Expression* %t390, i32 0, i32 1
-  %t392 = bitcast [16 x i8]* %t391 to i8*
-  %t393 = bitcast i8* %t392 to %Expression*
-  %t394 = load %Expression, %Expression* %t393
-  %t395 = icmp eq i32 %t389, 7
-  %t396 = select i1 %t395, %Expression %t394, %Expression zeroinitializer
-  %t397 = extractvalue %Expression %t396, 0
-  %t398 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t399 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t400 = icmp eq i32 %t397, 0
-  %t401 = select i1 %t400, i8* %t399, i8* %t398
-  %t402 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t403 = icmp eq i32 %t397, 1
-  %t404 = select i1 %t403, i8* %t402, i8* %t401
-  %t405 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t406 = icmp eq i32 %t397, 2
-  %t407 = select i1 %t406, i8* %t405, i8* %t404
-  %t408 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t409 = icmp eq i32 %t397, 3
-  %t410 = select i1 %t409, i8* %t408, i8* %t407
-  %t411 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t412 = icmp eq i32 %t397, 4
-  %t413 = select i1 %t412, i8* %t411, i8* %t410
-  %t414 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t415 = icmp eq i32 %t397, 5
-  %t416 = select i1 %t415, i8* %t414, i8* %t413
-  %t417 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t418 = icmp eq i32 %t397, 6
-  %t419 = select i1 %t418, i8* %t417, i8* %t416
-  %t420 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t421 = icmp eq i32 %t397, 7
-  %t422 = select i1 %t421, i8* %t420, i8* %t419
-  %t423 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t424 = icmp eq i32 %t397, 8
-  %t425 = select i1 %t424, i8* %t423, i8* %t422
-  %t426 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t427 = icmp eq i32 %t397, 9
-  %t428 = select i1 %t427, i8* %t426, i8* %t425
-  %t429 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t430 = icmp eq i32 %t397, 10
-  %t431 = select i1 %t430, i8* %t429, i8* %t428
-  %t432 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t433 = icmp eq i32 %t397, 11
-  %t434 = select i1 %t433, i8* %t432, i8* %t431
-  %t435 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t436 = icmp eq i32 %t397, 12
-  %t437 = select i1 %t436, i8* %t435, i8* %t434
-  %t438 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t439 = icmp eq i32 %t397, 13
-  %t440 = select i1 %t439, i8* %t438, i8* %t437
-  %t441 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t442 = icmp eq i32 %t397, 14
-  %t443 = select i1 %t442, i8* %t441, i8* %t440
-  %t444 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t445 = icmp eq i32 %t397, 15
-  %t446 = select i1 %t445, i8* %t444, i8* %t443
-  %s447 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.447, i32 0, i32 0
-  %t448 = icmp eq i8* %t446, %s447
-  br i1 %t448, label %then16, label %merge17
+  %t390 = extractvalue %Expression %expression, 0
+  %t391 = alloca %Expression
+  store %Expression %expression, %Expression* %t391
+  %t392 = getelementptr inbounds %Expression, %Expression* %t391, i32 0, i32 1
+  %t393 = bitcast [16 x i8]* %t392 to i8*
+  %t394 = bitcast i8* %t393 to %Expression**
+  %t395 = load %Expression*, %Expression** %t394
+  %t396 = icmp eq i32 %t390, 7
+  %t397 = select i1 %t396, %Expression* %t395, %Expression* null
+  %t398 = getelementptr inbounds %Expression, %Expression* %t397, i32 0, i32 0
+  %t399 = load i32, i32* %t398
+  %t400 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t401 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t402 = icmp eq i32 %t399, 0
+  %t403 = select i1 %t402, i8* %t401, i8* %t400
+  %t404 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t405 = icmp eq i32 %t399, 1
+  %t406 = select i1 %t405, i8* %t404, i8* %t403
+  %t407 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t408 = icmp eq i32 %t399, 2
+  %t409 = select i1 %t408, i8* %t407, i8* %t406
+  %t410 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t411 = icmp eq i32 %t399, 3
+  %t412 = select i1 %t411, i8* %t410, i8* %t409
+  %t413 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t414 = icmp eq i32 %t399, 4
+  %t415 = select i1 %t414, i8* %t413, i8* %t412
+  %t416 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t417 = icmp eq i32 %t399, 5
+  %t418 = select i1 %t417, i8* %t416, i8* %t415
+  %t419 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t420 = icmp eq i32 %t399, 6
+  %t421 = select i1 %t420, i8* %t419, i8* %t418
+  %t422 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t423 = icmp eq i32 %t399, 7
+  %t424 = select i1 %t423, i8* %t422, i8* %t421
+  %t425 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t426 = icmp eq i32 %t399, 8
+  %t427 = select i1 %t426, i8* %t425, i8* %t424
+  %t428 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t429 = icmp eq i32 %t399, 9
+  %t430 = select i1 %t429, i8* %t428, i8* %t427
+  %t431 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t432 = icmp eq i32 %t399, 10
+  %t433 = select i1 %t432, i8* %t431, i8* %t430
+  %t434 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t435 = icmp eq i32 %t399, 11
+  %t436 = select i1 %t435, i8* %t434, i8* %t433
+  %t437 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t438 = icmp eq i32 %t399, 12
+  %t439 = select i1 %t438, i8* %t437, i8* %t436
+  %t440 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t441 = icmp eq i32 %t399, 13
+  %t442 = select i1 %t441, i8* %t440, i8* %t439
+  %t443 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t444 = icmp eq i32 %t399, 14
+  %t445 = select i1 %t444, i8* %t443, i8* %t442
+  %t446 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t447 = icmp eq i32 %t399, 15
+  %t448 = select i1 %t447, i8* %t446, i8* %t445
+  %s449 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.449, i32 0, i32 0
+  %t450 = icmp eq i8* %t448, %s449
+  br i1 %t450, label %then16, label %merge17
 then16:
-  %t449 = extractvalue %Expression %expression, 0
-  %t450 = alloca %Expression
-  store %Expression %expression, %Expression* %t450
-  %t451 = getelementptr inbounds %Expression, %Expression* %t450, i32 0, i32 1
-  %t452 = bitcast [16 x i8]* %t451 to i8*
-  %t453 = bitcast i8* %t452 to %Expression*
-  %t454 = load %Expression, %Expression* %t453
-  %t455 = icmp eq i32 %t449, 7
-  %t456 = select i1 %t455, %Expression %t454, %Expression zeroinitializer
-  %t457 = call i8* @infer_expression_type(%Expression %t456)
-  ret i8* %t457
+  %t451 = extractvalue %Expression %expression, 0
+  %t452 = alloca %Expression
+  store %Expression %expression, %Expression* %t452
+  %t453 = getelementptr inbounds %Expression, %Expression* %t452, i32 0, i32 1
+  %t454 = bitcast [16 x i8]* %t453 to i8*
+  %t455 = bitcast i8* %t454 to %Expression**
+  %t456 = load %Expression*, %Expression** %t455
+  %t457 = icmp eq i32 %t451, 7
+  %t458 = select i1 %t457, %Expression* %t456, %Expression* null
+  %t459 = load %Expression, %Expression* %t458
+  %t460 = call i8* @infer_expression_type(%Expression %t459)
+  ret i8* %t460
 merge17:
-  %s458 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.458, i32 0, i32 0
-  ret i8* %s458
+  %s461 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.461, i32 0, i32 0
+  ret i8* %s461
 merge13:
-  %t459 = extractvalue %Expression %expression, 0
-  %t460 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
-  %t461 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
-  %t462 = icmp eq i32 %t459, 0
-  %t463 = select i1 %t462, i8* %t461, i8* %t460
-  %t464 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
-  %t465 = icmp eq i32 %t459, 1
+  %t462 = extractvalue %Expression %expression, 0
+  %t463 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
+  %t464 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.Expression.Identifier.variant, i32 0, i32 0
+  %t465 = icmp eq i32 %t462, 0
   %t466 = select i1 %t465, i8* %t464, i8* %t463
-  %t467 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
-  %t468 = icmp eq i32 %t459, 2
+  %t467 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.NumberLiteral.variant, i32 0, i32 0
+  %t468 = icmp eq i32 %t462, 1
   %t469 = select i1 %t468, i8* %t467, i8* %t466
-  %t470 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
-  %t471 = icmp eq i32 %t459, 3
+  %t470 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Expression.StringLiteral.variant, i32 0, i32 0
+  %t471 = icmp eq i32 %t462, 2
   %t472 = select i1 %t471, i8* %t470, i8* %t469
-  %t473 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
-  %t474 = icmp eq i32 %t459, 4
+  %t473 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Expression.BooleanLiteral.variant, i32 0, i32 0
+  %t474 = icmp eq i32 %t462, 3
   %t475 = select i1 %t474, i8* %t473, i8* %t472
-  %t476 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
-  %t477 = icmp eq i32 %t459, 5
+  %t476 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Expression.NullLiteral.variant, i32 0, i32 0
+  %t477 = icmp eq i32 %t462, 4
   %t478 = select i1 %t477, i8* %t476, i8* %t475
-  %t479 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
-  %t480 = icmp eq i32 %t459, 6
+  %t479 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Unary.variant, i32 0, i32 0
+  %t480 = icmp eq i32 %t462, 5
   %t481 = select i1 %t480, i8* %t479, i8* %t478
-  %t482 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
-  %t483 = icmp eq i32 %t459, 7
+  %t482 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Binary.variant, i32 0, i32 0
+  %t483 = icmp eq i32 %t462, 6
   %t484 = select i1 %t483, i8* %t482, i8* %t481
-  %t485 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
-  %t486 = icmp eq i32 %t459, 8
+  %t485 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Member.variant, i32 0, i32 0
+  %t486 = icmp eq i32 %t462, 7
   %t487 = select i1 %t486, i8* %t485, i8* %t484
-  %t488 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
-  %t489 = icmp eq i32 %t459, 9
+  %t488 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.Expression.Call.variant, i32 0, i32 0
+  %t489 = icmp eq i32 %t462, 8
   %t490 = select i1 %t489, i8* %t488, i8* %t487
-  %t491 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
-  %t492 = icmp eq i32 %t459, 10
+  %t491 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Index.variant, i32 0, i32 0
+  %t492 = icmp eq i32 %t462, 9
   %t493 = select i1 %t492, i8* %t491, i8* %t490
-  %t494 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
-  %t495 = icmp eq i32 %t459, 11
+  %t494 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Array.variant, i32 0, i32 0
+  %t495 = icmp eq i32 %t462, 10
   %t496 = select i1 %t495, i8* %t494, i8* %t493
-  %t497 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
-  %t498 = icmp eq i32 %t459, 12
+  %t497 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Object.variant, i32 0, i32 0
+  %t498 = icmp eq i32 %t462, 11
   %t499 = select i1 %t498, i8* %t497, i8* %t496
-  %t500 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
-  %t501 = icmp eq i32 %t459, 13
+  %t500 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Struct.variant, i32 0, i32 0
+  %t501 = icmp eq i32 %t462, 12
   %t502 = select i1 %t501, i8* %t500, i8* %t499
-  %t503 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
-  %t504 = icmp eq i32 %t459, 14
+  %t503 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.Expression.Lambda.variant, i32 0, i32 0
+  %t504 = icmp eq i32 %t462, 13
   %t505 = select i1 %t504, i8* %t503, i8* %t502
-  %t506 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
-  %t507 = icmp eq i32 %t459, 15
+  %t506 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.Expression.Range.variant, i32 0, i32 0
+  %t507 = icmp eq i32 %t462, 14
   %t508 = select i1 %t507, i8* %t506, i8* %t505
-  %s509 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.509, i32 0, i32 0
-  %t510 = icmp eq i8* %t508, %s509
-  br i1 %t510, label %then18, label %merge19
+  %t509 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
+  %t510 = icmp eq i32 %t462, 15
+  %t511 = select i1 %t510, i8* %t509, i8* %t508
+  %s512 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.512, i32 0, i32 0
+  %t513 = icmp eq i8* %t511, %s512
+  br i1 %t513, label %then18, label %merge19
 then18:
-  %t511 = extractvalue %Expression %expression, 0
-  %t512 = alloca %Expression
-  store %Expression %expression, %Expression* %t512
-  %t513 = getelementptr inbounds %Expression, %Expression* %t512, i32 0, i32 1
-  %t514 = bitcast [8 x i8]* %t513 to i8*
-  %t515 = bitcast i8* %t514 to { %Expression**, i64 }**
-  %t516 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t515
-  %t517 = icmp eq i32 %t511, 10
-  %t518 = select i1 %t517, { %Expression**, i64 }* %t516, { %Expression**, i64 }* null
-  %t519 = bitcast { %Expression**, i64 }* %t518 to { %Expression*, i64 }*
-  %t520 = call i8* @infer_array_element_type({ %Expression*, i64 }* %t519)
-  store i8* %t520, i8** %l0
-  %t521 = load i8*, i8** %l0
-  %t522 = call i64 @sailfin_runtime_string_length(i8* %t521)
-  %t523 = icmp eq i64 %t522, 0
+  %t514 = extractvalue %Expression %expression, 0
+  %t515 = alloca %Expression
+  store %Expression %expression, %Expression* %t515
+  %t516 = getelementptr inbounds %Expression, %Expression* %t515, i32 0, i32 1
+  %t517 = bitcast [8 x i8]* %t516 to i8*
+  %t518 = bitcast i8* %t517 to { %Expression**, i64 }**
+  %t519 = load { %Expression**, i64 }*, { %Expression**, i64 }** %t518
+  %t520 = icmp eq i32 %t514, 10
+  %t521 = select i1 %t520, { %Expression**, i64 }* %t519, { %Expression**, i64 }* null
+  %t522 = bitcast { %Expression**, i64 }* %t521 to { %Expression*, i64 }*
+  %t523 = call i8* @infer_array_element_type({ %Expression*, i64 }* %t522)
+  store i8* %t523, i8** %l0
   %t524 = load i8*, i8** %l0
-  br i1 %t523, label %then20, label %merge21
+  %t525 = call i64 @sailfin_runtime_string_length(i8* %t524)
+  %t526 = icmp eq i64 %t525, 0
+  %t527 = load i8*, i8** %l0
+  br i1 %t526, label %then20, label %merge21
 then20:
-  %s525 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.525, i32 0, i32 0
-  ret i8* %s525
+  %s528 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.528, i32 0, i32 0
+  ret i8* %s528
 merge21:
-  %t526 = load i8*, i8** %l0
-  %s527 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.527, i32 0, i32 0
-  %t528 = add i8* %t526, %s527
-  ret i8* %t528
+  %t529 = load i8*, i8** %l0
+  %s530 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.530, i32 0, i32 0
+  %t531 = add i8* %t529, %s530
+  ret i8* %t531
 merge19:
-  %s529 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.529, i32 0, i32 0
-  ret i8* %s529
+  %s532 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.532, i32 0, i32 0
+  ret i8* %s532
 }
 
 define i8* @quote_string(i8* %value) {
