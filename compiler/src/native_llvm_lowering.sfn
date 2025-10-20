@@ -500,10 +500,14 @@ fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[]
 }
 
 fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
-    let mut diagnostics -> string[] = [];
     if manifest == null {
-        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: diagnostics };
+        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
     }
+    return apply_layout_manifest_entries(structs, enums, manifest);
+}
+
+fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest) -> LayoutManifestApplication {
+    let mut diagnostics -> string[] = [];
 
     let mut updated_structs -> NativeStruct[] = structs;
     let mut struct_index -> number = 0;
@@ -536,7 +540,7 @@ fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnu
             break;
         }
         let layout_enum = manifest.enums[enum_index];
-        let target_index = find_enum_index(updated_enums, layout_enum.name);
+    let target_index = find_enum_index(updated_enums, layout_enum.name);
         if target_index < 0 {
             diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
         } else {

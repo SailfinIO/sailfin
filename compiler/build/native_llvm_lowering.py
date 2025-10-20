@@ -747,9 +747,12 @@ def load_imported_layout_manifests(imports):
     return []
 
 def apply_layout_manifest_to_module(structs, enums, manifest):
-    diagnostics = []
     if manifest == None:
-        return LayoutManifestApplication(structs=structs, enums=enums, diagnostics=diagnostics)
+        return LayoutManifestApplication(structs=structs, enums=enums, diagnostics=[])
+    return apply_layout_manifest_entries(structs, enums, manifest)
+
+def apply_layout_manifest_entries(structs, enums, manifest):
+    diagnostics = []
     updated_structs = structs
     struct_index = 0
     while True:
