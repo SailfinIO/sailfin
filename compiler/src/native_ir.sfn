@@ -1995,13 +1995,23 @@ fn parse_enum_variant_field(text -> string) -> NativeEnumVariantField? {
     return NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
+fn text_char_at(value -> string, index -> number) -> string {
+    if index < 0 {
+        return "";
+    }
+    if index >= value.length {
+        return "";
+    }
+    return substring(value, index, index + 1);
+}
+
 fn trim_trailing_delimiters(text -> string) -> string {
     let mut end -> number = text.length;
     loop {
         if end <= 0 {
             break;
         }
-        let ch = text[end - 1];
+        let ch = text_char_at(text, end - 1);
         if ch == "," || ch == ";" {
             end -= 1;
             continue;
@@ -2760,7 +2770,7 @@ fn split_whitespace(value -> string) -> string[] {
         if index >= value.length {
             break;
         }
-        let ch = value[index];
+        let ch = text_char_at(value, index);
         let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
         if is_space {
             if start >= 0 {

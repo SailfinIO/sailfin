@@ -1615,12 +1615,19 @@ def parse_enum_variant_field(text):
     type_text = trim_text(substring(trimmed, arrow_index + 2, len(trimmed)))
     return NativeEnumVariantField(name=name, type_annotation=type_text, mutable=is_mutable)
 
+def text_char_at(value, index):
+    if index < 0:
+        return ""
+    if index >= len(value):
+        return ""
+    return substring(value, index, index + 1)
+
 def trim_trailing_delimiters(text):
     end = len(text)
     while True:
         if end <= 0:
             break
-        ch = text[end - 1]
+        ch = text_char_at(text, end - 1)
         if ch == ","  or  ch == ";":
             end -= 1
             continue
@@ -2219,7 +2226,7 @@ def split_whitespace(value):
     while True:
         if index >= len(value):
             break
-        ch = value[index]
+        ch = text_char_at(value, index)
         is_space = ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"
         if is_space:
             if start >= 0:
