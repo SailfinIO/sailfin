@@ -55,6 +55,11 @@
 .layout field capability_manifest type=CapabilityManifest offset=48 size=8 align=8
 .layout field string_constants type=StringConstant[] offset=56 size=8 align=8
 
+.layout struct name=LayoutManifestApplication size=24 align=8
+.layout field structs type=NativeStruct[] offset=0 size=8 align=8
+.layout field enums type=NativeEnum[] offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
 .layout struct name=LoweredLLVMFunction size=32 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8

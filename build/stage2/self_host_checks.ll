@@ -1,12 +1,12 @@
 ; ModuleID = 'sailfin'
 source_filename = "sailfin"
 
-%SelfHostCheckResult = type { i1, double, double, { i8**, i64 }*, { i8**, i64 }* }
+%SelfHostCheckResult = type { i1, double, double, { %ModuleDiagnostics**, i64 }*, { i8**, i64 }* }
 %CompiledModule = type { i8*, i8* }
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
-%ModuleCompilationResult = type { i8*, { i8**, i64 }* }
-%ProjectCompilation = type { { i8**, i64 }*, { i8**, i64 }* }
-%LLVMCompilationResult = type { i8*, i8* }
+%ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics**, i64 }* }
+%ProjectCompilation = type { { %CompiledModule**, i64 }*, { %ModuleDiagnostics**, i64 }* }
+%LLVMCompilationResult = type { %LoweredLLVMResult*, %NativeModule* }
 
 declare noalias i8* @malloc(i64)
 
@@ -51,7 +51,7 @@ merge1:
   %t21 = sitofp i64 %t20 to double
   %t22 = insertvalue %SelfHostCheckResult %t18, double %t21, 2
   %t23 = load double, double* %l1
-  %t24 = insertvalue %SelfHostCheckResult %t22, { i8**, i64 }* null, 3
+  %t24 = insertvalue %SelfHostCheckResult %t22, { %ModuleDiagnostics**, i64 }* null, 3
   %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t26 = insertvalue %SelfHostCheckResult %t24, { i8**, i64 }* %t25, 4
   ret %SelfHostCheckResult %t26
@@ -192,7 +192,7 @@ merge5:
   store i8* %t22, i8** %l2
   %t23 = load i8*, i8** %l2
   %t24 = extractvalue %ProjectCompilation %compilation, 0
-  %t25 = bitcast { i8**, i64 }* %t24 to { %CompiledModule*, i64 }*
+  %t25 = bitcast { %CompiledModule**, i64 }* %t24 to { %CompiledModule*, i64 }*
   %t26 = call i1 @module_present(i8* %t23, { %CompiledModule*, i64 }* %t25)
   %t27 = xor i1 %t26, 1
   %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0

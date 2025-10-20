@@ -42,6 +42,28 @@ def test_layout_manifest_is_generated(stage2_environment):
 
 
 @pytest.mark.unit
+def test_manifest_applied_to_current_module(stage2_environment):
+    """Ensure the current module's manifest populates struct layouts for lowering."""
+    source = """
+    struct Point {
+        x -> number;
+        y -> number;
+    }
+
+    fn get_x(point -> Point) -> number {
+        return point.x;
+    }
+    """
+
+    result = stage2_environment.compile_to_native_llvm(source)
+
+    metadata_errors = [d for d in result.diagnostics
+                       if "struct metadata" in d or "missing layout" in d]
+    assert len(
+        metadata_errors) == 0, f"struct layout diagnostics persisted: {metadata_errors}"
+
+
+@pytest.mark.unit
 def test_select_layout_manifest_artifact(stage2_environment):
     """Test that select_layout_manifest_artifact can find manifests."""
     from compiler.build import native_ir

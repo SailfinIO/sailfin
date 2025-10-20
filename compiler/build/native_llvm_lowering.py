@@ -119,6 +119,15 @@ class LoweredLLVMResult:
     def __repr__(self):
         return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
+class LayoutManifestApplication:
+    def __init__(self, structs, enums, diagnostics):
+        self.structs = structs
+        self.enums = enums
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('LayoutManifestApplication', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class LoweredLLVMFunction:
     def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
         self.lines = lines
@@ -737,6 +746,40 @@ def load_imported_layout_manifests(imports):
     # effects: io
     return []
 
+def apply_layout_manifest_to_module(structs, enums, manifest):
+    diagnostics = []
+    if manifest == None:
+        return LayoutManifestApplication(structs=structs, enums=enums, diagnostics=diagnostics)
+    updated_structs = structs
+    struct_index = 0
+    while True:
+        if struct_index >= len(manifest.structs):
+            break
+        layout_struct = manifest.structs[struct_index]
+        target_index = find_struct_index(updated_structs, layout_struct.name)
+        if target_index < 0:
+            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module")
+        else:
+            target = updated_structs[target_index]
+            replaced = NativeStruct(name=target.name, fields=target.fields, methods=target.methods, implements=target.implements, layout=layout_struct.layout)
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced)
+        struct_index += 1
+    updated_enums = enums
+    enum_index = 0
+    while True:
+        if enum_index >= len(manifest.enums):
+            break
+        layout_enum = manifest.enums[enum_index]
+        target_index = find_enum_index(updated_enums, layout_enum.name)
+        if target_index < 0:
+            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module")
+        else:
+            target = updated_enums[target_index]
+            replaced = NativeEnum(name=target.name, variants=target.variants, layout=layout_enum.layout)
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced)
+        enum_index += 1
+    return LayoutManifestApplication(structs=updated_structs, enums=updated_enums, diagnostics=diagnostics)
+
 def lower_to_llvm(native_module):
     return lower_to_llvm_with_manifests(native_module, [])
 
@@ -748,11 +791,21 @@ def lower_to_llvm_with_manifests(native_module, imported_manifests):
         return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=[])
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
-    trait_metadata = build_trait_metadata(parse.interfaces, parse.structs)
-    type_build = build_type_context_with_imports(parse.structs, parse.enums, parse.interfaces, imported_manifests)
+    manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
+    module_manifest = None
+    if manifest_artifact != None:
+        parsed_manifest = parse_layout_manifest(manifest_artifact.contents)
+        diagnostics = (diagnostics) + (parsed_manifest.diagnostics)
+        module_manifest = parsed_manifest
+    manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest)
+    diagnostics = (diagnostics) + (manifest_application.diagnostics)
+    module_structs = manifest_application.structs
+    module_enums = manifest_application.enums
+    trait_metadata = build_trait_metadata(parse.interfaces, module_structs)
+    type_build = build_type_context_with_imports(module_structs, module_enums, parse.interfaces, imported_manifests)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
-    struct_methods = flatten_struct_methods(parse.structs)
+    struct_methods = flatten_struct_methods(module_structs)
     all_functions = concat_native_functions(parse.functions, struct_methods)
     runtime_helpers = collect_runtime_helper_targets(all_functions)
     direct_effects = collect_direct_function_effects(all_functions)
@@ -1248,11 +1301,47 @@ def render_vtable_constants(context):
         index += 1
     return lines
 
+def is_ascii_uppercase(ch):
+    if len(ch) == 0:
+        return False
+    return ch >= "A"  and  ch <= "Z"
+
+def looks_like_user_type(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return False
+    first = trimmed[0]
+    if is_ascii_uppercase(first):
+        return True
+    index = 1
+    while True:
+        if index >= len(trimmed):
+            break
+        current = trimmed[index]
+        if current == "."  and  index + 1 < len(trimmed):
+            next = trimmed[index + 1]
+            if is_ascii_uppercase(next):
+                return True
+        index += 1
+    return False
+
 def map_type_annotation(annotation):
     trimmed = trim_text(annotation)
     if len(trimmed) == 0:
         return "void"
     normalized = unwrap_move_wrapper(trimmed)
+    if len(normalized) > 0:
+        optional_marker = normalized[len(normalized) - 1]
+        if optional_marker == "?":
+            inner_annotation = trim_text(substring(normalized, 0, len(normalized) - 1))
+            if len(inner_annotation) == 0:
+                return "i8*"
+            inner_type = map_type_annotation(inner_annotation)
+            if len(inner_type) == 0  or  inner_type == "void":
+                return "i8*"
+            if len(inner_type) > 0  and  inner_type[len(inner_type) - 1] == "*":
+                return inner_type
+            return inner_type + "*"
     if normalized == "number":
         return "double"
     if normalized == "boolean"  or  normalized == "bool":
@@ -1274,6 +1363,9 @@ def map_type_annotation(annotation):
                 return "i8*"
             aggregate = array_struct_type_for_element(element_type)
             return aggregate + "*"
+    if looks_like_user_type(normalized):
+        sanitized = sanitize_symbol(normalized)
+        return "%" + sanitized + "*"
     return "i8*"
 
 def map_struct_field_annotation(annotation):
@@ -7573,6 +7665,12 @@ def append_llvm_operand(values, value):
 def append_struct_literal_field(values, value):
     return (values) + ([value])
 
+def append_native_struct(values, value):
+    return (values) + ([value])
+
+def append_native_enum(values, value):
+    return (values) + ([value])
+
 def replace_llvm_operand(values, index, value):
     result = []
     current = 0
@@ -7586,6 +7684,32 @@ def replace_llvm_operand(values, index, value):
         current += 1
     return result
 
+def replace_native_struct(values, index, value):
+    result = []
+    current = 0
+    while True:
+        if current >= len(values):
+            break
+        if current == index:
+            result = append_native_struct(result, value)
+        else:
+            result = append_native_struct(result, values[current])
+        current += 1
+    return result
+
+def replace_native_enum(values, index, value):
+    result = []
+    current = 0
+    while True:
+        if current >= len(values):
+            break
+        if current == index:
+            result = append_native_enum(result, value)
+        else:
+            result = append_native_enum(result, values[current])
+        current += 1
+    return result
+
 def find_function_by_name(functions, name):
     index = 0
     while True:
@@ -7595,6 +7719,26 @@ def find_function_by_name(functions, name):
             return functions[index]
         index += 1
     return None
+
+def find_struct_index(structs, name):
+    index = 0
+    while True:
+        if index >= len(structs):
+            break
+        if structs[index].name == name:
+            return index
+        index += 1
+    return -1
+
+def find_enum_index(enums, name):
+    index = 0
+    while True:
+        if index >= len(enums):
+            break
+        if enums[index].name == name:
+            return index
+        index += 1
+    return -1
 
 def number_to_string(value):
     if value == 0:

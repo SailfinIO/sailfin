@@ -3,10 +3,10 @@ source_filename = "sailfin"
 
 %EnumField = type { i8*, i8* }
 %EnumVariantDefinition = type { i8*, { i8**, i64 }* }
-%EnumType = type { i8*, { i8**, i64 }* }
-%EnumInstance = type { i8*, i8*, { i8**, i64 }* }
+%EnumType = type { i8*, { %EnumVariantDefinition**, i64 }* }
+%EnumInstance = type { %EnumType*, i8*, { %EnumField**, i64 }* }
 %StructField = type { i8*, i8* }
-%TypeDescriptor = type { i8*, i8*, { i8**, i64 }* }
+%TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 
@@ -260,14 +260,14 @@ merge5:
 define %EnumType @enum_type(i8* %name) {
 entry:
   %t0 = insertvalue %EnumType undef, i8* %name, 0
-  %t1 = alloca [0 x i8*]
-  %t2 = getelementptr [0 x i8*], [0 x i8*]* %t1, i32 0, i32 0
-  %t3 = alloca { i8**, i64 }
-  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 0
-  store i8** %t2, i8*** %t4
-  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %EnumVariantDefinition*]
+  %t2 = getelementptr [0 x %EnumVariantDefinition*], [0 x %EnumVariantDefinition*]* %t1, i32 0, i32 0
+  %t3 = alloca { %EnumVariantDefinition**, i64 }
+  %t4 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t3, i32 0, i32 0
+  store %EnumVariantDefinition** %t2, %EnumVariantDefinition*** %t4
+  %t5 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = insertvalue %EnumType %t0, { i8**, i64 }* %t3, 1
+  %t6 = insertvalue %EnumType %t0, { %EnumVariantDefinition**, i64 }* %t3, 1
   ret %EnumType %t6
 }
 
@@ -296,14 +296,16 @@ entry:
   store %EnumVariantDefinition* %t5, %EnumVariantDefinition** %t8
   %t9 = getelementptr { %EnumVariantDefinition*, i64 }, { %EnumVariantDefinition*, i64 }* %t7, i32 0, i32 1
   store i64 1, i64* %t9
-  %t10 = bitcast { %EnumVariantDefinition*, i64 }* %t7 to { i8**, i64 }*
-  %t11 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t2, { i8**, i64 }* %t10)
-  store { i8**, i64 }* %t11, { i8**, i64 }** %l1
-  %t12 = extractvalue %EnumType %enum_type, 0
-  %t13 = insertvalue %EnumType undef, i8* %t12, 0
-  %t14 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t15 = insertvalue %EnumType %t13, { i8**, i64 }* %t14, 1
-  ret %EnumType %t15
+  %t10 = bitcast { %EnumVariantDefinition**, i64 }* %t2 to { i8**, i64 }*
+  %t11 = bitcast { %EnumVariantDefinition*, i64 }* %t7 to { i8**, i64 }*
+  %t12 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t10, { i8**, i64 }* %t11)
+  store { i8**, i64 }* %t12, { i8**, i64 }** %l1
+  %t13 = extractvalue %EnumType %enum_type, 0
+  %t14 = insertvalue %EnumType undef, i8* %t13, 0
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t16 = bitcast { i8**, i64 }* %t15 to { %EnumVariantDefinition**, i64 }*
+  %t17 = insertvalue %EnumType %t14, { %EnumVariantDefinition**, i64 }* %t16, 1
+  ret %EnumType %t17
 }
 
 define { %EnumField*, i64 }* @enum_normalize_fields(i8* %definition, { %EnumField*, i64 }* %provided) {
@@ -392,11 +394,11 @@ entry:
   %t1 = load double, double* %l0
   %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(i8* null, { %EnumField*, i64 }* %provided)
   store { %EnumField*, i64 }* %t2, { %EnumField*, i64 }** %l1
-  %t3 = insertvalue %EnumInstance undef, i8* null, 0
+  %t3 = insertvalue %EnumInstance undef, %EnumType* null, 0
   %t4 = insertvalue %EnumInstance %t3, i8* %variant_name, 1
   %t5 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t6 = bitcast { %EnumField*, i64 }* %t5 to { i8**, i64 }*
-  %t7 = insertvalue %EnumInstance %t4, { i8**, i64 }* %t6, 2
+  %t6 = bitcast { %EnumField*, i64 }* %t5 to { %EnumField**, i64 }*
+  %t7 = insertvalue %EnumInstance %t4, { %EnumField**, i64 }* %t6, 2
   ret %EnumInstance %t7
 }
 
@@ -582,8 +584,8 @@ define %TypeDescriptor @type_descriptor(i8* %kind, i8* %name, { %TypeDescriptor*
 entry:
   %t0 = insertvalue %TypeDescriptor undef, i8* %kind, 0
   %t1 = insertvalue %TypeDescriptor %t0, i8* %name, 1
-  %t2 = bitcast { %TypeDescriptor*, i64 }* %items to { i8**, i64 }*
-  %t3 = insertvalue %TypeDescriptor %t1, { i8**, i64 }* %t2, 2
+  %t2 = bitcast { %TypeDescriptor*, i64 }* %items to { %TypeDescriptor**, i64 }*
+  %t3 = insertvalue %TypeDescriptor %t1, { %TypeDescriptor**, i64 }* %t2, 2
   ret %TypeDescriptor %t3
 }
 
@@ -2113,7 +2115,7 @@ define i1 @check_type_descriptor(i8* %value, %TypeDescriptor %descriptor) {
 entry:
   %l0 = alloca i64
   %l1 = alloca i64
-  %l2 = alloca i8*
+  %l2 = alloca %TypeDescriptor*
   %l3 = alloca i64
   %l4 = alloca double
   %t0 = extractvalue %TypeDescriptor %descriptor, 0
@@ -2146,8 +2148,8 @@ loop.header6:
 loop.body7:
   %t11 = load i64, i64* %l0
   %t12 = extractvalue %TypeDescriptor %descriptor, 2
-  %t13 = load { i8**, i64 }, { i8**, i64 }* %t12
-  %t14 = extractvalue { i8**, i64 } %t13, 1
+  %t13 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t12
+  %t14 = extractvalue { %TypeDescriptor**, i64 } %t13, 1
   %t15 = icmp sge i64 %t11, %t14
   %t16 = load i64, i64* %l0
   br i1 %t15, label %then10, label %merge11
@@ -2156,13 +2158,13 @@ then10:
 merge11:
   %t17 = extractvalue %TypeDescriptor %descriptor, 2
   %t18 = load i64, i64* %l0
-  %t19 = load { i8**, i64 }, { i8**, i64 }* %t17
-  %t20 = extractvalue { i8**, i64 } %t19, 0
-  %t21 = extractvalue { i8**, i64 } %t19, 1
+  %t19 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t17
+  %t20 = extractvalue { %TypeDescriptor**, i64 } %t19, 0
+  %t21 = extractvalue { %TypeDescriptor**, i64 } %t19, 1
   %t22 = icmp uge i64 %t18, %t21
   ; bounds check: %t22 (if true, out of bounds)
-  %t23 = getelementptr i8*, i8** %t20, i64 %t18
-  %t24 = load i8*, i8** %t23
+  %t23 = getelementptr %TypeDescriptor*, %TypeDescriptor** %t20, i64 %t18
+  %t24 = load %TypeDescriptor*, %TypeDescriptor** %t23
   %t25 = call i1 @check_type_descriptor(i8* %value, %TypeDescriptor zeroinitializer)
   %t26 = load i64, i64* %l0
   br i1 %t25, label %then12, label %merge13
@@ -2194,8 +2196,8 @@ loop.header16:
 loop.body17:
   %t35 = load i64, i64* %l1
   %t36 = extractvalue %TypeDescriptor %descriptor, 2
-  %t37 = load { i8**, i64 }, { i8**, i64 }* %t36
-  %t38 = extractvalue { i8**, i64 } %t37, 1
+  %t37 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t36
+  %t38 = extractvalue { %TypeDescriptor**, i64 } %t37, 1
   %t39 = icmp sge i64 %t35, %t38
   %t40 = load i64, i64* %l1
   br i1 %t39, label %then20, label %merge21
@@ -2204,13 +2206,13 @@ then20:
 merge21:
   %t41 = extractvalue %TypeDescriptor %descriptor, 2
   %t42 = load i64, i64* %l1
-  %t43 = load { i8**, i64 }, { i8**, i64 }* %t41
-  %t44 = extractvalue { i8**, i64 } %t43, 0
-  %t45 = extractvalue { i8**, i64 } %t43, 1
+  %t43 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t41
+  %t44 = extractvalue { %TypeDescriptor**, i64 } %t43, 0
+  %t45 = extractvalue { %TypeDescriptor**, i64 } %t43, 1
   %t46 = icmp uge i64 %t42, %t45
   ; bounds check: %t46 (if true, out of bounds)
-  %t47 = getelementptr i8*, i8** %t44, i64 %t42
-  %t48 = load i8*, i8** %t47
+  %t47 = getelementptr %TypeDescriptor*, %TypeDescriptor** %t44, i64 %t42
+  %t48 = load %TypeDescriptor*, %TypeDescriptor** %t47
   %t49 = call i1 @check_type_descriptor(i8* %value, %TypeDescriptor zeroinitializer)
   %t50 = xor i1 %t49, 1
   %t51 = load i64, i64* %l1
@@ -2227,8 +2229,8 @@ loop.latch18:
   br label %loop.header16
 afterloop19:
   %t56 = extractvalue %TypeDescriptor %descriptor, 2
-  %t57 = load { i8**, i64 }, { i8**, i64 }* %t56
-  %t58 = extractvalue { i8**, i64 } %t57, 1
+  %t57 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t56
+  %t58 = extractvalue { %TypeDescriptor**, i64 } %t57, 1
   %t59 = icmp sgt i64 %t58, 0
   ret i1 %t59
 merge15:
@@ -2238,24 +2240,24 @@ merge15:
   br i1 %t62, label %then24, label %merge25
 then24:
   %t63 = extractvalue %TypeDescriptor %descriptor, 2
-  %t64 = load { i8**, i64 }, { i8**, i64 }* %t63
-  %t65 = extractvalue { i8**, i64 } %t64, 1
+  %t64 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t63
+  %t65 = extractvalue { %TypeDescriptor**, i64 } %t64, 1
   %t66 = icmp eq i64 %t65, 0
   br i1 %t66, label %then26, label %merge27
 then26:
   ret i1 false
 merge27:
   %t67 = extractvalue %TypeDescriptor %descriptor, 2
-  %t68 = load { i8**, i64 }, { i8**, i64 }* %t67
-  %t69 = extractvalue { i8**, i64 } %t68, 0
-  %t70 = extractvalue { i8**, i64 } %t68, 1
+  %t68 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t67
+  %t69 = extractvalue { %TypeDescriptor**, i64 } %t68, 0
+  %t70 = extractvalue { %TypeDescriptor**, i64 } %t68, 1
   %t71 = icmp uge i64 0, %t70
   ; bounds check: %t71 (if true, out of bounds)
-  %t72 = getelementptr i8*, i8** %t69, i64 0
-  %t73 = load i8*, i8** %t72
-  store i8* %t73, i8** %l2
+  %t72 = getelementptr %TypeDescriptor*, %TypeDescriptor** %t69, i64 0
+  %t73 = load %TypeDescriptor*, %TypeDescriptor** %t72
+  store %TypeDescriptor* %t73, %TypeDescriptor** %l2
   store i64 0, i64* %l3
-  %t74 = load i8*, i8** %l2
+  %t74 = load %TypeDescriptor*, %TypeDescriptor** %l2
   %t75 = load i64, i64* %l3
   br label %loop.header28
 loop.header28:
@@ -2266,7 +2268,7 @@ loop.body29:
   %t76 = load i64, i64* %l3
   %t77 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t78 = icmp sge i64 %t76, %t77
-  %t79 = load i8*, i8** %l2
+  %t79 = load %TypeDescriptor*, %TypeDescriptor** %l2
   %t80 = load i64, i64* %l3
   br i1 %t78, label %then32, label %merge33
 then32:
@@ -2275,7 +2277,7 @@ merge33:
   %t81 = load i64, i64* %l3
   %t82 = getelementptr i8, i8* %value, i64 %t81
   %t83 = load i8, i8* %t82
-  %t84 = load i8*, i8** %l2
+  %t84 = load %TypeDescriptor*, %TypeDescriptor** %l2
   %t85 = alloca [2 x i8], align 1
   %t86 = getelementptr [2 x i8], [2 x i8]* %t85, i32 0, i32 0
   store i8 %t83, i8* %t86
@@ -2284,7 +2286,7 @@ merge33:
   %t88 = getelementptr [2 x i8], [2 x i8]* %t85, i32 0, i32 0
   %t89 = call i1 @check_type_descriptor(i8* %t88, %TypeDescriptor zeroinitializer)
   %t90 = xor i1 %t89, 1
-  %t91 = load i8*, i8** %l2
+  %t91 = load %TypeDescriptor*, %TypeDescriptor** %l2
   %t92 = load i64, i64* %l3
   br i1 %t90, label %then34, label %merge35
 then34:

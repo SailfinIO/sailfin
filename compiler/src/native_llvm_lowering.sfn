@@ -73,6 +73,12 @@ struct LoweredLLVMResult {
     string_constants -> StringConstant[];
 }
 
+struct LayoutManifestApplication {
+    structs -> NativeStruct[];
+    enums -> NativeEnum[];
+    diagnostics -> string[];
+}
+
 struct LoweredLLVMFunction {
     lines -> string[];
     diagnostics -> string[];
@@ -493,6 +499,65 @@ fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[]
     return [];
 }
 
+fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
+    let mut diagnostics -> string[] = [];
+    if manifest == null {
+        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: diagnostics };
+    }
+
+    let mut updated_structs -> NativeStruct[] = structs;
+    let mut struct_index -> number = 0;
+    loop {
+        if struct_index >= manifest.structs.length {
+            break;
+        }
+        let layout_struct = manifest.structs[struct_index];
+        let target_index = find_struct_index(updated_structs, layout_struct.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module");
+        } else {
+            let target = updated_structs[target_index];
+            let replaced = NativeStruct {
+                name: target.name,
+                fields: target.fields,
+                methods: target.methods,
+                implements: target.implements,
+                layout: layout_struct.layout,
+            };
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced);
+        }
+        struct_index += 1;
+    }
+
+    let mut updated_enums -> NativeEnum[] = enums;
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= manifest.enums.length {
+            break;
+        }
+        let layout_enum = manifest.enums[enum_index];
+        let target_index = find_enum_index(updated_enums, layout_enum.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
+        } else {
+            let target = updated_enums[target_index];
+            let replaced = NativeEnum {
+                name: target.name,
+                variants: target.variants,
+                layout: layout_enum.layout,
+            };
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced);
+        }
+        enum_index += 1;
+    }
+
+    return LayoutManifestApplication {
+        structs: updated_structs,
+        enums: updated_enums,
+        diagnostics: diagnostics,
+    };
+}
+
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
     return lower_to_llvm_with_manifests(native_module, []);
 }
@@ -516,13 +581,26 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
 
+    let manifest_artifact = select_layout_manifest_artifact(native_module.artifacts);
+    let mut module_manifest -> LayoutManifest? = null;
+    if manifest_artifact != null {
+        let parsed_manifest = parse_layout_manifest(manifest_artifact.contents);
+        diagnostics = diagnostics.concat(parsed_manifest.diagnostics);
+        module_manifest = parsed_manifest;
+    }
+
+    let manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest);
+    diagnostics = diagnostics.concat(manifest_application.diagnostics);
+    let module_structs = manifest_application.structs;
+    let module_enums = manifest_application.enums;
+
     // Use the provided imported_manifests for cross-module type resolution
     
-    let trait_metadata = build_trait_metadata(parse.interfaces, parse.structs);
-    let type_build = build_type_context_with_imports(parse.structs, parse.enums, parse.interfaces, imported_manifests);
+    let trait_metadata = build_trait_metadata(parse.interfaces, module_structs);
+    let type_build = build_type_context_with_imports(module_structs, module_enums, parse.interfaces, imported_manifests);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
-    let struct_methods = flatten_struct_methods(parse.structs);
+    let struct_methods = flatten_struct_methods(module_structs);
     let all_functions = concat_native_functions(parse.functions, struct_methods);
     let runtime_helpers = collect_runtime_helper_targets(all_functions);
     let direct_effects = collect_direct_function_effects(all_functions);
@@ -1254,12 +1332,62 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
     return lines;
 }
 
+fn is_ascii_uppercase(ch -> string) -> boolean {
+    if ch.length == 0 {
+        return false;
+    }
+    return ch >= "A" && ch <= "Z";
+}
+
+fn looks_like_user_type(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let first = trimmed[0];
+    if is_ascii_uppercase(first) {
+        return true;
+    }
+    let mut index -> number = 1;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let current = trimmed[index];
+        if current == "." && index + 1 < trimmed.length {
+            let next = trimmed[index + 1];
+            if is_ascii_uppercase(next) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
 fn map_type_annotation(annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length > 0 {
+        let optional_marker = normalized[normalized.length - 1];
+        if optional_marker == "?" {
+            let inner_annotation = trim_text(substring(normalized, 0, normalized.length - 1));
+            if inner_annotation.length == 0 {
+                return "i8*";
+            }
+            let inner_type = map_type_annotation(inner_annotation);
+            if inner_type.length == 0 || inner_type == "void" {
+                return "i8*";
+            }
+            if inner_type.length > 0 && inner_type[inner_type.length - 1] == "*" {
+                return inner_type;
+            }
+            return inner_type + "*";
+        }
+    }
     if normalized == "number" {
         return "double";
     }
@@ -1289,6 +1417,10 @@ fn map_type_annotation(annotation -> string) -> string {
             let aggregate = array_struct_type_for_element(element_type);
             return aggregate + "*";
         }
+    }
+    if looks_like_user_type(normalized) {
+        let sanitized = sanitize_symbol(normalized);
+        return "%" + sanitized + "*";
     }
     // Default to i8* for unknown types
     return "i8*";
@@ -10814,6 +10946,14 @@ fn append_struct_literal_field(values -> StructLiteralField[], value -> StructLi
     return values.concat([value]);
 }
 
+fn append_native_struct(values -> NativeStruct[], value -> NativeStruct) -> NativeStruct[] {
+    return values.concat([value]);
+}
+
+fn append_native_enum(values -> NativeEnum[], value -> NativeEnum) -> NativeEnum[] {
+    return values.concat([value]);
+}
+
 fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMOperand) -> LLVMOperand[] {
     let mut result -> LLVMOperand[] = [];
     let mut current -> number = 0;
@@ -10825,6 +10965,40 @@ fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMO
             result = append_llvm_operand(result, value);
         } else {
             result = append_llvm_operand(result, values[current]);
+        }
+        current += 1;
+    }
+    return result;
+}
+
+fn replace_native_struct(values -> NativeStruct[], index -> number, value -> NativeStruct) -> NativeStruct[] {
+    let mut result -> NativeStruct[] = [];
+    let mut current -> number = 0;
+    loop {
+        if current >= values.length {
+            break;
+        }
+        if current == index {
+            result = append_native_struct(result, value);
+        } else {
+            result = append_native_struct(result, values[current]);
+        }
+        current += 1;
+    }
+    return result;
+}
+
+fn replace_native_enum(values -> NativeEnum[], index -> number, value -> NativeEnum) -> NativeEnum[] {
+    let mut result -> NativeEnum[] = [];
+    let mut current -> number = 0;
+    loop {
+        if current >= values.length {
+            break;
+        }
+        if current == index {
+            result = append_native_enum(result, value);
+        } else {
+            result = append_native_enum(result, values[current]);
         }
         current += 1;
     }
@@ -10843,6 +11017,34 @@ fn find_function_by_name(functions -> NativeFunction[], name -> string) -> Nativ
         index += 1;
     }
     return null;
+}
+
+fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        if structs[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        if enums[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
 }
 
 fn number_to_string(value -> number) -> string {

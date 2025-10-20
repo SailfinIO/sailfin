@@ -4,67 +4,67 @@ source_filename = "sailfin"
 %LoweredPythonResult = type { i8*, { i8**, i64 }* }
 %MatchContext = type { i8*, double, i1 }
 %LoweredCaseCondition = type { i8*, i1, i1 }
-%PythonModuleEmission = type { i8*, { i8**, i64 }* }
-%PythonFunctionEmission = type { i8*, { i8**, i64 }* }
-%PythonImportEmission = type { i8*, { i8**, i64 }* }
-%PythonStructEmission = type { i8*, { i8**, i64 }* }
+%PythonModuleEmission = type { %PythonBuilder*, { i8**, i64 }* }
+%PythonFunctionEmission = type { %PythonBuilder*, { i8**, i64 }* }
+%PythonImportEmission = type { %PythonBuilder*, { i8**, i64 }* }
+%PythonStructEmission = type { %PythonBuilder*, { i8**, i64 }* }
 %StructLiteralCapture = type { i8*, double, i1 }
 %ExpressionContinuationCapture = type { i8*, double, i1 }
 %ExtractedSpan = type { i8*, double, double, i1 }
 %PythonBuilder = type { { i8**, i64 }*, double }
 %NativeArtifact = type { i8*, i8*, i8* }
-%NativeModule = type { { i8**, i64 }*, { i8**, i64 }*, double }
-%EmitNativeResult = type { i8*, { i8**, i64 }* }
+%NativeModule = type { { %NativeArtifact**, i64 }*, { i8**, i64 }*, double }
+%EmitNativeResult = type { %NativeModule*, { i8**, i64 }* }
 %TextBuilder = type { { i8**, i64 }*, double }
-%NativeState = type { i8*, { i8**, i64 }*, i8* }
+%NativeState = type { %TextBuilder*, { i8**, i64 }*, %LayoutContext* }
 %LayoutEmitResult = type { { i8**, i64 }*, { i8**, i64 }* }
 %StructFieldLayoutDescriptor = type { i8*, i8*, double, double, double }
-%RecordLayoutResult = type { double, double, { i8**, i64 }*, { i8**, i64 }* }
-%EnumVariantLayoutDescriptor = type { i8*, double, double, double, double, { i8**, i64 }* }
-%EnumAggregateLayout = type { double, double, double, double, { i8**, i64 }*, { i8**, i64 }* }
+%RecordLayoutResult = type { double, double, { %StructFieldLayoutDescriptor**, i64 }*, { i8**, i64 }* }
+%EnumVariantLayoutDescriptor = type { i8*, double, double, double, double, { %StructFieldLayoutDescriptor**, i64 }* }
+%EnumAggregateLayout = type { double, double, double, double, { %EnumVariantLayoutDescriptor**, i64 }*, { i8**, i64 }* }
 %TypeLayoutInfo = type { double, double, { i8**, i64 }* }
 %LayoutFieldInput = type { i8*, i8* }
-%LayoutStructDefinition = type { i8*, { i8**, i64 }* }
-%LayoutEnumVariantDefinition = type { i8*, { i8**, i64 }* }
-%LayoutEnumDefinition = type { i8*, { i8**, i64 }* }
+%LayoutStructDefinition = type { i8*, { %LayoutFieldInput**, i64 }* }
+%LayoutEnumVariantDefinition = type { i8*, { %LayoutFieldInput**, i64 }* }
+%LayoutEnumDefinition = type { i8*, { %LayoutEnumVariantDefinition**, i64 }* }
 %CanonicalTypeLayout = type { i8*, double, double }
-%LayoutContext = type { { i8**, i64 }*, { i8**, i64 }* }
+%LayoutContext = type { { %LayoutStructDefinition**, i64 }*, { %LayoutEnumDefinition**, i64 }* }
 %NativeSourceSpan = type { double, double, double, double }
-%NativeParameter = type { i8*, i8*, i1, i8*, i8* }
-%NativeFunction = type { i8*, { i8**, i64 }*, i8*, { i8**, i64 }*, { i8**, i64 }* }
+%NativeParameter = type { i8*, i8*, i1, i8*, %NativeSourceSpan* }
+%NativeFunction = type { i8*, { %NativeParameter**, i64 }*, i8*, { i8**, i64 }*, { %NativeInstruction**, i64 }* }
 %NativeImportSpecifier = type { i8*, i8* }
-%NativeImport = type { i8*, i8*, { i8**, i64 }* }
+%NativeImport = type { i8*, i8*, { %NativeImportSpecifier**, i64 }* }
 %NativeStructField = type { i8*, i8*, i1 }
 %NativeStructLayoutField = type { i8*, i8*, double, double, double }
-%NativeStructLayout = type { double, double, { i8**, i64 }* }
-%NativeStruct = type { i8*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, i8* }
-%NativeInterfaceSignature = type { i8*, i1, { i8**, i64 }*, { i8**, i64 }*, i8*, { i8**, i64 }* }
-%NativeInterface = type { i8*, { i8**, i64 }*, { i8**, i64 }* }
+%NativeStructLayout = type { double, double, { %NativeStructLayoutField**, i64 }* }
+%NativeStruct = type { i8*, { %NativeStructField**, i64 }*, { %NativeFunction**, i64 }*, { i8**, i64 }*, %NativeStructLayout* }
+%NativeInterfaceSignature = type { i8*, i1, { i8**, i64 }*, { %NativeParameter**, i64 }*, i8*, { i8**, i64 }* }
+%NativeInterface = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature**, i64 }* }
 %NativeEnumVariantField = type { i8*, i8*, i1 }
-%NativeEnumVariant = type { i8*, { i8**, i64 }* }
-%NativeEnumVariantLayout = type { i8*, double, double, double, double, { i8**, i64 }* }
-%NativeEnumLayout = type { double, double, i8*, double, double, { i8**, i64 }* }
-%NativeEnum = type { i8*, { i8**, i64 }*, i8* }
+%NativeEnumVariant = type { i8*, { %NativeEnumVariantField**, i64 }* }
+%NativeEnumVariantLayout = type { i8*, double, double, double, double, { %NativeStructLayoutField**, i64 }* }
+%NativeEnumLayout = type { double, double, i8*, double, double, { %NativeEnumVariantLayout**, i64 }* }
+%NativeEnum = type { i8*, { %NativeEnumVariant**, i64 }*, %NativeEnumLayout* }
 %NativeBinding = type { i8*, i1, i8*, i8* }
-%EnumParseResult = type { i8*, double, { i8**, i64 }* }
+%EnumParseResult = type { %NativeEnum*, double, { i8**, i64 }* }
 %CaseComponents = type { i8*, i8* }
-%InstructionParseResult = type { { i8**, i64 }*, i1, i1 }
+%InstructionParseResult = type { { %NativeInstruction**, i64 }*, i1, i1 }
 %InstructionGatherResult = type { i8*, double }
 %InstructionDepthState = type { double, double, double, i1, i1 }
-%StructParseResult = type { i8*, double, { i8**, i64 }* }
-%InterfaceParseResult = type { i8*, double, { i8**, i64 }* }
-%InterfaceSignatureParse = type { i1, i8*, { i8**, i64 }* }
+%StructParseResult = type { %NativeStruct*, double, { i8**, i64 }* }
+%InterfaceParseResult = type { %NativeInterface*, double, { i8**, i64 }* }
+%InterfaceSignatureParse = type { i1, %NativeInterfaceSignature*, { i8**, i64 }* }
 %StructHeaderParse = type { i8*, { i8**, i64 }*, { i8**, i64 }* }
 %InterfaceHeaderParse = type { i8*, { i8**, i64 }*, { i8**, i64 }* }
 %HeaderNameParse = type { i8*, { i8**, i64 }*, i8*, { i8**, i64 }* }
 %StructLayoutHeaderParse = type { i1, i8*, double, double, { i8**, i64 }* }
-%StructLayoutFieldParse = type { i1, i8*, { i8**, i64 }* }
-%ParseNativeResult = type { { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
+%StructLayoutFieldParse = type { i1, %NativeStructLayoutField*, { i8**, i64 }* }
+%ParseNativeResult = type { { %NativeFunction**, i64 }*, { %NativeImport**, i64 }*, { %NativeStruct**, i64 }*, { %NativeInterface**, i64 }*, { %NativeEnum**, i64 }*, { %NativeBinding**, i64 }*, { i8**, i64 }* }
 %EnumLayoutHeaderParse = type { i1, i8*, double, double, i8*, double, double, { i8**, i64 }* }
-%EnumLayoutVariantParse = type { i1, i8*, { i8**, i64 }* }
-%EnumLayoutPayloadParse = type { i1, i8*, i8*, { i8**, i64 }* }
+%EnumLayoutVariantParse = type { i1, %NativeEnumVariantLayout*, { i8**, i64 }* }
+%EnumLayoutPayloadParse = type { i1, i8*, %NativeStructLayoutField*, { i8**, i64 }* }
 %NumberParseResult = type { i1, double }
-%LayoutManifest = type { { i8**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
+%LayoutManifest = type { { %NativeStruct**, i64 }*, { %NativeEnum**, i64 }*, { i8**, i64 }* }
 %BindingComponents = type { i8*, i8*, i8* }
 
 %NativeInstruction = type { i32, [48 x i8] }
@@ -97,7 +97,7 @@ declare noalias i8* @malloc(i64)
 @.str.128 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.2 = private unnamed_addr constant [7 x i8] c"class \00"
 @.str.23 = private unnamed_addr constant [18 x i8] c"def __init__(self\00"
-@.str.110 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
+@.str.119 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
 @.str.40 = private unnamed_addr constant [96 x i8] c"return runtime.struct_repr('\22 + class_name + \22', [\22 + join_with_separator(rendered, \22, \22) + \22])\00"
 @.str.97 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.5 = private unnamed_addr constant [1 x i8] c"\00"
@@ -121,7 +121,7 @@ entry:
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = extractvalue %NativeModule %native_module, 0
-  %t6 = call double @select_text_artifact({ i8**, i64 }* %t5)
+  %t6 = call double @select_text_artifact({ %NativeArtifact**, i64 }* %t5)
   store double %t6, double* %l1
   %t7 = load double, double* %l1
   %t8 = load double, double* %l1
@@ -392,7 +392,7 @@ merge17:
   store %PythonBuilder %t150, %PythonBuilder* %l0
   store %PythonBuilder %t151, %PythonBuilder* %l0
   %t152 = load %PythonBuilder, %PythonBuilder* %l0
-  %t153 = insertvalue %PythonModuleEmission undef, i8* null, 0
+  %t153 = insertvalue %PythonModuleEmission undef, %PythonBuilder* null, 0
   %t154 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t155 = insertvalue %PythonModuleEmission %t153, { i8**, i64 }* %t154, 1
   ret %PythonModuleEmission %t155
@@ -623,7 +623,7 @@ then6:
   %t33 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t34 = load %NativeImport, %NativeImport* %l3
   %t35 = extractvalue %NativeImport %t34, 2
-  %t36 = bitcast { i8**, i64 }* %t35 to { %NativeImportSpecifier*, i64 }*
+  %t36 = bitcast { %NativeImportSpecifier**, i64 }* %t35 to { %NativeImportSpecifier*, i64 }*
   %t37 = call { i8**, i64 }* @collect_export_names({ i8**, i64 }* %t33, { %NativeImportSpecifier*, i64 }* %t36)
   store { i8**, i64 }* %t37, { i8**, i64 }** %l1
   %t38 = load %NativeImport, %NativeImport* %l3
@@ -685,7 +685,7 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t77 = load %PythonBuilder, %PythonBuilder* %l0
-  %t78 = insertvalue %PythonImportEmission undef, i8* null, 0
+  %t78 = insertvalue %PythonImportEmission undef, %PythonBuilder* null, 0
   %t79 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t80 = insertvalue %PythonImportEmission %t78, { i8**, i64 }* %t79, 1
   ret %PythonImportEmission %t80
@@ -768,8 +768,8 @@ entry:
   %l0 = alloca i8*
   %l1 = alloca %PythonBuilder
   %l2 = alloca double
-  %l3 = alloca i8*
-  %l4 = alloca double
+  %l3 = alloca %NativeEnumVariant*
+  %l4 = alloca i8*
   %l5 = alloca i8*
   %t0 = extractvalue %NativeEnum %definition, 0
   %t1 = call i8* @sanitize_identifier(i8* %t0)
@@ -786,16 +786,16 @@ entry:
   %t9 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t40 = phi %PythonBuilder [ %t8, %entry ], [ %t38, %loop.latch2 ]
-  %t41 = phi double [ %t9, %entry ], [ %t39, %loop.latch2 ]
-  store %PythonBuilder %t40, %PythonBuilder* %l1
-  store double %t41, double* %l2
+  %t43 = phi %PythonBuilder [ %t8, %entry ], [ %t41, %loop.latch2 ]
+  %t44 = phi double [ %t9, %entry ], [ %t42, %loop.latch2 ]
+  store %PythonBuilder %t43, %PythonBuilder* %l1
+  store double %t44, double* %l2
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l2
   %t11 = extractvalue %NativeEnum %definition, 1
-  %t12 = load { i8**, i64 }, { i8**, i64 }* %t11
-  %t13 = extractvalue { i8**, i64 } %t12, 1
+  %t12 = load { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t11
+  %t13 = extractvalue { %NativeEnumVariant**, i64 } %t12, 1
   %t14 = sitofp i64 %t13 to double
   %t15 = fcmp oge double %t10, %t14
   %t16 = load i8*, i8** %l0
@@ -808,36 +808,39 @@ merge5:
   %t19 = extractvalue %NativeEnum %definition, 1
   %t20 = load double, double* %l2
   %t21 = fptosi double %t20 to i64
-  %t22 = load { i8**, i64 }, { i8**, i64 }* %t19
-  %t23 = extractvalue { i8**, i64 } %t22, 0
-  %t24 = extractvalue { i8**, i64 } %t22, 1
+  %t22 = load { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t19
+  %t23 = extractvalue { %NativeEnumVariant**, i64 } %t22, 0
+  %t24 = extractvalue { %NativeEnumVariant**, i64 } %t22, 1
   %t25 = icmp uge i64 %t21, %t24
   ; bounds check: %t25 (if true, out of bounds)
-  %t26 = getelementptr i8*, i8** %t23, i64 %t21
-  %t27 = load i8*, i8** %t26
-  store i8* %t27, i8** %l3
-  %t28 = load i8*, i8** %l3
-  store double 0.0, double* %l4
-  %t29 = load i8*, i8** %l0
-  %s30 = getelementptr inbounds [128 x i8], [128 x i8]* @.str.30, i32 0, i32 0
-  %t31 = add i8* %t29, %s30
-  store i8* %t31, i8** %l5
-  %t32 = load %PythonBuilder, %PythonBuilder* %l1
-  %t33 = load i8*, i8** %l5
-  %t34 = call %PythonBuilder @builder_emit(%PythonBuilder %t32, i8* %t33)
-  store %PythonBuilder %t34, %PythonBuilder* %l1
-  %t35 = load double, double* %l2
-  %t36 = sitofp i64 1 to double
-  %t37 = fadd double %t35, %t36
-  store double %t37, double* %l2
+  %t26 = getelementptr %NativeEnumVariant*, %NativeEnumVariant** %t23, i64 %t21
+  %t27 = load %NativeEnumVariant*, %NativeEnumVariant** %t26
+  store %NativeEnumVariant* %t27, %NativeEnumVariant** %l3
+  %t28 = load %NativeEnumVariant*, %NativeEnumVariant** %l3
+  %t29 = getelementptr %NativeEnumVariant, %NativeEnumVariant* %t28, i32 0, i32 0
+  %t30 = load i8*, i8** %t29
+  %t31 = call i8* @sanitize_identifier(i8* %t30)
+  store i8* %t31, i8** %l4
+  %t32 = load i8*, i8** %l0
+  %s33 = getelementptr inbounds [128 x i8], [128 x i8]* @.str.33, i32 0, i32 0
+  %t34 = add i8* %t32, %s33
+  store i8* %t34, i8** %l5
+  %t35 = load %PythonBuilder, %PythonBuilder* %l1
+  %t36 = load i8*, i8** %l5
+  %t37 = call %PythonBuilder @builder_emit(%PythonBuilder %t35, i8* %t36)
+  store %PythonBuilder %t37, %PythonBuilder* %l1
+  %t38 = load double, double* %l2
+  %t39 = sitofp i64 1 to double
+  %t40 = fadd double %t38, %t39
+  store double %t40, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t38 = load %PythonBuilder, %PythonBuilder* %l1
-  %t39 = load double, double* %l2
+  %t41 = load %PythonBuilder, %PythonBuilder* %l1
+  %t42 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t42 = load %PythonBuilder, %PythonBuilder* %l1
-  ret %PythonBuilder %t42
+  %t45 = load %PythonBuilder, %PythonBuilder* %l1
+  ret %PythonBuilder %t45
 }
 
 define i8* @render_enum_variant_fields({ %NativeEnumVariantField*, i64 }* %fields) {
@@ -940,8 +943,8 @@ then0:
   ret i8* %s6
 merge1:
   %t7 = extractvalue %NativeImport %entry, 2
-  %t8 = load { i8**, i64 }, { i8**, i64 }* %t7
-  %t9 = extractvalue { i8**, i64 } %t8, 1
+  %t8 = load { %NativeImportSpecifier**, i64 }, { %NativeImportSpecifier**, i64 }* %t7
+  %t9 = extractvalue { %NativeImportSpecifier**, i64 } %t8, 1
   %t10 = icmp eq i64 %t9, 0
   %t11 = load i8*, i8** %l0
   br i1 %t10, label %then2, label %merge3
@@ -952,7 +955,7 @@ then2:
   ret i8* %t14
 merge3:
   %t15 = extractvalue %NativeImport %entry, 2
-  %t16 = bitcast { i8**, i64 }* %t15 to { %NativeImportSpecifier*, i64 }*
+  %t16 = bitcast { %NativeImportSpecifier**, i64 }* %t15 to { %NativeImportSpecifier*, i64 }*
   %t17 = call i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* %t16)
   store i8* %t17, i8** %l1
   %s18 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.18, i32 0, i32 0
@@ -1182,7 +1185,7 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t56 = load %PythonBuilder, %PythonBuilder* %l0
-  %t57 = insertvalue %PythonStructEmission undef, i8* null, 0
+  %t57 = insertvalue %PythonStructEmission undef, %PythonBuilder* null, 0
   %t58 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t59 = insertvalue %PythonStructEmission %t57, { i8**, i64 }* %t58, 1
   ret %PythonStructEmission %t59
@@ -1524,11 +1527,11 @@ entry:
   %l3 = alloca { i8**, i64 }*
   %l4 = alloca i8*
   %l5 = alloca double
-  %l6 = alloca i8*
-  %l7 = alloca double
+  %l6 = alloca %NativeStructField*
+  %l7 = alloca i8*
   %l8 = alloca i8*
   %l9 = alloca double
-  %l10 = alloca i8*
+  %l10 = alloca %NativeFunction*
   %l11 = alloca %PythonFunctionEmission
   %t0 = extractvalue %NativeStruct %definition, 0
   %t1 = call i8* @sanitize_identifier(i8* %t0)
@@ -1559,7 +1562,7 @@ entry:
   store i64 0, i64* %t19
   store { i8**, i64 }* %t17, { i8**, i64 }** %l2
   %t20 = extractvalue %NativeStruct %definition, 1
-  %t21 = bitcast { i8**, i64 }* %t20 to { %NativeStructField*, i64 }*
+  %t21 = bitcast { %NativeStructField**, i64 }* %t20 to { %NativeStructField*, i64 }*
   %t22 = call { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* %t21)
   store { i8**, i64 }* %t22, { i8**, i64 }** %l3
   %s23 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.23, i32 0, i32 0
@@ -1604,8 +1607,8 @@ merge1:
   %t52 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t51)
   store %PythonBuilder %t52, %PythonBuilder* %l1
   %t53 = extractvalue %NativeStruct %definition, 1
-  %t54 = load { i8**, i64 }, { i8**, i64 }* %t53
-  %t55 = extractvalue { i8**, i64 } %t54, 1
+  %t54 = load { %NativeStructField**, i64 }, { %NativeStructField**, i64 }* %t53
+  %t55 = extractvalue { %NativeStructField**, i64 } %t54, 1
   %t56 = icmp eq i64 %t55, 0
   %t57 = load i8*, i8** %l0
   %t58 = load %PythonBuilder, %PythonBuilder* %l1
@@ -1630,16 +1633,16 @@ else3:
   %t71 = load double, double* %l5
   br label %loop.header5
 loop.header5:
-  %t102 = phi %PythonBuilder [ %t67, %else3 ], [ %t100, %loop.latch7 ]
-  %t103 = phi double [ %t71, %else3 ], [ %t101, %loop.latch7 ]
-  store %PythonBuilder %t102, %PythonBuilder* %l1
-  store double %t103, double* %l5
+  %t111 = phi %PythonBuilder [ %t67, %else3 ], [ %t109, %loop.latch7 ]
+  %t112 = phi double [ %t71, %else3 ], [ %t110, %loop.latch7 ]
+  store %PythonBuilder %t111, %PythonBuilder* %l1
+  store double %t112, double* %l5
   br label %loop.body6
 loop.body6:
   %t72 = load double, double* %l5
   %t73 = extractvalue %NativeStruct %definition, 1
-  %t74 = load { i8**, i64 }, { i8**, i64 }* %t73
-  %t75 = extractvalue { i8**, i64 } %t74, 1
+  %t74 = load { %NativeStructField**, i64 }, { %NativeStructField**, i64 }* %t73
+  %t75 = extractvalue { %NativeStructField**, i64 } %t74, 1
   %t76 = sitofp i64 %t75 to double
   %t77 = fcmp oge double %t72, %t76
   %t78 = load i8*, i8** %l0
@@ -1655,157 +1658,158 @@ merge10:
   %t84 = extractvalue %NativeStruct %definition, 1
   %t85 = load double, double* %l5
   %t86 = fptosi double %t85 to i64
-  %t87 = load { i8**, i64 }, { i8**, i64 }* %t84
-  %t88 = extractvalue { i8**, i64 } %t87, 0
-  %t89 = extractvalue { i8**, i64 } %t87, 1
+  %t87 = load { %NativeStructField**, i64 }, { %NativeStructField**, i64 }* %t84
+  %t88 = extractvalue { %NativeStructField**, i64 } %t87, 0
+  %t89 = extractvalue { %NativeStructField**, i64 } %t87, 1
   %t90 = icmp uge i64 %t86, %t89
   ; bounds check: %t90 (if true, out of bounds)
-  %t91 = getelementptr i8*, i8** %t88, i64 %t86
-  %t92 = load i8*, i8** %t91
-  store i8* %t92, i8** %l6
-  %t93 = load i8*, i8** %l6
-  store double 0.0, double* %l7
-  %t94 = load %PythonBuilder, %PythonBuilder* %l1
-  %s95 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.95, i32 0, i32 0
-  %t96 = load double, double* %l7
-  %t97 = load double, double* %l5
-  %t98 = sitofp i64 1 to double
-  %t99 = fadd double %t97, %t98
-  store double %t99, double* %l5
+  %t91 = getelementptr %NativeStructField*, %NativeStructField** %t88, i64 %t86
+  %t92 = load %NativeStructField*, %NativeStructField** %t91
+  store %NativeStructField* %t92, %NativeStructField** %l6
+  %t93 = load %NativeStructField*, %NativeStructField** %l6
+  %t94 = getelementptr %NativeStructField, %NativeStructField* %t93, i32 0, i32 0
+  %t95 = load i8*, i8** %t94
+  %t96 = call i8* @sanitize_identifier(i8* %t95)
+  store i8* %t96, i8** %l7
+  %t97 = load %PythonBuilder, %PythonBuilder* %l1
+  %s98 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.98, i32 0, i32 0
+  %t99 = load i8*, i8** %l7
+  %t100 = add i8* %s98, %t99
+  %s101 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.101, i32 0, i32 0
+  %t102 = add i8* %t100, %s101
+  %t103 = load i8*, i8** %l7
+  %t104 = add i8* %t102, %t103
+  %t105 = call %PythonBuilder @builder_emit(%PythonBuilder %t97, i8* %t104)
+  store %PythonBuilder %t105, %PythonBuilder* %l1
+  %t106 = load double, double* %l5
+  %t107 = sitofp i64 1 to double
+  %t108 = fadd double %t106, %t107
+  store double %t108, double* %l5
   br label %loop.latch7
 loop.latch7:
-  %t100 = load %PythonBuilder, %PythonBuilder* %l1
-  %t101 = load double, double* %l5
+  %t109 = load %PythonBuilder, %PythonBuilder* %l1
+  %t110 = load double, double* %l5
   br label %loop.header5
 afterloop8:
   br label %merge4
 merge4:
-  %t104 = phi %PythonBuilder [ %t64, %then2 ], [ zeroinitializer, %else3 ]
-  store %PythonBuilder %t104, %PythonBuilder* %l1
-  %t105 = load %PythonBuilder, %PythonBuilder* %l1
-  %t106 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t105)
-  store %PythonBuilder %t106, %PythonBuilder* %l1
-  %t107 = load %PythonBuilder, %PythonBuilder* %l1
-  %t108 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t107)
-  store %PythonBuilder %t108, %PythonBuilder* %l1
-  %t109 = load %PythonBuilder, %PythonBuilder* %l1
-  %s110 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.110, i32 0, i32 0
-  %t111 = call %PythonBuilder @builder_emit(%PythonBuilder %t109, i8* %s110)
-  store %PythonBuilder %t111, %PythonBuilder* %l1
-  %t112 = load %PythonBuilder, %PythonBuilder* %l1
-  %t113 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t112)
+  %t113 = phi %PythonBuilder [ %t64, %then2 ], [ %t105, %else3 ]
   store %PythonBuilder %t113, %PythonBuilder* %l1
-  %t114 = load i8*, i8** %l0
-  %t115 = extractvalue %NativeStruct %definition, 1
-  %t116 = bitcast { i8**, i64 }* %t115 to { %NativeStructField*, i64 }*
-  %t117 = call i8* @render_struct_repr_fields(i8* %t114, { %NativeStructField*, i64 }* %t116)
-  store i8* %t117, i8** %l8
+  %t114 = load %PythonBuilder, %PythonBuilder* %l1
+  %t115 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t114)
+  store %PythonBuilder %t115, %PythonBuilder* %l1
+  %t116 = load %PythonBuilder, %PythonBuilder* %l1
+  %t117 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t116)
+  store %PythonBuilder %t117, %PythonBuilder* %l1
   %t118 = load %PythonBuilder, %PythonBuilder* %l1
-  %t119 = load i8*, i8** %l8
-  %t120 = call %PythonBuilder @builder_emit(%PythonBuilder %t118, i8* %t119)
+  %s119 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.119, i32 0, i32 0
+  %t120 = call %PythonBuilder @builder_emit(%PythonBuilder %t118, i8* %s119)
   store %PythonBuilder %t120, %PythonBuilder* %l1
   %t121 = load %PythonBuilder, %PythonBuilder* %l1
-  %t122 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t121)
+  %t122 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t121)
   store %PythonBuilder %t122, %PythonBuilder* %l1
   %t123 = load i8*, i8** %l0
-  %s124 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.124, i32 0, i32 0
-  %t125 = icmp eq i8* %t123, %s124
-  %t126 = load i8*, i8** %l0
+  %t124 = extractvalue %NativeStruct %definition, 1
+  %t125 = bitcast { %NativeStructField**, i64 }* %t124 to { %NativeStructField*, i64 }*
+  %t126 = call i8* @render_struct_repr_fields(i8* %t123, { %NativeStructField*, i64 }* %t125)
+  store i8* %t126, i8** %l8
   %t127 = load %PythonBuilder, %PythonBuilder* %l1
-  %t128 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t130 = load i8*, i8** %l4
-  %t131 = load i8*, i8** %l8
-  br i1 %t125, label %then11, label %merge12
+  %t128 = load i8*, i8** %l8
+  %t129 = call %PythonBuilder @builder_emit(%PythonBuilder %t127, i8* %t128)
+  store %PythonBuilder %t129, %PythonBuilder* %l1
+  %t130 = load %PythonBuilder, %PythonBuilder* %l1
+  %t131 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t130)
+  store %PythonBuilder %t131, %PythonBuilder* %l1
+  %t132 = load i8*, i8** %l0
+  %s133 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.133, i32 0, i32 0
+  %t134 = icmp eq i8* %t132, %s133
+  %t135 = load i8*, i8** %l0
+  %t136 = load %PythonBuilder, %PythonBuilder* %l1
+  %t137 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t138 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t139 = load i8*, i8** %l4
+  %t140 = load i8*, i8** %l8
+  br i1 %t134, label %then11, label %merge12
 then11:
-  %t132 = load %PythonBuilder, %PythonBuilder* %l1
-  %t133 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t132)
-  store %PythonBuilder %t133, %PythonBuilder* %l1
-  %t134 = load %PythonBuilder, %PythonBuilder* %l1
-  %s135 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.135, i32 0, i32 0
-  %t136 = call %PythonBuilder @builder_emit(%PythonBuilder %t134, i8* %s135)
-  store %PythonBuilder %t136, %PythonBuilder* %l1
-  %t137 = load %PythonBuilder, %PythonBuilder* %l1
-  %t138 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t137)
-  store %PythonBuilder %t138, %PythonBuilder* %l1
-  %t139 = load %PythonBuilder, %PythonBuilder* %l1
-  %s140 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.140, i32 0, i32 0
-  %t141 = call %PythonBuilder @builder_emit(%PythonBuilder %t139, i8* %s140)
-  store %PythonBuilder %t141, %PythonBuilder* %l1
-  %t142 = load %PythonBuilder, %PythonBuilder* %l1
-  %s143 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.143, i32 0, i32 0
-  %t144 = call %PythonBuilder @builder_emit(%PythonBuilder %t142, i8* %s143)
-  store %PythonBuilder %t144, %PythonBuilder* %l1
-  %t145 = load %PythonBuilder, %PythonBuilder* %l1
-  %t146 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t145)
-  store %PythonBuilder %t146, %PythonBuilder* %l1
-  %t147 = load %PythonBuilder, %PythonBuilder* %l1
+  %t141 = load %PythonBuilder, %PythonBuilder* %l1
+  %t142 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t141)
+  store %PythonBuilder %t142, %PythonBuilder* %l1
+  %t143 = load %PythonBuilder, %PythonBuilder* %l1
+  %s144 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.144, i32 0, i32 0
+  %t145 = call %PythonBuilder @builder_emit(%PythonBuilder %t143, i8* %s144)
+  store %PythonBuilder %t145, %PythonBuilder* %l1
+  %t146 = load %PythonBuilder, %PythonBuilder* %l1
+  %t147 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t146)
+  store %PythonBuilder %t147, %PythonBuilder* %l1
   %t148 = load %PythonBuilder, %PythonBuilder* %l1
-  %t149 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t148)
-  store %PythonBuilder %t149, %PythonBuilder* %l1
-  %t150 = load %PythonBuilder, %PythonBuilder* %l1
-  %s151 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.151, i32 0, i32 0
-  %t152 = call %PythonBuilder @builder_emit(%PythonBuilder %t150, i8* %s151)
-  store %PythonBuilder %t152, %PythonBuilder* %l1
-  %t153 = load %PythonBuilder, %PythonBuilder* %l1
-  %t154 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t153)
-  store %PythonBuilder %t154, %PythonBuilder* %l1
-  %t155 = load %PythonBuilder, %PythonBuilder* %l1
-  %s156 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.156, i32 0, i32 0
-  %t157 = call %PythonBuilder @builder_emit(%PythonBuilder %t155, i8* %s156)
-  store %PythonBuilder %t157, %PythonBuilder* %l1
-  %t158 = load %PythonBuilder, %PythonBuilder* %l1
+  %s149 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.149, i32 0, i32 0
+  %t150 = call %PythonBuilder @builder_emit(%PythonBuilder %t148, i8* %s149)
+  store %PythonBuilder %t150, %PythonBuilder* %l1
+  %t151 = load %PythonBuilder, %PythonBuilder* %l1
+  %s152 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.152, i32 0, i32 0
+  %t153 = call %PythonBuilder @builder_emit(%PythonBuilder %t151, i8* %s152)
+  store %PythonBuilder %t153, %PythonBuilder* %l1
+  %t154 = load %PythonBuilder, %PythonBuilder* %l1
+  %t155 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t154)
+  store %PythonBuilder %t155, %PythonBuilder* %l1
+  %t156 = load %PythonBuilder, %PythonBuilder* %l1
+  %t157 = load %PythonBuilder, %PythonBuilder* %l1
+  %t158 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t157)
+  store %PythonBuilder %t158, %PythonBuilder* %l1
   %t159 = load %PythonBuilder, %PythonBuilder* %l1
-  %t160 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t159)
-  store %PythonBuilder %t160, %PythonBuilder* %l1
-  %t161 = load %PythonBuilder, %PythonBuilder* %l1
-  %s162 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.162, i32 0, i32 0
-  %t163 = call %PythonBuilder @builder_emit(%PythonBuilder %t161, i8* %s162)
+  %s160 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.160, i32 0, i32 0
+  %t161 = call %PythonBuilder @builder_emit(%PythonBuilder %t159, i8* %s160)
+  store %PythonBuilder %t161, %PythonBuilder* %l1
+  %t162 = load %PythonBuilder, %PythonBuilder* %l1
+  %t163 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t162)
   store %PythonBuilder %t163, %PythonBuilder* %l1
   %t164 = load %PythonBuilder, %PythonBuilder* %l1
-  %t165 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t164)
-  store %PythonBuilder %t165, %PythonBuilder* %l1
-  %t166 = load %PythonBuilder, %PythonBuilder* %l1
+  %s165 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.165, i32 0, i32 0
+  %t166 = call %PythonBuilder @builder_emit(%PythonBuilder %t164, i8* %s165)
+  store %PythonBuilder %t166, %PythonBuilder* %l1
   %t167 = load %PythonBuilder, %PythonBuilder* %l1
-  %t168 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t167)
-  store %PythonBuilder %t168, %PythonBuilder* %l1
-  %t169 = load %PythonBuilder, %PythonBuilder* %l1
-  %s170 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.170, i32 0, i32 0
-  %t171 = call %PythonBuilder @builder_emit(%PythonBuilder %t169, i8* %s170)
-  store %PythonBuilder %t171, %PythonBuilder* %l1
-  %t172 = load %PythonBuilder, %PythonBuilder* %l1
-  %t173 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t172)
-  store %PythonBuilder %t173, %PythonBuilder* %l1
+  %t168 = load %PythonBuilder, %PythonBuilder* %l1
+  %t169 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t168)
+  store %PythonBuilder %t169, %PythonBuilder* %l1
+  %t170 = load %PythonBuilder, %PythonBuilder* %l1
+  %s171 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.171, i32 0, i32 0
+  %t172 = call %PythonBuilder @builder_emit(%PythonBuilder %t170, i8* %s171)
+  store %PythonBuilder %t172, %PythonBuilder* %l1
+  %t173 = load %PythonBuilder, %PythonBuilder* %l1
+  %t174 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t173)
+  store %PythonBuilder %t174, %PythonBuilder* %l1
+  %t175 = load %PythonBuilder, %PythonBuilder* %l1
+  %t176 = load %PythonBuilder, %PythonBuilder* %l1
+  %t177 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t176)
+  store %PythonBuilder %t177, %PythonBuilder* %l1
+  %t178 = load %PythonBuilder, %PythonBuilder* %l1
+  %s179 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.179, i32 0, i32 0
+  %t180 = call %PythonBuilder @builder_emit(%PythonBuilder %t178, i8* %s179)
+  store %PythonBuilder %t180, %PythonBuilder* %l1
+  %t181 = load %PythonBuilder, %PythonBuilder* %l1
+  %t182 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t181)
+  store %PythonBuilder %t182, %PythonBuilder* %l1
   br label %merge12
 merge12:
-  %t174 = phi %PythonBuilder [ %t133, %then11 ], [ %t127, %entry ]
-  %t175 = phi %PythonBuilder [ %t136, %then11 ], [ %t127, %entry ]
-  %t176 = phi %PythonBuilder [ %t138, %then11 ], [ %t127, %entry ]
-  %t177 = phi %PythonBuilder [ %t141, %then11 ], [ %t127, %entry ]
-  %t178 = phi %PythonBuilder [ %t144, %then11 ], [ %t127, %entry ]
-  %t179 = phi %PythonBuilder [ %t146, %then11 ], [ %t127, %entry ]
-  %t180 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t127, %entry ]
-  %t181 = phi %PythonBuilder [ %t149, %then11 ], [ %t127, %entry ]
-  %t182 = phi %PythonBuilder [ %t152, %then11 ], [ %t127, %entry ]
-  %t183 = phi %PythonBuilder [ %t154, %then11 ], [ %t127, %entry ]
-  %t184 = phi %PythonBuilder [ %t157, %then11 ], [ %t127, %entry ]
-  %t185 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t127, %entry ]
-  %t186 = phi %PythonBuilder [ %t160, %then11 ], [ %t127, %entry ]
-  %t187 = phi %PythonBuilder [ %t163, %then11 ], [ %t127, %entry ]
-  %t188 = phi %PythonBuilder [ %t165, %then11 ], [ %t127, %entry ]
-  %t189 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t127, %entry ]
-  %t190 = phi %PythonBuilder [ %t168, %then11 ], [ %t127, %entry ]
-  %t191 = phi %PythonBuilder [ %t171, %then11 ], [ %t127, %entry ]
-  %t192 = phi %PythonBuilder [ %t173, %then11 ], [ %t127, %entry ]
-  store %PythonBuilder %t174, %PythonBuilder* %l1
-  store %PythonBuilder %t175, %PythonBuilder* %l1
-  store %PythonBuilder %t176, %PythonBuilder* %l1
-  store %PythonBuilder %t177, %PythonBuilder* %l1
-  store %PythonBuilder %t178, %PythonBuilder* %l1
-  store %PythonBuilder %t179, %PythonBuilder* %l1
-  store %PythonBuilder %t180, %PythonBuilder* %l1
-  store %PythonBuilder %t181, %PythonBuilder* %l1
-  store %PythonBuilder %t182, %PythonBuilder* %l1
+  %t183 = phi %PythonBuilder [ %t142, %then11 ], [ %t136, %entry ]
+  %t184 = phi %PythonBuilder [ %t145, %then11 ], [ %t136, %entry ]
+  %t185 = phi %PythonBuilder [ %t147, %then11 ], [ %t136, %entry ]
+  %t186 = phi %PythonBuilder [ %t150, %then11 ], [ %t136, %entry ]
+  %t187 = phi %PythonBuilder [ %t153, %then11 ], [ %t136, %entry ]
+  %t188 = phi %PythonBuilder [ %t155, %then11 ], [ %t136, %entry ]
+  %t189 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t136, %entry ]
+  %t190 = phi %PythonBuilder [ %t158, %then11 ], [ %t136, %entry ]
+  %t191 = phi %PythonBuilder [ %t161, %then11 ], [ %t136, %entry ]
+  %t192 = phi %PythonBuilder [ %t163, %then11 ], [ %t136, %entry ]
+  %t193 = phi %PythonBuilder [ %t166, %then11 ], [ %t136, %entry ]
+  %t194 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t136, %entry ]
+  %t195 = phi %PythonBuilder [ %t169, %then11 ], [ %t136, %entry ]
+  %t196 = phi %PythonBuilder [ %t172, %then11 ], [ %t136, %entry ]
+  %t197 = phi %PythonBuilder [ %t174, %then11 ], [ %t136, %entry ]
+  %t198 = phi %PythonBuilder [ zeroinitializer, %then11 ], [ %t136, %entry ]
+  %t199 = phi %PythonBuilder [ %t177, %then11 ], [ %t136, %entry ]
+  %t200 = phi %PythonBuilder [ %t180, %then11 ], [ %t136, %entry ]
+  %t201 = phi %PythonBuilder [ %t182, %then11 ], [ %t136, %entry ]
   store %PythonBuilder %t183, %PythonBuilder* %l1
   store %PythonBuilder %t184, %PythonBuilder* %l1
   store %PythonBuilder %t185, %PythonBuilder* %l1
@@ -1816,135 +1820,144 @@ merge12:
   store %PythonBuilder %t190, %PythonBuilder* %l1
   store %PythonBuilder %t191, %PythonBuilder* %l1
   store %PythonBuilder %t192, %PythonBuilder* %l1
-  %t193 = extractvalue %NativeStruct %definition, 2
-  %t194 = load { i8**, i64 }, { i8**, i64 }* %t193
-  %t195 = extractvalue { i8**, i64 } %t194, 1
-  %t196 = icmp sgt i64 %t195, 0
-  %t197 = load i8*, i8** %l0
-  %t198 = load %PythonBuilder, %PythonBuilder* %l1
-  %t199 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t200 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t201 = load i8*, i8** %l4
-  %t202 = load i8*, i8** %l8
-  br i1 %t196, label %then13, label %merge14
-then13:
-  %t203 = load %PythonBuilder, %PythonBuilder* %l1
-  %t204 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t203)
-  store %PythonBuilder %t204, %PythonBuilder* %l1
-  %t205 = sitofp i64 0 to double
-  store double %t205, double* %l9
+  store %PythonBuilder %t193, %PythonBuilder* %l1
+  store %PythonBuilder %t194, %PythonBuilder* %l1
+  store %PythonBuilder %t195, %PythonBuilder* %l1
+  store %PythonBuilder %t196, %PythonBuilder* %l1
+  store %PythonBuilder %t197, %PythonBuilder* %l1
+  store %PythonBuilder %t198, %PythonBuilder* %l1
+  store %PythonBuilder %t199, %PythonBuilder* %l1
+  store %PythonBuilder %t200, %PythonBuilder* %l1
+  store %PythonBuilder %t201, %PythonBuilder* %l1
+  %t202 = extractvalue %NativeStruct %definition, 2
+  %t203 = load { %NativeFunction**, i64 }, { %NativeFunction**, i64 }* %t202
+  %t204 = extractvalue { %NativeFunction**, i64 } %t203, 1
+  %t205 = icmp sgt i64 %t204, 0
   %t206 = load i8*, i8** %l0
   %t207 = load %PythonBuilder, %PythonBuilder* %l1
   %t208 = load { i8**, i64 }*, { i8**, i64 }** %l2
   %t209 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t210 = load i8*, i8** %l4
   %t211 = load i8*, i8** %l8
-  %t212 = load double, double* %l9
+  br i1 %t205, label %then13, label %merge14
+then13:
+  %t212 = load %PythonBuilder, %PythonBuilder* %l1
+  %t213 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t212)
+  store %PythonBuilder %t213, %PythonBuilder* %l1
+  %t214 = sitofp i64 0 to double
+  store double %t214, double* %l9
+  %t215 = load i8*, i8** %l0
+  %t216 = load %PythonBuilder, %PythonBuilder* %l1
+  %t217 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t218 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t219 = load i8*, i8** %l4
+  %t220 = load i8*, i8** %l8
+  %t221 = load double, double* %l9
   br label %loop.header15
 loop.header15:
-  %t270 = phi %PythonBuilder [ %t207, %then13 ], [ %t267, %loop.latch17 ]
-  %t271 = phi { i8**, i64 }* [ %t208, %then13 ], [ %t268, %loop.latch17 ]
-  %t272 = phi double [ %t212, %then13 ], [ %t269, %loop.latch17 ]
-  store %PythonBuilder %t270, %PythonBuilder* %l1
-  store { i8**, i64 }* %t271, { i8**, i64 }** %l2
-  store double %t272, double* %l9
+  %t279 = phi %PythonBuilder [ %t216, %then13 ], [ %t276, %loop.latch17 ]
+  %t280 = phi { i8**, i64 }* [ %t217, %then13 ], [ %t277, %loop.latch17 ]
+  %t281 = phi double [ %t221, %then13 ], [ %t278, %loop.latch17 ]
+  store %PythonBuilder %t279, %PythonBuilder* %l1
+  store { i8**, i64 }* %t280, { i8**, i64 }** %l2
+  store double %t281, double* %l9
   br label %loop.body16
 loop.body16:
-  %t213 = load double, double* %l9
-  %t214 = extractvalue %NativeStruct %definition, 2
-  %t215 = load { i8**, i64 }, { i8**, i64 }* %t214
-  %t216 = extractvalue { i8**, i64 } %t215, 1
-  %t217 = sitofp i64 %t216 to double
-  %t218 = fcmp oge double %t213, %t217
-  %t219 = load i8*, i8** %l0
-  %t220 = load %PythonBuilder, %PythonBuilder* %l1
-  %t221 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t222 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t223 = load i8*, i8** %l4
-  %t224 = load i8*, i8** %l8
-  %t225 = load double, double* %l9
-  br i1 %t218, label %then19, label %merge20
+  %t222 = load double, double* %l9
+  %t223 = extractvalue %NativeStruct %definition, 2
+  %t224 = load { %NativeFunction**, i64 }, { %NativeFunction**, i64 }* %t223
+  %t225 = extractvalue { %NativeFunction**, i64 } %t224, 1
+  %t226 = sitofp i64 %t225 to double
+  %t227 = fcmp oge double %t222, %t226
+  %t228 = load i8*, i8** %l0
+  %t229 = load %PythonBuilder, %PythonBuilder* %l1
+  %t230 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t231 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t232 = load i8*, i8** %l4
+  %t233 = load i8*, i8** %l8
+  %t234 = load double, double* %l9
+  br i1 %t227, label %then19, label %merge20
 then19:
   br label %afterloop18
 merge20:
-  %t226 = extractvalue %NativeStruct %definition, 2
-  %t227 = load double, double* %l9
-  %t228 = fptosi double %t227 to i64
-  %t229 = load { i8**, i64 }, { i8**, i64 }* %t226
-  %t230 = extractvalue { i8**, i64 } %t229, 0
-  %t231 = extractvalue { i8**, i64 } %t229, 1
-  %t232 = icmp uge i64 %t228, %t231
-  ; bounds check: %t232 (if true, out of bounds)
-  %t233 = getelementptr i8*, i8** %t230, i64 %t228
-  %t234 = load i8*, i8** %t233
-  store i8* %t234, i8** %l10
-  %t235 = load %PythonBuilder, %PythonBuilder* %l1
-  %t236 = load i8*, i8** %l10
-  %t237 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t235, %NativeFunction zeroinitializer)
-  store %PythonFunctionEmission %t237, %PythonFunctionEmission* %l11
-  %t238 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  %t239 = extractvalue %PythonFunctionEmission %t238, 0
+  %t235 = extractvalue %NativeStruct %definition, 2
+  %t236 = load double, double* %l9
+  %t237 = fptosi double %t236 to i64
+  %t238 = load { %NativeFunction**, i64 }, { %NativeFunction**, i64 }* %t235
+  %t239 = extractvalue { %NativeFunction**, i64 } %t238, 0
+  %t240 = extractvalue { %NativeFunction**, i64 } %t238, 1
+  %t241 = icmp uge i64 %t237, %t240
+  ; bounds check: %t241 (if true, out of bounds)
+  %t242 = getelementptr %NativeFunction*, %NativeFunction** %t239, i64 %t237
+  %t243 = load %NativeFunction*, %NativeFunction** %t242
+  store %NativeFunction* %t243, %NativeFunction** %l10
+  %t244 = load %PythonBuilder, %PythonBuilder* %l1
+  %t245 = load %NativeFunction*, %NativeFunction** %l10
+  %t246 = call %PythonFunctionEmission @emit_python_function(%PythonBuilder %t244, %NativeFunction zeroinitializer)
+  store %PythonFunctionEmission %t246, %PythonFunctionEmission* %l11
+  %t247 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
+  %t248 = extractvalue %PythonFunctionEmission %t247, 0
   store %PythonBuilder zeroinitializer, %PythonBuilder* %l1
-  %t240 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t241 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  %t242 = extractvalue %PythonFunctionEmission %t241, 1
-  %t243 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t240, { i8**, i64 }* %t242)
-  store { i8**, i64 }* %t243, { i8**, i64 }** %l2
-  %t244 = load double, double* %l9
-  %t245 = sitofp i64 1 to double
-  %t246 = fadd double %t244, %t245
-  %t247 = extractvalue %NativeStruct %definition, 2
-  %t248 = load { i8**, i64 }, { i8**, i64 }* %t247
-  %t249 = extractvalue { i8**, i64 } %t248, 1
-  %t250 = sitofp i64 %t249 to double
-  %t251 = fcmp olt double %t246, %t250
-  %t252 = load i8*, i8** %l0
-  %t253 = load %PythonBuilder, %PythonBuilder* %l1
-  %t254 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t255 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %t256 = load i8*, i8** %l4
-  %t257 = load i8*, i8** %l8
-  %t258 = load double, double* %l9
-  %t259 = load i8*, i8** %l10
-  %t260 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
-  br i1 %t251, label %then21, label %merge22
+  %t249 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t250 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
+  %t251 = extractvalue %PythonFunctionEmission %t250, 1
+  %t252 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t249, { i8**, i64 }* %t251)
+  store { i8**, i64 }* %t252, { i8**, i64 }** %l2
+  %t253 = load double, double* %l9
+  %t254 = sitofp i64 1 to double
+  %t255 = fadd double %t253, %t254
+  %t256 = extractvalue %NativeStruct %definition, 2
+  %t257 = load { %NativeFunction**, i64 }, { %NativeFunction**, i64 }* %t256
+  %t258 = extractvalue { %NativeFunction**, i64 } %t257, 1
+  %t259 = sitofp i64 %t258 to double
+  %t260 = fcmp olt double %t255, %t259
+  %t261 = load i8*, i8** %l0
+  %t262 = load %PythonBuilder, %PythonBuilder* %l1
+  %t263 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t264 = load { i8**, i64 }*, { i8**, i64 }** %l3
+  %t265 = load i8*, i8** %l4
+  %t266 = load i8*, i8** %l8
+  %t267 = load double, double* %l9
+  %t268 = load %NativeFunction*, %NativeFunction** %l10
+  %t269 = load %PythonFunctionEmission, %PythonFunctionEmission* %l11
+  br i1 %t260, label %then21, label %merge22
 then21:
-  %t261 = load %PythonBuilder, %PythonBuilder* %l1
-  %t262 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t261)
-  store %PythonBuilder %t262, %PythonBuilder* %l1
+  %t270 = load %PythonBuilder, %PythonBuilder* %l1
+  %t271 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t270)
+  store %PythonBuilder %t271, %PythonBuilder* %l1
   br label %merge22
 merge22:
-  %t263 = phi %PythonBuilder [ %t262, %then21 ], [ %t253, %loop.body16 ]
-  store %PythonBuilder %t263, %PythonBuilder* %l1
-  %t264 = load double, double* %l9
-  %t265 = sitofp i64 1 to double
-  %t266 = fadd double %t264, %t265
-  store double %t266, double* %l9
+  %t272 = phi %PythonBuilder [ %t271, %then21 ], [ %t262, %loop.body16 ]
+  store %PythonBuilder %t272, %PythonBuilder* %l1
+  %t273 = load double, double* %l9
+  %t274 = sitofp i64 1 to double
+  %t275 = fadd double %t273, %t274
+  store double %t275, double* %l9
   br label %loop.latch17
 loop.latch17:
-  %t267 = load %PythonBuilder, %PythonBuilder* %l1
-  %t268 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t269 = load double, double* %l9
+  %t276 = load %PythonBuilder, %PythonBuilder* %l1
+  %t277 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t278 = load double, double* %l9
   br label %loop.header15
 afterloop18:
   br label %merge14
 merge14:
-  %t273 = phi %PythonBuilder [ %t204, %then13 ], [ %t198, %entry ]
-  %t274 = phi %PythonBuilder [ zeroinitializer, %then13 ], [ %t198, %entry ]
-  %t275 = phi { i8**, i64 }* [ %t243, %then13 ], [ %t199, %entry ]
-  %t276 = phi %PythonBuilder [ %t262, %then13 ], [ %t198, %entry ]
-  store %PythonBuilder %t273, %PythonBuilder* %l1
-  store %PythonBuilder %t274, %PythonBuilder* %l1
-  store { i8**, i64 }* %t275, { i8**, i64 }** %l2
-  store %PythonBuilder %t276, %PythonBuilder* %l1
-  %t277 = load %PythonBuilder, %PythonBuilder* %l1
-  %t278 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t277)
-  store %PythonBuilder %t278, %PythonBuilder* %l1
-  %t279 = load %PythonBuilder, %PythonBuilder* %l1
-  %t280 = insertvalue %PythonStructEmission undef, i8* null, 0
-  %t281 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t282 = insertvalue %PythonStructEmission %t280, { i8**, i64 }* %t281, 1
-  ret %PythonStructEmission %t282
+  %t282 = phi %PythonBuilder [ %t213, %then13 ], [ %t207, %entry ]
+  %t283 = phi %PythonBuilder [ zeroinitializer, %then13 ], [ %t207, %entry ]
+  %t284 = phi { i8**, i64 }* [ %t252, %then13 ], [ %t208, %entry ]
+  %t285 = phi %PythonBuilder [ %t271, %then13 ], [ %t207, %entry ]
+  store %PythonBuilder %t282, %PythonBuilder* %l1
+  store %PythonBuilder %t283, %PythonBuilder* %l1
+  store { i8**, i64 }* %t284, { i8**, i64 }** %l2
+  store %PythonBuilder %t285, %PythonBuilder* %l1
+  %t286 = load %PythonBuilder, %PythonBuilder* %l1
+  %t287 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t286)
+  store %PythonBuilder %t287, %PythonBuilder* %l1
+  %t288 = load %PythonBuilder, %PythonBuilder* %l1
+  %t289 = insertvalue %PythonStructEmission undef, %PythonBuilder* null, 0
+  %t290 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t291 = insertvalue %PythonStructEmission %t289, { i8**, i64 }* %t290, 1
+  ret %PythonStructEmission %t291
 }
 
 define { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* %fields) {
@@ -7246,9 +7259,38 @@ entry:
   %l5 = alloca { %MatchContext*, i64 }*
   %l6 = alloca double
   %l7 = alloca double
-  %l8 = alloca i8*
-  %l9 = alloca i64
-  %l10 = alloca %MatchContext
+  %l8 = alloca %NativeInstruction*
+  %l9 = alloca i8*
+  %l10 = alloca %StructLiteralCapture
+  %l11 = alloca double
+  %l12 = alloca %ExpressionContinuationCapture
+  %l13 = alloca i8*
+  %l14 = alloca %StructLiteralCapture
+  %l15 = alloca double
+  %l16 = alloca %ExpressionContinuationCapture
+  %l17 = alloca i8*
+  %l18 = alloca i8*
+  %l19 = alloca i8*
+  %l20 = alloca %StructLiteralCapture
+  %l21 = alloca double
+  %l22 = alloca %ExpressionContinuationCapture
+  %l23 = alloca i8*
+  %l24 = alloca i8*
+  %l25 = alloca i8*
+  %l26 = alloca i8*
+  %l27 = alloca %MatchContext
+  %l28 = alloca i8*
+  %l29 = alloca i8*
+  %l30 = alloca i64
+  %l31 = alloca %MatchContext
+  %l32 = alloca %LoweredCaseCondition
+  %l33 = alloca double
+  %l34 = alloca i64
+  %l35 = alloca %MatchContext
+  %l36 = alloca i8*
+  %l37 = alloca i8*
+  %l38 = alloca i64
+  %l39 = alloca %MatchContext
   store %PythonBuilder %builder, %PythonBuilder* %l0
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
@@ -7259,7 +7301,7 @@ entry:
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l1
   %t5 = extractvalue %NativeFunction %function, 1
-  %t6 = bitcast { i8**, i64 }* %t5 to { %NativeParameter*, i64 }*
+  %t6 = bitcast { %NativeParameter**, i64 }* %t5 to { %NativeParameter*, i64 }*
   %t7 = call { i8**, i64 }* @render_python_parameters({ %NativeParameter*, i64 }* %t6)
   store { i8**, i64 }* %t7, { i8**, i64 }** %l2
   %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.8, i32 0, i32 0
@@ -7299,8 +7341,8 @@ merge1:
   %t34 = phi %PythonBuilder [ %t33, %then0 ], [ %t23, %entry ]
   store %PythonBuilder %t34, %PythonBuilder* %l0
   %t35 = extractvalue %NativeFunction %function, 4
-  %t36 = load { i8**, i64 }, { i8**, i64 }* %t35
-  %t37 = extractvalue { i8**, i64 } %t36, 1
+  %t36 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t35
+  %t37 = extractvalue { %NativeInstruction**, i64 } %t36, 1
   %t38 = icmp eq i64 %t37, 0
   %t39 = load %PythonBuilder, %PythonBuilder* %l0
   %t40 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -7316,7 +7358,7 @@ then2:
   %t47 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t46)
   store %PythonBuilder %t47, %PythonBuilder* %l0
   %t48 = load %PythonBuilder, %PythonBuilder* %l0
-  %t49 = insertvalue %PythonFunctionEmission undef, i8* null, 0
+  %t49 = insertvalue %PythonFunctionEmission undef, %PythonBuilder* null, 0
   %t50 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t51 = insertvalue %PythonFunctionEmission %t49, { i8**, i64 }* %t50, 1
   ret %PythonFunctionEmission %t51
@@ -7345,14 +7387,24 @@ merge3:
   %t67 = load double, double* %l7
   br label %loop.header4
 loop.header4:
-  %t96 = phi double [ %t67, %entry ], [ %t95, %loop.latch6 ]
-  store double %t96, double* %l7
+  %t2059 = phi %PythonBuilder [ %t60, %entry ], [ %t2053, %loop.latch6 ]
+  %t2060 = phi double [ %t67, %entry ], [ %t2054, %loop.latch6 ]
+  %t2061 = phi double [ %t64, %entry ], [ %t2055, %loop.latch6 ]
+  %t2062 = phi { i8**, i64 }* [ %t61, %entry ], [ %t2056, %loop.latch6 ]
+  %t2063 = phi double [ %t66, %entry ], [ %t2057, %loop.latch6 ]
+  %t2064 = phi { %MatchContext*, i64 }* [ %t65, %entry ], [ %t2058, %loop.latch6 ]
+  store %PythonBuilder %t2059, %PythonBuilder* %l0
+  store double %t2060, double* %l7
+  store double %t2061, double* %l4
+  store { i8**, i64 }* %t2062, { i8**, i64 }** %l1
+  store double %t2063, double* %l6
+  store { %MatchContext*, i64 }* %t2064, { %MatchContext*, i64 }** %l5
   br label %loop.body5
 loop.body5:
   %t68 = load double, double* %l7
   %t69 = extractvalue %NativeFunction %function, 4
-  %t70 = load { i8**, i64 }, { i8**, i64 }* %t69
-  %t71 = extractvalue { i8**, i64 } %t70, 1
+  %t70 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t69
+  %t71 = extractvalue { %NativeInstruction**, i64 } %t70, 1
   %t72 = sitofp i64 %t71 to double
   %t73 = fcmp oge double %t68, %t72
   %t74 = load %PythonBuilder, %PythonBuilder* %l0
@@ -7370,168 +7422,2560 @@ merge9:
   %t82 = extractvalue %NativeFunction %function, 4
   %t83 = load double, double* %l7
   %t84 = fptosi double %t83 to i64
-  %t85 = load { i8**, i64 }, { i8**, i64 }* %t82
-  %t86 = extractvalue { i8**, i64 } %t85, 0
-  %t87 = extractvalue { i8**, i64 } %t85, 1
+  %t85 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t82
+  %t86 = extractvalue { %NativeInstruction**, i64 } %t85, 0
+  %t87 = extractvalue { %NativeInstruction**, i64 } %t85, 1
   %t88 = icmp uge i64 %t84, %t87
   ; bounds check: %t88 (if true, out of bounds)
-  %t89 = getelementptr i8*, i8** %t86, i64 %t84
-  %t90 = load i8*, i8** %t89
-  store i8* %t90, i8** %l8
-  %t91 = load i8*, i8** %l8
-  %t92 = load double, double* %l7
-  %t93 = sitofp i64 1 to double
-  %t94 = fadd double %t92, %t93
-  store double %t94, double* %l7
+  %t89 = getelementptr %NativeInstruction*, %NativeInstruction** %t86, i64 %t84
+  %t90 = load %NativeInstruction*, %NativeInstruction** %t89
+  store %NativeInstruction* %t90, %NativeInstruction** %l8
+  %t91 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t92 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t91, i32 0, i32 0
+  %t93 = load i32, i32* %t92
+  %t94 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t95 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t96 = icmp eq i32 %t93, 0
+  %t97 = select i1 %t96, i8* %t95, i8* %t94
+  %t98 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t99 = icmp eq i32 %t93, 1
+  %t100 = select i1 %t99, i8* %t98, i8* %t97
+  %t101 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t102 = icmp eq i32 %t93, 2
+  %t103 = select i1 %t102, i8* %t101, i8* %t100
+  %t104 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t105 = icmp eq i32 %t93, 3
+  %t106 = select i1 %t105, i8* %t104, i8* %t103
+  %t107 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t108 = icmp eq i32 %t93, 4
+  %t109 = select i1 %t108, i8* %t107, i8* %t106
+  %t110 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t111 = icmp eq i32 %t93, 5
+  %t112 = select i1 %t111, i8* %t110, i8* %t109
+  %t113 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t114 = icmp eq i32 %t93, 6
+  %t115 = select i1 %t114, i8* %t113, i8* %t112
+  %t116 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t117 = icmp eq i32 %t93, 7
+  %t118 = select i1 %t117, i8* %t116, i8* %t115
+  %t119 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t120 = icmp eq i32 %t93, 8
+  %t121 = select i1 %t120, i8* %t119, i8* %t118
+  %t122 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t123 = icmp eq i32 %t93, 9
+  %t124 = select i1 %t123, i8* %t122, i8* %t121
+  %t125 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t126 = icmp eq i32 %t93, 10
+  %t127 = select i1 %t126, i8* %t125, i8* %t124
+  %t128 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t129 = icmp eq i32 %t93, 11
+  %t130 = select i1 %t129, i8* %t128, i8* %t127
+  %t131 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t132 = icmp eq i32 %t93, 12
+  %t133 = select i1 %t132, i8* %t131, i8* %t130
+  %t134 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t135 = icmp eq i32 %t93, 13
+  %t136 = select i1 %t135, i8* %t134, i8* %t133
+  %t137 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t138 = icmp eq i32 %t93, 14
+  %t139 = select i1 %t138, i8* %t137, i8* %t136
+  %t140 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t141 = icmp eq i32 %t93, 15
+  %t142 = select i1 %t141, i8* %t140, i8* %t139
+  %t143 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t144 = icmp eq i32 %t93, 16
+  %t145 = select i1 %t144, i8* %t143, i8* %t142
+  %s146 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.146, i32 0, i32 0
+  %t147 = icmp eq i8* %t145, %s146
+  %t148 = load %PythonBuilder, %PythonBuilder* %l0
+  %t149 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t151 = load i8*, i8** %l3
+  %t152 = load double, double* %l4
+  %t153 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t154 = load double, double* %l6
+  %t155 = load double, double* %l7
+  %t156 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t147, label %then10, label %else11
+then10:
+  %t157 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t158 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t157, i32 0, i32 0
+  %t159 = load i32, i32* %t158
+  %t160 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t157, i32 0, i32 1
+  %t161 = bitcast [16 x i8]* %t160 to i8*
+  %t162 = bitcast i8* %t161 to i8**
+  %t163 = load i8*, i8** %t162
+  %t164 = icmp eq i32 %t159, 0
+  %t165 = select i1 %t164, i8* %t163, i8* null
+  %t166 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t157, i32 0, i32 1
+  %t167 = bitcast [16 x i8]* %t166 to i8*
+  %t168 = bitcast i8* %t167 to i8**
+  %t169 = load i8*, i8** %t168
+  %t170 = icmp eq i32 %t159, 1
+  %t171 = select i1 %t170, i8* %t169, i8* %t165
+  %t172 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t157, i32 0, i32 1
+  %t173 = bitcast [8 x i8]* %t172 to i8*
+  %t174 = bitcast i8* %t173 to i8**
+  %t175 = load i8*, i8** %t174
+  %t176 = icmp eq i32 %t159, 12
+  %t177 = select i1 %t176, i8* %t175, i8* %t171
+  %t178 = call i64 @sailfin_runtime_string_length(i8* %t177)
+  %t179 = icmp eq i64 %t178, 0
+  %t180 = load %PythonBuilder, %PythonBuilder* %l0
+  %t181 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t182 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t183 = load i8*, i8** %l3
+  %t184 = load double, double* %l4
+  %t185 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t186 = load double, double* %l6
+  %t187 = load double, double* %l7
+  %t188 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t179, label %then13, label %else14
+then13:
+  %t189 = load %PythonBuilder, %PythonBuilder* %l0
+  %s190 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.190, i32 0, i32 0
+  %t191 = call %PythonBuilder @builder_emit(%PythonBuilder %t189, i8* %s190)
+  store %PythonBuilder %t191, %PythonBuilder* %l0
+  br label %merge15
+else14:
+  %t192 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t193 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t192, i32 0, i32 0
+  %t194 = load i32, i32* %t193
+  %t195 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t192, i32 0, i32 1
+  %t196 = bitcast [16 x i8]* %t195 to i8*
+  %t197 = bitcast i8* %t196 to i8**
+  %t198 = load i8*, i8** %t197
+  %t199 = icmp eq i32 %t194, 0
+  %t200 = select i1 %t199, i8* %t198, i8* null
+  %t201 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t192, i32 0, i32 1
+  %t202 = bitcast [16 x i8]* %t201 to i8*
+  %t203 = bitcast i8* %t202 to i8**
+  %t204 = load i8*, i8** %t203
+  %t205 = icmp eq i32 %t194, 1
+  %t206 = select i1 %t205, i8* %t204, i8* %t200
+  %t207 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t192, i32 0, i32 1
+  %t208 = bitcast [8 x i8]* %t207 to i8*
+  %t209 = bitcast i8* %t208 to i8**
+  %t210 = load i8*, i8** %t209
+  %t211 = icmp eq i32 %t194, 12
+  %t212 = select i1 %t211, i8* %t210, i8* %t206
+  store i8* %t212, i8** %l9
+  %t213 = load i8*, i8** %l9
+  %t214 = extractvalue %NativeFunction %function, 4
+  %t215 = load double, double* %l7
+  %t216 = sitofp i64 1 to double
+  %t217 = fadd double %t215, %t216
+  %t218 = bitcast { %NativeInstruction**, i64 }* %t214 to { %NativeInstruction*, i64 }*
+  %t219 = call %StructLiteralCapture @capture_struct_literal_expression(i8* %t213, { %NativeInstruction*, i64 }* %t218, double %t217)
+  store %StructLiteralCapture %t219, %StructLiteralCapture* %l10
+  %t220 = sitofp i64 0 to double
+  store double %t220, double* %l11
+  %t221 = load %StructLiteralCapture, %StructLiteralCapture* %l10
+  %t222 = extractvalue %StructLiteralCapture %t221, 2
+  %t223 = load %PythonBuilder, %PythonBuilder* %l0
+  %t224 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t225 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t226 = load i8*, i8** %l3
+  %t227 = load double, double* %l4
+  %t228 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t229 = load double, double* %l6
+  %t230 = load double, double* %l7
+  %t231 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t232 = load i8*, i8** %l9
+  %t233 = load %StructLiteralCapture, %StructLiteralCapture* %l10
+  %t234 = load double, double* %l11
+  br i1 %t222, label %then16, label %else17
+then16:
+  %t235 = load %StructLiteralCapture, %StructLiteralCapture* %l10
+  %t236 = extractvalue %StructLiteralCapture %t235, 0
+  store i8* %t236, i8** %l9
+  %t237 = load %StructLiteralCapture, %StructLiteralCapture* %l10
+  %t238 = extractvalue %StructLiteralCapture %t237, 1
+  store double %t238, double* %l11
+  br label %merge18
+else17:
+  %t239 = load i8*, i8** %l9
+  %t240 = extractvalue %NativeFunction %function, 4
+  %t241 = load double, double* %l7
+  %t242 = sitofp i64 1 to double
+  %t243 = fadd double %t241, %t242
+  %t244 = bitcast { %NativeInstruction**, i64 }* %t240 to { %NativeInstruction*, i64 }*
+  %t245 = call %ExpressionContinuationCapture @capture_expression_continuation(i8* %t239, { %NativeInstruction*, i64 }* %t244, double %t243)
+  store %ExpressionContinuationCapture %t245, %ExpressionContinuationCapture* %l12
+  %t246 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l12
+  %t247 = extractvalue %ExpressionContinuationCapture %t246, 2
+  %t248 = load %PythonBuilder, %PythonBuilder* %l0
+  %t249 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t250 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t251 = load i8*, i8** %l3
+  %t252 = load double, double* %l4
+  %t253 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t254 = load double, double* %l6
+  %t255 = load double, double* %l7
+  %t256 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t257 = load i8*, i8** %l9
+  %t258 = load %StructLiteralCapture, %StructLiteralCapture* %l10
+  %t259 = load double, double* %l11
+  %t260 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l12
+  br i1 %t247, label %then19, label %merge20
+then19:
+  %t261 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l12
+  %t262 = extractvalue %ExpressionContinuationCapture %t261, 0
+  store i8* %t262, i8** %l9
+  %t263 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l12
+  %t264 = extractvalue %ExpressionContinuationCapture %t263, 1
+  store double %t264, double* %l11
+  br label %merge20
+merge20:
+  %t265 = phi i8* [ %t262, %then19 ], [ %t257, %else17 ]
+  %t266 = phi double [ %t264, %then19 ], [ %t259, %else17 ]
+  store i8* %t265, i8** %l9
+  store double %t266, double* %l11
+  br label %merge18
+merge18:
+  %t267 = phi i8* [ %t236, %then16 ], [ %t262, %else17 ]
+  %t268 = phi double [ %t238, %then16 ], [ %t264, %else17 ]
+  store i8* %t267, i8** %l9
+  store double %t268, double* %l11
+  %t269 = load %PythonBuilder, %PythonBuilder* %l0
+  %s270 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.270, i32 0, i32 0
+  %t271 = load i8*, i8** %l9
+  %t272 = call i8* @lower_expression(i8* %t271)
+  %t273 = add i8* %s270, %t272
+  %t274 = call %PythonBuilder @builder_emit(%PythonBuilder %t269, i8* %t273)
+  store %PythonBuilder %t274, %PythonBuilder* %l0
+  %t275 = load double, double* %l7
+  %t276 = load double, double* %l11
+  %t277 = fadd double %t275, %t276
+  store double %t277, double* %l7
+  br label %merge15
+merge15:
+  %t278 = phi %PythonBuilder [ %t191, %then13 ], [ %t274, %else14 ]
+  %t279 = phi double [ %t187, %then13 ], [ %t277, %else14 ]
+  store %PythonBuilder %t278, %PythonBuilder* %l0
+  store double %t279, double* %l7
+  br label %merge12
+else11:
+  %t280 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t281 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t280, i32 0, i32 0
+  %t282 = load i32, i32* %t281
+  %t283 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t284 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t285 = icmp eq i32 %t282, 0
+  %t286 = select i1 %t285, i8* %t284, i8* %t283
+  %t287 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t288 = icmp eq i32 %t282, 1
+  %t289 = select i1 %t288, i8* %t287, i8* %t286
+  %t290 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t291 = icmp eq i32 %t282, 2
+  %t292 = select i1 %t291, i8* %t290, i8* %t289
+  %t293 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t294 = icmp eq i32 %t282, 3
+  %t295 = select i1 %t294, i8* %t293, i8* %t292
+  %t296 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t297 = icmp eq i32 %t282, 4
+  %t298 = select i1 %t297, i8* %t296, i8* %t295
+  %t299 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t300 = icmp eq i32 %t282, 5
+  %t301 = select i1 %t300, i8* %t299, i8* %t298
+  %t302 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t303 = icmp eq i32 %t282, 6
+  %t304 = select i1 %t303, i8* %t302, i8* %t301
+  %t305 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t306 = icmp eq i32 %t282, 7
+  %t307 = select i1 %t306, i8* %t305, i8* %t304
+  %t308 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t309 = icmp eq i32 %t282, 8
+  %t310 = select i1 %t309, i8* %t308, i8* %t307
+  %t311 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t312 = icmp eq i32 %t282, 9
+  %t313 = select i1 %t312, i8* %t311, i8* %t310
+  %t314 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t315 = icmp eq i32 %t282, 10
+  %t316 = select i1 %t315, i8* %t314, i8* %t313
+  %t317 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t318 = icmp eq i32 %t282, 11
+  %t319 = select i1 %t318, i8* %t317, i8* %t316
+  %t320 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t321 = icmp eq i32 %t282, 12
+  %t322 = select i1 %t321, i8* %t320, i8* %t319
+  %t323 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t324 = icmp eq i32 %t282, 13
+  %t325 = select i1 %t324, i8* %t323, i8* %t322
+  %t326 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t327 = icmp eq i32 %t282, 14
+  %t328 = select i1 %t327, i8* %t326, i8* %t325
+  %t329 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t330 = icmp eq i32 %t282, 15
+  %t331 = select i1 %t330, i8* %t329, i8* %t328
+  %t332 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t333 = icmp eq i32 %t282, 16
+  %t334 = select i1 %t333, i8* %t332, i8* %t331
+  %s335 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.335, i32 0, i32 0
+  %t336 = icmp eq i8* %t334, %s335
+  %t337 = load %PythonBuilder, %PythonBuilder* %l0
+  %t338 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t339 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t340 = load i8*, i8** %l3
+  %t341 = load double, double* %l4
+  %t342 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t343 = load double, double* %l6
+  %t344 = load double, double* %l7
+  %t345 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t336, label %then21, label %else22
+then21:
+  %t346 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t347 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 0
+  %t348 = load i32, i32* %t347
+  %t349 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
+  %t350 = bitcast [16 x i8]* %t349 to i8*
+  %t351 = bitcast i8* %t350 to i8**
+  %t352 = load i8*, i8** %t351
+  %t353 = icmp eq i32 %t348, 0
+  %t354 = select i1 %t353, i8* %t352, i8* null
+  %t355 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
+  %t356 = bitcast [16 x i8]* %t355 to i8*
+  %t357 = bitcast i8* %t356 to i8**
+  %t358 = load i8*, i8** %t357
+  %t359 = icmp eq i32 %t348, 1
+  %t360 = select i1 %t359, i8* %t358, i8* %t354
+  %t361 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
+  %t362 = bitcast [8 x i8]* %t361 to i8*
+  %t363 = bitcast i8* %t362 to i8**
+  %t364 = load i8*, i8** %t363
+  %t365 = icmp eq i32 %t348, 12
+  %t366 = select i1 %t365, i8* %t364, i8* %t360
+  store i8* %t366, i8** %l13
+  %t367 = load i8*, i8** %l13
+  %t368 = extractvalue %NativeFunction %function, 4
+  %t369 = load double, double* %l7
+  %t370 = sitofp i64 1 to double
+  %t371 = fadd double %t369, %t370
+  %t372 = bitcast { %NativeInstruction**, i64 }* %t368 to { %NativeInstruction*, i64 }*
+  %t373 = call %StructLiteralCapture @capture_struct_literal_expression(i8* %t367, { %NativeInstruction*, i64 }* %t372, double %t371)
+  store %StructLiteralCapture %t373, %StructLiteralCapture* %l14
+  %t374 = sitofp i64 0 to double
+  store double %t374, double* %l15
+  %t375 = load %StructLiteralCapture, %StructLiteralCapture* %l14
+  %t376 = extractvalue %StructLiteralCapture %t375, 2
+  %t377 = load %PythonBuilder, %PythonBuilder* %l0
+  %t378 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t379 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t380 = load i8*, i8** %l3
+  %t381 = load double, double* %l4
+  %t382 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t383 = load double, double* %l6
+  %t384 = load double, double* %l7
+  %t385 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t386 = load i8*, i8** %l13
+  %t387 = load %StructLiteralCapture, %StructLiteralCapture* %l14
+  %t388 = load double, double* %l15
+  br i1 %t376, label %then24, label %else25
+then24:
+  %t389 = load %StructLiteralCapture, %StructLiteralCapture* %l14
+  %t390 = extractvalue %StructLiteralCapture %t389, 0
+  store i8* %t390, i8** %l13
+  %t391 = load %StructLiteralCapture, %StructLiteralCapture* %l14
+  %t392 = extractvalue %StructLiteralCapture %t391, 1
+  store double %t392, double* %l15
+  br label %merge26
+else25:
+  %t393 = load i8*, i8** %l13
+  %t394 = extractvalue %NativeFunction %function, 4
+  %t395 = load double, double* %l7
+  %t396 = sitofp i64 1 to double
+  %t397 = fadd double %t395, %t396
+  %t398 = bitcast { %NativeInstruction**, i64 }* %t394 to { %NativeInstruction*, i64 }*
+  %t399 = call %ExpressionContinuationCapture @capture_expression_continuation(i8* %t393, { %NativeInstruction*, i64 }* %t398, double %t397)
+  store %ExpressionContinuationCapture %t399, %ExpressionContinuationCapture* %l16
+  %t400 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l16
+  %t401 = extractvalue %ExpressionContinuationCapture %t400, 2
+  %t402 = load %PythonBuilder, %PythonBuilder* %l0
+  %t403 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t404 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t405 = load i8*, i8** %l3
+  %t406 = load double, double* %l4
+  %t407 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t408 = load double, double* %l6
+  %t409 = load double, double* %l7
+  %t410 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t411 = load i8*, i8** %l13
+  %t412 = load %StructLiteralCapture, %StructLiteralCapture* %l14
+  %t413 = load double, double* %l15
+  %t414 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l16
+  br i1 %t401, label %then27, label %merge28
+then27:
+  %t415 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l16
+  %t416 = extractvalue %ExpressionContinuationCapture %t415, 0
+  store i8* %t416, i8** %l13
+  %t417 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l16
+  %t418 = extractvalue %ExpressionContinuationCapture %t417, 1
+  store double %t418, double* %l15
+  br label %merge28
+merge28:
+  %t419 = phi i8* [ %t416, %then27 ], [ %t411, %else25 ]
+  %t420 = phi double [ %t418, %then27 ], [ %t413, %else25 ]
+  store i8* %t419, i8** %l13
+  store double %t420, double* %l15
+  br label %merge26
+merge26:
+  %t421 = phi i8* [ %t390, %then24 ], [ %t416, %else25 ]
+  %t422 = phi double [ %t392, %then24 ], [ %t418, %else25 ]
+  store i8* %t421, i8** %l13
+  store double %t422, double* %l15
+  %t423 = load %PythonBuilder, %PythonBuilder* %l0
+  %t424 = load i8*, i8** %l13
+  %t425 = call i8* @lower_expression(i8* %t424)
+  %t426 = call %PythonBuilder @builder_emit(%PythonBuilder %t423, i8* %t425)
+  store %PythonBuilder %t426, %PythonBuilder* %l0
+  %t427 = load double, double* %l7
+  %t428 = load double, double* %l15
+  %t429 = fadd double %t427, %t428
+  store double %t429, double* %l7
+  br label %merge23
+else22:
+  %t430 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t431 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t430, i32 0, i32 0
+  %t432 = load i32, i32* %t431
+  %t433 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t434 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t435 = icmp eq i32 %t432, 0
+  %t436 = select i1 %t435, i8* %t434, i8* %t433
+  %t437 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t438 = icmp eq i32 %t432, 1
+  %t439 = select i1 %t438, i8* %t437, i8* %t436
+  %t440 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t441 = icmp eq i32 %t432, 2
+  %t442 = select i1 %t441, i8* %t440, i8* %t439
+  %t443 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t444 = icmp eq i32 %t432, 3
+  %t445 = select i1 %t444, i8* %t443, i8* %t442
+  %t446 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t447 = icmp eq i32 %t432, 4
+  %t448 = select i1 %t447, i8* %t446, i8* %t445
+  %t449 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t450 = icmp eq i32 %t432, 5
+  %t451 = select i1 %t450, i8* %t449, i8* %t448
+  %t452 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t453 = icmp eq i32 %t432, 6
+  %t454 = select i1 %t453, i8* %t452, i8* %t451
+  %t455 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t456 = icmp eq i32 %t432, 7
+  %t457 = select i1 %t456, i8* %t455, i8* %t454
+  %t458 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t459 = icmp eq i32 %t432, 8
+  %t460 = select i1 %t459, i8* %t458, i8* %t457
+  %t461 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t462 = icmp eq i32 %t432, 9
+  %t463 = select i1 %t462, i8* %t461, i8* %t460
+  %t464 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t465 = icmp eq i32 %t432, 10
+  %t466 = select i1 %t465, i8* %t464, i8* %t463
+  %t467 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t468 = icmp eq i32 %t432, 11
+  %t469 = select i1 %t468, i8* %t467, i8* %t466
+  %t470 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t471 = icmp eq i32 %t432, 12
+  %t472 = select i1 %t471, i8* %t470, i8* %t469
+  %t473 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t474 = icmp eq i32 %t432, 13
+  %t475 = select i1 %t474, i8* %t473, i8* %t472
+  %t476 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t477 = icmp eq i32 %t432, 14
+  %t478 = select i1 %t477, i8* %t476, i8* %t475
+  %t479 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t480 = icmp eq i32 %t432, 15
+  %t481 = select i1 %t480, i8* %t479, i8* %t478
+  %t482 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t483 = icmp eq i32 %t432, 16
+  %t484 = select i1 %t483, i8* %t482, i8* %t481
+  %s485 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.485, i32 0, i32 0
+  %t486 = icmp eq i8* %t484, %s485
+  %t487 = load %PythonBuilder, %PythonBuilder* %l0
+  %t488 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t489 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t490 = load i8*, i8** %l3
+  %t491 = load double, double* %l4
+  %t492 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t493 = load double, double* %l6
+  %t494 = load double, double* %l7
+  %t495 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t486, label %then29, label %else30
+then29:
+  %t496 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t497 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t496, i32 0, i32 0
+  %t498 = load i32, i32* %t497
+  %t499 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t496, i32 0, i32 1
+  %t500 = bitcast [48 x i8]* %t499 to i8*
+  %t501 = bitcast i8* %t500 to i8**
+  %t502 = load i8*, i8** %t501
+  %t503 = icmp eq i32 %t498, 2
+  %t504 = select i1 %t503, i8* %t502, i8* null
+  %t505 = call i8* @sanitize_identifier(i8* %t504)
+  store i8* %t505, i8** %l17
+  %t506 = load i8*, i8** %l17
+  %s507 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.507, i32 0, i32 0
+  %t508 = add i8* %t506, %s507
+  store i8* %t508, i8** %l18
+  %t509 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t510 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t509, i32 0, i32 0
+  %t511 = load i32, i32* %t510
+  %t512 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t509, i32 0, i32 1
+  %t513 = bitcast [48 x i8]* %t512 to i8*
+  %t514 = getelementptr inbounds i8, i8* %t513, i64 24
+  %t515 = bitcast i8* %t514 to i8**
+  %t516 = load i8*, i8** %t515
+  %t517 = icmp eq i32 %t511, 2
+  %t518 = select i1 %t517, i8* %t516, i8* null
+  %t519 = icmp ne i8* %t518, null
+  %t520 = load %PythonBuilder, %PythonBuilder* %l0
+  %t521 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t522 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t523 = load i8*, i8** %l3
+  %t524 = load double, double* %l4
+  %t525 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t526 = load double, double* %l6
+  %t527 = load double, double* %l7
+  %t528 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t529 = load i8*, i8** %l17
+  %t530 = load i8*, i8** %l18
+  br i1 %t519, label %then32, label %else33
+then32:
+  %t531 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t532 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t531, i32 0, i32 0
+  %t533 = load i32, i32* %t532
+  %t534 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t531, i32 0, i32 1
+  %t535 = bitcast [48 x i8]* %t534 to i8*
+  %t536 = getelementptr inbounds i8, i8* %t535, i64 24
+  %t537 = bitcast i8* %t536 to i8**
+  %t538 = load i8*, i8** %t537
+  %t539 = icmp eq i32 %t533, 2
+  %t540 = select i1 %t539, i8* %t538, i8* null
+  store i8* %t540, i8** %l19
+  %t541 = load i8*, i8** %l19
+  %t542 = extractvalue %NativeFunction %function, 4
+  %t543 = load double, double* %l7
+  %t544 = sitofp i64 1 to double
+  %t545 = fadd double %t543, %t544
+  %t546 = bitcast { %NativeInstruction**, i64 }* %t542 to { %NativeInstruction*, i64 }*
+  %t547 = call %StructLiteralCapture @capture_struct_literal_expression(i8* %t541, { %NativeInstruction*, i64 }* %t546, double %t545)
+  store %StructLiteralCapture %t547, %StructLiteralCapture* %l20
+  %t548 = sitofp i64 0 to double
+  store double %t548, double* %l21
+  %t549 = load %StructLiteralCapture, %StructLiteralCapture* %l20
+  %t550 = extractvalue %StructLiteralCapture %t549, 2
+  %t551 = load %PythonBuilder, %PythonBuilder* %l0
+  %t552 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t553 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t554 = load i8*, i8** %l3
+  %t555 = load double, double* %l4
+  %t556 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t557 = load double, double* %l6
+  %t558 = load double, double* %l7
+  %t559 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t560 = load i8*, i8** %l17
+  %t561 = load i8*, i8** %l18
+  %t562 = load i8*, i8** %l19
+  %t563 = load %StructLiteralCapture, %StructLiteralCapture* %l20
+  %t564 = load double, double* %l21
+  br i1 %t550, label %then35, label %else36
+then35:
+  %t565 = load %StructLiteralCapture, %StructLiteralCapture* %l20
+  %t566 = extractvalue %StructLiteralCapture %t565, 0
+  store i8* %t566, i8** %l19
+  %t567 = load %StructLiteralCapture, %StructLiteralCapture* %l20
+  %t568 = extractvalue %StructLiteralCapture %t567, 1
+  store double %t568, double* %l21
+  br label %merge37
+else36:
+  %t569 = load i8*, i8** %l19
+  %t570 = extractvalue %NativeFunction %function, 4
+  %t571 = load double, double* %l7
+  %t572 = sitofp i64 1 to double
+  %t573 = fadd double %t571, %t572
+  %t574 = bitcast { %NativeInstruction**, i64 }* %t570 to { %NativeInstruction*, i64 }*
+  %t575 = call %ExpressionContinuationCapture @capture_expression_continuation(i8* %t569, { %NativeInstruction*, i64 }* %t574, double %t573)
+  store %ExpressionContinuationCapture %t575, %ExpressionContinuationCapture* %l22
+  %t576 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l22
+  %t577 = extractvalue %ExpressionContinuationCapture %t576, 2
+  %t578 = load %PythonBuilder, %PythonBuilder* %l0
+  %t579 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t580 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t581 = load i8*, i8** %l3
+  %t582 = load double, double* %l4
+  %t583 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t584 = load double, double* %l6
+  %t585 = load double, double* %l7
+  %t586 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t587 = load i8*, i8** %l17
+  %t588 = load i8*, i8** %l18
+  %t589 = load i8*, i8** %l19
+  %t590 = load %StructLiteralCapture, %StructLiteralCapture* %l20
+  %t591 = load double, double* %l21
+  %t592 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l22
+  br i1 %t577, label %then38, label %merge39
+then38:
+  %t593 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l22
+  %t594 = extractvalue %ExpressionContinuationCapture %t593, 0
+  store i8* %t594, i8** %l19
+  %t595 = load %ExpressionContinuationCapture, %ExpressionContinuationCapture* %l22
+  %t596 = extractvalue %ExpressionContinuationCapture %t595, 1
+  store double %t596, double* %l21
+  br label %merge39
+merge39:
+  %t597 = phi i8* [ %t594, %then38 ], [ %t589, %else36 ]
+  %t598 = phi double [ %t596, %then38 ], [ %t591, %else36 ]
+  store i8* %t597, i8** %l19
+  store double %t598, double* %l21
+  br label %merge37
+merge37:
+  %t599 = phi i8* [ %t566, %then35 ], [ %t594, %else36 ]
+  %t600 = phi double [ %t568, %then35 ], [ %t596, %else36 ]
+  store i8* %t599, i8** %l19
+  store double %t600, double* %l21
+  %t601 = load i8*, i8** %l18
+  %t602 = load i8*, i8** %l19
+  %t603 = call i8* @lower_expression(i8* %t602)
+  %t604 = add i8* %t601, %t603
+  store i8* %t604, i8** %l18
+  %t605 = load double, double* %l7
+  %t606 = load double, double* %l21
+  %t607 = fadd double %t605, %t606
+  store double %t607, double* %l7
+  br label %merge34
+else33:
+  %t608 = load i8*, i8** %l18
+  %s609 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.609, i32 0, i32 0
+  %t610 = add i8* %t608, %s609
+  store i8* %t610, i8** %l18
+  br label %merge34
+merge34:
+  %t611 = phi i8* [ %t604, %then32 ], [ %t610, %else33 ]
+  %t612 = phi double [ %t607, %then32 ], [ %t527, %else33 ]
+  store i8* %t611, i8** %l18
+  store double %t612, double* %l7
+  %t613 = load %PythonBuilder, %PythonBuilder* %l0
+  %t614 = load i8*, i8** %l18
+  %t615 = call %PythonBuilder @builder_emit(%PythonBuilder %t613, i8* %t614)
+  store %PythonBuilder %t615, %PythonBuilder* %l0
+  br label %merge31
+else30:
+  %t616 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t617 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t616, i32 0, i32 0
+  %t618 = load i32, i32* %t617
+  %t619 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t620 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t621 = icmp eq i32 %t618, 0
+  %t622 = select i1 %t621, i8* %t620, i8* %t619
+  %t623 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t624 = icmp eq i32 %t618, 1
+  %t625 = select i1 %t624, i8* %t623, i8* %t622
+  %t626 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t627 = icmp eq i32 %t618, 2
+  %t628 = select i1 %t627, i8* %t626, i8* %t625
+  %t629 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t630 = icmp eq i32 %t618, 3
+  %t631 = select i1 %t630, i8* %t629, i8* %t628
+  %t632 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t633 = icmp eq i32 %t618, 4
+  %t634 = select i1 %t633, i8* %t632, i8* %t631
+  %t635 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t636 = icmp eq i32 %t618, 5
+  %t637 = select i1 %t636, i8* %t635, i8* %t634
+  %t638 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t639 = icmp eq i32 %t618, 6
+  %t640 = select i1 %t639, i8* %t638, i8* %t637
+  %t641 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t642 = icmp eq i32 %t618, 7
+  %t643 = select i1 %t642, i8* %t641, i8* %t640
+  %t644 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t645 = icmp eq i32 %t618, 8
+  %t646 = select i1 %t645, i8* %t644, i8* %t643
+  %t647 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t648 = icmp eq i32 %t618, 9
+  %t649 = select i1 %t648, i8* %t647, i8* %t646
+  %t650 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t651 = icmp eq i32 %t618, 10
+  %t652 = select i1 %t651, i8* %t650, i8* %t649
+  %t653 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t654 = icmp eq i32 %t618, 11
+  %t655 = select i1 %t654, i8* %t653, i8* %t652
+  %t656 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t657 = icmp eq i32 %t618, 12
+  %t658 = select i1 %t657, i8* %t656, i8* %t655
+  %t659 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t660 = icmp eq i32 %t618, 13
+  %t661 = select i1 %t660, i8* %t659, i8* %t658
+  %t662 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t663 = icmp eq i32 %t618, 14
+  %t664 = select i1 %t663, i8* %t662, i8* %t661
+  %t665 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t666 = icmp eq i32 %t618, 15
+  %t667 = select i1 %t666, i8* %t665, i8* %t664
+  %t668 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t669 = icmp eq i32 %t618, 16
+  %t670 = select i1 %t669, i8* %t668, i8* %t667
+  %s671 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.671, i32 0, i32 0
+  %t672 = icmp eq i8* %t670, %s671
+  %t673 = load %PythonBuilder, %PythonBuilder* %l0
+  %t674 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t675 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t676 = load i8*, i8** %l3
+  %t677 = load double, double* %l4
+  %t678 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t679 = load double, double* %l6
+  %t680 = load double, double* %l7
+  %t681 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t672, label %then40, label %else41
+then40:
+  %t682 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t683 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t682, i32 0, i32 0
+  %t684 = load i32, i32* %t683
+  %t685 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t682, i32 0, i32 1
+  %t686 = bitcast [8 x i8]* %t685 to i8*
+  %t687 = bitcast i8* %t686 to i8**
+  %t688 = load i8*, i8** %t687
+  %t689 = icmp eq i32 %t684, 3
+  %t690 = select i1 %t689, i8* %t688, i8* null
+  %t691 = call i8* @trim_text(i8* %t690)
+  %t692 = call i8* @rewrite_expression_intrinsics(i8* %t691)
+  store i8* %t692, i8** %l23
+  %t693 = load %PythonBuilder, %PythonBuilder* %l0
+  %s694 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.694, i32 0, i32 0
+  %t695 = load i8*, i8** %l23
+  %t696 = add i8* %s694, %t695
+  %t697 = getelementptr i8, i8* %t696, i64 0
+  %t698 = load i8, i8* %t697
+  %t699 = add i8 %t698, 58
+  %t700 = alloca [2 x i8], align 1
+  %t701 = getelementptr [2 x i8], [2 x i8]* %t700, i32 0, i32 0
+  store i8 %t699, i8* %t701
+  %t702 = getelementptr [2 x i8], [2 x i8]* %t700, i32 0, i32 1
+  store i8 0, i8* %t702
+  %t703 = getelementptr [2 x i8], [2 x i8]* %t700, i32 0, i32 0
+  %t704 = call %PythonBuilder @builder_emit(%PythonBuilder %t693, i8* %t703)
+  store %PythonBuilder %t704, %PythonBuilder* %l0
+  %t705 = load %PythonBuilder, %PythonBuilder* %l0
+  %t706 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t705)
+  store %PythonBuilder %t706, %PythonBuilder* %l0
+  %t707 = load double, double* %l4
+  %t708 = sitofp i64 1 to double
+  %t709 = fadd double %t707, %t708
+  store double %t709, double* %l4
+  br label %merge42
+else41:
+  %t710 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t711 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t710, i32 0, i32 0
+  %t712 = load i32, i32* %t711
+  %t713 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t714 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t715 = icmp eq i32 %t712, 0
+  %t716 = select i1 %t715, i8* %t714, i8* %t713
+  %t717 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t718 = icmp eq i32 %t712, 1
+  %t719 = select i1 %t718, i8* %t717, i8* %t716
+  %t720 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t721 = icmp eq i32 %t712, 2
+  %t722 = select i1 %t721, i8* %t720, i8* %t719
+  %t723 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t724 = icmp eq i32 %t712, 3
+  %t725 = select i1 %t724, i8* %t723, i8* %t722
+  %t726 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t727 = icmp eq i32 %t712, 4
+  %t728 = select i1 %t727, i8* %t726, i8* %t725
+  %t729 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t730 = icmp eq i32 %t712, 5
+  %t731 = select i1 %t730, i8* %t729, i8* %t728
+  %t732 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t733 = icmp eq i32 %t712, 6
+  %t734 = select i1 %t733, i8* %t732, i8* %t731
+  %t735 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t736 = icmp eq i32 %t712, 7
+  %t737 = select i1 %t736, i8* %t735, i8* %t734
+  %t738 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t739 = icmp eq i32 %t712, 8
+  %t740 = select i1 %t739, i8* %t738, i8* %t737
+  %t741 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t742 = icmp eq i32 %t712, 9
+  %t743 = select i1 %t742, i8* %t741, i8* %t740
+  %t744 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t745 = icmp eq i32 %t712, 10
+  %t746 = select i1 %t745, i8* %t744, i8* %t743
+  %t747 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t748 = icmp eq i32 %t712, 11
+  %t749 = select i1 %t748, i8* %t747, i8* %t746
+  %t750 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t751 = icmp eq i32 %t712, 12
+  %t752 = select i1 %t751, i8* %t750, i8* %t749
+  %t753 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t754 = icmp eq i32 %t712, 13
+  %t755 = select i1 %t754, i8* %t753, i8* %t752
+  %t756 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t757 = icmp eq i32 %t712, 14
+  %t758 = select i1 %t757, i8* %t756, i8* %t755
+  %t759 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t760 = icmp eq i32 %t712, 15
+  %t761 = select i1 %t760, i8* %t759, i8* %t758
+  %t762 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t763 = icmp eq i32 %t712, 16
+  %t764 = select i1 %t763, i8* %t762, i8* %t761
+  %s765 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.765, i32 0, i32 0
+  %t766 = icmp eq i8* %t764, %s765
+  %t767 = load %PythonBuilder, %PythonBuilder* %l0
+  %t768 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t769 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t770 = load i8*, i8** %l3
+  %t771 = load double, double* %l4
+  %t772 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t773 = load double, double* %l6
+  %t774 = load double, double* %l7
+  %t775 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t766, label %then43, label %else44
+then43:
+  %t776 = load double, double* %l4
+  %t777 = sitofp i64 0 to double
+  %t778 = fcmp ogt double %t776, %t777
+  %t779 = load %PythonBuilder, %PythonBuilder* %l0
+  %t780 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t781 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t782 = load i8*, i8** %l3
+  %t783 = load double, double* %l4
+  %t784 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t785 = load double, double* %l6
+  %t786 = load double, double* %l7
+  %t787 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t778, label %then46, label %else47
+then46:
+  %t788 = load %PythonBuilder, %PythonBuilder* %l0
+  %t789 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t788)
+  store %PythonBuilder %t789, %PythonBuilder* %l0
+  br label %merge48
+else47:
+  %t790 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t791 = extractvalue %NativeFunction %function, 0
+  %s792 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.792, i32 0, i32 0
+  %t793 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t790, i8* %t791, i8* %s792)
+  store { i8**, i64 }* %t793, { i8**, i64 }** %l1
+  br label %merge48
+merge48:
+  %t794 = phi %PythonBuilder [ %t789, %then46 ], [ %t779, %else47 ]
+  %t795 = phi { i8**, i64 }* [ %t780, %then46 ], [ %t793, %else47 ]
+  store %PythonBuilder %t794, %PythonBuilder* %l0
+  store { i8**, i64 }* %t795, { i8**, i64 }** %l1
+  %t796 = load %PythonBuilder, %PythonBuilder* %l0
+  %s797 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.797, i32 0, i32 0
+  %t798 = call %PythonBuilder @builder_emit(%PythonBuilder %t796, i8* %s797)
+  store %PythonBuilder %t798, %PythonBuilder* %l0
+  %t799 = load %PythonBuilder, %PythonBuilder* %l0
+  %t800 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t799)
+  store %PythonBuilder %t800, %PythonBuilder* %l0
+  br label %merge45
+else44:
+  %t801 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t802 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t801, i32 0, i32 0
+  %t803 = load i32, i32* %t802
+  %t804 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t805 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t806 = icmp eq i32 %t803, 0
+  %t807 = select i1 %t806, i8* %t805, i8* %t804
+  %t808 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t809 = icmp eq i32 %t803, 1
+  %t810 = select i1 %t809, i8* %t808, i8* %t807
+  %t811 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t812 = icmp eq i32 %t803, 2
+  %t813 = select i1 %t812, i8* %t811, i8* %t810
+  %t814 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t815 = icmp eq i32 %t803, 3
+  %t816 = select i1 %t815, i8* %t814, i8* %t813
+  %t817 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t818 = icmp eq i32 %t803, 4
+  %t819 = select i1 %t818, i8* %t817, i8* %t816
+  %t820 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t821 = icmp eq i32 %t803, 5
+  %t822 = select i1 %t821, i8* %t820, i8* %t819
+  %t823 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t824 = icmp eq i32 %t803, 6
+  %t825 = select i1 %t824, i8* %t823, i8* %t822
+  %t826 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t827 = icmp eq i32 %t803, 7
+  %t828 = select i1 %t827, i8* %t826, i8* %t825
+  %t829 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t830 = icmp eq i32 %t803, 8
+  %t831 = select i1 %t830, i8* %t829, i8* %t828
+  %t832 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t833 = icmp eq i32 %t803, 9
+  %t834 = select i1 %t833, i8* %t832, i8* %t831
+  %t835 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t836 = icmp eq i32 %t803, 10
+  %t837 = select i1 %t836, i8* %t835, i8* %t834
+  %t838 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t839 = icmp eq i32 %t803, 11
+  %t840 = select i1 %t839, i8* %t838, i8* %t837
+  %t841 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t842 = icmp eq i32 %t803, 12
+  %t843 = select i1 %t842, i8* %t841, i8* %t840
+  %t844 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t845 = icmp eq i32 %t803, 13
+  %t846 = select i1 %t845, i8* %t844, i8* %t843
+  %t847 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t848 = icmp eq i32 %t803, 14
+  %t849 = select i1 %t848, i8* %t847, i8* %t846
+  %t850 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t851 = icmp eq i32 %t803, 15
+  %t852 = select i1 %t851, i8* %t850, i8* %t849
+  %t853 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t854 = icmp eq i32 %t803, 16
+  %t855 = select i1 %t854, i8* %t853, i8* %t852
+  %s856 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.856, i32 0, i32 0
+  %t857 = icmp eq i8* %t855, %s856
+  %t858 = load %PythonBuilder, %PythonBuilder* %l0
+  %t859 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t860 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t861 = load i8*, i8** %l3
+  %t862 = load double, double* %l4
+  %t863 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t864 = load double, double* %l6
+  %t865 = load double, double* %l7
+  %t866 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t857, label %then49, label %else50
+then49:
+  %t867 = load double, double* %l4
+  %t868 = sitofp i64 0 to double
+  %t869 = fcmp ogt double %t867, %t868
+  %t870 = load %PythonBuilder, %PythonBuilder* %l0
+  %t871 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t872 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t873 = load i8*, i8** %l3
+  %t874 = load double, double* %l4
+  %t875 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t876 = load double, double* %l6
+  %t877 = load double, double* %l7
+  %t878 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t869, label %then52, label %else53
+then52:
+  %t879 = load %PythonBuilder, %PythonBuilder* %l0
+  %t880 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t879)
+  store %PythonBuilder %t880, %PythonBuilder* %l0
+  %t881 = load double, double* %l4
+  %t882 = sitofp i64 1 to double
+  %t883 = fsub double %t881, %t882
+  store double %t883, double* %l4
+  br label %merge54
+else53:
+  %t884 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t885 = extractvalue %NativeFunction %function, 0
+  %s886 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.886, i32 0, i32 0
+  %t887 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t884, i8* %t885, i8* %s886)
+  store { i8**, i64 }* %t887, { i8**, i64 }** %l1
+  br label %merge54
+merge54:
+  %t888 = phi %PythonBuilder [ %t880, %then52 ], [ %t870, %else53 ]
+  %t889 = phi double [ %t883, %then52 ], [ %t874, %else53 ]
+  %t890 = phi { i8**, i64 }* [ %t871, %then52 ], [ %t887, %else53 ]
+  store %PythonBuilder %t888, %PythonBuilder* %l0
+  store double %t889, double* %l4
+  store { i8**, i64 }* %t890, { i8**, i64 }** %l1
+  br label %merge51
+else50:
+  %t891 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t892 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t891, i32 0, i32 0
+  %t893 = load i32, i32* %t892
+  %t894 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t895 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t896 = icmp eq i32 %t893, 0
+  %t897 = select i1 %t896, i8* %t895, i8* %t894
+  %t898 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t899 = icmp eq i32 %t893, 1
+  %t900 = select i1 %t899, i8* %t898, i8* %t897
+  %t901 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t902 = icmp eq i32 %t893, 2
+  %t903 = select i1 %t902, i8* %t901, i8* %t900
+  %t904 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t905 = icmp eq i32 %t893, 3
+  %t906 = select i1 %t905, i8* %t904, i8* %t903
+  %t907 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t908 = icmp eq i32 %t893, 4
+  %t909 = select i1 %t908, i8* %t907, i8* %t906
+  %t910 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t911 = icmp eq i32 %t893, 5
+  %t912 = select i1 %t911, i8* %t910, i8* %t909
+  %t913 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t914 = icmp eq i32 %t893, 6
+  %t915 = select i1 %t914, i8* %t913, i8* %t912
+  %t916 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t917 = icmp eq i32 %t893, 7
+  %t918 = select i1 %t917, i8* %t916, i8* %t915
+  %t919 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t920 = icmp eq i32 %t893, 8
+  %t921 = select i1 %t920, i8* %t919, i8* %t918
+  %t922 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t923 = icmp eq i32 %t893, 9
+  %t924 = select i1 %t923, i8* %t922, i8* %t921
+  %t925 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t926 = icmp eq i32 %t893, 10
+  %t927 = select i1 %t926, i8* %t925, i8* %t924
+  %t928 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t929 = icmp eq i32 %t893, 11
+  %t930 = select i1 %t929, i8* %t928, i8* %t927
+  %t931 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t932 = icmp eq i32 %t893, 12
+  %t933 = select i1 %t932, i8* %t931, i8* %t930
+  %t934 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t935 = icmp eq i32 %t893, 13
+  %t936 = select i1 %t935, i8* %t934, i8* %t933
+  %t937 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t938 = icmp eq i32 %t893, 14
+  %t939 = select i1 %t938, i8* %t937, i8* %t936
+  %t940 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t941 = icmp eq i32 %t893, 15
+  %t942 = select i1 %t941, i8* %t940, i8* %t939
+  %t943 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t944 = icmp eq i32 %t893, 16
+  %t945 = select i1 %t944, i8* %t943, i8* %t942
+  %s946 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.946, i32 0, i32 0
+  %t947 = icmp eq i8* %t945, %s946
+  %t948 = load %PythonBuilder, %PythonBuilder* %l0
+  %t949 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t950 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t951 = load i8*, i8** %l3
+  %t952 = load double, double* %l4
+  %t953 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t954 = load double, double* %l6
+  %t955 = load double, double* %l7
+  %t956 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t947, label %then55, label %else56
+then55:
+  %t957 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t958 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t957, i32 0, i32 0
+  %t959 = load i32, i32* %t958
+  %t960 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t957, i32 0, i32 1
+  %t961 = bitcast [16 x i8]* %t960 to i8*
+  %t962 = getelementptr inbounds i8, i8* %t961, i64 8
+  %t963 = bitcast i8* %t962 to i8**
+  %t964 = load i8*, i8** %t963
+  %t965 = icmp eq i32 %t959, 6
+  %t966 = select i1 %t965, i8* %t964, i8* null
+  %t967 = call i8* @trim_text(i8* %t966)
+  %t968 = call i8* @rewrite_expression_intrinsics(i8* %t967)
+  store i8* %t968, i8** %l24
+  %t969 = load %PythonBuilder, %PythonBuilder* %l0
+  %s970 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.970, i32 0, i32 0
+  %t971 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t972 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t971, i32 0, i32 0
+  %t973 = load i32, i32* %t972
+  %t974 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t971, i32 0, i32 1
+  %t975 = bitcast [16 x i8]* %t974 to i8*
+  %t976 = bitcast i8* %t975 to i8**
+  %t977 = load i8*, i8** %t976
+  %t978 = icmp eq i32 %t973, 6
+  %t979 = select i1 %t978, i8* %t977, i8* null
+  %t980 = add i8* %s970, %t979
+  %s981 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.981, i32 0, i32 0
+  %t982 = add i8* %t980, %s981
+  %t983 = load i8*, i8** %l24
+  %t984 = add i8* %t982, %t983
+  %t985 = getelementptr i8, i8* %t984, i64 0
+  %t986 = load i8, i8* %t985
+  %t987 = add i8 %t986, 58
+  %t988 = alloca [2 x i8], align 1
+  %t989 = getelementptr [2 x i8], [2 x i8]* %t988, i32 0, i32 0
+  store i8 %t987, i8* %t989
+  %t990 = getelementptr [2 x i8], [2 x i8]* %t988, i32 0, i32 1
+  store i8 0, i8* %t990
+  %t991 = getelementptr [2 x i8], [2 x i8]* %t988, i32 0, i32 0
+  %t992 = call %PythonBuilder @builder_emit(%PythonBuilder %t969, i8* %t991)
+  store %PythonBuilder %t992, %PythonBuilder* %l0
+  %t993 = load %PythonBuilder, %PythonBuilder* %l0
+  %t994 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t993)
+  store %PythonBuilder %t994, %PythonBuilder* %l0
+  %t995 = load double, double* %l4
+  %t996 = sitofp i64 1 to double
+  %t997 = fadd double %t995, %t996
+  store double %t997, double* %l4
+  br label %merge57
+else56:
+  %t998 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t999 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t998, i32 0, i32 0
+  %t1000 = load i32, i32* %t999
+  %t1001 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1002 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1003 = icmp eq i32 %t1000, 0
+  %t1004 = select i1 %t1003, i8* %t1002, i8* %t1001
+  %t1005 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1006 = icmp eq i32 %t1000, 1
+  %t1007 = select i1 %t1006, i8* %t1005, i8* %t1004
+  %t1008 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1009 = icmp eq i32 %t1000, 2
+  %t1010 = select i1 %t1009, i8* %t1008, i8* %t1007
+  %t1011 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1012 = icmp eq i32 %t1000, 3
+  %t1013 = select i1 %t1012, i8* %t1011, i8* %t1010
+  %t1014 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1015 = icmp eq i32 %t1000, 4
+  %t1016 = select i1 %t1015, i8* %t1014, i8* %t1013
+  %t1017 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1018 = icmp eq i32 %t1000, 5
+  %t1019 = select i1 %t1018, i8* %t1017, i8* %t1016
+  %t1020 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1021 = icmp eq i32 %t1000, 6
+  %t1022 = select i1 %t1021, i8* %t1020, i8* %t1019
+  %t1023 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1024 = icmp eq i32 %t1000, 7
+  %t1025 = select i1 %t1024, i8* %t1023, i8* %t1022
+  %t1026 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1027 = icmp eq i32 %t1000, 8
+  %t1028 = select i1 %t1027, i8* %t1026, i8* %t1025
+  %t1029 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1030 = icmp eq i32 %t1000, 9
+  %t1031 = select i1 %t1030, i8* %t1029, i8* %t1028
+  %t1032 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1033 = icmp eq i32 %t1000, 10
+  %t1034 = select i1 %t1033, i8* %t1032, i8* %t1031
+  %t1035 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1036 = icmp eq i32 %t1000, 11
+  %t1037 = select i1 %t1036, i8* %t1035, i8* %t1034
+  %t1038 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1039 = icmp eq i32 %t1000, 12
+  %t1040 = select i1 %t1039, i8* %t1038, i8* %t1037
+  %t1041 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1042 = icmp eq i32 %t1000, 13
+  %t1043 = select i1 %t1042, i8* %t1041, i8* %t1040
+  %t1044 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1045 = icmp eq i32 %t1000, 14
+  %t1046 = select i1 %t1045, i8* %t1044, i8* %t1043
+  %t1047 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1048 = icmp eq i32 %t1000, 15
+  %t1049 = select i1 %t1048, i8* %t1047, i8* %t1046
+  %t1050 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1051 = icmp eq i32 %t1000, 16
+  %t1052 = select i1 %t1051, i8* %t1050, i8* %t1049
+  %s1053 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1053, i32 0, i32 0
+  %t1054 = icmp eq i8* %t1052, %s1053
+  %t1055 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1056 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1057 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1058 = load i8*, i8** %l3
+  %t1059 = load double, double* %l4
+  %t1060 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1061 = load double, double* %l6
+  %t1062 = load double, double* %l7
+  %t1063 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1054, label %then58, label %else59
+then58:
+  %t1064 = load double, double* %l4
+  %t1065 = sitofp i64 0 to double
+  %t1066 = fcmp ogt double %t1064, %t1065
+  %t1067 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1068 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1069 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1070 = load i8*, i8** %l3
+  %t1071 = load double, double* %l4
+  %t1072 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1073 = load double, double* %l6
+  %t1074 = load double, double* %l7
+  %t1075 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1066, label %then61, label %else62
+then61:
+  %t1076 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1077 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t1076)
+  store %PythonBuilder %t1077, %PythonBuilder* %l0
+  %t1078 = load double, double* %l4
+  %t1079 = sitofp i64 1 to double
+  %t1080 = fsub double %t1078, %t1079
+  store double %t1080, double* %l4
+  br label %merge63
+else62:
+  %t1081 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1082 = extractvalue %NativeFunction %function, 0
+  %s1083 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.1083, i32 0, i32 0
+  %t1084 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1081, i8* %t1082, i8* %s1083)
+  store { i8**, i64 }* %t1084, { i8**, i64 }** %l1
+  br label %merge63
+merge63:
+  %t1085 = phi %PythonBuilder [ %t1077, %then61 ], [ %t1067, %else62 ]
+  %t1086 = phi double [ %t1080, %then61 ], [ %t1071, %else62 ]
+  %t1087 = phi { i8**, i64 }* [ %t1068, %then61 ], [ %t1084, %else62 ]
+  store %PythonBuilder %t1085, %PythonBuilder* %l0
+  store double %t1086, double* %l4
+  store { i8**, i64 }* %t1087, { i8**, i64 }** %l1
+  br label %merge60
+else59:
+  %t1088 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1089 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1088, i32 0, i32 0
+  %t1090 = load i32, i32* %t1089
+  %t1091 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1092 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1093 = icmp eq i32 %t1090, 0
+  %t1094 = select i1 %t1093, i8* %t1092, i8* %t1091
+  %t1095 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1096 = icmp eq i32 %t1090, 1
+  %t1097 = select i1 %t1096, i8* %t1095, i8* %t1094
+  %t1098 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1099 = icmp eq i32 %t1090, 2
+  %t1100 = select i1 %t1099, i8* %t1098, i8* %t1097
+  %t1101 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1102 = icmp eq i32 %t1090, 3
+  %t1103 = select i1 %t1102, i8* %t1101, i8* %t1100
+  %t1104 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1105 = icmp eq i32 %t1090, 4
+  %t1106 = select i1 %t1105, i8* %t1104, i8* %t1103
+  %t1107 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1108 = icmp eq i32 %t1090, 5
+  %t1109 = select i1 %t1108, i8* %t1107, i8* %t1106
+  %t1110 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1111 = icmp eq i32 %t1090, 6
+  %t1112 = select i1 %t1111, i8* %t1110, i8* %t1109
+  %t1113 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1114 = icmp eq i32 %t1090, 7
+  %t1115 = select i1 %t1114, i8* %t1113, i8* %t1112
+  %t1116 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1117 = icmp eq i32 %t1090, 8
+  %t1118 = select i1 %t1117, i8* %t1116, i8* %t1115
+  %t1119 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1120 = icmp eq i32 %t1090, 9
+  %t1121 = select i1 %t1120, i8* %t1119, i8* %t1118
+  %t1122 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1123 = icmp eq i32 %t1090, 10
+  %t1124 = select i1 %t1123, i8* %t1122, i8* %t1121
+  %t1125 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1126 = icmp eq i32 %t1090, 11
+  %t1127 = select i1 %t1126, i8* %t1125, i8* %t1124
+  %t1128 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1129 = icmp eq i32 %t1090, 12
+  %t1130 = select i1 %t1129, i8* %t1128, i8* %t1127
+  %t1131 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1132 = icmp eq i32 %t1090, 13
+  %t1133 = select i1 %t1132, i8* %t1131, i8* %t1130
+  %t1134 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1135 = icmp eq i32 %t1090, 14
+  %t1136 = select i1 %t1135, i8* %t1134, i8* %t1133
+  %t1137 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1138 = icmp eq i32 %t1090, 15
+  %t1139 = select i1 %t1138, i8* %t1137, i8* %t1136
+  %t1140 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1141 = icmp eq i32 %t1090, 16
+  %t1142 = select i1 %t1141, i8* %t1140, i8* %t1139
+  %s1143 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1143, i32 0, i32 0
+  %t1144 = icmp eq i8* %t1142, %s1143
+  %t1145 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1146 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1147 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1148 = load i8*, i8** %l3
+  %t1149 = load double, double* %l4
+  %t1150 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1151 = load double, double* %l6
+  %t1152 = load double, double* %l7
+  %t1153 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1144, label %then64, label %else65
+then64:
+  %t1154 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1155 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.1155, i32 0, i32 0
+  %t1156 = call %PythonBuilder @builder_emit(%PythonBuilder %t1154, i8* %s1155)
+  store %PythonBuilder %t1156, %PythonBuilder* %l0
+  %t1157 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1158 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t1157)
+  store %PythonBuilder %t1158, %PythonBuilder* %l0
+  %t1159 = load double, double* %l4
+  %t1160 = sitofp i64 1 to double
+  %t1161 = fadd double %t1159, %t1160
+  store double %t1161, double* %l4
+  br label %merge66
+else65:
+  %t1162 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1163 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1162, i32 0, i32 0
+  %t1164 = load i32, i32* %t1163
+  %t1165 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1166 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1167 = icmp eq i32 %t1164, 0
+  %t1168 = select i1 %t1167, i8* %t1166, i8* %t1165
+  %t1169 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1170 = icmp eq i32 %t1164, 1
+  %t1171 = select i1 %t1170, i8* %t1169, i8* %t1168
+  %t1172 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1173 = icmp eq i32 %t1164, 2
+  %t1174 = select i1 %t1173, i8* %t1172, i8* %t1171
+  %t1175 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1176 = icmp eq i32 %t1164, 3
+  %t1177 = select i1 %t1176, i8* %t1175, i8* %t1174
+  %t1178 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1179 = icmp eq i32 %t1164, 4
+  %t1180 = select i1 %t1179, i8* %t1178, i8* %t1177
+  %t1181 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1182 = icmp eq i32 %t1164, 5
+  %t1183 = select i1 %t1182, i8* %t1181, i8* %t1180
+  %t1184 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1185 = icmp eq i32 %t1164, 6
+  %t1186 = select i1 %t1185, i8* %t1184, i8* %t1183
+  %t1187 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1188 = icmp eq i32 %t1164, 7
+  %t1189 = select i1 %t1188, i8* %t1187, i8* %t1186
+  %t1190 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1191 = icmp eq i32 %t1164, 8
+  %t1192 = select i1 %t1191, i8* %t1190, i8* %t1189
+  %t1193 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1194 = icmp eq i32 %t1164, 9
+  %t1195 = select i1 %t1194, i8* %t1193, i8* %t1192
+  %t1196 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1197 = icmp eq i32 %t1164, 10
+  %t1198 = select i1 %t1197, i8* %t1196, i8* %t1195
+  %t1199 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1200 = icmp eq i32 %t1164, 11
+  %t1201 = select i1 %t1200, i8* %t1199, i8* %t1198
+  %t1202 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1203 = icmp eq i32 %t1164, 12
+  %t1204 = select i1 %t1203, i8* %t1202, i8* %t1201
+  %t1205 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1206 = icmp eq i32 %t1164, 13
+  %t1207 = select i1 %t1206, i8* %t1205, i8* %t1204
+  %t1208 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1209 = icmp eq i32 %t1164, 14
+  %t1210 = select i1 %t1209, i8* %t1208, i8* %t1207
+  %t1211 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1212 = icmp eq i32 %t1164, 15
+  %t1213 = select i1 %t1212, i8* %t1211, i8* %t1210
+  %t1214 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1215 = icmp eq i32 %t1164, 16
+  %t1216 = select i1 %t1215, i8* %t1214, i8* %t1213
+  %s1217 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1217, i32 0, i32 0
+  %t1218 = icmp eq i8* %t1216, %s1217
+  %t1219 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1220 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1221 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1222 = load i8*, i8** %l3
+  %t1223 = load double, double* %l4
+  %t1224 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1225 = load double, double* %l6
+  %t1226 = load double, double* %l7
+  %t1227 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1218, label %then67, label %else68
+then67:
+  %t1228 = load double, double* %l4
+  %t1229 = sitofp i64 0 to double
+  %t1230 = fcmp ogt double %t1228, %t1229
+  %t1231 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1232 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1233 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1234 = load i8*, i8** %l3
+  %t1235 = load double, double* %l4
+  %t1236 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1237 = load double, double* %l6
+  %t1238 = load double, double* %l7
+  %t1239 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1230, label %then70, label %else71
+then70:
+  %t1240 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1241 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t1240)
+  store %PythonBuilder %t1241, %PythonBuilder* %l0
+  %t1242 = load double, double* %l4
+  %t1243 = sitofp i64 1 to double
+  %t1244 = fsub double %t1242, %t1243
+  store double %t1244, double* %l4
+  br label %merge72
+else71:
+  %t1245 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1246 = extractvalue %NativeFunction %function, 0
+  %s1247 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1247, i32 0, i32 0
+  %t1248 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1245, i8* %t1246, i8* %s1247)
+  store { i8**, i64 }* %t1248, { i8**, i64 }** %l1
+  br label %merge72
+merge72:
+  %t1249 = phi %PythonBuilder [ %t1241, %then70 ], [ %t1231, %else71 ]
+  %t1250 = phi double [ %t1244, %then70 ], [ %t1235, %else71 ]
+  %t1251 = phi { i8**, i64 }* [ %t1232, %then70 ], [ %t1248, %else71 ]
+  store %PythonBuilder %t1249, %PythonBuilder* %l0
+  store double %t1250, double* %l4
+  store { i8**, i64 }* %t1251, { i8**, i64 }** %l1
+  br label %merge69
+else68:
+  %t1252 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1253 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1252, i32 0, i32 0
+  %t1254 = load i32, i32* %t1253
+  %t1255 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1256 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1257 = icmp eq i32 %t1254, 0
+  %t1258 = select i1 %t1257, i8* %t1256, i8* %t1255
+  %t1259 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1260 = icmp eq i32 %t1254, 1
+  %t1261 = select i1 %t1260, i8* %t1259, i8* %t1258
+  %t1262 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1263 = icmp eq i32 %t1254, 2
+  %t1264 = select i1 %t1263, i8* %t1262, i8* %t1261
+  %t1265 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1266 = icmp eq i32 %t1254, 3
+  %t1267 = select i1 %t1266, i8* %t1265, i8* %t1264
+  %t1268 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1269 = icmp eq i32 %t1254, 4
+  %t1270 = select i1 %t1269, i8* %t1268, i8* %t1267
+  %t1271 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1272 = icmp eq i32 %t1254, 5
+  %t1273 = select i1 %t1272, i8* %t1271, i8* %t1270
+  %t1274 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1275 = icmp eq i32 %t1254, 6
+  %t1276 = select i1 %t1275, i8* %t1274, i8* %t1273
+  %t1277 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1278 = icmp eq i32 %t1254, 7
+  %t1279 = select i1 %t1278, i8* %t1277, i8* %t1276
+  %t1280 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1281 = icmp eq i32 %t1254, 8
+  %t1282 = select i1 %t1281, i8* %t1280, i8* %t1279
+  %t1283 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1284 = icmp eq i32 %t1254, 9
+  %t1285 = select i1 %t1284, i8* %t1283, i8* %t1282
+  %t1286 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1287 = icmp eq i32 %t1254, 10
+  %t1288 = select i1 %t1287, i8* %t1286, i8* %t1285
+  %t1289 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1290 = icmp eq i32 %t1254, 11
+  %t1291 = select i1 %t1290, i8* %t1289, i8* %t1288
+  %t1292 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1293 = icmp eq i32 %t1254, 12
+  %t1294 = select i1 %t1293, i8* %t1292, i8* %t1291
+  %t1295 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1296 = icmp eq i32 %t1254, 13
+  %t1297 = select i1 %t1296, i8* %t1295, i8* %t1294
+  %t1298 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1299 = icmp eq i32 %t1254, 14
+  %t1300 = select i1 %t1299, i8* %t1298, i8* %t1297
+  %t1301 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1302 = icmp eq i32 %t1254, 15
+  %t1303 = select i1 %t1302, i8* %t1301, i8* %t1300
+  %t1304 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1305 = icmp eq i32 %t1254, 16
+  %t1306 = select i1 %t1305, i8* %t1304, i8* %t1303
+  %s1307 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1307, i32 0, i32 0
+  %t1308 = icmp eq i8* %t1306, %s1307
+  %t1309 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1310 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1311 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1312 = load i8*, i8** %l3
+  %t1313 = load double, double* %l4
+  %t1314 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1315 = load double, double* %l6
+  %t1316 = load double, double* %l7
+  %t1317 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1308, label %then73, label %else74
+then73:
+  %t1318 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1319 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1319, i32 0, i32 0
+  %t1320 = call %PythonBuilder @builder_emit(%PythonBuilder %t1318, i8* %s1319)
+  store %PythonBuilder %t1320, %PythonBuilder* %l0
+  br label %merge75
+else74:
+  %t1321 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1322 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1321, i32 0, i32 0
+  %t1323 = load i32, i32* %t1322
+  %t1324 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1325 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1326 = icmp eq i32 %t1323, 0
+  %t1327 = select i1 %t1326, i8* %t1325, i8* %t1324
+  %t1328 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1329 = icmp eq i32 %t1323, 1
+  %t1330 = select i1 %t1329, i8* %t1328, i8* %t1327
+  %t1331 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1332 = icmp eq i32 %t1323, 2
+  %t1333 = select i1 %t1332, i8* %t1331, i8* %t1330
+  %t1334 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1335 = icmp eq i32 %t1323, 3
+  %t1336 = select i1 %t1335, i8* %t1334, i8* %t1333
+  %t1337 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1338 = icmp eq i32 %t1323, 4
+  %t1339 = select i1 %t1338, i8* %t1337, i8* %t1336
+  %t1340 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1341 = icmp eq i32 %t1323, 5
+  %t1342 = select i1 %t1341, i8* %t1340, i8* %t1339
+  %t1343 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1344 = icmp eq i32 %t1323, 6
+  %t1345 = select i1 %t1344, i8* %t1343, i8* %t1342
+  %t1346 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1347 = icmp eq i32 %t1323, 7
+  %t1348 = select i1 %t1347, i8* %t1346, i8* %t1345
+  %t1349 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1350 = icmp eq i32 %t1323, 8
+  %t1351 = select i1 %t1350, i8* %t1349, i8* %t1348
+  %t1352 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1353 = icmp eq i32 %t1323, 9
+  %t1354 = select i1 %t1353, i8* %t1352, i8* %t1351
+  %t1355 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1356 = icmp eq i32 %t1323, 10
+  %t1357 = select i1 %t1356, i8* %t1355, i8* %t1354
+  %t1358 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1359 = icmp eq i32 %t1323, 11
+  %t1360 = select i1 %t1359, i8* %t1358, i8* %t1357
+  %t1361 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1362 = icmp eq i32 %t1323, 12
+  %t1363 = select i1 %t1362, i8* %t1361, i8* %t1360
+  %t1364 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1365 = icmp eq i32 %t1323, 13
+  %t1366 = select i1 %t1365, i8* %t1364, i8* %t1363
+  %t1367 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1368 = icmp eq i32 %t1323, 14
+  %t1369 = select i1 %t1368, i8* %t1367, i8* %t1366
+  %t1370 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1371 = icmp eq i32 %t1323, 15
+  %t1372 = select i1 %t1371, i8* %t1370, i8* %t1369
+  %t1373 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1374 = icmp eq i32 %t1323, 16
+  %t1375 = select i1 %t1374, i8* %t1373, i8* %t1372
+  %s1376 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1376, i32 0, i32 0
+  %t1377 = icmp eq i8* %t1375, %s1376
+  %t1378 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1379 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1380 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1381 = load i8*, i8** %l3
+  %t1382 = load double, double* %l4
+  %t1383 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1384 = load double, double* %l6
+  %t1385 = load double, double* %l7
+  %t1386 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1377, label %then76, label %else77
+then76:
+  %t1387 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1388 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1388, i32 0, i32 0
+  %t1389 = call %PythonBuilder @builder_emit(%PythonBuilder %t1387, i8* %s1388)
+  store %PythonBuilder %t1389, %PythonBuilder* %l0
+  br label %merge78
+else77:
+  %t1390 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1391 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1390, i32 0, i32 0
+  %t1392 = load i32, i32* %t1391
+  %t1393 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1394 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1395 = icmp eq i32 %t1392, 0
+  %t1396 = select i1 %t1395, i8* %t1394, i8* %t1393
+  %t1397 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1398 = icmp eq i32 %t1392, 1
+  %t1399 = select i1 %t1398, i8* %t1397, i8* %t1396
+  %t1400 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1401 = icmp eq i32 %t1392, 2
+  %t1402 = select i1 %t1401, i8* %t1400, i8* %t1399
+  %t1403 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1404 = icmp eq i32 %t1392, 3
+  %t1405 = select i1 %t1404, i8* %t1403, i8* %t1402
+  %t1406 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1407 = icmp eq i32 %t1392, 4
+  %t1408 = select i1 %t1407, i8* %t1406, i8* %t1405
+  %t1409 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1410 = icmp eq i32 %t1392, 5
+  %t1411 = select i1 %t1410, i8* %t1409, i8* %t1408
+  %t1412 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1413 = icmp eq i32 %t1392, 6
+  %t1414 = select i1 %t1413, i8* %t1412, i8* %t1411
+  %t1415 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1416 = icmp eq i32 %t1392, 7
+  %t1417 = select i1 %t1416, i8* %t1415, i8* %t1414
+  %t1418 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1419 = icmp eq i32 %t1392, 8
+  %t1420 = select i1 %t1419, i8* %t1418, i8* %t1417
+  %t1421 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1422 = icmp eq i32 %t1392, 9
+  %t1423 = select i1 %t1422, i8* %t1421, i8* %t1420
+  %t1424 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1425 = icmp eq i32 %t1392, 10
+  %t1426 = select i1 %t1425, i8* %t1424, i8* %t1423
+  %t1427 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1428 = icmp eq i32 %t1392, 11
+  %t1429 = select i1 %t1428, i8* %t1427, i8* %t1426
+  %t1430 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1431 = icmp eq i32 %t1392, 12
+  %t1432 = select i1 %t1431, i8* %t1430, i8* %t1429
+  %t1433 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1434 = icmp eq i32 %t1392, 13
+  %t1435 = select i1 %t1434, i8* %t1433, i8* %t1432
+  %t1436 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1437 = icmp eq i32 %t1392, 14
+  %t1438 = select i1 %t1437, i8* %t1436, i8* %t1435
+  %t1439 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1440 = icmp eq i32 %t1392, 15
+  %t1441 = select i1 %t1440, i8* %t1439, i8* %t1438
+  %t1442 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1443 = icmp eq i32 %t1392, 16
+  %t1444 = select i1 %t1443, i8* %t1442, i8* %t1441
+  %s1445 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1445, i32 0, i32 0
+  %t1446 = icmp eq i8* %t1444, %s1445
+  %t1447 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1448 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1449 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1450 = load i8*, i8** %l3
+  %t1451 = load double, double* %l4
+  %t1452 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1453 = load double, double* %l6
+  %t1454 = load double, double* %l7
+  %t1455 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1446, label %then79, label %else80
+then79:
+  %t1456 = load double, double* %l6
+  %t1457 = call i8* @generate_match_subject_name(double %t1456)
+  store i8* %t1457, i8** %l25
+  %t1458 = load double, double* %l6
+  %t1459 = sitofp i64 1 to double
+  %t1460 = fadd double %t1458, %t1459
+  store double %t1460, double* %l6
+  %t1461 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1462 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1461, i32 0, i32 0
+  %t1463 = load i32, i32* %t1462
+  %t1464 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1461, i32 0, i32 1
+  %t1465 = bitcast [16 x i8]* %t1464 to i8*
+  %t1466 = bitcast i8* %t1465 to i8**
+  %t1467 = load i8*, i8** %t1466
+  %t1468 = icmp eq i32 %t1463, 0
+  %t1469 = select i1 %t1468, i8* %t1467, i8* null
+  %t1470 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1461, i32 0, i32 1
+  %t1471 = bitcast [16 x i8]* %t1470 to i8*
+  %t1472 = bitcast i8* %t1471 to i8**
+  %t1473 = load i8*, i8** %t1472
+  %t1474 = icmp eq i32 %t1463, 1
+  %t1475 = select i1 %t1474, i8* %t1473, i8* %t1469
+  %t1476 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1461, i32 0, i32 1
+  %t1477 = bitcast [8 x i8]* %t1476 to i8*
+  %t1478 = bitcast i8* %t1477 to i8**
+  %t1479 = load i8*, i8** %t1478
+  %t1480 = icmp eq i32 %t1463, 12
+  %t1481 = select i1 %t1480, i8* %t1479, i8* %t1475
+  %t1482 = call i8* @lower_expression(i8* %t1481)
+  store i8* %t1482, i8** %l26
+  %t1483 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1484 = load i8*, i8** %l25
+  %s1485 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1485, i32 0, i32 0
+  %t1486 = add i8* %t1484, %s1485
+  %t1487 = load i8*, i8** %l26
+  %t1488 = add i8* %t1486, %t1487
+  %t1489 = call %PythonBuilder @builder_emit(%PythonBuilder %t1483, i8* %t1488)
+  store %PythonBuilder %t1489, %PythonBuilder* %l0
+  %t1490 = load i8*, i8** %l25
+  %t1491 = insertvalue %MatchContext undef, i8* %t1490, 0
+  %t1492 = sitofp i64 0 to double
+  %t1493 = insertvalue %MatchContext %t1491, double %t1492, 1
+  %t1494 = insertvalue %MatchContext %t1493, i1 0, 2
+  store %MatchContext %t1494, %MatchContext* %l27
+  %t1495 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1496 = load %MatchContext, %MatchContext* %l27
+  %t1497 = call { %MatchContext*, i64 }* @append_match_context({ %MatchContext*, i64 }* %t1495, %MatchContext %t1496)
+  store { %MatchContext*, i64 }* %t1497, { %MatchContext*, i64 }** %l5
+  br label %merge81
+else80:
+  %t1498 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1499 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1498, i32 0, i32 0
+  %t1500 = load i32, i32* %t1499
+  %t1501 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1502 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1503 = icmp eq i32 %t1500, 0
+  %t1504 = select i1 %t1503, i8* %t1502, i8* %t1501
+  %t1505 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1506 = icmp eq i32 %t1500, 1
+  %t1507 = select i1 %t1506, i8* %t1505, i8* %t1504
+  %t1508 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1509 = icmp eq i32 %t1500, 2
+  %t1510 = select i1 %t1509, i8* %t1508, i8* %t1507
+  %t1511 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1512 = icmp eq i32 %t1500, 3
+  %t1513 = select i1 %t1512, i8* %t1511, i8* %t1510
+  %t1514 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1515 = icmp eq i32 %t1500, 4
+  %t1516 = select i1 %t1515, i8* %t1514, i8* %t1513
+  %t1517 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1518 = icmp eq i32 %t1500, 5
+  %t1519 = select i1 %t1518, i8* %t1517, i8* %t1516
+  %t1520 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1521 = icmp eq i32 %t1500, 6
+  %t1522 = select i1 %t1521, i8* %t1520, i8* %t1519
+  %t1523 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1524 = icmp eq i32 %t1500, 7
+  %t1525 = select i1 %t1524, i8* %t1523, i8* %t1522
+  %t1526 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1527 = icmp eq i32 %t1500, 8
+  %t1528 = select i1 %t1527, i8* %t1526, i8* %t1525
+  %t1529 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1530 = icmp eq i32 %t1500, 9
+  %t1531 = select i1 %t1530, i8* %t1529, i8* %t1528
+  %t1532 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1533 = icmp eq i32 %t1500, 10
+  %t1534 = select i1 %t1533, i8* %t1532, i8* %t1531
+  %t1535 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1536 = icmp eq i32 %t1500, 11
+  %t1537 = select i1 %t1536, i8* %t1535, i8* %t1534
+  %t1538 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1539 = icmp eq i32 %t1500, 12
+  %t1540 = select i1 %t1539, i8* %t1538, i8* %t1537
+  %t1541 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1542 = icmp eq i32 %t1500, 13
+  %t1543 = select i1 %t1542, i8* %t1541, i8* %t1540
+  %t1544 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1545 = icmp eq i32 %t1500, 14
+  %t1546 = select i1 %t1545, i8* %t1544, i8* %t1543
+  %t1547 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1548 = icmp eq i32 %t1500, 15
+  %t1549 = select i1 %t1548, i8* %t1547, i8* %t1546
+  %t1550 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1551 = icmp eq i32 %t1500, 16
+  %t1552 = select i1 %t1551, i8* %t1550, i8* %t1549
+  %s1553 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1553, i32 0, i32 0
+  %t1554 = icmp eq i8* %t1552, %s1553
+  %t1555 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1556 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1557 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1558 = load i8*, i8** %l3
+  %t1559 = load double, double* %l4
+  %t1560 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1561 = load double, double* %l6
+  %t1562 = load double, double* %l7
+  %t1563 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1554, label %then82, label %else83
+then82:
+  %t1564 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1565 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1564
+  %t1566 = extractvalue { %MatchContext*, i64 } %t1565, 1
+  %t1567 = icmp eq i64 %t1566, 0
+  %t1568 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1569 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1570 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1571 = load i8*, i8** %l3
+  %t1572 = load double, double* %l4
+  %t1573 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1574 = load double, double* %l6
+  %t1575 = load double, double* %l7
+  %t1576 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1567, label %then85, label %else86
+then85:
+  %t1577 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1578 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1577, i32 0, i32 0
+  %t1579 = load i32, i32* %t1578
+  %t1580 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1577, i32 0, i32 1
+  %t1581 = bitcast [16 x i8]* %t1580 to i8*
+  %t1582 = bitcast i8* %t1581 to i8**
+  %t1583 = load i8*, i8** %t1582
+  %t1584 = icmp eq i32 %t1579, 13
+  %t1585 = select i1 %t1584, i8* %t1583, i8* null
+  %t1586 = call i8* @trim_text(i8* %t1585)
+  store i8* %t1586, i8** %l28
+  %s1587 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.1587, i32 0, i32 0
+  store i8* %s1587, i8** %l29
+  %t1588 = load i8*, i8** %l28
+  %t1589 = call i64 @sailfin_runtime_string_length(i8* %t1588)
+  %t1590 = icmp sgt i64 %t1589, 0
+  %t1591 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1592 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1593 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1594 = load i8*, i8** %l3
+  %t1595 = load double, double* %l4
+  %t1596 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1597 = load double, double* %l6
+  %t1598 = load double, double* %l7
+  %t1599 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1600 = load i8*, i8** %l28
+  %t1601 = load i8*, i8** %l29
+  br i1 %t1590, label %then88, label %merge89
+then88:
+  %t1602 = load i8*, i8** %l29
+  %s1603 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.1603, i32 0, i32 0
+  %t1604 = add i8* %t1602, %s1603
+  store i8* %t1604, i8** %l29
+  br label %merge89
+merge89:
+  %t1605 = phi i8* [ %t1604, %then88 ], [ %t1601, %then85 ]
+  store i8* %t1605, i8** %l29
+  %t1606 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1607 = extractvalue %NativeFunction %function, 0
+  %t1608 = load i8*, i8** %l29
+  %t1609 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1606, i8* %t1607, i8* %t1608)
+  store { i8**, i64 }* %t1609, { i8**, i64 }** %l1
+  %t1610 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1611 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.1611, i32 0, i32 0
+  %t1612 = call %PythonBuilder @builder_emit(%PythonBuilder %t1610, i8* %s1611)
+  store %PythonBuilder %t1612, %PythonBuilder* %l0
+  br label %merge87
+else86:
+  %t1613 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1614 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1613
+  %t1615 = extractvalue { %MatchContext*, i64 } %t1614, 1
+  %t1616 = sub i64 %t1615, 1
+  store i64 %t1616, i64* %l30
+  %t1617 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1618 = load i64, i64* %l30
+  %t1619 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1617
+  %t1620 = extractvalue { %MatchContext*, i64 } %t1619, 0
+  %t1621 = extractvalue { %MatchContext*, i64 } %t1619, 1
+  %t1622 = icmp uge i64 %t1618, %t1621
+  ; bounds check: %t1622 (if true, out of bounds)
+  %t1623 = getelementptr %MatchContext, %MatchContext* %t1620, i64 %t1618
+  %t1624 = load %MatchContext, %MatchContext* %t1623
+  store %MatchContext %t1624, %MatchContext* %l31
+  %t1625 = load %MatchContext, %MatchContext* %l31
+  %t1626 = extractvalue %MatchContext %t1625, 2
+  %t1627 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1628 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1629 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1630 = load i8*, i8** %l3
+  %t1631 = load double, double* %l4
+  %t1632 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1633 = load double, double* %l6
+  %t1634 = load double, double* %l7
+  %t1635 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1636 = load i64, i64* %l30
+  %t1637 = load %MatchContext, %MatchContext* %l31
+  br i1 %t1626, label %then90, label %merge91
+then90:
+  %t1638 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1639 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t1638)
+  store %PythonBuilder %t1639, %PythonBuilder* %l0
+  br label %merge91
+merge91:
+  %t1640 = phi %PythonBuilder [ %t1639, %then90 ], [ %t1627, %else86 ]
+  store %PythonBuilder %t1640, %PythonBuilder* %l0
+  %t1641 = load %MatchContext, %MatchContext* %l31
+  %t1642 = extractvalue %MatchContext %t1641, 0
+  %t1643 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1644 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1643, i32 0, i32 0
+  %t1645 = load i32, i32* %t1644
+  %t1646 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1643, i32 0, i32 1
+  %t1647 = bitcast [16 x i8]* %t1646 to i8*
+  %t1648 = bitcast i8* %t1647 to i8**
+  %t1649 = load i8*, i8** %t1648
+  %t1650 = icmp eq i32 %t1645, 13
+  %t1651 = select i1 %t1650, i8* %t1649, i8* null
+  %t1652 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1653 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1652, i32 0, i32 0
+  %t1654 = load i32, i32* %t1653
+  %t1655 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1652, i32 0, i32 1
+  %t1656 = bitcast [16 x i8]* %t1655 to i8*
+  %t1657 = getelementptr inbounds i8, i8* %t1656, i64 8
+  %t1658 = bitcast i8* %t1657 to i8**
+  %t1659 = load i8*, i8** %t1658
+  %t1660 = icmp eq i32 %t1654, 13
+  %t1661 = select i1 %t1660, i8* %t1659, i8* null
+  %t1662 = call %LoweredCaseCondition @lower_match_case_condition(i8* %t1642, i8* %t1651, i8* %t1661)
+  store %LoweredCaseCondition %t1662, %LoweredCaseCondition* %l32
+  %t1663 = load %MatchContext, %MatchContext* %l31
+  %t1664 = extractvalue %MatchContext %t1663, 1
+  %t1665 = sitofp i64 0 to double
+  %t1666 = fcmp oeq double %t1664, %t1665
+  %t1667 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1668 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1669 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1670 = load i8*, i8** %l3
+  %t1671 = load double, double* %l4
+  %t1672 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1673 = load double, double* %l6
+  %t1674 = load double, double* %l7
+  %t1675 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1676 = load i64, i64* %l30
+  %t1677 = load %MatchContext, %MatchContext* %l31
+  %t1678 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  br i1 %t1666, label %then92, label %else93
+then92:
+  %t1679 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1680 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1680, i32 0, i32 0
+  %t1681 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  %t1682 = extractvalue %LoweredCaseCondition %t1681, 0
+  %t1683 = add i8* %s1680, %t1682
+  %t1684 = getelementptr i8, i8* %t1683, i64 0
+  %t1685 = load i8, i8* %t1684
+  %t1686 = add i8 %t1685, 58
+  %t1687 = alloca [2 x i8], align 1
+  %t1688 = getelementptr [2 x i8], [2 x i8]* %t1687, i32 0, i32 0
+  store i8 %t1686, i8* %t1688
+  %t1689 = getelementptr [2 x i8], [2 x i8]* %t1687, i32 0, i32 1
+  store i8 0, i8* %t1689
+  %t1690 = getelementptr [2 x i8], [2 x i8]* %t1687, i32 0, i32 0
+  %t1691 = call %PythonBuilder @builder_emit(%PythonBuilder %t1679, i8* %t1690)
+  store %PythonBuilder %t1691, %PythonBuilder* %l0
+  br label %merge94
+else93:
+  %t1693 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  %t1694 = extractvalue %LoweredCaseCondition %t1693, 1
+  br label %logical_and_entry_1692
+
+logical_and_entry_1692:
+  br i1 %t1694, label %logical_and_right_1692, label %logical_and_merge_1692
+
+logical_and_right_1692:
+  %t1695 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  %t1696 = extractvalue %LoweredCaseCondition %t1695, 2
+  %t1697 = xor i1 %t1696, 1
+  br label %logical_and_right_end_1692
+
+logical_and_right_end_1692:
+  br label %logical_and_merge_1692
+
+logical_and_merge_1692:
+  %t1698 = phi i1 [ false, %logical_and_entry_1692 ], [ %t1697, %logical_and_right_end_1692 ]
+  %t1699 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1700 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1701 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1702 = load i8*, i8** %l3
+  %t1703 = load double, double* %l4
+  %t1704 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1705 = load double, double* %l6
+  %t1706 = load double, double* %l7
+  %t1707 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1708 = load i64, i64* %l30
+  %t1709 = load %MatchContext, %MatchContext* %l31
+  %t1710 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  br i1 %t1698, label %then95, label %else96
+then95:
+  %t1711 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1712 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1712, i32 0, i32 0
+  %t1713 = call %PythonBuilder @builder_emit(%PythonBuilder %t1711, i8* %s1712)
+  store %PythonBuilder %t1713, %PythonBuilder* %l0
+  br label %merge97
+else96:
+  %t1714 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1715 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1715, i32 0, i32 0
+  %t1716 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
+  %t1717 = extractvalue %LoweredCaseCondition %t1716, 0
+  %t1718 = add i8* %s1715, %t1717
+  %t1719 = getelementptr i8, i8* %t1718, i64 0
+  %t1720 = load i8, i8* %t1719
+  %t1721 = add i8 %t1720, 58
+  %t1722 = alloca [2 x i8], align 1
+  %t1723 = getelementptr [2 x i8], [2 x i8]* %t1722, i32 0, i32 0
+  store i8 %t1721, i8* %t1723
+  %t1724 = getelementptr [2 x i8], [2 x i8]* %t1722, i32 0, i32 1
+  store i8 0, i8* %t1724
+  %t1725 = getelementptr [2 x i8], [2 x i8]* %t1722, i32 0, i32 0
+  %t1726 = call %PythonBuilder @builder_emit(%PythonBuilder %t1714, i8* %t1725)
+  store %PythonBuilder %t1726, %PythonBuilder* %l0
+  br label %merge97
+merge97:
+  %t1727 = phi %PythonBuilder [ %t1713, %then95 ], [ %t1726, %else96 ]
+  store %PythonBuilder %t1727, %PythonBuilder* %l0
+  br label %merge94
+merge94:
+  %t1728 = phi %PythonBuilder [ %t1691, %then92 ], [ %t1713, %else93 ]
+  store %PythonBuilder %t1728, %PythonBuilder* %l0
+  %t1729 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1730 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t1729)
+  store %PythonBuilder %t1730, %PythonBuilder* %l0
+  store double 0.0, double* %l33
+  %t1731 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1732 = load i64, i64* %l30
+  %t1733 = load double, double* %l33
+  %t1734 = sitofp i64 %t1732 to double
+  %t1735 = call { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* %t1731, double %t1734, %MatchContext zeroinitializer)
+  store { %MatchContext*, i64 }* %t1735, { %MatchContext*, i64 }** %l5
+  br label %merge87
+merge87:
+  %t1736 = phi { i8**, i64 }* [ %t1609, %then85 ], [ %t1569, %else86 ]
+  %t1737 = phi %PythonBuilder [ %t1612, %then85 ], [ %t1639, %else86 ]
+  %t1738 = phi { %MatchContext*, i64 }* [ %t1573, %then85 ], [ %t1735, %else86 ]
+  store { i8**, i64 }* %t1736, { i8**, i64 }** %l1
+  store %PythonBuilder %t1737, %PythonBuilder* %l0
+  store { %MatchContext*, i64 }* %t1738, { %MatchContext*, i64 }** %l5
+  br label %merge84
+else83:
+  %t1739 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1740 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1739, i32 0, i32 0
+  %t1741 = load i32, i32* %t1740
+  %t1742 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1743 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1744 = icmp eq i32 %t1741, 0
+  %t1745 = select i1 %t1744, i8* %t1743, i8* %t1742
+  %t1746 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1747 = icmp eq i32 %t1741, 1
+  %t1748 = select i1 %t1747, i8* %t1746, i8* %t1745
+  %t1749 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1750 = icmp eq i32 %t1741, 2
+  %t1751 = select i1 %t1750, i8* %t1749, i8* %t1748
+  %t1752 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1753 = icmp eq i32 %t1741, 3
+  %t1754 = select i1 %t1753, i8* %t1752, i8* %t1751
+  %t1755 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1756 = icmp eq i32 %t1741, 4
+  %t1757 = select i1 %t1756, i8* %t1755, i8* %t1754
+  %t1758 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1759 = icmp eq i32 %t1741, 5
+  %t1760 = select i1 %t1759, i8* %t1758, i8* %t1757
+  %t1761 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1762 = icmp eq i32 %t1741, 6
+  %t1763 = select i1 %t1762, i8* %t1761, i8* %t1760
+  %t1764 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1765 = icmp eq i32 %t1741, 7
+  %t1766 = select i1 %t1765, i8* %t1764, i8* %t1763
+  %t1767 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1768 = icmp eq i32 %t1741, 8
+  %t1769 = select i1 %t1768, i8* %t1767, i8* %t1766
+  %t1770 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1771 = icmp eq i32 %t1741, 9
+  %t1772 = select i1 %t1771, i8* %t1770, i8* %t1769
+  %t1773 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1774 = icmp eq i32 %t1741, 10
+  %t1775 = select i1 %t1774, i8* %t1773, i8* %t1772
+  %t1776 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1777 = icmp eq i32 %t1741, 11
+  %t1778 = select i1 %t1777, i8* %t1776, i8* %t1775
+  %t1779 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1780 = icmp eq i32 %t1741, 12
+  %t1781 = select i1 %t1780, i8* %t1779, i8* %t1778
+  %t1782 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1783 = icmp eq i32 %t1741, 13
+  %t1784 = select i1 %t1783, i8* %t1782, i8* %t1781
+  %t1785 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1786 = icmp eq i32 %t1741, 14
+  %t1787 = select i1 %t1786, i8* %t1785, i8* %t1784
+  %t1788 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1789 = icmp eq i32 %t1741, 15
+  %t1790 = select i1 %t1789, i8* %t1788, i8* %t1787
+  %t1791 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1792 = icmp eq i32 %t1741, 16
+  %t1793 = select i1 %t1792, i8* %t1791, i8* %t1790
+  %s1794 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1794, i32 0, i32 0
+  %t1795 = icmp eq i8* %t1793, %s1794
+  %t1796 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1797 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1798 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1799 = load i8*, i8** %l3
+  %t1800 = load double, double* %l4
+  %t1801 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1802 = load double, double* %l6
+  %t1803 = load double, double* %l7
+  %t1804 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1795, label %then98, label %else99
+then98:
+  %t1805 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1806 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1805
+  %t1807 = extractvalue { %MatchContext*, i64 } %t1806, 1
+  %t1808 = icmp eq i64 %t1807, 0
+  %t1809 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1810 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1811 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1812 = load i8*, i8** %l3
+  %t1813 = load double, double* %l4
+  %t1814 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1815 = load double, double* %l6
+  %t1816 = load double, double* %l7
+  %t1817 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1808, label %then101, label %else102
+then101:
+  %t1818 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1819 = extractvalue %NativeFunction %function, 0
+  %s1820 = getelementptr inbounds [38 x i8], [38 x i8]* @.str.1820, i32 0, i32 0
+  %t1821 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1818, i8* %t1819, i8* %s1820)
+  store { i8**, i64 }* %t1821, { i8**, i64 }** %l1
+  %t1822 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1823 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.1823, i32 0, i32 0
+  %t1824 = call %PythonBuilder @builder_emit(%PythonBuilder %t1822, i8* %s1823)
+  store %PythonBuilder %t1824, %PythonBuilder* %l0
+  br label %merge103
+else102:
+  %t1825 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1826 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1825
+  %t1827 = extractvalue { %MatchContext*, i64 } %t1826, 1
+  %t1828 = sub i64 %t1827, 1
+  store i64 %t1828, i64* %l34
+  %t1829 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1830 = load i64, i64* %l34
+  %t1831 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t1829
+  %t1832 = extractvalue { %MatchContext*, i64 } %t1831, 0
+  %t1833 = extractvalue { %MatchContext*, i64 } %t1831, 1
+  %t1834 = icmp uge i64 %t1830, %t1833
+  ; bounds check: %t1834 (if true, out of bounds)
+  %t1835 = getelementptr %MatchContext, %MatchContext* %t1832, i64 %t1830
+  %t1836 = load %MatchContext, %MatchContext* %t1835
+  store %MatchContext %t1836, %MatchContext* %l35
+  %t1837 = load %MatchContext, %MatchContext* %l35
+  %t1838 = extractvalue %MatchContext %t1837, 2
+  %t1839 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1840 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1841 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1842 = load i8*, i8** %l3
+  %t1843 = load double, double* %l4
+  %t1844 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1845 = load double, double* %l6
+  %t1846 = load double, double* %l7
+  %t1847 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1848 = load i64, i64* %l34
+  %t1849 = load %MatchContext, %MatchContext* %l35
+  br i1 %t1838, label %then104, label %merge105
+then104:
+  %t1850 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1851 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t1850)
+  store %PythonBuilder %t1851, %PythonBuilder* %l0
+  br label %merge105
+merge105:
+  %t1852 = phi %PythonBuilder [ %t1851, %then104 ], [ %t1839, %else102 ]
+  store %PythonBuilder %t1852, %PythonBuilder* %l0
+  %t1853 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1854 = load i64, i64* %l34
+  %t1855 = sitofp i64 %t1854 to double
+  %t1856 = call { %MatchContext*, i64 }* @truncate_match_contexts({ %MatchContext*, i64 }* %t1853, double %t1855)
+  store { %MatchContext*, i64 }* %t1856, { %MatchContext*, i64 }** %l5
+  br label %merge103
+merge103:
+  %t1857 = phi { i8**, i64 }* [ %t1821, %then101 ], [ %t1810, %else102 ]
+  %t1858 = phi %PythonBuilder [ %t1824, %then101 ], [ %t1851, %else102 ]
+  %t1859 = phi { %MatchContext*, i64 }* [ %t1814, %then101 ], [ %t1856, %else102 ]
+  store { i8**, i64 }* %t1857, { i8**, i64 }** %l1
+  store %PythonBuilder %t1858, %PythonBuilder* %l0
+  store { %MatchContext*, i64 }* %t1859, { %MatchContext*, i64 }** %l5
+  br label %merge100
+else99:
+  %t1860 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1861 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1860, i32 0, i32 0
+  %t1862 = load i32, i32* %t1861
+  %t1863 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1864 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1865 = icmp eq i32 %t1862, 0
+  %t1866 = select i1 %t1865, i8* %t1864, i8* %t1863
+  %t1867 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1868 = icmp eq i32 %t1862, 1
+  %t1869 = select i1 %t1868, i8* %t1867, i8* %t1866
+  %t1870 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1871 = icmp eq i32 %t1862, 2
+  %t1872 = select i1 %t1871, i8* %t1870, i8* %t1869
+  %t1873 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1874 = icmp eq i32 %t1862, 3
+  %t1875 = select i1 %t1874, i8* %t1873, i8* %t1872
+  %t1876 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1877 = icmp eq i32 %t1862, 4
+  %t1878 = select i1 %t1877, i8* %t1876, i8* %t1875
+  %t1879 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1880 = icmp eq i32 %t1862, 5
+  %t1881 = select i1 %t1880, i8* %t1879, i8* %t1878
+  %t1882 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1883 = icmp eq i32 %t1862, 6
+  %t1884 = select i1 %t1883, i8* %t1882, i8* %t1881
+  %t1885 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1886 = icmp eq i32 %t1862, 7
+  %t1887 = select i1 %t1886, i8* %t1885, i8* %t1884
+  %t1888 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1889 = icmp eq i32 %t1862, 8
+  %t1890 = select i1 %t1889, i8* %t1888, i8* %t1887
+  %t1891 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1892 = icmp eq i32 %t1862, 9
+  %t1893 = select i1 %t1892, i8* %t1891, i8* %t1890
+  %t1894 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1895 = icmp eq i32 %t1862, 10
+  %t1896 = select i1 %t1895, i8* %t1894, i8* %t1893
+  %t1897 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1898 = icmp eq i32 %t1862, 11
+  %t1899 = select i1 %t1898, i8* %t1897, i8* %t1896
+  %t1900 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1901 = icmp eq i32 %t1862, 12
+  %t1902 = select i1 %t1901, i8* %t1900, i8* %t1899
+  %t1903 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1904 = icmp eq i32 %t1862, 13
+  %t1905 = select i1 %t1904, i8* %t1903, i8* %t1902
+  %t1906 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1907 = icmp eq i32 %t1862, 14
+  %t1908 = select i1 %t1907, i8* %t1906, i8* %t1905
+  %t1909 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1910 = icmp eq i32 %t1862, 15
+  %t1911 = select i1 %t1910, i8* %t1909, i8* %t1908
+  %t1912 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1913 = icmp eq i32 %t1862, 16
+  %t1914 = select i1 %t1913, i8* %t1912, i8* %t1911
+  %s1915 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1915, i32 0, i32 0
+  %t1916 = icmp eq i8* %t1914, %s1915
+  %t1917 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1918 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1919 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1920 = load i8*, i8** %l3
+  %t1921 = load double, double* %l4
+  %t1922 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1923 = load double, double* %l6
+  %t1924 = load double, double* %l7
+  %t1925 = load %NativeInstruction*, %NativeInstruction** %l8
+  br i1 %t1916, label %then106, label %else107
+then106:
+  %t1926 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1927 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1927, i32 0, i32 0
+  %t1928 = call %PythonBuilder @builder_emit(%PythonBuilder %t1926, i8* %s1927)
+  store %PythonBuilder %t1928, %PythonBuilder* %l0
+  br label %merge108
+else107:
+  %t1929 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1930 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1929, i32 0, i32 0
+  %t1931 = load i32, i32* %t1930
+  %t1932 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1929, i32 0, i32 1
+  %t1933 = bitcast [8 x i8]* %t1932 to i8*
+  %t1934 = bitcast i8* %t1933 to i8**
+  %t1935 = load i8*, i8** %t1934
+  %t1936 = icmp eq i32 %t1931, 16
+  %t1937 = select i1 %t1936, i8* %t1935, i8* null
+  %t1938 = call i8* @trim_text(i8* %t1937)
+  store i8* %t1938, i8** %l36
+  %s1939 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.1939, i32 0, i32 0
+  store i8* %s1939, i8** %l37
+  %t1940 = load i8*, i8** %l36
+  %t1941 = call i64 @sailfin_runtime_string_length(i8* %t1940)
+  %t1942 = icmp sgt i64 %t1941, 0
+  %t1943 = load %PythonBuilder, %PythonBuilder* %l0
+  %t1944 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1945 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1946 = load i8*, i8** %l3
+  %t1947 = load double, double* %l4
+  %t1948 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t1949 = load double, double* %l6
+  %t1950 = load double, double* %l7
+  %t1951 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1952 = load i8*, i8** %l36
+  %t1953 = load i8*, i8** %l37
+  br i1 %t1942, label %then109, label %merge110
+then109:
+  %t1954 = load i8*, i8** %l37
+  %s1955 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1955, i32 0, i32 0
+  %t1956 = add i8* %t1954, %s1955
+  %t1957 = load i8*, i8** %l36
+  %t1958 = add i8* %t1956, %t1957
+  store i8* %t1958, i8** %l37
+  br label %merge110
+merge110:
+  %t1959 = phi i8* [ %t1958, %then109 ], [ %t1953, %else107 ]
+  store i8* %t1959, i8** %l37
+  %t1960 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1961 = extractvalue %NativeFunction %function, 0
+  %t1962 = load i8*, i8** %l37
+  %t1963 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1960, i8* %t1961, i8* %t1962)
+  store { i8**, i64 }* %t1963, { i8**, i64 }** %l1
+  %t1964 = load %PythonBuilder, %PythonBuilder* %l0
+  %s1965 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1965, i32 0, i32 0
+  %t1966 = load %NativeInstruction*, %NativeInstruction** %l8
+  %t1967 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1966, i32 0, i32 0
+  %t1968 = load i32, i32* %t1967
+  %t1969 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1966, i32 0, i32 1
+  %t1970 = bitcast [8 x i8]* %t1969 to i8*
+  %t1971 = bitcast i8* %t1970 to i8**
+  %t1972 = load i8*, i8** %t1971
+  %t1973 = icmp eq i32 %t1968, 16
+  %t1974 = select i1 %t1973, i8* %t1972, i8* null
+  %t1975 = add i8* %s1965, %t1974
+  %t1976 = call %PythonBuilder @builder_emit(%PythonBuilder %t1964, i8* %t1975)
+  store %PythonBuilder %t1976, %PythonBuilder* %l0
+  br label %merge108
+merge108:
+  %t1977 = phi %PythonBuilder [ %t1928, %then106 ], [ %t1976, %else107 ]
+  %t1978 = phi { i8**, i64 }* [ %t1918, %then106 ], [ %t1963, %else107 ]
+  store %PythonBuilder %t1977, %PythonBuilder* %l0
+  store { i8**, i64 }* %t1978, { i8**, i64 }** %l1
+  br label %merge100
+merge100:
+  %t1979 = phi { i8**, i64 }* [ %t1821, %then98 ], [ %t1963, %else99 ]
+  %t1980 = phi %PythonBuilder [ %t1824, %then98 ], [ %t1928, %else99 ]
+  %t1981 = phi { %MatchContext*, i64 }* [ %t1856, %then98 ], [ %t1801, %else99 ]
+  store { i8**, i64 }* %t1979, { i8**, i64 }** %l1
+  store %PythonBuilder %t1980, %PythonBuilder* %l0
+  store { %MatchContext*, i64 }* %t1981, { %MatchContext*, i64 }** %l5
+  br label %merge84
+merge84:
+  %t1982 = phi { i8**, i64 }* [ %t1609, %then82 ], [ %t1821, %else83 ]
+  %t1983 = phi %PythonBuilder [ %t1612, %then82 ], [ %t1824, %else83 ]
+  %t1984 = phi { %MatchContext*, i64 }* [ %t1735, %then82 ], [ %t1856, %else83 ]
+  store { i8**, i64 }* %t1982, { i8**, i64 }** %l1
+  store %PythonBuilder %t1983, %PythonBuilder* %l0
+  store { %MatchContext*, i64 }* %t1984, { %MatchContext*, i64 }** %l5
+  br label %merge81
+merge81:
+  %t1985 = phi double [ %t1460, %then79 ], [ %t1453, %else80 ]
+  %t1986 = phi %PythonBuilder [ %t1489, %then79 ], [ %t1612, %else80 ]
+  %t1987 = phi { %MatchContext*, i64 }* [ %t1497, %then79 ], [ %t1735, %else80 ]
+  %t1988 = phi { i8**, i64 }* [ %t1448, %then79 ], [ %t1609, %else80 ]
+  store double %t1985, double* %l6
+  store %PythonBuilder %t1986, %PythonBuilder* %l0
+  store { %MatchContext*, i64 }* %t1987, { %MatchContext*, i64 }** %l5
+  store { i8**, i64 }* %t1988, { i8**, i64 }** %l1
+  br label %merge78
+merge78:
+  %t1989 = phi %PythonBuilder [ %t1389, %then76 ], [ %t1489, %else77 ]
+  %t1990 = phi double [ %t1384, %then76 ], [ %t1460, %else77 ]
+  %t1991 = phi { %MatchContext*, i64 }* [ %t1383, %then76 ], [ %t1497, %else77 ]
+  %t1992 = phi { i8**, i64 }* [ %t1379, %then76 ], [ %t1609, %else77 ]
+  store %PythonBuilder %t1989, %PythonBuilder* %l0
+  store double %t1990, double* %l6
+  store { %MatchContext*, i64 }* %t1991, { %MatchContext*, i64 }** %l5
+  store { i8**, i64 }* %t1992, { i8**, i64 }** %l1
+  br label %merge75
+merge75:
+  %t1993 = phi %PythonBuilder [ %t1320, %then73 ], [ %t1389, %else74 ]
+  %t1994 = phi double [ %t1315, %then73 ], [ %t1460, %else74 ]
+  %t1995 = phi { %MatchContext*, i64 }* [ %t1314, %then73 ], [ %t1497, %else74 ]
+  %t1996 = phi { i8**, i64 }* [ %t1310, %then73 ], [ %t1609, %else74 ]
+  store %PythonBuilder %t1993, %PythonBuilder* %l0
+  store double %t1994, double* %l6
+  store { %MatchContext*, i64 }* %t1995, { %MatchContext*, i64 }** %l5
+  store { i8**, i64 }* %t1996, { i8**, i64 }** %l1
+  br label %merge69
+merge69:
+  %t1997 = phi %PythonBuilder [ %t1241, %then67 ], [ %t1320, %else68 ]
+  %t1998 = phi double [ %t1244, %then67 ], [ %t1223, %else68 ]
+  %t1999 = phi { i8**, i64 }* [ %t1248, %then67 ], [ %t1609, %else68 ]
+  %t2000 = phi double [ %t1225, %then67 ], [ %t1460, %else68 ]
+  %t2001 = phi { %MatchContext*, i64 }* [ %t1224, %then67 ], [ %t1497, %else68 ]
+  store %PythonBuilder %t1997, %PythonBuilder* %l0
+  store double %t1998, double* %l4
+  store { i8**, i64 }* %t1999, { i8**, i64 }** %l1
+  store double %t2000, double* %l6
+  store { %MatchContext*, i64 }* %t2001, { %MatchContext*, i64 }** %l5
+  br label %merge66
+merge66:
+  %t2002 = phi %PythonBuilder [ %t1156, %then64 ], [ %t1241, %else65 ]
+  %t2003 = phi double [ %t1161, %then64 ], [ %t1244, %else65 ]
+  %t2004 = phi { i8**, i64 }* [ %t1146, %then64 ], [ %t1248, %else65 ]
+  %t2005 = phi double [ %t1151, %then64 ], [ %t1460, %else65 ]
+  %t2006 = phi { %MatchContext*, i64 }* [ %t1150, %then64 ], [ %t1497, %else65 ]
+  store %PythonBuilder %t2002, %PythonBuilder* %l0
+  store double %t2003, double* %l4
+  store { i8**, i64 }* %t2004, { i8**, i64 }** %l1
+  store double %t2005, double* %l6
+  store { %MatchContext*, i64 }* %t2006, { %MatchContext*, i64 }** %l5
+  br label %merge60
+merge60:
+  %t2007 = phi %PythonBuilder [ %t1077, %then58 ], [ %t1156, %else59 ]
+  %t2008 = phi double [ %t1080, %then58 ], [ %t1161, %else59 ]
+  %t2009 = phi { i8**, i64 }* [ %t1084, %then58 ], [ %t1248, %else59 ]
+  %t2010 = phi double [ %t1061, %then58 ], [ %t1460, %else59 ]
+  %t2011 = phi { %MatchContext*, i64 }* [ %t1060, %then58 ], [ %t1497, %else59 ]
+  store %PythonBuilder %t2007, %PythonBuilder* %l0
+  store double %t2008, double* %l4
+  store { i8**, i64 }* %t2009, { i8**, i64 }** %l1
+  store double %t2010, double* %l6
+  store { %MatchContext*, i64 }* %t2011, { %MatchContext*, i64 }** %l5
+  br label %merge57
+merge57:
+  %t2012 = phi %PythonBuilder [ %t992, %then55 ], [ %t1077, %else56 ]
+  %t2013 = phi double [ %t997, %then55 ], [ %t1080, %else56 ]
+  %t2014 = phi { i8**, i64 }* [ %t949, %then55 ], [ %t1084, %else56 ]
+  %t2015 = phi double [ %t954, %then55 ], [ %t1460, %else56 ]
+  %t2016 = phi { %MatchContext*, i64 }* [ %t953, %then55 ], [ %t1497, %else56 ]
+  store %PythonBuilder %t2012, %PythonBuilder* %l0
+  store double %t2013, double* %l4
+  store { i8**, i64 }* %t2014, { i8**, i64 }** %l1
+  store double %t2015, double* %l6
+  store { %MatchContext*, i64 }* %t2016, { %MatchContext*, i64 }** %l5
+  br label %merge51
+merge51:
+  %t2017 = phi %PythonBuilder [ %t880, %then49 ], [ %t992, %else50 ]
+  %t2018 = phi double [ %t883, %then49 ], [ %t997, %else50 ]
+  %t2019 = phi { i8**, i64 }* [ %t887, %then49 ], [ %t1084, %else50 ]
+  %t2020 = phi double [ %t864, %then49 ], [ %t1460, %else50 ]
+  %t2021 = phi { %MatchContext*, i64 }* [ %t863, %then49 ], [ %t1497, %else50 ]
+  store %PythonBuilder %t2017, %PythonBuilder* %l0
+  store double %t2018, double* %l4
+  store { i8**, i64 }* %t2019, { i8**, i64 }** %l1
+  store double %t2020, double* %l6
+  store { %MatchContext*, i64 }* %t2021, { %MatchContext*, i64 }** %l5
+  br label %merge45
+merge45:
+  %t2022 = phi %PythonBuilder [ %t789, %then43 ], [ %t880, %else44 ]
+  %t2023 = phi { i8**, i64 }* [ %t793, %then43 ], [ %t887, %else44 ]
+  %t2024 = phi double [ %t771, %then43 ], [ %t883, %else44 ]
+  %t2025 = phi double [ %t773, %then43 ], [ %t1460, %else44 ]
+  %t2026 = phi { %MatchContext*, i64 }* [ %t772, %then43 ], [ %t1497, %else44 ]
+  store %PythonBuilder %t2022, %PythonBuilder* %l0
+  store { i8**, i64 }* %t2023, { i8**, i64 }** %l1
+  store double %t2024, double* %l4
+  store double %t2025, double* %l6
+  store { %MatchContext*, i64 }* %t2026, { %MatchContext*, i64 }** %l5
+  br label %merge42
+merge42:
+  %t2027 = phi %PythonBuilder [ %t704, %then40 ], [ %t789, %else41 ]
+  %t2028 = phi double [ %t709, %then40 ], [ %t883, %else41 ]
+  %t2029 = phi { i8**, i64 }* [ %t674, %then40 ], [ %t793, %else41 ]
+  %t2030 = phi double [ %t679, %then40 ], [ %t1460, %else41 ]
+  %t2031 = phi { %MatchContext*, i64 }* [ %t678, %then40 ], [ %t1497, %else41 ]
+  store %PythonBuilder %t2027, %PythonBuilder* %l0
+  store double %t2028, double* %l4
+  store { i8**, i64 }* %t2029, { i8**, i64 }** %l1
+  store double %t2030, double* %l6
+  store { %MatchContext*, i64 }* %t2031, { %MatchContext*, i64 }** %l5
+  br label %merge31
+merge31:
+  %t2032 = phi double [ %t607, %then29 ], [ %t494, %else30 ]
+  %t2033 = phi %PythonBuilder [ %t615, %then29 ], [ %t704, %else30 ]
+  %t2034 = phi double [ %t491, %then29 ], [ %t709, %else30 ]
+  %t2035 = phi { i8**, i64 }* [ %t488, %then29 ], [ %t793, %else30 ]
+  %t2036 = phi double [ %t493, %then29 ], [ %t1460, %else30 ]
+  %t2037 = phi { %MatchContext*, i64 }* [ %t492, %then29 ], [ %t1497, %else30 ]
+  store double %t2032, double* %l7
+  store %PythonBuilder %t2033, %PythonBuilder* %l0
+  store double %t2034, double* %l4
+  store { i8**, i64 }* %t2035, { i8**, i64 }** %l1
+  store double %t2036, double* %l6
+  store { %MatchContext*, i64 }* %t2037, { %MatchContext*, i64 }** %l5
+  br label %merge23
+merge23:
+  %t2038 = phi %PythonBuilder [ %t426, %then21 ], [ %t615, %else22 ]
+  %t2039 = phi double [ %t429, %then21 ], [ %t607, %else22 ]
+  %t2040 = phi double [ %t341, %then21 ], [ %t709, %else22 ]
+  %t2041 = phi { i8**, i64 }* [ %t338, %then21 ], [ %t793, %else22 ]
+  %t2042 = phi double [ %t343, %then21 ], [ %t1460, %else22 ]
+  %t2043 = phi { %MatchContext*, i64 }* [ %t342, %then21 ], [ %t1497, %else22 ]
+  store %PythonBuilder %t2038, %PythonBuilder* %l0
+  store double %t2039, double* %l7
+  store double %t2040, double* %l4
+  store { i8**, i64 }* %t2041, { i8**, i64 }** %l1
+  store double %t2042, double* %l6
+  store { %MatchContext*, i64 }* %t2043, { %MatchContext*, i64 }** %l5
+  br label %merge12
+merge12:
+  %t2044 = phi %PythonBuilder [ %t191, %then10 ], [ %t426, %else11 ]
+  %t2045 = phi double [ %t277, %then10 ], [ %t429, %else11 ]
+  %t2046 = phi double [ %t152, %then10 ], [ %t709, %else11 ]
+  %t2047 = phi { i8**, i64 }* [ %t149, %then10 ], [ %t793, %else11 ]
+  %t2048 = phi double [ %t154, %then10 ], [ %t1460, %else11 ]
+  %t2049 = phi { %MatchContext*, i64 }* [ %t153, %then10 ], [ %t1497, %else11 ]
+  store %PythonBuilder %t2044, %PythonBuilder* %l0
+  store double %t2045, double* %l7
+  store double %t2046, double* %l4
+  store { i8**, i64 }* %t2047, { i8**, i64 }** %l1
+  store double %t2048, double* %l6
+  store { %MatchContext*, i64 }* %t2049, { %MatchContext*, i64 }** %l5
+  %t2050 = load double, double* %l7
+  %t2051 = sitofp i64 1 to double
+  %t2052 = fadd double %t2050, %t2051
+  store double %t2052, double* %l7
   br label %loop.latch6
 loop.latch6:
-  %t95 = load double, double* %l7
+  %t2053 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2054 = load double, double* %l7
+  %t2055 = load double, double* %l4
+  %t2056 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2057 = load double, double* %l6
+  %t2058 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
   br label %loop.header4
 afterloop7:
-  %t97 = load %PythonBuilder, %PythonBuilder* %l0
-  %t98 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t100 = load i8*, i8** %l3
-  %t101 = load double, double* %l4
-  %t102 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t103 = load double, double* %l6
-  %t104 = load double, double* %l7
-  br label %loop.header10
-loop.header10:
-  %t155 = phi %PythonBuilder [ %t97, %entry ], [ %t152, %loop.latch12 ]
-  %t156 = phi { i8**, i64 }* [ %t98, %entry ], [ %t153, %loop.latch12 ]
-  %t157 = phi { %MatchContext*, i64 }* [ %t102, %entry ], [ %t154, %loop.latch12 ]
-  store %PythonBuilder %t155, %PythonBuilder* %l0
-  store { i8**, i64 }* %t156, { i8**, i64 }** %l1
-  store { %MatchContext*, i64 }* %t157, { %MatchContext*, i64 }** %l5
-  br label %loop.body11
-loop.body11:
-  %t105 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t106 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t105
-  %t107 = extractvalue { %MatchContext*, i64 } %t106, 1
-  %t108 = icmp eq i64 %t107, 0
-  %t109 = load %PythonBuilder, %PythonBuilder* %l0
-  %t110 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t111 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t112 = load i8*, i8** %l3
-  %t113 = load double, double* %l4
-  %t114 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t115 = load double, double* %l6
-  %t116 = load double, double* %l7
-  br i1 %t108, label %then14, label %merge15
-then14:
-  br label %afterloop13
-merge15:
-  %t117 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t118 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t117
-  %t119 = extractvalue { %MatchContext*, i64 } %t118, 1
-  %t120 = sub i64 %t119, 1
-  store i64 %t120, i64* %l9
-  %t121 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t122 = load i64, i64* %l9
-  %t123 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t121
-  %t124 = extractvalue { %MatchContext*, i64 } %t123, 0
-  %t125 = extractvalue { %MatchContext*, i64 } %t123, 1
-  %t126 = icmp uge i64 %t122, %t125
-  ; bounds check: %t126 (if true, out of bounds)
-  %t127 = getelementptr %MatchContext, %MatchContext* %t124, i64 %t122
-  %t128 = load %MatchContext, %MatchContext* %t127
-  store %MatchContext %t128, %MatchContext* %l10
-  %t129 = load %MatchContext, %MatchContext* %l10
-  %t130 = extractvalue %MatchContext %t129, 2
-  %t131 = load %PythonBuilder, %PythonBuilder* %l0
-  %t132 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t133 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t134 = load i8*, i8** %l3
-  %t135 = load double, double* %l4
-  %t136 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t137 = load double, double* %l6
-  %t138 = load double, double* %l7
-  %t139 = load i64, i64* %l9
-  %t140 = load %MatchContext, %MatchContext* %l10
-  br i1 %t130, label %then16, label %merge17
-then16:
-  %t141 = load %PythonBuilder, %PythonBuilder* %l0
-  %t142 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t141)
-  store %PythonBuilder %t142, %PythonBuilder* %l0
-  br label %merge17
-merge17:
-  %t143 = phi %PythonBuilder [ %t142, %then16 ], [ %t131, %loop.body11 ]
-  store %PythonBuilder %t143, %PythonBuilder* %l0
-  %t144 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t145 = extractvalue %NativeFunction %function, 0
-  %s146 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.146, i32 0, i32 0
-  %t147 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t144, i8* %t145, i8* %s146)
-  store { i8**, i64 }* %t147, { i8**, i64 }** %l1
-  %t148 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t149 = load i64, i64* %l9
-  %t150 = sitofp i64 %t149 to double
-  %t151 = call { %MatchContext*, i64 }* @truncate_match_contexts({ %MatchContext*, i64 }* %t148, double %t150)
-  store { %MatchContext*, i64 }* %t151, { %MatchContext*, i64 }** %l5
-  br label %loop.latch12
-loop.latch12:
-  %t152 = load %PythonBuilder, %PythonBuilder* %l0
-  %t153 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t154 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  br label %loop.header10
-afterloop13:
-  %t158 = load %PythonBuilder, %PythonBuilder* %l0
-  %t159 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t160 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t161 = load i8*, i8** %l3
-  %t162 = load double, double* %l4
-  %t163 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t164 = load double, double* %l6
-  %t165 = load double, double* %l7
-  br label %loop.header18
-loop.header18:
-  %t187 = phi %PythonBuilder [ %t158, %entry ], [ %t184, %loop.latch20 ]
-  %t188 = phi double [ %t162, %entry ], [ %t185, %loop.latch20 ]
-  %t189 = phi { i8**, i64 }* [ %t159, %entry ], [ %t186, %loop.latch20 ]
-  store %PythonBuilder %t187, %PythonBuilder* %l0
-  store double %t188, double* %l4
-  store { i8**, i64 }* %t189, { i8**, i64 }** %l1
-  br label %loop.body19
-loop.body19:
-  %t166 = load double, double* %l4
-  %t167 = sitofp i64 0 to double
-  %t168 = fcmp ole double %t166, %t167
-  %t169 = load %PythonBuilder, %PythonBuilder* %l0
-  %t170 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t171 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t172 = load i8*, i8** %l3
-  %t173 = load double, double* %l4
-  %t174 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
-  %t175 = load double, double* %l6
-  %t176 = load double, double* %l7
-  br i1 %t168, label %then22, label %merge23
-then22:
-  br label %afterloop21
-merge23:
-  %t177 = load %PythonBuilder, %PythonBuilder* %l0
-  %t178 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t177)
-  store %PythonBuilder %t178, %PythonBuilder* %l0
-  %t179 = load double, double* %l4
-  %t180 = sitofp i64 1 to double
-  %t181 = fsub double %t179, %t180
-  store double %t181, double* %l4
-  %t182 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t183 = extractvalue %NativeFunction %function, 0
-  br label %loop.latch20
-loop.latch20:
-  %t184 = load %PythonBuilder, %PythonBuilder* %l0
-  %t185 = load double, double* %l4
-  %t186 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  br label %loop.header18
-afterloop21:
-  %t190 = load %PythonBuilder, %PythonBuilder* %l0
-  %t191 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t190)
-  store %PythonBuilder %t191, %PythonBuilder* %l0
-  %t192 = load %PythonBuilder, %PythonBuilder* %l0
-  %t193 = insertvalue %PythonFunctionEmission undef, i8* null, 0
-  %t194 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t195 = insertvalue %PythonFunctionEmission %t193, { i8**, i64 }* %t194, 1
-  ret %PythonFunctionEmission %t195
+  %t2065 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2066 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2067 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2068 = load i8*, i8** %l3
+  %t2069 = load double, double* %l4
+  %t2070 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2071 = load double, double* %l6
+  %t2072 = load double, double* %l7
+  br label %loop.header111
+loop.header111:
+  %t2123 = phi %PythonBuilder [ %t2065, %entry ], [ %t2120, %loop.latch113 ]
+  %t2124 = phi { i8**, i64 }* [ %t2066, %entry ], [ %t2121, %loop.latch113 ]
+  %t2125 = phi { %MatchContext*, i64 }* [ %t2070, %entry ], [ %t2122, %loop.latch113 ]
+  store %PythonBuilder %t2123, %PythonBuilder* %l0
+  store { i8**, i64 }* %t2124, { i8**, i64 }** %l1
+  store { %MatchContext*, i64 }* %t2125, { %MatchContext*, i64 }** %l5
+  br label %loop.body112
+loop.body112:
+  %t2073 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2074 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t2073
+  %t2075 = extractvalue { %MatchContext*, i64 } %t2074, 1
+  %t2076 = icmp eq i64 %t2075, 0
+  %t2077 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2078 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2079 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2080 = load i8*, i8** %l3
+  %t2081 = load double, double* %l4
+  %t2082 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2083 = load double, double* %l6
+  %t2084 = load double, double* %l7
+  br i1 %t2076, label %then115, label %merge116
+then115:
+  br label %afterloop114
+merge116:
+  %t2085 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2086 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t2085
+  %t2087 = extractvalue { %MatchContext*, i64 } %t2086, 1
+  %t2088 = sub i64 %t2087, 1
+  store i64 %t2088, i64* %l38
+  %t2089 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2090 = load i64, i64* %l38
+  %t2091 = load { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t2089
+  %t2092 = extractvalue { %MatchContext*, i64 } %t2091, 0
+  %t2093 = extractvalue { %MatchContext*, i64 } %t2091, 1
+  %t2094 = icmp uge i64 %t2090, %t2093
+  ; bounds check: %t2094 (if true, out of bounds)
+  %t2095 = getelementptr %MatchContext, %MatchContext* %t2092, i64 %t2090
+  %t2096 = load %MatchContext, %MatchContext* %t2095
+  store %MatchContext %t2096, %MatchContext* %l39
+  %t2097 = load %MatchContext, %MatchContext* %l39
+  %t2098 = extractvalue %MatchContext %t2097, 2
+  %t2099 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2100 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2101 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2102 = load i8*, i8** %l3
+  %t2103 = load double, double* %l4
+  %t2104 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2105 = load double, double* %l6
+  %t2106 = load double, double* %l7
+  %t2107 = load i64, i64* %l38
+  %t2108 = load %MatchContext, %MatchContext* %l39
+  br i1 %t2098, label %then117, label %merge118
+then117:
+  %t2109 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2110 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t2109)
+  store %PythonBuilder %t2110, %PythonBuilder* %l0
+  br label %merge118
+merge118:
+  %t2111 = phi %PythonBuilder [ %t2110, %then117 ], [ %t2099, %loop.body112 ]
+  store %PythonBuilder %t2111, %PythonBuilder* %l0
+  %t2112 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2113 = extractvalue %NativeFunction %function, 0
+  %s2114 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.2114, i32 0, i32 0
+  %t2115 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t2112, i8* %t2113, i8* %s2114)
+  store { i8**, i64 }* %t2115, { i8**, i64 }** %l1
+  %t2116 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2117 = load i64, i64* %l38
+  %t2118 = sitofp i64 %t2117 to double
+  %t2119 = call { %MatchContext*, i64 }* @truncate_match_contexts({ %MatchContext*, i64 }* %t2116, double %t2118)
+  store { %MatchContext*, i64 }* %t2119, { %MatchContext*, i64 }** %l5
+  br label %loop.latch113
+loop.latch113:
+  %t2120 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2121 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2122 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  br label %loop.header111
+afterloop114:
+  %t2126 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2127 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2128 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2129 = load i8*, i8** %l3
+  %t2130 = load double, double* %l4
+  %t2131 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2132 = load double, double* %l6
+  %t2133 = load double, double* %l7
+  br label %loop.header119
+loop.header119:
+  %t2155 = phi %PythonBuilder [ %t2126, %entry ], [ %t2152, %loop.latch121 ]
+  %t2156 = phi double [ %t2130, %entry ], [ %t2153, %loop.latch121 ]
+  %t2157 = phi { i8**, i64 }* [ %t2127, %entry ], [ %t2154, %loop.latch121 ]
+  store %PythonBuilder %t2155, %PythonBuilder* %l0
+  store double %t2156, double* %l4
+  store { i8**, i64 }* %t2157, { i8**, i64 }** %l1
+  br label %loop.body120
+loop.body120:
+  %t2134 = load double, double* %l4
+  %t2135 = sitofp i64 0 to double
+  %t2136 = fcmp ole double %t2134, %t2135
+  %t2137 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2138 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2139 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2140 = load i8*, i8** %l3
+  %t2141 = load double, double* %l4
+  %t2142 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
+  %t2143 = load double, double* %l6
+  %t2144 = load double, double* %l7
+  br i1 %t2136, label %then123, label %merge124
+then123:
+  br label %afterloop122
+merge124:
+  %t2145 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2146 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t2145)
+  store %PythonBuilder %t2146, %PythonBuilder* %l0
+  %t2147 = load double, double* %l4
+  %t2148 = sitofp i64 1 to double
+  %t2149 = fsub double %t2147, %t2148
+  store double %t2149, double* %l4
+  %t2150 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2151 = extractvalue %NativeFunction %function, 0
+  br label %loop.latch121
+loop.latch121:
+  %t2152 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2153 = load double, double* %l4
+  %t2154 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  br label %loop.header119
+afterloop122:
+  %t2158 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2159 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t2158)
+  store %PythonBuilder %t2159, %PythonBuilder* %l0
+  %t2160 = load %PythonBuilder, %PythonBuilder* %l0
+  %t2161 = insertvalue %PythonFunctionEmission undef, %PythonBuilder* null, 0
+  %t2162 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2163 = insertvalue %PythonFunctionEmission %t2161, { i8**, i64 }* %t2162, 1
+  ret %PythonFunctionEmission %t2163
 }
 
 define { %MatchContext*, i64 }* @append_match_context({ %MatchContext*, i64 }* %values, %MatchContext %value) {
