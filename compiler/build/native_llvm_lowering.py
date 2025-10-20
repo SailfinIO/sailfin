@@ -1517,6 +1517,17 @@ def find_struct_info_by_llvm_type(context, llvm_type):
         index += 1
     return None
 
+def find_struct_field_index(struct_info, field_name):
+    index = 0
+    while True:
+        if index >= len(struct_info.fields):
+            break
+        field = struct_info.fields[index]
+        if field.name == field_name:
+            return index
+        index += 1
+    return -1
+
 def find_enum_info_by_llvm_type(context, llvm_type):
     trimmed = trim_text(llvm_type)
     index = 0
@@ -4147,6 +4158,45 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
     string_constants = []
     parsed_assignment = parse_assignment_expression(expression)
     if parsed_assignment.success:
+        member_parse = parse_member_access(parsed_assignment.target)
+        if member_parse.success:
+            effective_value = parsed_assignment.value
+            if len(parsed_assignment.operator) > 0:
+                effective_value = parsed_assignment.target + " " + parsed_assignment.operator + " " + parsed_assignment.value
+            lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            string_constants = lowered.string_constants
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            if lowered.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for member `" + parsed_assignment.target + "`")
+            else:
+                base_result = lower_expression(member_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+                diagnostics = (diagnostics) + (base_result.diagnostics)
+                current_lines = base_result.lines
+                current_temp = base_result.temp_index
+                if base_result.operand == None:
+                    diagnostics = append_string(diagnostics, "llvm lowering: member access assignment base `" + member_parse.base + "` produced no value")
+                else:
+                    struct_info = find_struct_info_by_llvm_type(context, base_result.operand.llvm_type)
+                    if struct_info == None:
+                        diagnostics = append_string(diagnostics, "llvm lowering: member access assignment on non-struct type `" + base_result.operand.llvm_type + "`")
+                    else:
+                        field_index = find_struct_field_index(struct_info, member_parse.field)
+                        if field_index < 0:
+                            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_info.name + "` has no field `" + member_parse.field + "`")
+                        else:
+                            field_info = struct_info.fields[field_index]
+                            coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines)
+                            diagnostics = (diagnostics) + (coerced.diagnostics)
+                            current_lines = coerced.lines
+                            current_temp = coerced.temp_index
+                            if coerced.operand != None:
+                                field_ptr_temp = format_temp_name(current_temp)
+                                current_temp += 1
+                                current_lines = append_string(current_lines, "  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 " + number_to_string(field_index))
+                                current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + field_ptr_temp)
+            return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
         binding = find_local_binding(current_locals, parsed_assignment.target)
         if binding == None:
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`")

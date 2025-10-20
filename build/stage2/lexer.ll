@@ -84,8 +84,8 @@ entry:
   %t13 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   br label %loop.header0
 loop.header0:
-  %t795 = phi { %Token*, i64 }* [ %t13, %entry ], [ %t794, %loop.latch2 ]
-  store { %Token*, i64 }* %t795, { %Token*, i64 }** %l1
+  %t1062 = phi { %Token*, i64 }* [ %t13, %entry ], [ %t1061, %loop.latch2 ]
+  store { %Token*, i64 }* %t1062, { %Token*, i64 }** %l1
   br label %loop.body1
 loop.body1:
   %t14 = load %LexerState, %LexerState* %l0
@@ -199,355 +199,329 @@ merge15:
   %t96 = load double, double* %l5
   br i1 %t90, label %then16, label %else17
 then16:
+  %t97 = load %LexerState, %LexerState* %l0
+  %t98 = extractvalue %LexerState %t97, 1
+  %t99 = sitofp i64 1 to double
+  %t100 = fadd double %t98, %t99
+  %t101 = load %LexerState, %LexerState* %l0
+  %t102 = getelementptr %LexerState, %LexerState %t101, i32 0, i32 1
+  store double %t100, double* %t102
+  %t103 = load %LexerState, %LexerState* %l0
+  %t104 = extractvalue %LexerState %t103, 2
+  %t105 = sitofp i64 1 to double
+  %t106 = fadd double %t104, %t105
+  %t107 = load %LexerState, %LexerState* %l0
+  %t108 = getelementptr %LexerState, %LexerState %t107, i32 0, i32 2
+  store double %t106, double* %t108
+  %t109 = load %LexerState, %LexerState* %l0
+  %t110 = sitofp i64 1 to double
+  %t111 = getelementptr %LexerState, %LexerState %t109, i32 0, i32 3
+  store double %t110, double* %t111
   br label %merge18
 else17:
+  %t112 = load %LexerState, %LexerState* %l0
+  %t113 = extractvalue %LexerState %t112, 1
+  %t114 = sitofp i64 1 to double
+  %t115 = fadd double %t113, %t114
+  %t116 = load %LexerState, %LexerState* %l0
+  %t117 = getelementptr %LexerState, %LexerState %t116, i32 0, i32 1
+  store double %t115, double* %t117
+  %t118 = load %LexerState, %LexerState* %l0
+  %t119 = extractvalue %LexerState %t118, 3
+  %t120 = sitofp i64 1 to double
+  %t121 = fadd double %t119, %t120
+  %t122 = load %LexerState, %LexerState* %l0
+  %t123 = getelementptr %LexerState, %LexerState %t122, i32 0, i32 3
+  store double %t121, double* %t123
   br label %merge18
 merge18:
   br label %loop.latch10
 loop.latch10:
   br label %loop.header8
 afterloop11:
-  %t97 = load %LexerState, %LexerState* %l0
-  %t98 = extractvalue %LexerState %t97, 0
-  %t99 = load double, double* %l3
-  %t100 = load %LexerState, %LexerState* %l0
-  %t101 = extractvalue %LexerState %t100, 1
-  %t102 = call i8* @slice(i8* %t98, double %t99, double %t101)
-  store i8* %t102, i8** %l6
-  %t103 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t104 = insertvalue %TokenKind undef, i32 5, 0
-  %t105 = insertvalue %Token undef, %TokenKind %t104, 0
-  %t106 = load i8*, i8** %l6
-  %t107 = insertvalue %Token %t105, i8* %t106, 1
-  %t108 = load double, double* %l4
-  %t109 = insertvalue %Token %t107, double %t108, 2
-  %t110 = load double, double* %l5
-  %t111 = insertvalue %Token %t109, double %t110, 3
-  %t112 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t103, %Token %t111)
-  store { %Token*, i64 }* %t112, { %Token*, i64 }** %l1
-  br label %loop.latch2
-merge7:
-  %t113 = load i8, i8* %l2
-  %t114 = icmp eq i8 %t113, 47
-  %t115 = load %LexerState, %LexerState* %l0
-  %t116 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t117 = load i8, i8* %l2
-  br i1 %t114, label %then19, label %merge20
-then19:
-  %t118 = load %LexerState, %LexerState* %l0
-  %t119 = call i8* @peek_next_char(%LexerState %t118)
-  store i8* %t119, i8** %l7
-  %t120 = load i8*, i8** %l7
-  %t121 = load i8, i8* %t120
-  %t122 = icmp eq i8 %t121, 47
-  %t123 = load %LexerState, %LexerState* %l0
-  %t124 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t125 = load i8, i8* %l2
-  %t126 = load i8*, i8** %l7
-  br i1 %t122, label %then21, label %merge22
-then21:
+  %t124 = load %LexerState, %LexerState* %l0
+  %t125 = extractvalue %LexerState %t124, 0
+  %t126 = load double, double* %l3
   %t127 = load %LexerState, %LexerState* %l0
   %t128 = extractvalue %LexerState %t127, 1
-  store double %t128, double* %l8
-  %t129 = load %LexerState, %LexerState* %l0
-  %t130 = extractvalue %LexerState %t129, 2
-  store double %t130, double* %l9
-  %t131 = load %LexerState, %LexerState* %l0
-  %t132 = extractvalue %LexerState %t131, 3
-  store double %t132, double* %l10
-  %t133 = load %LexerState, %LexerState* %l0
-  %t134 = extractvalue %LexerState %t133, 0
-  %t135 = load %LexerState, %LexerState* %l0
-  %t136 = extractvalue %LexerState %t135, 1
-  %t137 = call double @find_char(i8* %t134, i8 10, double %t136)
-  store double %t137, double* %l11
-  %t138 = load %LexerState, %LexerState* %l0
-  %t139 = extractvalue %LexerState %t138, 0
-  %t140 = load %LexerState, %LexerState* %l0
-  %t141 = extractvalue %LexerState %t140, 1
-  %t142 = call double @find_char(i8* %t139, i8 13, double %t141)
-  store double %t142, double* %l12
-  %t143 = load %LexerState, %LexerState* %l0
-  %t144 = extractvalue %LexerState %t143, 0
-  %t145 = call i64 @sailfin_runtime_string_length(i8* %t144)
-  %t146 = sitofp i64 %t145 to double
-  store double %t146, double* %l13
-  %t147 = load double, double* %l11
-  %t148 = sitofp i64 -1 to double
-  %t149 = fcmp une double %t147, %t148
+  %t129 = call i8* @slice(i8* %t125, double %t126, double %t128)
+  store i8* %t129, i8** %l6
+  %t130 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t131 = insertvalue %TokenKind undef, i32 5, 0
+  %t132 = insertvalue %Token undef, %TokenKind %t131, 0
+  %t133 = load i8*, i8** %l6
+  %t134 = insertvalue %Token %t132, i8* %t133, 1
+  %t135 = load double, double* %l4
+  %t136 = insertvalue %Token %t134, double %t135, 2
+  %t137 = load double, double* %l5
+  %t138 = insertvalue %Token %t136, double %t137, 3
+  %t139 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t130, %Token %t138)
+  store { %Token*, i64 }* %t139, { %Token*, i64 }** %l1
+  br label %loop.latch2
+merge7:
+  %t140 = load i8, i8* %l2
+  %t141 = icmp eq i8 %t140, 47
+  %t142 = load %LexerState, %LexerState* %l0
+  %t143 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t144 = load i8, i8* %l2
+  br i1 %t141, label %then19, label %merge20
+then19:
+  %t145 = load %LexerState, %LexerState* %l0
+  %t146 = call i8* @peek_next_char(%LexerState %t145)
+  store i8* %t146, i8** %l7
+  %t147 = load i8*, i8** %l7
+  %t148 = load i8, i8* %t147
+  %t149 = icmp eq i8 %t148, 47
   %t150 = load %LexerState, %LexerState* %l0
   %t151 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t152 = load i8, i8* %l2
   %t153 = load i8*, i8** %l7
-  %t154 = load double, double* %l8
-  %t155 = load double, double* %l9
-  %t156 = load double, double* %l10
-  %t157 = load double, double* %l11
-  %t158 = load double, double* %l12
-  %t159 = load double, double* %l13
-  br i1 %t149, label %then23, label %merge24
-then23:
-  %t160 = load double, double* %l11
-  store double %t160, double* %l13
-  br label %merge24
-merge24:
-  %t161 = phi double [ %t160, %then23 ], [ %t159, %then21 ]
-  store double %t161, double* %l13
-  %t163 = load double, double* %l12
-  %t164 = sitofp i64 -1 to double
-  %t165 = fcmp une double %t163, %t164
-  br label %logical_and_entry_162
-
-logical_and_entry_162:
-  br i1 %t165, label %logical_and_right_162, label %logical_and_merge_162
-
-logical_and_right_162:
-  %t166 = load double, double* %l12
-  %t167 = load double, double* %l13
-  %t168 = fcmp olt double %t166, %t167
-  br label %logical_and_right_end_162
-
-logical_and_right_end_162:
-  br label %logical_and_merge_162
-
-logical_and_merge_162:
-  %t169 = phi i1 [ false, %logical_and_entry_162 ], [ %t168, %logical_and_right_end_162 ]
+  br i1 %t149, label %then21, label %merge22
+then21:
+  %t154 = load %LexerState, %LexerState* %l0
+  %t155 = extractvalue %LexerState %t154, 1
+  store double %t155, double* %l8
+  %t156 = load %LexerState, %LexerState* %l0
+  %t157 = extractvalue %LexerState %t156, 2
+  store double %t157, double* %l9
+  %t158 = load %LexerState, %LexerState* %l0
+  %t159 = extractvalue %LexerState %t158, 3
+  store double %t159, double* %l10
+  %t160 = load %LexerState, %LexerState* %l0
+  %t161 = extractvalue %LexerState %t160, 1
+  %t162 = sitofp i64 2 to double
+  %t163 = fadd double %t161, %t162
+  %t164 = load %LexerState, %LexerState* %l0
+  %t165 = getelementptr %LexerState, %LexerState %t164, i32 0, i32 1
+  store double %t163, double* %t165
+  %t166 = load %LexerState, %LexerState* %l0
+  %t167 = extractvalue %LexerState %t166, 3
+  %t168 = sitofp i64 2 to double
+  %t169 = fadd double %t167, %t168
   %t170 = load %LexerState, %LexerState* %l0
-  %t171 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t172 = load i8, i8* %l2
-  %t173 = load i8*, i8** %l7
-  %t174 = load double, double* %l8
-  %t175 = load double, double* %l9
-  %t176 = load double, double* %l10
-  %t177 = load double, double* %l11
-  %t178 = load double, double* %l12
-  %t179 = load double, double* %l13
-  br i1 %t169, label %then25, label %merge26
-then25:
-  %t180 = load double, double* %l12
-  store double %t180, double* %l13
-  br label %merge26
-merge26:
-  %t181 = phi double [ %t180, %then25 ], [ %t179, %then21 ]
-  store double %t181, double* %l13
+  %t171 = getelementptr %LexerState, %LexerState %t170, i32 0, i32 3
+  store double %t169, double* %t171
+  %t172 = load %LexerState, %LexerState* %l0
+  %t173 = extractvalue %LexerState %t172, 0
+  %t174 = load %LexerState, %LexerState* %l0
+  %t175 = extractvalue %LexerState %t174, 1
+  %t176 = call double @find_char(i8* %t173, i8 10, double %t175)
+  store double %t176, double* %l11
+  %t177 = load %LexerState, %LexerState* %l0
+  %t178 = extractvalue %LexerState %t177, 0
+  %t179 = load %LexerState, %LexerState* %l0
+  %t180 = extractvalue %LexerState %t179, 1
+  %t181 = call double @find_char(i8* %t178, i8 13, double %t180)
+  store double %t181, double* %l12
   %t182 = load %LexerState, %LexerState* %l0
   %t183 = extractvalue %LexerState %t182, 0
-  %t184 = load double, double* %l8
-  %t185 = load double, double* %l13
-  %t186 = call i8* @slice(i8* %t183, double %t184, double %t185)
-  store i8* %t186, i8** %l14
-  %t187 = load double, double* %l13
-  %t188 = load %LexerState, %LexerState* %l0
-  %t189 = extractvalue %LexerState %t188, 1
-  %t190 = fsub double %t187, %t189
-  store double %t190, double* %l15
-  %t191 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t192 = insertvalue %TokenKind undef, i32 6, 0
-  %t193 = insertvalue %Token undef, %TokenKind %t192, 0
-  %t194 = load i8*, i8** %l14
-  %t195 = insertvalue %Token %t193, i8* %t194, 1
-  %t196 = load double, double* %l9
-  %t197 = insertvalue %Token %t195, double %t196, 2
-  %t198 = load double, double* %l10
-  %t199 = insertvalue %Token %t197, double %t198, 3
-  %t200 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t191, %Token %t199)
-  store { %Token*, i64 }* %t200, { %Token*, i64 }** %l1
+  %t184 = call i64 @sailfin_runtime_string_length(i8* %t183)
+  %t185 = sitofp i64 %t184 to double
+  store double %t185, double* %l13
+  %t186 = load double, double* %l11
+  %t187 = sitofp i64 -1 to double
+  %t188 = fcmp une double %t186, %t187
+  %t189 = load %LexerState, %LexerState* %l0
+  %t190 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t191 = load i8, i8* %l2
+  %t192 = load i8*, i8** %l7
+  %t193 = load double, double* %l8
+  %t194 = load double, double* %l9
+  %t195 = load double, double* %l10
+  %t196 = load double, double* %l11
+  %t197 = load double, double* %l12
+  %t198 = load double, double* %l13
+  br i1 %t188, label %then23, label %merge24
+then23:
+  %t199 = load double, double* %l11
+  store double %t199, double* %l13
+  br label %merge24
+merge24:
+  %t200 = phi double [ %t199, %then23 ], [ %t198, %then21 ]
+  store double %t200, double* %l13
+  %t202 = load double, double* %l12
+  %t203 = sitofp i64 -1 to double
+  %t204 = fcmp une double %t202, %t203
+  br label %logical_and_entry_201
+
+logical_and_entry_201:
+  br i1 %t204, label %logical_and_right_201, label %logical_and_merge_201
+
+logical_and_right_201:
+  %t205 = load double, double* %l12
+  %t206 = load double, double* %l13
+  %t207 = fcmp olt double %t205, %t206
+  br label %logical_and_right_end_201
+
+logical_and_right_end_201:
+  br label %logical_and_merge_201
+
+logical_and_merge_201:
+  %t208 = phi i1 [ false, %logical_and_entry_201 ], [ %t207, %logical_and_right_end_201 ]
+  %t209 = load %LexerState, %LexerState* %l0
+  %t210 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t211 = load i8, i8* %l2
+  %t212 = load i8*, i8** %l7
+  %t213 = load double, double* %l8
+  %t214 = load double, double* %l9
+  %t215 = load double, double* %l10
+  %t216 = load double, double* %l11
+  %t217 = load double, double* %l12
+  %t218 = load double, double* %l13
+  br i1 %t208, label %then25, label %merge26
+then25:
+  %t219 = load double, double* %l12
+  store double %t219, double* %l13
+  br label %merge26
+merge26:
+  %t220 = phi double [ %t219, %then25 ], [ %t218, %then21 ]
+  store double %t220, double* %l13
+  %t221 = load %LexerState, %LexerState* %l0
+  %t222 = extractvalue %LexerState %t221, 0
+  %t223 = load double, double* %l8
+  %t224 = load double, double* %l13
+  %t225 = call i8* @slice(i8* %t222, double %t223, double %t224)
+  store i8* %t225, i8** %l14
+  %t226 = load double, double* %l13
+  %t227 = load %LexerState, %LexerState* %l0
+  %t228 = extractvalue %LexerState %t227, 1
+  %t229 = fsub double %t226, %t228
+  store double %t229, double* %l15
+  %t230 = load double, double* %l13
+  %t231 = load %LexerState, %LexerState* %l0
+  %t232 = getelementptr %LexerState, %LexerState %t231, i32 0, i32 1
+  store double %t230, double* %t232
+  %t233 = load %LexerState, %LexerState* %l0
+  %t234 = extractvalue %LexerState %t233, 3
+  %t235 = load double, double* %l15
+  %t236 = fadd double %t234, %t235
+  %t237 = load %LexerState, %LexerState* %l0
+  %t238 = getelementptr %LexerState, %LexerState %t237, i32 0, i32 3
+  store double %t236, double* %t238
+  %t239 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t240 = insertvalue %TokenKind undef, i32 6, 0
+  %t241 = insertvalue %Token undef, %TokenKind %t240, 0
+  %t242 = load i8*, i8** %l14
+  %t243 = insertvalue %Token %t241, i8* %t242, 1
+  %t244 = load double, double* %l9
+  %t245 = insertvalue %Token %t243, double %t244, 2
+  %t246 = load double, double* %l10
+  %t247 = insertvalue %Token %t245, double %t246, 3
+  %t248 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t239, %Token %t247)
+  store { %Token*, i64 }* %t248, { %Token*, i64 }** %l1
   br label %loop.latch2
 merge22:
-  %t201 = load i8*, i8** %l7
-  %t202 = load i8, i8* %t201
-  %t203 = icmp eq i8 %t202, 42
-  %t204 = load %LexerState, %LexerState* %l0
-  %t205 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t206 = load i8, i8* %l2
-  %t207 = load i8*, i8** %l7
-  br i1 %t203, label %then27, label %merge28
+  %t249 = load i8*, i8** %l7
+  %t250 = load i8, i8* %t249
+  %t251 = icmp eq i8 %t250, 42
+  %t252 = load %LexerState, %LexerState* %l0
+  %t253 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t254 = load i8, i8* %l2
+  %t255 = load i8*, i8** %l7
+  br i1 %t251, label %then27, label %merge28
 then27:
-  %t208 = load %LexerState, %LexerState* %l0
-  %t209 = extractvalue %LexerState %t208, 1
-  store double %t209, double* %l16
-  %t210 = load %LexerState, %LexerState* %l0
-  %t211 = extractvalue %LexerState %t210, 2
-  store double %t211, double* %l17
-  %t212 = load %LexerState, %LexerState* %l0
-  %t213 = extractvalue %LexerState %t212, 3
-  store double %t213, double* %l18
-  %t214 = load %LexerState, %LexerState* %l0
-  %t215 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t216 = load i8, i8* %l2
-  %t217 = load i8*, i8** %l7
-  %t218 = load double, double* %l16
-  %t219 = load double, double* %l17
-  %t220 = load double, double* %l18
+  %t256 = load %LexerState, %LexerState* %l0
+  %t257 = extractvalue %LexerState %t256, 1
+  store double %t257, double* %l16
+  %t258 = load %LexerState, %LexerState* %l0
+  %t259 = extractvalue %LexerState %t258, 2
+  store double %t259, double* %l17
+  %t260 = load %LexerState, %LexerState* %l0
+  %t261 = extractvalue %LexerState %t260, 3
+  store double %t261, double* %l18
+  %t262 = load %LexerState, %LexerState* %l0
+  %t263 = extractvalue %LexerState %t262, 1
+  %t264 = sitofp i64 2 to double
+  %t265 = fadd double %t263, %t264
+  %t266 = load %LexerState, %LexerState* %l0
+  %t267 = getelementptr %LexerState, %LexerState %t266, i32 0, i32 1
+  store double %t265, double* %t267
+  %t268 = load %LexerState, %LexerState* %l0
+  %t269 = extractvalue %LexerState %t268, 3
+  %t270 = sitofp i64 2 to double
+  %t271 = fadd double %t269, %t270
+  %t272 = load %LexerState, %LexerState* %l0
+  %t273 = getelementptr %LexerState, %LexerState %t272, i32 0, i32 3
+  store double %t271, double* %t273
+  %t274 = load %LexerState, %LexerState* %l0
+  %t275 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t276 = load i8, i8* %l2
+  %t277 = load i8*, i8** %l7
+  %t278 = load double, double* %l16
+  %t279 = load double, double* %l17
+  %t280 = load double, double* %l18
   br label %loop.header29
 loop.header29:
   br label %loop.body30
 loop.body30:
-  %t221 = load %LexerState, %LexerState* %l0
-  %t222 = extractvalue %LexerState %t221, 1
-  %t223 = load %LexerState, %LexerState* %l0
-  %t224 = extractvalue %LexerState %t223, 0
-  %t225 = call i64 @sailfin_runtime_string_length(i8* %t224)
-  %t226 = sitofp i64 %t225 to double
-  %t227 = fcmp oge double %t222, %t226
-  %t228 = load %LexerState, %LexerState* %l0
-  %t229 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t230 = load i8, i8* %l2
-  %t231 = load i8*, i8** %l7
-  %t232 = load double, double* %l16
-  %t233 = load double, double* %l17
-  %t234 = load double, double* %l18
-  br i1 %t227, label %then33, label %merge34
+  %t281 = load %LexerState, %LexerState* %l0
+  %t282 = extractvalue %LexerState %t281, 1
+  %t283 = load %LexerState, %LexerState* %l0
+  %t284 = extractvalue %LexerState %t283, 0
+  %t285 = call i64 @sailfin_runtime_string_length(i8* %t284)
+  %t286 = sitofp i64 %t285 to double
+  %t287 = fcmp oge double %t282, %t286
+  %t288 = load %LexerState, %LexerState* %l0
+  %t289 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t290 = load i8, i8* %l2
+  %t291 = load i8*, i8** %l7
+  %t292 = load double, double* %l16
+  %t293 = load double, double* %l17
+  %t294 = load double, double* %l18
+  br i1 %t287, label %then33, label %merge34
 then33:
   br label %afterloop32
 merge34:
-  %t236 = load %LexerState, %LexerState* %l0
-  %t237 = extractvalue %LexerState %t236, 0
-  %t238 = load %LexerState, %LexerState* %l0
-  %t239 = extractvalue %LexerState %t238, 1
-  %t240 = fptosi double %t239 to i64
-  %t241 = getelementptr i8, i8* %t237, i64 %t240
-  %t242 = load i8, i8* %t241
-  %t243 = icmp eq i8 %t242, 42
-  br label %logical_and_entry_235
-
-logical_and_entry_235:
-  br i1 %t243, label %logical_and_right_235, label %logical_and_merge_235
-
-logical_and_right_235:
-  %t244 = load %LexerState, %LexerState* %l0
-  %t245 = call i8* @peek_next_char(%LexerState %t244)
-  %t246 = load i8, i8* %t245
-  %t247 = icmp eq i8 %t246, 47
-  br label %logical_and_right_end_235
-
-logical_and_right_end_235:
-  br label %logical_and_merge_235
-
-logical_and_merge_235:
-  %t248 = phi i1 [ false, %logical_and_entry_235 ], [ %t247, %logical_and_right_end_235 ]
-  %t249 = load %LexerState, %LexerState* %l0
-  %t250 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t251 = load i8, i8* %l2
-  %t252 = load i8*, i8** %l7
-  %t253 = load double, double* %l16
-  %t254 = load double, double* %l17
-  %t255 = load double, double* %l18
-  br i1 %t248, label %then35, label %merge36
-then35:
-  br label %afterloop32
-merge36:
-  %t256 = load %LexerState, %LexerState* %l0
-  %t257 = extractvalue %LexerState %t256, 0
-  %t258 = load %LexerState, %LexerState* %l0
-  %t259 = extractvalue %LexerState %t258, 1
-  %t260 = fptosi double %t259 to i64
-  %t261 = getelementptr i8, i8* %t257, i64 %t260
-  %t262 = load i8, i8* %t261
-  %t263 = icmp eq i8 %t262, 10
-  %t264 = load %LexerState, %LexerState* %l0
-  %t265 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t266 = load i8, i8* %l2
-  %t267 = load i8*, i8** %l7
-  %t268 = load double, double* %l16
-  %t269 = load double, double* %l17
-  %t270 = load double, double* %l18
-  br i1 %t263, label %then37, label %else38
-then37:
-  br label %merge39
-else38:
-  br label %merge39
-merge39:
-  br label %loop.latch31
-loop.latch31:
-  br label %loop.header29
-afterloop32:
-  %t271 = load %LexerState, %LexerState* %l0
-  %t272 = extractvalue %LexerState %t271, 0
-  %t273 = load double, double* %l16
-  %t274 = load %LexerState, %LexerState* %l0
-  %t275 = extractvalue %LexerState %t274, 1
-  %t276 = call i8* @slice(i8* %t272, double %t273, double %t275)
-  store i8* %t276, i8** %l19
-  %t277 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t278 = insertvalue %TokenKind undef, i32 6, 0
-  %t279 = insertvalue %Token undef, %TokenKind %t278, 0
-  %t280 = load i8*, i8** %l19
-  %t281 = insertvalue %Token %t279, i8* %t280, 1
-  %t282 = load double, double* %l17
-  %t283 = insertvalue %Token %t281, double %t282, 2
-  %t284 = load double, double* %l18
-  %t285 = insertvalue %Token %t283, double %t284, 3
-  %t286 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t277, %Token %t285)
-  store { %Token*, i64 }* %t286, { %Token*, i64 }** %l1
-  br label %loop.latch2
-merge28:
-  br label %merge20
-merge20:
-  %t287 = phi { %Token*, i64 }* [ %t200, %then19 ], [ %t116, %loop.body1 ]
-  %t288 = phi { %Token*, i64 }* [ %t286, %then19 ], [ %t116, %loop.body1 ]
-  store { %Token*, i64 }* %t287, { %Token*, i64 }** %l1
-  store { %Token*, i64 }* %t288, { %Token*, i64 }** %l1
-  %t289 = load i8, i8* %l2
-  %t290 = alloca [2 x i8], align 1
-  %t291 = getelementptr [2 x i8], [2 x i8]* %t290, i32 0, i32 0
-  store i8 %t289, i8* %t291
-  %t292 = getelementptr [2 x i8], [2 x i8]* %t290, i32 0, i32 1
-  store i8 0, i8* %t292
-  %t293 = getelementptr [2 x i8], [2 x i8]* %t290, i32 0, i32 0
-  %t294 = call i1 @is_double_quote(i8* %t293)
-  %t295 = load %LexerState, %LexerState* %l0
-  %t296 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t297 = load i8, i8* %l2
-  br i1 %t294, label %then40, label %merge41
-then40:
+  %t296 = load %LexerState, %LexerState* %l0
+  %t297 = extractvalue %LexerState %t296, 0
   %t298 = load %LexerState, %LexerState* %l0
   %t299 = extractvalue %LexerState %t298, 1
-  store double %t299, double* %l20
-  %t300 = load %LexerState, %LexerState* %l0
-  %t301 = extractvalue %LexerState %t300, 2
-  store double %t301, double* %l21
-  %t302 = load %LexerState, %LexerState* %l0
-  %t303 = extractvalue %LexerState %t302, 3
-  store double %t303, double* %l22
-  %s304 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.304, i32 0, i32 0
-  store i8* %s304, i8** %l23
-  store i1 0, i1* %l24
-  %t305 = load %LexerState, %LexerState* %l0
-  %t306 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t307 = load i8, i8* %l2
-  %t308 = load double, double* %l20
-  %t309 = load double, double* %l21
-  %t310 = load double, double* %l22
-  %t311 = load i8*, i8** %l23
-  %t312 = load i1, i1* %l24
-  br label %loop.header42
-loop.header42:
-  %t414 = phi i1 [ %t312, %then40 ], [ %t412, %loop.latch44 ]
-  %t415 = phi i8* [ %t311, %then40 ], [ %t413, %loop.latch44 ]
-  store i1 %t414, i1* %l24
-  store i8* %t415, i8** %l23
-  br label %loop.body43
-loop.body43:
-  %t313 = load %LexerState, %LexerState* %l0
-  %t314 = extractvalue %LexerState %t313, 1
-  %t315 = load %LexerState, %LexerState* %l0
-  %t316 = extractvalue %LexerState %t315, 0
-  %t317 = call i64 @sailfin_runtime_string_length(i8* %t316)
-  %t318 = sitofp i64 %t317 to double
-  %t319 = fcmp oge double %t314, %t318
+  %t300 = fptosi double %t299 to i64
+  %t301 = getelementptr i8, i8* %t297, i64 %t300
+  %t302 = load i8, i8* %t301
+  %t303 = icmp eq i8 %t302, 42
+  br label %logical_and_entry_295
+
+logical_and_entry_295:
+  br i1 %t303, label %logical_and_right_295, label %logical_and_merge_295
+
+logical_and_right_295:
+  %t304 = load %LexerState, %LexerState* %l0
+  %t305 = call i8* @peek_next_char(%LexerState %t304)
+  %t306 = load i8, i8* %t305
+  %t307 = icmp eq i8 %t306, 47
+  br label %logical_and_right_end_295
+
+logical_and_right_end_295:
+  br label %logical_and_merge_295
+
+logical_and_merge_295:
+  %t308 = phi i1 [ false, %logical_and_entry_295 ], [ %t307, %logical_and_right_end_295 ]
+  %t309 = load %LexerState, %LexerState* %l0
+  %t310 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t311 = load i8, i8* %l2
+  %t312 = load i8*, i8** %l7
+  %t313 = load double, double* %l16
+  %t314 = load double, double* %l17
+  %t315 = load double, double* %l18
+  br i1 %t308, label %then35, label %merge36
+then35:
+  %t316 = load %LexerState, %LexerState* %l0
+  %t317 = extractvalue %LexerState %t316, 1
+  %t318 = sitofp i64 2 to double
+  %t319 = fadd double %t317, %t318
   %t320 = load %LexerState, %LexerState* %l0
-  %t321 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t322 = load i8, i8* %l2
-  %t323 = load double, double* %l20
-  %t324 = load double, double* %l21
-  %t325 = load double, double* %l22
-  %t326 = load i8*, i8** %l23
-  %t327 = load i1, i1* %l24
-  br i1 %t319, label %then46, label %merge47
-then46:
-  br label %afterloop45
-merge47:
+  %t321 = getelementptr %LexerState, %LexerState %t320, i32 0, i32 1
+  store double %t319, double* %t321
+  %t322 = load %LexerState, %LexerState* %l0
+  %t323 = extractvalue %LexerState %t322, 3
+  %t324 = sitofp i64 2 to double
+  %t325 = fadd double %t323, %t324
+  %t326 = load %LexerState, %LexerState* %l0
+  %t327 = getelementptr %LexerState, %LexerState %t326, i32 0, i32 3
+  store double %t325, double* %t327
+  br label %afterloop32
+merge36:
   %t328 = load %LexerState, %LexerState* %l0
   %t329 = extractvalue %LexerState %t328, 0
   %t330 = load %LexerState, %LexerState* %l0
@@ -555,370 +529,643 @@ merge47:
   %t332 = fptosi double %t331 to i64
   %t333 = getelementptr i8, i8* %t329, i64 %t332
   %t334 = load i8, i8* %t333
-  store i8 %t334, i8* %l25
-  %t336 = load i1, i1* %l24
-  br label %logical_and_entry_335
+  %t335 = icmp eq i8 %t334, 10
+  %t336 = load %LexerState, %LexerState* %l0
+  %t337 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t338 = load i8, i8* %l2
+  %t339 = load i8*, i8** %l7
+  %t340 = load double, double* %l16
+  %t341 = load double, double* %l17
+  %t342 = load double, double* %l18
+  br i1 %t335, label %then37, label %else38
+then37:
+  %t343 = load %LexerState, %LexerState* %l0
+  %t344 = extractvalue %LexerState %t343, 1
+  %t345 = sitofp i64 1 to double
+  %t346 = fadd double %t344, %t345
+  %t347 = load %LexerState, %LexerState* %l0
+  %t348 = getelementptr %LexerState, %LexerState %t347, i32 0, i32 1
+  store double %t346, double* %t348
+  %t349 = load %LexerState, %LexerState* %l0
+  %t350 = extractvalue %LexerState %t349, 2
+  %t351 = sitofp i64 1 to double
+  %t352 = fadd double %t350, %t351
+  %t353 = load %LexerState, %LexerState* %l0
+  %t354 = getelementptr %LexerState, %LexerState %t353, i32 0, i32 2
+  store double %t352, double* %t354
+  %t355 = load %LexerState, %LexerState* %l0
+  %t356 = sitofp i64 1 to double
+  %t357 = getelementptr %LexerState, %LexerState %t355, i32 0, i32 3
+  store double %t356, double* %t357
+  br label %merge39
+else38:
+  %t358 = load %LexerState, %LexerState* %l0
+  %t359 = extractvalue %LexerState %t358, 1
+  %t360 = sitofp i64 1 to double
+  %t361 = fadd double %t359, %t360
+  %t362 = load %LexerState, %LexerState* %l0
+  %t363 = getelementptr %LexerState, %LexerState %t362, i32 0, i32 1
+  store double %t361, double* %t363
+  %t364 = load %LexerState, %LexerState* %l0
+  %t365 = extractvalue %LexerState %t364, 3
+  %t366 = sitofp i64 1 to double
+  %t367 = fadd double %t365, %t366
+  %t368 = load %LexerState, %LexerState* %l0
+  %t369 = getelementptr %LexerState, %LexerState %t368, i32 0, i32 3
+  store double %t367, double* %t369
+  br label %merge39
+merge39:
+  br label %loop.latch31
+loop.latch31:
+  br label %loop.header29
+afterloop32:
+  %t370 = load %LexerState, %LexerState* %l0
+  %t371 = extractvalue %LexerState %t370, 0
+  %t372 = load double, double* %l16
+  %t373 = load %LexerState, %LexerState* %l0
+  %t374 = extractvalue %LexerState %t373, 1
+  %t375 = call i8* @slice(i8* %t371, double %t372, double %t374)
+  store i8* %t375, i8** %l19
+  %t376 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t377 = insertvalue %TokenKind undef, i32 6, 0
+  %t378 = insertvalue %Token undef, %TokenKind %t377, 0
+  %t379 = load i8*, i8** %l19
+  %t380 = insertvalue %Token %t378, i8* %t379, 1
+  %t381 = load double, double* %l17
+  %t382 = insertvalue %Token %t380, double %t381, 2
+  %t383 = load double, double* %l18
+  %t384 = insertvalue %Token %t382, double %t383, 3
+  %t385 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t376, %Token %t384)
+  store { %Token*, i64 }* %t385, { %Token*, i64 }** %l1
+  br label %loop.latch2
+merge28:
+  br label %merge20
+merge20:
+  %t386 = phi { %Token*, i64 }* [ %t248, %then19 ], [ %t143, %loop.body1 ]
+  %t387 = phi { %Token*, i64 }* [ %t385, %then19 ], [ %t143, %loop.body1 ]
+  store { %Token*, i64 }* %t386, { %Token*, i64 }** %l1
+  store { %Token*, i64 }* %t387, { %Token*, i64 }** %l1
+  %t388 = load i8, i8* %l2
+  %t389 = alloca [2 x i8], align 1
+  %t390 = getelementptr [2 x i8], [2 x i8]* %t389, i32 0, i32 0
+  store i8 %t388, i8* %t390
+  %t391 = getelementptr [2 x i8], [2 x i8]* %t389, i32 0, i32 1
+  store i8 0, i8* %t391
+  %t392 = getelementptr [2 x i8], [2 x i8]* %t389, i32 0, i32 0
+  %t393 = call i1 @is_double_quote(i8* %t392)
+  %t394 = load %LexerState, %LexerState* %l0
+  %t395 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t396 = load i8, i8* %l2
+  br i1 %t393, label %then40, label %merge41
+then40:
+  %t397 = load %LexerState, %LexerState* %l0
+  %t398 = extractvalue %LexerState %t397, 1
+  store double %t398, double* %l20
+  %t399 = load %LexerState, %LexerState* %l0
+  %t400 = extractvalue %LexerState %t399, 2
+  store double %t400, double* %l21
+  %t401 = load %LexerState, %LexerState* %l0
+  %t402 = extractvalue %LexerState %t401, 3
+  store double %t402, double* %l22
+  %t403 = load %LexerState, %LexerState* %l0
+  %t404 = extractvalue %LexerState %t403, 1
+  %t405 = sitofp i64 1 to double
+  %t406 = fadd double %t404, %t405
+  %t407 = load %LexerState, %LexerState* %l0
+  %t408 = getelementptr %LexerState, %LexerState %t407, i32 0, i32 1
+  store double %t406, double* %t408
+  %t409 = load %LexerState, %LexerState* %l0
+  %t410 = extractvalue %LexerState %t409, 3
+  %t411 = sitofp i64 1 to double
+  %t412 = fadd double %t410, %t411
+  %t413 = load %LexerState, %LexerState* %l0
+  %t414 = getelementptr %LexerState, %LexerState %t413, i32 0, i32 3
+  store double %t412, double* %t414
+  %s415 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.415, i32 0, i32 0
+  store i8* %s415, i8** %l23
+  store i1 0, i1* %l24
+  %t416 = load %LexerState, %LexerState* %l0
+  %t417 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t418 = load i8, i8* %l2
+  %t419 = load double, double* %l20
+  %t420 = load double, double* %l21
+  %t421 = load double, double* %l22
+  %t422 = load i8*, i8** %l23
+  %t423 = load i1, i1* %l24
+  br label %loop.header42
+loop.header42:
+  %t576 = phi i1 [ %t423, %then40 ], [ %t574, %loop.latch44 ]
+  %t577 = phi i8* [ %t422, %then40 ], [ %t575, %loop.latch44 ]
+  store i1 %t576, i1* %l24
+  store i8* %t577, i8** %l23
+  br label %loop.body43
+loop.body43:
+  %t424 = load %LexerState, %LexerState* %l0
+  %t425 = extractvalue %LexerState %t424, 1
+  %t426 = load %LexerState, %LexerState* %l0
+  %t427 = extractvalue %LexerState %t426, 0
+  %t428 = call i64 @sailfin_runtime_string_length(i8* %t427)
+  %t429 = sitofp i64 %t428 to double
+  %t430 = fcmp oge double %t425, %t429
+  %t431 = load %LexerState, %LexerState* %l0
+  %t432 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t433 = load i8, i8* %l2
+  %t434 = load double, double* %l20
+  %t435 = load double, double* %l21
+  %t436 = load double, double* %l22
+  %t437 = load i8*, i8** %l23
+  %t438 = load i1, i1* %l24
+  br i1 %t430, label %then46, label %merge47
+then46:
+  br label %afterloop45
+merge47:
+  %t439 = load %LexerState, %LexerState* %l0
+  %t440 = extractvalue %LexerState %t439, 0
+  %t441 = load %LexerState, %LexerState* %l0
+  %t442 = extractvalue %LexerState %t441, 1
+  %t443 = fptosi double %t442 to i64
+  %t444 = getelementptr i8, i8* %t440, i64 %t443
+  %t445 = load i8, i8* %t444
+  store i8 %t445, i8* %l25
+  %t447 = load i1, i1* %l24
+  br label %logical_and_entry_446
 
-logical_and_entry_335:
-  br i1 %t336, label %logical_and_right_335, label %logical_and_merge_335
+logical_and_entry_446:
+  br i1 %t447, label %logical_and_right_446, label %logical_and_merge_446
 
-logical_and_right_335:
-  %t337 = load i8, i8* %l25
-  %t338 = alloca [2 x i8], align 1
-  %t339 = getelementptr [2 x i8], [2 x i8]* %t338, i32 0, i32 0
-  store i8 %t337, i8* %t339
-  %t340 = getelementptr [2 x i8], [2 x i8]* %t338, i32 0, i32 1
-  store i8 0, i8* %t340
-  %t341 = getelementptr [2 x i8], [2 x i8]* %t338, i32 0, i32 0
-  %t342 = call i1 @is_double_quote(i8* %t341)
-  br label %logical_and_right_end_335
+logical_and_right_446:
+  %t448 = load i8, i8* %l25
+  %t449 = alloca [2 x i8], align 1
+  %t450 = getelementptr [2 x i8], [2 x i8]* %t449, i32 0, i32 0
+  store i8 %t448, i8* %t450
+  %t451 = getelementptr [2 x i8], [2 x i8]* %t449, i32 0, i32 1
+  store i8 0, i8* %t451
+  %t452 = getelementptr [2 x i8], [2 x i8]* %t449, i32 0, i32 0
+  %t453 = call i1 @is_double_quote(i8* %t452)
+  br label %logical_and_right_end_446
 
-logical_and_right_end_335:
-  br label %logical_and_merge_335
+logical_and_right_end_446:
+  br label %logical_and_merge_446
 
-logical_and_merge_335:
-  %t343 = phi i1 [ false, %logical_and_entry_335 ], [ %t342, %logical_and_right_end_335 ]
-  %t344 = xor i1 %t343, 1
-  %t345 = load %LexerState, %LexerState* %l0
-  %t346 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t347 = load i8, i8* %l2
-  %t348 = load double, double* %l20
-  %t349 = load double, double* %l21
-  %t350 = load double, double* %l22
-  %t351 = load i8*, i8** %l23
-  %t352 = load i1, i1* %l24
-  %t353 = load i8, i8* %l25
-  br i1 %t344, label %then48, label %merge49
+logical_and_merge_446:
+  %t454 = phi i1 [ false, %logical_and_entry_446 ], [ %t453, %logical_and_right_end_446 ]
+  %t455 = xor i1 %t454, 1
+  %t456 = load %LexerState, %LexerState* %l0
+  %t457 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t458 = load i8, i8* %l2
+  %t459 = load double, double* %l20
+  %t460 = load double, double* %l21
+  %t461 = load double, double* %l22
+  %t462 = load i8*, i8** %l23
+  %t463 = load i1, i1* %l24
+  %t464 = load i8, i8* %l25
+  br i1 %t455, label %then48, label %merge49
 then48:
+  %t465 = load %LexerState, %LexerState* %l0
+  %t466 = extractvalue %LexerState %t465, 1
+  %t467 = sitofp i64 1 to double
+  %t468 = fadd double %t466, %t467
+  %t469 = load %LexerState, %LexerState* %l0
+  %t470 = getelementptr %LexerState, %LexerState %t469, i32 0, i32 1
+  store double %t468, double* %t470
+  %t471 = load %LexerState, %LexerState* %l0
+  %t472 = extractvalue %LexerState %t471, 3
+  %t473 = sitofp i64 1 to double
+  %t474 = fadd double %t472, %t473
+  %t475 = load %LexerState, %LexerState* %l0
+  %t476 = getelementptr %LexerState, %LexerState %t475, i32 0, i32 3
+  store double %t474, double* %t476
   br label %afterloop45
 merge49:
-  %t355 = load i1, i1* %l24
-  br label %logical_and_entry_354
+  %t478 = load i1, i1* %l24
+  br label %logical_and_entry_477
 
-logical_and_entry_354:
-  br i1 %t355, label %logical_and_right_354, label %logical_and_merge_354
+logical_and_entry_477:
+  br i1 %t478, label %logical_and_right_477, label %logical_and_merge_477
 
-logical_and_right_354:
-  %t356 = load i8, i8* %l25
-  %t357 = alloca [2 x i8], align 1
-  %t358 = getelementptr [2 x i8], [2 x i8]* %t357, i32 0, i32 0
-  store i8 %t356, i8* %t358
-  %t359 = getelementptr [2 x i8], [2 x i8]* %t357, i32 0, i32 1
-  store i8 0, i8* %t359
-  %t360 = getelementptr [2 x i8], [2 x i8]* %t357, i32 0, i32 0
-  %t361 = call i1 @is_backslash(i8* %t360)
-  br label %logical_and_right_end_354
+logical_and_right_477:
+  %t479 = load i8, i8* %l25
+  %t480 = alloca [2 x i8], align 1
+  %t481 = getelementptr [2 x i8], [2 x i8]* %t480, i32 0, i32 0
+  store i8 %t479, i8* %t481
+  %t482 = getelementptr [2 x i8], [2 x i8]* %t480, i32 0, i32 1
+  store i8 0, i8* %t482
+  %t483 = getelementptr [2 x i8], [2 x i8]* %t480, i32 0, i32 0
+  %t484 = call i1 @is_backslash(i8* %t483)
+  br label %logical_and_right_end_477
 
-logical_and_right_end_354:
-  br label %logical_and_merge_354
+logical_and_right_end_477:
+  br label %logical_and_merge_477
 
-logical_and_merge_354:
-  %t362 = phi i1 [ false, %logical_and_entry_354 ], [ %t361, %logical_and_right_end_354 ]
-  %t363 = xor i1 %t362, 1
-  %t364 = load %LexerState, %LexerState* %l0
-  %t365 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t366 = load i8, i8* %l2
-  %t367 = load double, double* %l20
-  %t368 = load double, double* %l21
-  %t369 = load double, double* %l22
-  %t370 = load i8*, i8** %l23
-  %t371 = load i1, i1* %l24
-  %t372 = load i8, i8* %l25
-  br i1 %t363, label %then50, label %merge51
+logical_and_merge_477:
+  %t485 = phi i1 [ false, %logical_and_entry_477 ], [ %t484, %logical_and_right_end_477 ]
+  %t486 = xor i1 %t485, 1
+  %t487 = load %LexerState, %LexerState* %l0
+  %t488 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t489 = load i8, i8* %l2
+  %t490 = load double, double* %l20
+  %t491 = load double, double* %l21
+  %t492 = load double, double* %l22
+  %t493 = load i8*, i8** %l23
+  %t494 = load i1, i1* %l24
+  %t495 = load i8, i8* %l25
+  br i1 %t486, label %then50, label %merge51
 then50:
   store i1 1, i1* %l24
+  %t496 = load %LexerState, %LexerState* %l0
+  %t497 = extractvalue %LexerState %t496, 1
+  %t498 = sitofp i64 1 to double
+  %t499 = fadd double %t497, %t498
+  %t500 = load %LexerState, %LexerState* %l0
+  %t501 = getelementptr %LexerState, %LexerState %t500, i32 0, i32 1
+  store double %t499, double* %t501
+  %t502 = load %LexerState, %LexerState* %l0
+  %t503 = extractvalue %LexerState %t502, 3
+  %t504 = sitofp i64 1 to double
+  %t505 = fadd double %t503, %t504
+  %t506 = load %LexerState, %LexerState* %l0
+  %t507 = getelementptr %LexerState, %LexerState %t506, i32 0, i32 3
+  store double %t505, double* %t507
   br label %loop.latch44
 merge51:
-  %t373 = load i1, i1* %l24
-  %t374 = load %LexerState, %LexerState* %l0
-  %t375 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t376 = load i8, i8* %l2
-  %t377 = load double, double* %l20
-  %t378 = load double, double* %l21
-  %t379 = load double, double* %l22
-  %t380 = load i8*, i8** %l23
-  %t381 = load i1, i1* %l24
-  %t382 = load i8, i8* %l25
-  br i1 %t373, label %then52, label %else53
+  %t508 = load i1, i1* %l24
+  %t509 = load %LexerState, %LexerState* %l0
+  %t510 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t511 = load i8, i8* %l2
+  %t512 = load double, double* %l20
+  %t513 = load double, double* %l21
+  %t514 = load double, double* %l22
+  %t515 = load i8*, i8** %l23
+  %t516 = load i1, i1* %l24
+  %t517 = load i8, i8* %l25
+  br i1 %t508, label %then52, label %else53
 then52:
-  %t383 = load i8*, i8** %l23
-  %t384 = load i8, i8* %l25
-  %t385 = alloca [2 x i8], align 1
-  %t386 = getelementptr [2 x i8], [2 x i8]* %t385, i32 0, i32 0
-  store i8 %t384, i8* %t386
-  %t387 = getelementptr [2 x i8], [2 x i8]* %t385, i32 0, i32 1
-  store i8 0, i8* %t387
-  %t388 = getelementptr [2 x i8], [2 x i8]* %t385, i32 0, i32 0
-  %t389 = call i8* @interpret_escape(i8* %t388)
-  %t390 = add i8* %t383, %t389
-  store i8* %t390, i8** %l23
+  %t518 = load i8*, i8** %l23
+  %t519 = load i8, i8* %l25
+  %t520 = alloca [2 x i8], align 1
+  %t521 = getelementptr [2 x i8], [2 x i8]* %t520, i32 0, i32 0
+  store i8 %t519, i8* %t521
+  %t522 = getelementptr [2 x i8], [2 x i8]* %t520, i32 0, i32 1
+  store i8 0, i8* %t522
+  %t523 = getelementptr [2 x i8], [2 x i8]* %t520, i32 0, i32 0
+  %t524 = call i8* @interpret_escape(i8* %t523)
+  %t525 = add i8* %t518, %t524
+  store i8* %t525, i8** %l23
   store i1 0, i1* %l24
   br label %merge54
 else53:
-  %t391 = load i8*, i8** %l23
-  %t392 = load i8, i8* %l25
-  %t393 = load i8, i8* %t391
-  %t394 = add i8 %t393, %t392
-  %t395 = alloca [2 x i8], align 1
-  %t396 = getelementptr [2 x i8], [2 x i8]* %t395, i32 0, i32 0
-  store i8 %t394, i8* %t396
-  %t397 = getelementptr [2 x i8], [2 x i8]* %t395, i32 0, i32 1
-  store i8 0, i8* %t397
-  %t398 = getelementptr [2 x i8], [2 x i8]* %t395, i32 0, i32 0
-  store i8* %t398, i8** %l23
+  %t526 = load i8*, i8** %l23
+  %t527 = load i8, i8* %l25
+  %t528 = load i8, i8* %t526
+  %t529 = add i8 %t528, %t527
+  %t530 = alloca [2 x i8], align 1
+  %t531 = getelementptr [2 x i8], [2 x i8]* %t530, i32 0, i32 0
+  store i8 %t529, i8* %t531
+  %t532 = getelementptr [2 x i8], [2 x i8]* %t530, i32 0, i32 1
+  store i8 0, i8* %t532
+  %t533 = getelementptr [2 x i8], [2 x i8]* %t530, i32 0, i32 0
+  store i8* %t533, i8** %l23
   br label %merge54
 merge54:
-  %t399 = phi i8* [ %t390, %then52 ], [ %t398, %else53 ]
-  %t400 = phi i1 [ 0, %then52 ], [ %t381, %else53 ]
-  store i8* %t399, i8** %l23
-  store i1 %t400, i1* %l24
-  %t401 = load i8, i8* %l25
-  %t402 = icmp eq i8 %t401, 10
-  %t403 = load %LexerState, %LexerState* %l0
-  %t404 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t405 = load i8, i8* %l2
-  %t406 = load double, double* %l20
-  %t407 = load double, double* %l21
-  %t408 = load double, double* %l22
-  %t409 = load i8*, i8** %l23
-  %t410 = load i1, i1* %l24
-  %t411 = load i8, i8* %l25
-  br i1 %t402, label %then55, label %else56
+  %t534 = phi i8* [ %t525, %then52 ], [ %t533, %else53 ]
+  %t535 = phi i1 [ 0, %then52 ], [ %t516, %else53 ]
+  store i8* %t534, i8** %l23
+  store i1 %t535, i1* %l24
+  %t536 = load i8, i8* %l25
+  %t537 = icmp eq i8 %t536, 10
+  %t538 = load %LexerState, %LexerState* %l0
+  %t539 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t540 = load i8, i8* %l2
+  %t541 = load double, double* %l20
+  %t542 = load double, double* %l21
+  %t543 = load double, double* %l22
+  %t544 = load i8*, i8** %l23
+  %t545 = load i1, i1* %l24
+  %t546 = load i8, i8* %l25
+  br i1 %t537, label %then55, label %else56
 then55:
+  %t547 = load %LexerState, %LexerState* %l0
+  %t548 = extractvalue %LexerState %t547, 1
+  %t549 = sitofp i64 1 to double
+  %t550 = fadd double %t548, %t549
+  %t551 = load %LexerState, %LexerState* %l0
+  %t552 = getelementptr %LexerState, %LexerState %t551, i32 0, i32 1
+  store double %t550, double* %t552
+  %t553 = load %LexerState, %LexerState* %l0
+  %t554 = extractvalue %LexerState %t553, 2
+  %t555 = sitofp i64 1 to double
+  %t556 = fadd double %t554, %t555
+  %t557 = load %LexerState, %LexerState* %l0
+  %t558 = getelementptr %LexerState, %LexerState %t557, i32 0, i32 2
+  store double %t556, double* %t558
+  %t559 = load %LexerState, %LexerState* %l0
+  %t560 = sitofp i64 1 to double
+  %t561 = getelementptr %LexerState, %LexerState %t559, i32 0, i32 3
+  store double %t560, double* %t561
   br label %merge57
 else56:
+  %t562 = load %LexerState, %LexerState* %l0
+  %t563 = extractvalue %LexerState %t562, 1
+  %t564 = sitofp i64 1 to double
+  %t565 = fadd double %t563, %t564
+  %t566 = load %LexerState, %LexerState* %l0
+  %t567 = getelementptr %LexerState, %LexerState %t566, i32 0, i32 1
+  store double %t565, double* %t567
+  %t568 = load %LexerState, %LexerState* %l0
+  %t569 = extractvalue %LexerState %t568, 3
+  %t570 = sitofp i64 1 to double
+  %t571 = fadd double %t569, %t570
+  %t572 = load %LexerState, %LexerState* %l0
+  %t573 = getelementptr %LexerState, %LexerState %t572, i32 0, i32 3
+  store double %t571, double* %t573
   br label %merge57
 merge57:
   br label %loop.latch44
 loop.latch44:
-  %t412 = load i1, i1* %l24
-  %t413 = load i8*, i8** %l23
+  %t574 = load i1, i1* %l24
+  %t575 = load i8*, i8** %l23
   br label %loop.header42
 afterloop45:
-  %t416 = load %LexerState, %LexerState* %l0
-  %t417 = extractvalue %LexerState %t416, 0
-  %t418 = load double, double* %l20
-  %t419 = load %LexerState, %LexerState* %l0
-  %t420 = extractvalue %LexerState %t419, 1
-  %t421 = call i8* @slice(i8* %t417, double %t418, double %t420)
-  store i8* %t421, i8** %l26
-  %t422 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t423 = alloca %TokenKind
-  %t424 = getelementptr inbounds %TokenKind, %TokenKind* %t423, i32 0, i32 0
-  store i32 2, i32* %t424
-  %t425 = load i8*, i8** %l23
-  %t426 = getelementptr inbounds %TokenKind, %TokenKind* %t423, i32 0, i32 1
-  %t427 = bitcast [8 x i8]* %t426 to i8*
-  %t428 = bitcast i8* %t427 to i8**
-  store i8* %t425, i8** %t428
-  %t429 = load %TokenKind, %TokenKind* %t423
-  %t430 = insertvalue %Token undef, %TokenKind %t429, 0
-  %t431 = load i8*, i8** %l26
-  %t432 = insertvalue %Token %t430, i8* %t431, 1
-  %t433 = load double, double* %l21
-  %t434 = insertvalue %Token %t432, double %t433, 2
-  %t435 = load double, double* %l22
-  %t436 = insertvalue %Token %t434, double %t435, 3
-  %t437 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t422, %Token %t436)
-  store { %Token*, i64 }* %t437, { %Token*, i64 }** %l1
+  %t578 = load %LexerState, %LexerState* %l0
+  %t579 = extractvalue %LexerState %t578, 0
+  %t580 = load double, double* %l20
+  %t581 = load %LexerState, %LexerState* %l0
+  %t582 = extractvalue %LexerState %t581, 1
+  %t583 = call i8* @slice(i8* %t579, double %t580, double %t582)
+  store i8* %t583, i8** %l26
+  %t584 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t585 = alloca %TokenKind
+  %t586 = getelementptr inbounds %TokenKind, %TokenKind* %t585, i32 0, i32 0
+  store i32 2, i32* %t586
+  %t587 = load i8*, i8** %l23
+  %t588 = getelementptr inbounds %TokenKind, %TokenKind* %t585, i32 0, i32 1
+  %t589 = bitcast [8 x i8]* %t588 to i8*
+  %t590 = bitcast i8* %t589 to i8**
+  store i8* %t587, i8** %t590
+  %t591 = load %TokenKind, %TokenKind* %t585
+  %t592 = insertvalue %Token undef, %TokenKind %t591, 0
+  %t593 = load i8*, i8** %l26
+  %t594 = insertvalue %Token %t592, i8* %t593, 1
+  %t595 = load double, double* %l21
+  %t596 = insertvalue %Token %t594, double %t595, 2
+  %t597 = load double, double* %l22
+  %t598 = insertvalue %Token %t596, double %t597, 3
+  %t599 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t584, %Token %t598)
+  store { %Token*, i64 }* %t599, { %Token*, i64 }** %l1
   br label %loop.latch2
 merge41:
-  %t438 = load i8, i8* %l2
-  %t439 = alloca [2 x i8], align 1
-  %t440 = getelementptr [2 x i8], [2 x i8]* %t439, i32 0, i32 0
-  store i8 %t438, i8* %t440
-  %t441 = getelementptr [2 x i8], [2 x i8]* %t439, i32 0, i32 1
-  store i8 0, i8* %t441
-  %t442 = getelementptr [2 x i8], [2 x i8]* %t439, i32 0, i32 0
-  %t443 = call i1 @is_digit(i8* %t442)
-  %t444 = load %LexerState, %LexerState* %l0
-  %t445 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t446 = load i8, i8* %l2
-  br i1 %t443, label %then58, label %merge59
+  %t600 = load i8, i8* %l2
+  %t601 = alloca [2 x i8], align 1
+  %t602 = getelementptr [2 x i8], [2 x i8]* %t601, i32 0, i32 0
+  store i8 %t600, i8* %t602
+  %t603 = getelementptr [2 x i8], [2 x i8]* %t601, i32 0, i32 1
+  store i8 0, i8* %t603
+  %t604 = getelementptr [2 x i8], [2 x i8]* %t601, i32 0, i32 0
+  %t605 = call i1 @is_digit(i8* %t604)
+  %t606 = load %LexerState, %LexerState* %l0
+  %t607 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t608 = load i8, i8* %l2
+  br i1 %t605, label %then58, label %merge59
 then58:
-  %t447 = load %LexerState, %LexerState* %l0
-  %t448 = extractvalue %LexerState %t447, 1
-  store double %t448, double* %l27
-  %t449 = load %LexerState, %LexerState* %l0
-  %t450 = extractvalue %LexerState %t449, 2
-  store double %t450, double* %l28
-  %t451 = load %LexerState, %LexerState* %l0
-  %t452 = extractvalue %LexerState %t451, 3
-  store double %t452, double* %l29
-  %t453 = load %LexerState, %LexerState* %l0
-  %t454 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t455 = load i8, i8* %l2
-  %t456 = load double, double* %l27
-  %t457 = load double, double* %l28
-  %t458 = load double, double* %l29
+  %t609 = load %LexerState, %LexerState* %l0
+  %t610 = extractvalue %LexerState %t609, 1
+  store double %t610, double* %l27
+  %t611 = load %LexerState, %LexerState* %l0
+  %t612 = extractvalue %LexerState %t611, 2
+  store double %t612, double* %l28
+  %t613 = load %LexerState, %LexerState* %l0
+  %t614 = extractvalue %LexerState %t613, 3
+  store double %t614, double* %l29
+  %t615 = load %LexerState, %LexerState* %l0
+  %t616 = extractvalue %LexerState %t615, 1
+  %t617 = sitofp i64 1 to double
+  %t618 = fadd double %t616, %t617
+  %t619 = load %LexerState, %LexerState* %l0
+  %t620 = getelementptr %LexerState, %LexerState %t619, i32 0, i32 1
+  store double %t618, double* %t620
+  %t621 = load %LexerState, %LexerState* %l0
+  %t622 = extractvalue %LexerState %t621, 3
+  %t623 = sitofp i64 1 to double
+  %t624 = fadd double %t622, %t623
+  %t625 = load %LexerState, %LexerState* %l0
+  %t626 = getelementptr %LexerState, %LexerState %t625, i32 0, i32 3
+  store double %t624, double* %t626
+  %t627 = load %LexerState, %LexerState* %l0
+  %t628 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t629 = load i8, i8* %l2
+  %t630 = load double, double* %l27
+  %t631 = load double, double* %l28
+  %t632 = load double, double* %l29
   br label %loop.header60
 loop.header60:
   br label %loop.body61
 loop.body61:
-  %t459 = load %LexerState, %LexerState* %l0
-  %t460 = extractvalue %LexerState %t459, 1
-  %t461 = load %LexerState, %LexerState* %l0
-  %t462 = extractvalue %LexerState %t461, 0
-  %t463 = call i64 @sailfin_runtime_string_length(i8* %t462)
-  %t464 = sitofp i64 %t463 to double
-  %t465 = fcmp oge double %t460, %t464
-  %t466 = load %LexerState, %LexerState* %l0
-  %t467 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t468 = load i8, i8* %l2
-  %t469 = load double, double* %l27
-  %t470 = load double, double* %l28
-  %t471 = load double, double* %l29
-  br i1 %t465, label %then64, label %merge65
+  %t633 = load %LexerState, %LexerState* %l0
+  %t634 = extractvalue %LexerState %t633, 1
+  %t635 = load %LexerState, %LexerState* %l0
+  %t636 = extractvalue %LexerState %t635, 0
+  %t637 = call i64 @sailfin_runtime_string_length(i8* %t636)
+  %t638 = sitofp i64 %t637 to double
+  %t639 = fcmp oge double %t634, %t638
+  %t640 = load %LexerState, %LexerState* %l0
+  %t641 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t642 = load i8, i8* %l2
+  %t643 = load double, double* %l27
+  %t644 = load double, double* %l28
+  %t645 = load double, double* %l29
+  br i1 %t639, label %then64, label %merge65
 then64:
   br label %afterloop63
 merge65:
-  %t472 = load %LexerState, %LexerState* %l0
-  %t473 = extractvalue %LexerState %t472, 0
-  %t474 = load %LexerState, %LexerState* %l0
-  %t475 = extractvalue %LexerState %t474, 1
-  %t476 = fptosi double %t475 to i64
-  %t477 = getelementptr i8, i8* %t473, i64 %t476
-  %t478 = load i8, i8* %t477
-  %t479 = alloca [2 x i8], align 1
-  %t480 = getelementptr [2 x i8], [2 x i8]* %t479, i32 0, i32 0
-  store i8 %t478, i8* %t480
-  %t481 = getelementptr [2 x i8], [2 x i8]* %t479, i32 0, i32 1
-  store i8 0, i8* %t481
-  %t482 = getelementptr [2 x i8], [2 x i8]* %t479, i32 0, i32 0
-  %t483 = call i1 @is_digit(i8* %t482)
-  %t484 = xor i1 %t483, 1
-  %t485 = load %LexerState, %LexerState* %l0
-  %t486 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t487 = load i8, i8* %l2
-  %t488 = load double, double* %l27
-  %t489 = load double, double* %l28
-  %t490 = load double, double* %l29
-  br i1 %t484, label %then66, label %merge67
+  %t646 = load %LexerState, %LexerState* %l0
+  %t647 = extractvalue %LexerState %t646, 0
+  %t648 = load %LexerState, %LexerState* %l0
+  %t649 = extractvalue %LexerState %t648, 1
+  %t650 = fptosi double %t649 to i64
+  %t651 = getelementptr i8, i8* %t647, i64 %t650
+  %t652 = load i8, i8* %t651
+  %t653 = alloca [2 x i8], align 1
+  %t654 = getelementptr [2 x i8], [2 x i8]* %t653, i32 0, i32 0
+  store i8 %t652, i8* %t654
+  %t655 = getelementptr [2 x i8], [2 x i8]* %t653, i32 0, i32 1
+  store i8 0, i8* %t655
+  %t656 = getelementptr [2 x i8], [2 x i8]* %t653, i32 0, i32 0
+  %t657 = call i1 @is_digit(i8* %t656)
+  %t658 = xor i1 %t657, 1
+  %t659 = load %LexerState, %LexerState* %l0
+  %t660 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t661 = load i8, i8* %l2
+  %t662 = load double, double* %l27
+  %t663 = load double, double* %l28
+  %t664 = load double, double* %l29
+  br i1 %t658, label %then66, label %merge67
 then66:
   br label %afterloop63
 merge67:
+  %t665 = load %LexerState, %LexerState* %l0
+  %t666 = extractvalue %LexerState %t665, 1
+  %t667 = sitofp i64 1 to double
+  %t668 = fadd double %t666, %t667
+  %t669 = load %LexerState, %LexerState* %l0
+  %t670 = getelementptr %LexerState, %LexerState %t669, i32 0, i32 1
+  store double %t668, double* %t670
+  %t671 = load %LexerState, %LexerState* %l0
+  %t672 = extractvalue %LexerState %t671, 3
+  %t673 = sitofp i64 1 to double
+  %t674 = fadd double %t672, %t673
+  %t675 = load %LexerState, %LexerState* %l0
+  %t676 = getelementptr %LexerState, %LexerState %t675, i32 0, i32 3
+  store double %t674, double* %t676
   br label %loop.latch62
 loop.latch62:
   br label %loop.header60
 afterloop63:
-  %t492 = load %LexerState, %LexerState* %l0
-  %t493 = extractvalue %LexerState %t492, 1
-  %t494 = load %LexerState, %LexerState* %l0
-  %t495 = extractvalue %LexerState %t494, 0
-  %t496 = call i64 @sailfin_runtime_string_length(i8* %t495)
-  %t497 = sitofp i64 %t496 to double
-  %t498 = fcmp olt double %t493, %t497
-  br label %logical_and_entry_491
+  %t678 = load %LexerState, %LexerState* %l0
+  %t679 = extractvalue %LexerState %t678, 1
+  %t680 = load %LexerState, %LexerState* %l0
+  %t681 = extractvalue %LexerState %t680, 0
+  %t682 = call i64 @sailfin_runtime_string_length(i8* %t681)
+  %t683 = sitofp i64 %t682 to double
+  %t684 = fcmp olt double %t679, %t683
+  br label %logical_and_entry_677
 
-logical_and_entry_491:
-  br i1 %t498, label %logical_and_right_491, label %logical_and_merge_491
+logical_and_entry_677:
+  br i1 %t684, label %logical_and_right_677, label %logical_and_merge_677
 
-logical_and_right_491:
-  %t499 = load %LexerState, %LexerState* %l0
-  %t500 = extractvalue %LexerState %t499, 0
-  %t501 = load %LexerState, %LexerState* %l0
-  %t502 = extractvalue %LexerState %t501, 1
-  %t503 = fptosi double %t502 to i64
-  %t504 = getelementptr i8, i8* %t500, i64 %t503
-  %t505 = load i8, i8* %t504
-  %t506 = icmp eq i8 %t505, 46
-  br label %logical_and_right_end_491
+logical_and_right_677:
+  %t685 = load %LexerState, %LexerState* %l0
+  %t686 = extractvalue %LexerState %t685, 0
+  %t687 = load %LexerState, %LexerState* %l0
+  %t688 = extractvalue %LexerState %t687, 1
+  %t689 = fptosi double %t688 to i64
+  %t690 = getelementptr i8, i8* %t686, i64 %t689
+  %t691 = load i8, i8* %t690
+  %t692 = icmp eq i8 %t691, 46
+  br label %logical_and_right_end_677
 
-logical_and_right_end_491:
-  br label %logical_and_merge_491
+logical_and_right_end_677:
+  br label %logical_and_merge_677
 
-logical_and_merge_491:
-  %t507 = phi i1 [ false, %logical_and_entry_491 ], [ %t506, %logical_and_right_end_491 ]
-  %t508 = load %LexerState, %LexerState* %l0
-  %t509 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t510 = load i8, i8* %l2
-  %t511 = load double, double* %l27
-  %t512 = load double, double* %l28
-  %t513 = load double, double* %l29
-  br i1 %t507, label %then68, label %merge69
+logical_and_merge_677:
+  %t693 = phi i1 [ false, %logical_and_entry_677 ], [ %t692, %logical_and_right_end_677 ]
+  %t694 = load %LexerState, %LexerState* %l0
+  %t695 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t696 = load i8, i8* %l2
+  %t697 = load double, double* %l27
+  %t698 = load double, double* %l28
+  %t699 = load double, double* %l29
+  br i1 %t693, label %then68, label %merge69
 then68:
-  %t515 = load %LexerState, %LexerState* %l0
-  %t516 = extractvalue %LexerState %t515, 1
-  %t517 = sitofp i64 1 to double
-  %t518 = fadd double %t516, %t517
-  %t519 = load %LexerState, %LexerState* %l0
-  %t520 = extractvalue %LexerState %t519, 0
-  %t521 = call i64 @sailfin_runtime_string_length(i8* %t520)
-  %t522 = sitofp i64 %t521 to double
-  %t523 = fcmp olt double %t518, %t522
-  br label %logical_and_entry_514
+  %t701 = load %LexerState, %LexerState* %l0
+  %t702 = extractvalue %LexerState %t701, 1
+  %t703 = sitofp i64 1 to double
+  %t704 = fadd double %t702, %t703
+  %t705 = load %LexerState, %LexerState* %l0
+  %t706 = extractvalue %LexerState %t705, 0
+  %t707 = call i64 @sailfin_runtime_string_length(i8* %t706)
+  %t708 = sitofp i64 %t707 to double
+  %t709 = fcmp olt double %t704, %t708
+  br label %logical_and_entry_700
 
-logical_and_entry_514:
-  br i1 %t523, label %logical_and_right_514, label %logical_and_merge_514
+logical_and_entry_700:
+  br i1 %t709, label %logical_and_right_700, label %logical_and_merge_700
 
-logical_and_right_514:
+logical_and_right_700:
   store double 0.0, double* %l30
-  %t524 = load double, double* %l30
-  %t525 = fcmp one double %t524, 0.0
-  %t526 = load %LexerState, %LexerState* %l0
-  %t527 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t528 = load i8, i8* %l2
-  %t529 = load double, double* %l27
-  %t530 = load double, double* %l28
-  %t531 = load double, double* %l29
-  %t532 = load double, double* %l30
-  br i1 %t525, label %then70, label %merge71
+  %t710 = load double, double* %l30
+  %t711 = fcmp one double %t710, 0.0
+  %t712 = load %LexerState, %LexerState* %l0
+  %t713 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t714 = load i8, i8* %l2
+  %t715 = load double, double* %l27
+  %t716 = load double, double* %l28
+  %t717 = load double, double* %l29
+  %t718 = load double, double* %l30
+  br i1 %t711, label %then70, label %merge71
 then70:
-  %t533 = load %LexerState, %LexerState* %l0
-  %t534 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t535 = load i8, i8* %l2
-  %t536 = load double, double* %l27
-  %t537 = load double, double* %l28
-  %t538 = load double, double* %l29
-  %t539 = load double, double* %l30
+  %t719 = load %LexerState, %LexerState* %l0
+  %t720 = extractvalue %LexerState %t719, 1
+  %t721 = sitofp i64 1 to double
+  %t722 = fadd double %t720, %t721
+  %t723 = load %LexerState, %LexerState* %l0
+  %t724 = getelementptr %LexerState, %LexerState %t723, i32 0, i32 1
+  store double %t722, double* %t724
+  %t725 = load %LexerState, %LexerState* %l0
+  %t726 = extractvalue %LexerState %t725, 3
+  %t727 = sitofp i64 1 to double
+  %t728 = fadd double %t726, %t727
+  %t729 = load %LexerState, %LexerState* %l0
+  %t730 = getelementptr %LexerState, %LexerState %t729, i32 0, i32 3
+  store double %t728, double* %t730
+  %t731 = load %LexerState, %LexerState* %l0
+  %t732 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t733 = load i8, i8* %l2
+  %t734 = load double, double* %l27
+  %t735 = load double, double* %l28
+  %t736 = load double, double* %l29
+  %t737 = load double, double* %l30
   br label %loop.header72
 loop.header72:
   br label %loop.body73
 loop.body73:
-  %t540 = load %LexerState, %LexerState* %l0
-  %t541 = extractvalue %LexerState %t540, 1
-  %t542 = load %LexerState, %LexerState* %l0
-  %t543 = extractvalue %LexerState %t542, 0
-  %t544 = call i64 @sailfin_runtime_string_length(i8* %t543)
-  %t545 = sitofp i64 %t544 to double
-  %t546 = fcmp oge double %t541, %t545
-  %t547 = load %LexerState, %LexerState* %l0
-  %t548 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t549 = load i8, i8* %l2
-  %t550 = load double, double* %l27
-  %t551 = load double, double* %l28
-  %t552 = load double, double* %l29
-  %t553 = load double, double* %l30
-  br i1 %t546, label %then76, label %merge77
+  %t738 = load %LexerState, %LexerState* %l0
+  %t739 = extractvalue %LexerState %t738, 1
+  %t740 = load %LexerState, %LexerState* %l0
+  %t741 = extractvalue %LexerState %t740, 0
+  %t742 = call i64 @sailfin_runtime_string_length(i8* %t741)
+  %t743 = sitofp i64 %t742 to double
+  %t744 = fcmp oge double %t739, %t743
+  %t745 = load %LexerState, %LexerState* %l0
+  %t746 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t747 = load i8, i8* %l2
+  %t748 = load double, double* %l27
+  %t749 = load double, double* %l28
+  %t750 = load double, double* %l29
+  %t751 = load double, double* %l30
+  br i1 %t744, label %then76, label %merge77
 then76:
   br label %afterloop75
 merge77:
-  %t554 = load %LexerState, %LexerState* %l0
-  %t555 = extractvalue %LexerState %t554, 0
-  %t556 = load %LexerState, %LexerState* %l0
-  %t557 = extractvalue %LexerState %t556, 1
-  %t558 = fptosi double %t557 to i64
-  %t559 = getelementptr i8, i8* %t555, i64 %t558
-  %t560 = load i8, i8* %t559
-  %t561 = alloca [2 x i8], align 1
-  %t562 = getelementptr [2 x i8], [2 x i8]* %t561, i32 0, i32 0
-  store i8 %t560, i8* %t562
-  %t563 = getelementptr [2 x i8], [2 x i8]* %t561, i32 0, i32 1
-  store i8 0, i8* %t563
-  %t564 = getelementptr [2 x i8], [2 x i8]* %t561, i32 0, i32 0
-  %t565 = call i1 @is_digit(i8* %t564)
-  %t566 = xor i1 %t565, 1
-  %t567 = load %LexerState, %LexerState* %l0
-  %t568 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t569 = load i8, i8* %l2
-  %t570 = load double, double* %l27
-  %t571 = load double, double* %l28
-  %t572 = load double, double* %l29
-  %t573 = load double, double* %l30
-  br i1 %t566, label %then78, label %merge79
+  %t752 = load %LexerState, %LexerState* %l0
+  %t753 = extractvalue %LexerState %t752, 0
+  %t754 = load %LexerState, %LexerState* %l0
+  %t755 = extractvalue %LexerState %t754, 1
+  %t756 = fptosi double %t755 to i64
+  %t757 = getelementptr i8, i8* %t753, i64 %t756
+  %t758 = load i8, i8* %t757
+  %t759 = alloca [2 x i8], align 1
+  %t760 = getelementptr [2 x i8], [2 x i8]* %t759, i32 0, i32 0
+  store i8 %t758, i8* %t760
+  %t761 = getelementptr [2 x i8], [2 x i8]* %t759, i32 0, i32 1
+  store i8 0, i8* %t761
+  %t762 = getelementptr [2 x i8], [2 x i8]* %t759, i32 0, i32 0
+  %t763 = call i1 @is_digit(i8* %t762)
+  %t764 = xor i1 %t763, 1
+  %t765 = load %LexerState, %LexerState* %l0
+  %t766 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t767 = load i8, i8* %l2
+  %t768 = load double, double* %l27
+  %t769 = load double, double* %l28
+  %t770 = load double, double* %l29
+  %t771 = load double, double* %l30
+  br i1 %t764, label %then78, label %merge79
 then78:
   br label %afterloop75
 merge79:
+  %t772 = load %LexerState, %LexerState* %l0
+  %t773 = extractvalue %LexerState %t772, 1
+  %t774 = sitofp i64 1 to double
+  %t775 = fadd double %t773, %t774
+  %t776 = load %LexerState, %LexerState* %l0
+  %t777 = getelementptr %LexerState, %LexerState %t776, i32 0, i32 1
+  store double %t775, double* %t777
+  %t778 = load %LexerState, %LexerState* %l0
+  %t779 = extractvalue %LexerState %t778, 3
+  %t780 = sitofp i64 1 to double
+  %t781 = fadd double %t779, %t780
+  %t782 = load %LexerState, %LexerState* %l0
+  %t783 = getelementptr %LexerState, %LexerState %t782, i32 0, i32 3
+  store double %t781, double* %t783
   br label %loop.latch74
 loop.latch74:
   br label %loop.header72
@@ -927,335 +1174,402 @@ afterloop75:
 merge71:
   br label %merge69
 merge69:
-  %t574 = load %LexerState, %LexerState* %l0
-  %t575 = extractvalue %LexerState %t574, 0
-  %t576 = load double, double* %l27
-  %t577 = load %LexerState, %LexerState* %l0
-  %t578 = extractvalue %LexerState %t577, 1
-  %t579 = call i8* @slice(i8* %t575, double %t576, double %t578)
-  store i8* %t579, i8** %l31
-  %t580 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t581 = alloca %TokenKind
-  %t582 = getelementptr inbounds %TokenKind, %TokenKind* %t581, i32 0, i32 0
-  store i32 1, i32* %t582
-  %t583 = load i8*, i8** %l31
-  %t584 = getelementptr inbounds %TokenKind, %TokenKind* %t581, i32 0, i32 1
-  %t585 = bitcast [8 x i8]* %t584 to i8*
-  %t586 = bitcast i8* %t585 to i8**
-  store i8* %t583, i8** %t586
-  %t587 = load %TokenKind, %TokenKind* %t581
-  %t588 = insertvalue %Token undef, %TokenKind %t587, 0
-  %t589 = load i8*, i8** %l31
-  %t590 = insertvalue %Token %t588, i8* %t589, 1
-  %t591 = load double, double* %l28
-  %t592 = insertvalue %Token %t590, double %t591, 2
-  %t593 = load double, double* %l29
-  %t594 = insertvalue %Token %t592, double %t593, 3
-  %t595 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t580, %Token %t594)
-  store { %Token*, i64 }* %t595, { %Token*, i64 }** %l1
+  %t784 = load %LexerState, %LexerState* %l0
+  %t785 = extractvalue %LexerState %t784, 0
+  %t786 = load double, double* %l27
+  %t787 = load %LexerState, %LexerState* %l0
+  %t788 = extractvalue %LexerState %t787, 1
+  %t789 = call i8* @slice(i8* %t785, double %t786, double %t788)
+  store i8* %t789, i8** %l31
+  %t790 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t791 = alloca %TokenKind
+  %t792 = getelementptr inbounds %TokenKind, %TokenKind* %t791, i32 0, i32 0
+  store i32 1, i32* %t792
+  %t793 = load i8*, i8** %l31
+  %t794 = getelementptr inbounds %TokenKind, %TokenKind* %t791, i32 0, i32 1
+  %t795 = bitcast [8 x i8]* %t794 to i8*
+  %t796 = bitcast i8* %t795 to i8**
+  store i8* %t793, i8** %t796
+  %t797 = load %TokenKind, %TokenKind* %t791
+  %t798 = insertvalue %Token undef, %TokenKind %t797, 0
+  %t799 = load i8*, i8** %l31
+  %t800 = insertvalue %Token %t798, i8* %t799, 1
+  %t801 = load double, double* %l28
+  %t802 = insertvalue %Token %t800, double %t801, 2
+  %t803 = load double, double* %l29
+  %t804 = insertvalue %Token %t802, double %t803, 3
+  %t805 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t790, %Token %t804)
+  store { %Token*, i64 }* %t805, { %Token*, i64 }** %l1
   br label %loop.latch2
 merge59:
-  %t596 = load i8, i8* %l2
-  %t597 = alloca [2 x i8], align 1
-  %t598 = getelementptr [2 x i8], [2 x i8]* %t597, i32 0, i32 0
-  store i8 %t596, i8* %t598
-  %t599 = getelementptr [2 x i8], [2 x i8]* %t597, i32 0, i32 1
-  store i8 0, i8* %t599
-  %t600 = getelementptr [2 x i8], [2 x i8]* %t597, i32 0, i32 0
-  %t601 = call i1 @is_identifier_start(i8* %t600)
-  %t602 = load %LexerState, %LexerState* %l0
-  %t603 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t604 = load i8, i8* %l2
-  br i1 %t601, label %then80, label %merge81
+  %t806 = load i8, i8* %l2
+  %t807 = alloca [2 x i8], align 1
+  %t808 = getelementptr [2 x i8], [2 x i8]* %t807, i32 0, i32 0
+  store i8 %t806, i8* %t808
+  %t809 = getelementptr [2 x i8], [2 x i8]* %t807, i32 0, i32 1
+  store i8 0, i8* %t809
+  %t810 = getelementptr [2 x i8], [2 x i8]* %t807, i32 0, i32 0
+  %t811 = call i1 @is_identifier_start(i8* %t810)
+  %t812 = load %LexerState, %LexerState* %l0
+  %t813 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t814 = load i8, i8* %l2
+  br i1 %t811, label %then80, label %merge81
 then80:
-  %t605 = load %LexerState, %LexerState* %l0
-  %t606 = extractvalue %LexerState %t605, 1
-  store double %t606, double* %l32
-  %t607 = load %LexerState, %LexerState* %l0
-  %t608 = extractvalue %LexerState %t607, 2
-  store double %t608, double* %l33
-  %t609 = load %LexerState, %LexerState* %l0
-  %t610 = extractvalue %LexerState %t609, 3
-  store double %t610, double* %l34
-  %t611 = load %LexerState, %LexerState* %l0
-  %t612 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t613 = load i8, i8* %l2
-  %t614 = load double, double* %l32
-  %t615 = load double, double* %l33
-  %t616 = load double, double* %l34
+  %t815 = load %LexerState, %LexerState* %l0
+  %t816 = extractvalue %LexerState %t815, 1
+  store double %t816, double* %l32
+  %t817 = load %LexerState, %LexerState* %l0
+  %t818 = extractvalue %LexerState %t817, 2
+  store double %t818, double* %l33
+  %t819 = load %LexerState, %LexerState* %l0
+  %t820 = extractvalue %LexerState %t819, 3
+  store double %t820, double* %l34
+  %t821 = load %LexerState, %LexerState* %l0
+  %t822 = extractvalue %LexerState %t821, 1
+  %t823 = sitofp i64 1 to double
+  %t824 = fadd double %t822, %t823
+  %t825 = load %LexerState, %LexerState* %l0
+  %t826 = getelementptr %LexerState, %LexerState %t825, i32 0, i32 1
+  store double %t824, double* %t826
+  %t827 = load %LexerState, %LexerState* %l0
+  %t828 = extractvalue %LexerState %t827, 3
+  %t829 = sitofp i64 1 to double
+  %t830 = fadd double %t828, %t829
+  %t831 = load %LexerState, %LexerState* %l0
+  %t832 = getelementptr %LexerState, %LexerState %t831, i32 0, i32 3
+  store double %t830, double* %t832
+  %t833 = load %LexerState, %LexerState* %l0
+  %t834 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t835 = load i8, i8* %l2
+  %t836 = load double, double* %l32
+  %t837 = load double, double* %l33
+  %t838 = load double, double* %l34
   br label %loop.header82
 loop.header82:
   br label %loop.body83
 loop.body83:
-  %t617 = load %LexerState, %LexerState* %l0
-  %t618 = extractvalue %LexerState %t617, 1
-  %t619 = load %LexerState, %LexerState* %l0
-  %t620 = extractvalue %LexerState %t619, 0
-  %t621 = call i64 @sailfin_runtime_string_length(i8* %t620)
-  %t622 = sitofp i64 %t621 to double
-  %t623 = fcmp oge double %t618, %t622
-  %t624 = load %LexerState, %LexerState* %l0
-  %t625 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t626 = load i8, i8* %l2
-  %t627 = load double, double* %l32
-  %t628 = load double, double* %l33
-  %t629 = load double, double* %l34
-  br i1 %t623, label %then86, label %merge87
+  %t839 = load %LexerState, %LexerState* %l0
+  %t840 = extractvalue %LexerState %t839, 1
+  %t841 = load %LexerState, %LexerState* %l0
+  %t842 = extractvalue %LexerState %t841, 0
+  %t843 = call i64 @sailfin_runtime_string_length(i8* %t842)
+  %t844 = sitofp i64 %t843 to double
+  %t845 = fcmp oge double %t840, %t844
+  %t846 = load %LexerState, %LexerState* %l0
+  %t847 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t848 = load i8, i8* %l2
+  %t849 = load double, double* %l32
+  %t850 = load double, double* %l33
+  %t851 = load double, double* %l34
+  br i1 %t845, label %then86, label %merge87
 then86:
   br label %afterloop85
 merge87:
-  %t630 = load %LexerState, %LexerState* %l0
-  %t631 = extractvalue %LexerState %t630, 0
-  %t632 = load %LexerState, %LexerState* %l0
-  %t633 = extractvalue %LexerState %t632, 1
-  %t634 = fptosi double %t633 to i64
-  %t635 = getelementptr i8, i8* %t631, i64 %t634
-  %t636 = load i8, i8* %t635
-  %t637 = alloca [2 x i8], align 1
-  %t638 = getelementptr [2 x i8], [2 x i8]* %t637, i32 0, i32 0
-  store i8 %t636, i8* %t638
-  %t639 = getelementptr [2 x i8], [2 x i8]* %t637, i32 0, i32 1
-  store i8 0, i8* %t639
-  %t640 = getelementptr [2 x i8], [2 x i8]* %t637, i32 0, i32 0
-  %t641 = call i1 @is_identifier_part(i8* %t640)
-  %t642 = xor i1 %t641, 1
-  %t643 = load %LexerState, %LexerState* %l0
-  %t644 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t645 = load i8, i8* %l2
-  %t646 = load double, double* %l32
-  %t647 = load double, double* %l33
-  %t648 = load double, double* %l34
-  br i1 %t642, label %then88, label %merge89
+  %t852 = load %LexerState, %LexerState* %l0
+  %t853 = extractvalue %LexerState %t852, 0
+  %t854 = load %LexerState, %LexerState* %l0
+  %t855 = extractvalue %LexerState %t854, 1
+  %t856 = fptosi double %t855 to i64
+  %t857 = getelementptr i8, i8* %t853, i64 %t856
+  %t858 = load i8, i8* %t857
+  %t859 = alloca [2 x i8], align 1
+  %t860 = getelementptr [2 x i8], [2 x i8]* %t859, i32 0, i32 0
+  store i8 %t858, i8* %t860
+  %t861 = getelementptr [2 x i8], [2 x i8]* %t859, i32 0, i32 1
+  store i8 0, i8* %t861
+  %t862 = getelementptr [2 x i8], [2 x i8]* %t859, i32 0, i32 0
+  %t863 = call i1 @is_identifier_part(i8* %t862)
+  %t864 = xor i1 %t863, 1
+  %t865 = load %LexerState, %LexerState* %l0
+  %t866 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t867 = load i8, i8* %l2
+  %t868 = load double, double* %l32
+  %t869 = load double, double* %l33
+  %t870 = load double, double* %l34
+  br i1 %t864, label %then88, label %merge89
 then88:
   br label %afterloop85
 merge89:
+  %t871 = load %LexerState, %LexerState* %l0
+  %t872 = extractvalue %LexerState %t871, 1
+  %t873 = sitofp i64 1 to double
+  %t874 = fadd double %t872, %t873
+  %t875 = load %LexerState, %LexerState* %l0
+  %t876 = getelementptr %LexerState, %LexerState %t875, i32 0, i32 1
+  store double %t874, double* %t876
+  %t877 = load %LexerState, %LexerState* %l0
+  %t878 = extractvalue %LexerState %t877, 3
+  %t879 = sitofp i64 1 to double
+  %t880 = fadd double %t878, %t879
+  %t881 = load %LexerState, %LexerState* %l0
+  %t882 = getelementptr %LexerState, %LexerState %t881, i32 0, i32 3
+  store double %t880, double* %t882
   br label %loop.latch84
 loop.latch84:
   br label %loop.header82
 afterloop85:
-  %t649 = load %LexerState, %LexerState* %l0
-  %t650 = extractvalue %LexerState %t649, 0
-  %t651 = load double, double* %l32
-  %t652 = load %LexerState, %LexerState* %l0
-  %t653 = extractvalue %LexerState %t652, 1
-  %t654 = call i8* @slice(i8* %t650, double %t651, double %t653)
-  store i8* %t654, i8** %l35
-  %t656 = load i8*, i8** %l35
-  %s657 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.657, i32 0, i32 0
-  %t658 = icmp eq i8* %t656, %s657
-  br label %logical_or_entry_655
+  %t883 = load %LexerState, %LexerState* %l0
+  %t884 = extractvalue %LexerState %t883, 0
+  %t885 = load double, double* %l32
+  %t886 = load %LexerState, %LexerState* %l0
+  %t887 = extractvalue %LexerState %t886, 1
+  %t888 = call i8* @slice(i8* %t884, double %t885, double %t887)
+  store i8* %t888, i8** %l35
+  %t890 = load i8*, i8** %l35
+  %s891 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.891, i32 0, i32 0
+  %t892 = icmp eq i8* %t890, %s891
+  br label %logical_or_entry_889
 
-logical_or_entry_655:
-  br i1 %t658, label %logical_or_merge_655, label %logical_or_right_655
+logical_or_entry_889:
+  br i1 %t892, label %logical_or_merge_889, label %logical_or_right_889
 
-logical_or_right_655:
-  %t659 = load i8*, i8** %l35
-  %s660 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.660, i32 0, i32 0
-  %t661 = icmp eq i8* %t659, %s660
-  br label %logical_or_right_end_655
+logical_or_right_889:
+  %t893 = load i8*, i8** %l35
+  %s894 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.894, i32 0, i32 0
+  %t895 = icmp eq i8* %t893, %s894
+  br label %logical_or_right_end_889
 
-logical_or_right_end_655:
-  br label %logical_or_merge_655
+logical_or_right_end_889:
+  br label %logical_or_merge_889
 
-logical_or_merge_655:
-  %t662 = phi i1 [ true, %logical_or_entry_655 ], [ %t661, %logical_or_right_end_655 ]
-  %t663 = load %LexerState, %LexerState* %l0
-  %t664 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t665 = load i8, i8* %l2
-  %t666 = load double, double* %l32
-  %t667 = load double, double* %l33
-  %t668 = load double, double* %l34
-  %t669 = load i8*, i8** %l35
-  br i1 %t662, label %then90, label %else91
+logical_or_merge_889:
+  %t896 = phi i1 [ true, %logical_or_entry_889 ], [ %t895, %logical_or_right_end_889 ]
+  %t897 = load %LexerState, %LexerState* %l0
+  %t898 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t899 = load i8, i8* %l2
+  %t900 = load double, double* %l32
+  %t901 = load double, double* %l33
+  %t902 = load double, double* %l34
+  %t903 = load i8*, i8** %l35
+  br i1 %t896, label %then90, label %else91
 then90:
-  %t670 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t671 = alloca %TokenKind
-  %t672 = getelementptr inbounds %TokenKind, %TokenKind* %t671, i32 0, i32 0
-  store i32 3, i32* %t672
-  %t673 = load i8*, i8** %l35
-  %t674 = getelementptr inbounds %TokenKind, %TokenKind* %t671, i32 0, i32 1
-  %t675 = bitcast [8 x i8]* %t674 to i8*
-  %t676 = bitcast i8* %t675 to i8**
-  store i8* %t673, i8** %t676
-  %t677 = load %TokenKind, %TokenKind* %t671
-  %t678 = insertvalue %Token undef, %TokenKind %t677, 0
-  %t679 = load i8*, i8** %l35
-  %t680 = insertvalue %Token %t678, i8* %t679, 1
-  %t681 = load double, double* %l33
-  %t682 = insertvalue %Token %t680, double %t681, 2
-  %t683 = load double, double* %l34
-  %t684 = insertvalue %Token %t682, double %t683, 3
-  %t685 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t670, %Token %t684)
-  store { %Token*, i64 }* %t685, { %Token*, i64 }** %l1
+  %t904 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t905 = alloca %TokenKind
+  %t906 = getelementptr inbounds %TokenKind, %TokenKind* %t905, i32 0, i32 0
+  store i32 3, i32* %t906
+  %t907 = load i8*, i8** %l35
+  %t908 = getelementptr inbounds %TokenKind, %TokenKind* %t905, i32 0, i32 1
+  %t909 = bitcast [8 x i8]* %t908 to i8*
+  %t910 = bitcast i8* %t909 to i8**
+  store i8* %t907, i8** %t910
+  %t911 = load %TokenKind, %TokenKind* %t905
+  %t912 = insertvalue %Token undef, %TokenKind %t911, 0
+  %t913 = load i8*, i8** %l35
+  %t914 = insertvalue %Token %t912, i8* %t913, 1
+  %t915 = load double, double* %l33
+  %t916 = insertvalue %Token %t914, double %t915, 2
+  %t917 = load double, double* %l34
+  %t918 = insertvalue %Token %t916, double %t917, 3
+  %t919 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t904, %Token %t918)
+  store { %Token*, i64 }* %t919, { %Token*, i64 }** %l1
   br label %merge92
 else91:
-  %t686 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t687 = alloca %TokenKind
-  %t688 = getelementptr inbounds %TokenKind, %TokenKind* %t687, i32 0, i32 0
-  store i32 0, i32* %t688
-  %t689 = load i8*, i8** %l35
-  %t690 = getelementptr inbounds %TokenKind, %TokenKind* %t687, i32 0, i32 1
-  %t691 = bitcast [8 x i8]* %t690 to i8*
-  %t692 = bitcast i8* %t691 to i8**
-  store i8* %t689, i8** %t692
-  %t693 = load %TokenKind, %TokenKind* %t687
-  %t694 = insertvalue %Token undef, %TokenKind %t693, 0
-  %t695 = load i8*, i8** %l35
-  %t696 = insertvalue %Token %t694, i8* %t695, 1
-  %t697 = load double, double* %l33
-  %t698 = insertvalue %Token %t696, double %t697, 2
-  %t699 = load double, double* %l34
-  %t700 = insertvalue %Token %t698, double %t699, 3
-  %t701 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t686, %Token %t700)
-  store { %Token*, i64 }* %t701, { %Token*, i64 }** %l1
+  %t920 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t921 = alloca %TokenKind
+  %t922 = getelementptr inbounds %TokenKind, %TokenKind* %t921, i32 0, i32 0
+  store i32 0, i32* %t922
+  %t923 = load i8*, i8** %l35
+  %t924 = getelementptr inbounds %TokenKind, %TokenKind* %t921, i32 0, i32 1
+  %t925 = bitcast [8 x i8]* %t924 to i8*
+  %t926 = bitcast i8* %t925 to i8**
+  store i8* %t923, i8** %t926
+  %t927 = load %TokenKind, %TokenKind* %t921
+  %t928 = insertvalue %Token undef, %TokenKind %t927, 0
+  %t929 = load i8*, i8** %l35
+  %t930 = insertvalue %Token %t928, i8* %t929, 1
+  %t931 = load double, double* %l33
+  %t932 = insertvalue %Token %t930, double %t931, 2
+  %t933 = load double, double* %l34
+  %t934 = insertvalue %Token %t932, double %t933, 3
+  %t935 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t920, %Token %t934)
+  store { %Token*, i64 }* %t935, { %Token*, i64 }** %l1
   br label %merge92
 merge92:
-  %t702 = phi { %Token*, i64 }* [ %t685, %then90 ], [ %t701, %else91 ]
-  store { %Token*, i64 }* %t702, { %Token*, i64 }** %l1
+  %t936 = phi { %Token*, i64 }* [ %t919, %then90 ], [ %t935, %else91 ]
+  store { %Token*, i64 }* %t936, { %Token*, i64 }** %l1
   br label %loop.latch2
 merge81:
-  %t703 = load %LexerState, %LexerState* %l0
-  %t704 = extractvalue %LexerState %t703, 2
-  store double %t704, double* %l36
-  %t705 = load %LexerState, %LexerState* %l0
-  %t706 = extractvalue %LexerState %t705, 3
-  store double %t706, double* %l37
-  %t707 = load i8, i8* %l2
-  store i8 %t707, i8* %l38
-  %t708 = load %LexerState, %LexerState* %l0
-  %t709 = call i8* @peek_next_char(%LexerState %t708)
-  store i8* %t709, i8** %l39
-  %t710 = load i8*, i8** %l39
-  %s711 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.711, i32 0, i32 0
-  %t712 = icmp ne i8* %t710, %s711
-  %t713 = load %LexerState, %LexerState* %l0
-  %t714 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t715 = load i8, i8* %l2
-  %t716 = load double, double* %l36
-  %t717 = load double, double* %l37
-  %t718 = load i8, i8* %l38
-  %t719 = load i8*, i8** %l39
-  br i1 %t712, label %then93, label %merge94
+  %t937 = load %LexerState, %LexerState* %l0
+  %t938 = extractvalue %LexerState %t937, 2
+  store double %t938, double* %l36
+  %t939 = load %LexerState, %LexerState* %l0
+  %t940 = extractvalue %LexerState %t939, 3
+  store double %t940, double* %l37
+  %t941 = load i8, i8* %l2
+  store i8 %t941, i8* %l38
+  %t942 = load %LexerState, %LexerState* %l0
+  %t943 = call i8* @peek_next_char(%LexerState %t942)
+  store i8* %t943, i8** %l39
+  %t944 = load i8*, i8** %l39
+  %s945 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.945, i32 0, i32 0
+  %t946 = icmp ne i8* %t944, %s945
+  %t947 = load %LexerState, %LexerState* %l0
+  %t948 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t949 = load i8, i8* %l2
+  %t950 = load double, double* %l36
+  %t951 = load double, double* %l37
+  %t952 = load i8, i8* %l38
+  %t953 = load i8*, i8** %l39
+  br i1 %t946, label %then93, label %merge94
 then93:
-  %t720 = load i8, i8* %l2
-  %t721 = load i8*, i8** %l39
-  %t722 = load i8, i8* %t721
-  %t723 = add i8 %t720, %t722
-  store i8 %t723, i8* %l40
-  %t724 = load i8, i8* %l40
-  %t725 = alloca [2 x i8], align 1
-  %t726 = getelementptr [2 x i8], [2 x i8]* %t725, i32 0, i32 0
-  store i8 %t724, i8* %t726
-  %t727 = getelementptr [2 x i8], [2 x i8]* %t725, i32 0, i32 1
-  store i8 0, i8* %t727
-  %t728 = getelementptr [2 x i8], [2 x i8]* %t725, i32 0, i32 0
-  %t729 = call i1 @is_two_char_symbol(i8* %t728)
-  %t730 = load %LexerState, %LexerState* %l0
-  %t731 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t732 = load i8, i8* %l2
-  %t733 = load double, double* %l36
-  %t734 = load double, double* %l37
-  %t735 = load i8, i8* %l38
-  %t736 = load i8*, i8** %l39
-  %t737 = load i8, i8* %l40
-  br i1 %t729, label %then95, label %merge96
+  %t954 = load i8, i8* %l2
+  %t955 = load i8*, i8** %l39
+  %t956 = load i8, i8* %t955
+  %t957 = add i8 %t954, %t956
+  store i8 %t957, i8* %l40
+  %t958 = load i8, i8* %l40
+  %t959 = alloca [2 x i8], align 1
+  %t960 = getelementptr [2 x i8], [2 x i8]* %t959, i32 0, i32 0
+  store i8 %t958, i8* %t960
+  %t961 = getelementptr [2 x i8], [2 x i8]* %t959, i32 0, i32 1
+  store i8 0, i8* %t961
+  %t962 = getelementptr [2 x i8], [2 x i8]* %t959, i32 0, i32 0
+  %t963 = call i1 @is_two_char_symbol(i8* %t962)
+  %t964 = load %LexerState, %LexerState* %l0
+  %t965 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t966 = load i8, i8* %l2
+  %t967 = load double, double* %l36
+  %t968 = load double, double* %l37
+  %t969 = load i8, i8* %l38
+  %t970 = load i8*, i8** %l39
+  %t971 = load i8, i8* %l40
+  br i1 %t963, label %then95, label %merge96
 then95:
-  %t738 = load i8, i8* %l40
-  store i8 %t738, i8* %l38
-  %t739 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t740 = alloca %TokenKind
-  %t741 = getelementptr inbounds %TokenKind, %TokenKind* %t740, i32 0, i32 0
-  store i32 4, i32* %t741
-  %t742 = load i8, i8* %l38
-  %t743 = call noalias i8* @malloc(i64 1)
-  %t744 = bitcast i8* %t743 to i8*
-  store i8 %t742, i8* %t744
-  %t745 = getelementptr inbounds %TokenKind, %TokenKind* %t740, i32 0, i32 1
-  %t746 = bitcast [8 x i8]* %t745 to i8*
-  %t747 = bitcast i8* %t746 to i8**
-  store i8* %t743, i8** %t747
-  %t748 = load %TokenKind, %TokenKind* %t740
-  %t749 = insertvalue %Token undef, %TokenKind %t748, 0
-  %t750 = load i8, i8* %l38
-  %t751 = alloca [2 x i8], align 1
-  %t752 = getelementptr [2 x i8], [2 x i8]* %t751, i32 0, i32 0
-  store i8 %t750, i8* %t752
-  %t753 = getelementptr [2 x i8], [2 x i8]* %t751, i32 0, i32 1
-  store i8 0, i8* %t753
-  %t754 = getelementptr [2 x i8], [2 x i8]* %t751, i32 0, i32 0
-  %t755 = insertvalue %Token %t749, i8* %t754, 1
-  %t756 = load double, double* %l36
-  %t757 = insertvalue %Token %t755, double %t756, 2
-  %t758 = load double, double* %l37
-  %t759 = insertvalue %Token %t757, double %t758, 3
-  %t760 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t739, %Token %t759)
-  store { %Token*, i64 }* %t760, { %Token*, i64 }** %l1
+  %t972 = load i8, i8* %l40
+  store i8 %t972, i8* %l38
+  %t973 = load %LexerState, %LexerState* %l0
+  %t974 = extractvalue %LexerState %t973, 1
+  %t975 = sitofp i64 2 to double
+  %t976 = fadd double %t974, %t975
+  %t977 = load %LexerState, %LexerState* %l0
+  %t978 = getelementptr %LexerState, %LexerState %t977, i32 0, i32 1
+  store double %t976, double* %t978
+  %t979 = load %LexerState, %LexerState* %l0
+  %t980 = extractvalue %LexerState %t979, 3
+  %t981 = sitofp i64 2 to double
+  %t982 = fadd double %t980, %t981
+  %t983 = load %LexerState, %LexerState* %l0
+  %t984 = getelementptr %LexerState, %LexerState %t983, i32 0, i32 3
+  store double %t982, double* %t984
+  %t985 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t986 = alloca %TokenKind
+  %t987 = getelementptr inbounds %TokenKind, %TokenKind* %t986, i32 0, i32 0
+  store i32 4, i32* %t987
+  %t988 = load i8, i8* %l38
+  %t989 = call noalias i8* @malloc(i64 1)
+  %t990 = bitcast i8* %t989 to i8*
+  store i8 %t988, i8* %t990
+  %t991 = getelementptr inbounds %TokenKind, %TokenKind* %t986, i32 0, i32 1
+  %t992 = bitcast [8 x i8]* %t991 to i8*
+  %t993 = bitcast i8* %t992 to i8**
+  store i8* %t989, i8** %t993
+  %t994 = load %TokenKind, %TokenKind* %t986
+  %t995 = insertvalue %Token undef, %TokenKind %t994, 0
+  %t996 = load i8, i8* %l38
+  %t997 = alloca [2 x i8], align 1
+  %t998 = getelementptr [2 x i8], [2 x i8]* %t997, i32 0, i32 0
+  store i8 %t996, i8* %t998
+  %t999 = getelementptr [2 x i8], [2 x i8]* %t997, i32 0, i32 1
+  store i8 0, i8* %t999
+  %t1000 = getelementptr [2 x i8], [2 x i8]* %t997, i32 0, i32 0
+  %t1001 = insertvalue %Token %t995, i8* %t1000, 1
+  %t1002 = load double, double* %l36
+  %t1003 = insertvalue %Token %t1001, double %t1002, 2
+  %t1004 = load double, double* %l37
+  %t1005 = insertvalue %Token %t1003, double %t1004, 3
+  %t1006 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t985, %Token %t1005)
+  store { %Token*, i64 }* %t1006, { %Token*, i64 }** %l1
   br label %loop.latch2
 merge96:
   br label %merge94
 merge94:
-  %t761 = phi i8 [ %t738, %then93 ], [ %t718, %loop.body1 ]
-  %t762 = phi { %Token*, i64 }* [ %t760, %then93 ], [ %t714, %loop.body1 ]
-  store i8 %t761, i8* %l38
-  store { %Token*, i64 }* %t762, { %Token*, i64 }** %l1
-  %t763 = load i8, i8* %l2
-  %t764 = icmp eq i8 %t763, 10
-  %t765 = load %LexerState, %LexerState* %l0
-  %t766 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t767 = load i8, i8* %l2
-  %t768 = load double, double* %l36
-  %t769 = load double, double* %l37
-  %t770 = load i8, i8* %l38
-  %t771 = load i8*, i8** %l39
-  br i1 %t764, label %then97, label %else98
+  %t1007 = phi i8 [ %t972, %then93 ], [ %t952, %loop.body1 ]
+  %t1008 = phi { %Token*, i64 }* [ %t1006, %then93 ], [ %t948, %loop.body1 ]
+  store i8 %t1007, i8* %l38
+  store { %Token*, i64 }* %t1008, { %Token*, i64 }** %l1
+  %t1009 = load %LexerState, %LexerState* %l0
+  %t1010 = extractvalue %LexerState %t1009, 1
+  %t1011 = sitofp i64 1 to double
+  %t1012 = fadd double %t1010, %t1011
+  %t1013 = load %LexerState, %LexerState* %l0
+  %t1014 = getelementptr %LexerState, %LexerState %t1013, i32 0, i32 1
+  store double %t1012, double* %t1014
+  %t1015 = load i8, i8* %l2
+  %t1016 = icmp eq i8 %t1015, 10
+  %t1017 = load %LexerState, %LexerState* %l0
+  %t1018 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t1019 = load i8, i8* %l2
+  %t1020 = load double, double* %l36
+  %t1021 = load double, double* %l37
+  %t1022 = load i8, i8* %l38
+  %t1023 = load i8*, i8** %l39
+  br i1 %t1016, label %then97, label %else98
 then97:
+  %t1024 = load %LexerState, %LexerState* %l0
+  %t1025 = extractvalue %LexerState %t1024, 2
+  %t1026 = sitofp i64 1 to double
+  %t1027 = fadd double %t1025, %t1026
+  %t1028 = load %LexerState, %LexerState* %l0
+  %t1029 = getelementptr %LexerState, %LexerState %t1028, i32 0, i32 2
+  store double %t1027, double* %t1029
+  %t1030 = load %LexerState, %LexerState* %l0
+  %t1031 = sitofp i64 1 to double
+  %t1032 = getelementptr %LexerState, %LexerState %t1030, i32 0, i32 3
+  store double %t1031, double* %t1032
   br label %merge99
 else98:
+  %t1033 = load %LexerState, %LexerState* %l0
+  %t1034 = extractvalue %LexerState %t1033, 3
+  %t1035 = sitofp i64 1 to double
+  %t1036 = fadd double %t1034, %t1035
+  %t1037 = load %LexerState, %LexerState* %l0
+  %t1038 = getelementptr %LexerState, %LexerState %t1037, i32 0, i32 3
+  store double %t1036, double* %t1038
   br label %merge99
 merge99:
-  %t772 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t773 = alloca %TokenKind
-  %t774 = getelementptr inbounds %TokenKind, %TokenKind* %t773, i32 0, i32 0
-  store i32 4, i32* %t774
-  %t775 = load i8, i8* %l38
-  %t776 = call noalias i8* @malloc(i64 1)
-  %t777 = bitcast i8* %t776 to i8*
-  store i8 %t775, i8* %t777
-  %t778 = getelementptr inbounds %TokenKind, %TokenKind* %t773, i32 0, i32 1
-  %t779 = bitcast [8 x i8]* %t778 to i8*
-  %t780 = bitcast i8* %t779 to i8**
-  store i8* %t776, i8** %t780
-  %t781 = load %TokenKind, %TokenKind* %t773
-  %t782 = insertvalue %Token undef, %TokenKind %t781, 0
-  %t783 = load i8, i8* %l38
-  %t784 = alloca [2 x i8], align 1
-  %t785 = getelementptr [2 x i8], [2 x i8]* %t784, i32 0, i32 0
-  store i8 %t783, i8* %t785
-  %t786 = getelementptr [2 x i8], [2 x i8]* %t784, i32 0, i32 1
-  store i8 0, i8* %t786
-  %t787 = getelementptr [2 x i8], [2 x i8]* %t784, i32 0, i32 0
-  %t788 = insertvalue %Token %t782, i8* %t787, 1
-  %t789 = load double, double* %l36
-  %t790 = insertvalue %Token %t788, double %t789, 2
-  %t791 = load double, double* %l37
-  %t792 = insertvalue %Token %t790, double %t791, 3
-  %t793 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t772, %Token %t792)
-  store { %Token*, i64 }* %t793, { %Token*, i64 }** %l1
+  %t1039 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t1040 = alloca %TokenKind
+  %t1041 = getelementptr inbounds %TokenKind, %TokenKind* %t1040, i32 0, i32 0
+  store i32 4, i32* %t1041
+  %t1042 = load i8, i8* %l38
+  %t1043 = call noalias i8* @malloc(i64 1)
+  %t1044 = bitcast i8* %t1043 to i8*
+  store i8 %t1042, i8* %t1044
+  %t1045 = getelementptr inbounds %TokenKind, %TokenKind* %t1040, i32 0, i32 1
+  %t1046 = bitcast [8 x i8]* %t1045 to i8*
+  %t1047 = bitcast i8* %t1046 to i8**
+  store i8* %t1043, i8** %t1047
+  %t1048 = load %TokenKind, %TokenKind* %t1040
+  %t1049 = insertvalue %Token undef, %TokenKind %t1048, 0
+  %t1050 = load i8, i8* %l38
+  %t1051 = alloca [2 x i8], align 1
+  %t1052 = getelementptr [2 x i8], [2 x i8]* %t1051, i32 0, i32 0
+  store i8 %t1050, i8* %t1052
+  %t1053 = getelementptr [2 x i8], [2 x i8]* %t1051, i32 0, i32 1
+  store i8 0, i8* %t1053
+  %t1054 = getelementptr [2 x i8], [2 x i8]* %t1051, i32 0, i32 0
+  %t1055 = insertvalue %Token %t1049, i8* %t1054, 1
+  %t1056 = load double, double* %l36
+  %t1057 = insertvalue %Token %t1055, double %t1056, 2
+  %t1058 = load double, double* %l37
+  %t1059 = insertvalue %Token %t1057, double %t1058, 3
+  %t1060 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t1039, %Token %t1059)
+  store { %Token*, i64 }* %t1060, { %Token*, i64 }** %l1
   br label %loop.latch2
 loop.latch2:
-  %t794 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t1061 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   br label %loop.header0
 afterloop3:
-  %t796 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  %t797 = load %LexerState, %LexerState* %l0
-  %t798 = extractvalue %LexerState %t797, 2
-  %t799 = load %LexerState, %LexerState* %l0
-  %t800 = extractvalue %LexerState %t799, 3
-  %t801 = call double @eof_token(double %t798, double %t800)
-  %t802 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t796, i8* null)
-  store { %Token*, i64 }* %t802, { %Token*, i64 }** %l1
-  %t803 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
-  ret { %Token*, i64 }* %t803
+  %t1063 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  %t1064 = load %LexerState, %LexerState* %l0
+  %t1065 = extractvalue %LexerState %t1064, 2
+  %t1066 = load %LexerState, %LexerState* %l0
+  %t1067 = extractvalue %LexerState %t1066, 3
+  %t1068 = call double @eof_token(double %t1065, double %t1067)
+  %t1069 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t1063, i8* null)
+  store { %Token*, i64 }* %t1069, { %Token*, i64 }** %l1
+  %t1070 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
+  ret { %Token*, i64 }* %t1070
 }
 
 define i1 @is_whitespace(i8* %ch) {
