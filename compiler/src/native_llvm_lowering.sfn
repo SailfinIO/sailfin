@@ -2405,6 +2405,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "char_code",
+        symbol: "char_code",
+        return_type: "double",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "is_whitespace_char",
         symbol: "sailfin_runtime_is_whitespace_char",
         return_type: "i1",
@@ -9634,6 +9641,16 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     }
     if operand.llvm_type == target_type {
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+    // Allow implicit loads when a pointer-to-T is passed where T is expected.
+    if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type) {
+        let source_base = strip_pointer_suffix(operand.llvm_type);
+        if source_base == target_type {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = load " + target_type + ", " + operand.llvm_type + " " + operand.value);
+            let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
     if target_type == "double" {
         if operand.llvm_type == "i64" {
