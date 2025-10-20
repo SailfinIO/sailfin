@@ -17,7 +17,8 @@ def test_string_utils_helpers() -> None:
     source_path = REPO_ROOT / "compiler" / "src" / "string_utils.sfn"
     runtime_prelude = REPO_ROOT / "runtime" / "prelude.sfn"
 
-    result = stage1_main.compile_project([str(source_path), str(runtime_prelude)])
+    result = stage1_main.compile_project(
+        [str(source_path), str(runtime_prelude)])
     diagnostics = getattr(result, "diagnostics", [])
     unexpected: list[str] = []
     for entry in diagnostics:
@@ -34,7 +35,8 @@ def test_string_utils_helpers() -> None:
     assert modules, "Stage1 returned no modules for string utils"
 
     module = next(
-        (entry for entry in modules if pathlib.Path(getattr(entry, "source_path")).resolve() == source_path.resolve()),
+        (entry for entry in modules if pathlib.Path(
+            getattr(entry, "source_path")).resolve() == source_path.resolve()),
         None,
     )
     assert module is not None, "String utils module missing from stage1 output"
@@ -48,6 +50,7 @@ def test_string_utils_helpers() -> None:
     grapheme_count = namespace["grapheme_count"]
     grapheme_at = namespace["grapheme_at"]
     char_code = namespace["char_code"]
+    char_at = namespace["char_at"]
 
     assert substring("sailfin", 0, 4) == "sail"
     assert substring("sailfin", 2, 2) == ""
@@ -68,6 +71,13 @@ def test_string_utils_helpers() -> None:
     assert find_char("line1\nline2", "\\n", -8) == 5
     assert find_char("emoji🙂", "🙂", 0) == 5
     assert find_char("emoji🙂", "🙂", 6) == -1
+
+    assert char_at("stage", 0) == "s"
+    assert char_at("stage", 4) == "e"
+    assert char_at("", 0) == ""
+    assert char_at("stage", -1) == ""
+    assert char_at("stage", 99) == ""
+    assert char_at("emoji🙂", 5) == "🙂"
 
     assert grapheme_count("stage") == 5
     assert grapheme_count("naïve") == 5

@@ -3,6 +3,19 @@
 // Shared string helpers surfaced via the runtime prelude. The compiler and
 // downstream projects import from here to keep a single implementation.
 
-import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at } from "runtime/prelude";
+import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code } from "runtime/prelude";
+
+fn char_at(value -> string, index -> number) -> string {
+	if value.length == 0 {
+		return "";
+	}
+	if index < 0 {
+		return "";
+	}
+	if index >= value.length {
+		return "";
+	}
+	return substring(value, index, index + 1);
+}
 
 export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at };

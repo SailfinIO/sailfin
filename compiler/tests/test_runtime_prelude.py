@@ -64,6 +64,7 @@ def test_runtime_prelude_collection_helpers() -> None:
     grapheme_count = namespace["grapheme_count"]
     grapheme_at = namespace["grapheme_at"]
     char_code = namespace["char_code"]
+    char_at = namespace["char_at"]
     match_exhaustive_failed = namespace["match_exhaustive_failed"]
     enum_type = namespace["enum_type"]
     enum_define_variant = namespace["enum_define_variant"]
@@ -107,6 +108,13 @@ def test_runtime_prelude_collection_helpers() -> None:
     assert find_char("line1\nline2", "\\n", -8) == 5
     assert find_char("emoji🙂", "🙂", 0) == 5
     assert find_char("emoji🙂", "🙂", 6) == -1
+
+    assert char_at("stage", 0) == "s"
+    assert char_at("stage", 4) == "e"
+    assert char_at("", 0) == ""
+    assert char_at("stage", -1) == ""
+    assert char_at("stage", 99) == ""
+    assert char_at("emoji🙂", 5) == "🙂"
 
     assert grapheme_count("sailfin") == 7
     assert grapheme_count("e\u0301") == 1
@@ -245,7 +253,8 @@ def test_runtime_capability_bridges(tmp_path: pathlib.Path) -> None:
 
     model.register_stub(
         "custom",
-        lambda prompt, options: {"model": "custom", "prompt": prompt, "output": "stub"},
+        lambda prompt, options: {"model": "custom",
+                                 "prompt": prompt, "output": "stub"},
     )
 
     async def _invoke_stub() -> Any:
