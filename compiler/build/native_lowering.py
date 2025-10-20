@@ -672,7 +672,7 @@ def lower_struct_literal_expression(expression, depth):
     while True:
         if index >= len(sanitized_type):
             break
-        if sanitized_type[index] == ".":
+        if char_at(sanitized_type, index) == ".":
             last_dot = index
         index += 1
     if last_dot >= 0:
@@ -1170,7 +1170,7 @@ def segment_signals_expression_continuation(segment):
         return True
     if starts_with(segment, "||"):
         return True
-    first = segment[0]
+    first = char_at(segment, 0)
     if first == "."  or  first == ")"  or  first == "]"  or  first == "}":
         return True
     return False
@@ -1183,7 +1183,7 @@ def compute_brace_balance(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if ch == "{":
             balance += 1
         else:
@@ -1206,7 +1206,7 @@ def compute_symbol_balance(text, open, close):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if ch == open:
             balance += 1
         else:
@@ -1225,13 +1225,13 @@ def split_struct_field_entries(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if in_string:
             current = current + ch
             if ch == "\\":
                 index += 1
                 if index < len(text):
-                    current = current + text[index]
+                    current = current + char_at(text, index)
             else:
                 if ch == string_quote:
                     in_string = False
@@ -1269,13 +1269,13 @@ def split_array_entries(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if in_string:
             current = current + ch
             if ch == "\\":
                 index += 1
                 if index < len(text):
-                    current = current + text[index]
+                    current = current + char_at(text, index)
             else:
                 if ch == string_quote:
                     in_string = False
@@ -1308,7 +1308,7 @@ def trim_trailing_delimiters(text):
     while True:
         if end <= 0:
             break
-        ch = text[end - 1]
+        ch = char_at(text, end - 1)
         if ch == ","  or  ch == ";":
             end -= 1
             continue
@@ -1329,7 +1329,9 @@ def index_of(value, target):
         while True:
             if match_index >= len(target):
                 break
-            if value[index + match_index] != target[match_index]:
+            value_ch = char_at(value, index + match_index)
+            target_ch = char_at(target, match_index)
+            if value_ch != target_ch:
                 matches = False
                 break
             match_index += 1
@@ -1344,7 +1346,7 @@ def find_matching_brace(text, open_index):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if ch == "{":
             depth += 1
         else:
@@ -1365,7 +1367,7 @@ def is_escaped_quote(text, position):
     while True:
         if index < 0:
             break
-        if text[index] != "\\":
+        if char_at(text, index) != "\\":
             break
         escapes += 1
         index -= 1
@@ -1380,7 +1382,7 @@ def find_next_square_open(text, start):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if ch == "'":
             if not in_double  and  not is_escaped_quote(text, index):
                 in_single = not in_single
@@ -1921,7 +1923,7 @@ def replace_all(value, target, replacement):
                 result = result + replacement
                 index += len(target)
                 continue
-        result = result + value[index]
+        result = result + char_at(value, index)
         index += 1
     return result
 
@@ -1948,3 +1950,6 @@ def append_lowering_diagnostic(diagnostics, function_name, detail):
 
 def append_string(values, value):
     return (values) + ([value])
+
+def char_at(value, index):
+    return substring(value, index, index + 1)

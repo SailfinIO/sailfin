@@ -144,6 +144,15 @@ def array_reduce(items, initial, reducer):
         accumulator = reducer(accumulator, item)
     return accumulator
 
+def char_at(value, index):
+    if len(value) == 0:
+        return ""
+    if index < 0:
+        return ""
+    if index >= len(value):
+        return ""
+    return runtime.substring(value, index, index + 1)
+
 def enum_type(name):
     return EnumType(name=name, variants=[])
 
@@ -276,7 +285,7 @@ def descriptor_trim(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
+        ch = char_at(value, start)
         if ch == " "  or  ch == "\n"  or  ch == "\t"  or  ch == "\r":
             start = start + 1
             continue
@@ -284,7 +293,7 @@ def descriptor_trim(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        ch = char_at(value, end - 1)
         if ch == " "  or  ch == "\n"  or  ch == "\t"  or  ch == "\r":
             end = end - 1
             continue
@@ -298,7 +307,9 @@ def string_starts_with(value, prefix):
     while True:
         if index >= len(prefix):
             break
-        if value[index] != prefix[index]:
+        value_ch = char_at(value, index)
+        prefix_ch = char_at(prefix, index)
+        if value_ch != prefix_ch:
             return False
         index = index + 1
     return True
@@ -311,7 +322,9 @@ def string_ends_with(value, suffix):
     while True:
         if index >= len(suffix):
             break
-        if value[offset + index] != suffix[index]:
+        value_ch = char_at(value, offset + index)
+        suffix_ch = char_at(suffix, index)
+        if value_ch != suffix_ch:
             return False
         index = index + 1
     return True
@@ -320,7 +333,7 @@ def descriptor_find_top_level(value, needle):
     trimmed = descriptor_trim(value)
     if len(needle) != 1:
         return -1
-    target = needle[0]
+    target = char_at(needle, 0)
     index = 0
     paren_depth = 0
     angle_depth = 0
@@ -328,7 +341,7 @@ def descriptor_find_top_level(value, needle):
     while True:
         if index >= len(trimmed):
             break
-        ch = trimmed[index]
+        ch = char_at(trimmed, index)
         if ch == "(":
             paren_depth = paren_depth + 1
         else:
@@ -359,9 +372,9 @@ def descriptor_strip_outer_parens(value):
     while True:
         if len(current) < 2:
             return current
-        if current[0] != "(":
+        if char_at(current, 0) != "(":
             return current
-        if current[len(current) - 1] != ")":
+        if char_at(current, len(current) - 1) != ")":
             return current
         depth = 0
         index = 0
@@ -369,7 +382,7 @@ def descriptor_strip_outer_parens(value):
         while True:
             if index >= len(current):
                 break
-            ch = current[index]
+            ch = char_at(current, index)
             if ch == "(":
                 depth = depth + 1
             else:
@@ -396,11 +409,11 @@ def split_descriptor(value, separator):
     paren_depth = 0
     angle_depth = 0
     bracket_depth = 0
-    target = separator[0]
+    target = char_at(separator, 0)
     while True:
         if index >= len(trimmed):
             break
-        ch = trimmed[index]
+        ch = char_at(trimmed, index)
         if ch == "(":
             paren_depth = paren_depth + 1
         else:
@@ -459,7 +472,7 @@ def parse_type_descriptor(text):
         return type_descriptor_array(parse_type_descriptor(inner_text))
     if string_starts_with(trimmed, "fn("):
         return type_descriptor_function()
-    if trimmed[len(trimmed) - 1] == "?":
+    if char_at(trimmed, len(trimmed) - 1) == "?":
         base_text = substring(trimmed, 0, len(trimmed) - 1)
         base_descriptor = parse_type_descriptor(base_text)
         void_descriptor = type_descriptor_primitive("void")
@@ -556,14 +569,7 @@ def substring(text, start, end):
     normalized_end = clamp(end, 0, length)
     if normalized_start >= normalized_end:
         return ""
-    index = normalized_start
-    result = ""
-    while True:
-        if index >= normalized_end:
-            break
-        result = result + text[index]
-        index = index + 1
-    return result
+    return runtime.substring(text, normalized_start, normalized_end)
 
 def find_char(text, character, start = 0):
     length = len(text)
@@ -575,8 +581,8 @@ def find_char(text, character, start = 0):
     if normalized_start >= length:
         return -1
     target = character
-    if len(target) == 2  and  target[0] == "\\":
-        escape = target[1]
+    if len(target) == 2  and  char_at(target, 0) == "\\":
+        escape = char_at(target, 1)
         if escape == "n":
             target = "\n"
         else:
@@ -589,7 +595,7 @@ def find_char(text, character, start = 0):
     while True:
         if index >= length:
             break
-        if text[index] == target:
+        if char_at(text, index) == target:
             return index
         index = index + 1
     return -1
@@ -601,7 +607,7 @@ def match_exhaustive_failed(value):
 def char_code(character):
     if len(character) == 0:
         return -1
-    ch = character[0]
+    ch = char_at(character, 0)
     digits = "0123456789"
     digit_index = find_char(digits, ch, 0)
     if digit_index >= 0:
@@ -698,7 +704,7 @@ def iter_grapheme_clusters(text):
     clusters = []
     if len(text) == 0:
         return clusters
-    current = text[0]
+    current = char_at(text, 0)
     prev_code = char_code(current)
     prev_was_joiner = prev_code == ZERO_WIDTH_JOINER
     prev_was_ri = is_regional_indicator(prev_code)
@@ -709,7 +715,7 @@ def iter_grapheme_clusters(text):
     while True:
         if index >= len(text):
             break
-        character = text[index]
+        character = char_at(text, index)
         codepoint = char_code(character)
         is_joiner = codepoint == ZERO_WIDTH_JOINER
         is_extend = is_grapheme_extend(codepoint)

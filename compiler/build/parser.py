@@ -5,7 +5,7 @@ from compiler.build.lexer import lex
 from compiler.build.token import Token, TokenKind
 from compiler.build.ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelDeclaration, ModelProperty, ObjectField, Parameter, PipelineDeclaration, ForClause, Program, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TestDeclaration, TypeAnnotation, ToolDeclaration, MatchCase, ElseBranch, WithClause, SourceSpan
 from compiler.build.decorator_semantics import evaluate_decorators, infer_effects
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
 sleep = runtime.sleep
@@ -821,7 +821,7 @@ def parse_enum_variant_field(parser):
     while True:
         if len(type_text) == 0:
             break
-        last = type_text[len(type_text) - 1]
+        last = char_at(type_text, len(type_text) - 1)
         if last != ";":
             break
         trimmed = substring(type_text, 0, len(type_text) - 1)
@@ -2056,7 +2056,7 @@ def parse_decorator_argument(tokens):
     expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens))
     if expr.variant == "Raw":
         raw_text = trim_text(tokens_to_text(value_tokens))
-        if len(raw_text) >= 2  and  raw_text[0] == "\""  and  raw_text[len(raw_text) - 1] == "\"":
+        if len(raw_text) >= 2  and  char_at(raw_text, 0) == "\""  and  char_at(raw_text, len(raw_text) - 1) == "\"":
             literal = strip_surrounding_quotes(raw_text)
             expr = runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         else:
@@ -2082,7 +2082,7 @@ def normalize_expression(tokens, expr):
             if token.kind.variant == "NumberLiteral":
                 return runtime.enum_instantiate(Expression, 'NumberLiteral', [runtime.enum_field('value', token.kind.value)])
         raw_text = trim_text(expr.text)
-        if len(raw_text) >= 2  and  raw_text[0] == "\""  and  raw_text[len(raw_text) - 1] == "\"":
+        if len(raw_text) >= 2  and  char_at(raw_text, 0) == "\""  and  char_at(raw_text, len(raw_text) - 1) == "\"":
             literal = strip_surrounding_quotes(raw_text)
             return runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', literal)])
         if raw_text == "true":
@@ -2098,14 +2098,14 @@ def looks_like_number(text):
         return False
     has_decimal = False
     index = 0
-    if text[0] == "-":
+    if char_at(text, 0) == "-":
         if len(text) == 1:
             return False
         index = 1
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if ch == ".":
             if has_decimal:
                 return False
@@ -2164,7 +2164,7 @@ def source_span_from_tokens(tokens):
     while True:
         if index >= len(lexeme):
             break
-        ch = lexeme[index]
+        ch = char_at(lexeme, index)
         if ch == "\n":
             end_line += 1
             end_column = 1
@@ -2799,7 +2799,7 @@ def trim_text(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
+        ch = char_at(value, start)
         if is_trim_whitespace(ch):
             start += 1
             continue
@@ -2807,7 +2807,7 @@ def trim_text(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        ch = char_at(value, end - 1)
         if is_trim_whitespace(ch):
             end -= 1
             continue
@@ -2843,7 +2843,7 @@ def is_whitespace_lexeme(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if not is_trim_whitespace(ch):
             return False
         index += 1
@@ -2902,8 +2902,8 @@ def skip_enum_variant_entry(parser):
 def strip_surrounding_quotes(text):
     if len(text) < 2:
         return text
-    first = char_code(text[0])
-    last = char_code(text[len(text) - 1])
+    first = char_code(char_at(text, 0))
+    last = char_code(char_at(text, len(text) - 1))
     if first == 34  and  last == 34:
         return substring(text, 1, len(text) - 1)
     return text
@@ -2911,8 +2911,8 @@ def strip_surrounding_quotes(text):
 def normalize_test_name(text):
     trimmed = trim_text(text)
     if len(trimmed) >= 2:
-        first = char_code(trimmed[0])
-        last = char_code(trimmed[len(trimmed) - 1])
+        first = char_code(char_at(trimmed, 0))
+        last = char_code(char_at(trimmed, len(trimmed) - 1))
         if first == 34  and  last == 34:
             return strip_surrounding_quotes(trimmed)
     return trimmed

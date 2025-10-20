@@ -36,7 +36,7 @@ import {
     SourceSpan,
 } from "./ast";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";
-import { substring, char_code } from "./string_utils";
+import { substring, char_code, char_at } from "./string_utils";
 
 struct Parser {
     tokens -> Token[];
@@ -980,7 +980,7 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
         if type_text.length == 0 {
             break;
         }
-        let last = type_text[type_text.length - 1];
+        let last = char_at(type_text, type_text.length - 1);
         if last != ";" {
             break;
         }
@@ -2861,7 +2861,7 @@ fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
     let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
     if expr.variant == "Raw" {
         let raw_text = trim_text(tokens_to_text(value_tokens));
-        if raw_text.length >= 2 && raw_text[0] == "\"" && raw_text[raw_text.length - 1] == "\"" {
+        if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\"" {
             let literal = strip_surrounding_quotes(raw_text);
             expr = Expression.StringLiteral { value: literal };
         } else if raw_text == "true" {
@@ -2891,7 +2891,7 @@ fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression {
             }
         }
         let raw_text = trim_text(expr.text);
-        if raw_text.length >= 2 && raw_text[0] == "\"" && raw_text[raw_text.length - 1] == "\"" {
+        if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\"" {
             let literal = strip_surrounding_quotes(raw_text);
             return Expression.StringLiteral { value: literal };
         }
@@ -2914,7 +2914,7 @@ fn looks_like_number(text -> string) -> boolean {
     }
     let mut has_decimal -> boolean = false;
     let mut index -> number = 0;
-    if text[0] == "-" {
+    if char_at(text, 0) == "-" {
         if text.length == 1 {
             return false;
         }
@@ -2924,7 +2924,7 @@ fn looks_like_number(text -> string) -> boolean {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = char_at(text, index);
         if ch == "." {
             if has_decimal {
                 return false;
@@ -3015,7 +3015,7 @@ fn source_span_from_tokens(tokens -> Token[]) -> SourceSpan? {
         if index >= lexeme.length {
             break;
         }
-        let ch = lexeme[index];
+        let ch = char_at(lexeme, index);
         if ch == "\n" {
             end_line += 1;
             end_column = 1;
@@ -4008,7 +4008,7 @@ fn trim_text(value -> string) -> string {
         if start >= end {
             break;
         }
-        let ch = value[start];
+        let ch = char_at(value, start);
         if is_trim_whitespace(ch) {
             start += 1;
             continue;
@@ -4020,7 +4020,7 @@ fn trim_text(value -> string) -> string {
         if end <= start {
             break;
         }
-        let ch = value[end - 1];
+        let ch = char_at(value, end - 1);
         if is_trim_whitespace(ch) {
             end -= 1;
             continue;
@@ -4074,7 +4074,7 @@ fn is_whitespace_lexeme(text -> string) -> boolean {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = char_at(text, index);
         if !is_trim_whitespace(ch) {
             return false;
         }
@@ -4156,10 +4156,10 @@ fn strip_surrounding_quotes(text -> string) -> string {
     if text.length < 2 {
         return text;
     }
-    let first = char_code(text[0]);
-    let last = char_code(text[text.length - 1]);
+    let first = char_code(char_at(text, 0));
+    let last = char_code(char_at(text, text.length - 1));
     if first == 34 && last == 34 {
-    return substring(text, 1, text.length - 1);
+        return substring(text, 1, text.length - 1);
     }
     return text;
 }
@@ -4167,8 +4167,8 @@ fn strip_surrounding_quotes(text -> string) -> string {
 fn normalize_test_name(text -> string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length >= 2 {
-    let first = char_code(trimmed[0]);
-    let last = char_code(trimmed[trimmed.length - 1]);
+        let first = char_code(char_at(trimmed, 0));
+        let last = char_code(char_at(trimmed, trimmed.length - 1));
         if first == 34 && last == 34 {
             return strip_surrounding_quotes(trimmed);
         }
