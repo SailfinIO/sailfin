@@ -970,11 +970,13 @@ merge3:
   %t73 = insertvalue %CompiledModule undef, i8* %source_path, 0
   %t74 = load double, double* %l6
   %t75 = insertvalue %CompiledModule %t73, i8* null, 1
-  %t76 = insertvalue %ModuleCompilationResult undef, %CompiledModule* null, 0
-  %t77 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  %t78 = bitcast { %ModuleDiagnostics*, i64 }* %t77 to { %ModuleDiagnostics**, i64 }*
-  %t79 = insertvalue %ModuleCompilationResult %t76, { %ModuleDiagnostics**, i64 }* %t78, 1
-  ret %ModuleCompilationResult %t79
+  %t76 = alloca %CompiledModule
+  store %CompiledModule %t75, %CompiledModule* %t76
+  %t77 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t76, 0
+  %t78 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t79 = bitcast { %ModuleDiagnostics*, i64 }* %t78 to { %ModuleDiagnostics**, i64 }*
+  %t80 = insertvalue %ModuleCompilationResult %t77, { %ModuleDiagnostics**, i64 }* %t79, 1
+  ret %ModuleCompilationResult %t80
 }
 
 define { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %entries, i8* %source) {

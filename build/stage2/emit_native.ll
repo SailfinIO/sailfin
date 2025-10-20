@@ -11314,8 +11314,8 @@ entry:
   %t3 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t32 = phi double [ %t3, %entry ], [ %t31, %loop.latch2 ]
-  store double %t32, double* %l1
+  %t33 = phi double [ %t3, %entry ], [ %t32, %loop.latch2 ]
+  store double %t33, double* %l1
   br label %loop.body1
 loop.body1:
   %t4 = load double, double* %l1
@@ -11350,19 +11350,21 @@ merge5:
   br i1 %t23, label %then6, label %merge7
 then6:
   %t27 = load %CanonicalTypeLayout, %CanonicalTypeLayout* %l2
-  ret %CanonicalTypeLayout* null
+  %t28 = alloca %CanonicalTypeLayout
+  store %CanonicalTypeLayout %t27, %CanonicalTypeLayout* %t28
+  ret %CanonicalTypeLayout* %t28
 merge7:
-  %t28 = load double, double* %l1
-  %t29 = sitofp i64 1 to double
-  %t30 = fadd double %t28, %t29
-  store double %t30, double* %l1
+  %t29 = load double, double* %l1
+  %t30 = sitofp i64 1 to double
+  %t31 = fadd double %t29, %t30
+  store double %t31, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t31 = load double, double* %l1
+  %t32 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t33 = bitcast i8* null to %CanonicalTypeLayout*
-  ret %CanonicalTypeLayout* %t33
+  %t34 = bitcast i8* null to %CanonicalTypeLayout*
+  ret %CanonicalTypeLayout* %t34
 }
 
 define double @align_to(double %value, double %alignment) {

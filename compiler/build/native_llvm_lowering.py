@@ -6926,6 +6926,14 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target_type)
         coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
         return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if not ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
+        expected_value_type = strip_pointer_suffix(target_type)
+        if expected_value_type == operand.llvm_type:
+            alloca_temp = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type)
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp)
+            coerced = LLVMOperand(llvm_type=target_type, value=alloca_temp)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     if ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
         source_element = array_pointer_element_type(operand.llvm_type)
         target_element = array_pointer_element_type(target_type)

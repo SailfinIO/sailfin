@@ -318,8 +318,8 @@ entry:
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t22 = phi i64 [ %t0, %entry ], [ %t21, %loop.latch2 ]
-  store i64 %t22, i64* %l0
+  %t23 = phi i64 [ %t0, %entry ], [ %t22, %loop.latch2 ]
+  store i64 %t23, i64* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load i64, i64* %l0
@@ -348,18 +348,20 @@ merge5:
   br i1 %t15, label %then6, label %merge7
 then6:
   %t18 = load %EnumField, %EnumField* %l1
-  ret %EnumField* null
+  %t19 = alloca %EnumField
+  store %EnumField %t18, %EnumField* %t19
+  ret %EnumField* %t19
 merge7:
-  %t19 = load i64, i64* %l0
-  %t20 = add i64 %t19, 1
-  store i64 %t20, i64* %l0
+  %t20 = load i64, i64* %l0
+  %t21 = add i64 %t20, 1
+  store i64 %t21, i64* %l0
   br label %loop.latch2
 loop.latch2:
-  %t21 = load i64, i64* %l0
+  %t22 = load i64, i64* %l0
   br label %loop.header0
 afterloop3:
-  %t23 = bitcast i8* null to %EnumField*
-  ret %EnumField* %t23
+  %t24 = bitcast i8* null to %EnumField*
+  ret %EnumField* %t24
 }
 
 define %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name) {

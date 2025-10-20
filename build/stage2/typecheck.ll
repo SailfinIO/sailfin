@@ -5667,39 +5667,43 @@ forbody1:
   br i1 %t57, label %then4, label %merge5
 then4:
   %t61 = load %Statement, %Statement* %l2
-  ret %Statement* null
+  %t62 = alloca %Statement
+  store %Statement %t61, %Statement* %t62
+  ret %Statement* %t62
 merge5:
-  %t62 = load i8*, i8** %l3
-  %t63 = load i8, i8* %t62
-  %t64 = add i8 %t63, 60
-  store i8 %t64, i8* %l4
-  %t65 = load i8*, i8** %l0
-  %t66 = load i8, i8* %l4
-  %t67 = alloca [2 x i8], align 1
-  %t68 = getelementptr [2 x i8], [2 x i8]* %t67, i32 0, i32 0
-  store i8 %t66, i8* %t68
-  %t69 = getelementptr [2 x i8], [2 x i8]* %t67, i32 0, i32 1
-  store i8 0, i8* %t69
-  %t70 = getelementptr [2 x i8], [2 x i8]* %t67, i32 0, i32 0
-  %t71 = call i1 @starts_with(i8* %t65, i8* %t70)
-  %t72 = load i8*, i8** %l0
-  %t73 = load %Statement, %Statement* %l2
-  %t74 = load i8*, i8** %l3
-  %t75 = load i8, i8* %l4
-  br i1 %t71, label %then6, label %merge7
+  %t63 = load i8*, i8** %l3
+  %t64 = load i8, i8* %t63
+  %t65 = add i8 %t64, 60
+  store i8 %t65, i8* %l4
+  %t66 = load i8*, i8** %l0
+  %t67 = load i8, i8* %l4
+  %t68 = alloca [2 x i8], align 1
+  %t69 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 0
+  store i8 %t67, i8* %t69
+  %t70 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 1
+  store i8 0, i8* %t70
+  %t71 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 0
+  %t72 = call i1 @starts_with(i8* %t66, i8* %t71)
+  %t73 = load i8*, i8** %l0
+  %t74 = load %Statement, %Statement* %l2
+  %t75 = load i8*, i8** %l3
+  %t76 = load i8, i8* %l4
+  br i1 %t72, label %then6, label %merge7
 then6:
-  %t76 = load %Statement, %Statement* %l2
-  ret %Statement* null
+  %t77 = load %Statement, %Statement* %l2
+  %t78 = alloca %Statement
+  store %Statement %t77, %Statement* %t78
+  ret %Statement* %t78
 merge7:
   br label %forinc2
 forinc2:
-  %t77 = load i64, i64* %l1
-  %t78 = add i64 %t77, 1
-  store i64 %t78, i64* %l1
+  %t79 = load i64, i64* %l1
+  %t80 = add i64 %t79, 1
+  store i64 %t80, i64* %l1
   br label %for0
 afterfor3:
-  %t79 = bitcast i8* null to %Statement*
-  ret %Statement* %t79
+  %t81 = bitcast i8* null to %Statement*
+  ret %Statement* %t81
 }
 
 define { %Diagnostic*, i64 }* @check_struct_fields({ %FieldDeclaration*, i64 }* %fields) {
@@ -7616,8 +7620,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t26 = phi double [ %t1, %entry ], [ %t25, %loop.latch2 ]
-  store double %t26, double* %l0
+  %t27 = phi double [ %t1, %entry ], [ %t26, %loop.latch2 ]
+  store double %t27, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -7648,19 +7652,21 @@ merge5:
   br i1 %t18, label %then6, label %merge7
 then6:
   %t21 = load %EffectRequirement, %EffectRequirement* %l1
-  ret %EffectRequirement* null
+  %t22 = alloca %EffectRequirement
+  store %EffectRequirement %t21, %EffectRequirement* %t22
+  ret %EffectRequirement* %t22
 merge7:
-  %t22 = load double, double* %l0
-  %t23 = sitofp i64 1 to double
-  %t24 = fadd double %t22, %t23
-  store double %t24, double* %l0
+  %t23 = load double, double* %l0
+  %t24 = sitofp i64 1 to double
+  %t25 = fadd double %t23, %t24
+  store double %t25, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t25 = load double, double* %l0
+  %t26 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t27 = bitcast i8* null to %EffectRequirement*
-  ret %EffectRequirement* %t27
+  %t28 = bitcast i8* null to %EffectRequirement*
+  ret %EffectRequirement* %t28
 }
 
 define %Token* @requirement_primary_token(%EffectRequirement* %requirement) {
@@ -8001,7 +8007,9 @@ merge1:
   %t14 = getelementptr %SourceSpan, %SourceSpan* %span, i32 0, i32 1
   %t15 = load double, double* %t14
   %t16 = insertvalue %Token %t13, double %t15, 3
-  ret %Token* null
+  %t17 = alloca %Token
+  store %Token %t16, %Token* %t17
+  ret %Token* %t17
 }
 
 define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, %Token* %token) {

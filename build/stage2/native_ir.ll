@@ -94,8 +94,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t27 = phi double [ %t1, %entry ], [ %t26, %loop.latch2 ]
-  store double %t27, double* %l0
+  %t28 = phi double [ %t1, %entry ], [ %t27, %loop.latch2 ]
+  store double %t28, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -127,19 +127,21 @@ merge5:
   br i1 %t19, label %then6, label %merge7
 then6:
   %t22 = load %NativeArtifact, %NativeArtifact* %l1
-  ret %NativeArtifact* null
+  %t23 = alloca %NativeArtifact
+  store %NativeArtifact %t22, %NativeArtifact* %t23
+  ret %NativeArtifact* %t23
 merge7:
-  %t23 = load double, double* %l0
-  %t24 = sitofp i64 1 to double
-  %t25 = fadd double %t23, %t24
-  store double %t25, double* %l0
+  %t24 = load double, double* %l0
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t26 = load double, double* %l0
+  %t27 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t28 = bitcast i8* null to %NativeArtifact*
-  ret %NativeArtifact* %t28
+  %t29 = bitcast i8* null to %NativeArtifact*
+  ret %NativeArtifact* %t29
 }
 
 define %NativeArtifact* @select_layout_manifest_artifact({ %NativeArtifact*, i64 }* %artifacts) {
@@ -151,8 +153,8 @@ entry:
   %t1 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t27 = phi double [ %t1, %entry ], [ %t26, %loop.latch2 ]
-  store double %t27, double* %l0
+  %t28 = phi double [ %t1, %entry ], [ %t27, %loop.latch2 ]
+  store double %t28, double* %l0
   br label %loop.body1
 loop.body1:
   %t2 = load double, double* %l0
@@ -184,19 +186,21 @@ merge5:
   br i1 %t19, label %then6, label %merge7
 then6:
   %t22 = load %NativeArtifact, %NativeArtifact* %l1
-  ret %NativeArtifact* null
+  %t23 = alloca %NativeArtifact
+  store %NativeArtifact %t22, %NativeArtifact* %t23
+  ret %NativeArtifact* %t23
 merge7:
-  %t23 = load double, double* %l0
-  %t24 = sitofp i64 1 to double
-  %t25 = fadd double %t23, %t24
-  store double %t25, double* %l0
+  %t24 = load double, double* %l0
+  %t25 = sitofp i64 1 to double
+  %t26 = fadd double %t24, %t25
+  store double %t26, double* %l0
   br label %loop.latch2
 loop.latch2:
-  %t26 = load double, double* %l0
+  %t27 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t28 = bitcast i8* null to %NativeArtifact*
-  ret %NativeArtifact* %t28
+  %t29 = bitcast i8* null to %NativeArtifact*
+  ret %NativeArtifact* %t29
 }
 
 define %ParseNativeResult @parse_native_artifact(i8* %text) {
@@ -316,28 +320,28 @@ entry:
   %t51 = load double, double* %l11
   br label %loop.header0
 loop.header0:
-  %t1366 = phi double [ %t51, %entry ], [ %t1355, %loop.latch2 ]
-  %t1367 = phi { i8**, i64 }* [ %t41, %entry ], [ %t1356, %loop.latch2 ]
-  %t1368 = phi { %NativeImport*, i64 }* [ %t43, %entry ], [ %t1357, %loop.latch2 ]
-  %t1369 = phi %NativeSourceSpan* [ %t49, %entry ], [ %t1358, %loop.latch2 ]
-  %t1370 = phi %NativeSourceSpan* [ %t50, %entry ], [ %t1359, %loop.latch2 ]
-  %t1371 = phi { %NativeStruct*, i64 }* [ %t44, %entry ], [ %t1360, %loop.latch2 ]
-  %t1372 = phi { %NativeInterface*, i64 }* [ %t45, %entry ], [ %t1361, %loop.latch2 ]
-  %t1373 = phi { %NativeEnum*, i64 }* [ %t46, %entry ], [ %t1362, %loop.latch2 ]
-  %t1374 = phi %NativeFunction* [ %t48, %entry ], [ %t1363, %loop.latch2 ]
-  %t1375 = phi { %NativeFunction*, i64 }* [ %t42, %entry ], [ %t1364, %loop.latch2 ]
-  %t1376 = phi { %NativeBinding*, i64 }* [ %t47, %entry ], [ %t1365, %loop.latch2 ]
-  store double %t1366, double* %l11
-  store { i8**, i64 }* %t1367, { i8**, i64 }** %l1
-  store { %NativeImport*, i64 }* %t1368, { %NativeImport*, i64 }** %l3
-  store %NativeSourceSpan* %t1369, %NativeSourceSpan** %l9
-  store %NativeSourceSpan* %t1370, %NativeSourceSpan** %l10
-  store { %NativeStruct*, i64 }* %t1371, { %NativeStruct*, i64 }** %l4
-  store { %NativeInterface*, i64 }* %t1372, { %NativeInterface*, i64 }** %l5
-  store { %NativeEnum*, i64 }* %t1373, { %NativeEnum*, i64 }** %l6
-  store %NativeFunction* %t1374, %NativeFunction** %l8
-  store { %NativeFunction*, i64 }* %t1375, { %NativeFunction*, i64 }** %l2
-  store { %NativeBinding*, i64 }* %t1376, { %NativeBinding*, i64 }** %l7
+  %t1370 = phi double [ %t51, %entry ], [ %t1359, %loop.latch2 ]
+  %t1371 = phi { i8**, i64 }* [ %t41, %entry ], [ %t1360, %loop.latch2 ]
+  %t1372 = phi { %NativeImport*, i64 }* [ %t43, %entry ], [ %t1361, %loop.latch2 ]
+  %t1373 = phi %NativeSourceSpan* [ %t49, %entry ], [ %t1362, %loop.latch2 ]
+  %t1374 = phi %NativeSourceSpan* [ %t50, %entry ], [ %t1363, %loop.latch2 ]
+  %t1375 = phi { %NativeStruct*, i64 }* [ %t44, %entry ], [ %t1364, %loop.latch2 ]
+  %t1376 = phi { %NativeInterface*, i64 }* [ %t45, %entry ], [ %t1365, %loop.latch2 ]
+  %t1377 = phi { %NativeEnum*, i64 }* [ %t46, %entry ], [ %t1366, %loop.latch2 ]
+  %t1378 = phi %NativeFunction* [ %t48, %entry ], [ %t1367, %loop.latch2 ]
+  %t1379 = phi { %NativeFunction*, i64 }* [ %t42, %entry ], [ %t1368, %loop.latch2 ]
+  %t1380 = phi { %NativeBinding*, i64 }* [ %t47, %entry ], [ %t1369, %loop.latch2 ]
+  store double %t1370, double* %l11
+  store { i8**, i64 }* %t1371, { i8**, i64 }** %l1
+  store { %NativeImport*, i64 }* %t1372, { %NativeImport*, i64 }** %l3
+  store %NativeSourceSpan* %t1373, %NativeSourceSpan** %l9
+  store %NativeSourceSpan* %t1374, %NativeSourceSpan** %l10
+  store { %NativeStruct*, i64 }* %t1375, { %NativeStruct*, i64 }** %l4
+  store { %NativeInterface*, i64 }* %t1376, { %NativeInterface*, i64 }** %l5
+  store { %NativeEnum*, i64 }* %t1377, { %NativeEnum*, i64 }** %l6
+  store %NativeFunction* %t1378, %NativeFunction** %l8
+  store { %NativeFunction*, i64 }* %t1379, { %NativeFunction*, i64 }** %l2
+  store { %NativeBinding*, i64 }* %t1380, { %NativeBinding*, i64 }** %l7
   br label %loop.body1
 loop.body1:
   %t52 = load double, double* %l11
@@ -997,1088 +1001,1096 @@ merge47:
   %t566 = getelementptr { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t564, i32 0, i32 1
   store i64 0, i64* %t566
   %t567 = insertvalue %NativeFunction %t561, { %NativeInstruction**, i64 }* %t564, 4
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t568 = load double, double* %l11
-  %t569 = sitofp i64 1 to double
-  %t570 = fadd double %t568, %t569
-  store double %t570, double* %l11
+  %t568 = alloca %NativeFunction
+  store %NativeFunction %t567, %NativeFunction* %t568
+  store %NativeFunction* %t568, %NativeFunction** %l8
+  %t569 = load double, double* %l11
+  %t570 = sitofp i64 1 to double
+  %t571 = fadd double %t569, %t570
+  store double %t571, double* %l11
   br label %loop.latch2
 merge45:
-  %t571 = load i8*, i8** %l13
-  %s572 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.572, i32 0, i32 0
-  %t573 = call i1 @starts_with(i8* %t571, i8* %s572)
-  %t574 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t575 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t576 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t577 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t578 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t579 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t580 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t581 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t582 = load %NativeFunction*, %NativeFunction** %l8
-  %t583 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t584 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t585 = load double, double* %l11
-  %t586 = load i8*, i8** %l12
-  %t587 = load i8*, i8** %l13
-  br i1 %t573, label %then48, label %merge49
+  %t572 = load i8*, i8** %l13
+  %s573 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.573, i32 0, i32 0
+  %t574 = call i1 @starts_with(i8* %t572, i8* %s573)
+  %t575 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t576 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t577 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t578 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t579 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t580 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t581 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t582 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t583 = load %NativeFunction*, %NativeFunction** %l8
+  %t584 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t585 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t586 = load double, double* %l11
+  %t587 = load i8*, i8** %l12
+  %t588 = load i8*, i8** %l13
+  br i1 %t574, label %then48, label %merge49
 then48:
-  %t588 = load %NativeFunction*, %NativeFunction** %l8
-  %t589 = bitcast i8* null to %NativeFunction*
-  %t590 = icmp eq %NativeFunction* %t588, %t589
-  %t591 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t592 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t593 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t594 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t595 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t596 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t597 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t598 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t599 = load %NativeFunction*, %NativeFunction** %l8
-  %t600 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t601 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t602 = load double, double* %l11
-  %t603 = load i8*, i8** %l12
-  %t604 = load i8*, i8** %l13
-  br i1 %t590, label %then50, label %else51
+  %t589 = load %NativeFunction*, %NativeFunction** %l8
+  %t590 = bitcast i8* null to %NativeFunction*
+  %t591 = icmp eq %NativeFunction* %t589, %t590
+  %t592 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t593 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t594 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t595 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t596 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t597 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t598 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t599 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t600 = load %NativeFunction*, %NativeFunction** %l8
+  %t601 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t602 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t603 = load double, double* %l11
+  %t604 = load i8*, i8** %l12
+  %t605 = load i8*, i8** %l13
+  br i1 %t591, label %then50, label %else51
 then50:
-  %t605 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s606 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.606, i32 0, i32 0
-  %t607 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t605, i8* %s606)
-  store { i8**, i64 }* %t607, { i8**, i64 }** %l1
+  %t606 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s607 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.607, i32 0, i32 0
+  %t608 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t606, i8* %s607)
+  store { i8**, i64 }* %t608, { i8**, i64 }** %l1
   br label %merge52
 else51:
-  %t608 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t609 = load %NativeFunction*, %NativeFunction** %l8
-  %t610 = load %NativeFunction, %NativeFunction* %t609
-  %t611 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t608, %NativeFunction %t610)
-  store { %NativeFunction*, i64 }* %t611, { %NativeFunction*, i64 }** %l2
-  %t612 = bitcast i8* null to %NativeFunction*
-  store %NativeFunction* %t612, %NativeFunction** %l8
+  %t609 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t610 = load %NativeFunction*, %NativeFunction** %l8
+  %t611 = load %NativeFunction, %NativeFunction* %t610
+  %t612 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t609, %NativeFunction %t611)
+  store { %NativeFunction*, i64 }* %t612, { %NativeFunction*, i64 }** %l2
+  %t613 = bitcast i8* null to %NativeFunction*
+  store %NativeFunction* %t613, %NativeFunction** %l8
   br label %merge52
 merge52:
-  %t613 = phi { i8**, i64 }* [ %t607, %then50 ], [ %t592, %else51 ]
-  %t614 = phi { %NativeFunction*, i64 }* [ %t593, %then50 ], [ %t611, %else51 ]
-  %t615 = phi %NativeFunction* [ %t599, %then50 ], [ %t612, %else51 ]
-  store { i8**, i64 }* %t613, { i8**, i64 }** %l1
-  store { %NativeFunction*, i64 }* %t614, { %NativeFunction*, i64 }** %l2
-  store %NativeFunction* %t615, %NativeFunction** %l8
-  %t616 = load double, double* %l11
-  %t617 = sitofp i64 1 to double
-  %t618 = fadd double %t616, %t617
-  store double %t618, double* %l11
+  %t614 = phi { i8**, i64 }* [ %t608, %then50 ], [ %t593, %else51 ]
+  %t615 = phi { %NativeFunction*, i64 }* [ %t594, %then50 ], [ %t612, %else51 ]
+  %t616 = phi %NativeFunction* [ %t600, %then50 ], [ %t613, %else51 ]
+  store { i8**, i64 }* %t614, { i8**, i64 }** %l1
+  store { %NativeFunction*, i64 }* %t615, { %NativeFunction*, i64 }** %l2
+  store %NativeFunction* %t616, %NativeFunction** %l8
+  %t617 = load double, double* %l11
+  %t618 = sitofp i64 1 to double
+  %t619 = fadd double %t617, %t618
+  store double %t619, double* %l11
   br label %loop.latch2
 merge49:
-  %t619 = load i8*, i8** %l13
-  %s620 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.620, i32 0, i32 0
-  %t621 = call i1 @starts_with(i8* %t619, i8* %s620)
-  %t622 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t623 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t624 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t625 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t626 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t627 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t628 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t629 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t630 = load %NativeFunction*, %NativeFunction** %l8
-  %t631 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t632 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t633 = load double, double* %l11
-  %t634 = load i8*, i8** %l12
-  %t635 = load i8*, i8** %l13
-  br i1 %t621, label %then53, label %merge54
+  %t620 = load i8*, i8** %l13
+  %s621 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.621, i32 0, i32 0
+  %t622 = call i1 @starts_with(i8* %t620, i8* %s621)
+  %t623 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t624 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t625 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t626 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t627 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t628 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t629 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t630 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t631 = load %NativeFunction*, %NativeFunction** %l8
+  %t632 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t633 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t634 = load double, double* %l11
+  %t635 = load i8*, i8** %l12
+  %t636 = load i8*, i8** %l13
+  br i1 %t622, label %then53, label %merge54
 then53:
-  %t636 = load %NativeFunction*, %NativeFunction** %l8
-  %t637 = bitcast i8* null to %NativeFunction*
-  %t638 = icmp ne %NativeFunction* %t636, %t637
-  %t639 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t640 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t641 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t642 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t643 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t644 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t645 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t646 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t647 = load %NativeFunction*, %NativeFunction** %l8
-  %t648 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t649 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t650 = load double, double* %l11
-  %t651 = load i8*, i8** %l12
-  %t652 = load i8*, i8** %l13
-  br i1 %t638, label %then55, label %else56
+  %t637 = load %NativeFunction*, %NativeFunction** %l8
+  %t638 = bitcast i8* null to %NativeFunction*
+  %t639 = icmp ne %NativeFunction* %t637, %t638
+  %t640 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t641 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t642 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t643 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t644 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t645 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t646 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t647 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t648 = load %NativeFunction*, %NativeFunction** %l8
+  %t649 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t650 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t651 = load double, double* %l11
+  %t652 = load i8*, i8** %l12
+  %t653 = load i8*, i8** %l13
+  br i1 %t639, label %then55, label %else56
 then55:
-  %t653 = load %NativeFunction*, %NativeFunction** %l8
-  %t654 = load i8*, i8** %l13
-  %s655 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.655, i32 0, i32 0
-  %t656 = call i8* @strip_prefix(i8* %t654, i8* %s655)
-  %t657 = load %NativeFunction, %NativeFunction* %t653
-  %t658 = call %NativeFunction @apply_meta(%NativeFunction %t657, i8* %t656)
-  store %NativeFunction* null, %NativeFunction** %l8
+  %t654 = load %NativeFunction*, %NativeFunction** %l8
+  %t655 = load i8*, i8** %l13
+  %s656 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.656, i32 0, i32 0
+  %t657 = call i8* @strip_prefix(i8* %t655, i8* %s656)
+  %t658 = load %NativeFunction, %NativeFunction* %t654
+  %t659 = call %NativeFunction @apply_meta(%NativeFunction %t658, i8* %t657)
+  %t660 = alloca %NativeFunction
+  store %NativeFunction %t659, %NativeFunction* %t660
+  store %NativeFunction* %t660, %NativeFunction** %l8
   br label %merge57
 else56:
-  %t659 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s660 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.660, i32 0, i32 0
-  %t661 = load i8*, i8** %l13
-  %t662 = add i8* %s660, %t661
-  %t663 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t659, i8* %t662)
-  store { i8**, i64 }* %t663, { i8**, i64 }** %l1
+  %t661 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s662 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.662, i32 0, i32 0
+  %t663 = load i8*, i8** %l13
+  %t664 = add i8* %s662, %t663
+  %t665 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t661, i8* %t664)
+  store { i8**, i64 }* %t665, { i8**, i64 }** %l1
   br label %merge57
 merge57:
-  %t664 = phi %NativeFunction* [ null, %then55 ], [ %t647, %else56 ]
-  %t665 = phi { i8**, i64 }* [ %t640, %then55 ], [ %t663, %else56 ]
-  store %NativeFunction* %t664, %NativeFunction** %l8
-  store { i8**, i64 }* %t665, { i8**, i64 }** %l1
-  %t666 = load double, double* %l11
-  %t667 = sitofp i64 1 to double
-  %t668 = fadd double %t666, %t667
-  store double %t668, double* %l11
+  %t666 = phi %NativeFunction* [ %t660, %then55 ], [ %t648, %else56 ]
+  %t667 = phi { i8**, i64 }* [ %t641, %then55 ], [ %t665, %else56 ]
+  store %NativeFunction* %t666, %NativeFunction** %l8
+  store { i8**, i64 }* %t667, { i8**, i64 }** %l1
+  %t668 = load double, double* %l11
+  %t669 = sitofp i64 1 to double
+  %t670 = fadd double %t668, %t669
+  store double %t670, double* %l11
   br label %loop.latch2
 merge54:
-  %t669 = load i8*, i8** %l13
-  %s670 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.670, i32 0, i32 0
-  %t671 = call i1 @starts_with(i8* %t669, i8* %s670)
-  %t672 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t673 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t674 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t675 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t676 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t677 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t678 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t679 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t680 = load %NativeFunction*, %NativeFunction** %l8
-  %t681 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t682 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t683 = load double, double* %l11
-  %t684 = load i8*, i8** %l12
-  %t685 = load i8*, i8** %l13
-  br i1 %t671, label %then58, label %merge59
+  %t671 = load i8*, i8** %l13
+  %s672 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.672, i32 0, i32 0
+  %t673 = call i1 @starts_with(i8* %t671, i8* %s672)
+  %t674 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t675 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t676 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t677 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t678 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t679 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t680 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t681 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t682 = load %NativeFunction*, %NativeFunction** %l8
+  %t683 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t684 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t685 = load double, double* %l11
+  %t686 = load i8*, i8** %l12
+  %t687 = load i8*, i8** %l13
+  br i1 %t673, label %then58, label %merge59
 then58:
-  %t686 = load %NativeFunction*, %NativeFunction** %l8
-  %t687 = bitcast i8* null to %NativeFunction*
-  %t688 = icmp ne %NativeFunction* %t686, %t687
-  %t689 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t690 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t691 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t692 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t693 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t694 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t695 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t696 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t697 = load %NativeFunction*, %NativeFunction** %l8
-  %t698 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t699 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t700 = load double, double* %l11
-  %t701 = load i8*, i8** %l12
-  %t702 = load i8*, i8** %l13
-  br i1 %t688, label %then60, label %else61
+  %t688 = load %NativeFunction*, %NativeFunction** %l8
+  %t689 = bitcast i8* null to %NativeFunction*
+  %t690 = icmp ne %NativeFunction* %t688, %t689
+  %t691 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t692 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t693 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t694 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t695 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t696 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t697 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t698 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t699 = load %NativeFunction*, %NativeFunction** %l8
+  %t700 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t701 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t702 = load double, double* %l11
+  %t703 = load i8*, i8** %l12
+  %t704 = load i8*, i8** %l13
+  br i1 %t690, label %then60, label %else61
 then60:
-  %t703 = load i8*, i8** %l13
-  %s704 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.704, i32 0, i32 0
-  %t705 = call i8* @strip_prefix(i8* %t703, i8* %s704)
-  store i8* %t705, i8** %l21
-  %t706 = load double, double* %l11
-  %t707 = sitofp i64 1 to double
-  %t708 = fadd double %t706, %t707
-  store double %t708, double* %l22
-  %t709 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t710 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t711 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t712 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t713 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t714 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t715 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t716 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t717 = load %NativeFunction*, %NativeFunction** %l8
-  %t718 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t719 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t720 = load double, double* %l11
-  %t721 = load i8*, i8** %l12
-  %t722 = load i8*, i8** %l13
-  %t723 = load i8*, i8** %l21
-  %t724 = load double, double* %l22
+  %t705 = load i8*, i8** %l13
+  %s706 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.706, i32 0, i32 0
+  %t707 = call i8* @strip_prefix(i8* %t705, i8* %s706)
+  store i8* %t707, i8** %l21
+  %t708 = load double, double* %l11
+  %t709 = sitofp i64 1 to double
+  %t710 = fadd double %t708, %t709
+  store double %t710, double* %l22
+  %t711 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t712 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t713 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t714 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t715 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t716 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t717 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t718 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t719 = load %NativeFunction*, %NativeFunction** %l8
+  %t720 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t721 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t722 = load double, double* %l11
+  %t723 = load i8*, i8** %l12
+  %t724 = load i8*, i8** %l13
+  %t725 = load i8*, i8** %l21
+  %t726 = load double, double* %l22
   br label %loop.header63
 loop.header63:
-  %t838 = phi double [ %t724, %then60 ], [ %t836, %loop.latch65 ]
-  %t839 = phi i8* [ %t723, %then60 ], [ %t837, %loop.latch65 ]
-  store double %t838, double* %l22
-  store i8* %t839, i8** %l21
+  %t840 = phi double [ %t726, %then60 ], [ %t838, %loop.latch65 ]
+  %t841 = phi i8* [ %t725, %then60 ], [ %t839, %loop.latch65 ]
+  store double %t840, double* %l22
+  store i8* %t841, i8** %l21
   br label %loop.body64
 loop.body64:
-  %t725 = load double, double* %l22
-  %t726 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t727 = load { i8**, i64 }, { i8**, i64 }* %t726
-  %t728 = extractvalue { i8**, i64 } %t727, 1
-  %t729 = sitofp i64 %t728 to double
-  %t730 = fcmp oge double %t725, %t729
-  %t731 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t732 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t733 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t734 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t735 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t736 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t737 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t738 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t739 = load %NativeFunction*, %NativeFunction** %l8
-  %t740 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t741 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t742 = load double, double* %l11
-  %t743 = load i8*, i8** %l12
-  %t744 = load i8*, i8** %l13
-  %t745 = load i8*, i8** %l21
-  %t746 = load double, double* %l22
-  br i1 %t730, label %then67, label %merge68
+  %t727 = load double, double* %l22
+  %t728 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t729 = load { i8**, i64 }, { i8**, i64 }* %t728
+  %t730 = extractvalue { i8**, i64 } %t729, 1
+  %t731 = sitofp i64 %t730 to double
+  %t732 = fcmp oge double %t727, %t731
+  %t733 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t734 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t735 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t736 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t737 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t738 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t739 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t740 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t741 = load %NativeFunction*, %NativeFunction** %l8
+  %t742 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t743 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t744 = load double, double* %l11
+  %t745 = load i8*, i8** %l12
+  %t746 = load i8*, i8** %l13
+  %t747 = load i8*, i8** %l21
+  %t748 = load double, double* %l22
+  br i1 %t732, label %then67, label %merge68
 then67:
   br label %afterloop66
 merge68:
-  %t747 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t748 = load double, double* %l22
-  %t749 = fptosi double %t748 to i64
-  %t750 = load { i8**, i64 }, { i8**, i64 }* %t747
-  %t751 = extractvalue { i8**, i64 } %t750, 0
-  %t752 = extractvalue { i8**, i64 } %t750, 1
-  %t753 = icmp uge i64 %t749, %t752
-  ; bounds check: %t753 (if true, out of bounds)
-  %t754 = getelementptr i8*, i8** %t751, i64 %t749
-  %t755 = load i8*, i8** %t754
-  store i8* %t755, i8** %l23
-  %t756 = load i8*, i8** %l23
-  %t757 = call i64 @sailfin_runtime_string_length(i8* %t756)
-  %t758 = icmp eq i64 %t757, 0
-  %t759 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t760 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t761 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t762 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t763 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t764 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t765 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t766 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t767 = load %NativeFunction*, %NativeFunction** %l8
-  %t768 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t769 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t770 = load double, double* %l11
-  %t771 = load i8*, i8** %l12
-  %t772 = load i8*, i8** %l13
-  %t773 = load i8*, i8** %l21
-  %t774 = load double, double* %l22
-  %t775 = load i8*, i8** %l23
-  br i1 %t758, label %then69, label %merge70
+  %t749 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t750 = load double, double* %l22
+  %t751 = fptosi double %t750 to i64
+  %t752 = load { i8**, i64 }, { i8**, i64 }* %t749
+  %t753 = extractvalue { i8**, i64 } %t752, 0
+  %t754 = extractvalue { i8**, i64 } %t752, 1
+  %t755 = icmp uge i64 %t751, %t754
+  ; bounds check: %t755 (if true, out of bounds)
+  %t756 = getelementptr i8*, i8** %t753, i64 %t751
+  %t757 = load i8*, i8** %t756
+  store i8* %t757, i8** %l23
+  %t758 = load i8*, i8** %l23
+  %t759 = call i64 @sailfin_runtime_string_length(i8* %t758)
+  %t760 = icmp eq i64 %t759, 0
+  %t761 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t762 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t763 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t764 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t765 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t766 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t767 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t768 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t769 = load %NativeFunction*, %NativeFunction** %l8
+  %t770 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t771 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t772 = load double, double* %l11
+  %t773 = load i8*, i8** %l12
+  %t774 = load i8*, i8** %l13
+  %t775 = load i8*, i8** %l21
+  %t776 = load double, double* %l22
+  %t777 = load i8*, i8** %l23
+  br i1 %t760, label %then69, label %merge70
 then69:
   br label %afterloop66
 merge70:
-  %t776 = load i8*, i8** %l23
-  %t777 = call i8* @trim_text(i8* %t776)
-  store i8* %t777, i8** %l24
-  %t778 = load i8*, i8** %l24
-  %t779 = call i64 @sailfin_runtime_string_length(i8* %t778)
-  %t780 = icmp eq i64 %t779, 0
-  %t781 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t782 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t783 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t784 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t785 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t786 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t787 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t788 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t789 = load %NativeFunction*, %NativeFunction** %l8
-  %t790 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t791 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t792 = load double, double* %l11
-  %t793 = load i8*, i8** %l12
-  %t794 = load i8*, i8** %l13
-  %t795 = load i8*, i8** %l21
-  %t796 = load double, double* %l22
-  %t797 = load i8*, i8** %l23
-  %t798 = load i8*, i8** %l24
-  br i1 %t780, label %then71, label %merge72
+  %t778 = load i8*, i8** %l23
+  %t779 = call i8* @trim_text(i8* %t778)
+  store i8* %t779, i8** %l24
+  %t780 = load i8*, i8** %l24
+  %t781 = call i64 @sailfin_runtime_string_length(i8* %t780)
+  %t782 = icmp eq i64 %t781, 0
+  %t783 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t784 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t785 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t786 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t787 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t788 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t789 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t790 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t791 = load %NativeFunction*, %NativeFunction** %l8
+  %t792 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t793 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t794 = load double, double* %l11
+  %t795 = load i8*, i8** %l12
+  %t796 = load i8*, i8** %l13
+  %t797 = load i8*, i8** %l21
+  %t798 = load double, double* %l22
+  %t799 = load i8*, i8** %l23
+  %t800 = load i8*, i8** %l24
+  br i1 %t782, label %then71, label %merge72
 then71:
-  %t799 = load double, double* %l22
-  %t800 = sitofp i64 1 to double
-  %t801 = fadd double %t799, %t800
-  store double %t801, double* %l22
+  %t801 = load double, double* %l22
+  %t802 = sitofp i64 1 to double
+  %t803 = fadd double %t801, %t802
+  store double %t803, double* %l22
   br label %loop.latch65
 merge72:
-  %t802 = load i8*, i8** %l24
-  %t803 = call i1 @line_looks_like_parameter_entry(i8* %t802)
-  %t804 = xor i1 %t803, 1
-  %t805 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t806 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t807 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t808 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t809 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t810 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t811 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t812 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t813 = load %NativeFunction*, %NativeFunction** %l8
-  %t814 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t815 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t816 = load double, double* %l11
-  %t817 = load i8*, i8** %l12
-  %t818 = load i8*, i8** %l13
-  %t819 = load i8*, i8** %l21
-  %t820 = load double, double* %l22
-  %t821 = load i8*, i8** %l23
-  %t822 = load i8*, i8** %l24
-  br i1 %t804, label %then73, label %merge74
+  %t804 = load i8*, i8** %l24
+  %t805 = call i1 @line_looks_like_parameter_entry(i8* %t804)
+  %t806 = xor i1 %t805, 1
+  %t807 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t808 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t809 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t810 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t811 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t812 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t813 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t814 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t815 = load %NativeFunction*, %NativeFunction** %l8
+  %t816 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t817 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t818 = load double, double* %l11
+  %t819 = load i8*, i8** %l12
+  %t820 = load i8*, i8** %l13
+  %t821 = load i8*, i8** %l21
+  %t822 = load double, double* %l22
+  %t823 = load i8*, i8** %l23
+  %t824 = load i8*, i8** %l24
+  br i1 %t806, label %then73, label %merge74
 then73:
   br label %afterloop66
 merge74:
-  %t823 = load i8*, i8** %l21
-  %t824 = load i8, i8* %t823
-  %t825 = add i8 %t824, 32
-  %t826 = load i8*, i8** %l24
-  %t827 = load i8, i8* %t826
-  %t828 = add i8 %t825, %t827
-  %t829 = alloca [2 x i8], align 1
-  %t830 = getelementptr [2 x i8], [2 x i8]* %t829, i32 0, i32 0
-  store i8 %t828, i8* %t830
-  %t831 = getelementptr [2 x i8], [2 x i8]* %t829, i32 0, i32 1
-  store i8 0, i8* %t831
-  %t832 = getelementptr [2 x i8], [2 x i8]* %t829, i32 0, i32 0
-  store i8* %t832, i8** %l21
-  %t833 = load double, double* %l22
-  %t834 = sitofp i64 1 to double
-  %t835 = fadd double %t833, %t834
-  store double %t835, double* %l22
+  %t825 = load i8*, i8** %l21
+  %t826 = load i8, i8* %t825
+  %t827 = add i8 %t826, 32
+  %t828 = load i8*, i8** %l24
+  %t829 = load i8, i8* %t828
+  %t830 = add i8 %t827, %t829
+  %t831 = alloca [2 x i8], align 1
+  %t832 = getelementptr [2 x i8], [2 x i8]* %t831, i32 0, i32 0
+  store i8 %t830, i8* %t832
+  %t833 = getelementptr [2 x i8], [2 x i8]* %t831, i32 0, i32 1
+  store i8 0, i8* %t833
+  %t834 = getelementptr [2 x i8], [2 x i8]* %t831, i32 0, i32 0
+  store i8* %t834, i8** %l21
+  %t835 = load double, double* %l22
+  %t836 = sitofp i64 1 to double
+  %t837 = fadd double %t835, %t836
+  store double %t837, double* %l22
   br label %loop.latch65
 loop.latch65:
-  %t836 = load double, double* %l22
-  %t837 = load i8*, i8** %l21
+  %t838 = load double, double* %l22
+  %t839 = load i8*, i8** %l21
   br label %loop.header63
 afterloop66:
-  %t840 = load i8*, i8** %l21
-  %t841 = call { i8**, i64 }* @split_parameter_entries(i8* %t840)
-  store { i8**, i64 }* %t841, { i8**, i64 }** %l25
-  %t842 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t843 = load { i8**, i64 }, { i8**, i64 }* %t842
-  %t844 = extractvalue { i8**, i64 } %t843, 1
-  %t845 = icmp eq i64 %t844, 0
-  %t846 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t847 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t848 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t849 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t850 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t851 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t852 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t853 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t854 = load %NativeFunction*, %NativeFunction** %l8
-  %t855 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t856 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t857 = load double, double* %l11
-  %t858 = load i8*, i8** %l12
-  %t859 = load i8*, i8** %l13
-  %t860 = load i8*, i8** %l21
-  %t861 = load double, double* %l22
-  %t862 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  br i1 %t845, label %then75, label %else76
+  %t842 = load i8*, i8** %l21
+  %t843 = call { i8**, i64 }* @split_parameter_entries(i8* %t842)
+  store { i8**, i64 }* %t843, { i8**, i64 }** %l25
+  %t844 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t845 = load { i8**, i64 }, { i8**, i64 }* %t844
+  %t846 = extractvalue { i8**, i64 } %t845, 1
+  %t847 = icmp eq i64 %t846, 0
+  %t848 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t849 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t850 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t851 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t852 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t853 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t854 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t855 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t856 = load %NativeFunction*, %NativeFunction** %l8
+  %t857 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t858 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t859 = load double, double* %l11
+  %t860 = load i8*, i8** %l12
+  %t861 = load i8*, i8** %l13
+  %t862 = load i8*, i8** %l21
+  %t863 = load double, double* %l22
+  %t864 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  br i1 %t847, label %then75, label %else76
 then75:
-  %t863 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s864 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.864, i32 0, i32 0
-  %t865 = load i8*, i8** %l13
-  %t866 = add i8* %s864, %t865
-  %t867 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t863, i8* %t866)
-  store { i8**, i64 }* %t867, { i8**, i64 }** %l1
-  %t868 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t868, %NativeSourceSpan** %l9
+  %t865 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s866 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.866, i32 0, i32 0
+  %t867 = load i8*, i8** %l13
+  %t868 = add i8* %s866, %t867
+  %t869 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t865, i8* %t868)
+  store { i8**, i64 }* %t869, { i8**, i64 }** %l1
+  %t870 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t870, %NativeSourceSpan** %l9
   br label %merge77
 else76:
-  %t869 = sitofp i64 0 to double
-  store double %t869, double* %l26
+  %t871 = sitofp i64 0 to double
+  store double %t871, double* %l26
   store i1 0, i1* %l27
-  %t870 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t871 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t872 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t873 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t874 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t875 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t876 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t877 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t878 = load %NativeFunction*, %NativeFunction** %l8
-  %t879 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t880 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t881 = load double, double* %l11
-  %t882 = load i8*, i8** %l12
-  %t883 = load i8*, i8** %l13
-  %t884 = load i8*, i8** %l21
-  %t885 = load double, double* %l22
-  %t886 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t887 = load double, double* %l26
-  %t888 = load i1, i1* %l27
+  %t872 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t873 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t874 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t875 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t876 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t877 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t878 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t879 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t880 = load %NativeFunction*, %NativeFunction** %l8
+  %t881 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t882 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t883 = load double, double* %l11
+  %t884 = load i8*, i8** %l12
+  %t885 = load i8*, i8** %l13
+  %t886 = load i8*, i8** %l21
+  %t887 = load double, double* %l22
+  %t888 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t889 = load double, double* %l26
+  %t890 = load i1, i1* %l27
   br label %loop.header78
 loop.header78:
-  %t1024 = phi { i8**, i64 }* [ %t871, %else76 ], [ %t1020, %loop.latch80 ]
-  %t1025 = phi %NativeFunction* [ %t878, %else76 ], [ %t1021, %loop.latch80 ]
-  %t1026 = phi i1 [ %t888, %else76 ], [ %t1022, %loop.latch80 ]
-  %t1027 = phi double [ %t887, %else76 ], [ %t1023, %loop.latch80 ]
-  store { i8**, i64 }* %t1024, { i8**, i64 }** %l1
-  store %NativeFunction* %t1025, %NativeFunction** %l8
-  store i1 %t1026, i1* %l27
-  store double %t1027, double* %l26
+  %t1027 = phi { i8**, i64 }* [ %t873, %else76 ], [ %t1023, %loop.latch80 ]
+  %t1028 = phi %NativeFunction* [ %t880, %else76 ], [ %t1024, %loop.latch80 ]
+  %t1029 = phi i1 [ %t890, %else76 ], [ %t1025, %loop.latch80 ]
+  %t1030 = phi double [ %t889, %else76 ], [ %t1026, %loop.latch80 ]
+  store { i8**, i64 }* %t1027, { i8**, i64 }** %l1
+  store %NativeFunction* %t1028, %NativeFunction** %l8
+  store i1 %t1029, i1* %l27
+  store double %t1030, double* %l26
   br label %loop.body79
 loop.body79:
-  %t889 = load double, double* %l26
-  %t890 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t891 = load { i8**, i64 }, { i8**, i64 }* %t890
-  %t892 = extractvalue { i8**, i64 } %t891, 1
-  %t893 = sitofp i64 %t892 to double
-  %t894 = fcmp oge double %t889, %t893
-  %t895 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t896 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t897 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t898 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t899 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t900 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t901 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t902 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t903 = load %NativeFunction*, %NativeFunction** %l8
-  %t904 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t905 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t906 = load double, double* %l11
-  %t907 = load i8*, i8** %l12
-  %t908 = load i8*, i8** %l13
-  %t909 = load i8*, i8** %l21
-  %t910 = load double, double* %l22
-  %t911 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t912 = load double, double* %l26
-  %t913 = load i1, i1* %l27
-  br i1 %t894, label %then82, label %merge83
+  %t891 = load double, double* %l26
+  %t892 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t893 = load { i8**, i64 }, { i8**, i64 }* %t892
+  %t894 = extractvalue { i8**, i64 } %t893, 1
+  %t895 = sitofp i64 %t894 to double
+  %t896 = fcmp oge double %t891, %t895
+  %t897 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t898 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t899 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t900 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t901 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t902 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t903 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t904 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t905 = load %NativeFunction*, %NativeFunction** %l8
+  %t906 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t907 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t908 = load double, double* %l11
+  %t909 = load i8*, i8** %l12
+  %t910 = load i8*, i8** %l13
+  %t911 = load i8*, i8** %l21
+  %t912 = load double, double* %l22
+  %t913 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t914 = load double, double* %l26
+  %t915 = load i1, i1* %l27
+  br i1 %t896, label %then82, label %merge83
 then82:
   br label %afterloop81
 merge83:
-  %t914 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t915 = load double, double* %l26
-  %t916 = fptosi double %t915 to i64
-  %t917 = load { i8**, i64 }, { i8**, i64 }* %t914
-  %t918 = extractvalue { i8**, i64 } %t917, 0
-  %t919 = extractvalue { i8**, i64 } %t917, 1
-  %t920 = icmp uge i64 %t916, %t919
-  ; bounds check: %t920 (if true, out of bounds)
-  %t921 = getelementptr i8*, i8** %t918, i64 %t916
-  %t922 = load i8*, i8** %t921
-  store i8* %t922, i8** %l28
-  %t923 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  store %NativeSourceSpan* %t923, %NativeSourceSpan** %l29
-  %t924 = load i1, i1* %l27
-  %t925 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t926 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t927 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t928 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t929 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t930 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t931 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t932 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t933 = load %NativeFunction*, %NativeFunction** %l8
-  %t934 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t935 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t936 = load double, double* %l11
-  %t937 = load i8*, i8** %l12
-  %t938 = load i8*, i8** %l13
-  %t939 = load i8*, i8** %l21
-  %t940 = load double, double* %l22
-  %t941 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t942 = load double, double* %l26
-  %t943 = load i1, i1* %l27
-  %t944 = load i8*, i8** %l28
-  %t945 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
-  br i1 %t924, label %then84, label %merge85
+  %t916 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t917 = load double, double* %l26
+  %t918 = fptosi double %t917 to i64
+  %t919 = load { i8**, i64 }, { i8**, i64 }* %t916
+  %t920 = extractvalue { i8**, i64 } %t919, 0
+  %t921 = extractvalue { i8**, i64 } %t919, 1
+  %t922 = icmp uge i64 %t918, %t921
+  ; bounds check: %t922 (if true, out of bounds)
+  %t923 = getelementptr i8*, i8** %t920, i64 %t918
+  %t924 = load i8*, i8** %t923
+  store i8* %t924, i8** %l28
+  %t925 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  store %NativeSourceSpan* %t925, %NativeSourceSpan** %l29
+  %t926 = load i1, i1* %l27
+  %t927 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t928 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t929 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t930 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t931 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t932 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t933 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t934 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t935 = load %NativeFunction*, %NativeFunction** %l8
+  %t936 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t937 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t938 = load double, double* %l11
+  %t939 = load i8*, i8** %l12
+  %t940 = load i8*, i8** %l13
+  %t941 = load i8*, i8** %l21
+  %t942 = load double, double* %l22
+  %t943 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t944 = load double, double* %l26
+  %t945 = load i1, i1* %l27
+  %t946 = load i8*, i8** %l28
+  %t947 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
+  br i1 %t926, label %then84, label %merge85
 then84:
-  %t946 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t946, %NativeSourceSpan** %l29
+  %t948 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t948, %NativeSourceSpan** %l29
   br label %merge85
 merge85:
-  %t947 = phi %NativeSourceSpan* [ %t946, %then84 ], [ %t945, %loop.body79 ]
-  store %NativeSourceSpan* %t947, %NativeSourceSpan** %l29
-  %t948 = load i8*, i8** %l28
-  %t949 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
-  %t950 = call %NativeParameter* @parse_parameter_entry(i8* %t948, %NativeSourceSpan* %t949)
-  store %NativeParameter* %t950, %NativeParameter** %l30
-  %t951 = load %NativeParameter*, %NativeParameter** %l30
-  %t952 = bitcast i8* null to %NativeParameter*
-  %t953 = icmp eq %NativeParameter* %t951, %t952
-  %t954 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t955 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t956 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t957 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t958 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t959 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t960 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t961 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t962 = load %NativeFunction*, %NativeFunction** %l8
-  %t963 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t964 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t965 = load double, double* %l11
-  %t966 = load i8*, i8** %l12
-  %t967 = load i8*, i8** %l13
-  %t968 = load i8*, i8** %l21
-  %t969 = load double, double* %l22
-  %t970 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t971 = load double, double* %l26
-  %t972 = load i1, i1* %l27
-  %t973 = load i8*, i8** %l28
-  %t974 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
-  %t975 = load %NativeParameter*, %NativeParameter** %l30
-  br i1 %t953, label %then86, label %else87
+  %t949 = phi %NativeSourceSpan* [ %t948, %then84 ], [ %t947, %loop.body79 ]
+  store %NativeSourceSpan* %t949, %NativeSourceSpan** %l29
+  %t950 = load i8*, i8** %l28
+  %t951 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
+  %t952 = call %NativeParameter* @parse_parameter_entry(i8* %t950, %NativeSourceSpan* %t951)
+  store %NativeParameter* %t952, %NativeParameter** %l30
+  %t953 = load %NativeParameter*, %NativeParameter** %l30
+  %t954 = bitcast i8* null to %NativeParameter*
+  %t955 = icmp eq %NativeParameter* %t953, %t954
+  %t956 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t957 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t958 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t959 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t960 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t961 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t962 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t963 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t964 = load %NativeFunction*, %NativeFunction** %l8
+  %t965 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t966 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t967 = load double, double* %l11
+  %t968 = load i8*, i8** %l12
+  %t969 = load i8*, i8** %l13
+  %t970 = load i8*, i8** %l21
+  %t971 = load double, double* %l22
+  %t972 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t973 = load double, double* %l26
+  %t974 = load i1, i1* %l27
+  %t975 = load i8*, i8** %l28
+  %t976 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
+  %t977 = load %NativeParameter*, %NativeParameter** %l30
+  br i1 %t955, label %then86, label %else87
 then86:
-  %t976 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s977 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.977, i32 0, i32 0
-  %t978 = load i8*, i8** %l28
-  %t979 = add i8* %s977, %t978
-  %t980 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t976, i8* %t979)
-  store { i8**, i64 }* %t980, { i8**, i64 }** %l1
+  %t978 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s979 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.979, i32 0, i32 0
+  %t980 = load i8*, i8** %l28
+  %t981 = add i8* %s979, %t980
+  %t982 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t978, i8* %t981)
+  store { i8**, i64 }* %t982, { i8**, i64 }** %l1
   br label %merge88
 else87:
-  %t981 = load %NativeFunction*, %NativeFunction** %l8
-  %t982 = load %NativeParameter*, %NativeParameter** %l30
-  %t983 = load %NativeFunction, %NativeFunction* %t981
-  %t984 = load %NativeParameter, %NativeParameter* %t982
-  %t985 = call %NativeFunction @append_parameter(%NativeFunction %t983, %NativeParameter %t984)
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t986 = load %NativeParameter*, %NativeParameter** %l30
-  %t987 = getelementptr %NativeParameter, %NativeParameter* %t986, i32 0, i32 4
-  %t988 = load %NativeSourceSpan*, %NativeSourceSpan** %t987
-  %t989 = bitcast i8* null to %NativeSourceSpan*
-  %t990 = icmp ne %NativeSourceSpan* %t988, %t989
-  %t991 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t992 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t993 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t994 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t995 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t996 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t997 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t998 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t999 = load %NativeFunction*, %NativeFunction** %l8
-  %t1000 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1001 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1002 = load double, double* %l11
-  %t1003 = load i8*, i8** %l12
-  %t1004 = load i8*, i8** %l13
-  %t1005 = load i8*, i8** %l21
-  %t1006 = load double, double* %l22
-  %t1007 = load { i8**, i64 }*, { i8**, i64 }** %l25
-  %t1008 = load double, double* %l26
-  %t1009 = load i1, i1* %l27
-  %t1010 = load i8*, i8** %l28
-  %t1011 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
-  %t1012 = load %NativeParameter*, %NativeParameter** %l30
-  br i1 %t990, label %then89, label %merge90
+  %t983 = load %NativeFunction*, %NativeFunction** %l8
+  %t984 = load %NativeParameter*, %NativeParameter** %l30
+  %t985 = load %NativeFunction, %NativeFunction* %t983
+  %t986 = load %NativeParameter, %NativeParameter* %t984
+  %t987 = call %NativeFunction @append_parameter(%NativeFunction %t985, %NativeParameter %t986)
+  %t988 = alloca %NativeFunction
+  store %NativeFunction %t987, %NativeFunction* %t988
+  store %NativeFunction* %t988, %NativeFunction** %l8
+  %t989 = load %NativeParameter*, %NativeParameter** %l30
+  %t990 = getelementptr %NativeParameter, %NativeParameter* %t989, i32 0, i32 4
+  %t991 = load %NativeSourceSpan*, %NativeSourceSpan** %t990
+  %t992 = bitcast i8* null to %NativeSourceSpan*
+  %t993 = icmp ne %NativeSourceSpan* %t991, %t992
+  %t994 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t995 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t996 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t997 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t998 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t999 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1000 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1001 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1002 = load %NativeFunction*, %NativeFunction** %l8
+  %t1003 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1004 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1005 = load double, double* %l11
+  %t1006 = load i8*, i8** %l12
+  %t1007 = load i8*, i8** %l13
+  %t1008 = load i8*, i8** %l21
+  %t1009 = load double, double* %l22
+  %t1010 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1011 = load double, double* %l26
+  %t1012 = load i1, i1* %l27
+  %t1013 = load i8*, i8** %l28
+  %t1014 = load %NativeSourceSpan*, %NativeSourceSpan** %l29
+  %t1015 = load %NativeParameter*, %NativeParameter** %l30
+  br i1 %t993, label %then89, label %merge90
 then89:
   store i1 1, i1* %l27
   br label %merge90
 merge90:
-  %t1013 = phi i1 [ 1, %then89 ], [ %t1009, %else87 ]
-  store i1 %t1013, i1* %l27
+  %t1016 = phi i1 [ 1, %then89 ], [ %t1012, %else87 ]
+  store i1 %t1016, i1* %l27
   br label %merge88
 merge88:
-  %t1014 = phi { i8**, i64 }* [ %t980, %then86 ], [ %t955, %else87 ]
-  %t1015 = phi %NativeFunction* [ %t962, %then86 ], [ null, %else87 ]
-  %t1016 = phi i1 [ %t972, %then86 ], [ 1, %else87 ]
-  store { i8**, i64 }* %t1014, { i8**, i64 }** %l1
-  store %NativeFunction* %t1015, %NativeFunction** %l8
-  store i1 %t1016, i1* %l27
-  %t1017 = load double, double* %l26
-  %t1018 = sitofp i64 1 to double
-  %t1019 = fadd double %t1017, %t1018
-  store double %t1019, double* %l26
+  %t1017 = phi { i8**, i64 }* [ %t982, %then86 ], [ %t957, %else87 ]
+  %t1018 = phi %NativeFunction* [ %t964, %then86 ], [ %t988, %else87 ]
+  %t1019 = phi i1 [ %t974, %then86 ], [ 1, %else87 ]
+  store { i8**, i64 }* %t1017, { i8**, i64 }** %l1
+  store %NativeFunction* %t1018, %NativeFunction** %l8
+  store i1 %t1019, i1* %l27
+  %t1020 = load double, double* %l26
+  %t1021 = sitofp i64 1 to double
+  %t1022 = fadd double %t1020, %t1021
+  store double %t1022, double* %l26
   br label %loop.latch80
 loop.latch80:
-  %t1020 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1021 = load %NativeFunction*, %NativeFunction** %l8
-  %t1022 = load i1, i1* %l27
-  %t1023 = load double, double* %l26
+  %t1023 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1024 = load %NativeFunction*, %NativeFunction** %l8
+  %t1025 = load i1, i1* %l27
+  %t1026 = load double, double* %l26
   br label %loop.header78
 afterloop81:
-  %t1028 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1028, %NativeSourceSpan** %l9
+  %t1031 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1031, %NativeSourceSpan** %l9
   br label %merge77
 merge77:
-  %t1029 = phi { i8**, i64 }* [ %t867, %then75 ], [ %t980, %else76 ]
-  %t1030 = phi %NativeSourceSpan* [ %t868, %then75 ], [ %t1028, %else76 ]
-  %t1031 = phi %NativeFunction* [ %t854, %then75 ], [ null, %else76 ]
-  store { i8**, i64 }* %t1029, { i8**, i64 }** %l1
-  store %NativeSourceSpan* %t1030, %NativeSourceSpan** %l9
-  store %NativeFunction* %t1031, %NativeFunction** %l8
-  %t1032 = load double, double* %l22
-  %t1033 = sitofp i64 1 to double
-  %t1034 = fsub double %t1032, %t1033
-  store double %t1034, double* %l11
+  %t1032 = phi { i8**, i64 }* [ %t869, %then75 ], [ %t982, %else76 ]
+  %t1033 = phi %NativeSourceSpan* [ %t870, %then75 ], [ %t1031, %else76 ]
+  %t1034 = phi %NativeFunction* [ %t856, %then75 ], [ %t988, %else76 ]
+  store { i8**, i64 }* %t1032, { i8**, i64 }** %l1
+  store %NativeSourceSpan* %t1033, %NativeSourceSpan** %l9
+  store %NativeFunction* %t1034, %NativeFunction** %l8
+  %t1035 = load double, double* %l22
+  %t1036 = sitofp i64 1 to double
+  %t1037 = fsub double %t1035, %t1036
+  store double %t1037, double* %l11
   br label %merge62
 else61:
-  %t1035 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1036 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.1036, i32 0, i32 0
-  %t1037 = load i8*, i8** %l13
-  %t1038 = add i8* %s1036, %t1037
-  %t1039 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1035, i8* %t1038)
-  store { i8**, i64 }* %t1039, { i8**, i64 }** %l1
+  %t1038 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1039 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.1039, i32 0, i32 0
+  %t1040 = load i8*, i8** %l13
+  %t1041 = add i8* %s1039, %t1040
+  %t1042 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1038, i8* %t1041)
+  store { i8**, i64 }* %t1042, { i8**, i64 }** %l1
   br label %merge62
 merge62:
-  %t1040 = phi { i8**, i64 }* [ %t867, %then60 ], [ %t1039, %else61 ]
-  %t1041 = phi %NativeSourceSpan* [ %t868, %then60 ], [ %t698, %else61 ]
-  %t1042 = phi %NativeFunction* [ null, %then60 ], [ %t697, %else61 ]
-  %t1043 = phi double [ %t1034, %then60 ], [ %t700, %else61 ]
-  store { i8**, i64 }* %t1040, { i8**, i64 }** %l1
-  store %NativeSourceSpan* %t1041, %NativeSourceSpan** %l9
-  store %NativeFunction* %t1042, %NativeFunction** %l8
-  store double %t1043, double* %l11
-  %t1044 = load double, double* %l11
-  %t1045 = sitofp i64 1 to double
-  %t1046 = fadd double %t1044, %t1045
+  %t1043 = phi { i8**, i64 }* [ %t869, %then60 ], [ %t1042, %else61 ]
+  %t1044 = phi %NativeSourceSpan* [ %t870, %then60 ], [ %t700, %else61 ]
+  %t1045 = phi %NativeFunction* [ %t988, %then60 ], [ %t699, %else61 ]
+  %t1046 = phi double [ %t1037, %then60 ], [ %t702, %else61 ]
+  store { i8**, i64 }* %t1043, { i8**, i64 }** %l1
+  store %NativeSourceSpan* %t1044, %NativeSourceSpan** %l9
+  store %NativeFunction* %t1045, %NativeFunction** %l8
   store double %t1046, double* %l11
+  %t1047 = load double, double* %l11
+  %t1048 = sitofp i64 1 to double
+  %t1049 = fadd double %t1047, %t1048
+  store double %t1049, double* %l11
   br label %loop.latch2
 merge59:
-  %t1047 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1048 = load double, double* %l11
-  %t1049 = call %InstructionGatherResult @gather_instruction({ i8**, i64 }* %t1047, double %t1048)
-  store %InstructionGatherResult %t1049, %InstructionGatherResult* %l31
-  %t1050 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1051 = extractvalue %InstructionGatherResult %t1050, 0
-  store i8* %t1051, i8** %l13
-  %t1052 = load double, double* %l11
+  %t1050 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1051 = load double, double* %l11
+  %t1052 = call %InstructionGatherResult @gather_instruction({ i8**, i64 }* %t1050, double %t1051)
+  store %InstructionGatherResult %t1052, %InstructionGatherResult* %l31
   %t1053 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1054 = extractvalue %InstructionGatherResult %t1053, 1
-  %t1055 = fadd double %t1052, %t1054
-  store double %t1055, double* %l11
-  %t1056 = load i8*, i8** %l13
-  %t1057 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1058 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1059 = call %InstructionParseResult @parse_instruction(i8* %t1056, %NativeSourceSpan* %t1057, %NativeSourceSpan* %t1058)
-  store %InstructionParseResult %t1059, %InstructionParseResult* %l32
-  %t1060 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1061 = extractvalue %InstructionParseResult %t1060, 0
-  store { %NativeInstruction**, i64 }* %t1061, { %NativeInstruction**, i64 }** %l33
-  %t1062 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1063 = extractvalue %InstructionParseResult %t1062, 1
-  %t1064 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1065 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1066 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1067 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1068 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1069 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1070 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1071 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1072 = load %NativeFunction*, %NativeFunction** %l8
-  %t1073 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1074 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1075 = load double, double* %l11
-  %t1076 = load i8*, i8** %l12
-  %t1077 = load i8*, i8** %l13
-  %t1078 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1079 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1080 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1063, label %then91, label %else92
+  %t1054 = extractvalue %InstructionGatherResult %t1053, 0
+  store i8* %t1054, i8** %l13
+  %t1055 = load double, double* %l11
+  %t1056 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1057 = extractvalue %InstructionGatherResult %t1056, 1
+  %t1058 = fadd double %t1055, %t1057
+  store double %t1058, double* %l11
+  %t1059 = load i8*, i8** %l13
+  %t1060 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1061 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1062 = call %InstructionParseResult @parse_instruction(i8* %t1059, %NativeSourceSpan* %t1060, %NativeSourceSpan* %t1061)
+  store %InstructionParseResult %t1062, %InstructionParseResult* %l32
+  %t1063 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1064 = extractvalue %InstructionParseResult %t1063, 0
+  store { %NativeInstruction**, i64 }* %t1064, { %NativeInstruction**, i64 }** %l33
+  %t1065 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1066 = extractvalue %InstructionParseResult %t1065, 1
+  %t1067 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1068 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1069 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1070 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1071 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1072 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1073 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1074 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1075 = load %NativeFunction*, %NativeFunction** %l8
+  %t1076 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1077 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1078 = load double, double* %l11
+  %t1079 = load i8*, i8** %l12
+  %t1080 = load i8*, i8** %l13
+  %t1081 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1082 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1083 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1066, label %then91, label %else92
 then91:
-  %t1081 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1081, %NativeSourceSpan** %l9
+  %t1084 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1084, %NativeSourceSpan** %l9
   br label %merge93
 else92:
-  %t1082 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1083 = bitcast i8* null to %NativeSourceSpan*
-  %t1084 = icmp ne %NativeSourceSpan* %t1082, %t1083
-  %t1085 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1086 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1087 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1088 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1089 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1090 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1091 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1092 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1093 = load %NativeFunction*, %NativeFunction** %l8
-  %t1094 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1095 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1096 = load double, double* %l11
-  %t1097 = load i8*, i8** %l12
-  %t1098 = load i8*, i8** %l13
-  %t1099 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1100 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1101 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1084, label %then94, label %merge95
+  %t1085 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1086 = bitcast i8* null to %NativeSourceSpan*
+  %t1087 = icmp ne %NativeSourceSpan* %t1085, %t1086
+  %t1088 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1089 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1090 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1091 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1092 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1093 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1094 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1095 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1096 = load %NativeFunction*, %NativeFunction** %l8
+  %t1097 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1098 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1099 = load double, double* %l11
+  %t1100 = load i8*, i8** %l12
+  %t1101 = load i8*, i8** %l13
+  %t1102 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1103 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1104 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1087, label %then94, label %merge95
 then94:
-  %t1102 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1103 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1103, i32 0, i32 0
-  %t1104 = load i8*, i8** %l13
-  %t1105 = add i8* %s1103, %t1104
-  %t1106 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1102, i8* %t1105)
-  store { i8**, i64 }* %t1106, { i8**, i64 }** %l1
-  %t1107 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1107, %NativeSourceSpan** %l9
+  %t1105 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1106 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1106, i32 0, i32 0
+  %t1107 = load i8*, i8** %l13
+  %t1108 = add i8* %s1106, %t1107
+  %t1109 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1105, i8* %t1108)
+  store { i8**, i64 }* %t1109, { i8**, i64 }** %l1
+  %t1110 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1110, %NativeSourceSpan** %l9
   br label %merge95
 merge95:
-  %t1108 = phi { i8**, i64 }* [ %t1106, %then94 ], [ %t1086, %else92 ]
-  %t1109 = phi %NativeSourceSpan* [ %t1107, %then94 ], [ %t1094, %else92 ]
-  store { i8**, i64 }* %t1108, { i8**, i64 }** %l1
-  store %NativeSourceSpan* %t1109, %NativeSourceSpan** %l9
+  %t1111 = phi { i8**, i64 }* [ %t1109, %then94 ], [ %t1089, %else92 ]
+  %t1112 = phi %NativeSourceSpan* [ %t1110, %then94 ], [ %t1097, %else92 ]
+  store { i8**, i64 }* %t1111, { i8**, i64 }** %l1
+  store %NativeSourceSpan* %t1112, %NativeSourceSpan** %l9
   br label %merge93
 merge93:
-  %t1110 = phi %NativeSourceSpan* [ %t1081, %then91 ], [ %t1107, %else92 ]
-  %t1111 = phi { i8**, i64 }* [ %t1065, %then91 ], [ %t1106, %else92 ]
-  store %NativeSourceSpan* %t1110, %NativeSourceSpan** %l9
-  store { i8**, i64 }* %t1111, { i8**, i64 }** %l1
-  %t1112 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1113 = extractvalue %InstructionParseResult %t1112, 2
-  %t1114 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1115 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1116 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1117 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1118 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1119 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1120 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1121 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1122 = load %NativeFunction*, %NativeFunction** %l8
-  %t1123 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1124 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1125 = load double, double* %l11
-  %t1126 = load i8*, i8** %l12
-  %t1127 = load i8*, i8** %l13
-  %t1128 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1129 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1130 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1113, label %then96, label %else97
+  %t1113 = phi %NativeSourceSpan* [ %t1084, %then91 ], [ %t1110, %else92 ]
+  %t1114 = phi { i8**, i64 }* [ %t1068, %then91 ], [ %t1109, %else92 ]
+  store %NativeSourceSpan* %t1113, %NativeSourceSpan** %l9
+  store { i8**, i64 }* %t1114, { i8**, i64 }** %l1
+  %t1115 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1116 = extractvalue %InstructionParseResult %t1115, 2
+  %t1117 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1118 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1119 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1120 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1121 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1122 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1123 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1124 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1125 = load %NativeFunction*, %NativeFunction** %l8
+  %t1126 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1127 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1128 = load double, double* %l11
+  %t1129 = load i8*, i8** %l12
+  %t1130 = load i8*, i8** %l13
+  %t1131 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1132 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1133 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1116, label %then96, label %else97
 then96:
-  %t1131 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1131, %NativeSourceSpan** %l10
+  %t1134 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1134, %NativeSourceSpan** %l10
   br label %merge98
 else97:
-  %t1132 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1133 = bitcast i8* null to %NativeSourceSpan*
-  %t1134 = icmp ne %NativeSourceSpan* %t1132, %t1133
-  %t1135 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1136 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1137 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1138 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1139 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1140 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1141 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1142 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1143 = load %NativeFunction*, %NativeFunction** %l8
-  %t1144 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1145 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1146 = load double, double* %l11
-  %t1147 = load i8*, i8** %l12
-  %t1148 = load i8*, i8** %l13
-  %t1149 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1150 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1151 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1134, label %then99, label %merge100
+  %t1135 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1136 = bitcast i8* null to %NativeSourceSpan*
+  %t1137 = icmp ne %NativeSourceSpan* %t1135, %t1136
+  %t1138 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1139 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1140 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1141 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1142 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1143 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1144 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1145 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1146 = load %NativeFunction*, %NativeFunction** %l8
+  %t1147 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1148 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1149 = load double, double* %l11
+  %t1150 = load i8*, i8** %l12
+  %t1151 = load i8*, i8** %l13
+  %t1152 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1153 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1154 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1137, label %then99, label %merge100
 then99:
-  %t1152 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1153 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.1153, i32 0, i32 0
-  %t1154 = load i8*, i8** %l13
-  %t1155 = add i8* %s1153, %t1154
-  %t1156 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1152, i8* %t1155)
-  store { i8**, i64 }* %t1156, { i8**, i64 }** %l1
-  %t1157 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1157, %NativeSourceSpan** %l10
+  %t1155 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1156 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.1156, i32 0, i32 0
+  %t1157 = load i8*, i8** %l13
+  %t1158 = add i8* %s1156, %t1157
+  %t1159 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1155, i8* %t1158)
+  store { i8**, i64 }* %t1159, { i8**, i64 }** %l1
+  %t1160 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1160, %NativeSourceSpan** %l10
   br label %merge100
 merge100:
-  %t1158 = phi { i8**, i64 }* [ %t1156, %then99 ], [ %t1136, %else97 ]
-  %t1159 = phi %NativeSourceSpan* [ %t1157, %then99 ], [ %t1145, %else97 ]
-  store { i8**, i64 }* %t1158, { i8**, i64 }** %l1
-  store %NativeSourceSpan* %t1159, %NativeSourceSpan** %l10
+  %t1161 = phi { i8**, i64 }* [ %t1159, %then99 ], [ %t1139, %else97 ]
+  %t1162 = phi %NativeSourceSpan* [ %t1160, %then99 ], [ %t1148, %else97 ]
+  store { i8**, i64 }* %t1161, { i8**, i64 }** %l1
+  store %NativeSourceSpan* %t1162, %NativeSourceSpan** %l10
   br label %merge98
 merge98:
-  %t1160 = phi %NativeSourceSpan* [ %t1131, %then96 ], [ %t1157, %else97 ]
-  %t1161 = phi { i8**, i64 }* [ %t1115, %then96 ], [ %t1156, %else97 ]
-  store %NativeSourceSpan* %t1160, %NativeSourceSpan** %l10
-  store { i8**, i64 }* %t1161, { i8**, i64 }** %l1
-  %t1162 = load %NativeFunction*, %NativeFunction** %l8
-  %t1163 = bitcast i8* null to %NativeFunction*
-  %t1164 = icmp eq %NativeFunction* %t1162, %t1163
-  %t1165 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1166 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1167 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1168 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1169 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1170 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1171 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1172 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1173 = load %NativeFunction*, %NativeFunction** %l8
-  %t1174 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1175 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1176 = load double, double* %l11
-  %t1177 = load i8*, i8** %l12
-  %t1178 = load i8*, i8** %l13
-  %t1179 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1180 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1181 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1164, label %then101, label %merge102
+  %t1163 = phi %NativeSourceSpan* [ %t1134, %then96 ], [ %t1160, %else97 ]
+  %t1164 = phi { i8**, i64 }* [ %t1118, %then96 ], [ %t1159, %else97 ]
+  store %NativeSourceSpan* %t1163, %NativeSourceSpan** %l10
+  store { i8**, i64 }* %t1164, { i8**, i64 }** %l1
+  %t1165 = load %NativeFunction*, %NativeFunction** %l8
+  %t1166 = bitcast i8* null to %NativeFunction*
+  %t1167 = icmp eq %NativeFunction* %t1165, %t1166
+  %t1168 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1169 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1170 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1171 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1172 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1173 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1174 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1175 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1176 = load %NativeFunction*, %NativeFunction** %l8
+  %t1177 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1178 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1179 = load double, double* %l11
+  %t1180 = load i8*, i8** %l12
+  %t1181 = load i8*, i8** %l13
+  %t1182 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1183 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1184 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1167, label %then101, label %merge102
 then101:
-  %t1183 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1184 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1183
-  %t1185 = extractvalue { %NativeInstruction**, i64 } %t1184, 1
-  %t1186 = icmp eq i64 %t1185, 1
-  br label %logical_and_entry_1182
+  %t1186 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1187 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1186
+  %t1188 = extractvalue { %NativeInstruction**, i64 } %t1187, 1
+  %t1189 = icmp eq i64 %t1188, 1
+  br label %logical_and_entry_1185
 
-logical_and_entry_1182:
-  br i1 %t1186, label %logical_and_right_1182, label %logical_and_merge_1182
+logical_and_entry_1185:
+  br i1 %t1189, label %logical_and_right_1185, label %logical_and_merge_1185
 
-logical_and_right_1182:
-  %t1187 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1188 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1187
-  %t1189 = extractvalue { %NativeInstruction**, i64 } %t1188, 0
-  %t1190 = extractvalue { %NativeInstruction**, i64 } %t1188, 1
-  %t1191 = icmp uge i64 0, %t1190
-  ; bounds check: %t1191 (if true, out of bounds)
-  %t1192 = getelementptr %NativeInstruction*, %NativeInstruction** %t1189, i64 0
-  %t1193 = load %NativeInstruction*, %NativeInstruction** %t1192
-  %t1194 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1193, i32 0, i32 0
-  %t1195 = load i32, i32* %t1194
-  %t1196 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1197 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1198 = icmp eq i32 %t1195, 0
-  %t1199 = select i1 %t1198, i8* %t1197, i8* %t1196
-  %t1200 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1201 = icmp eq i32 %t1195, 1
+logical_and_right_1185:
+  %t1190 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1191 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1190
+  %t1192 = extractvalue { %NativeInstruction**, i64 } %t1191, 0
+  %t1193 = extractvalue { %NativeInstruction**, i64 } %t1191, 1
+  %t1194 = icmp uge i64 0, %t1193
+  ; bounds check: %t1194 (if true, out of bounds)
+  %t1195 = getelementptr %NativeInstruction*, %NativeInstruction** %t1192, i64 0
+  %t1196 = load %NativeInstruction*, %NativeInstruction** %t1195
+  %t1197 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1196, i32 0, i32 0
+  %t1198 = load i32, i32* %t1197
+  %t1199 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1200 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1201 = icmp eq i32 %t1198, 0
   %t1202 = select i1 %t1201, i8* %t1200, i8* %t1199
-  %t1203 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1204 = icmp eq i32 %t1195, 2
+  %t1203 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1204 = icmp eq i32 %t1198, 1
   %t1205 = select i1 %t1204, i8* %t1203, i8* %t1202
-  %t1206 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1207 = icmp eq i32 %t1195, 3
+  %t1206 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1207 = icmp eq i32 %t1198, 2
   %t1208 = select i1 %t1207, i8* %t1206, i8* %t1205
-  %t1209 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1210 = icmp eq i32 %t1195, 4
+  %t1209 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1210 = icmp eq i32 %t1198, 3
   %t1211 = select i1 %t1210, i8* %t1209, i8* %t1208
-  %t1212 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1213 = icmp eq i32 %t1195, 5
+  %t1212 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1213 = icmp eq i32 %t1198, 4
   %t1214 = select i1 %t1213, i8* %t1212, i8* %t1211
-  %t1215 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1216 = icmp eq i32 %t1195, 6
+  %t1215 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1216 = icmp eq i32 %t1198, 5
   %t1217 = select i1 %t1216, i8* %t1215, i8* %t1214
-  %t1218 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1219 = icmp eq i32 %t1195, 7
+  %t1218 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1219 = icmp eq i32 %t1198, 6
   %t1220 = select i1 %t1219, i8* %t1218, i8* %t1217
-  %t1221 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1222 = icmp eq i32 %t1195, 8
+  %t1221 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1222 = icmp eq i32 %t1198, 7
   %t1223 = select i1 %t1222, i8* %t1221, i8* %t1220
-  %t1224 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1225 = icmp eq i32 %t1195, 9
+  %t1224 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1225 = icmp eq i32 %t1198, 8
   %t1226 = select i1 %t1225, i8* %t1224, i8* %t1223
-  %t1227 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1228 = icmp eq i32 %t1195, 10
+  %t1227 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1228 = icmp eq i32 %t1198, 9
   %t1229 = select i1 %t1228, i8* %t1227, i8* %t1226
-  %t1230 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1231 = icmp eq i32 %t1195, 11
+  %t1230 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1231 = icmp eq i32 %t1198, 10
   %t1232 = select i1 %t1231, i8* %t1230, i8* %t1229
-  %t1233 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1234 = icmp eq i32 %t1195, 12
+  %t1233 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1234 = icmp eq i32 %t1198, 11
   %t1235 = select i1 %t1234, i8* %t1233, i8* %t1232
-  %t1236 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1237 = icmp eq i32 %t1195, 13
+  %t1236 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1237 = icmp eq i32 %t1198, 12
   %t1238 = select i1 %t1237, i8* %t1236, i8* %t1235
-  %t1239 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1240 = icmp eq i32 %t1195, 14
+  %t1239 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1240 = icmp eq i32 %t1198, 13
   %t1241 = select i1 %t1240, i8* %t1239, i8* %t1238
-  %t1242 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1243 = icmp eq i32 %t1195, 15
+  %t1242 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1243 = icmp eq i32 %t1198, 14
   %t1244 = select i1 %t1243, i8* %t1242, i8* %t1241
-  %t1245 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1246 = icmp eq i32 %t1195, 16
+  %t1245 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1246 = icmp eq i32 %t1198, 15
   %t1247 = select i1 %t1246, i8* %t1245, i8* %t1244
-  %s1248 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1248, i32 0, i32 0
-  %t1249 = icmp eq i8* %t1247, %s1248
-  br label %logical_and_right_end_1182
+  %t1248 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1249 = icmp eq i32 %t1198, 16
+  %t1250 = select i1 %t1249, i8* %t1248, i8* %t1247
+  %s1251 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1251, i32 0, i32 0
+  %t1252 = icmp eq i8* %t1250, %s1251
+  br label %logical_and_right_end_1185
 
-logical_and_right_end_1182:
-  br label %logical_and_merge_1182
+logical_and_right_end_1185:
+  br label %logical_and_merge_1185
 
-logical_and_merge_1182:
-  %t1250 = phi i1 [ false, %logical_and_entry_1182 ], [ %t1249, %logical_and_right_end_1182 ]
-  %t1251 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1252 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1253 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1254 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1255 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1256 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1257 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1258 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1259 = load %NativeFunction*, %NativeFunction** %l8
-  %t1260 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1261 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1262 = load double, double* %l11
-  %t1263 = load i8*, i8** %l12
-  %t1264 = load i8*, i8** %l13
-  %t1265 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1266 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1267 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  br i1 %t1250, label %then103, label %else104
+logical_and_merge_1185:
+  %t1253 = phi i1 [ false, %logical_and_entry_1185 ], [ %t1252, %logical_and_right_end_1185 ]
+  %t1254 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1255 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1256 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1257 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1258 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1259 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1260 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1261 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1262 = load %NativeFunction*, %NativeFunction** %l8
+  %t1263 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1264 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1265 = load double, double* %l11
+  %t1266 = load i8*, i8** %l12
+  %t1267 = load i8*, i8** %l13
+  %t1268 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1269 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1270 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  br i1 %t1253, label %then103, label %else104
 then103:
-  %t1268 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1269 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1270 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1269
-  %t1271 = extractvalue { %NativeInstruction**, i64 } %t1270, 0
-  %t1272 = extractvalue { %NativeInstruction**, i64 } %t1270, 1
-  %t1273 = icmp uge i64 0, %t1272
-  ; bounds check: %t1273 (if true, out of bounds)
-  %t1274 = getelementptr %NativeInstruction*, %NativeInstruction** %t1271, i64 0
-  %t1275 = load %NativeInstruction*, %NativeInstruction** %t1274
-  %t1276 = load %NativeInstruction, %NativeInstruction* %t1275
-  %t1277 = call %NativeBinding @binding_from_instruction(%NativeInstruction %t1276)
-  %t1278 = call { %NativeBinding*, i64 }* @append_binding({ %NativeBinding*, i64 }* %t1268, %NativeBinding %t1277)
-  store { %NativeBinding*, i64 }* %t1278, { %NativeBinding*, i64 }** %l7
+  %t1271 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1272 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1273 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1272
+  %t1274 = extractvalue { %NativeInstruction**, i64 } %t1273, 0
+  %t1275 = extractvalue { %NativeInstruction**, i64 } %t1273, 1
+  %t1276 = icmp uge i64 0, %t1275
+  ; bounds check: %t1276 (if true, out of bounds)
+  %t1277 = getelementptr %NativeInstruction*, %NativeInstruction** %t1274, i64 0
+  %t1278 = load %NativeInstruction*, %NativeInstruction** %t1277
+  %t1279 = load %NativeInstruction, %NativeInstruction* %t1278
+  %t1280 = call %NativeBinding @binding_from_instruction(%NativeInstruction %t1279)
+  %t1281 = call { %NativeBinding*, i64 }* @append_binding({ %NativeBinding*, i64 }* %t1271, %NativeBinding %t1280)
+  store { %NativeBinding*, i64 }* %t1281, { %NativeBinding*, i64 }** %l7
   br label %merge105
 else104:
-  %t1279 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1280 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.1280, i32 0, i32 0
-  %t1281 = load i8*, i8** %l13
-  %t1282 = add i8* %s1280, %t1281
-  %t1283 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1279, i8* %t1282)
-  store { i8**, i64 }* %t1283, { i8**, i64 }** %l1
+  %t1282 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1283 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.1283, i32 0, i32 0
+  %t1284 = load i8*, i8** %l13
+  %t1285 = add i8* %s1283, %t1284
+  %t1286 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1282, i8* %t1285)
+  store { i8**, i64 }* %t1286, { i8**, i64 }** %l1
   br label %merge105
 merge105:
-  %t1284 = phi { %NativeBinding*, i64 }* [ %t1278, %then103 ], [ %t1258, %else104 ]
-  %t1285 = phi { i8**, i64 }* [ %t1252, %then103 ], [ %t1283, %else104 ]
-  store { %NativeBinding*, i64 }* %t1284, { %NativeBinding*, i64 }** %l7
-  store { i8**, i64 }* %t1285, { i8**, i64 }** %l1
-  %t1286 = load double, double* %l11
-  %t1287 = sitofp i64 1 to double
-  %t1288 = fadd double %t1286, %t1287
-  store double %t1288, double* %l11
+  %t1287 = phi { %NativeBinding*, i64 }* [ %t1281, %then103 ], [ %t1261, %else104 ]
+  %t1288 = phi { i8**, i64 }* [ %t1255, %then103 ], [ %t1286, %else104 ]
+  store { %NativeBinding*, i64 }* %t1287, { %NativeBinding*, i64 }** %l7
+  store { i8**, i64 }* %t1288, { i8**, i64 }** %l1
+  %t1289 = load double, double* %l11
+  %t1290 = sitofp i64 1 to double
+  %t1291 = fadd double %t1289, %t1290
+  store double %t1291, double* %l11
   br label %loop.latch2
 merge102:
-  %t1289 = sitofp i64 0 to double
-  store double %t1289, double* %l34
-  %t1290 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1291 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1292 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1293 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1294 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1295 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1296 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1297 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1298 = load %NativeFunction*, %NativeFunction** %l8
-  %t1299 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1300 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1301 = load double, double* %l11
-  %t1302 = load i8*, i8** %l12
-  %t1303 = load i8*, i8** %l13
-  %t1304 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1305 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1306 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1307 = load double, double* %l34
+  %t1292 = sitofp i64 0 to double
+  store double %t1292, double* %l34
+  %t1293 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1294 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1295 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1296 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1297 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1298 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1299 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1300 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1301 = load %NativeFunction*, %NativeFunction** %l8
+  %t1302 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1303 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1304 = load double, double* %l11
+  %t1305 = load i8*, i8** %l12
+  %t1306 = load i8*, i8** %l13
+  %t1307 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1308 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1309 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1310 = load double, double* %l34
   br label %loop.header106
 loop.header106:
-  %t1350 = phi %NativeFunction* [ %t1298, %loop.body1 ], [ %t1348, %loop.latch108 ]
-  %t1351 = phi double [ %t1307, %loop.body1 ], [ %t1349, %loop.latch108 ]
-  store %NativeFunction* %t1350, %NativeFunction** %l8
-  store double %t1351, double* %l34
+  %t1354 = phi %NativeFunction* [ %t1301, %loop.body1 ], [ %t1352, %loop.latch108 ]
+  %t1355 = phi double [ %t1310, %loop.body1 ], [ %t1353, %loop.latch108 ]
+  store %NativeFunction* %t1354, %NativeFunction** %l8
+  store double %t1355, double* %l34
   br label %loop.body107
 loop.body107:
-  %t1308 = load double, double* %l34
-  %t1309 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1310 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1309
-  %t1311 = extractvalue { %NativeInstruction**, i64 } %t1310, 1
-  %t1312 = sitofp i64 %t1311 to double
-  %t1313 = fcmp oge double %t1308, %t1312
-  %t1314 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1315 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1316 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1317 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1318 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1319 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1320 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1321 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1322 = load %NativeFunction*, %NativeFunction** %l8
-  %t1323 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1324 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1325 = load double, double* %l11
-  %t1326 = load i8*, i8** %l12
-  %t1327 = load i8*, i8** %l13
-  %t1328 = load %InstructionGatherResult, %InstructionGatherResult* %l31
-  %t1329 = load %InstructionParseResult, %InstructionParseResult* %l32
-  %t1330 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1331 = load double, double* %l34
-  br i1 %t1313, label %then110, label %merge111
+  %t1311 = load double, double* %l34
+  %t1312 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1313 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1312
+  %t1314 = extractvalue { %NativeInstruction**, i64 } %t1313, 1
+  %t1315 = sitofp i64 %t1314 to double
+  %t1316 = fcmp oge double %t1311, %t1315
+  %t1317 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1318 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1319 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1320 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1321 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1322 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1323 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1324 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1325 = load %NativeFunction*, %NativeFunction** %l8
+  %t1326 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1327 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1328 = load double, double* %l11
+  %t1329 = load i8*, i8** %l12
+  %t1330 = load i8*, i8** %l13
+  %t1331 = load %InstructionGatherResult, %InstructionGatherResult* %l31
+  %t1332 = load %InstructionParseResult, %InstructionParseResult* %l32
+  %t1333 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1334 = load double, double* %l34
+  br i1 %t1316, label %then110, label %merge111
 then110:
   br label %afterloop109
 merge111:
-  %t1332 = load %NativeFunction*, %NativeFunction** %l8
-  %t1333 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
-  %t1334 = load double, double* %l34
-  %t1335 = fptosi double %t1334 to i64
-  %t1336 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1333
-  %t1337 = extractvalue { %NativeInstruction**, i64 } %t1336, 0
-  %t1338 = extractvalue { %NativeInstruction**, i64 } %t1336, 1
-  %t1339 = icmp uge i64 %t1335, %t1338
-  ; bounds check: %t1339 (if true, out of bounds)
-  %t1340 = getelementptr %NativeInstruction*, %NativeInstruction** %t1337, i64 %t1335
-  %t1341 = load %NativeInstruction*, %NativeInstruction** %t1340
-  %t1342 = load %NativeFunction, %NativeFunction* %t1332
-  %t1343 = load %NativeInstruction, %NativeInstruction* %t1341
-  %t1344 = call %NativeFunction @append_instruction(%NativeFunction %t1342, %NativeInstruction %t1343)
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t1345 = load double, double* %l34
-  %t1346 = sitofp i64 1 to double
-  %t1347 = fadd double %t1345, %t1346
-  store double %t1347, double* %l34
+  %t1335 = load %NativeFunction*, %NativeFunction** %l8
+  %t1336 = load { %NativeInstruction**, i64 }*, { %NativeInstruction**, i64 }** %l33
+  %t1337 = load double, double* %l34
+  %t1338 = fptosi double %t1337 to i64
+  %t1339 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1336
+  %t1340 = extractvalue { %NativeInstruction**, i64 } %t1339, 0
+  %t1341 = extractvalue { %NativeInstruction**, i64 } %t1339, 1
+  %t1342 = icmp uge i64 %t1338, %t1341
+  ; bounds check: %t1342 (if true, out of bounds)
+  %t1343 = getelementptr %NativeInstruction*, %NativeInstruction** %t1340, i64 %t1338
+  %t1344 = load %NativeInstruction*, %NativeInstruction** %t1343
+  %t1345 = load %NativeFunction, %NativeFunction* %t1335
+  %t1346 = load %NativeInstruction, %NativeInstruction* %t1344
+  %t1347 = call %NativeFunction @append_instruction(%NativeFunction %t1345, %NativeInstruction %t1346)
+  %t1348 = alloca %NativeFunction
+  store %NativeFunction %t1347, %NativeFunction* %t1348
+  store %NativeFunction* %t1348, %NativeFunction** %l8
+  %t1349 = load double, double* %l34
+  %t1350 = sitofp i64 1 to double
+  %t1351 = fadd double %t1349, %t1350
+  store double %t1351, double* %l34
   br label %loop.latch108
 loop.latch108:
-  %t1348 = load %NativeFunction*, %NativeFunction** %l8
-  %t1349 = load double, double* %l34
+  %t1352 = load %NativeFunction*, %NativeFunction** %l8
+  %t1353 = load double, double* %l34
   br label %loop.header106
 afterloop109:
-  %t1352 = load double, double* %l11
-  %t1353 = sitofp i64 1 to double
-  %t1354 = fadd double %t1352, %t1353
-  store double %t1354, double* %l11
+  %t1356 = load double, double* %l11
+  %t1357 = sitofp i64 1 to double
+  %t1358 = fadd double %t1356, %t1357
+  store double %t1358, double* %l11
   br label %loop.latch2
 loop.latch2:
-  %t1355 = load double, double* %l11
-  %t1356 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1357 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1358 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1359 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1360 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1361 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1362 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1363 = load %NativeFunction*, %NativeFunction** %l8
-  %t1364 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1365 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1359 = load double, double* %l11
+  %t1360 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1361 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1362 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1363 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1364 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1365 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1366 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1367 = load %NativeFunction*, %NativeFunction** %l8
+  %t1368 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1369 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
   br label %loop.header0
 afterloop3:
-  %t1377 = load %NativeFunction*, %NativeFunction** %l8
-  %t1378 = bitcast i8* null to %NativeFunction*
-  %t1379 = icmp ne %NativeFunction* %t1377, %t1378
-  %t1380 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1381 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1382 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1383 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1384 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1385 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1386 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1387 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1388 = load %NativeFunction*, %NativeFunction** %l8
-  %t1389 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1390 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1391 = load double, double* %l11
-  br i1 %t1379, label %then112, label %merge113
+  %t1381 = load %NativeFunction*, %NativeFunction** %l8
+  %t1382 = bitcast i8* null to %NativeFunction*
+  %t1383 = icmp ne %NativeFunction* %t1381, %t1382
+  %t1384 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1385 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1386 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1387 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1388 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1389 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1390 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1391 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1392 = load %NativeFunction*, %NativeFunction** %l8
+  %t1393 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1394 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1395 = load double, double* %l11
+  br i1 %t1383, label %then112, label %merge113
 then112:
-  %t1392 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1393 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.1393, i32 0, i32 0
-  %t1394 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1392, i8* %s1393)
-  store { i8**, i64 }* %t1394, { i8**, i64 }** %l1
+  %t1396 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1397 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.1397, i32 0, i32 0
+  %t1398 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1396, i8* %s1397)
+  store { i8**, i64 }* %t1398, { i8**, i64 }** %l1
   br label %merge113
 merge113:
-  %t1395 = phi { i8**, i64 }* [ %t1394, %then112 ], [ %t1381, %entry ]
-  store { i8**, i64 }* %t1395, { i8**, i64 }** %l1
-  %t1396 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
-  %t1397 = bitcast { %NativeFunction*, i64 }* %t1396 to { %NativeFunction**, i64 }*
-  %t1398 = insertvalue %ParseNativeResult undef, { %NativeFunction**, i64 }* %t1397, 0
-  %t1399 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
-  %t1400 = bitcast { %NativeImport*, i64 }* %t1399 to { %NativeImport**, i64 }*
-  %t1401 = insertvalue %ParseNativeResult %t1398, { %NativeImport**, i64 }* %t1400, 1
-  %t1402 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
-  %t1403 = bitcast { %NativeStruct*, i64 }* %t1402 to { %NativeStruct**, i64 }*
-  %t1404 = insertvalue %ParseNativeResult %t1401, { %NativeStruct**, i64 }* %t1403, 2
-  %t1405 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
-  %t1406 = bitcast { %NativeInterface*, i64 }* %t1405 to { %NativeInterface**, i64 }*
-  %t1407 = insertvalue %ParseNativeResult %t1404, { %NativeInterface**, i64 }* %t1406, 3
-  %t1408 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
-  %t1409 = bitcast { %NativeEnum*, i64 }* %t1408 to { %NativeEnum**, i64 }*
-  %t1410 = insertvalue %ParseNativeResult %t1407, { %NativeEnum**, i64 }* %t1409, 4
-  %t1411 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
-  %t1412 = bitcast { %NativeBinding*, i64 }* %t1411 to { %NativeBinding**, i64 }*
-  %t1413 = insertvalue %ParseNativeResult %t1410, { %NativeBinding**, i64 }* %t1412, 5
-  %t1414 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1415 = insertvalue %ParseNativeResult %t1413, { i8**, i64 }* %t1414, 6
-  ret %ParseNativeResult %t1415
+  %t1399 = phi { i8**, i64 }* [ %t1398, %then112 ], [ %t1385, %entry ]
+  store { i8**, i64 }* %t1399, { i8**, i64 }** %l1
+  %t1400 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l2
+  %t1401 = bitcast { %NativeFunction*, i64 }* %t1400 to { %NativeFunction**, i64 }*
+  %t1402 = insertvalue %ParseNativeResult undef, { %NativeFunction**, i64 }* %t1401, 0
+  %t1403 = load { %NativeImport*, i64 }*, { %NativeImport*, i64 }** %l3
+  %t1404 = bitcast { %NativeImport*, i64 }* %t1403 to { %NativeImport**, i64 }*
+  %t1405 = insertvalue %ParseNativeResult %t1402, { %NativeImport**, i64 }* %t1404, 1
+  %t1406 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l4
+  %t1407 = bitcast { %NativeStruct*, i64 }* %t1406 to { %NativeStruct**, i64 }*
+  %t1408 = insertvalue %ParseNativeResult %t1405, { %NativeStruct**, i64 }* %t1407, 2
+  %t1409 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l5
+  %t1410 = bitcast { %NativeInterface*, i64 }* %t1409 to { %NativeInterface**, i64 }*
+  %t1411 = insertvalue %ParseNativeResult %t1408, { %NativeInterface**, i64 }* %t1410, 3
+  %t1412 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l6
+  %t1413 = bitcast { %NativeEnum*, i64 }* %t1412 to { %NativeEnum**, i64 }*
+  %t1414 = insertvalue %ParseNativeResult %t1411, { %NativeEnum**, i64 }* %t1413, 4
+  %t1415 = load { %NativeBinding*, i64 }*, { %NativeBinding*, i64 }** %l7
+  %t1416 = bitcast { %NativeBinding*, i64 }* %t1415 to { %NativeBinding**, i64 }*
+  %t1417 = insertvalue %ParseNativeResult %t1414, { %NativeBinding**, i64 }* %t1416, 5
+  %t1418 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1419 = insertvalue %ParseNativeResult %t1417, { i8**, i64 }* %t1418, 6
+  ret %ParseNativeResult %t1419
 }
 
 define %NativeSourceSpan* @parse_source_span(i8* %text) {
@@ -2216,7 +2228,9 @@ merge11:
   %t90 = load %NumberParseResult, %NumberParseResult* %l5
   %t91 = extractvalue %NumberParseResult %t90, 1
   %t92 = insertvalue %NativeSourceSpan %t89, double %t91, 3
-  ret %NativeSourceSpan* null
+  %t93 = alloca %NativeSourceSpan
+  store %NativeSourceSpan %t92, %NativeSourceSpan* %t93
+  ret %NativeSourceSpan* %t93
 }
 
 define { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %functions, %NativeFunction %value) {
@@ -4513,7 +4527,9 @@ merge3:
   %t68 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
   %t69 = bitcast { %NativeImportSpecifier*, i64 }* %t68 to { %NativeImportSpecifier**, i64 }*
   %t70 = insertvalue %NativeImport %t67, { %NativeImportSpecifier**, i64 }* %t69, 2
-  ret %NativeImport* null
+  %t71 = alloca %NativeImport
+  store %NativeImport %t70, %NativeImport* %t71
+  ret %NativeImport* %t71
 }
 
 define { %NativeImportSpecifier*, i64 }* @parse_import_specifiers(i8* %text) {
@@ -4861,30 +4877,30 @@ merge1:
   %t79 = load double, double* %l16
   br label %loop.header2
 loop.header2:
-  %t1157 = phi { i8**, i64 }* [ %t63, %entry ], [ %t1145, %loop.latch4 ]
-  %t1158 = phi double [ %t79, %entry ], [ %t1146, %loop.latch4 ]
-  %t1159 = phi { %NativeFunction*, i64 }* [ %t70, %entry ], [ %t1147, %loop.latch4 ]
-  %t1160 = phi %NativeFunction* [ %t71, %entry ], [ %t1148, %loop.latch4 ]
-  %t1161 = phi %NativeSourceSpan* [ %t72, %entry ], [ %t1149, %loop.latch4 ]
-  %t1162 = phi %NativeSourceSpan* [ %t73, %entry ], [ %t1150, %loop.latch4 ]
-  %t1163 = phi double [ %t75, %entry ], [ %t1151, %loop.latch4 ]
-  %t1164 = phi double [ %t76, %entry ], [ %t1152, %loop.latch4 ]
-  %t1165 = phi i1 [ %t77, %entry ], [ %t1153, %loop.latch4 ]
-  %t1166 = phi { %NativeStructLayoutField*, i64 }* [ %t74, %entry ], [ %t1154, %loop.latch4 ]
-  %t1167 = phi i1 [ %t78, %entry ], [ %t1155, %loop.latch4 ]
-  %t1168 = phi { %NativeStructField*, i64 }* [ %t69, %entry ], [ %t1156, %loop.latch4 ]
-  store { i8**, i64 }* %t1157, { i8**, i64 }** %l0
-  store double %t1158, double* %l16
-  store { %NativeFunction*, i64 }* %t1159, { %NativeFunction*, i64 }** %l7
-  store %NativeFunction* %t1160, %NativeFunction** %l8
-  store %NativeSourceSpan* %t1161, %NativeSourceSpan** %l9
-  store %NativeSourceSpan* %t1162, %NativeSourceSpan** %l10
-  store double %t1163, double* %l12
-  store double %t1164, double* %l13
-  store i1 %t1165, i1* %l14
-  store { %NativeStructLayoutField*, i64 }* %t1166, { %NativeStructLayoutField*, i64 }** %l11
-  store i1 %t1167, i1* %l15
-  store { %NativeStructField*, i64 }* %t1168, { %NativeStructField*, i64 }** %l6
+  %t1163 = phi { i8**, i64 }* [ %t63, %entry ], [ %t1151, %loop.latch4 ]
+  %t1164 = phi double [ %t79, %entry ], [ %t1152, %loop.latch4 ]
+  %t1165 = phi { %NativeFunction*, i64 }* [ %t70, %entry ], [ %t1153, %loop.latch4 ]
+  %t1166 = phi %NativeFunction* [ %t71, %entry ], [ %t1154, %loop.latch4 ]
+  %t1167 = phi %NativeSourceSpan* [ %t72, %entry ], [ %t1155, %loop.latch4 ]
+  %t1168 = phi %NativeSourceSpan* [ %t73, %entry ], [ %t1156, %loop.latch4 ]
+  %t1169 = phi double [ %t75, %entry ], [ %t1157, %loop.latch4 ]
+  %t1170 = phi double [ %t76, %entry ], [ %t1158, %loop.latch4 ]
+  %t1171 = phi i1 [ %t77, %entry ], [ %t1159, %loop.latch4 ]
+  %t1172 = phi { %NativeStructLayoutField*, i64 }* [ %t74, %entry ], [ %t1160, %loop.latch4 ]
+  %t1173 = phi i1 [ %t78, %entry ], [ %t1161, %loop.latch4 ]
+  %t1174 = phi { %NativeStructField*, i64 }* [ %t69, %entry ], [ %t1162, %loop.latch4 ]
+  store { i8**, i64 }* %t1163, { i8**, i64 }** %l0
+  store double %t1164, double* %l16
+  store { %NativeFunction*, i64 }* %t1165, { %NativeFunction*, i64 }** %l7
+  store %NativeFunction* %t1166, %NativeFunction** %l8
+  store %NativeSourceSpan* %t1167, %NativeSourceSpan** %l9
+  store %NativeSourceSpan* %t1168, %NativeSourceSpan** %l10
+  store double %t1169, double* %l12
+  store double %t1170, double* %l13
+  store i1 %t1171, i1* %l14
+  store { %NativeStructLayoutField*, i64 }* %t1172, { %NativeStructLayoutField*, i64 }** %l11
+  store i1 %t1173, i1* %l15
+  store { %NativeStructField*, i64 }* %t1174, { %NativeStructField*, i64 }** %l6
   br label %loop.body3
 loop.body3:
   %t80 = load double, double* %l16
@@ -4947,1368 +4963,1384 @@ then8:
   %t131 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
   %t132 = bitcast { %NativeStructLayoutField*, i64 }* %t131 to { %NativeStructLayoutField**, i64 }*
   %t133 = insertvalue %NativeStructLayout %t130, { %NativeStructLayoutField**, i64 }* %t132, 2
-  store %NativeStructLayout* null, %NativeStructLayout** %l17
+  %t134 = alloca %NativeStructLayout
+  store %NativeStructLayout %t133, %NativeStructLayout* %t134
+  store %NativeStructLayout* %t134, %NativeStructLayout** %l17
   br label %merge9
 merge9:
-  %t134 = phi %NativeStructLayout* [ null, %then8 ], [ %t126, %then6 ]
-  store %NativeStructLayout* %t134, %NativeStructLayout** %l17
-  %t135 = load i8*, i8** %l4
-  %t136 = insertvalue %NativeStruct undef, i8* %t135, 0
-  %t137 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t138 = bitcast { %NativeStructField*, i64 }* %t137 to { %NativeStructField**, i64 }*
-  %t139 = insertvalue %NativeStruct %t136, { %NativeStructField**, i64 }* %t138, 1
-  %t140 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t141 = bitcast { %NativeFunction*, i64 }* %t140 to { %NativeFunction**, i64 }*
-  %t142 = insertvalue %NativeStruct %t139, { %NativeFunction**, i64 }* %t141, 2
-  %t143 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t144 = insertvalue %NativeStruct %t142, { i8**, i64 }* %t143, 3
-  %t145 = load %NativeStructLayout*, %NativeStructLayout** %l17
-  %t146 = insertvalue %NativeStruct %t144, %NativeStructLayout* %t145, 4
-  %t147 = insertvalue %StructParseResult undef, %NativeStruct* null, 0
-  %t148 = load double, double* %l16
-  %t149 = insertvalue %StructParseResult %t147, double %t148, 1
-  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t151 = insertvalue %StructParseResult %t149, { i8**, i64 }* %t150, 2
-  ret %StructParseResult %t151
+  %t135 = phi %NativeStructLayout* [ %t134, %then8 ], [ %t126, %then6 ]
+  store %NativeStructLayout* %t135, %NativeStructLayout** %l17
+  %t136 = load i8*, i8** %l4
+  %t137 = insertvalue %NativeStruct undef, i8* %t136, 0
+  %t138 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t139 = bitcast { %NativeStructField*, i64 }* %t138 to { %NativeStructField**, i64 }*
+  %t140 = insertvalue %NativeStruct %t137, { %NativeStructField**, i64 }* %t139, 1
+  %t141 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t142 = bitcast { %NativeFunction*, i64 }* %t141 to { %NativeFunction**, i64 }*
+  %t143 = insertvalue %NativeStruct %t140, { %NativeFunction**, i64 }* %t142, 2
+  %t144 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t145 = insertvalue %NativeStruct %t143, { i8**, i64 }* %t144, 3
+  %t146 = load %NativeStructLayout*, %NativeStructLayout** %l17
+  %t147 = insertvalue %NativeStruct %t145, %NativeStructLayout* %t146, 4
+  %t148 = alloca %NativeStruct
+  store %NativeStruct %t147, %NativeStruct* %t148
+  %t149 = insertvalue %StructParseResult undef, %NativeStruct* %t148, 0
+  %t150 = load double, double* %l16
+  %t151 = insertvalue %StructParseResult %t149, double %t150, 1
+  %t152 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t153 = insertvalue %StructParseResult %t151, { i8**, i64 }* %t152, 2
+  ret %StructParseResult %t153
 merge7:
-  %t152 = load double, double* %l16
-  %t153 = fptosi double %t152 to i64
-  %t154 = load { i8**, i64 }, { i8**, i64 }* %lines
-  %t155 = extractvalue { i8**, i64 } %t154, 0
-  %t156 = extractvalue { i8**, i64 } %t154, 1
-  %t157 = icmp uge i64 %t153, %t156
-  ; bounds check: %t157 (if true, out of bounds)
-  %t158 = getelementptr i8*, i8** %t155, i64 %t153
-  %t159 = load i8*, i8** %t158
-  %t160 = call i8* @trim_text(i8* %t159)
-  store i8* %t160, i8** %l18
-  %t162 = load i8*, i8** %l18
-  %t163 = call i64 @sailfin_runtime_string_length(i8* %t162)
-  %t164 = icmp eq i64 %t163, 0
-  br label %logical_or_entry_161
+  %t154 = load double, double* %l16
+  %t155 = fptosi double %t154 to i64
+  %t156 = load { i8**, i64 }, { i8**, i64 }* %lines
+  %t157 = extractvalue { i8**, i64 } %t156, 0
+  %t158 = extractvalue { i8**, i64 } %t156, 1
+  %t159 = icmp uge i64 %t155, %t158
+  ; bounds check: %t159 (if true, out of bounds)
+  %t160 = getelementptr i8*, i8** %t157, i64 %t155
+  %t161 = load i8*, i8** %t160
+  %t162 = call i8* @trim_text(i8* %t161)
+  store i8* %t162, i8** %l18
+  %t164 = load i8*, i8** %l18
+  %t165 = call i64 @sailfin_runtime_string_length(i8* %t164)
+  %t166 = icmp eq i64 %t165, 0
+  br label %logical_or_entry_163
 
-logical_or_entry_161:
-  br i1 %t164, label %logical_or_merge_161, label %logical_or_right_161
+logical_or_entry_163:
+  br i1 %t166, label %logical_or_merge_163, label %logical_or_right_163
 
-logical_or_right_161:
-  %t165 = load i8*, i8** %l18
-  %t166 = alloca [2 x i8], align 1
-  %t167 = getelementptr [2 x i8], [2 x i8]* %t166, i32 0, i32 0
-  store i8 59, i8* %t167
-  %t168 = getelementptr [2 x i8], [2 x i8]* %t166, i32 0, i32 1
-  store i8 0, i8* %t168
-  %t169 = getelementptr [2 x i8], [2 x i8]* %t166, i32 0, i32 0
-  %t170 = call i1 @starts_with(i8* %t165, i8* %t169)
-  br label %logical_or_right_end_161
+logical_or_right_163:
+  %t167 = load i8*, i8** %l18
+  %t168 = alloca [2 x i8], align 1
+  %t169 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 0
+  store i8 59, i8* %t169
+  %t170 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 1
+  store i8 0, i8* %t170
+  %t171 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 0
+  %t172 = call i1 @starts_with(i8* %t167, i8* %t171)
+  br label %logical_or_right_end_163
 
-logical_or_right_end_161:
-  br label %logical_or_merge_161
+logical_or_right_end_163:
+  br label %logical_or_merge_163
 
-logical_or_merge_161:
-  %t171 = phi i1 [ true, %logical_or_entry_161 ], [ %t170, %logical_or_right_end_161 ]
-  %t172 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t173 = load i8*, i8** %l1
-  %t174 = load i8*, i8** %l2
-  %t175 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t176 = load i8*, i8** %l4
-  %t177 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t178 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t179 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t180 = load %NativeFunction*, %NativeFunction** %l8
-  %t181 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t182 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t183 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t184 = load double, double* %l12
-  %t185 = load double, double* %l13
-  %t186 = load i1, i1* %l14
-  %t187 = load i1, i1* %l15
-  %t188 = load double, double* %l16
-  %t189 = load i8*, i8** %l18
-  br i1 %t171, label %then10, label %merge11
-then10:
+logical_or_merge_163:
+  %t173 = phi i1 [ true, %logical_or_entry_163 ], [ %t172, %logical_or_right_end_163 ]
+  %t174 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t175 = load i8*, i8** %l1
+  %t176 = load i8*, i8** %l2
+  %t177 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t178 = load i8*, i8** %l4
+  %t179 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t180 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t181 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t182 = load %NativeFunction*, %NativeFunction** %l8
+  %t183 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t184 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t185 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t186 = load double, double* %l12
+  %t187 = load double, double* %l13
+  %t188 = load i1, i1* %l14
+  %t189 = load i1, i1* %l15
   %t190 = load double, double* %l16
-  %t191 = sitofp i64 1 to double
-  %t192 = fadd double %t190, %t191
-  store double %t192, double* %l16
+  %t191 = load i8*, i8** %l18
+  br i1 %t173, label %then10, label %merge11
+then10:
+  %t192 = load double, double* %l16
+  %t193 = sitofp i64 1 to double
+  %t194 = fadd double %t192, %t193
+  store double %t194, double* %l16
   br label %loop.latch4
 merge11:
-  %t193 = load i8*, i8** %l18
-  %s194 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.194, i32 0, i32 0
-  %t195 = icmp eq i8* %t193, %s194
-  %t196 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t197 = load i8*, i8** %l1
-  %t198 = load i8*, i8** %l2
-  %t199 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t200 = load i8*, i8** %l4
-  %t201 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t202 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t203 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t204 = load %NativeFunction*, %NativeFunction** %l8
-  %t205 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t206 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t207 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t208 = load double, double* %l12
-  %t209 = load double, double* %l13
-  %t210 = load i1, i1* %l14
-  %t211 = load i1, i1* %l15
-  %t212 = load double, double* %l16
-  %t213 = load i8*, i8** %l18
-  br i1 %t195, label %then12, label %merge13
+  %t195 = load i8*, i8** %l18
+  %s196 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.196, i32 0, i32 0
+  %t197 = icmp eq i8* %t195, %s196
+  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t199 = load i8*, i8** %l1
+  %t200 = load i8*, i8** %l2
+  %t201 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t202 = load i8*, i8** %l4
+  %t203 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t204 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t205 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t206 = load %NativeFunction*, %NativeFunction** %l8
+  %t207 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t208 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t209 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t210 = load double, double* %l12
+  %t211 = load double, double* %l13
+  %t212 = load i1, i1* %l14
+  %t213 = load i1, i1* %l15
+  %t214 = load double, double* %l16
+  %t215 = load i8*, i8** %l18
+  br i1 %t197, label %then12, label %merge13
 then12:
-  %t214 = load %NativeFunction*, %NativeFunction** %l8
-  %t215 = bitcast i8* null to %NativeFunction*
-  %t216 = icmp ne %NativeFunction* %t214, %t215
-  %t217 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t218 = load i8*, i8** %l1
-  %t219 = load i8*, i8** %l2
-  %t220 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t221 = load i8*, i8** %l4
-  %t222 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t223 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t224 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t225 = load %NativeFunction*, %NativeFunction** %l8
-  %t226 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t227 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t228 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t229 = load double, double* %l12
-  %t230 = load double, double* %l13
-  %t231 = load i1, i1* %l14
-  %t232 = load i1, i1* %l15
-  %t233 = load double, double* %l16
-  %t234 = load i8*, i8** %l18
-  br i1 %t216, label %then14, label %merge15
+  %t216 = load %NativeFunction*, %NativeFunction** %l8
+  %t217 = bitcast i8* null to %NativeFunction*
+  %t218 = icmp ne %NativeFunction* %t216, %t217
+  %t219 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t220 = load i8*, i8** %l1
+  %t221 = load i8*, i8** %l2
+  %t222 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t223 = load i8*, i8** %l4
+  %t224 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t225 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t226 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t227 = load %NativeFunction*, %NativeFunction** %l8
+  %t228 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t229 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t230 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t231 = load double, double* %l12
+  %t232 = load double, double* %l13
+  %t233 = load i1, i1* %l14
+  %t234 = load i1, i1* %l15
+  %t235 = load double, double* %l16
+  %t236 = load i8*, i8** %l18
+  br i1 %t218, label %then14, label %merge15
 then14:
-  %t235 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s236 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.236, i32 0, i32 0
-  %t237 = load i8*, i8** %l4
-  %t238 = add i8* %s236, %t237
-  %t239 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t235, i8* %t238)
-  store { i8**, i64 }* %t239, { i8**, i64 }** %l0
-  %t240 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t241 = load %NativeFunction*, %NativeFunction** %l8
-  %t242 = load %NativeFunction, %NativeFunction* %t241
-  %t243 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t240, %NativeFunction %t242)
-  store { %NativeFunction*, i64 }* %t243, { %NativeFunction*, i64 }** %l7
-  %t244 = bitcast i8* null to %NativeFunction*
-  store %NativeFunction* %t244, %NativeFunction** %l8
-  %t245 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t245, %NativeSourceSpan** %l9
-  %t246 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t246, %NativeSourceSpan** %l10
+  %t237 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s238 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.238, i32 0, i32 0
+  %t239 = load i8*, i8** %l4
+  %t240 = add i8* %s238, %t239
+  %t241 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t237, i8* %t240)
+  store { i8**, i64 }* %t241, { i8**, i64 }** %l0
+  %t242 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t243 = load %NativeFunction*, %NativeFunction** %l8
+  %t244 = load %NativeFunction, %NativeFunction* %t243
+  %t245 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t242, %NativeFunction %t244)
+  store { %NativeFunction*, i64 }* %t245, { %NativeFunction*, i64 }** %l7
+  %t246 = bitcast i8* null to %NativeFunction*
+  store %NativeFunction* %t246, %NativeFunction** %l8
+  %t247 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t247, %NativeSourceSpan** %l9
+  %t248 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t248, %NativeSourceSpan** %l10
   br label %merge15
 merge15:
-  %t247 = phi { i8**, i64 }* [ %t239, %then14 ], [ %t217, %then12 ]
-  %t248 = phi { %NativeFunction*, i64 }* [ %t243, %then14 ], [ %t224, %then12 ]
-  %t249 = phi %NativeFunction* [ %t244, %then14 ], [ %t225, %then12 ]
-  %t250 = phi %NativeSourceSpan* [ %t245, %then14 ], [ %t226, %then12 ]
-  %t251 = phi %NativeSourceSpan* [ %t246, %then14 ], [ %t227, %then12 ]
-  store { i8**, i64 }* %t247, { i8**, i64 }** %l0
-  store { %NativeFunction*, i64 }* %t248, { %NativeFunction*, i64 }** %l7
-  store %NativeFunction* %t249, %NativeFunction** %l8
-  store %NativeSourceSpan* %t250, %NativeSourceSpan** %l9
-  store %NativeSourceSpan* %t251, %NativeSourceSpan** %l10
-  %t252 = load double, double* %l16
-  %t253 = sitofp i64 1 to double
-  %t254 = fadd double %t252, %t253
-  store double %t254, double* %l16
+  %t249 = phi { i8**, i64 }* [ %t241, %then14 ], [ %t219, %then12 ]
+  %t250 = phi { %NativeFunction*, i64 }* [ %t245, %then14 ], [ %t226, %then12 ]
+  %t251 = phi %NativeFunction* [ %t246, %then14 ], [ %t227, %then12 ]
+  %t252 = phi %NativeSourceSpan* [ %t247, %then14 ], [ %t228, %then12 ]
+  %t253 = phi %NativeSourceSpan* [ %t248, %then14 ], [ %t229, %then12 ]
+  store { i8**, i64 }* %t249, { i8**, i64 }** %l0
+  store { %NativeFunction*, i64 }* %t250, { %NativeFunction*, i64 }** %l7
+  store %NativeFunction* %t251, %NativeFunction** %l8
+  store %NativeSourceSpan* %t252, %NativeSourceSpan** %l9
+  store %NativeSourceSpan* %t253, %NativeSourceSpan** %l10
+  %t254 = load double, double* %l16
+  %t255 = sitofp i64 1 to double
+  %t256 = fadd double %t254, %t255
+  store double %t256, double* %l16
   br label %afterloop5
 merge13:
-  %t255 = load %NativeFunction*, %NativeFunction** %l8
-  %t256 = bitcast i8* null to %NativeFunction*
-  %t257 = icmp ne %NativeFunction* %t255, %t256
-  %t258 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t259 = load i8*, i8** %l1
-  %t260 = load i8*, i8** %l2
-  %t261 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t262 = load i8*, i8** %l4
-  %t263 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t264 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t265 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t266 = load %NativeFunction*, %NativeFunction** %l8
-  %t267 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t268 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t269 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t270 = load double, double* %l12
-  %t271 = load double, double* %l13
-  %t272 = load i1, i1* %l14
-  %t273 = load i1, i1* %l15
-  %t274 = load double, double* %l16
-  %t275 = load i8*, i8** %l18
-  br i1 %t257, label %then16, label %merge17
+  %t257 = load %NativeFunction*, %NativeFunction** %l8
+  %t258 = bitcast i8* null to %NativeFunction*
+  %t259 = icmp ne %NativeFunction* %t257, %t258
+  %t260 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t261 = load i8*, i8** %l1
+  %t262 = load i8*, i8** %l2
+  %t263 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t264 = load i8*, i8** %l4
+  %t265 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t266 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t267 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t268 = load %NativeFunction*, %NativeFunction** %l8
+  %t269 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t270 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t271 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t272 = load double, double* %l12
+  %t273 = load double, double* %l13
+  %t274 = load i1, i1* %l14
+  %t275 = load i1, i1* %l15
+  %t276 = load double, double* %l16
+  %t277 = load i8*, i8** %l18
+  br i1 %t259, label %then16, label %merge17
 then16:
-  %t276 = load i8*, i8** %l18
-  %s277 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.277, i32 0, i32 0
-  %t278 = icmp eq i8* %t276, %s277
-  %t279 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t280 = load i8*, i8** %l1
-  %t281 = load i8*, i8** %l2
-  %t282 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t283 = load i8*, i8** %l4
-  %t284 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t285 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t286 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t287 = load %NativeFunction*, %NativeFunction** %l8
-  %t288 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t289 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t290 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t291 = load double, double* %l12
-  %t292 = load double, double* %l13
-  %t293 = load i1, i1* %l14
-  %t294 = load i1, i1* %l15
-  %t295 = load double, double* %l16
-  %t296 = load i8*, i8** %l18
-  br i1 %t278, label %then18, label %merge19
+  %t278 = load i8*, i8** %l18
+  %s279 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.279, i32 0, i32 0
+  %t280 = icmp eq i8* %t278, %s279
+  %t281 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t282 = load i8*, i8** %l1
+  %t283 = load i8*, i8** %l2
+  %t284 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t285 = load i8*, i8** %l4
+  %t286 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t287 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t288 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t289 = load %NativeFunction*, %NativeFunction** %l8
+  %t290 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t291 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t292 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t293 = load double, double* %l12
+  %t294 = load double, double* %l13
+  %t295 = load i1, i1* %l14
+  %t296 = load i1, i1* %l15
+  %t297 = load double, double* %l16
+  %t298 = load i8*, i8** %l18
+  br i1 %t280, label %then18, label %merge19
 then18:
-  %t297 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t298 = load %NativeFunction*, %NativeFunction** %l8
-  %t299 = load %NativeFunction, %NativeFunction* %t298
-  %t300 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t297, %NativeFunction %t299)
-  store { %NativeFunction*, i64 }* %t300, { %NativeFunction*, i64 }** %l7
-  %t301 = bitcast i8* null to %NativeFunction*
-  store %NativeFunction* %t301, %NativeFunction** %l8
-  %t302 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t302, %NativeSourceSpan** %l9
-  %t303 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t303, %NativeSourceSpan** %l10
-  %t304 = load double, double* %l16
-  %t305 = sitofp i64 1 to double
-  %t306 = fadd double %t304, %t305
-  store double %t306, double* %l16
+  %t299 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t300 = load %NativeFunction*, %NativeFunction** %l8
+  %t301 = load %NativeFunction, %NativeFunction* %t300
+  %t302 = call { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %t299, %NativeFunction %t301)
+  store { %NativeFunction*, i64 }* %t302, { %NativeFunction*, i64 }** %l7
+  %t303 = bitcast i8* null to %NativeFunction*
+  store %NativeFunction* %t303, %NativeFunction** %l8
+  %t304 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t304, %NativeSourceSpan** %l9
+  %t305 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t305, %NativeSourceSpan** %l10
+  %t306 = load double, double* %l16
+  %t307 = sitofp i64 1 to double
+  %t308 = fadd double %t306, %t307
+  store double %t308, double* %l16
   br label %loop.latch4
 merge19:
-  %t307 = load i8*, i8** %l18
-  %s308 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.308, i32 0, i32 0
-  %t309 = call i1 @starts_with(i8* %t307, i8* %s308)
-  %t310 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t311 = load i8*, i8** %l1
-  %t312 = load i8*, i8** %l2
-  %t313 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t314 = load i8*, i8** %l4
-  %t315 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t316 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t317 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t318 = load %NativeFunction*, %NativeFunction** %l8
-  %t319 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t320 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t321 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t322 = load double, double* %l12
-  %t323 = load double, double* %l13
-  %t324 = load i1, i1* %l14
-  %t325 = load i1, i1* %l15
-  %t326 = load double, double* %l16
-  %t327 = load i8*, i8** %l18
-  br i1 %t309, label %then20, label %merge21
-then20:
-  %t328 = load %NativeFunction*, %NativeFunction** %l8
+  %t309 = load i8*, i8** %l18
+  %s310 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.310, i32 0, i32 0
+  %t311 = call i1 @starts_with(i8* %t309, i8* %s310)
+  %t312 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t313 = load i8*, i8** %l1
+  %t314 = load i8*, i8** %l2
+  %t315 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t316 = load i8*, i8** %l4
+  %t317 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t318 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t319 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t320 = load %NativeFunction*, %NativeFunction** %l8
+  %t321 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t322 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t323 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t324 = load double, double* %l12
+  %t325 = load double, double* %l13
+  %t326 = load i1, i1* %l14
+  %t327 = load i1, i1* %l15
+  %t328 = load double, double* %l16
   %t329 = load i8*, i8** %l18
-  %s330 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.330, i32 0, i32 0
-  %t331 = call i8* @strip_prefix(i8* %t329, i8* %s330)
-  %t332 = load %NativeFunction, %NativeFunction* %t328
-  %t333 = call %NativeFunction @apply_meta(%NativeFunction %t332, i8* %t331)
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t334 = load double, double* %l16
-  %t335 = sitofp i64 1 to double
-  %t336 = fadd double %t334, %t335
-  store double %t336, double* %l16
+  br i1 %t311, label %then20, label %merge21
+then20:
+  %t330 = load %NativeFunction*, %NativeFunction** %l8
+  %t331 = load i8*, i8** %l18
+  %s332 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.332, i32 0, i32 0
+  %t333 = call i8* @strip_prefix(i8* %t331, i8* %s332)
+  %t334 = load %NativeFunction, %NativeFunction* %t330
+  %t335 = call %NativeFunction @apply_meta(%NativeFunction %t334, i8* %t333)
+  %t336 = alloca %NativeFunction
+  store %NativeFunction %t335, %NativeFunction* %t336
+  store %NativeFunction* %t336, %NativeFunction** %l8
+  %t337 = load double, double* %l16
+  %t338 = sitofp i64 1 to double
+  %t339 = fadd double %t337, %t338
+  store double %t339, double* %l16
   br label %loop.latch4
 merge21:
-  %t337 = load i8*, i8** %l18
-  %s338 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.338, i32 0, i32 0
-  %t339 = call i1 @starts_with(i8* %t337, i8* %s338)
-  %t340 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t341 = load i8*, i8** %l1
-  %t342 = load i8*, i8** %l2
-  %t343 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t344 = load i8*, i8** %l4
-  %t345 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t346 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t347 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t348 = load %NativeFunction*, %NativeFunction** %l8
-  %t349 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t350 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t351 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t352 = load double, double* %l12
-  %t353 = load double, double* %l13
-  %t354 = load i1, i1* %l14
-  %t355 = load i1, i1* %l15
-  %t356 = load double, double* %l16
-  %t357 = load i8*, i8** %l18
-  br i1 %t339, label %then22, label %merge23
+  %t340 = load i8*, i8** %l18
+  %s341 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.341, i32 0, i32 0
+  %t342 = call i1 @starts_with(i8* %t340, i8* %s341)
+  %t343 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t344 = load i8*, i8** %l1
+  %t345 = load i8*, i8** %l2
+  %t346 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t347 = load i8*, i8** %l4
+  %t348 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t349 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t350 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t351 = load %NativeFunction*, %NativeFunction** %l8
+  %t352 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t353 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t354 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t355 = load double, double* %l12
+  %t356 = load double, double* %l13
+  %t357 = load i1, i1* %l14
+  %t358 = load i1, i1* %l15
+  %t359 = load double, double* %l16
+  %t360 = load i8*, i8** %l18
+  br i1 %t342, label %then22, label %merge23
 then22:
-  %t358 = load i8*, i8** %l18
-  %s359 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.359, i32 0, i32 0
-  %t360 = call i8* @strip_prefix(i8* %t358, i8* %s359)
-  %t361 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t362 = call %NativeParameter* @parse_parameter_entry(i8* %t360, %NativeSourceSpan* %t361)
-  store %NativeParameter* %t362, %NativeParameter** %l19
-  %t363 = load %NativeParameter*, %NativeParameter** %l19
-  %t364 = bitcast i8* null to %NativeParameter*
-  %t365 = icmp eq %NativeParameter* %t363, %t364
-  %t366 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t367 = load i8*, i8** %l1
-  %t368 = load i8*, i8** %l2
-  %t369 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t370 = load i8*, i8** %l4
-  %t371 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t372 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t373 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t374 = load %NativeFunction*, %NativeFunction** %l8
-  %t375 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t376 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t377 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t378 = load double, double* %l12
-  %t379 = load double, double* %l13
-  %t380 = load i1, i1* %l14
-  %t381 = load i1, i1* %l15
-  %t382 = load double, double* %l16
-  %t383 = load i8*, i8** %l18
-  %t384 = load %NativeParameter*, %NativeParameter** %l19
-  br i1 %t365, label %then24, label %else25
+  %t361 = load i8*, i8** %l18
+  %s362 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.362, i32 0, i32 0
+  %t363 = call i8* @strip_prefix(i8* %t361, i8* %s362)
+  %t364 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t365 = call %NativeParameter* @parse_parameter_entry(i8* %t363, %NativeSourceSpan* %t364)
+  store %NativeParameter* %t365, %NativeParameter** %l19
+  %t366 = load %NativeParameter*, %NativeParameter** %l19
+  %t367 = bitcast i8* null to %NativeParameter*
+  %t368 = icmp eq %NativeParameter* %t366, %t367
+  %t369 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t370 = load i8*, i8** %l1
+  %t371 = load i8*, i8** %l2
+  %t372 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t373 = load i8*, i8** %l4
+  %t374 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t375 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t376 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t377 = load %NativeFunction*, %NativeFunction** %l8
+  %t378 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t379 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t380 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t381 = load double, double* %l12
+  %t382 = load double, double* %l13
+  %t383 = load i1, i1* %l14
+  %t384 = load i1, i1* %l15
+  %t385 = load double, double* %l16
+  %t386 = load i8*, i8** %l18
+  %t387 = load %NativeParameter*, %NativeParameter** %l19
+  br i1 %t368, label %then24, label %else25
 then24:
-  %t385 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s386 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.386, i32 0, i32 0
-  %t387 = load i8*, i8** %l18
-  %t388 = add i8* %s386, %t387
-  %t389 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t385, i8* %t388)
-  store { i8**, i64 }* %t389, { i8**, i64 }** %l0
+  %t388 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s389 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.389, i32 0, i32 0
+  %t390 = load i8*, i8** %l18
+  %t391 = add i8* %s389, %t390
+  %t392 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t388, i8* %t391)
+  store { i8**, i64 }* %t392, { i8**, i64 }** %l0
   br label %merge26
 else25:
-  %t390 = load %NativeFunction*, %NativeFunction** %l8
-  %t391 = load %NativeParameter*, %NativeParameter** %l19
-  %t392 = load %NativeFunction, %NativeFunction* %t390
-  %t393 = load %NativeParameter, %NativeParameter* %t391
-  %t394 = call %NativeFunction @append_parameter(%NativeFunction %t392, %NativeParameter %t393)
-  store %NativeFunction* null, %NativeFunction** %l8
+  %t393 = load %NativeFunction*, %NativeFunction** %l8
+  %t394 = load %NativeParameter*, %NativeParameter** %l19
+  %t395 = load %NativeFunction, %NativeFunction* %t393
+  %t396 = load %NativeParameter, %NativeParameter* %t394
+  %t397 = call %NativeFunction @append_parameter(%NativeFunction %t395, %NativeParameter %t396)
+  %t398 = alloca %NativeFunction
+  store %NativeFunction %t397, %NativeFunction* %t398
+  store %NativeFunction* %t398, %NativeFunction** %l8
   br label %merge26
 merge26:
-  %t395 = phi { i8**, i64 }* [ %t389, %then24 ], [ %t366, %else25 ]
-  %t396 = phi %NativeFunction* [ %t374, %then24 ], [ null, %else25 ]
-  store { i8**, i64 }* %t395, { i8**, i64 }** %l0
-  store %NativeFunction* %t396, %NativeFunction** %l8
-  %t397 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t397, %NativeSourceSpan** %l9
-  %t398 = load double, double* %l16
-  %t399 = sitofp i64 1 to double
-  %t400 = fadd double %t398, %t399
-  store double %t400, double* %l16
+  %t399 = phi { i8**, i64 }* [ %t392, %then24 ], [ %t369, %else25 ]
+  %t400 = phi %NativeFunction* [ %t377, %then24 ], [ %t398, %else25 ]
+  store { i8**, i64 }* %t399, { i8**, i64 }** %l0
+  store %NativeFunction* %t400, %NativeFunction** %l8
+  %t401 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t401, %NativeSourceSpan** %l9
+  %t402 = load double, double* %l16
+  %t403 = sitofp i64 1 to double
+  %t404 = fadd double %t402, %t403
+  store double %t404, double* %l16
   br label %loop.latch4
 merge23:
-  %t401 = load i8*, i8** %l18
-  %s402 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.402, i32 0, i32 0
-  %t403 = call i1 @starts_with(i8* %t401, i8* %s402)
-  %t404 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t405 = load i8*, i8** %l1
-  %t406 = load i8*, i8** %l2
-  %t407 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t408 = load i8*, i8** %l4
-  %t409 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t410 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t411 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t412 = load %NativeFunction*, %NativeFunction** %l8
-  %t413 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t414 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t415 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t416 = load double, double* %l12
-  %t417 = load double, double* %l13
-  %t418 = load i1, i1* %l14
-  %t419 = load i1, i1* %l15
-  %t420 = load double, double* %l16
-  %t421 = load i8*, i8** %l18
-  br i1 %t403, label %then27, label %merge28
+  %t405 = load i8*, i8** %l18
+  %s406 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.406, i32 0, i32 0
+  %t407 = call i1 @starts_with(i8* %t405, i8* %s406)
+  %t408 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t409 = load i8*, i8** %l1
+  %t410 = load i8*, i8** %l2
+  %t411 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t412 = load i8*, i8** %l4
+  %t413 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t414 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t415 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t416 = load %NativeFunction*, %NativeFunction** %l8
+  %t417 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t418 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t419 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t420 = load double, double* %l12
+  %t421 = load double, double* %l13
+  %t422 = load i1, i1* %l14
+  %t423 = load i1, i1* %l15
+  %t424 = load double, double* %l16
+  %t425 = load i8*, i8** %l18
+  br i1 %t407, label %then27, label %merge28
 then27:
-  %t422 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s423 = getelementptr inbounds [37 x i8], [37 x i8]* @.str.423, i32 0, i32 0
-  %t424 = load i8*, i8** %l4
-  %t425 = add i8* %s423, %t424
-  %t426 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t422, i8* %t425)
-  store { i8**, i64 }* %t426, { i8**, i64 }** %l0
-  %t427 = load double, double* %l16
-  %t428 = sitofp i64 1 to double
-  %t429 = fadd double %t427, %t428
-  store double %t429, double* %l16
+  %t426 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s427 = getelementptr inbounds [37 x i8], [37 x i8]* @.str.427, i32 0, i32 0
+  %t428 = load i8*, i8** %l4
+  %t429 = add i8* %s427, %t428
+  %t430 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t426, i8* %t429)
+  store { i8**, i64 }* %t430, { i8**, i64 }** %l0
+  %t431 = load double, double* %l16
+  %t432 = sitofp i64 1 to double
+  %t433 = fadd double %t431, %t432
+  store double %t433, double* %l16
   br label %loop.latch4
 merge28:
-  %t430 = load i8*, i8** %l18
-  %s431 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.431, i32 0, i32 0
-  %t432 = call i1 @starts_with(i8* %t430, i8* %s431)
-  %t433 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t434 = load i8*, i8** %l1
-  %t435 = load i8*, i8** %l2
-  %t436 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t437 = load i8*, i8** %l4
-  %t438 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t439 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t440 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t441 = load %NativeFunction*, %NativeFunction** %l8
-  %t442 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t443 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t444 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t445 = load double, double* %l12
-  %t446 = load double, double* %l13
-  %t447 = load i1, i1* %l14
-  %t448 = load i1, i1* %l15
-  %t449 = load double, double* %l16
-  %t450 = load i8*, i8** %l18
-  br i1 %t432, label %then29, label %merge30
+  %t434 = load i8*, i8** %l18
+  %s435 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.435, i32 0, i32 0
+  %t436 = call i1 @starts_with(i8* %t434, i8* %s435)
+  %t437 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t438 = load i8*, i8** %l1
+  %t439 = load i8*, i8** %l2
+  %t440 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t441 = load i8*, i8** %l4
+  %t442 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t443 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t444 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t445 = load %NativeFunction*, %NativeFunction** %l8
+  %t446 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t447 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t448 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t449 = load double, double* %l12
+  %t450 = load double, double* %l13
+  %t451 = load i1, i1* %l14
+  %t452 = load i1, i1* %l15
+  %t453 = load double, double* %l16
+  %t454 = load i8*, i8** %l18
+  br i1 %t436, label %then29, label %merge30
 then29:
-  %t451 = load i8*, i8** %l18
-  %s452 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.452, i32 0, i32 0
-  %t453 = call i8* @strip_prefix(i8* %t451, i8* %s452)
-  %t454 = call %NativeSourceSpan* @parse_source_span(i8* %t453)
-  store %NativeSourceSpan* %t454, %NativeSourceSpan** %l20
-  %t455 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
-  %t456 = bitcast i8* null to %NativeSourceSpan*
-  %t457 = icmp eq %NativeSourceSpan* %t455, %t456
-  %t458 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t459 = load i8*, i8** %l1
-  %t460 = load i8*, i8** %l2
-  %t461 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t462 = load i8*, i8** %l4
-  %t463 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t464 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t465 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t466 = load %NativeFunction*, %NativeFunction** %l8
-  %t467 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t468 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t469 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t470 = load double, double* %l12
-  %t471 = load double, double* %l13
-  %t472 = load i1, i1* %l14
-  %t473 = load i1, i1* %l15
-  %t474 = load double, double* %l16
-  %t475 = load i8*, i8** %l18
-  %t476 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
-  br i1 %t457, label %then31, label %else32
-then31:
-  %t477 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s478 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.478, i32 0, i32 0
+  %t455 = load i8*, i8** %l18
+  %s456 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.456, i32 0, i32 0
+  %t457 = call i8* @strip_prefix(i8* %t455, i8* %s456)
+  %t458 = call %NativeSourceSpan* @parse_source_span(i8* %t457)
+  store %NativeSourceSpan* %t458, %NativeSourceSpan** %l20
+  %t459 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
+  %t460 = bitcast i8* null to %NativeSourceSpan*
+  %t461 = icmp eq %NativeSourceSpan* %t459, %t460
+  %t462 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t463 = load i8*, i8** %l1
+  %t464 = load i8*, i8** %l2
+  %t465 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t466 = load i8*, i8** %l4
+  %t467 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t468 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t469 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t470 = load %NativeFunction*, %NativeFunction** %l8
+  %t471 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t472 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t473 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t474 = load double, double* %l12
+  %t475 = load double, double* %l13
+  %t476 = load i1, i1* %l14
+  %t477 = load i1, i1* %l15
+  %t478 = load double, double* %l16
   %t479 = load i8*, i8** %l18
-  %t480 = add i8* %s478, %t479
-  %t481 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t477, i8* %t480)
-  store { i8**, i64 }* %t481, { i8**, i64 }** %l0
+  %t480 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
+  br i1 %t461, label %then31, label %else32
+then31:
+  %t481 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s482 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.482, i32 0, i32 0
+  %t483 = load i8*, i8** %l18
+  %t484 = add i8* %s482, %t483
+  %t485 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t481, i8* %t484)
+  store { i8**, i64 }* %t485, { i8**, i64 }** %l0
   br label %merge33
 else32:
-  %t482 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
-  store %NativeSourceSpan* %t482, %NativeSourceSpan** %l9
+  %t486 = load %NativeSourceSpan*, %NativeSourceSpan** %l20
+  store %NativeSourceSpan* %t486, %NativeSourceSpan** %l9
   br label %merge33
 merge33:
-  %t483 = phi { i8**, i64 }* [ %t481, %then31 ], [ %t458, %else32 ]
-  %t484 = phi %NativeSourceSpan* [ %t467, %then31 ], [ %t482, %else32 ]
-  store { i8**, i64 }* %t483, { i8**, i64 }** %l0
-  store %NativeSourceSpan* %t484, %NativeSourceSpan** %l9
-  %t485 = load double, double* %l16
-  %t486 = sitofp i64 1 to double
-  %t487 = fadd double %t485, %t486
-  store double %t487, double* %l16
+  %t487 = phi { i8**, i64 }* [ %t485, %then31 ], [ %t462, %else32 ]
+  %t488 = phi %NativeSourceSpan* [ %t471, %then31 ], [ %t486, %else32 ]
+  store { i8**, i64 }* %t487, { i8**, i64 }** %l0
+  store %NativeSourceSpan* %t488, %NativeSourceSpan** %l9
+  %t489 = load double, double* %l16
+  %t490 = sitofp i64 1 to double
+  %t491 = fadd double %t489, %t490
+  store double %t491, double* %l16
   br label %loop.latch4
 merge30:
-  %t488 = load i8*, i8** %l18
-  %s489 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.489, i32 0, i32 0
-  %t490 = call i1 @starts_with(i8* %t488, i8* %s489)
-  %t491 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t492 = load i8*, i8** %l1
-  %t493 = load i8*, i8** %l2
-  %t494 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t495 = load i8*, i8** %l4
-  %t496 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t497 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t498 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t499 = load %NativeFunction*, %NativeFunction** %l8
-  %t500 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t501 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t502 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t503 = load double, double* %l12
-  %t504 = load double, double* %l13
-  %t505 = load i1, i1* %l14
-  %t506 = load i1, i1* %l15
-  %t507 = load double, double* %l16
-  %t508 = load i8*, i8** %l18
-  br i1 %t490, label %then34, label %merge35
+  %t492 = load i8*, i8** %l18
+  %s493 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.493, i32 0, i32 0
+  %t494 = call i1 @starts_with(i8* %t492, i8* %s493)
+  %t495 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t496 = load i8*, i8** %l1
+  %t497 = load i8*, i8** %l2
+  %t498 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t499 = load i8*, i8** %l4
+  %t500 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t501 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t502 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t503 = load %NativeFunction*, %NativeFunction** %l8
+  %t504 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t505 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t506 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t507 = load double, double* %l12
+  %t508 = load double, double* %l13
+  %t509 = load i1, i1* %l14
+  %t510 = load i1, i1* %l15
+  %t511 = load double, double* %l16
+  %t512 = load i8*, i8** %l18
+  br i1 %t494, label %then34, label %merge35
 then34:
-  %t509 = load i8*, i8** %l18
-  %s510 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.510, i32 0, i32 0
-  %t511 = call i8* @strip_prefix(i8* %t509, i8* %s510)
-  %t512 = call %NativeSourceSpan* @parse_source_span(i8* %t511)
-  store %NativeSourceSpan* %t512, %NativeSourceSpan** %l21
-  %t513 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
-  %t514 = bitcast i8* null to %NativeSourceSpan*
-  %t515 = icmp eq %NativeSourceSpan* %t513, %t514
-  %t516 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t517 = load i8*, i8** %l1
-  %t518 = load i8*, i8** %l2
-  %t519 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t520 = load i8*, i8** %l4
-  %t521 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t522 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t523 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t524 = load %NativeFunction*, %NativeFunction** %l8
-  %t525 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t526 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t527 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t528 = load double, double* %l12
-  %t529 = load double, double* %l13
-  %t530 = load i1, i1* %l14
-  %t531 = load i1, i1* %l15
-  %t532 = load double, double* %l16
-  %t533 = load i8*, i8** %l18
-  %t534 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
-  br i1 %t515, label %then36, label %else37
-then36:
-  %t535 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s536 = getelementptr inbounds [44 x i8], [44 x i8]* @.str.536, i32 0, i32 0
+  %t513 = load i8*, i8** %l18
+  %s514 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.514, i32 0, i32 0
+  %t515 = call i8* @strip_prefix(i8* %t513, i8* %s514)
+  %t516 = call %NativeSourceSpan* @parse_source_span(i8* %t515)
+  store %NativeSourceSpan* %t516, %NativeSourceSpan** %l21
+  %t517 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
+  %t518 = bitcast i8* null to %NativeSourceSpan*
+  %t519 = icmp eq %NativeSourceSpan* %t517, %t518
+  %t520 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t521 = load i8*, i8** %l1
+  %t522 = load i8*, i8** %l2
+  %t523 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t524 = load i8*, i8** %l4
+  %t525 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t526 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t527 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t528 = load %NativeFunction*, %NativeFunction** %l8
+  %t529 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t530 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t531 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t532 = load double, double* %l12
+  %t533 = load double, double* %l13
+  %t534 = load i1, i1* %l14
+  %t535 = load i1, i1* %l15
+  %t536 = load double, double* %l16
   %t537 = load i8*, i8** %l18
-  %t538 = add i8* %s536, %t537
-  %t539 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t535, i8* %t538)
-  store { i8**, i64 }* %t539, { i8**, i64 }** %l0
+  %t538 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
+  br i1 %t519, label %then36, label %else37
+then36:
+  %t539 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s540 = getelementptr inbounds [44 x i8], [44 x i8]* @.str.540, i32 0, i32 0
+  %t541 = load i8*, i8** %l18
+  %t542 = add i8* %s540, %t541
+  %t543 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t539, i8* %t542)
+  store { i8**, i64 }* %t543, { i8**, i64 }** %l0
   br label %merge38
 else37:
-  %t540 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
-  store %NativeSourceSpan* %t540, %NativeSourceSpan** %l10
+  %t544 = load %NativeSourceSpan*, %NativeSourceSpan** %l21
+  store %NativeSourceSpan* %t544, %NativeSourceSpan** %l10
   br label %merge38
 merge38:
-  %t541 = phi { i8**, i64 }* [ %t539, %then36 ], [ %t516, %else37 ]
-  %t542 = phi %NativeSourceSpan* [ %t526, %then36 ], [ %t540, %else37 ]
-  store { i8**, i64 }* %t541, { i8**, i64 }** %l0
-  store %NativeSourceSpan* %t542, %NativeSourceSpan** %l10
-  %t543 = load double, double* %l16
-  %t544 = sitofp i64 1 to double
-  %t545 = fadd double %t543, %t544
-  store double %t545, double* %l16
+  %t545 = phi { i8**, i64 }* [ %t543, %then36 ], [ %t520, %else37 ]
+  %t546 = phi %NativeSourceSpan* [ %t530, %then36 ], [ %t544, %else37 ]
+  store { i8**, i64 }* %t545, { i8**, i64 }** %l0
+  store %NativeSourceSpan* %t546, %NativeSourceSpan** %l10
+  %t547 = load double, double* %l16
+  %t548 = sitofp i64 1 to double
+  %t549 = fadd double %t547, %t548
+  store double %t549, double* %l16
   br label %loop.latch4
 merge35:
-  %t546 = load i8*, i8** %l18
-  %t547 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t548 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t549 = call %InstructionParseResult @parse_instruction(i8* %t546, %NativeSourceSpan* %t547, %NativeSourceSpan* %t548)
-  store %InstructionParseResult %t549, %InstructionParseResult* %l22
-  %t550 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t551 = extractvalue %InstructionParseResult %t550, 1
-  %t552 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t553 = load i8*, i8** %l1
-  %t554 = load i8*, i8** %l2
-  %t555 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t556 = load i8*, i8** %l4
-  %t557 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t558 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t559 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t560 = load %NativeFunction*, %NativeFunction** %l8
-  %t561 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t562 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t563 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t564 = load double, double* %l12
-  %t565 = load double, double* %l13
-  %t566 = load i1, i1* %l14
-  %t567 = load i1, i1* %l15
-  %t568 = load double, double* %l16
-  %t569 = load i8*, i8** %l18
-  %t570 = load %InstructionParseResult, %InstructionParseResult* %l22
-  br i1 %t551, label %then39, label %else40
+  %t550 = load i8*, i8** %l18
+  %t551 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t552 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t553 = call %InstructionParseResult @parse_instruction(i8* %t550, %NativeSourceSpan* %t551, %NativeSourceSpan* %t552)
+  store %InstructionParseResult %t553, %InstructionParseResult* %l22
+  %t554 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t555 = extractvalue %InstructionParseResult %t554, 1
+  %t556 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t557 = load i8*, i8** %l1
+  %t558 = load i8*, i8** %l2
+  %t559 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t560 = load i8*, i8** %l4
+  %t561 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t562 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t563 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t564 = load %NativeFunction*, %NativeFunction** %l8
+  %t565 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t566 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t567 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t568 = load double, double* %l12
+  %t569 = load double, double* %l13
+  %t570 = load i1, i1* %l14
+  %t571 = load i1, i1* %l15
+  %t572 = load double, double* %l16
+  %t573 = load i8*, i8** %l18
+  %t574 = load %InstructionParseResult, %InstructionParseResult* %l22
+  br i1 %t555, label %then39, label %else40
 then39:
-  %t571 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t571, %NativeSourceSpan** %l9
+  %t575 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t575, %NativeSourceSpan** %l9
   br label %merge41
 else40:
-  %t572 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t573 = bitcast i8* null to %NativeSourceSpan*
-  %t574 = icmp ne %NativeSourceSpan* %t572, %t573
-  %t575 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t576 = load i8*, i8** %l1
-  %t577 = load i8*, i8** %l2
-  %t578 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t579 = load i8*, i8** %l4
-  %t580 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t581 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t582 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t583 = load %NativeFunction*, %NativeFunction** %l8
-  %t584 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t585 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t586 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t587 = load double, double* %l12
-  %t588 = load double, double* %l13
-  %t589 = load i1, i1* %l14
-  %t590 = load i1, i1* %l15
-  %t591 = load double, double* %l16
-  %t592 = load i8*, i8** %l18
-  %t593 = load %InstructionParseResult, %InstructionParseResult* %l22
-  br i1 %t574, label %then42, label %merge43
-then42:
-  %t594 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s595 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.595, i32 0, i32 0
+  %t576 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t577 = bitcast i8* null to %NativeSourceSpan*
+  %t578 = icmp ne %NativeSourceSpan* %t576, %t577
+  %t579 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t580 = load i8*, i8** %l1
+  %t581 = load i8*, i8** %l2
+  %t582 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t583 = load i8*, i8** %l4
+  %t584 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t585 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t586 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t587 = load %NativeFunction*, %NativeFunction** %l8
+  %t588 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t589 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t590 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t591 = load double, double* %l12
+  %t592 = load double, double* %l13
+  %t593 = load i1, i1* %l14
+  %t594 = load i1, i1* %l15
+  %t595 = load double, double* %l16
   %t596 = load i8*, i8** %l18
-  %t597 = add i8* %s595, %t596
-  %t598 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t594, i8* %t597)
-  store { i8**, i64 }* %t598, { i8**, i64 }** %l0
-  %t599 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t599, %NativeSourceSpan** %l9
+  %t597 = load %InstructionParseResult, %InstructionParseResult* %l22
+  br i1 %t578, label %then42, label %merge43
+then42:
+  %t598 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s599 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.599, i32 0, i32 0
+  %t600 = load i8*, i8** %l18
+  %t601 = add i8* %s599, %t600
+  %t602 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t598, i8* %t601)
+  store { i8**, i64 }* %t602, { i8**, i64 }** %l0
+  %t603 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t603, %NativeSourceSpan** %l9
   br label %merge43
 merge43:
-  %t600 = phi { i8**, i64 }* [ %t598, %then42 ], [ %t575, %else40 ]
-  %t601 = phi %NativeSourceSpan* [ %t599, %then42 ], [ %t584, %else40 ]
-  store { i8**, i64 }* %t600, { i8**, i64 }** %l0
-  store %NativeSourceSpan* %t601, %NativeSourceSpan** %l9
+  %t604 = phi { i8**, i64 }* [ %t602, %then42 ], [ %t579, %else40 ]
+  %t605 = phi %NativeSourceSpan* [ %t603, %then42 ], [ %t588, %else40 ]
+  store { i8**, i64 }* %t604, { i8**, i64 }** %l0
+  store %NativeSourceSpan* %t605, %NativeSourceSpan** %l9
   br label %merge41
 merge41:
-  %t602 = phi %NativeSourceSpan* [ %t571, %then39 ], [ %t599, %else40 ]
-  %t603 = phi { i8**, i64 }* [ %t552, %then39 ], [ %t598, %else40 ]
-  store %NativeSourceSpan* %t602, %NativeSourceSpan** %l9
-  store { i8**, i64 }* %t603, { i8**, i64 }** %l0
-  %t604 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t605 = extractvalue %InstructionParseResult %t604, 2
-  %t606 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t607 = load i8*, i8** %l1
-  %t608 = load i8*, i8** %l2
-  %t609 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t610 = load i8*, i8** %l4
-  %t611 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t612 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t613 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t614 = load %NativeFunction*, %NativeFunction** %l8
-  %t615 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t616 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t617 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t618 = load double, double* %l12
-  %t619 = load double, double* %l13
-  %t620 = load i1, i1* %l14
-  %t621 = load i1, i1* %l15
-  %t622 = load double, double* %l16
-  %t623 = load i8*, i8** %l18
-  %t624 = load %InstructionParseResult, %InstructionParseResult* %l22
-  br i1 %t605, label %then44, label %else45
+  %t606 = phi %NativeSourceSpan* [ %t575, %then39 ], [ %t603, %else40 ]
+  %t607 = phi { i8**, i64 }* [ %t556, %then39 ], [ %t602, %else40 ]
+  store %NativeSourceSpan* %t606, %NativeSourceSpan** %l9
+  store { i8**, i64 }* %t607, { i8**, i64 }** %l0
+  %t608 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t609 = extractvalue %InstructionParseResult %t608, 2
+  %t610 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t611 = load i8*, i8** %l1
+  %t612 = load i8*, i8** %l2
+  %t613 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t614 = load i8*, i8** %l4
+  %t615 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t616 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t617 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t618 = load %NativeFunction*, %NativeFunction** %l8
+  %t619 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t620 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t621 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t622 = load double, double* %l12
+  %t623 = load double, double* %l13
+  %t624 = load i1, i1* %l14
+  %t625 = load i1, i1* %l15
+  %t626 = load double, double* %l16
+  %t627 = load i8*, i8** %l18
+  %t628 = load %InstructionParseResult, %InstructionParseResult* %l22
+  br i1 %t609, label %then44, label %else45
 then44:
-  %t625 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t625, %NativeSourceSpan** %l10
+  %t629 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t629, %NativeSourceSpan** %l10
   br label %merge46
 else45:
-  %t626 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t627 = bitcast i8* null to %NativeSourceSpan*
-  %t628 = icmp ne %NativeSourceSpan* %t626, %t627
-  %t629 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t630 = load i8*, i8** %l1
-  %t631 = load i8*, i8** %l2
-  %t632 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t633 = load i8*, i8** %l4
-  %t634 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t635 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t636 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t637 = load %NativeFunction*, %NativeFunction** %l8
-  %t638 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t639 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t640 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t641 = load double, double* %l12
-  %t642 = load double, double* %l13
-  %t643 = load i1, i1* %l14
-  %t644 = load i1, i1* %l15
-  %t645 = load double, double* %l16
-  %t646 = load i8*, i8** %l18
-  %t647 = load %InstructionParseResult, %InstructionParseResult* %l22
-  br i1 %t628, label %then47, label %merge48
-then47:
-  %t648 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s649 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.649, i32 0, i32 0
+  %t630 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t631 = bitcast i8* null to %NativeSourceSpan*
+  %t632 = icmp ne %NativeSourceSpan* %t630, %t631
+  %t633 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t634 = load i8*, i8** %l1
+  %t635 = load i8*, i8** %l2
+  %t636 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t637 = load i8*, i8** %l4
+  %t638 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t639 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t640 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t641 = load %NativeFunction*, %NativeFunction** %l8
+  %t642 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t643 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t644 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t645 = load double, double* %l12
+  %t646 = load double, double* %l13
+  %t647 = load i1, i1* %l14
+  %t648 = load i1, i1* %l15
+  %t649 = load double, double* %l16
   %t650 = load i8*, i8** %l18
-  %t651 = add i8* %s649, %t650
-  %t652 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t648, i8* %t651)
-  store { i8**, i64 }* %t652, { i8**, i64 }** %l0
-  %t653 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t653, %NativeSourceSpan** %l10
+  %t651 = load %InstructionParseResult, %InstructionParseResult* %l22
+  br i1 %t632, label %then47, label %merge48
+then47:
+  %t652 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s653 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.653, i32 0, i32 0
+  %t654 = load i8*, i8** %l18
+  %t655 = add i8* %s653, %t654
+  %t656 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t652, i8* %t655)
+  store { i8**, i64 }* %t656, { i8**, i64 }** %l0
+  %t657 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t657, %NativeSourceSpan** %l10
   br label %merge48
 merge48:
-  %t654 = phi { i8**, i64 }* [ %t652, %then47 ], [ %t629, %else45 ]
-  %t655 = phi %NativeSourceSpan* [ %t653, %then47 ], [ %t639, %else45 ]
-  store { i8**, i64 }* %t654, { i8**, i64 }** %l0
-  store %NativeSourceSpan* %t655, %NativeSourceSpan** %l10
+  %t658 = phi { i8**, i64 }* [ %t656, %then47 ], [ %t633, %else45 ]
+  %t659 = phi %NativeSourceSpan* [ %t657, %then47 ], [ %t643, %else45 ]
+  store { i8**, i64 }* %t658, { i8**, i64 }** %l0
+  store %NativeSourceSpan* %t659, %NativeSourceSpan** %l10
   br label %merge46
 merge46:
-  %t656 = phi %NativeSourceSpan* [ %t625, %then44 ], [ %t653, %else45 ]
-  %t657 = phi { i8**, i64 }* [ %t606, %then44 ], [ %t652, %else45 ]
-  store %NativeSourceSpan* %t656, %NativeSourceSpan** %l10
-  store { i8**, i64 }* %t657, { i8**, i64 }** %l0
-  %t658 = sitofp i64 0 to double
-  store double %t658, double* %l23
-  %t659 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t660 = load i8*, i8** %l1
-  %t661 = load i8*, i8** %l2
-  %t662 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t663 = load i8*, i8** %l4
-  %t664 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t665 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t666 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t667 = load %NativeFunction*, %NativeFunction** %l8
-  %t668 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t669 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t670 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t671 = load double, double* %l12
-  %t672 = load double, double* %l13
-  %t673 = load i1, i1* %l14
-  %t674 = load i1, i1* %l15
-  %t675 = load double, double* %l16
-  %t676 = load i8*, i8** %l18
-  %t677 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t678 = load double, double* %l23
+  %t660 = phi %NativeSourceSpan* [ %t629, %then44 ], [ %t657, %else45 ]
+  %t661 = phi { i8**, i64 }* [ %t610, %then44 ], [ %t656, %else45 ]
+  store %NativeSourceSpan* %t660, %NativeSourceSpan** %l10
+  store { i8**, i64 }* %t661, { i8**, i64 }** %l0
+  %t662 = sitofp i64 0 to double
+  store double %t662, double* %l23
+  %t663 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t664 = load i8*, i8** %l1
+  %t665 = load i8*, i8** %l2
+  %t666 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t667 = load i8*, i8** %l4
+  %t668 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t669 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t670 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t671 = load %NativeFunction*, %NativeFunction** %l8
+  %t672 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t673 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t674 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t675 = load double, double* %l12
+  %t676 = load double, double* %l13
+  %t677 = load i1, i1* %l14
+  %t678 = load i1, i1* %l15
+  %t679 = load double, double* %l16
+  %t680 = load i8*, i8** %l18
+  %t681 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t682 = load double, double* %l23
   br label %loop.header49
 loop.header49:
-  %t725 = phi %NativeFunction* [ %t667, %then16 ], [ %t723, %loop.latch51 ]
-  %t726 = phi double [ %t678, %then16 ], [ %t724, %loop.latch51 ]
-  store %NativeFunction* %t725, %NativeFunction** %l8
-  store double %t726, double* %l23
+  %t730 = phi %NativeFunction* [ %t671, %then16 ], [ %t728, %loop.latch51 ]
+  %t731 = phi double [ %t682, %then16 ], [ %t729, %loop.latch51 ]
+  store %NativeFunction* %t730, %NativeFunction** %l8
+  store double %t731, double* %l23
   br label %loop.body50
 loop.body50:
-  %t679 = load double, double* %l23
-  %t680 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t681 = extractvalue %InstructionParseResult %t680, 0
-  %t682 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t681
-  %t683 = extractvalue { %NativeInstruction**, i64 } %t682, 1
-  %t684 = sitofp i64 %t683 to double
-  %t685 = fcmp oge double %t679, %t684
-  %t686 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t687 = load i8*, i8** %l1
-  %t688 = load i8*, i8** %l2
-  %t689 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t690 = load i8*, i8** %l4
-  %t691 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t692 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t693 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t694 = load %NativeFunction*, %NativeFunction** %l8
-  %t695 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t696 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t697 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t698 = load double, double* %l12
-  %t699 = load double, double* %l13
-  %t700 = load i1, i1* %l14
-  %t701 = load i1, i1* %l15
-  %t702 = load double, double* %l16
-  %t703 = load i8*, i8** %l18
-  %t704 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t705 = load double, double* %l23
-  br i1 %t685, label %then53, label %merge54
+  %t683 = load double, double* %l23
+  %t684 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t685 = extractvalue %InstructionParseResult %t684, 0
+  %t686 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t685
+  %t687 = extractvalue { %NativeInstruction**, i64 } %t686, 1
+  %t688 = sitofp i64 %t687 to double
+  %t689 = fcmp oge double %t683, %t688
+  %t690 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t691 = load i8*, i8** %l1
+  %t692 = load i8*, i8** %l2
+  %t693 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t694 = load i8*, i8** %l4
+  %t695 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t696 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t697 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t698 = load %NativeFunction*, %NativeFunction** %l8
+  %t699 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t700 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t701 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t702 = load double, double* %l12
+  %t703 = load double, double* %l13
+  %t704 = load i1, i1* %l14
+  %t705 = load i1, i1* %l15
+  %t706 = load double, double* %l16
+  %t707 = load i8*, i8** %l18
+  %t708 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t709 = load double, double* %l23
+  br i1 %t689, label %then53, label %merge54
 then53:
   br label %afterloop52
 merge54:
-  %t706 = load %NativeFunction*, %NativeFunction** %l8
-  %t707 = load %InstructionParseResult, %InstructionParseResult* %l22
-  %t708 = extractvalue %InstructionParseResult %t707, 0
-  %t709 = load double, double* %l23
-  %t710 = fptosi double %t709 to i64
-  %t711 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t708
-  %t712 = extractvalue { %NativeInstruction**, i64 } %t711, 0
-  %t713 = extractvalue { %NativeInstruction**, i64 } %t711, 1
-  %t714 = icmp uge i64 %t710, %t713
-  ; bounds check: %t714 (if true, out of bounds)
-  %t715 = getelementptr %NativeInstruction*, %NativeInstruction** %t712, i64 %t710
-  %t716 = load %NativeInstruction*, %NativeInstruction** %t715
-  %t717 = load %NativeFunction, %NativeFunction* %t706
-  %t718 = load %NativeInstruction, %NativeInstruction* %t716
-  %t719 = call %NativeFunction @append_instruction(%NativeFunction %t717, %NativeInstruction %t718)
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t720 = load double, double* %l23
-  %t721 = sitofp i64 1 to double
-  %t722 = fadd double %t720, %t721
-  store double %t722, double* %l23
+  %t710 = load %NativeFunction*, %NativeFunction** %l8
+  %t711 = load %InstructionParseResult, %InstructionParseResult* %l22
+  %t712 = extractvalue %InstructionParseResult %t711, 0
+  %t713 = load double, double* %l23
+  %t714 = fptosi double %t713 to i64
+  %t715 = load { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t712
+  %t716 = extractvalue { %NativeInstruction**, i64 } %t715, 0
+  %t717 = extractvalue { %NativeInstruction**, i64 } %t715, 1
+  %t718 = icmp uge i64 %t714, %t717
+  ; bounds check: %t718 (if true, out of bounds)
+  %t719 = getelementptr %NativeInstruction*, %NativeInstruction** %t716, i64 %t714
+  %t720 = load %NativeInstruction*, %NativeInstruction** %t719
+  %t721 = load %NativeFunction, %NativeFunction* %t710
+  %t722 = load %NativeInstruction, %NativeInstruction* %t720
+  %t723 = call %NativeFunction @append_instruction(%NativeFunction %t721, %NativeInstruction %t722)
+  %t724 = alloca %NativeFunction
+  store %NativeFunction %t723, %NativeFunction* %t724
+  store %NativeFunction* %t724, %NativeFunction** %l8
+  %t725 = load double, double* %l23
+  %t726 = sitofp i64 1 to double
+  %t727 = fadd double %t725, %t726
+  store double %t727, double* %l23
   br label %loop.latch51
 loop.latch51:
-  %t723 = load %NativeFunction*, %NativeFunction** %l8
-  %t724 = load double, double* %l23
+  %t728 = load %NativeFunction*, %NativeFunction** %l8
+  %t729 = load double, double* %l23
   br label %loop.header49
 afterloop52:
-  %t727 = load double, double* %l16
-  %t728 = sitofp i64 1 to double
-  %t729 = fadd double %t727, %t728
-  store double %t729, double* %l16
+  %t732 = load double, double* %l16
+  %t733 = sitofp i64 1 to double
+  %t734 = fadd double %t732, %t733
+  store double %t734, double* %l16
   br label %loop.latch4
 merge17:
-  %t730 = load i8*, i8** %l18
-  %s731 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.731, i32 0, i32 0
-  %t732 = call i1 @starts_with(i8* %t730, i8* %s731)
-  %t733 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t734 = load i8*, i8** %l1
-  %t735 = load i8*, i8** %l2
-  %t736 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t737 = load i8*, i8** %l4
-  %t738 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t739 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t740 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t741 = load %NativeFunction*, %NativeFunction** %l8
-  %t742 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t743 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t744 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t745 = load double, double* %l12
-  %t746 = load double, double* %l13
-  %t747 = load i1, i1* %l14
-  %t748 = load i1, i1* %l15
-  %t749 = load double, double* %l16
-  %t750 = load i8*, i8** %l18
-  br i1 %t732, label %then55, label %merge56
+  %t735 = load i8*, i8** %l18
+  %s736 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.736, i32 0, i32 0
+  %t737 = call i1 @starts_with(i8* %t735, i8* %s736)
+  %t738 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t739 = load i8*, i8** %l1
+  %t740 = load i8*, i8** %l2
+  %t741 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t742 = load i8*, i8** %l4
+  %t743 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t744 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t745 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t746 = load %NativeFunction*, %NativeFunction** %l8
+  %t747 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t748 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t749 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t750 = load double, double* %l12
+  %t751 = load double, double* %l13
+  %t752 = load i1, i1* %l14
+  %t753 = load i1, i1* %l15
+  %t754 = load double, double* %l16
+  %t755 = load i8*, i8** %l18
+  br i1 %t737, label %then55, label %merge56
 then55:
-  %t751 = load i8*, i8** %l18
-  %s752 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.752, i32 0, i32 0
-  %t753 = call i8* @strip_prefix(i8* %t751, i8* %s752)
-  store i8* %t753, i8** %l24
-  %t754 = load i8*, i8** %l24
-  %s755 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.755, i32 0, i32 0
-  %t756 = call i1 @starts_with(i8* %t754, i8* %s755)
-  %t757 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t758 = load i8*, i8** %l1
-  %t759 = load i8*, i8** %l2
-  %t760 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t761 = load i8*, i8** %l4
-  %t762 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t763 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t764 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t765 = load %NativeFunction*, %NativeFunction** %l8
-  %t766 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t767 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t768 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t769 = load double, double* %l12
-  %t770 = load double, double* %l13
-  %t771 = load i1, i1* %l14
-  %t772 = load i1, i1* %l15
-  %t773 = load double, double* %l16
-  %t774 = load i8*, i8** %l18
-  %t775 = load i8*, i8** %l24
-  br i1 %t756, label %then57, label %merge58
+  %t756 = load i8*, i8** %l18
+  %s757 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.757, i32 0, i32 0
+  %t758 = call i8* @strip_prefix(i8* %t756, i8* %s757)
+  store i8* %t758, i8** %l24
+  %t759 = load i8*, i8** %l24
+  %s760 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.760, i32 0, i32 0
+  %t761 = call i1 @starts_with(i8* %t759, i8* %s760)
+  %t762 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t763 = load i8*, i8** %l1
+  %t764 = load i8*, i8** %l2
+  %t765 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t766 = load i8*, i8** %l4
+  %t767 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t768 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t769 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t770 = load %NativeFunction*, %NativeFunction** %l8
+  %t771 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t772 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t773 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t774 = load double, double* %l12
+  %t775 = load double, double* %l13
+  %t776 = load i1, i1* %l14
+  %t777 = load i1, i1* %l15
+  %t778 = load double, double* %l16
+  %t779 = load i8*, i8** %l18
+  %t780 = load i8*, i8** %l24
+  br i1 %t761, label %then57, label %merge58
 then57:
-  %t776 = load i8*, i8** %l24
-  %s777 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.777, i32 0, i32 0
-  %t778 = call i8* @strip_prefix(i8* %t776, i8* %s777)
-  %t779 = call %StructLayoutHeaderParse @parse_struct_layout_header(i8* %t778)
-  store %StructLayoutHeaderParse %t779, %StructLayoutHeaderParse* %l25
-  %t780 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t781 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  %t782 = extractvalue %StructLayoutHeaderParse %t781, 4
-  %t783 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t780, { i8**, i64 }* %t782)
-  store { i8**, i64 }* %t783, { i8**, i64 }** %l0
-  %t784 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  %t785 = extractvalue %StructLayoutHeaderParse %t784, 0
-  %t786 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t787 = load i8*, i8** %l1
-  %t788 = load i8*, i8** %l2
-  %t789 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t790 = load i8*, i8** %l4
-  %t791 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t792 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t793 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t794 = load %NativeFunction*, %NativeFunction** %l8
-  %t795 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t796 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t797 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t798 = load double, double* %l12
-  %t799 = load double, double* %l13
-  %t800 = load i1, i1* %l14
-  %t801 = load i1, i1* %l15
-  %t802 = load double, double* %l16
-  %t803 = load i8*, i8** %l18
-  %t804 = load i8*, i8** %l24
-  %t805 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  br i1 %t785, label %then59, label %merge60
+  %t781 = load i8*, i8** %l24
+  %s782 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.782, i32 0, i32 0
+  %t783 = call i8* @strip_prefix(i8* %t781, i8* %s782)
+  %t784 = call %StructLayoutHeaderParse @parse_struct_layout_header(i8* %t783)
+  store %StructLayoutHeaderParse %t784, %StructLayoutHeaderParse* %l25
+  %t785 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t786 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  %t787 = extractvalue %StructLayoutHeaderParse %t786, 4
+  %t788 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t785, { i8**, i64 }* %t787)
+  store { i8**, i64 }* %t788, { i8**, i64 }** %l0
+  %t789 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  %t790 = extractvalue %StructLayoutHeaderParse %t789, 0
+  %t791 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t792 = load i8*, i8** %l1
+  %t793 = load i8*, i8** %l2
+  %t794 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t795 = load i8*, i8** %l4
+  %t796 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t797 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t798 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t799 = load %NativeFunction*, %NativeFunction** %l8
+  %t800 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t801 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t802 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t803 = load double, double* %l12
+  %t804 = load double, double* %l13
+  %t805 = load i1, i1* %l14
+  %t806 = load i1, i1* %l15
+  %t807 = load double, double* %l16
+  %t808 = load i8*, i8** %l18
+  %t809 = load i8*, i8** %l24
+  %t810 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  br i1 %t790, label %then59, label %merge60
 then59:
-  %t806 = load i1, i1* %l14
-  %t807 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t808 = load i8*, i8** %l1
-  %t809 = load i8*, i8** %l2
-  %t810 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t811 = load i8*, i8** %l4
-  %t812 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t813 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t814 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t815 = load %NativeFunction*, %NativeFunction** %l8
-  %t816 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t817 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t818 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t819 = load double, double* %l12
-  %t820 = load double, double* %l13
-  %t821 = load i1, i1* %l14
-  %t822 = load i1, i1* %l15
-  %t823 = load double, double* %l16
-  %t824 = load i8*, i8** %l18
-  %t825 = load i8*, i8** %l24
-  %t826 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  br i1 %t806, label %then61, label %else62
+  %t811 = load i1, i1* %l14
+  %t812 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t813 = load i8*, i8** %l1
+  %t814 = load i8*, i8** %l2
+  %t815 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t816 = load i8*, i8** %l4
+  %t817 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t818 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t819 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t820 = load %NativeFunction*, %NativeFunction** %l8
+  %t821 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t822 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t823 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t824 = load double, double* %l12
+  %t825 = load double, double* %l13
+  %t826 = load i1, i1* %l14
+  %t827 = load i1, i1* %l15
+  %t828 = load double, double* %l16
+  %t829 = load i8*, i8** %l18
+  %t830 = load i8*, i8** %l24
+  %t831 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  br i1 %t811, label %then61, label %else62
 then61:
-  %t827 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s828 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.828, i32 0, i32 0
-  %t829 = load i8*, i8** %l4
-  %t830 = add i8* %s828, %t829
-  %t831 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t827, i8* %t830)
-  store { i8**, i64 }* %t831, { i8**, i64 }** %l0
+  %t832 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s833 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.833, i32 0, i32 0
+  %t834 = load i8*, i8** %l4
+  %t835 = add i8* %s833, %t834
+  %t836 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t832, i8* %t835)
+  store { i8**, i64 }* %t836, { i8**, i64 }** %l0
   br label %merge63
 else62:
-  %t832 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  %t833 = extractvalue %StructLayoutHeaderParse %t832, 2
-  store double %t833, double* %l12
-  %t834 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
-  %t835 = extractvalue %StructLayoutHeaderParse %t834, 3
-  store double %t835, double* %l13
+  %t837 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  %t838 = extractvalue %StructLayoutHeaderParse %t837, 2
+  store double %t838, double* %l12
+  %t839 = load %StructLayoutHeaderParse, %StructLayoutHeaderParse* %l25
+  %t840 = extractvalue %StructLayoutHeaderParse %t839, 3
+  store double %t840, double* %l13
   store i1 1, i1* %l14
   br label %merge63
 merge63:
-  %t836 = phi { i8**, i64 }* [ %t831, %then61 ], [ %t807, %else62 ]
-  %t837 = phi double [ %t819, %then61 ], [ %t833, %else62 ]
-  %t838 = phi double [ %t820, %then61 ], [ %t835, %else62 ]
-  %t839 = phi i1 [ %t821, %then61 ], [ 1, %else62 ]
-  store { i8**, i64 }* %t836, { i8**, i64 }** %l0
-  store double %t837, double* %l12
-  store double %t838, double* %l13
-  store i1 %t839, i1* %l14
+  %t841 = phi { i8**, i64 }* [ %t836, %then61 ], [ %t812, %else62 ]
+  %t842 = phi double [ %t824, %then61 ], [ %t838, %else62 ]
+  %t843 = phi double [ %t825, %then61 ], [ %t840, %else62 ]
+  %t844 = phi i1 [ %t826, %then61 ], [ 1, %else62 ]
+  store { i8**, i64 }* %t841, { i8**, i64 }** %l0
+  store double %t842, double* %l12
+  store double %t843, double* %l13
+  store i1 %t844, i1* %l14
   br label %merge60
 merge60:
-  %t840 = phi { i8**, i64 }* [ %t831, %then59 ], [ %t786, %then57 ]
-  %t841 = phi double [ %t833, %then59 ], [ %t798, %then57 ]
-  %t842 = phi double [ %t835, %then59 ], [ %t799, %then57 ]
-  %t843 = phi i1 [ 1, %then59 ], [ %t800, %then57 ]
-  store { i8**, i64 }* %t840, { i8**, i64 }** %l0
-  store double %t841, double* %l12
-  store double %t842, double* %l13
-  store i1 %t843, i1* %l14
-  %t844 = load double, double* %l16
-  %t845 = sitofp i64 1 to double
-  %t846 = fadd double %t844, %t845
-  store double %t846, double* %l16
+  %t845 = phi { i8**, i64 }* [ %t836, %then59 ], [ %t791, %then57 ]
+  %t846 = phi double [ %t838, %then59 ], [ %t803, %then57 ]
+  %t847 = phi double [ %t840, %then59 ], [ %t804, %then57 ]
+  %t848 = phi i1 [ 1, %then59 ], [ %t805, %then57 ]
+  store { i8**, i64 }* %t845, { i8**, i64 }** %l0
+  store double %t846, double* %l12
+  store double %t847, double* %l13
+  store i1 %t848, i1* %l14
+  %t849 = load double, double* %l16
+  %t850 = sitofp i64 1 to double
+  %t851 = fadd double %t849, %t850
+  store double %t851, double* %l16
   br label %loop.latch4
 merge58:
-  %t847 = load i8*, i8** %l24
-  %s848 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.848, i32 0, i32 0
-  %t849 = call i1 @starts_with(i8* %t847, i8* %s848)
-  %t850 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t851 = load i8*, i8** %l1
-  %t852 = load i8*, i8** %l2
-  %t853 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t854 = load i8*, i8** %l4
-  %t855 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t856 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t857 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t858 = load %NativeFunction*, %NativeFunction** %l8
-  %t859 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t860 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t861 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t862 = load double, double* %l12
-  %t863 = load double, double* %l13
-  %t864 = load i1, i1* %l14
-  %t865 = load i1, i1* %l15
-  %t866 = load double, double* %l16
-  %t867 = load i8*, i8** %l18
-  %t868 = load i8*, i8** %l24
-  br i1 %t849, label %then64, label %merge65
+  %t852 = load i8*, i8** %l24
+  %s853 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.853, i32 0, i32 0
+  %t854 = call i1 @starts_with(i8* %t852, i8* %s853)
+  %t855 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t856 = load i8*, i8** %l1
+  %t857 = load i8*, i8** %l2
+  %t858 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t859 = load i8*, i8** %l4
+  %t860 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t861 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t862 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t863 = load %NativeFunction*, %NativeFunction** %l8
+  %t864 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t865 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t866 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t867 = load double, double* %l12
+  %t868 = load double, double* %l13
+  %t869 = load i1, i1* %l14
+  %t870 = load i1, i1* %l15
+  %t871 = load double, double* %l16
+  %t872 = load i8*, i8** %l18
+  %t873 = load i8*, i8** %l24
+  br i1 %t854, label %then64, label %merge65
 then64:
-  %t869 = load i8*, i8** %l24
-  %s870 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.870, i32 0, i32 0
-  %t871 = call i8* @strip_prefix(i8* %t869, i8* %s870)
-  %t872 = load i8*, i8** %l4
-  %t873 = call %StructLayoutFieldParse @parse_struct_layout_field(i8* %t871, i8* %t872)
-  store %StructLayoutFieldParse %t873, %StructLayoutFieldParse* %l26
-  %t874 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t875 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  %t876 = extractvalue %StructLayoutFieldParse %t875, 2
-  %t877 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t874, { i8**, i64 }* %t876)
-  store { i8**, i64 }* %t877, { i8**, i64 }** %l0
-  %t878 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  %t879 = extractvalue %StructLayoutFieldParse %t878, 0
-  %t880 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t881 = load i8*, i8** %l1
-  %t882 = load i8*, i8** %l2
-  %t883 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t884 = load i8*, i8** %l4
-  %t885 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t886 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t887 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t888 = load %NativeFunction*, %NativeFunction** %l8
-  %t889 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t890 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t891 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t892 = load double, double* %l12
-  %t893 = load double, double* %l13
-  %t894 = load i1, i1* %l14
-  %t895 = load i1, i1* %l15
-  %t896 = load double, double* %l16
-  %t897 = load i8*, i8** %l18
-  %t898 = load i8*, i8** %l24
-  %t899 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  br i1 %t879, label %then66, label %merge67
+  %t874 = load i8*, i8** %l24
+  %s875 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.875, i32 0, i32 0
+  %t876 = call i8* @strip_prefix(i8* %t874, i8* %s875)
+  %t877 = load i8*, i8** %l4
+  %t878 = call %StructLayoutFieldParse @parse_struct_layout_field(i8* %t876, i8* %t877)
+  store %StructLayoutFieldParse %t878, %StructLayoutFieldParse* %l26
+  %t879 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t880 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  %t881 = extractvalue %StructLayoutFieldParse %t880, 2
+  %t882 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t879, { i8**, i64 }* %t881)
+  store { i8**, i64 }* %t882, { i8**, i64 }** %l0
+  %t883 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  %t884 = extractvalue %StructLayoutFieldParse %t883, 0
+  %t885 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t886 = load i8*, i8** %l1
+  %t887 = load i8*, i8** %l2
+  %t888 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t889 = load i8*, i8** %l4
+  %t890 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t891 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t892 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t893 = load %NativeFunction*, %NativeFunction** %l8
+  %t894 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t895 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t896 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t897 = load double, double* %l12
+  %t898 = load double, double* %l13
+  %t899 = load i1, i1* %l14
+  %t900 = load i1, i1* %l15
+  %t901 = load double, double* %l16
+  %t902 = load i8*, i8** %l18
+  %t903 = load i8*, i8** %l24
+  %t904 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  br i1 %t884, label %then66, label %merge67
 then66:
-  %t900 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t901 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  %t902 = extractvalue %StructLayoutFieldParse %t901, 1
-  %t903 = call { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %t900, %NativeStructLayoutField %t902)
-  store { %NativeStructLayoutField*, i64 }* %t903, { %NativeStructLayoutField*, i64 }** %l11
-  %t904 = load i1, i1* %l14
-  %t905 = xor i1 %t904, 1
-  %t906 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t907 = load i8*, i8** %l1
-  %t908 = load i8*, i8** %l2
-  %t909 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t910 = load i8*, i8** %l4
-  %t911 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t912 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t913 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t914 = load %NativeFunction*, %NativeFunction** %l8
-  %t915 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t916 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t917 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t918 = load double, double* %l12
-  %t919 = load double, double* %l13
-  %t920 = load i1, i1* %l14
-  %t921 = load i1, i1* %l15
-  %t922 = load double, double* %l16
-  %t923 = load i8*, i8** %l18
-  %t924 = load i8*, i8** %l24
-  %t925 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  br i1 %t905, label %then68, label %merge69
-then68:
+  %t905 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t906 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  %t907 = extractvalue %StructLayoutFieldParse %t906, 1
+  %t908 = call { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %t905, %NativeStructLayoutField %t907)
+  store { %NativeStructLayoutField*, i64 }* %t908, { %NativeStructLayoutField*, i64 }** %l11
+  %t909 = load i1, i1* %l14
+  %t910 = xor i1 %t909, 1
+  %t911 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t912 = load i8*, i8** %l1
+  %t913 = load i8*, i8** %l2
+  %t914 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t915 = load i8*, i8** %l4
+  %t916 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t917 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t918 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t919 = load %NativeFunction*, %NativeFunction** %l8
+  %t920 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t921 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t922 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t923 = load double, double* %l12
+  %t924 = load double, double* %l13
+  %t925 = load i1, i1* %l14
   %t926 = load i1, i1* %l15
-  %t927 = xor i1 %t926, 1
-  %t928 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t929 = load i8*, i8** %l1
-  %t930 = load i8*, i8** %l2
-  %t931 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t932 = load i8*, i8** %l4
-  %t933 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t934 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t935 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t936 = load %NativeFunction*, %NativeFunction** %l8
-  %t937 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t938 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t939 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t940 = load double, double* %l12
-  %t941 = load double, double* %l13
-  %t942 = load i1, i1* %l14
-  %t943 = load i1, i1* %l15
-  %t944 = load double, double* %l16
-  %t945 = load i8*, i8** %l18
-  %t946 = load i8*, i8** %l24
-  %t947 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
-  br i1 %t927, label %then70, label %merge71
+  %t927 = load double, double* %l16
+  %t928 = load i8*, i8** %l18
+  %t929 = load i8*, i8** %l24
+  %t930 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  br i1 %t910, label %then68, label %merge69
+then68:
+  %t931 = load i1, i1* %l15
+  %t932 = xor i1 %t931, 1
+  %t933 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t934 = load i8*, i8** %l1
+  %t935 = load i8*, i8** %l2
+  %t936 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t937 = load i8*, i8** %l4
+  %t938 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t939 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t940 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t941 = load %NativeFunction*, %NativeFunction** %l8
+  %t942 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t943 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t944 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t945 = load double, double* %l12
+  %t946 = load double, double* %l13
+  %t947 = load i1, i1* %l14
+  %t948 = load i1, i1* %l15
+  %t949 = load double, double* %l16
+  %t950 = load i8*, i8** %l18
+  %t951 = load i8*, i8** %l24
+  %t952 = load %StructLayoutFieldParse, %StructLayoutFieldParse* %l26
+  br i1 %t932, label %then70, label %merge71
 then70:
-  %t948 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s949 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.949, i32 0, i32 0
-  %t950 = load i8*, i8** %l4
-  %t951 = add i8* %s949, %t950
-  %s952 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.952, i32 0, i32 0
-  %t953 = add i8* %t951, %s952
-  %t954 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t948, i8* %t953)
-  store { i8**, i64 }* %t954, { i8**, i64 }** %l0
+  %t953 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s954 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.954, i32 0, i32 0
+  %t955 = load i8*, i8** %l4
+  %t956 = add i8* %s954, %t955
+  %s957 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.957, i32 0, i32 0
+  %t958 = add i8* %t956, %s957
+  %t959 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t953, i8* %t958)
+  store { i8**, i64 }* %t959, { i8**, i64 }** %l0
   store i1 1, i1* %l15
   br label %merge71
 merge71:
-  %t955 = phi { i8**, i64 }* [ %t954, %then70 ], [ %t928, %then68 ]
-  %t956 = phi i1 [ 1, %then70 ], [ %t943, %then68 ]
-  store { i8**, i64 }* %t955, { i8**, i64 }** %l0
-  store i1 %t956, i1* %l15
-  br label %merge69
-merge69:
-  %t957 = phi { i8**, i64 }* [ %t954, %then68 ], [ %t906, %then66 ]
-  %t958 = phi i1 [ 1, %then68 ], [ %t921, %then66 ]
-  store { i8**, i64 }* %t957, { i8**, i64 }** %l0
-  store i1 %t958, i1* %l15
-  br label %merge67
-merge67:
-  %t959 = phi { %NativeStructLayoutField*, i64 }* [ %t903, %then66 ], [ %t891, %then64 ]
-  %t960 = phi { i8**, i64 }* [ %t954, %then66 ], [ %t880, %then64 ]
-  %t961 = phi i1 [ 1, %then66 ], [ %t895, %then64 ]
-  store { %NativeStructLayoutField*, i64 }* %t959, { %NativeStructLayoutField*, i64 }** %l11
+  %t960 = phi { i8**, i64 }* [ %t959, %then70 ], [ %t933, %then68 ]
+  %t961 = phi i1 [ 1, %then70 ], [ %t948, %then68 ]
   store { i8**, i64 }* %t960, { i8**, i64 }** %l0
   store i1 %t961, i1* %l15
-  %t962 = load double, double* %l16
-  %t963 = sitofp i64 1 to double
-  %t964 = fadd double %t962, %t963
-  store double %t964, double* %l16
+  br label %merge69
+merge69:
+  %t962 = phi { i8**, i64 }* [ %t959, %then68 ], [ %t911, %then66 ]
+  %t963 = phi i1 [ 1, %then68 ], [ %t926, %then66 ]
+  store { i8**, i64 }* %t962, { i8**, i64 }** %l0
+  store i1 %t963, i1* %l15
+  br label %merge67
+merge67:
+  %t964 = phi { %NativeStructLayoutField*, i64 }* [ %t908, %then66 ], [ %t896, %then64 ]
+  %t965 = phi { i8**, i64 }* [ %t959, %then66 ], [ %t885, %then64 ]
+  %t966 = phi i1 [ 1, %then66 ], [ %t900, %then64 ]
+  store { %NativeStructLayoutField*, i64 }* %t964, { %NativeStructLayoutField*, i64 }** %l11
+  store { i8**, i64 }* %t965, { i8**, i64 }** %l0
+  store i1 %t966, i1* %l15
+  %t967 = load double, double* %l16
+  %t968 = sitofp i64 1 to double
+  %t969 = fadd double %t967, %t968
+  store double %t969, double* %l16
   br label %loop.latch4
 merge65:
-  %t965 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s966 = getelementptr inbounds [38 x i8], [38 x i8]* @.str.966, i32 0, i32 0
-  %t967 = load i8*, i8** %l18
-  %t968 = add i8* %s966, %t967
-  %t969 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t965, i8* %t968)
-  store { i8**, i64 }* %t969, { i8**, i64 }** %l0
-  %t970 = load double, double* %l16
-  %t971 = sitofp i64 1 to double
-  %t972 = fadd double %t970, %t971
-  store double %t972, double* %l16
+  %t970 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s971 = getelementptr inbounds [38 x i8], [38 x i8]* @.str.971, i32 0, i32 0
+  %t972 = load i8*, i8** %l18
+  %t973 = add i8* %s971, %t972
+  %t974 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t970, i8* %t973)
+  store { i8**, i64 }* %t974, { i8**, i64 }** %l0
+  %t975 = load double, double* %l16
+  %t976 = sitofp i64 1 to double
+  %t977 = fadd double %t975, %t976
+  store double %t977, double* %l16
   br label %loop.latch4
 merge56:
-  %t973 = load i8*, i8** %l18
-  %s974 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.974, i32 0, i32 0
-  %t975 = icmp eq i8* %t973, %s974
-  %t976 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t977 = load i8*, i8** %l1
-  %t978 = load i8*, i8** %l2
-  %t979 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t980 = load i8*, i8** %l4
-  %t981 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t982 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t983 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t984 = load %NativeFunction*, %NativeFunction** %l8
-  %t985 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t986 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t987 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t988 = load double, double* %l12
-  %t989 = load double, double* %l13
-  %t990 = load i1, i1* %l14
-  %t991 = load i1, i1* %l15
-  %t992 = load double, double* %l16
-  %t993 = load i8*, i8** %l18
-  br i1 %t975, label %then72, label %merge73
+  %t978 = load i8*, i8** %l18
+  %s979 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.979, i32 0, i32 0
+  %t980 = icmp eq i8* %t978, %s979
+  %t981 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t982 = load i8*, i8** %l1
+  %t983 = load i8*, i8** %l2
+  %t984 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t985 = load i8*, i8** %l4
+  %t986 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t987 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t988 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t989 = load %NativeFunction*, %NativeFunction** %l8
+  %t990 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t991 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t992 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t993 = load double, double* %l12
+  %t994 = load double, double* %l13
+  %t995 = load i1, i1* %l14
+  %t996 = load i1, i1* %l15
+  %t997 = load double, double* %l16
+  %t998 = load i8*, i8** %l18
+  br i1 %t980, label %then72, label %merge73
 then72:
-  %t994 = load double, double* %l16
-  %t995 = sitofp i64 1 to double
-  %t996 = fadd double %t994, %t995
-  store double %t996, double* %l16
+  %t999 = load double, double* %l16
+  %t1000 = sitofp i64 1 to double
+  %t1001 = fadd double %t999, %t1000
+  store double %t1001, double* %l16
   br label %loop.latch4
 merge73:
-  %t997 = load i8*, i8** %l18
-  %s998 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.998, i32 0, i32 0
-  %t999 = call i1 @starts_with(i8* %t997, i8* %s998)
-  %t1000 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1001 = load i8*, i8** %l1
-  %t1002 = load i8*, i8** %l2
-  %t1003 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t1004 = load i8*, i8** %l4
-  %t1005 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1006 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1007 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1008 = load %NativeFunction*, %NativeFunction** %l8
-  %t1009 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1010 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1011 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1012 = load double, double* %l12
-  %t1013 = load double, double* %l13
-  %t1014 = load i1, i1* %l14
-  %t1015 = load i1, i1* %l15
-  %t1016 = load double, double* %l16
-  %t1017 = load i8*, i8** %l18
-  br i1 %t999, label %then74, label %merge75
+  %t1002 = load i8*, i8** %l18
+  %s1003 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1003, i32 0, i32 0
+  %t1004 = call i1 @starts_with(i8* %t1002, i8* %s1003)
+  %t1005 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1006 = load i8*, i8** %l1
+  %t1007 = load i8*, i8** %l2
+  %t1008 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t1009 = load i8*, i8** %l4
+  %t1010 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1011 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1012 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1013 = load %NativeFunction*, %NativeFunction** %l8
+  %t1014 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1015 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1016 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1017 = load double, double* %l12
+  %t1018 = load double, double* %l13
+  %t1019 = load i1, i1* %l14
+  %t1020 = load i1, i1* %l15
+  %t1021 = load double, double* %l16
+  %t1022 = load i8*, i8** %l18
+  br i1 %t1004, label %then74, label %merge75
 then74:
-  %t1018 = load i8*, i8** %l18
-  %s1019 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1019, i32 0, i32 0
-  %t1020 = call i8* @strip_prefix(i8* %t1018, i8* %s1019)
-  %t1021 = call %NativeStructField* @parse_struct_field_line(i8* %t1020)
-  store %NativeStructField* %t1021, %NativeStructField** %l27
-  %t1022 = load %NativeStructField*, %NativeStructField** %l27
-  %t1023 = bitcast i8* null to %NativeStructField*
-  %t1024 = icmp eq %NativeStructField* %t1022, %t1023
-  %t1025 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1026 = load i8*, i8** %l1
-  %t1027 = load i8*, i8** %l2
-  %t1028 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t1029 = load i8*, i8** %l4
-  %t1030 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1031 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1032 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1033 = load %NativeFunction*, %NativeFunction** %l8
-  %t1034 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1035 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1036 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1037 = load double, double* %l12
-  %t1038 = load double, double* %l13
-  %t1039 = load i1, i1* %l14
-  %t1040 = load i1, i1* %l15
-  %t1041 = load double, double* %l16
-  %t1042 = load i8*, i8** %l18
-  %t1043 = load %NativeStructField*, %NativeStructField** %l27
-  br i1 %t1024, label %then76, label %else77
+  %t1023 = load i8*, i8** %l18
+  %s1024 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1024, i32 0, i32 0
+  %t1025 = call i8* @strip_prefix(i8* %t1023, i8* %s1024)
+  %t1026 = call %NativeStructField* @parse_struct_field_line(i8* %t1025)
+  store %NativeStructField* %t1026, %NativeStructField** %l27
+  %t1027 = load %NativeStructField*, %NativeStructField** %l27
+  %t1028 = bitcast i8* null to %NativeStructField*
+  %t1029 = icmp eq %NativeStructField* %t1027, %t1028
+  %t1030 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1031 = load i8*, i8** %l1
+  %t1032 = load i8*, i8** %l2
+  %t1033 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t1034 = load i8*, i8** %l4
+  %t1035 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1036 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1037 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1038 = load %NativeFunction*, %NativeFunction** %l8
+  %t1039 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1040 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1041 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1042 = load double, double* %l12
+  %t1043 = load double, double* %l13
+  %t1044 = load i1, i1* %l14
+  %t1045 = load i1, i1* %l15
+  %t1046 = load double, double* %l16
+  %t1047 = load i8*, i8** %l18
+  %t1048 = load %NativeStructField*, %NativeStructField** %l27
+  br i1 %t1029, label %then76, label %else77
 then76:
-  %t1044 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1045 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.1045, i32 0, i32 0
-  %t1046 = load i8*, i8** %l18
-  %t1047 = add i8* %s1045, %t1046
-  %t1048 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1044, i8* %t1047)
-  store { i8**, i64 }* %t1048, { i8**, i64 }** %l0
+  %t1049 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1050 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.1050, i32 0, i32 0
+  %t1051 = load i8*, i8** %l18
+  %t1052 = add i8* %s1050, %t1051
+  %t1053 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1049, i8* %t1052)
+  store { i8**, i64 }* %t1053, { i8**, i64 }** %l0
   br label %merge78
 else77:
-  %t1049 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1050 = load %NativeStructField*, %NativeStructField** %l27
-  %t1051 = load %NativeStructField, %NativeStructField* %t1050
-  %t1052 = call { %NativeStructField*, i64 }* @append_struct_field({ %NativeStructField*, i64 }* %t1049, %NativeStructField %t1051)
-  store { %NativeStructField*, i64 }* %t1052, { %NativeStructField*, i64 }** %l6
+  %t1054 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1055 = load %NativeStructField*, %NativeStructField** %l27
+  %t1056 = load %NativeStructField, %NativeStructField* %t1055
+  %t1057 = call { %NativeStructField*, i64 }* @append_struct_field({ %NativeStructField*, i64 }* %t1054, %NativeStructField %t1056)
+  store { %NativeStructField*, i64 }* %t1057, { %NativeStructField*, i64 }** %l6
   br label %merge78
 merge78:
-  %t1053 = phi { i8**, i64 }* [ %t1048, %then76 ], [ %t1025, %else77 ]
-  %t1054 = phi { %NativeStructField*, i64 }* [ %t1031, %then76 ], [ %t1052, %else77 ]
-  store { i8**, i64 }* %t1053, { i8**, i64 }** %l0
-  store { %NativeStructField*, i64 }* %t1054, { %NativeStructField*, i64 }** %l6
-  %t1055 = load double, double* %l16
-  %t1056 = sitofp i64 1 to double
-  %t1057 = fadd double %t1055, %t1056
-  store double %t1057, double* %l16
+  %t1058 = phi { i8**, i64 }* [ %t1053, %then76 ], [ %t1030, %else77 ]
+  %t1059 = phi { %NativeStructField*, i64 }* [ %t1036, %then76 ], [ %t1057, %else77 ]
+  store { i8**, i64 }* %t1058, { i8**, i64 }** %l0
+  store { %NativeStructField*, i64 }* %t1059, { %NativeStructField*, i64 }** %l6
+  %t1060 = load double, double* %l16
+  %t1061 = sitofp i64 1 to double
+  %t1062 = fadd double %t1060, %t1061
+  store double %t1062, double* %l16
   br label %loop.latch4
 merge75:
-  %t1058 = load i8*, i8** %l18
-  %s1059 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1059, i32 0, i32 0
-  %t1060 = call i1 @starts_with(i8* %t1058, i8* %s1059)
-  %t1061 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1062 = load i8*, i8** %l1
-  %t1063 = load i8*, i8** %l2
-  %t1064 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t1065 = load i8*, i8** %l4
-  %t1066 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1067 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1068 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1069 = load %NativeFunction*, %NativeFunction** %l8
-  %t1070 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1071 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1072 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1073 = load double, double* %l12
-  %t1074 = load double, double* %l13
-  %t1075 = load i1, i1* %l14
-  %t1076 = load i1, i1* %l15
-  %t1077 = load double, double* %l16
-  %t1078 = load i8*, i8** %l18
-  br i1 %t1060, label %then79, label %merge80
+  %t1063 = load i8*, i8** %l18
+  %s1064 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1064, i32 0, i32 0
+  %t1065 = call i1 @starts_with(i8* %t1063, i8* %s1064)
+  %t1066 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1067 = load i8*, i8** %l1
+  %t1068 = load i8*, i8** %l2
+  %t1069 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t1070 = load i8*, i8** %l4
+  %t1071 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1072 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1073 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1074 = load %NativeFunction*, %NativeFunction** %l8
+  %t1075 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1076 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1077 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1078 = load double, double* %l12
+  %t1079 = load double, double* %l13
+  %t1080 = load i1, i1* %l14
+  %t1081 = load i1, i1* %l15
+  %t1082 = load double, double* %l16
+  %t1083 = load i8*, i8** %l18
+  br i1 %t1065, label %then79, label %merge80
 then79:
-  %t1079 = load %NativeFunction*, %NativeFunction** %l8
-  %t1080 = bitcast i8* null to %NativeFunction*
-  %t1081 = icmp ne %NativeFunction* %t1079, %t1080
-  %t1082 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1083 = load i8*, i8** %l1
-  %t1084 = load i8*, i8** %l2
-  %t1085 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t1086 = load i8*, i8** %l4
-  %t1087 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1088 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1089 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1090 = load %NativeFunction*, %NativeFunction** %l8
-  %t1091 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1092 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1093 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1094 = load double, double* %l12
-  %t1095 = load double, double* %l13
-  %t1096 = load i1, i1* %l14
-  %t1097 = load i1, i1* %l15
-  %t1098 = load double, double* %l16
-  %t1099 = load i8*, i8** %l18
-  br i1 %t1081, label %then81, label %merge82
+  %t1084 = load %NativeFunction*, %NativeFunction** %l8
+  %t1085 = bitcast i8* null to %NativeFunction*
+  %t1086 = icmp ne %NativeFunction* %t1084, %t1085
+  %t1087 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1088 = load i8*, i8** %l1
+  %t1089 = load i8*, i8** %l2
+  %t1090 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t1091 = load i8*, i8** %l4
+  %t1092 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1093 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1094 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1095 = load %NativeFunction*, %NativeFunction** %l8
+  %t1096 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1097 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1098 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1099 = load double, double* %l12
+  %t1100 = load double, double* %l13
+  %t1101 = load i1, i1* %l14
+  %t1102 = load i1, i1* %l15
+  %t1103 = load double, double* %l16
+  %t1104 = load i8*, i8** %l18
+  br i1 %t1086, label %then81, label %merge82
 then81:
-  %t1100 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1101 = getelementptr inbounds [37 x i8], [37 x i8]* @.str.1101, i32 0, i32 0
-  %t1102 = load i8*, i8** %l4
-  %t1103 = add i8* %s1101, %t1102
-  %t1104 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1100, i8* %t1103)
-  store { i8**, i64 }* %t1104, { i8**, i64 }** %l0
+  %t1105 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1106 = getelementptr inbounds [37 x i8], [37 x i8]* @.str.1106, i32 0, i32 0
+  %t1107 = load i8*, i8** %l4
+  %t1108 = add i8* %s1106, %t1107
+  %t1109 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1105, i8* %t1108)
+  store { i8**, i64 }* %t1109, { i8**, i64 }** %l0
   br label %merge82
 merge82:
-  %t1105 = phi { i8**, i64 }* [ %t1104, %then81 ], [ %t1082, %then79 ]
-  store { i8**, i64 }* %t1105, { i8**, i64 }** %l0
-  %t1106 = load i8*, i8** %l18
-  %s1107 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1107, i32 0, i32 0
-  %t1108 = call i8* @strip_prefix(i8* %t1106, i8* %s1107)
-  %t1109 = call i8* @parse_function_name(i8* %t1108)
-  store i8* %t1109, i8** %l28
-  %t1110 = load i8*, i8** %l28
-  %t1111 = insertvalue %NativeFunction undef, i8* %t1110, 0
-  %t1112 = alloca [0 x %NativeParameter*]
-  %t1113 = getelementptr [0 x %NativeParameter*], [0 x %NativeParameter*]* %t1112, i32 0, i32 0
-  %t1114 = alloca { %NativeParameter**, i64 }
-  %t1115 = getelementptr { %NativeParameter**, i64 }, { %NativeParameter**, i64 }* %t1114, i32 0, i32 0
-  store %NativeParameter** %t1113, %NativeParameter*** %t1115
-  %t1116 = getelementptr { %NativeParameter**, i64 }, { %NativeParameter**, i64 }* %t1114, i32 0, i32 1
-  store i64 0, i64* %t1116
-  %t1117 = insertvalue %NativeFunction %t1111, { %NativeParameter**, i64 }* %t1114, 1
-  %s1118 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1118, i32 0, i32 0
-  %t1119 = insertvalue %NativeFunction %t1117, i8* %s1118, 2
-  %t1120 = alloca [0 x i8*]
-  %t1121 = getelementptr [0 x i8*], [0 x i8*]* %t1120, i32 0, i32 0
-  %t1122 = alloca { i8**, i64 }
-  %t1123 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1122, i32 0, i32 0
-  store i8** %t1121, i8*** %t1123
-  %t1124 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1122, i32 0, i32 1
-  store i64 0, i64* %t1124
-  %t1125 = insertvalue %NativeFunction %t1119, { i8**, i64 }* %t1122, 3
-  %t1126 = alloca [0 x %NativeInstruction*]
-  %t1127 = getelementptr [0 x %NativeInstruction*], [0 x %NativeInstruction*]* %t1126, i32 0, i32 0
-  %t1128 = alloca { %NativeInstruction**, i64 }
-  %t1129 = getelementptr { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1128, i32 0, i32 0
-  store %NativeInstruction** %t1127, %NativeInstruction*** %t1129
-  %t1130 = getelementptr { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1128, i32 0, i32 1
-  store i64 0, i64* %t1130
-  %t1131 = insertvalue %NativeFunction %t1125, { %NativeInstruction**, i64 }* %t1128, 4
-  store %NativeFunction* null, %NativeFunction** %l8
-  %t1132 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1132, %NativeSourceSpan** %l9
-  %t1133 = bitcast i8* null to %NativeSourceSpan*
-  store %NativeSourceSpan* %t1133, %NativeSourceSpan** %l10
-  %t1134 = load double, double* %l16
-  %t1135 = sitofp i64 1 to double
-  %t1136 = fadd double %t1134, %t1135
-  store double %t1136, double* %l16
+  %t1110 = phi { i8**, i64 }* [ %t1109, %then81 ], [ %t1087, %then79 ]
+  store { i8**, i64 }* %t1110, { i8**, i64 }** %l0
+  %t1111 = load i8*, i8** %l18
+  %s1112 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1112, i32 0, i32 0
+  %t1113 = call i8* @strip_prefix(i8* %t1111, i8* %s1112)
+  %t1114 = call i8* @parse_function_name(i8* %t1113)
+  store i8* %t1114, i8** %l28
+  %t1115 = load i8*, i8** %l28
+  %t1116 = insertvalue %NativeFunction undef, i8* %t1115, 0
+  %t1117 = alloca [0 x %NativeParameter*]
+  %t1118 = getelementptr [0 x %NativeParameter*], [0 x %NativeParameter*]* %t1117, i32 0, i32 0
+  %t1119 = alloca { %NativeParameter**, i64 }
+  %t1120 = getelementptr { %NativeParameter**, i64 }, { %NativeParameter**, i64 }* %t1119, i32 0, i32 0
+  store %NativeParameter** %t1118, %NativeParameter*** %t1120
+  %t1121 = getelementptr { %NativeParameter**, i64 }, { %NativeParameter**, i64 }* %t1119, i32 0, i32 1
+  store i64 0, i64* %t1121
+  %t1122 = insertvalue %NativeFunction %t1116, { %NativeParameter**, i64 }* %t1119, 1
+  %s1123 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1123, i32 0, i32 0
+  %t1124 = insertvalue %NativeFunction %t1122, i8* %s1123, 2
+  %t1125 = alloca [0 x i8*]
+  %t1126 = getelementptr [0 x i8*], [0 x i8*]* %t1125, i32 0, i32 0
+  %t1127 = alloca { i8**, i64 }
+  %t1128 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1127, i32 0, i32 0
+  store i8** %t1126, i8*** %t1128
+  %t1129 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1127, i32 0, i32 1
+  store i64 0, i64* %t1129
+  %t1130 = insertvalue %NativeFunction %t1124, { i8**, i64 }* %t1127, 3
+  %t1131 = alloca [0 x %NativeInstruction*]
+  %t1132 = getelementptr [0 x %NativeInstruction*], [0 x %NativeInstruction*]* %t1131, i32 0, i32 0
+  %t1133 = alloca { %NativeInstruction**, i64 }
+  %t1134 = getelementptr { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1133, i32 0, i32 0
+  store %NativeInstruction** %t1132, %NativeInstruction*** %t1134
+  %t1135 = getelementptr { %NativeInstruction**, i64 }, { %NativeInstruction**, i64 }* %t1133, i32 0, i32 1
+  store i64 0, i64* %t1135
+  %t1136 = insertvalue %NativeFunction %t1130, { %NativeInstruction**, i64 }* %t1133, 4
+  %t1137 = alloca %NativeFunction
+  store %NativeFunction %t1136, %NativeFunction* %t1137
+  store %NativeFunction* %t1137, %NativeFunction** %l8
+  %t1138 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1138, %NativeSourceSpan** %l9
+  %t1139 = bitcast i8* null to %NativeSourceSpan*
+  store %NativeSourceSpan* %t1139, %NativeSourceSpan** %l10
+  %t1140 = load double, double* %l16
+  %t1141 = sitofp i64 1 to double
+  %t1142 = fadd double %t1140, %t1141
+  store double %t1142, double* %l16
   br label %loop.latch4
 merge80:
-  %t1137 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1138 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.1138, i32 0, i32 0
-  %t1139 = load i8*, i8** %l18
-  %t1140 = add i8* %s1138, %t1139
-  %t1141 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1137, i8* %t1140)
-  store { i8**, i64 }* %t1141, { i8**, i64 }** %l0
-  %t1142 = load double, double* %l16
-  %t1143 = sitofp i64 1 to double
-  %t1144 = fadd double %t1142, %t1143
-  store double %t1144, double* %l16
+  %t1143 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1144 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.1144, i32 0, i32 0
+  %t1145 = load i8*, i8** %l18
+  %t1146 = add i8* %s1144, %t1145
+  %t1147 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1143, i8* %t1146)
+  store { i8**, i64 }* %t1147, { i8**, i64 }** %l0
+  %t1148 = load double, double* %l16
+  %t1149 = sitofp i64 1 to double
+  %t1150 = fadd double %t1148, %t1149
+  store double %t1150, double* %l16
   br label %loop.latch4
 loop.latch4:
-  %t1145 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1146 = load double, double* %l16
-  %t1147 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1148 = load %NativeFunction*, %NativeFunction** %l8
-  %t1149 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1150 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1151 = load double, double* %l12
-  %t1152 = load double, double* %l13
-  %t1153 = load i1, i1* %l14
-  %t1154 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1155 = load i1, i1* %l15
-  %t1156 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1151 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1152 = load double, double* %l16
+  %t1153 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1154 = load %NativeFunction*, %NativeFunction** %l8
+  %t1155 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1156 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1157 = load double, double* %l12
+  %t1158 = load double, double* %l13
+  %t1159 = load i1, i1* %l14
+  %t1160 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1161 = load i1, i1* %l15
+  %t1162 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
   br label %loop.header2
 afterloop5:
-  %t1169 = bitcast i8* null to %NativeStructLayout*
-  store %NativeStructLayout* %t1169, %NativeStructLayout** %l29
-  %t1170 = load i1, i1* %l14
-  %t1171 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1172 = load i8*, i8** %l1
-  %t1173 = load i8*, i8** %l2
-  %t1174 = load %StructHeaderParse, %StructHeaderParse* %l3
-  %t1175 = load i8*, i8** %l4
-  %t1176 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1177 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1178 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1179 = load %NativeFunction*, %NativeFunction** %l8
-  %t1180 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
-  %t1181 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
-  %t1182 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1183 = load double, double* %l12
-  %t1184 = load double, double* %l13
-  %t1185 = load i1, i1* %l14
-  %t1186 = load i1, i1* %l15
-  %t1187 = load double, double* %l16
-  %t1188 = load %NativeStructLayout*, %NativeStructLayout** %l29
-  br i1 %t1170, label %then83, label %merge84
-then83:
+  %t1175 = bitcast i8* null to %NativeStructLayout*
+  store %NativeStructLayout* %t1175, %NativeStructLayout** %l29
+  %t1176 = load i1, i1* %l14
+  %t1177 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1178 = load i8*, i8** %l1
+  %t1179 = load i8*, i8** %l2
+  %t1180 = load %StructHeaderParse, %StructHeaderParse* %l3
+  %t1181 = load i8*, i8** %l4
+  %t1182 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1183 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1184 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1185 = load %NativeFunction*, %NativeFunction** %l8
+  %t1186 = load %NativeSourceSpan*, %NativeSourceSpan** %l9
+  %t1187 = load %NativeSourceSpan*, %NativeSourceSpan** %l10
+  %t1188 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
   %t1189 = load double, double* %l12
-  %t1190 = insertvalue %NativeStructLayout undef, double %t1189, 0
-  %t1191 = load double, double* %l13
-  %t1192 = insertvalue %NativeStructLayout %t1190, double %t1191, 1
-  %t1193 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
-  %t1194 = bitcast { %NativeStructLayoutField*, i64 }* %t1193 to { %NativeStructLayoutField**, i64 }*
-  %t1195 = insertvalue %NativeStructLayout %t1192, { %NativeStructLayoutField**, i64 }* %t1194, 2
-  store %NativeStructLayout* null, %NativeStructLayout** %l29
+  %t1190 = load double, double* %l13
+  %t1191 = load i1, i1* %l14
+  %t1192 = load i1, i1* %l15
+  %t1193 = load double, double* %l16
+  %t1194 = load %NativeStructLayout*, %NativeStructLayout** %l29
+  br i1 %t1176, label %then83, label %merge84
+then83:
+  %t1195 = load double, double* %l12
+  %t1196 = insertvalue %NativeStructLayout undef, double %t1195, 0
+  %t1197 = load double, double* %l13
+  %t1198 = insertvalue %NativeStructLayout %t1196, double %t1197, 1
+  %t1199 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l11
+  %t1200 = bitcast { %NativeStructLayoutField*, i64 }* %t1199 to { %NativeStructLayoutField**, i64 }*
+  %t1201 = insertvalue %NativeStructLayout %t1198, { %NativeStructLayoutField**, i64 }* %t1200, 2
+  %t1202 = alloca %NativeStructLayout
+  store %NativeStructLayout %t1201, %NativeStructLayout* %t1202
+  store %NativeStructLayout* %t1202, %NativeStructLayout** %l29
   br label %merge84
 merge84:
-  %t1196 = phi %NativeStructLayout* [ null, %then83 ], [ %t1188, %entry ]
-  store %NativeStructLayout* %t1196, %NativeStructLayout** %l29
-  %t1197 = load i8*, i8** %l4
-  %t1198 = insertvalue %NativeStruct undef, i8* %t1197, 0
-  %t1199 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
-  %t1200 = bitcast { %NativeStructField*, i64 }* %t1199 to { %NativeStructField**, i64 }*
-  %t1201 = insertvalue %NativeStruct %t1198, { %NativeStructField**, i64 }* %t1200, 1
-  %t1202 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
-  %t1203 = bitcast { %NativeFunction*, i64 }* %t1202 to { %NativeFunction**, i64 }*
-  %t1204 = insertvalue %NativeStruct %t1201, { %NativeFunction**, i64 }* %t1203, 2
-  %t1205 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t1206 = insertvalue %NativeStruct %t1204, { i8**, i64 }* %t1205, 3
-  %t1207 = load %NativeStructLayout*, %NativeStructLayout** %l29
-  %t1208 = insertvalue %NativeStruct %t1206, %NativeStructLayout* %t1207, 4
-  %t1209 = insertvalue %StructParseResult undef, %NativeStruct* null, 0
-  %t1210 = load double, double* %l16
-  %t1211 = insertvalue %StructParseResult %t1209, double %t1210, 1
-  %t1212 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1213 = insertvalue %StructParseResult %t1211, { i8**, i64 }* %t1212, 2
-  ret %StructParseResult %t1213
+  %t1203 = phi %NativeStructLayout* [ %t1202, %then83 ], [ %t1194, %entry ]
+  store %NativeStructLayout* %t1203, %NativeStructLayout** %l29
+  %t1204 = load i8*, i8** %l4
+  %t1205 = insertvalue %NativeStruct undef, i8* %t1204, 0
+  %t1206 = load { %NativeStructField*, i64 }*, { %NativeStructField*, i64 }** %l6
+  %t1207 = bitcast { %NativeStructField*, i64 }* %t1206 to { %NativeStructField**, i64 }*
+  %t1208 = insertvalue %NativeStruct %t1205, { %NativeStructField**, i64 }* %t1207, 1
+  %t1209 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l7
+  %t1210 = bitcast { %NativeFunction*, i64 }* %t1209 to { %NativeFunction**, i64 }*
+  %t1211 = insertvalue %NativeStruct %t1208, { %NativeFunction**, i64 }* %t1210, 2
+  %t1212 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t1213 = insertvalue %NativeStruct %t1211, { i8**, i64 }* %t1212, 3
+  %t1214 = load %NativeStructLayout*, %NativeStructLayout** %l29
+  %t1215 = insertvalue %NativeStruct %t1213, %NativeStructLayout* %t1214, 4
+  %t1216 = alloca %NativeStruct
+  store %NativeStruct %t1215, %NativeStruct* %t1216
+  %t1217 = insertvalue %StructParseResult undef, %NativeStruct* %t1216, 0
+  %t1218 = load double, double* %l16
+  %t1219 = insertvalue %StructParseResult %t1217, double %t1218, 1
+  %t1220 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1221 = insertvalue %StructParseResult %t1219, { i8**, i64 }* %t1220, 2
+  ret %StructParseResult %t1221
 }
 
 define %InterfaceParseResult @parse_interface_definition({ i8**, i64 }* %lines, double %start_index) {
@@ -6394,12 +6426,12 @@ merge1:
   %t51 = load double, double* %l6
   br label %loop.header2
 loop.header2:
-  %t200 = phi { i8**, i64 }* [ %t45, %entry ], [ %t197, %loop.latch4 ]
-  %t201 = phi double [ %t51, %entry ], [ %t198, %loop.latch4 ]
-  %t202 = phi { %NativeInterfaceSignature*, i64 }* [ %t50, %entry ], [ %t199, %loop.latch4 ]
-  store { i8**, i64 }* %t200, { i8**, i64 }** %l0
-  store double %t201, double* %l6
-  store { %NativeInterfaceSignature*, i64 }* %t202, { %NativeInterfaceSignature*, i64 }** %l5
+  %t201 = phi { i8**, i64 }* [ %t45, %entry ], [ %t198, %loop.latch4 ]
+  %t202 = phi double [ %t51, %entry ], [ %t199, %loop.latch4 ]
+  %t203 = phi { %NativeInterfaceSignature*, i64 }* [ %t50, %entry ], [ %t200, %loop.latch4 ]
+  store { i8**, i64 }* %t201, { i8**, i64 }** %l0
+  store double %t202, double* %l6
+  store { %NativeInterfaceSignature*, i64 }* %t203, { %NativeInterfaceSignature*, i64 }** %l5
   br label %loop.body3
 loop.body3:
   %t52 = load double, double* %l6
@@ -6430,197 +6462,201 @@ then6:
   %t74 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
   %t75 = bitcast { %NativeInterfaceSignature*, i64 }* %t74 to { %NativeInterfaceSignature**, i64 }*
   %t76 = insertvalue %NativeInterface %t73, { %NativeInterfaceSignature**, i64 }* %t75, 2
-  %t77 = insertvalue %InterfaceParseResult undef, %NativeInterface* null, 0
-  %t78 = load double, double* %l6
-  %t79 = insertvalue %InterfaceParseResult %t77, double %t78, 1
-  %t80 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t81 = insertvalue %InterfaceParseResult %t79, { i8**, i64 }* %t80, 2
-  ret %InterfaceParseResult %t81
+  %t77 = alloca %NativeInterface
+  store %NativeInterface %t76, %NativeInterface* %t77
+  %t78 = insertvalue %InterfaceParseResult undef, %NativeInterface* %t77, 0
+  %t79 = load double, double* %l6
+  %t80 = insertvalue %InterfaceParseResult %t78, double %t79, 1
+  %t81 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t82 = insertvalue %InterfaceParseResult %t80, { i8**, i64 }* %t81, 2
+  ret %InterfaceParseResult %t82
 merge7:
-  %t82 = load double, double* %l6
-  %t83 = fptosi double %t82 to i64
-  %t84 = load { i8**, i64 }, { i8**, i64 }* %lines
-  %t85 = extractvalue { i8**, i64 } %t84, 0
-  %t86 = extractvalue { i8**, i64 } %t84, 1
-  %t87 = icmp uge i64 %t83, %t86
-  ; bounds check: %t87 (if true, out of bounds)
-  %t88 = getelementptr i8*, i8** %t85, i64 %t83
-  %t89 = load i8*, i8** %t88
-  %t90 = call i8* @trim_text(i8* %t89)
-  store i8* %t90, i8** %l7
-  %t92 = load i8*, i8** %l7
-  %t93 = call i64 @sailfin_runtime_string_length(i8* %t92)
-  %t94 = icmp eq i64 %t93, 0
-  br label %logical_or_entry_91
+  %t83 = load double, double* %l6
+  %t84 = fptosi double %t83 to i64
+  %t85 = load { i8**, i64 }, { i8**, i64 }* %lines
+  %t86 = extractvalue { i8**, i64 } %t85, 0
+  %t87 = extractvalue { i8**, i64 } %t85, 1
+  %t88 = icmp uge i64 %t84, %t87
+  ; bounds check: %t88 (if true, out of bounds)
+  %t89 = getelementptr i8*, i8** %t86, i64 %t84
+  %t90 = load i8*, i8** %t89
+  %t91 = call i8* @trim_text(i8* %t90)
+  store i8* %t91, i8** %l7
+  %t93 = load i8*, i8** %l7
+  %t94 = call i64 @sailfin_runtime_string_length(i8* %t93)
+  %t95 = icmp eq i64 %t94, 0
+  br label %logical_or_entry_92
 
-logical_or_entry_91:
-  br i1 %t94, label %logical_or_merge_91, label %logical_or_right_91
+logical_or_entry_92:
+  br i1 %t95, label %logical_or_merge_92, label %logical_or_right_92
 
-logical_or_right_91:
-  %t95 = load i8*, i8** %l7
-  %t96 = alloca [2 x i8], align 1
-  %t97 = getelementptr [2 x i8], [2 x i8]* %t96, i32 0, i32 0
-  store i8 59, i8* %t97
-  %t98 = getelementptr [2 x i8], [2 x i8]* %t96, i32 0, i32 1
-  store i8 0, i8* %t98
-  %t99 = getelementptr [2 x i8], [2 x i8]* %t96, i32 0, i32 0
-  %t100 = call i1 @starts_with(i8* %t95, i8* %t99)
-  br label %logical_or_right_end_91
+logical_or_right_92:
+  %t96 = load i8*, i8** %l7
+  %t97 = alloca [2 x i8], align 1
+  %t98 = getelementptr [2 x i8], [2 x i8]* %t97, i32 0, i32 0
+  store i8 59, i8* %t98
+  %t99 = getelementptr [2 x i8], [2 x i8]* %t97, i32 0, i32 1
+  store i8 0, i8* %t99
+  %t100 = getelementptr [2 x i8], [2 x i8]* %t97, i32 0, i32 0
+  %t101 = call i1 @starts_with(i8* %t96, i8* %t100)
+  br label %logical_or_right_end_92
 
-logical_or_right_end_91:
-  br label %logical_or_merge_91
+logical_or_right_end_92:
+  br label %logical_or_merge_92
 
-logical_or_merge_91:
-  %t101 = phi i1 [ true, %logical_or_entry_91 ], [ %t100, %logical_or_right_end_91 ]
-  %t102 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t103 = load i8*, i8** %l1
-  %t104 = load i8*, i8** %l2
-  %t105 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t106 = load i8*, i8** %l4
-  %t107 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t108 = load double, double* %l6
-  %t109 = load i8*, i8** %l7
-  br i1 %t101, label %then8, label %merge9
+logical_or_merge_92:
+  %t102 = phi i1 [ true, %logical_or_entry_92 ], [ %t101, %logical_or_right_end_92 ]
+  %t103 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t104 = load i8*, i8** %l1
+  %t105 = load i8*, i8** %l2
+  %t106 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t107 = load i8*, i8** %l4
+  %t108 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t109 = load double, double* %l6
+  %t110 = load i8*, i8** %l7
+  br i1 %t102, label %then8, label %merge9
 then8:
-  %t110 = load double, double* %l6
-  %t111 = sitofp i64 1 to double
-  %t112 = fadd double %t110, %t111
-  store double %t112, double* %l6
+  %t111 = load double, double* %l6
+  %t112 = sitofp i64 1 to double
+  %t113 = fadd double %t111, %t112
+  store double %t113, double* %l6
   br label %loop.latch4
 merge9:
-  %t113 = load i8*, i8** %l7
-  %s114 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.114, i32 0, i32 0
-  %t115 = icmp eq i8* %t113, %s114
-  %t116 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t117 = load i8*, i8** %l1
-  %t118 = load i8*, i8** %l2
-  %t119 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t120 = load i8*, i8** %l4
-  %t121 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t122 = load double, double* %l6
-  %t123 = load i8*, i8** %l7
-  br i1 %t115, label %then10, label %merge11
+  %t114 = load i8*, i8** %l7
+  %s115 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.115, i32 0, i32 0
+  %t116 = icmp eq i8* %t114, %s115
+  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t118 = load i8*, i8** %l1
+  %t119 = load i8*, i8** %l2
+  %t120 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t121 = load i8*, i8** %l4
+  %t122 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t123 = load double, double* %l6
+  %t124 = load i8*, i8** %l7
+  br i1 %t116, label %then10, label %merge11
 then10:
-  %t124 = load double, double* %l6
-  %t125 = sitofp i64 1 to double
-  %t126 = fadd double %t124, %t125
-  store double %t126, double* %l6
+  %t125 = load double, double* %l6
+  %t126 = sitofp i64 1 to double
+  %t127 = fadd double %t125, %t126
+  store double %t127, double* %l6
   br label %afterloop5
 merge11:
-  %t127 = load i8*, i8** %l7
-  %s128 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.128, i32 0, i32 0
-  %t129 = icmp eq i8* %t127, %s128
-  %t130 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t131 = load i8*, i8** %l1
-  %t132 = load i8*, i8** %l2
-  %t133 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t134 = load i8*, i8** %l4
-  %t135 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t136 = load double, double* %l6
-  %t137 = load i8*, i8** %l7
-  br i1 %t129, label %then12, label %merge13
+  %t128 = load i8*, i8** %l7
+  %s129 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.129, i32 0, i32 0
+  %t130 = icmp eq i8* %t128, %s129
+  %t131 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t132 = load i8*, i8** %l1
+  %t133 = load i8*, i8** %l2
+  %t134 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t135 = load i8*, i8** %l4
+  %t136 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t137 = load double, double* %l6
+  %t138 = load i8*, i8** %l7
+  br i1 %t130, label %then12, label %merge13
 then12:
-  %t138 = load double, double* %l6
-  %t139 = sitofp i64 1 to double
-  %t140 = fadd double %t138, %t139
-  store double %t140, double* %l6
+  %t139 = load double, double* %l6
+  %t140 = sitofp i64 1 to double
+  %t141 = fadd double %t139, %t140
+  store double %t141, double* %l6
   br label %loop.latch4
 merge13:
-  %t141 = load i8*, i8** %l7
-  %s142 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.142, i32 0, i32 0
-  %t143 = call i1 @starts_with(i8* %t141, i8* %s142)
-  %t144 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t145 = load i8*, i8** %l1
-  %t146 = load i8*, i8** %l2
-  %t147 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t148 = load i8*, i8** %l4
-  %t149 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t150 = load double, double* %l6
-  %t151 = load i8*, i8** %l7
-  br i1 %t143, label %then14, label %merge15
-then14:
+  %t142 = load i8*, i8** %l7
+  %s143 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.143, i32 0, i32 0
+  %t144 = call i1 @starts_with(i8* %t142, i8* %s143)
+  %t145 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t146 = load i8*, i8** %l1
+  %t147 = load i8*, i8** %l2
+  %t148 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t149 = load i8*, i8** %l4
+  %t150 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t151 = load double, double* %l6
   %t152 = load i8*, i8** %l7
-  %s153 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.153, i32 0, i32 0
-  %t154 = call i8* @strip_prefix(i8* %t152, i8* %s153)
-  %t155 = load i8*, i8** %l4
-  %t156 = call %InterfaceSignatureParse @parse_interface_signature(i8* %t154, i8* %t155)
-  store %InterfaceSignatureParse %t156, %InterfaceSignatureParse* %l8
-  %t157 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t158 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
-  %t159 = extractvalue %InterfaceSignatureParse %t158, 2
-  %t160 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t157, { i8**, i64 }* %t159)
-  store { i8**, i64 }* %t160, { i8**, i64 }** %l0
-  %t161 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
-  %t162 = extractvalue %InterfaceSignatureParse %t161, 0
-  %t163 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t164 = load i8*, i8** %l1
-  %t165 = load i8*, i8** %l2
-  %t166 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t167 = load i8*, i8** %l4
-  %t168 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t169 = load double, double* %l6
-  %t170 = load i8*, i8** %l7
-  %t171 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
-  br i1 %t162, label %then16, label %merge17
+  br i1 %t144, label %then14, label %merge15
+then14:
+  %t153 = load i8*, i8** %l7
+  %s154 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.154, i32 0, i32 0
+  %t155 = call i8* @strip_prefix(i8* %t153, i8* %s154)
+  %t156 = load i8*, i8** %l4
+  %t157 = call %InterfaceSignatureParse @parse_interface_signature(i8* %t155, i8* %t156)
+  store %InterfaceSignatureParse %t157, %InterfaceSignatureParse* %l8
+  %t158 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t159 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
+  %t160 = extractvalue %InterfaceSignatureParse %t159, 2
+  %t161 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t158, { i8**, i64 }* %t160)
+  store { i8**, i64 }* %t161, { i8**, i64 }** %l0
+  %t162 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
+  %t163 = extractvalue %InterfaceSignatureParse %t162, 0
+  %t164 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t165 = load i8*, i8** %l1
+  %t166 = load i8*, i8** %l2
+  %t167 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t168 = load i8*, i8** %l4
+  %t169 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t170 = load double, double* %l6
+  %t171 = load i8*, i8** %l7
+  %t172 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
+  br i1 %t163, label %then16, label %merge17
 then16:
-  %t172 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t173 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
-  %t174 = extractvalue %InterfaceSignatureParse %t173, 1
-  %t175 = alloca [1 x %NativeInterfaceSignature]
-  %t176 = getelementptr [1 x %NativeInterfaceSignature], [1 x %NativeInterfaceSignature]* %t175, i32 0, i32 0
-  %t177 = getelementptr %NativeInterfaceSignature, %NativeInterfaceSignature* %t176, i64 0
-  store %NativeInterfaceSignature %t174, %NativeInterfaceSignature* %t177
-  %t178 = alloca { %NativeInterfaceSignature*, i64 }
-  %t179 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t178, i32 0, i32 0
-  store %NativeInterfaceSignature* %t176, %NativeInterfaceSignature** %t179
-  %t180 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t178, i32 0, i32 1
-  store i64 1, i64* %t180
-  %t181 = bitcast { %NativeInterfaceSignature*, i64 }* %t172 to { i8**, i64 }*
-  %t182 = bitcast { %NativeInterfaceSignature*, i64 }* %t178 to { i8**, i64 }*
-  %t183 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t181, { i8**, i64 }* %t182)
-  %t184 = bitcast { i8**, i64 }* %t183 to { %NativeInterfaceSignature*, i64 }*
-  store { %NativeInterfaceSignature*, i64 }* %t184, { %NativeInterfaceSignature*, i64 }** %l5
+  %t173 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t174 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
+  %t175 = extractvalue %InterfaceSignatureParse %t174, 1
+  %t176 = alloca [1 x %NativeInterfaceSignature]
+  %t177 = getelementptr [1 x %NativeInterfaceSignature], [1 x %NativeInterfaceSignature]* %t176, i32 0, i32 0
+  %t178 = getelementptr %NativeInterfaceSignature, %NativeInterfaceSignature* %t177, i64 0
+  store %NativeInterfaceSignature %t175, %NativeInterfaceSignature* %t178
+  %t179 = alloca { %NativeInterfaceSignature*, i64 }
+  %t180 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t179, i32 0, i32 0
+  store %NativeInterfaceSignature* %t177, %NativeInterfaceSignature** %t180
+  %t181 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t179, i32 0, i32 1
+  store i64 1, i64* %t181
+  %t182 = bitcast { %NativeInterfaceSignature*, i64 }* %t173 to { i8**, i64 }*
+  %t183 = bitcast { %NativeInterfaceSignature*, i64 }* %t179 to { i8**, i64 }*
+  %t184 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t182, { i8**, i64 }* %t183)
+  %t185 = bitcast { i8**, i64 }* %t184 to { %NativeInterfaceSignature*, i64 }*
+  store { %NativeInterfaceSignature*, i64 }* %t185, { %NativeInterfaceSignature*, i64 }** %l5
   br label %merge17
 merge17:
-  %t185 = phi { %NativeInterfaceSignature*, i64 }* [ %t184, %then16 ], [ %t168, %then14 ]
-  store { %NativeInterfaceSignature*, i64 }* %t185, { %NativeInterfaceSignature*, i64 }** %l5
-  %t186 = load double, double* %l6
-  %t187 = sitofp i64 1 to double
-  %t188 = fadd double %t186, %t187
-  store double %t188, double* %l6
+  %t186 = phi { %NativeInterfaceSignature*, i64 }* [ %t185, %then16 ], [ %t169, %then14 ]
+  store { %NativeInterfaceSignature*, i64 }* %t186, { %NativeInterfaceSignature*, i64 }** %l5
+  %t187 = load double, double* %l6
+  %t188 = sitofp i64 1 to double
+  %t189 = fadd double %t187, %t188
+  store double %t189, double* %l6
   br label %loop.latch4
 merge15:
-  %t189 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s190 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.190, i32 0, i32 0
-  %t191 = load i8*, i8** %l7
-  %t192 = add i8* %s190, %t191
-  %t193 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t189, i8* %t192)
-  store { i8**, i64 }* %t193, { i8**, i64 }** %l0
-  %t194 = load double, double* %l6
-  %t195 = sitofp i64 1 to double
-  %t196 = fadd double %t194, %t195
-  store double %t196, double* %l6
+  %t190 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s191 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.191, i32 0, i32 0
+  %t192 = load i8*, i8** %l7
+  %t193 = add i8* %s191, %t192
+  %t194 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t190, i8* %t193)
+  store { i8**, i64 }* %t194, { i8**, i64 }** %l0
+  %t195 = load double, double* %l6
+  %t196 = sitofp i64 1 to double
+  %t197 = fadd double %t195, %t196
+  store double %t197, double* %l6
   br label %loop.latch4
 loop.latch4:
-  %t197 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t198 = load double, double* %l6
-  %t199 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t199 = load double, double* %l6
+  %t200 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
   br label %loop.header2
 afterloop5:
-  %t203 = load i8*, i8** %l4
-  %t204 = insertvalue %NativeInterface undef, i8* %t203, 0
-  %t205 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t206 = extractvalue %InterfaceHeaderParse %t205, 1
-  %t207 = insertvalue %NativeInterface %t204, { i8**, i64 }* %t206, 1
-  %t208 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t209 = bitcast { %NativeInterfaceSignature*, i64 }* %t208 to { %NativeInterfaceSignature**, i64 }*
-  %t210 = insertvalue %NativeInterface %t207, { %NativeInterfaceSignature**, i64 }* %t209, 2
-  %t211 = insertvalue %InterfaceParseResult undef, %NativeInterface* null, 0
-  %t212 = load double, double* %l6
-  %t213 = insertvalue %InterfaceParseResult %t211, double %t212, 1
-  %t214 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t215 = insertvalue %InterfaceParseResult %t213, { i8**, i64 }* %t214, 2
-  ret %InterfaceParseResult %t215
+  %t204 = load i8*, i8** %l4
+  %t205 = insertvalue %NativeInterface undef, i8* %t204, 0
+  %t206 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t207 = extractvalue %InterfaceHeaderParse %t206, 1
+  %t208 = insertvalue %NativeInterface %t205, { i8**, i64 }* %t207, 1
+  %t209 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t210 = bitcast { %NativeInterfaceSignature*, i64 }* %t209 to { %NativeInterfaceSignature**, i64 }*
+  %t211 = insertvalue %NativeInterface %t208, { %NativeInterfaceSignature**, i64 }* %t210, 2
+  %t212 = alloca %NativeInterface
+  store %NativeInterface %t211, %NativeInterface* %t212
+  %t213 = insertvalue %InterfaceParseResult undef, %NativeInterface* %t212, 0
+  %t214 = load double, double* %l6
+  %t215 = insertvalue %InterfaceParseResult %t213, double %t214, 1
+  %t216 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t217 = insertvalue %InterfaceParseResult %t215, { i8**, i64 }* %t216, 2
+  ret %InterfaceParseResult %t217
 }
 
 define %StructHeaderParse @parse_struct_header(i8* %text) {
@@ -9012,28 +9048,28 @@ merge3:
   %t84 = load double, double* %l14
   br label %loop.header4
 loop.header4:
-  %t753 = phi { i8**, i64 }* [ %t70, %entry ], [ %t742, %loop.latch6 ]
-  %t754 = phi double [ %t84, %entry ], [ %t743, %loop.latch6 ]
-  %t755 = phi double [ %t77, %entry ], [ %t744, %loop.latch6 ]
-  %t756 = phi double [ %t78, %entry ], [ %t745, %loop.latch6 ]
-  %t757 = phi i8* [ %t79, %entry ], [ %t746, %loop.latch6 ]
-  %t758 = phi double [ %t80, %entry ], [ %t747, %loop.latch6 ]
-  %t759 = phi double [ %t81, %entry ], [ %t748, %loop.latch6 ]
-  %t760 = phi i1 [ %t82, %entry ], [ %t749, %loop.latch6 ]
-  %t761 = phi { %NativeEnumVariantLayout*, i64 }* [ %t76, %entry ], [ %t750, %loop.latch6 ]
-  %t762 = phi i1 [ %t83, %entry ], [ %t751, %loop.latch6 ]
-  %t763 = phi { %NativeEnumVariant*, i64 }* [ %t75, %entry ], [ %t752, %loop.latch6 ]
-  store { i8**, i64 }* %t753, { i8**, i64 }** %l0
-  store double %t754, double* %l14
-  store double %t755, double* %l7
-  store double %t756, double* %l8
-  store i8* %t757, i8** %l9
-  store double %t758, double* %l10
-  store double %t759, double* %l11
-  store i1 %t760, i1* %l12
-  store { %NativeEnumVariantLayout*, i64 }* %t761, { %NativeEnumVariantLayout*, i64 }** %l6
-  store i1 %t762, i1* %l13
-  store { %NativeEnumVariant*, i64 }* %t763, { %NativeEnumVariant*, i64 }** %l5
+  %t755 = phi { i8**, i64 }* [ %t70, %entry ], [ %t744, %loop.latch6 ]
+  %t756 = phi double [ %t84, %entry ], [ %t745, %loop.latch6 ]
+  %t757 = phi double [ %t77, %entry ], [ %t746, %loop.latch6 ]
+  %t758 = phi double [ %t78, %entry ], [ %t747, %loop.latch6 ]
+  %t759 = phi i8* [ %t79, %entry ], [ %t748, %loop.latch6 ]
+  %t760 = phi double [ %t80, %entry ], [ %t749, %loop.latch6 ]
+  %t761 = phi double [ %t81, %entry ], [ %t750, %loop.latch6 ]
+  %t762 = phi i1 [ %t82, %entry ], [ %t751, %loop.latch6 ]
+  %t763 = phi { %NativeEnumVariantLayout*, i64 }* [ %t76, %entry ], [ %t752, %loop.latch6 ]
+  %t764 = phi i1 [ %t83, %entry ], [ %t753, %loop.latch6 ]
+  %t765 = phi { %NativeEnumVariant*, i64 }* [ %t75, %entry ], [ %t754, %loop.latch6 ]
+  store { i8**, i64 }* %t755, { i8**, i64 }** %l0
+  store double %t756, double* %l14
+  store double %t757, double* %l7
+  store double %t758, double* %l8
+  store i8* %t759, i8** %l9
+  store double %t760, double* %l10
+  store double %t761, double* %l11
+  store i1 %t762, i1* %l12
+  store { %NativeEnumVariantLayout*, i64 }* %t763, { %NativeEnumVariantLayout*, i64 }** %l6
+  store i1 %t764, i1* %l13
+  store { %NativeEnumVariant*, i64 }* %t765, { %NativeEnumVariant*, i64 }** %l5
   br label %loop.body5
 loop.body5:
   %t85 = load double, double* %l14
@@ -9098,855 +9134,863 @@ then10:
   %t138 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
   %t139 = bitcast { %NativeEnumVariantLayout*, i64 }* %t138 to { %NativeEnumVariantLayout**, i64 }*
   %t140 = insertvalue %NativeEnumLayout %t137, { %NativeEnumVariantLayout**, i64 }* %t139, 5
-  store %NativeEnumLayout* null, %NativeEnumLayout** %l15
+  %t141 = alloca %NativeEnumLayout
+  store %NativeEnumLayout %t140, %NativeEnumLayout* %t141
+  store %NativeEnumLayout* %t141, %NativeEnumLayout** %l15
   br label %merge11
 merge11:
-  %t141 = phi %NativeEnumLayout* [ null, %then10 ], [ %t127, %then8 ]
-  store %NativeEnumLayout* %t141, %NativeEnumLayout** %l15
-  %t142 = load i8*, i8** %l3
-  %t143 = insertvalue %NativeEnum undef, i8* %t142, 0
-  %t144 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t145 = bitcast { %NativeEnumVariant*, i64 }* %t144 to { %NativeEnumVariant**, i64 }*
-  %t146 = insertvalue %NativeEnum %t143, { %NativeEnumVariant**, i64 }* %t145, 1
-  %t147 = load %NativeEnumLayout*, %NativeEnumLayout** %l15
-  %t148 = insertvalue %NativeEnum %t146, %NativeEnumLayout* %t147, 2
-  %t149 = insertvalue %EnumParseResult undef, %NativeEnum* null, 0
-  %t150 = load double, double* %l14
-  %t151 = insertvalue %EnumParseResult %t149, double %t150, 1
-  %t152 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t153 = insertvalue %EnumParseResult %t151, { i8**, i64 }* %t152, 2
-  ret %EnumParseResult %t153
+  %t142 = phi %NativeEnumLayout* [ %t141, %then10 ], [ %t127, %then8 ]
+  store %NativeEnumLayout* %t142, %NativeEnumLayout** %l15
+  %t143 = load i8*, i8** %l3
+  %t144 = insertvalue %NativeEnum undef, i8* %t143, 0
+  %t145 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t146 = bitcast { %NativeEnumVariant*, i64 }* %t145 to { %NativeEnumVariant**, i64 }*
+  %t147 = insertvalue %NativeEnum %t144, { %NativeEnumVariant**, i64 }* %t146, 1
+  %t148 = load %NativeEnumLayout*, %NativeEnumLayout** %l15
+  %t149 = insertvalue %NativeEnum %t147, %NativeEnumLayout* %t148, 2
+  %t150 = alloca %NativeEnum
+  store %NativeEnum %t149, %NativeEnum* %t150
+  %t151 = insertvalue %EnumParseResult undef, %NativeEnum* %t150, 0
+  %t152 = load double, double* %l14
+  %t153 = insertvalue %EnumParseResult %t151, double %t152, 1
+  %t154 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t155 = insertvalue %EnumParseResult %t153, { i8**, i64 }* %t154, 2
+  ret %EnumParseResult %t155
 merge9:
-  %t154 = load double, double* %l14
-  %t155 = fptosi double %t154 to i64
-  %t156 = load { i8**, i64 }, { i8**, i64 }* %lines
-  %t157 = extractvalue { i8**, i64 } %t156, 0
-  %t158 = extractvalue { i8**, i64 } %t156, 1
-  %t159 = icmp uge i64 %t155, %t158
-  ; bounds check: %t159 (if true, out of bounds)
-  %t160 = getelementptr i8*, i8** %t157, i64 %t155
-  %t161 = load i8*, i8** %t160
-  %t162 = call i8* @trim_text(i8* %t161)
-  store i8* %t162, i8** %l16
-  %t164 = load i8*, i8** %l16
-  %t165 = call i64 @sailfin_runtime_string_length(i8* %t164)
-  %t166 = icmp eq i64 %t165, 0
-  br label %logical_or_entry_163
+  %t156 = load double, double* %l14
+  %t157 = fptosi double %t156 to i64
+  %t158 = load { i8**, i64 }, { i8**, i64 }* %lines
+  %t159 = extractvalue { i8**, i64 } %t158, 0
+  %t160 = extractvalue { i8**, i64 } %t158, 1
+  %t161 = icmp uge i64 %t157, %t160
+  ; bounds check: %t161 (if true, out of bounds)
+  %t162 = getelementptr i8*, i8** %t159, i64 %t157
+  %t163 = load i8*, i8** %t162
+  %t164 = call i8* @trim_text(i8* %t163)
+  store i8* %t164, i8** %l16
+  %t166 = load i8*, i8** %l16
+  %t167 = call i64 @sailfin_runtime_string_length(i8* %t166)
+  %t168 = icmp eq i64 %t167, 0
+  br label %logical_or_entry_165
 
-logical_or_entry_163:
-  br i1 %t166, label %logical_or_merge_163, label %logical_or_right_163
+logical_or_entry_165:
+  br i1 %t168, label %logical_or_merge_165, label %logical_or_right_165
 
-logical_or_right_163:
-  %t167 = load i8*, i8** %l16
-  %t168 = alloca [2 x i8], align 1
-  %t169 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 0
-  store i8 59, i8* %t169
-  %t170 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 1
-  store i8 0, i8* %t170
-  %t171 = getelementptr [2 x i8], [2 x i8]* %t168, i32 0, i32 0
-  %t172 = call i1 @starts_with(i8* %t167, i8* %t171)
-  br label %logical_or_right_end_163
+logical_or_right_165:
+  %t169 = load i8*, i8** %l16
+  %t170 = alloca [2 x i8], align 1
+  %t171 = getelementptr [2 x i8], [2 x i8]* %t170, i32 0, i32 0
+  store i8 59, i8* %t171
+  %t172 = getelementptr [2 x i8], [2 x i8]* %t170, i32 0, i32 1
+  store i8 0, i8* %t172
+  %t173 = getelementptr [2 x i8], [2 x i8]* %t170, i32 0, i32 0
+  %t174 = call i1 @starts_with(i8* %t169, i8* %t173)
+  br label %logical_or_right_end_165
 
-logical_or_right_end_163:
-  br label %logical_or_merge_163
+logical_or_right_end_165:
+  br label %logical_or_merge_165
 
-logical_or_merge_163:
-  %t173 = phi i1 [ true, %logical_or_entry_163 ], [ %t172, %logical_or_right_end_163 ]
-  %t174 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t175 = load i8*, i8** %l1
-  %t176 = load i8*, i8** %l2
-  %t177 = load i8*, i8** %l3
-  %t178 = load double, double* %l4
-  %t179 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t180 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t181 = load double, double* %l7
-  %t182 = load double, double* %l8
-  %t183 = load i8*, i8** %l9
-  %t184 = load double, double* %l10
-  %t185 = load double, double* %l11
-  %t186 = load i1, i1* %l12
-  %t187 = load i1, i1* %l13
-  %t188 = load double, double* %l14
-  %t189 = load i8*, i8** %l16
-  br i1 %t173, label %then12, label %merge13
-then12:
+logical_or_merge_165:
+  %t175 = phi i1 [ true, %logical_or_entry_165 ], [ %t174, %logical_or_right_end_165 ]
+  %t176 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t177 = load i8*, i8** %l1
+  %t178 = load i8*, i8** %l2
+  %t179 = load i8*, i8** %l3
+  %t180 = load double, double* %l4
+  %t181 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t182 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t183 = load double, double* %l7
+  %t184 = load double, double* %l8
+  %t185 = load i8*, i8** %l9
+  %t186 = load double, double* %l10
+  %t187 = load double, double* %l11
+  %t188 = load i1, i1* %l12
+  %t189 = load i1, i1* %l13
   %t190 = load double, double* %l14
-  %t191 = sitofp i64 1 to double
-  %t192 = fadd double %t190, %t191
-  store double %t192, double* %l14
+  %t191 = load i8*, i8** %l16
+  br i1 %t175, label %then12, label %merge13
+then12:
+  %t192 = load double, double* %l14
+  %t193 = sitofp i64 1 to double
+  %t194 = fadd double %t192, %t193
+  store double %t194, double* %l14
   br label %loop.latch6
 merge13:
-  %t193 = load i8*, i8** %l16
-  %s194 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.194, i32 0, i32 0
-  %t195 = icmp eq i8* %t193, %s194
-  %t196 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t197 = load i8*, i8** %l1
-  %t198 = load i8*, i8** %l2
-  %t199 = load i8*, i8** %l3
-  %t200 = load double, double* %l4
-  %t201 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t202 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t203 = load double, double* %l7
-  %t204 = load double, double* %l8
-  %t205 = load i8*, i8** %l9
-  %t206 = load double, double* %l10
-  %t207 = load double, double* %l11
-  %t208 = load i1, i1* %l12
-  %t209 = load i1, i1* %l13
-  %t210 = load double, double* %l14
-  %t211 = load i8*, i8** %l16
-  br i1 %t195, label %then14, label %merge15
-then14:
+  %t195 = load i8*, i8** %l16
+  %s196 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.196, i32 0, i32 0
+  %t197 = icmp eq i8* %t195, %s196
+  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t199 = load i8*, i8** %l1
+  %t200 = load i8*, i8** %l2
+  %t201 = load i8*, i8** %l3
+  %t202 = load double, double* %l4
+  %t203 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t204 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t205 = load double, double* %l7
+  %t206 = load double, double* %l8
+  %t207 = load i8*, i8** %l9
+  %t208 = load double, double* %l10
+  %t209 = load double, double* %l11
+  %t210 = load i1, i1* %l12
+  %t211 = load i1, i1* %l13
   %t212 = load double, double* %l14
-  %t213 = sitofp i64 1 to double
-  %t214 = fadd double %t212, %t213
-  store double %t214, double* %l14
+  %t213 = load i8*, i8** %l16
+  br i1 %t197, label %then14, label %merge15
+then14:
+  %t214 = load double, double* %l14
+  %t215 = sitofp i64 1 to double
+  %t216 = fadd double %t214, %t215
+  store double %t216, double* %l14
   br label %loop.latch6
 merge15:
-  %t215 = load i8*, i8** %l16
-  %s216 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.216, i32 0, i32 0
-  %t217 = call i1 @starts_with(i8* %t215, i8* %s216)
-  %t218 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t219 = load i8*, i8** %l1
-  %t220 = load i8*, i8** %l2
-  %t221 = load i8*, i8** %l3
-  %t222 = load double, double* %l4
-  %t223 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t224 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t225 = load double, double* %l7
-  %t226 = load double, double* %l8
-  %t227 = load i8*, i8** %l9
-  %t228 = load double, double* %l10
-  %t229 = load double, double* %l11
-  %t230 = load i1, i1* %l12
-  %t231 = load i1, i1* %l13
-  %t232 = load double, double* %l14
-  %t233 = load i8*, i8** %l16
-  br i1 %t217, label %then16, label %merge17
+  %t217 = load i8*, i8** %l16
+  %s218 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.218, i32 0, i32 0
+  %t219 = call i1 @starts_with(i8* %t217, i8* %s218)
+  %t220 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t221 = load i8*, i8** %l1
+  %t222 = load i8*, i8** %l2
+  %t223 = load i8*, i8** %l3
+  %t224 = load double, double* %l4
+  %t225 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t226 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t227 = load double, double* %l7
+  %t228 = load double, double* %l8
+  %t229 = load i8*, i8** %l9
+  %t230 = load double, double* %l10
+  %t231 = load double, double* %l11
+  %t232 = load i1, i1* %l12
+  %t233 = load i1, i1* %l13
+  %t234 = load double, double* %l14
+  %t235 = load i8*, i8** %l16
+  br i1 %t219, label %then16, label %merge17
 then16:
-  %t234 = load i8*, i8** %l16
-  %s235 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.235, i32 0, i32 0
-  %t236 = call i8* @strip_prefix(i8* %t234, i8* %s235)
-  store i8* %t236, i8** %l17
-  %t237 = load i8*, i8** %l17
-  %s238 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.238, i32 0, i32 0
-  %t239 = call i1 @starts_with(i8* %t237, i8* %s238)
-  %t240 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t241 = load i8*, i8** %l1
-  %t242 = load i8*, i8** %l2
-  %t243 = load i8*, i8** %l3
-  %t244 = load double, double* %l4
-  %t245 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t246 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t247 = load double, double* %l7
-  %t248 = load double, double* %l8
-  %t249 = load i8*, i8** %l9
-  %t250 = load double, double* %l10
-  %t251 = load double, double* %l11
-  %t252 = load i1, i1* %l12
-  %t253 = load i1, i1* %l13
-  %t254 = load double, double* %l14
-  %t255 = load i8*, i8** %l16
-  %t256 = load i8*, i8** %l17
-  br i1 %t239, label %then18, label %merge19
+  %t236 = load i8*, i8** %l16
+  %s237 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.237, i32 0, i32 0
+  %t238 = call i8* @strip_prefix(i8* %t236, i8* %s237)
+  store i8* %t238, i8** %l17
+  %t239 = load i8*, i8** %l17
+  %s240 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.240, i32 0, i32 0
+  %t241 = call i1 @starts_with(i8* %t239, i8* %s240)
+  %t242 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t243 = load i8*, i8** %l1
+  %t244 = load i8*, i8** %l2
+  %t245 = load i8*, i8** %l3
+  %t246 = load double, double* %l4
+  %t247 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t248 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t249 = load double, double* %l7
+  %t250 = load double, double* %l8
+  %t251 = load i8*, i8** %l9
+  %t252 = load double, double* %l10
+  %t253 = load double, double* %l11
+  %t254 = load i1, i1* %l12
+  %t255 = load i1, i1* %l13
+  %t256 = load double, double* %l14
+  %t257 = load i8*, i8** %l16
+  %t258 = load i8*, i8** %l17
+  br i1 %t241, label %then18, label %merge19
 then18:
-  %t257 = load i8*, i8** %l17
-  %s258 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.258, i32 0, i32 0
-  %t259 = call i8* @strip_prefix(i8* %t257, i8* %s258)
-  %t260 = call %EnumLayoutHeaderParse @parse_enum_layout_header(i8* %t259)
-  store %EnumLayoutHeaderParse %t260, %EnumLayoutHeaderParse* %l18
-  %t261 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t262 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t263 = extractvalue %EnumLayoutHeaderParse %t262, 7
-  %t264 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t261, { i8**, i64 }* %t263)
-  store { i8**, i64 }* %t264, { i8**, i64 }** %l0
-  %t265 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t266 = extractvalue %EnumLayoutHeaderParse %t265, 0
-  %t267 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t268 = load i8*, i8** %l1
-  %t269 = load i8*, i8** %l2
-  %t270 = load i8*, i8** %l3
-  %t271 = load double, double* %l4
-  %t272 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t273 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t274 = load double, double* %l7
-  %t275 = load double, double* %l8
-  %t276 = load i8*, i8** %l9
-  %t277 = load double, double* %l10
-  %t278 = load double, double* %l11
-  %t279 = load i1, i1* %l12
-  %t280 = load i1, i1* %l13
-  %t281 = load double, double* %l14
-  %t282 = load i8*, i8** %l16
-  %t283 = load i8*, i8** %l17
-  %t284 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  br i1 %t266, label %then20, label %merge21
+  %t259 = load i8*, i8** %l17
+  %s260 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.260, i32 0, i32 0
+  %t261 = call i8* @strip_prefix(i8* %t259, i8* %s260)
+  %t262 = call %EnumLayoutHeaderParse @parse_enum_layout_header(i8* %t261)
+  store %EnumLayoutHeaderParse %t262, %EnumLayoutHeaderParse* %l18
+  %t263 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t264 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
+  %t265 = extractvalue %EnumLayoutHeaderParse %t264, 7
+  %t266 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t263, { i8**, i64 }* %t265)
+  store { i8**, i64 }* %t266, { i8**, i64 }** %l0
+  %t267 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
+  %t268 = extractvalue %EnumLayoutHeaderParse %t267, 0
+  %t269 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t270 = load i8*, i8** %l1
+  %t271 = load i8*, i8** %l2
+  %t272 = load i8*, i8** %l3
+  %t273 = load double, double* %l4
+  %t274 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t275 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t276 = load double, double* %l7
+  %t277 = load double, double* %l8
+  %t278 = load i8*, i8** %l9
+  %t279 = load double, double* %l10
+  %t280 = load double, double* %l11
+  %t281 = load i1, i1* %l12
+  %t282 = load i1, i1* %l13
+  %t283 = load double, double* %l14
+  %t284 = load i8*, i8** %l16
+  %t285 = load i8*, i8** %l17
+  %t286 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
+  br i1 %t268, label %then20, label %merge21
 then20:
-  %t285 = load i1, i1* %l12
-  %t286 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t287 = load i8*, i8** %l1
-  %t288 = load i8*, i8** %l2
-  %t289 = load i8*, i8** %l3
-  %t290 = load double, double* %l4
-  %t291 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t292 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t293 = load double, double* %l7
-  %t294 = load double, double* %l8
-  %t295 = load i8*, i8** %l9
-  %t296 = load double, double* %l10
-  %t297 = load double, double* %l11
-  %t298 = load i1, i1* %l12
-  %t299 = load i1, i1* %l13
-  %t300 = load double, double* %l14
-  %t301 = load i8*, i8** %l16
-  %t302 = load i8*, i8** %l17
-  %t303 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  br i1 %t285, label %then22, label %else23
+  %t287 = load i1, i1* %l12
+  %t288 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t289 = load i8*, i8** %l1
+  %t290 = load i8*, i8** %l2
+  %t291 = load i8*, i8** %l3
+  %t292 = load double, double* %l4
+  %t293 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t294 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t295 = load double, double* %l7
+  %t296 = load double, double* %l8
+  %t297 = load i8*, i8** %l9
+  %t298 = load double, double* %l10
+  %t299 = load double, double* %l11
+  %t300 = load i1, i1* %l12
+  %t301 = load i1, i1* %l13
+  %t302 = load double, double* %l14
+  %t303 = load i8*, i8** %l16
+  %t304 = load i8*, i8** %l17
+  %t305 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
+  br i1 %t287, label %then22, label %else23
 then22:
-  %t304 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s305 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.305, i32 0, i32 0
-  %t306 = load i8*, i8** %l3
-  %t307 = add i8* %s305, %t306
-  %t308 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t304, i8* %t307)
-  store { i8**, i64 }* %t308, { i8**, i64 }** %l0
+  %t306 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s307 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.307, i32 0, i32 0
+  %t308 = load i8*, i8** %l3
+  %t309 = add i8* %s307, %t308
+  %t310 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t306, i8* %t309)
+  store { i8**, i64 }* %t310, { i8**, i64 }** %l0
   br label %merge24
 else23:
-  %t309 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t310 = extractvalue %EnumLayoutHeaderParse %t309, 2
-  store double %t310, double* %l7
   %t311 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t312 = extractvalue %EnumLayoutHeaderParse %t311, 3
-  store double %t312, double* %l8
+  %t312 = extractvalue %EnumLayoutHeaderParse %t311, 2
+  store double %t312, double* %l7
   %t313 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t314 = extractvalue %EnumLayoutHeaderParse %t313, 4
-  store i8* %t314, i8** %l9
+  %t314 = extractvalue %EnumLayoutHeaderParse %t313, 3
+  store double %t314, double* %l8
   %t315 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t316 = extractvalue %EnumLayoutHeaderParse %t315, 5
-  store double %t316, double* %l10
+  %t316 = extractvalue %EnumLayoutHeaderParse %t315, 4
+  store i8* %t316, i8** %l9
   %t317 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
-  %t318 = extractvalue %EnumLayoutHeaderParse %t317, 6
-  store double %t318, double* %l11
+  %t318 = extractvalue %EnumLayoutHeaderParse %t317, 5
+  store double %t318, double* %l10
+  %t319 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l18
+  %t320 = extractvalue %EnumLayoutHeaderParse %t319, 6
+  store double %t320, double* %l11
   store i1 1, i1* %l12
   br label %merge24
 merge24:
-  %t319 = phi { i8**, i64 }* [ %t308, %then22 ], [ %t286, %else23 ]
-  %t320 = phi double [ %t293, %then22 ], [ %t310, %else23 ]
-  %t321 = phi double [ %t294, %then22 ], [ %t312, %else23 ]
-  %t322 = phi i8* [ %t295, %then22 ], [ %t314, %else23 ]
-  %t323 = phi double [ %t296, %then22 ], [ %t316, %else23 ]
-  %t324 = phi double [ %t297, %then22 ], [ %t318, %else23 ]
-  %t325 = phi i1 [ %t298, %then22 ], [ 1, %else23 ]
-  store { i8**, i64 }* %t319, { i8**, i64 }** %l0
-  store double %t320, double* %l7
-  store double %t321, double* %l8
-  store i8* %t322, i8** %l9
-  store double %t323, double* %l10
-  store double %t324, double* %l11
-  store i1 %t325, i1* %l12
+  %t321 = phi { i8**, i64 }* [ %t310, %then22 ], [ %t288, %else23 ]
+  %t322 = phi double [ %t295, %then22 ], [ %t312, %else23 ]
+  %t323 = phi double [ %t296, %then22 ], [ %t314, %else23 ]
+  %t324 = phi i8* [ %t297, %then22 ], [ %t316, %else23 ]
+  %t325 = phi double [ %t298, %then22 ], [ %t318, %else23 ]
+  %t326 = phi double [ %t299, %then22 ], [ %t320, %else23 ]
+  %t327 = phi i1 [ %t300, %then22 ], [ 1, %else23 ]
+  store { i8**, i64 }* %t321, { i8**, i64 }** %l0
+  store double %t322, double* %l7
+  store double %t323, double* %l8
+  store i8* %t324, i8** %l9
+  store double %t325, double* %l10
+  store double %t326, double* %l11
+  store i1 %t327, i1* %l12
   br label %merge21
 merge21:
-  %t326 = phi { i8**, i64 }* [ %t308, %then20 ], [ %t267, %then18 ]
-  %t327 = phi double [ %t310, %then20 ], [ %t274, %then18 ]
-  %t328 = phi double [ %t312, %then20 ], [ %t275, %then18 ]
-  %t329 = phi i8* [ %t314, %then20 ], [ %t276, %then18 ]
-  %t330 = phi double [ %t316, %then20 ], [ %t277, %then18 ]
-  %t331 = phi double [ %t318, %then20 ], [ %t278, %then18 ]
-  %t332 = phi i1 [ 1, %then20 ], [ %t279, %then18 ]
-  store { i8**, i64 }* %t326, { i8**, i64 }** %l0
-  store double %t327, double* %l7
-  store double %t328, double* %l8
-  store i8* %t329, i8** %l9
-  store double %t330, double* %l10
-  store double %t331, double* %l11
-  store i1 %t332, i1* %l12
-  %t333 = load double, double* %l14
-  %t334 = sitofp i64 1 to double
-  %t335 = fadd double %t333, %t334
-  store double %t335, double* %l14
+  %t328 = phi { i8**, i64 }* [ %t310, %then20 ], [ %t269, %then18 ]
+  %t329 = phi double [ %t312, %then20 ], [ %t276, %then18 ]
+  %t330 = phi double [ %t314, %then20 ], [ %t277, %then18 ]
+  %t331 = phi i8* [ %t316, %then20 ], [ %t278, %then18 ]
+  %t332 = phi double [ %t318, %then20 ], [ %t279, %then18 ]
+  %t333 = phi double [ %t320, %then20 ], [ %t280, %then18 ]
+  %t334 = phi i1 [ 1, %then20 ], [ %t281, %then18 ]
+  store { i8**, i64 }* %t328, { i8**, i64 }** %l0
+  store double %t329, double* %l7
+  store double %t330, double* %l8
+  store i8* %t331, i8** %l9
+  store double %t332, double* %l10
+  store double %t333, double* %l11
+  store i1 %t334, i1* %l12
+  %t335 = load double, double* %l14
+  %t336 = sitofp i64 1 to double
+  %t337 = fadd double %t335, %t336
+  store double %t337, double* %l14
   br label %loop.latch6
 merge19:
-  %t336 = load i8*, i8** %l17
-  %s337 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.337, i32 0, i32 0
-  %t338 = call i1 @starts_with(i8* %t336, i8* %s337)
-  %t339 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t340 = load i8*, i8** %l1
-  %t341 = load i8*, i8** %l2
-  %t342 = load i8*, i8** %l3
-  %t343 = load double, double* %l4
-  %t344 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t345 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t346 = load double, double* %l7
-  %t347 = load double, double* %l8
-  %t348 = load i8*, i8** %l9
-  %t349 = load double, double* %l10
-  %t350 = load double, double* %l11
-  %t351 = load i1, i1* %l12
-  %t352 = load i1, i1* %l13
-  %t353 = load double, double* %l14
-  %t354 = load i8*, i8** %l16
-  %t355 = load i8*, i8** %l17
-  br i1 %t338, label %then25, label %merge26
+  %t338 = load i8*, i8** %l17
+  %s339 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.339, i32 0, i32 0
+  %t340 = call i1 @starts_with(i8* %t338, i8* %s339)
+  %t341 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t342 = load i8*, i8** %l1
+  %t343 = load i8*, i8** %l2
+  %t344 = load i8*, i8** %l3
+  %t345 = load double, double* %l4
+  %t346 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t347 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t348 = load double, double* %l7
+  %t349 = load double, double* %l8
+  %t350 = load i8*, i8** %l9
+  %t351 = load double, double* %l10
+  %t352 = load double, double* %l11
+  %t353 = load i1, i1* %l12
+  %t354 = load i1, i1* %l13
+  %t355 = load double, double* %l14
+  %t356 = load i8*, i8** %l16
+  %t357 = load i8*, i8** %l17
+  br i1 %t340, label %then25, label %merge26
 then25:
-  %t356 = load i8*, i8** %l17
-  %s357 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.357, i32 0, i32 0
-  %t358 = call i8* @strip_prefix(i8* %t356, i8* %s357)
-  %t359 = load i8*, i8** %l3
-  %t360 = call %EnumLayoutVariantParse @parse_enum_variant_layout(i8* %t358, i8* %t359)
-  store %EnumLayoutVariantParse %t360, %EnumLayoutVariantParse* %l19
-  %t361 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t362 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t363 = extractvalue %EnumLayoutVariantParse %t362, 2
-  %t364 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t361, { i8**, i64 }* %t363)
-  store { i8**, i64 }* %t364, { i8**, i64 }** %l0
-  %t365 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t366 = extractvalue %EnumLayoutVariantParse %t365, 0
-  %t367 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t368 = load i8*, i8** %l1
-  %t369 = load i8*, i8** %l2
-  %t370 = load i8*, i8** %l3
-  %t371 = load double, double* %l4
-  %t372 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t373 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t374 = load double, double* %l7
-  %t375 = load double, double* %l8
-  %t376 = load i8*, i8** %l9
-  %t377 = load double, double* %l10
-  %t378 = load double, double* %l11
-  %t379 = load i1, i1* %l12
-  %t380 = load i1, i1* %l13
-  %t381 = load double, double* %l14
-  %t382 = load i8*, i8** %l16
-  %t383 = load i8*, i8** %l17
-  %t384 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  br i1 %t366, label %then27, label %merge28
-then27:
-  %t385 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t358 = load i8*, i8** %l17
+  %s359 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.359, i32 0, i32 0
+  %t360 = call i8* @strip_prefix(i8* %t358, i8* %s359)
+  %t361 = load i8*, i8** %l3
+  %t362 = call %EnumLayoutVariantParse @parse_enum_variant_layout(i8* %t360, i8* %t361)
+  store %EnumLayoutVariantParse %t362, %EnumLayoutVariantParse* %l19
+  %t363 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t364 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t365 = extractvalue %EnumLayoutVariantParse %t364, 2
+  %t366 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t363, { i8**, i64 }* %t365)
+  store { i8**, i64 }* %t366, { i8**, i64 }** %l0
+  %t367 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t368 = extractvalue %EnumLayoutVariantParse %t367, 0
+  %t369 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t370 = load i8*, i8** %l1
+  %t371 = load i8*, i8** %l2
+  %t372 = load i8*, i8** %l3
+  %t373 = load double, double* %l4
+  %t374 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t375 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t376 = load double, double* %l7
+  %t377 = load double, double* %l8
+  %t378 = load i8*, i8** %l9
+  %t379 = load double, double* %l10
+  %t380 = load double, double* %l11
+  %t381 = load i1, i1* %l12
+  %t382 = load i1, i1* %l13
+  %t383 = load double, double* %l14
+  %t384 = load i8*, i8** %l16
+  %t385 = load i8*, i8** %l17
   %t386 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t387 = extractvalue %EnumLayoutVariantParse %t386, 1
-  %t388 = extractvalue %NativeEnumVariantLayout %t387, 0
-  %t389 = call double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t385, i8* %t388)
-  store double %t389, double* %l20
-  %t390 = load double, double* %l20
-  %t391 = sitofp i64 0 to double
-  %t392 = fcmp oge double %t390, %t391
-  %t393 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t394 = load i8*, i8** %l1
-  %t395 = load i8*, i8** %l2
-  %t396 = load i8*, i8** %l3
-  %t397 = load double, double* %l4
-  %t398 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t399 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t400 = load double, double* %l7
-  %t401 = load double, double* %l8
-  %t402 = load i8*, i8** %l9
-  %t403 = load double, double* %l10
-  %t404 = load double, double* %l11
-  %t405 = load i1, i1* %l12
-  %t406 = load i1, i1* %l13
-  %t407 = load double, double* %l14
-  %t408 = load i8*, i8** %l16
-  %t409 = load i8*, i8** %l17
-  %t410 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t411 = load double, double* %l20
-  br i1 %t392, label %then29, label %else30
+  br i1 %t368, label %then27, label %merge28
+then27:
+  %t387 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t388 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t389 = extractvalue %EnumLayoutVariantParse %t388, 1
+  %t390 = extractvalue %NativeEnumVariantLayout %t389, 0
+  %t391 = call double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t387, i8* %t390)
+  store double %t391, double* %l20
+  %t392 = load double, double* %l20
+  %t393 = sitofp i64 0 to double
+  %t394 = fcmp oge double %t392, %t393
+  %t395 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t396 = load i8*, i8** %l1
+  %t397 = load i8*, i8** %l2
+  %t398 = load i8*, i8** %l3
+  %t399 = load double, double* %l4
+  %t400 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t401 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t402 = load double, double* %l7
+  %t403 = load double, double* %l8
+  %t404 = load i8*, i8** %l9
+  %t405 = load double, double* %l10
+  %t406 = load double, double* %l11
+  %t407 = load i1, i1* %l12
+  %t408 = load i1, i1* %l13
+  %t409 = load double, double* %l14
+  %t410 = load i8*, i8** %l16
+  %t411 = load i8*, i8** %l17
+  %t412 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t413 = load double, double* %l20
+  br i1 %t394, label %then29, label %else30
 then29:
-  %t412 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s413 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.413, i32 0, i32 0
-  %t414 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t415 = extractvalue %EnumLayoutVariantParse %t414, 1
-  %t416 = extractvalue %NativeEnumVariantLayout %t415, 0
-  %t417 = add i8* %s413, %t416
-  %s418 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.418, i32 0, i32 0
-  %t419 = add i8* %t417, %s418
-  %t420 = load i8*, i8** %l3
-  %t421 = add i8* %t419, %t420
-  %t422 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t412, i8* %t421)
-  store { i8**, i64 }* %t422, { i8**, i64 }** %l0
+  %t414 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s415 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.415, i32 0, i32 0
+  %t416 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t417 = extractvalue %EnumLayoutVariantParse %t416, 1
+  %t418 = extractvalue %NativeEnumVariantLayout %t417, 0
+  %t419 = add i8* %s415, %t418
+  %s420 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.420, i32 0, i32 0
+  %t421 = add i8* %t419, %s420
+  %t422 = load i8*, i8** %l3
+  %t423 = add i8* %t421, %t422
+  %t424 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t414, i8* %t423)
+  store { i8**, i64 }* %t424, { i8**, i64 }** %l0
   br label %merge31
 else30:
-  %t423 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t424 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t425 = extractvalue %EnumLayoutVariantParse %t424, 1
-  %t426 = call { %NativeEnumVariantLayout*, i64 }* @append_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t423, %NativeEnumVariantLayout %t425)
-  store { %NativeEnumVariantLayout*, i64 }* %t426, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t425 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t426 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t427 = extractvalue %EnumLayoutVariantParse %t426, 1
+  %t428 = call { %NativeEnumVariantLayout*, i64 }* @append_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t425, %NativeEnumVariantLayout %t427)
+  store { %NativeEnumVariantLayout*, i64 }* %t428, { %NativeEnumVariantLayout*, i64 }** %l6
   br label %merge31
 merge31:
-  %t427 = phi { i8**, i64 }* [ %t422, %then29 ], [ %t393, %else30 ]
-  %t428 = phi { %NativeEnumVariantLayout*, i64 }* [ %t399, %then29 ], [ %t426, %else30 ]
-  store { i8**, i64 }* %t427, { i8**, i64 }** %l0
-  store { %NativeEnumVariantLayout*, i64 }* %t428, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t429 = load i1, i1* %l12
-  %t430 = xor i1 %t429, 1
-  %t431 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t432 = load i8*, i8** %l1
-  %t433 = load i8*, i8** %l2
-  %t434 = load i8*, i8** %l3
-  %t435 = load double, double* %l4
-  %t436 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t437 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t438 = load double, double* %l7
-  %t439 = load double, double* %l8
-  %t440 = load i8*, i8** %l9
-  %t441 = load double, double* %l10
-  %t442 = load double, double* %l11
-  %t443 = load i1, i1* %l12
-  %t444 = load i1, i1* %l13
-  %t445 = load double, double* %l14
-  %t446 = load i8*, i8** %l16
-  %t447 = load i8*, i8** %l17
-  %t448 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t449 = load double, double* %l20
-  br i1 %t430, label %then32, label %merge33
+  %t429 = phi { i8**, i64 }* [ %t424, %then29 ], [ %t395, %else30 ]
+  %t430 = phi { %NativeEnumVariantLayout*, i64 }* [ %t401, %then29 ], [ %t428, %else30 ]
+  store { i8**, i64 }* %t429, { i8**, i64 }** %l0
+  store { %NativeEnumVariantLayout*, i64 }* %t430, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t431 = load i1, i1* %l12
+  %t432 = xor i1 %t431, 1
+  %t433 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t434 = load i8*, i8** %l1
+  %t435 = load i8*, i8** %l2
+  %t436 = load i8*, i8** %l3
+  %t437 = load double, double* %l4
+  %t438 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t439 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t440 = load double, double* %l7
+  %t441 = load double, double* %l8
+  %t442 = load i8*, i8** %l9
+  %t443 = load double, double* %l10
+  %t444 = load double, double* %l11
+  %t445 = load i1, i1* %l12
+  %t446 = load i1, i1* %l13
+  %t447 = load double, double* %l14
+  %t448 = load i8*, i8** %l16
+  %t449 = load i8*, i8** %l17
+  %t450 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t451 = load double, double* %l20
+  br i1 %t432, label %then32, label %merge33
 then32:
-  %t450 = load i1, i1* %l13
-  %t451 = xor i1 %t450, 1
-  %t452 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t453 = load i8*, i8** %l1
-  %t454 = load i8*, i8** %l2
-  %t455 = load i8*, i8** %l3
-  %t456 = load double, double* %l4
-  %t457 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t458 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t459 = load double, double* %l7
-  %t460 = load double, double* %l8
-  %t461 = load i8*, i8** %l9
-  %t462 = load double, double* %l10
-  %t463 = load double, double* %l11
-  %t464 = load i1, i1* %l12
-  %t465 = load i1, i1* %l13
-  %t466 = load double, double* %l14
-  %t467 = load i8*, i8** %l16
-  %t468 = load i8*, i8** %l17
-  %t469 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
-  %t470 = load double, double* %l20
-  br i1 %t451, label %then34, label %merge35
+  %t452 = load i1, i1* %l13
+  %t453 = xor i1 %t452, 1
+  %t454 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t455 = load i8*, i8** %l1
+  %t456 = load i8*, i8** %l2
+  %t457 = load i8*, i8** %l3
+  %t458 = load double, double* %l4
+  %t459 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t460 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t461 = load double, double* %l7
+  %t462 = load double, double* %l8
+  %t463 = load i8*, i8** %l9
+  %t464 = load double, double* %l10
+  %t465 = load double, double* %l11
+  %t466 = load i1, i1* %l12
+  %t467 = load i1, i1* %l13
+  %t468 = load double, double* %l14
+  %t469 = load i8*, i8** %l16
+  %t470 = load i8*, i8** %l17
+  %t471 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l19
+  %t472 = load double, double* %l20
+  br i1 %t453, label %then34, label %merge35
 then34:
-  %t471 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s472 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.472, i32 0, i32 0
-  %t473 = load i8*, i8** %l3
-  %t474 = add i8* %s472, %t473
-  %s475 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.475, i32 0, i32 0
-  %t476 = add i8* %t474, %s475
-  %t477 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t471, i8* %t476)
-  store { i8**, i64 }* %t477, { i8**, i64 }** %l0
+  %t473 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s474 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.474, i32 0, i32 0
+  %t475 = load i8*, i8** %l3
+  %t476 = add i8* %s474, %t475
+  %s477 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.477, i32 0, i32 0
+  %t478 = add i8* %t476, %s477
+  %t479 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t473, i8* %t478)
+  store { i8**, i64 }* %t479, { i8**, i64 }** %l0
   store i1 1, i1* %l13
   br label %merge35
 merge35:
-  %t478 = phi { i8**, i64 }* [ %t477, %then34 ], [ %t452, %then32 ]
-  %t479 = phi i1 [ 1, %then34 ], [ %t465, %then32 ]
-  store { i8**, i64 }* %t478, { i8**, i64 }** %l0
-  store i1 %t479, i1* %l13
-  br label %merge33
-merge33:
-  %t480 = phi { i8**, i64 }* [ %t477, %then32 ], [ %t431, %then27 ]
-  %t481 = phi i1 [ 1, %then32 ], [ %t444, %then27 ]
+  %t480 = phi { i8**, i64 }* [ %t479, %then34 ], [ %t454, %then32 ]
+  %t481 = phi i1 [ 1, %then34 ], [ %t467, %then32 ]
   store { i8**, i64 }* %t480, { i8**, i64 }** %l0
   store i1 %t481, i1* %l13
+  br label %merge33
+merge33:
+  %t482 = phi { i8**, i64 }* [ %t479, %then32 ], [ %t433, %then27 ]
+  %t483 = phi i1 [ 1, %then32 ], [ %t446, %then27 ]
+  store { i8**, i64 }* %t482, { i8**, i64 }** %l0
+  store i1 %t483, i1* %l13
   br label %merge28
 merge28:
-  %t482 = phi { i8**, i64 }* [ %t422, %then27 ], [ %t367, %then25 ]
-  %t483 = phi { %NativeEnumVariantLayout*, i64 }* [ %t426, %then27 ], [ %t373, %then25 ]
-  %t484 = phi { i8**, i64 }* [ %t477, %then27 ], [ %t367, %then25 ]
-  %t485 = phi i1 [ 1, %then27 ], [ %t380, %then25 ]
-  store { i8**, i64 }* %t482, { i8**, i64 }** %l0
-  store { %NativeEnumVariantLayout*, i64 }* %t483, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t484 = phi { i8**, i64 }* [ %t424, %then27 ], [ %t369, %then25 ]
+  %t485 = phi { %NativeEnumVariantLayout*, i64 }* [ %t428, %then27 ], [ %t375, %then25 ]
+  %t486 = phi { i8**, i64 }* [ %t479, %then27 ], [ %t369, %then25 ]
+  %t487 = phi i1 [ 1, %then27 ], [ %t382, %then25 ]
   store { i8**, i64 }* %t484, { i8**, i64 }** %l0
-  store i1 %t485, i1* %l13
-  %t486 = load double, double* %l14
-  %t487 = sitofp i64 1 to double
-  %t488 = fadd double %t486, %t487
-  store double %t488, double* %l14
+  store { %NativeEnumVariantLayout*, i64 }* %t485, { %NativeEnumVariantLayout*, i64 }** %l6
+  store { i8**, i64 }* %t486, { i8**, i64 }** %l0
+  store i1 %t487, i1* %l13
+  %t488 = load double, double* %l14
+  %t489 = sitofp i64 1 to double
+  %t490 = fadd double %t488, %t489
+  store double %t490, double* %l14
   br label %loop.latch6
 merge26:
-  %t489 = load i8*, i8** %l17
-  %s490 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.490, i32 0, i32 0
-  %t491 = call i1 @starts_with(i8* %t489, i8* %s490)
-  %t492 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t493 = load i8*, i8** %l1
-  %t494 = load i8*, i8** %l2
-  %t495 = load i8*, i8** %l3
-  %t496 = load double, double* %l4
-  %t497 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t498 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t499 = load double, double* %l7
-  %t500 = load double, double* %l8
-  %t501 = load i8*, i8** %l9
-  %t502 = load double, double* %l10
-  %t503 = load double, double* %l11
-  %t504 = load i1, i1* %l12
-  %t505 = load i1, i1* %l13
-  %t506 = load double, double* %l14
-  %t507 = load i8*, i8** %l16
-  %t508 = load i8*, i8** %l17
-  br i1 %t491, label %then36, label %merge37
+  %t491 = load i8*, i8** %l17
+  %s492 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.492, i32 0, i32 0
+  %t493 = call i1 @starts_with(i8* %t491, i8* %s492)
+  %t494 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t495 = load i8*, i8** %l1
+  %t496 = load i8*, i8** %l2
+  %t497 = load i8*, i8** %l3
+  %t498 = load double, double* %l4
+  %t499 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t500 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t501 = load double, double* %l7
+  %t502 = load double, double* %l8
+  %t503 = load i8*, i8** %l9
+  %t504 = load double, double* %l10
+  %t505 = load double, double* %l11
+  %t506 = load i1, i1* %l12
+  %t507 = load i1, i1* %l13
+  %t508 = load double, double* %l14
+  %t509 = load i8*, i8** %l16
+  %t510 = load i8*, i8** %l17
+  br i1 %t493, label %then36, label %merge37
 then36:
-  %t509 = load i8*, i8** %l17
-  %s510 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.510, i32 0, i32 0
-  %t511 = call i8* @strip_prefix(i8* %t509, i8* %s510)
-  %t512 = load i8*, i8** %l3
-  %t513 = call %EnumLayoutPayloadParse @parse_enum_payload_layout(i8* %t511, i8* %t512)
-  store %EnumLayoutPayloadParse %t513, %EnumLayoutPayloadParse* %l21
-  %t514 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t515 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t516 = extractvalue %EnumLayoutPayloadParse %t515, 3
-  %t517 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t514, { i8**, i64 }* %t516)
-  store { i8**, i64 }* %t517, { i8**, i64 }** %l0
-  %t518 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t519 = extractvalue %EnumLayoutPayloadParse %t518, 0
-  %t520 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t521 = load i8*, i8** %l1
-  %t522 = load i8*, i8** %l2
-  %t523 = load i8*, i8** %l3
-  %t524 = load double, double* %l4
-  %t525 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t526 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t527 = load double, double* %l7
-  %t528 = load double, double* %l8
-  %t529 = load i8*, i8** %l9
-  %t530 = load double, double* %l10
-  %t531 = load double, double* %l11
-  %t532 = load i1, i1* %l12
-  %t533 = load i1, i1* %l13
-  %t534 = load double, double* %l14
-  %t535 = load i8*, i8** %l16
-  %t536 = load i8*, i8** %l17
-  %t537 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  br i1 %t519, label %then38, label %merge39
-then38:
-  %t538 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t511 = load i8*, i8** %l17
+  %s512 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.512, i32 0, i32 0
+  %t513 = call i8* @strip_prefix(i8* %t511, i8* %s512)
+  %t514 = load i8*, i8** %l3
+  %t515 = call %EnumLayoutPayloadParse @parse_enum_payload_layout(i8* %t513, i8* %t514)
+  store %EnumLayoutPayloadParse %t515, %EnumLayoutPayloadParse* %l21
+  %t516 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t517 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t518 = extractvalue %EnumLayoutPayloadParse %t517, 3
+  %t519 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t516, { i8**, i64 }* %t518)
+  store { i8**, i64 }* %t519, { i8**, i64 }** %l0
+  %t520 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t521 = extractvalue %EnumLayoutPayloadParse %t520, 0
+  %t522 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t523 = load i8*, i8** %l1
+  %t524 = load i8*, i8** %l2
+  %t525 = load i8*, i8** %l3
+  %t526 = load double, double* %l4
+  %t527 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t528 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t529 = load double, double* %l7
+  %t530 = load double, double* %l8
+  %t531 = load i8*, i8** %l9
+  %t532 = load double, double* %l10
+  %t533 = load double, double* %l11
+  %t534 = load i1, i1* %l12
+  %t535 = load i1, i1* %l13
+  %t536 = load double, double* %l14
+  %t537 = load i8*, i8** %l16
+  %t538 = load i8*, i8** %l17
   %t539 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t540 = extractvalue %EnumLayoutPayloadParse %t539, 1
-  %t541 = call double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t538, i8* %t540)
-  store double %t541, double* %l22
-  %t542 = load double, double* %l22
-  %t543 = sitofp i64 0 to double
-  %t544 = fcmp olt double %t542, %t543
-  %t545 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t546 = load i8*, i8** %l1
-  %t547 = load i8*, i8** %l2
-  %t548 = load i8*, i8** %l3
-  %t549 = load double, double* %l4
-  %t550 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t551 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t552 = load double, double* %l7
-  %t553 = load double, double* %l8
-  %t554 = load i8*, i8** %l9
-  %t555 = load double, double* %l10
-  %t556 = load double, double* %l11
-  %t557 = load i1, i1* %l12
-  %t558 = load i1, i1* %l13
-  %t559 = load double, double* %l14
-  %t560 = load i8*, i8** %l16
-  %t561 = load i8*, i8** %l17
-  %t562 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t563 = load double, double* %l22
-  br i1 %t544, label %then40, label %else41
+  br i1 %t521, label %then38, label %merge39
+then38:
+  %t540 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t541 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t542 = extractvalue %EnumLayoutPayloadParse %t541, 1
+  %t543 = call double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t540, i8* %t542)
+  store double %t543, double* %l22
+  %t544 = load double, double* %l22
+  %t545 = sitofp i64 0 to double
+  %t546 = fcmp olt double %t544, %t545
+  %t547 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t548 = load i8*, i8** %l1
+  %t549 = load i8*, i8** %l2
+  %t550 = load i8*, i8** %l3
+  %t551 = load double, double* %l4
+  %t552 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t553 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t554 = load double, double* %l7
+  %t555 = load double, double* %l8
+  %t556 = load i8*, i8** %l9
+  %t557 = load double, double* %l10
+  %t558 = load double, double* %l11
+  %t559 = load i1, i1* %l12
+  %t560 = load i1, i1* %l13
+  %t561 = load double, double* %l14
+  %t562 = load i8*, i8** %l16
+  %t563 = load i8*, i8** %l17
+  %t564 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t565 = load double, double* %l22
+  br i1 %t546, label %then40, label %else41
 then40:
-  %t564 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s565 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.565, i32 0, i32 0
-  %t566 = load i8*, i8** %l3
-  %t567 = add i8* %s565, %t566
-  %s568 = getelementptr inbounds [45 x i8], [45 x i8]* @.str.568, i32 0, i32 0
-  %t569 = add i8* %t567, %s568
-  %t570 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t571 = extractvalue %EnumLayoutPayloadParse %t570, 1
-  %t572 = add i8* %t569, %t571
-  %t573 = load i8, i8* %t572
-  %t574 = add i8 %t573, 96
-  %t575 = alloca [2 x i8], align 1
-  %t576 = getelementptr [2 x i8], [2 x i8]* %t575, i32 0, i32 0
-  store i8 %t574, i8* %t576
-  %t577 = getelementptr [2 x i8], [2 x i8]* %t575, i32 0, i32 1
-  store i8 0, i8* %t577
-  %t578 = getelementptr [2 x i8], [2 x i8]* %t575, i32 0, i32 0
-  %t579 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t564, i8* %t578)
-  store { i8**, i64 }* %t579, { i8**, i64 }** %l0
+  %t566 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s567 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.567, i32 0, i32 0
+  %t568 = load i8*, i8** %l3
+  %t569 = add i8* %s567, %t568
+  %s570 = getelementptr inbounds [45 x i8], [45 x i8]* @.str.570, i32 0, i32 0
+  %t571 = add i8* %t569, %s570
+  %t572 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t573 = extractvalue %EnumLayoutPayloadParse %t572, 1
+  %t574 = add i8* %t571, %t573
+  %t575 = load i8, i8* %t574
+  %t576 = add i8 %t575, 96
+  %t577 = alloca [2 x i8], align 1
+  %t578 = getelementptr [2 x i8], [2 x i8]* %t577, i32 0, i32 0
+  store i8 %t576, i8* %t578
+  %t579 = getelementptr [2 x i8], [2 x i8]* %t577, i32 0, i32 1
+  store i8 0, i8* %t579
+  %t580 = getelementptr [2 x i8], [2 x i8]* %t577, i32 0, i32 0
+  %t581 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t566, i8* %t580)
+  store { i8**, i64 }* %t581, { i8**, i64 }** %l0
   br label %merge42
 else41:
-  %t580 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t581 = load double, double* %l22
-  %t582 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t583 = extractvalue %EnumLayoutPayloadParse %t582, 2
-  %t584 = call { %NativeEnumVariantLayout*, i64 }* @update_enum_variant_fields({ %NativeEnumVariantLayout*, i64 }* %t580, double %t581, %NativeStructLayoutField %t583)
-  store { %NativeEnumVariantLayout*, i64 }* %t584, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t582 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t583 = load double, double* %l22
+  %t584 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t585 = extractvalue %EnumLayoutPayloadParse %t584, 2
+  %t586 = call { %NativeEnumVariantLayout*, i64 }* @update_enum_variant_fields({ %NativeEnumVariantLayout*, i64 }* %t582, double %t583, %NativeStructLayoutField %t585)
+  store { %NativeEnumVariantLayout*, i64 }* %t586, { %NativeEnumVariantLayout*, i64 }** %l6
   br label %merge42
 merge42:
-  %t585 = phi { i8**, i64 }* [ %t579, %then40 ], [ %t545, %else41 ]
-  %t586 = phi { %NativeEnumVariantLayout*, i64 }* [ %t551, %then40 ], [ %t584, %else41 ]
-  store { i8**, i64 }* %t585, { i8**, i64 }** %l0
-  store { %NativeEnumVariantLayout*, i64 }* %t586, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t587 = load i1, i1* %l12
-  %t588 = xor i1 %t587, 1
-  %t589 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t590 = load i8*, i8** %l1
-  %t591 = load i8*, i8** %l2
-  %t592 = load i8*, i8** %l3
-  %t593 = load double, double* %l4
-  %t594 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t595 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t596 = load double, double* %l7
-  %t597 = load double, double* %l8
-  %t598 = load i8*, i8** %l9
-  %t599 = load double, double* %l10
-  %t600 = load double, double* %l11
-  %t601 = load i1, i1* %l12
-  %t602 = load i1, i1* %l13
-  %t603 = load double, double* %l14
-  %t604 = load i8*, i8** %l16
-  %t605 = load i8*, i8** %l17
-  %t606 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t607 = load double, double* %l22
-  br i1 %t588, label %then43, label %merge44
+  %t587 = phi { i8**, i64 }* [ %t581, %then40 ], [ %t547, %else41 ]
+  %t588 = phi { %NativeEnumVariantLayout*, i64 }* [ %t553, %then40 ], [ %t586, %else41 ]
+  store { i8**, i64 }* %t587, { i8**, i64 }** %l0
+  store { %NativeEnumVariantLayout*, i64 }* %t588, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t589 = load i1, i1* %l12
+  %t590 = xor i1 %t589, 1
+  %t591 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t592 = load i8*, i8** %l1
+  %t593 = load i8*, i8** %l2
+  %t594 = load i8*, i8** %l3
+  %t595 = load double, double* %l4
+  %t596 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t597 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t598 = load double, double* %l7
+  %t599 = load double, double* %l8
+  %t600 = load i8*, i8** %l9
+  %t601 = load double, double* %l10
+  %t602 = load double, double* %l11
+  %t603 = load i1, i1* %l12
+  %t604 = load i1, i1* %l13
+  %t605 = load double, double* %l14
+  %t606 = load i8*, i8** %l16
+  %t607 = load i8*, i8** %l17
+  %t608 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t609 = load double, double* %l22
+  br i1 %t590, label %then43, label %merge44
 then43:
-  %t608 = load i1, i1* %l13
-  %t609 = xor i1 %t608, 1
-  %t610 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t611 = load i8*, i8** %l1
-  %t612 = load i8*, i8** %l2
-  %t613 = load i8*, i8** %l3
-  %t614 = load double, double* %l4
-  %t615 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t616 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t617 = load double, double* %l7
-  %t618 = load double, double* %l8
-  %t619 = load i8*, i8** %l9
-  %t620 = load double, double* %l10
-  %t621 = load double, double* %l11
-  %t622 = load i1, i1* %l12
-  %t623 = load i1, i1* %l13
-  %t624 = load double, double* %l14
-  %t625 = load i8*, i8** %l16
-  %t626 = load i8*, i8** %l17
-  %t627 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
-  %t628 = load double, double* %l22
-  br i1 %t609, label %then45, label %merge46
+  %t610 = load i1, i1* %l13
+  %t611 = xor i1 %t610, 1
+  %t612 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t613 = load i8*, i8** %l1
+  %t614 = load i8*, i8** %l2
+  %t615 = load i8*, i8** %l3
+  %t616 = load double, double* %l4
+  %t617 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t618 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t619 = load double, double* %l7
+  %t620 = load double, double* %l8
+  %t621 = load i8*, i8** %l9
+  %t622 = load double, double* %l10
+  %t623 = load double, double* %l11
+  %t624 = load i1, i1* %l12
+  %t625 = load i1, i1* %l13
+  %t626 = load double, double* %l14
+  %t627 = load i8*, i8** %l16
+  %t628 = load i8*, i8** %l17
+  %t629 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l21
+  %t630 = load double, double* %l22
+  br i1 %t611, label %then45, label %merge46
 then45:
-  %t629 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s630 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.630, i32 0, i32 0
-  %t631 = load i8*, i8** %l3
-  %t632 = add i8* %s630, %t631
-  %s633 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.633, i32 0, i32 0
-  %t634 = add i8* %t632, %s633
-  %t635 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t629, i8* %t634)
-  store { i8**, i64 }* %t635, { i8**, i64 }** %l0
+  %t631 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s632 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.632, i32 0, i32 0
+  %t633 = load i8*, i8** %l3
+  %t634 = add i8* %s632, %t633
+  %s635 = getelementptr inbounds [49 x i8], [49 x i8]* @.str.635, i32 0, i32 0
+  %t636 = add i8* %t634, %s635
+  %t637 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t631, i8* %t636)
+  store { i8**, i64 }* %t637, { i8**, i64 }** %l0
   store i1 1, i1* %l13
   br label %merge46
 merge46:
-  %t636 = phi { i8**, i64 }* [ %t635, %then45 ], [ %t610, %then43 ]
-  %t637 = phi i1 [ 1, %then45 ], [ %t623, %then43 ]
-  store { i8**, i64 }* %t636, { i8**, i64 }** %l0
-  store i1 %t637, i1* %l13
-  br label %merge44
-merge44:
-  %t638 = phi { i8**, i64 }* [ %t635, %then43 ], [ %t589, %then38 ]
-  %t639 = phi i1 [ 1, %then43 ], [ %t602, %then38 ]
+  %t638 = phi { i8**, i64 }* [ %t637, %then45 ], [ %t612, %then43 ]
+  %t639 = phi i1 [ 1, %then45 ], [ %t625, %then43 ]
   store { i8**, i64 }* %t638, { i8**, i64 }** %l0
   store i1 %t639, i1* %l13
+  br label %merge44
+merge44:
+  %t640 = phi { i8**, i64 }* [ %t637, %then43 ], [ %t591, %then38 ]
+  %t641 = phi i1 [ 1, %then43 ], [ %t604, %then38 ]
+  store { i8**, i64 }* %t640, { i8**, i64 }** %l0
+  store i1 %t641, i1* %l13
   br label %merge39
 merge39:
-  %t640 = phi { i8**, i64 }* [ %t579, %then38 ], [ %t520, %then36 ]
-  %t641 = phi { %NativeEnumVariantLayout*, i64 }* [ %t584, %then38 ], [ %t526, %then36 ]
-  %t642 = phi { i8**, i64 }* [ %t635, %then38 ], [ %t520, %then36 ]
-  %t643 = phi i1 [ 1, %then38 ], [ %t533, %then36 ]
-  store { i8**, i64 }* %t640, { i8**, i64 }** %l0
-  store { %NativeEnumVariantLayout*, i64 }* %t641, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t642 = phi { i8**, i64 }* [ %t581, %then38 ], [ %t522, %then36 ]
+  %t643 = phi { %NativeEnumVariantLayout*, i64 }* [ %t586, %then38 ], [ %t528, %then36 ]
+  %t644 = phi { i8**, i64 }* [ %t637, %then38 ], [ %t522, %then36 ]
+  %t645 = phi i1 [ 1, %then38 ], [ %t535, %then36 ]
   store { i8**, i64 }* %t642, { i8**, i64 }** %l0
-  store i1 %t643, i1* %l13
-  %t644 = load double, double* %l14
-  %t645 = sitofp i64 1 to double
-  %t646 = fadd double %t644, %t645
-  store double %t646, double* %l14
+  store { %NativeEnumVariantLayout*, i64 }* %t643, { %NativeEnumVariantLayout*, i64 }** %l6
+  store { i8**, i64 }* %t644, { i8**, i64 }** %l0
+  store i1 %t645, i1* %l13
+  %t646 = load double, double* %l14
+  %t647 = sitofp i64 1 to double
+  %t648 = fadd double %t646, %t647
+  store double %t648, double* %l14
   br label %loop.latch6
 merge37:
-  %t647 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s648 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.648, i32 0, i32 0
-  %t649 = load i8*, i8** %l16
-  %t650 = add i8* %s648, %t649
-  %t651 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t647, i8* %t650)
-  store { i8**, i64 }* %t651, { i8**, i64 }** %l0
-  %t652 = load double, double* %l14
-  %t653 = sitofp i64 1 to double
-  %t654 = fadd double %t652, %t653
-  store double %t654, double* %l14
+  %t649 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s650 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.650, i32 0, i32 0
+  %t651 = load i8*, i8** %l16
+  %t652 = add i8* %s650, %t651
+  %t653 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t649, i8* %t652)
+  store { i8**, i64 }* %t653, { i8**, i64 }** %l0
+  %t654 = load double, double* %l14
+  %t655 = sitofp i64 1 to double
+  %t656 = fadd double %t654, %t655
+  store double %t656, double* %l14
   br label %loop.latch6
 merge17:
-  %t655 = load i8*, i8** %l16
-  %s656 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.656, i32 0, i32 0
-  %t657 = icmp eq i8* %t655, %s656
-  %t658 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t659 = load i8*, i8** %l1
-  %t660 = load i8*, i8** %l2
-  %t661 = load i8*, i8** %l3
-  %t662 = load double, double* %l4
-  %t663 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t664 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t665 = load double, double* %l7
-  %t666 = load double, double* %l8
-  %t667 = load i8*, i8** %l9
-  %t668 = load double, double* %l10
-  %t669 = load double, double* %l11
-  %t670 = load i1, i1* %l12
-  %t671 = load i1, i1* %l13
-  %t672 = load double, double* %l14
-  %t673 = load i8*, i8** %l16
-  br i1 %t657, label %then47, label %merge48
-then47:
+  %t657 = load i8*, i8** %l16
+  %s658 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.658, i32 0, i32 0
+  %t659 = icmp eq i8* %t657, %s658
+  %t660 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t661 = load i8*, i8** %l1
+  %t662 = load i8*, i8** %l2
+  %t663 = load i8*, i8** %l3
+  %t664 = load double, double* %l4
+  %t665 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t666 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t667 = load double, double* %l7
+  %t668 = load double, double* %l8
+  %t669 = load i8*, i8** %l9
+  %t670 = load double, double* %l10
+  %t671 = load double, double* %l11
+  %t672 = load i1, i1* %l12
+  %t673 = load i1, i1* %l13
   %t674 = load double, double* %l14
-  %t675 = sitofp i64 1 to double
-  %t676 = fadd double %t674, %t675
-  store double %t676, double* %l14
+  %t675 = load i8*, i8** %l16
+  br i1 %t659, label %then47, label %merge48
+then47:
+  %t676 = load double, double* %l14
+  %t677 = sitofp i64 1 to double
+  %t678 = fadd double %t676, %t677
+  store double %t678, double* %l14
   br label %afterloop7
 merge48:
-  %t677 = load i8*, i8** %l16
-  %s678 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.678, i32 0, i32 0
-  %t679 = call i1 @starts_with(i8* %t677, i8* %s678)
-  %t680 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t681 = load i8*, i8** %l1
-  %t682 = load i8*, i8** %l2
-  %t683 = load i8*, i8** %l3
-  %t684 = load double, double* %l4
-  %t685 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t686 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t687 = load double, double* %l7
-  %t688 = load double, double* %l8
-  %t689 = load i8*, i8** %l9
-  %t690 = load double, double* %l10
-  %t691 = load double, double* %l11
-  %t692 = load i1, i1* %l12
-  %t693 = load i1, i1* %l13
-  %t694 = load double, double* %l14
-  %t695 = load i8*, i8** %l16
-  br i1 %t679, label %then49, label %merge50
+  %t679 = load i8*, i8** %l16
+  %s680 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.680, i32 0, i32 0
+  %t681 = call i1 @starts_with(i8* %t679, i8* %s680)
+  %t682 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t683 = load i8*, i8** %l1
+  %t684 = load i8*, i8** %l2
+  %t685 = load i8*, i8** %l3
+  %t686 = load double, double* %l4
+  %t687 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t688 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t689 = load double, double* %l7
+  %t690 = load double, double* %l8
+  %t691 = load i8*, i8** %l9
+  %t692 = load double, double* %l10
+  %t693 = load double, double* %l11
+  %t694 = load i1, i1* %l12
+  %t695 = load i1, i1* %l13
+  %t696 = load double, double* %l14
+  %t697 = load i8*, i8** %l16
+  br i1 %t681, label %then49, label %merge50
 then49:
-  %t696 = load i8*, i8** %l16
-  %s697 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.697, i32 0, i32 0
-  %t698 = call i8* @strip_prefix(i8* %t696, i8* %s697)
-  %t699 = call %NativeEnumVariant* @parse_enum_variant_line(i8* %t698)
-  store %NativeEnumVariant* %t699, %NativeEnumVariant** %l23
-  %t700 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
-  %t701 = bitcast i8* null to %NativeEnumVariant*
-  %t702 = icmp eq %NativeEnumVariant* %t700, %t701
-  %t703 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t704 = load i8*, i8** %l1
-  %t705 = load i8*, i8** %l2
-  %t706 = load i8*, i8** %l3
-  %t707 = load double, double* %l4
-  %t708 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t709 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t710 = load double, double* %l7
-  %t711 = load double, double* %l8
-  %t712 = load i8*, i8** %l9
-  %t713 = load double, double* %l10
-  %t714 = load double, double* %l11
-  %t715 = load i1, i1* %l12
-  %t716 = load i1, i1* %l13
-  %t717 = load double, double* %l14
-  %t718 = load i8*, i8** %l16
-  %t719 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
-  br i1 %t702, label %then51, label %else52
+  %t698 = load i8*, i8** %l16
+  %s699 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.699, i32 0, i32 0
+  %t700 = call i8* @strip_prefix(i8* %t698, i8* %s699)
+  %t701 = call %NativeEnumVariant* @parse_enum_variant_line(i8* %t700)
+  store %NativeEnumVariant* %t701, %NativeEnumVariant** %l23
+  %t702 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
+  %t703 = bitcast i8* null to %NativeEnumVariant*
+  %t704 = icmp eq %NativeEnumVariant* %t702, %t703
+  %t705 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t706 = load i8*, i8** %l1
+  %t707 = load i8*, i8** %l2
+  %t708 = load i8*, i8** %l3
+  %t709 = load double, double* %l4
+  %t710 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t711 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t712 = load double, double* %l7
+  %t713 = load double, double* %l8
+  %t714 = load i8*, i8** %l9
+  %t715 = load double, double* %l10
+  %t716 = load double, double* %l11
+  %t717 = load i1, i1* %l12
+  %t718 = load i1, i1* %l13
+  %t719 = load double, double* %l14
+  %t720 = load i8*, i8** %l16
+  %t721 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
+  br i1 %t704, label %then51, label %else52
 then51:
-  %t720 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s721 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.721, i32 0, i32 0
-  %t722 = load i8*, i8** %l16
-  %t723 = add i8* %s721, %t722
-  %t724 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t720, i8* %t723)
-  store { i8**, i64 }* %t724, { i8**, i64 }** %l0
+  %t722 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s723 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.723, i32 0, i32 0
+  %t724 = load i8*, i8** %l16
+  %t725 = add i8* %s723, %t724
+  %t726 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t722, i8* %t725)
+  store { i8**, i64 }* %t726, { i8**, i64 }** %l0
   br label %merge53
 else52:
-  %t725 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t726 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
-  %t727 = load %NativeEnumVariant, %NativeEnumVariant* %t726
-  %t728 = call { %NativeEnumVariant*, i64 }* @append_enum_variant({ %NativeEnumVariant*, i64 }* %t725, %NativeEnumVariant %t727)
-  store { %NativeEnumVariant*, i64 }* %t728, { %NativeEnumVariant*, i64 }** %l5
+  %t727 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t728 = load %NativeEnumVariant*, %NativeEnumVariant** %l23
+  %t729 = load %NativeEnumVariant, %NativeEnumVariant* %t728
+  %t730 = call { %NativeEnumVariant*, i64 }* @append_enum_variant({ %NativeEnumVariant*, i64 }* %t727, %NativeEnumVariant %t729)
+  store { %NativeEnumVariant*, i64 }* %t730, { %NativeEnumVariant*, i64 }** %l5
   br label %merge53
 merge53:
-  %t729 = phi { i8**, i64 }* [ %t724, %then51 ], [ %t703, %else52 ]
-  %t730 = phi { %NativeEnumVariant*, i64 }* [ %t708, %then51 ], [ %t728, %else52 ]
-  store { i8**, i64 }* %t729, { i8**, i64 }** %l0
-  store { %NativeEnumVariant*, i64 }* %t730, { %NativeEnumVariant*, i64 }** %l5
-  %t731 = load double, double* %l14
-  %t732 = sitofp i64 1 to double
-  %t733 = fadd double %t731, %t732
-  store double %t733, double* %l14
+  %t731 = phi { i8**, i64 }* [ %t726, %then51 ], [ %t705, %else52 ]
+  %t732 = phi { %NativeEnumVariant*, i64 }* [ %t710, %then51 ], [ %t730, %else52 ]
+  store { i8**, i64 }* %t731, { i8**, i64 }** %l0
+  store { %NativeEnumVariant*, i64 }* %t732, { %NativeEnumVariant*, i64 }** %l5
+  %t733 = load double, double* %l14
+  %t734 = sitofp i64 1 to double
+  %t735 = fadd double %t733, %t734
+  store double %t735, double* %l14
   br label %loop.latch6
 merge50:
-  %t734 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s735 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.735, i32 0, i32 0
-  %t736 = load i8*, i8** %l16
-  %t737 = add i8* %s735, %t736
-  %t738 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t734, i8* %t737)
-  store { i8**, i64 }* %t738, { i8**, i64 }** %l0
-  %t739 = load double, double* %l14
-  %t740 = sitofp i64 1 to double
-  %t741 = fadd double %t739, %t740
-  store double %t741, double* %l14
+  %t736 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s737 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.737, i32 0, i32 0
+  %t738 = load i8*, i8** %l16
+  %t739 = add i8* %s737, %t738
+  %t740 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t736, i8* %t739)
+  store { i8**, i64 }* %t740, { i8**, i64 }** %l0
+  %t741 = load double, double* %l14
+  %t742 = sitofp i64 1 to double
+  %t743 = fadd double %t741, %t742
+  store double %t743, double* %l14
   br label %loop.latch6
 loop.latch6:
-  %t742 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t743 = load double, double* %l14
-  %t744 = load double, double* %l7
-  %t745 = load double, double* %l8
-  %t746 = load i8*, i8** %l9
-  %t747 = load double, double* %l10
-  %t748 = load double, double* %l11
-  %t749 = load i1, i1* %l12
-  %t750 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t751 = load i1, i1* %l13
-  %t752 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t744 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t745 = load double, double* %l14
+  %t746 = load double, double* %l7
+  %t747 = load double, double* %l8
+  %t748 = load i8*, i8** %l9
+  %t749 = load double, double* %l10
+  %t750 = load double, double* %l11
+  %t751 = load i1, i1* %l12
+  %t752 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t753 = load i1, i1* %l13
+  %t754 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
   br label %loop.header4
 afterloop7:
-  %t764 = bitcast i8* null to %NativeEnumLayout*
-  store %NativeEnumLayout* %t764, %NativeEnumLayout** %l24
-  %t765 = load i1, i1* %l12
-  %t766 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t767 = load i8*, i8** %l1
-  %t768 = load i8*, i8** %l2
-  %t769 = load i8*, i8** %l3
-  %t770 = load double, double* %l4
-  %t771 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t772 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t773 = load double, double* %l7
-  %t774 = load double, double* %l8
-  %t775 = load i8*, i8** %l9
-  %t776 = load double, double* %l10
-  %t777 = load double, double* %l11
-  %t778 = load i1, i1* %l12
-  %t779 = load i1, i1* %l13
-  %t780 = load double, double* %l14
-  %t781 = load %NativeEnumLayout*, %NativeEnumLayout** %l24
-  br i1 %t765, label %then54, label %merge55
+  %t766 = bitcast i8* null to %NativeEnumLayout*
+  store %NativeEnumLayout* %t766, %NativeEnumLayout** %l24
+  %t767 = load i1, i1* %l12
+  %t768 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t769 = load i8*, i8** %l1
+  %t770 = load i8*, i8** %l2
+  %t771 = load i8*, i8** %l3
+  %t772 = load double, double* %l4
+  %t773 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t774 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t775 = load double, double* %l7
+  %t776 = load double, double* %l8
+  %t777 = load i8*, i8** %l9
+  %t778 = load double, double* %l10
+  %t779 = load double, double* %l11
+  %t780 = load i1, i1* %l12
+  %t781 = load i1, i1* %l13
+  %t782 = load double, double* %l14
+  %t783 = load %NativeEnumLayout*, %NativeEnumLayout** %l24
+  br i1 %t767, label %then54, label %merge55
 then54:
-  %t782 = load double, double* %l7
-  %t783 = insertvalue %NativeEnumLayout undef, double %t782, 0
-  %t784 = load double, double* %l8
-  %t785 = insertvalue %NativeEnumLayout %t783, double %t784, 1
-  %t786 = load i8*, i8** %l9
-  %t787 = insertvalue %NativeEnumLayout %t785, i8* %t786, 2
-  %t788 = load double, double* %l10
-  %t789 = insertvalue %NativeEnumLayout %t787, double %t788, 3
-  %t790 = load double, double* %l11
-  %t791 = insertvalue %NativeEnumLayout %t789, double %t790, 4
-  %t792 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
-  %t793 = bitcast { %NativeEnumVariantLayout*, i64 }* %t792 to { %NativeEnumVariantLayout**, i64 }*
-  %t794 = insertvalue %NativeEnumLayout %t791, { %NativeEnumVariantLayout**, i64 }* %t793, 5
-  store %NativeEnumLayout* null, %NativeEnumLayout** %l24
+  %t784 = load double, double* %l7
+  %t785 = insertvalue %NativeEnumLayout undef, double %t784, 0
+  %t786 = load double, double* %l8
+  %t787 = insertvalue %NativeEnumLayout %t785, double %t786, 1
+  %t788 = load i8*, i8** %l9
+  %t789 = insertvalue %NativeEnumLayout %t787, i8* %t788, 2
+  %t790 = load double, double* %l10
+  %t791 = insertvalue %NativeEnumLayout %t789, double %t790, 3
+  %t792 = load double, double* %l11
+  %t793 = insertvalue %NativeEnumLayout %t791, double %t792, 4
+  %t794 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l6
+  %t795 = bitcast { %NativeEnumVariantLayout*, i64 }* %t794 to { %NativeEnumVariantLayout**, i64 }*
+  %t796 = insertvalue %NativeEnumLayout %t793, { %NativeEnumVariantLayout**, i64 }* %t795, 5
+  %t797 = alloca %NativeEnumLayout
+  store %NativeEnumLayout %t796, %NativeEnumLayout* %t797
+  store %NativeEnumLayout* %t797, %NativeEnumLayout** %l24
   br label %merge55
 merge55:
-  %t795 = phi %NativeEnumLayout* [ null, %then54 ], [ %t781, %entry ]
-  store %NativeEnumLayout* %t795, %NativeEnumLayout** %l24
-  %t796 = load i8*, i8** %l3
-  %t797 = insertvalue %NativeEnum undef, i8* %t796, 0
-  %t798 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
-  %t799 = bitcast { %NativeEnumVariant*, i64 }* %t798 to { %NativeEnumVariant**, i64 }*
-  %t800 = insertvalue %NativeEnum %t797, { %NativeEnumVariant**, i64 }* %t799, 1
-  %t801 = load %NativeEnumLayout*, %NativeEnumLayout** %l24
-  %t802 = insertvalue %NativeEnum %t800, %NativeEnumLayout* %t801, 2
-  %t803 = insertvalue %EnumParseResult undef, %NativeEnum* null, 0
-  %t804 = load double, double* %l14
-  %t805 = insertvalue %EnumParseResult %t803, double %t804, 1
-  %t806 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t807 = insertvalue %EnumParseResult %t805, { i8**, i64 }* %t806, 2
-  ret %EnumParseResult %t807
+  %t798 = phi %NativeEnumLayout* [ %t797, %then54 ], [ %t783, %entry ]
+  store %NativeEnumLayout* %t798, %NativeEnumLayout** %l24
+  %t799 = load i8*, i8** %l3
+  %t800 = insertvalue %NativeEnum undef, i8* %t799, 0
+  %t801 = load { %NativeEnumVariant*, i64 }*, { %NativeEnumVariant*, i64 }** %l5
+  %t802 = bitcast { %NativeEnumVariant*, i64 }* %t801 to { %NativeEnumVariant**, i64 }*
+  %t803 = insertvalue %NativeEnum %t800, { %NativeEnumVariant**, i64 }* %t802, 1
+  %t804 = load %NativeEnumLayout*, %NativeEnumLayout** %l24
+  %t805 = insertvalue %NativeEnum %t803, %NativeEnumLayout* %t804, 2
+  %t806 = alloca %NativeEnum
+  store %NativeEnum %t805, %NativeEnum* %t806
+  %t807 = insertvalue %EnumParseResult undef, %NativeEnum* %t806, 0
+  %t808 = load double, double* %l14
+  %t809 = insertvalue %EnumParseResult %t807, double %t808, 1
+  %t810 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t811 = insertvalue %EnumParseResult %t809, { i8**, i64 }* %t810, 2
+  ret %EnumParseResult %t811
 }
 
 define %NativeEnumVariant* @parse_enum_variant_line(i8* %text) {
@@ -10000,194 +10044,198 @@ then2:
   %t25 = getelementptr { %NativeEnumVariantField**, i64 }, { %NativeEnumVariantField**, i64 }* %t23, i32 0, i32 1
   store i64 0, i64* %t25
   %t26 = insertvalue %NativeEnumVariant %t20, { %NativeEnumVariantField**, i64 }* %t23, 1
-  ret %NativeEnumVariant* null
+  %t27 = alloca %NativeEnumVariant
+  store %NativeEnumVariant %t26, %NativeEnumVariant* %t27
+  ret %NativeEnumVariant* %t27
 merge3:
-  %t27 = load i8*, i8** %l0
-  %t28 = alloca [2 x i8], align 1
-  %t29 = getelementptr [2 x i8], [2 x i8]* %t28, i32 0, i32 0
-  store i8 125, i8* %t29
-  %t30 = getelementptr [2 x i8], [2 x i8]* %t28, i32 0, i32 1
-  store i8 0, i8* %t30
-  %t31 = getelementptr [2 x i8], [2 x i8]* %t28, i32 0, i32 0
-  %t32 = call double @last_index_of(i8* %t27, i8* %t31)
-  store double %t32, double* %l2
-  %t34 = load double, double* %l2
-  %t35 = sitofp i64 0 to double
-  %t36 = fcmp olt double %t34, %t35
-  br label %logical_or_entry_33
+  %t28 = load i8*, i8** %l0
+  %t29 = alloca [2 x i8], align 1
+  %t30 = getelementptr [2 x i8], [2 x i8]* %t29, i32 0, i32 0
+  store i8 125, i8* %t30
+  %t31 = getelementptr [2 x i8], [2 x i8]* %t29, i32 0, i32 1
+  store i8 0, i8* %t31
+  %t32 = getelementptr [2 x i8], [2 x i8]* %t29, i32 0, i32 0
+  %t33 = call double @last_index_of(i8* %t28, i8* %t32)
+  store double %t33, double* %l2
+  %t35 = load double, double* %l2
+  %t36 = sitofp i64 0 to double
+  %t37 = fcmp olt double %t35, %t36
+  br label %logical_or_entry_34
 
-logical_or_entry_33:
-  br i1 %t36, label %logical_or_merge_33, label %logical_or_right_33
+logical_or_entry_34:
+  br i1 %t37, label %logical_or_merge_34, label %logical_or_right_34
 
-logical_or_right_33:
-  %t37 = load double, double* %l2
-  %t38 = load double, double* %l1
-  %t39 = fcmp ole double %t37, %t38
-  br label %logical_or_right_end_33
+logical_or_right_34:
+  %t38 = load double, double* %l2
+  %t39 = load double, double* %l1
+  %t40 = fcmp ole double %t38, %t39
+  br label %logical_or_right_end_34
 
-logical_or_right_end_33:
-  br label %logical_or_merge_33
+logical_or_right_end_34:
+  br label %logical_or_merge_34
 
-logical_or_merge_33:
-  %t40 = phi i1 [ true, %logical_or_entry_33 ], [ %t39, %logical_or_right_end_33 ]
-  %t41 = load i8*, i8** %l0
-  %t42 = load double, double* %l1
-  %t43 = load double, double* %l2
-  br i1 %t40, label %then4, label %merge5
+logical_or_merge_34:
+  %t41 = phi i1 [ true, %logical_or_entry_34 ], [ %t40, %logical_or_right_end_34 ]
+  %t42 = load i8*, i8** %l0
+  %t43 = load double, double* %l1
+  %t44 = load double, double* %l2
+  br i1 %t41, label %then4, label %merge5
 then4:
-  %t44 = bitcast i8* null to %NativeEnumVariant*
-  ret %NativeEnumVariant* %t44
+  %t45 = bitcast i8* null to %NativeEnumVariant*
+  ret %NativeEnumVariant* %t45
 merge5:
-  %t45 = load i8*, i8** %l0
-  %t46 = load double, double* %l1
-  %t47 = fptosi double %t46 to i64
-  %t48 = call i8* @sailfin_runtime_substring(i8* %t45, i64 0, i64 %t47)
-  %t49 = call i8* @trim_text(i8* %t48)
-  %t50 = call i8* @strip_generics(i8* %t49)
-  store i8* %t50, i8** %l3
-  %t51 = load i8*, i8** %l3
-  %t52 = call i64 @sailfin_runtime_string_length(i8* %t51)
-  %t53 = icmp eq i64 %t52, 0
-  %t54 = load i8*, i8** %l0
-  %t55 = load double, double* %l1
-  %t56 = load double, double* %l2
-  %t57 = load i8*, i8** %l3
-  br i1 %t53, label %then6, label %merge7
+  %t46 = load i8*, i8** %l0
+  %t47 = load double, double* %l1
+  %t48 = fptosi double %t47 to i64
+  %t49 = call i8* @sailfin_runtime_substring(i8* %t46, i64 0, i64 %t48)
+  %t50 = call i8* @trim_text(i8* %t49)
+  %t51 = call i8* @strip_generics(i8* %t50)
+  store i8* %t51, i8** %l3
+  %t52 = load i8*, i8** %l3
+  %t53 = call i64 @sailfin_runtime_string_length(i8* %t52)
+  %t54 = icmp eq i64 %t53, 0
+  %t55 = load i8*, i8** %l0
+  %t56 = load double, double* %l1
+  %t57 = load double, double* %l2
+  %t58 = load i8*, i8** %l3
+  br i1 %t54, label %then6, label %merge7
 then6:
-  %t58 = bitcast i8* null to %NativeEnumVariant*
-  ret %NativeEnumVariant* %t58
+  %t59 = bitcast i8* null to %NativeEnumVariant*
+  ret %NativeEnumVariant* %t59
 merge7:
-  %t59 = load i8*, i8** %l0
-  %t60 = load double, double* %l1
-  %t61 = sitofp i64 1 to double
-  %t62 = fadd double %t60, %t61
-  %t63 = load double, double* %l2
-  %t64 = fptosi double %t62 to i64
+  %t60 = load i8*, i8** %l0
+  %t61 = load double, double* %l1
+  %t62 = sitofp i64 1 to double
+  %t63 = fadd double %t61, %t62
+  %t64 = load double, double* %l2
   %t65 = fptosi double %t63 to i64
-  %t66 = call i8* @sailfin_runtime_substring(i8* %t59, i64 %t64, i64 %t65)
-  store i8* %t66, i8** %l4
-  %t67 = load i8*, i8** %l4
-  %t68 = call { i8**, i64 }* @split_enum_field_entries(i8* %t67)
-  store { i8**, i64 }* %t68, { i8**, i64 }** %l5
-  %t69 = alloca [0 x %NativeEnumVariantField]
-  %t70 = getelementptr [0 x %NativeEnumVariantField], [0 x %NativeEnumVariantField]* %t69, i32 0, i32 0
-  %t71 = alloca { %NativeEnumVariantField*, i64 }
-  %t72 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t71, i32 0, i32 0
-  store %NativeEnumVariantField* %t70, %NativeEnumVariantField** %t72
-  %t73 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t71, i32 0, i32 1
-  store i64 0, i64* %t73
-  store { %NativeEnumVariantField*, i64 }* %t71, { %NativeEnumVariantField*, i64 }** %l6
-  %t74 = sitofp i64 0 to double
-  store double %t74, double* %l7
-  %t75 = load i8*, i8** %l0
-  %t76 = load double, double* %l1
-  %t77 = load double, double* %l2
-  %t78 = load i8*, i8** %l3
-  %t79 = load i8*, i8** %l4
-  %t80 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t81 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t82 = load double, double* %l7
+  %t66 = fptosi double %t64 to i64
+  %t67 = call i8* @sailfin_runtime_substring(i8* %t60, i64 %t65, i64 %t66)
+  store i8* %t67, i8** %l4
+  %t68 = load i8*, i8** %l4
+  %t69 = call { i8**, i64 }* @split_enum_field_entries(i8* %t68)
+  store { i8**, i64 }* %t69, { i8**, i64 }** %l5
+  %t70 = alloca [0 x %NativeEnumVariantField]
+  %t71 = getelementptr [0 x %NativeEnumVariantField], [0 x %NativeEnumVariantField]* %t70, i32 0, i32 0
+  %t72 = alloca { %NativeEnumVariantField*, i64 }
+  %t73 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t72, i32 0, i32 0
+  store %NativeEnumVariantField* %t71, %NativeEnumVariantField** %t73
+  %t74 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t72, i32 0, i32 1
+  store i64 0, i64* %t74
+  store { %NativeEnumVariantField*, i64 }* %t72, { %NativeEnumVariantField*, i64 }** %l6
+  %t75 = sitofp i64 0 to double
+  store double %t75, double* %l7
+  %t76 = load i8*, i8** %l0
+  %t77 = load double, double* %l1
+  %t78 = load double, double* %l2
+  %t79 = load i8*, i8** %l3
+  %t80 = load i8*, i8** %l4
+  %t81 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t82 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t83 = load double, double* %l7
   br label %loop.header8
 loop.header8:
-  %t148 = phi double [ %t82, %entry ], [ %t146, %loop.latch10 ]
-  %t149 = phi { %NativeEnumVariantField*, i64 }* [ %t81, %entry ], [ %t147, %loop.latch10 ]
-  store double %t148, double* %l7
-  store { %NativeEnumVariantField*, i64 }* %t149, { %NativeEnumVariantField*, i64 }** %l6
+  %t149 = phi double [ %t83, %entry ], [ %t147, %loop.latch10 ]
+  %t150 = phi { %NativeEnumVariantField*, i64 }* [ %t82, %entry ], [ %t148, %loop.latch10 ]
+  store double %t149, double* %l7
+  store { %NativeEnumVariantField*, i64 }* %t150, { %NativeEnumVariantField*, i64 }** %l6
   br label %loop.body9
 loop.body9:
-  %t83 = load double, double* %l7
-  %t84 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t85 = load { i8**, i64 }, { i8**, i64 }* %t84
-  %t86 = extractvalue { i8**, i64 } %t85, 1
-  %t87 = sitofp i64 %t86 to double
-  %t88 = fcmp oge double %t83, %t87
-  %t89 = load i8*, i8** %l0
-  %t90 = load double, double* %l1
-  %t91 = load double, double* %l2
-  %t92 = load i8*, i8** %l3
-  %t93 = load i8*, i8** %l4
-  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t95 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t96 = load double, double* %l7
-  br i1 %t88, label %then12, label %merge13
+  %t84 = load double, double* %l7
+  %t85 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t86 = load { i8**, i64 }, { i8**, i64 }* %t85
+  %t87 = extractvalue { i8**, i64 } %t86, 1
+  %t88 = sitofp i64 %t87 to double
+  %t89 = fcmp oge double %t84, %t88
+  %t90 = load i8*, i8** %l0
+  %t91 = load double, double* %l1
+  %t92 = load double, double* %l2
+  %t93 = load i8*, i8** %l3
+  %t94 = load i8*, i8** %l4
+  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t96 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t97 = load double, double* %l7
+  br i1 %t89, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t97 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t98 = load double, double* %l7
-  %t99 = fptosi double %t98 to i64
-  %t100 = load { i8**, i64 }, { i8**, i64 }* %t97
-  %t101 = extractvalue { i8**, i64 } %t100, 0
-  %t102 = extractvalue { i8**, i64 } %t100, 1
-  %t103 = icmp uge i64 %t99, %t102
-  ; bounds check: %t103 (if true, out of bounds)
-  %t104 = getelementptr i8*, i8** %t101, i64 %t99
-  %t105 = load i8*, i8** %t104
-  %t106 = call i8* @trim_text(i8* %t105)
-  %t107 = call i8* @trim_trailing_delimiters(i8* %t106)
-  store i8* %t107, i8** %l8
-  %t108 = load i8*, i8** %l8
-  %t109 = call i64 @sailfin_runtime_string_length(i8* %t108)
-  %t110 = icmp eq i64 %t109, 0
-  %t111 = load i8*, i8** %l0
-  %t112 = load double, double* %l1
-  %t113 = load double, double* %l2
-  %t114 = load i8*, i8** %l3
-  %t115 = load i8*, i8** %l4
-  %t116 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t117 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t118 = load double, double* %l7
-  %t119 = load i8*, i8** %l8
-  br i1 %t110, label %then14, label %merge15
+  %t98 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t99 = load double, double* %l7
+  %t100 = fptosi double %t99 to i64
+  %t101 = load { i8**, i64 }, { i8**, i64 }* %t98
+  %t102 = extractvalue { i8**, i64 } %t101, 0
+  %t103 = extractvalue { i8**, i64 } %t101, 1
+  %t104 = icmp uge i64 %t100, %t103
+  ; bounds check: %t104 (if true, out of bounds)
+  %t105 = getelementptr i8*, i8** %t102, i64 %t100
+  %t106 = load i8*, i8** %t105
+  %t107 = call i8* @trim_text(i8* %t106)
+  %t108 = call i8* @trim_trailing_delimiters(i8* %t107)
+  store i8* %t108, i8** %l8
+  %t109 = load i8*, i8** %l8
+  %t110 = call i64 @sailfin_runtime_string_length(i8* %t109)
+  %t111 = icmp eq i64 %t110, 0
+  %t112 = load i8*, i8** %l0
+  %t113 = load double, double* %l1
+  %t114 = load double, double* %l2
+  %t115 = load i8*, i8** %l3
+  %t116 = load i8*, i8** %l4
+  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t118 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t119 = load double, double* %l7
+  %t120 = load i8*, i8** %l8
+  br i1 %t111, label %then14, label %merge15
 then14:
-  %t120 = load double, double* %l7
-  %t121 = sitofp i64 1 to double
-  %t122 = fadd double %t120, %t121
-  store double %t122, double* %l7
+  %t121 = load double, double* %l7
+  %t122 = sitofp i64 1 to double
+  %t123 = fadd double %t121, %t122
+  store double %t123, double* %l7
   br label %loop.latch10
 merge15:
-  %t123 = load i8*, i8** %l8
-  %t124 = call %NativeEnumVariantField* @parse_enum_variant_field(i8* %t123)
-  store %NativeEnumVariantField* %t124, %NativeEnumVariantField** %l9
-  %t125 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
-  %t126 = bitcast i8* null to %NativeEnumVariantField*
-  %t127 = icmp eq %NativeEnumVariantField* %t125, %t126
-  %t128 = load i8*, i8** %l0
-  %t129 = load double, double* %l1
-  %t130 = load double, double* %l2
-  %t131 = load i8*, i8** %l3
-  %t132 = load i8*, i8** %l4
-  %t133 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t134 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t135 = load double, double* %l7
-  %t136 = load i8*, i8** %l8
-  %t137 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
-  br i1 %t127, label %then16, label %merge17
+  %t124 = load i8*, i8** %l8
+  %t125 = call %NativeEnumVariantField* @parse_enum_variant_field(i8* %t124)
+  store %NativeEnumVariantField* %t125, %NativeEnumVariantField** %l9
+  %t126 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
+  %t127 = bitcast i8* null to %NativeEnumVariantField*
+  %t128 = icmp eq %NativeEnumVariantField* %t126, %t127
+  %t129 = load i8*, i8** %l0
+  %t130 = load double, double* %l1
+  %t131 = load double, double* %l2
+  %t132 = load i8*, i8** %l3
+  %t133 = load i8*, i8** %l4
+  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t135 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t136 = load double, double* %l7
+  %t137 = load i8*, i8** %l8
+  %t138 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
+  br i1 %t128, label %then16, label %merge17
 then16:
-  %t138 = bitcast i8* null to %NativeEnumVariant*
-  ret %NativeEnumVariant* %t138
+  %t139 = bitcast i8* null to %NativeEnumVariant*
+  ret %NativeEnumVariant* %t139
 merge17:
-  %t139 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t140 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
-  %t141 = load %NativeEnumVariantField, %NativeEnumVariantField* %t140
-  %t142 = call { %NativeEnumVariantField*, i64 }* @append_enum_variant_field({ %NativeEnumVariantField*, i64 }* %t139, %NativeEnumVariantField %t141)
-  store { %NativeEnumVariantField*, i64 }* %t142, { %NativeEnumVariantField*, i64 }** %l6
-  %t143 = load double, double* %l7
-  %t144 = sitofp i64 1 to double
-  %t145 = fadd double %t143, %t144
-  store double %t145, double* %l7
+  %t140 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t141 = load %NativeEnumVariantField*, %NativeEnumVariantField** %l9
+  %t142 = load %NativeEnumVariantField, %NativeEnumVariantField* %t141
+  %t143 = call { %NativeEnumVariantField*, i64 }* @append_enum_variant_field({ %NativeEnumVariantField*, i64 }* %t140, %NativeEnumVariantField %t142)
+  store { %NativeEnumVariantField*, i64 }* %t143, { %NativeEnumVariantField*, i64 }** %l6
+  %t144 = load double, double* %l7
+  %t145 = sitofp i64 1 to double
+  %t146 = fadd double %t144, %t145
+  store double %t146, double* %l7
   br label %loop.latch10
 loop.latch10:
-  %t146 = load double, double* %l7
-  %t147 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t147 = load double, double* %l7
+  %t148 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
   br label %loop.header8
 afterloop11:
-  %t150 = load i8*, i8** %l3
-  %t151 = insertvalue %NativeEnumVariant undef, i8* %t150, 0
-  %t152 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
-  %t153 = bitcast { %NativeEnumVariantField*, i64 }* %t152 to { %NativeEnumVariantField**, i64 }*
-  %t154 = insertvalue %NativeEnumVariant %t151, { %NativeEnumVariantField**, i64 }* %t153, 1
-  ret %NativeEnumVariant* null
+  %t151 = load i8*, i8** %l3
+  %t152 = insertvalue %NativeEnumVariant undef, i8* %t151, 0
+  %t153 = load { %NativeEnumVariantField*, i64 }*, { %NativeEnumVariantField*, i64 }** %l6
+  %t154 = bitcast { %NativeEnumVariantField*, i64 }* %t153 to { %NativeEnumVariantField**, i64 }*
+  %t155 = insertvalue %NativeEnumVariant %t152, { %NativeEnumVariantField**, i64 }* %t154, 1
+  %t156 = alloca %NativeEnumVariant
+  store %NativeEnumVariant %t155, %NativeEnumVariant* %t156
+  ret %NativeEnumVariant* %t156
 }
 
 define { i8**, i64 }* @split_enum_field_entries(i8* %text) {
@@ -10524,7 +10572,9 @@ merge7:
   %t52 = insertvalue %NativeEnumVariantField %t50, i8* %t51, 1
   %t53 = load i1, i1* %l1
   %t54 = insertvalue %NativeEnumVariantField %t52, i1 %t53, 2
-  ret %NativeEnumVariantField* null
+  %t55 = alloca %NativeEnumVariantField
+  store %NativeEnumVariantField %t54, %NativeEnumVariantField* %t55
+  ret %NativeEnumVariantField* %t55
 }
 
 define i8* @text_char_at(i8* %value, double %index) {
@@ -10729,7 +10779,9 @@ merge7:
   %t52 = insertvalue %NativeStructField %t50, i8* %t51, 1
   %t53 = load i1, i1* %l1
   %t54 = insertvalue %NativeStructField %t52, i1 %t53, 2
-  ret %NativeStructField* null
+  %t55 = alloca %NativeStructField
+  store %NativeStructField %t54, %NativeStructField* %t55
+  ret %NativeStructField* %t55
 }
 
 define %StructLayoutHeaderParse @parse_struct_layout_header(i8* %text) {
@@ -15539,7 +15591,9 @@ merge15:
   %t206 = load i8*, i8** %l6
   %t207 = insertvalue %NativeParameter %t205, i8* %t206, 3
   %t208 = insertvalue %NativeParameter %t207, %NativeSourceSpan* %span, 4
-  ret %NativeParameter* null
+  %t209 = alloca %NativeParameter
+  store %NativeParameter %t208, %NativeParameter* %t209
+  ret %NativeParameter* %t209
 }
 
 define i1 @line_looks_like_parameter_entry(i8* %text) {
@@ -17205,14 +17259,14 @@ entry:
   %t21 = load double, double* %l4
   br label %loop.header0
 loop.header0:
-  %t600 = phi double [ %t21, %entry ], [ %t596, %loop.latch2 ]
-  %t601 = phi { i8**, i64 }* [ %t18, %entry ], [ %t597, %loop.latch2 ]
-  %t602 = phi { %NativeStruct*, i64 }* [ %t19, %entry ], [ %t598, %loop.latch2 ]
-  %t603 = phi { %NativeEnum*, i64 }* [ %t20, %entry ], [ %t599, %loop.latch2 ]
-  store double %t600, double* %l4
-  store { i8**, i64 }* %t601, { i8**, i64 }** %l1
-  store { %NativeStruct*, i64 }* %t602, { %NativeStruct*, i64 }** %l2
-  store { %NativeEnum*, i64 }* %t603, { %NativeEnum*, i64 }** %l3
+  %t602 = phi double [ %t21, %entry ], [ %t598, %loop.latch2 ]
+  %t603 = phi { i8**, i64 }* [ %t18, %entry ], [ %t599, %loop.latch2 ]
+  %t604 = phi { %NativeStruct*, i64 }* [ %t19, %entry ], [ %t600, %loop.latch2 ]
+  %t605 = phi { %NativeEnum*, i64 }* [ %t20, %entry ], [ %t601, %loop.latch2 ]
+  store double %t602, double* %l4
+  store { i8**, i64 }* %t603, { i8**, i64 }** %l1
+  store { %NativeStruct*, i64 }* %t604, { %NativeStruct*, i64 }** %l2
+  store { %NativeEnum*, i64 }* %t605, { %NativeEnum*, i64 }** %l3
   br label %loop.body1
 loop.body1:
   %t22 = load double, double* %l4
@@ -17552,468 +17606,472 @@ afterloop19:
   %t276 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l10
   %t277 = bitcast { %NativeStructLayoutField*, i64 }* %t276 to { %NativeStructLayoutField**, i64 }*
   %t278 = insertvalue %NativeStructLayout %t275, { %NativeStructLayoutField**, i64 }* %t277, 2
-  %t279 = insertvalue %NativeStruct %t269, %NativeStructLayout* null, 4
-  store %NativeStruct %t279, %NativeStruct* %l16
-  %t280 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t281 = load %NativeStruct, %NativeStruct* %l16
-  %t282 = call { %NativeStruct*, i64 }* @append_struct({ %NativeStruct*, i64 }* %t280, %NativeStruct %t281)
-  store { %NativeStruct*, i64 }* %t282, { %NativeStruct*, i64 }** %l2
+  %t279 = alloca %NativeStructLayout
+  store %NativeStructLayout %t278, %NativeStructLayout* %t279
+  %t280 = insertvalue %NativeStruct %t269, %NativeStructLayout* %t279, 4
+  store %NativeStruct %t280, %NativeStruct* %l16
+  %t281 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t282 = load %NativeStruct, %NativeStruct* %l16
+  %t283 = call { %NativeStruct*, i64 }* @append_struct({ %NativeStruct*, i64 }* %t281, %NativeStruct %t282)
+  store { %NativeStruct*, i64 }* %t283, { %NativeStruct*, i64 }** %l2
   br label %merge15
 merge15:
-  %t283 = phi double [ %t129, %then14 ], [ %t114, %then12 ]
-  %t284 = phi i8* [ %t205, %then14 ], [ %t117, %then12 ]
-  %t285 = phi { i8**, i64 }* [ %t215, %then14 ], [ %t111, %then12 ]
-  %t286 = phi double [ %t241, %then14 ], [ %t114, %then12 ]
-  %t287 = phi { %NativeStruct*, i64 }* [ %t282, %then14 ], [ %t112, %then12 ]
-  store double %t283, double* %l4
-  store i8* %t284, i8** %l7
-  store { i8**, i64 }* %t285, { i8**, i64 }** %l1
-  store double %t286, double* %l4
-  store { %NativeStruct*, i64 }* %t287, { %NativeStruct*, i64 }** %l2
-  %t288 = load double, double* %l4
-  %t289 = sitofp i64 1 to double
-  %t290 = fadd double %t288, %t289
-  store double %t290, double* %l4
+  %t284 = phi double [ %t129, %then14 ], [ %t114, %then12 ]
+  %t285 = phi i8* [ %t205, %then14 ], [ %t117, %then12 ]
+  %t286 = phi { i8**, i64 }* [ %t215, %then14 ], [ %t111, %then12 ]
+  %t287 = phi double [ %t241, %then14 ], [ %t114, %then12 ]
+  %t288 = phi { %NativeStruct*, i64 }* [ %t283, %then14 ], [ %t112, %then12 ]
+  store double %t284, double* %l4
+  store i8* %t285, i8** %l7
+  store { i8**, i64 }* %t286, { i8**, i64 }** %l1
+  store double %t287, double* %l4
+  store { %NativeStruct*, i64 }* %t288, { %NativeStruct*, i64 }** %l2
+  %t289 = load double, double* %l4
+  %t290 = sitofp i64 1 to double
+  %t291 = fadd double %t289, %t290
+  store double %t291, double* %l4
   br label %loop.latch2
 merge13:
-  %t291 = load i8*, i8** %l6
-  %s292 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.292, i32 0, i32 0
-  %t293 = call i1 @starts_with(i8* %t291, i8* %s292)
-  %t294 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t295 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t296 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t297 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t298 = load double, double* %l4
-  %t299 = load i8*, i8** %l5
-  %t300 = load i8*, i8** %l6
-  br i1 %t293, label %then28, label %merge29
-then28:
+  %t292 = load i8*, i8** %l6
+  %s293 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.293, i32 0, i32 0
+  %t294 = call i1 @starts_with(i8* %t292, i8* %s293)
+  %t295 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t296 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t297 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t298 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t299 = load double, double* %l4
+  %t300 = load i8*, i8** %l5
   %t301 = load i8*, i8** %l6
-  %s302 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.302, i32 0, i32 0
-  %t303 = call i8* @strip_prefix(i8* %t301, i8* %s302)
-  store i8* %t303, i8** %l17
-  %t304 = load i8*, i8** %l17
-  %s305 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.305, i32 0, i32 0
-  %t306 = call i8* @strip_prefix(i8* %t304, i8* %s305)
-  store i8* %t306, i8** %l18
-  %t307 = load i8*, i8** %l18
-  %t308 = call %EnumLayoutHeaderParse @parse_enum_layout_header(i8* %t307)
-  store %EnumLayoutHeaderParse %t308, %EnumLayoutHeaderParse* %l19
-  %t309 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t310 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t311 = extractvalue %EnumLayoutHeaderParse %t310, 7
-  %t312 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t309, { i8**, i64 }* %t311)
-  store { i8**, i64 }* %t312, { i8**, i64 }** %l1
-  %t313 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t314 = extractvalue %EnumLayoutHeaderParse %t313, 0
-  %t315 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t316 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t317 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t318 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t319 = load double, double* %l4
-  %t320 = load i8*, i8** %l5
-  %t321 = load i8*, i8** %l6
-  %t322 = load i8*, i8** %l17
-  %t323 = load i8*, i8** %l18
-  %t324 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  br i1 %t314, label %then30, label %else31
+  br i1 %t294, label %then28, label %merge29
+then28:
+  %t302 = load i8*, i8** %l6
+  %s303 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.303, i32 0, i32 0
+  %t304 = call i8* @strip_prefix(i8* %t302, i8* %s303)
+  store i8* %t304, i8** %l17
+  %t305 = load i8*, i8** %l17
+  %s306 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.306, i32 0, i32 0
+  %t307 = call i8* @strip_prefix(i8* %t305, i8* %s306)
+  store i8* %t307, i8** %l18
+  %t308 = load i8*, i8** %l18
+  %t309 = call %EnumLayoutHeaderParse @parse_enum_layout_header(i8* %t308)
+  store %EnumLayoutHeaderParse %t309, %EnumLayoutHeaderParse* %l19
+  %t310 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t311 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t312 = extractvalue %EnumLayoutHeaderParse %t311, 7
+  %t313 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t310, { i8**, i64 }* %t312)
+  store { i8**, i64 }* %t313, { i8**, i64 }** %l1
+  %t314 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t315 = extractvalue %EnumLayoutHeaderParse %t314, 0
+  %t316 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t317 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t318 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t319 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t320 = load double, double* %l4
+  %t321 = load i8*, i8** %l5
+  %t322 = load i8*, i8** %l6
+  %t323 = load i8*, i8** %l17
+  %t324 = load i8*, i8** %l18
+  %t325 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  br i1 %t315, label %then30, label %else31
 then30:
-  %t325 = alloca [0 x %NativeEnumVariantLayout]
-  %t326 = getelementptr [0 x %NativeEnumVariantLayout], [0 x %NativeEnumVariantLayout]* %t325, i32 0, i32 0
-  %t327 = alloca { %NativeEnumVariantLayout*, i64 }
-  %t328 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t327, i32 0, i32 0
-  store %NativeEnumVariantLayout* %t326, %NativeEnumVariantLayout** %t328
-  %t329 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t327, i32 0, i32 1
-  store i64 0, i64* %t329
-  store { %NativeEnumVariantLayout*, i64 }* %t327, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t330 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t331 = extractvalue %EnumLayoutHeaderParse %t330, 1
-  store i8* %t331, i8** %l21
-  %t332 = load double, double* %l4
-  %t333 = sitofp i64 1 to double
-  %t334 = fadd double %t332, %t333
-  store double %t334, double* %l4
-  %t335 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t336 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t337 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t338 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t339 = load double, double* %l4
-  %t340 = load i8*, i8** %l5
-  %t341 = load i8*, i8** %l6
-  %t342 = load i8*, i8** %l17
-  %t343 = load i8*, i8** %l18
-  %t344 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t345 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t346 = load i8*, i8** %l21
+  %t326 = alloca [0 x %NativeEnumVariantLayout]
+  %t327 = getelementptr [0 x %NativeEnumVariantLayout], [0 x %NativeEnumVariantLayout]* %t326, i32 0, i32 0
+  %t328 = alloca { %NativeEnumVariantLayout*, i64 }
+  %t329 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t328, i32 0, i32 0
+  store %NativeEnumVariantLayout* %t327, %NativeEnumVariantLayout** %t329
+  %t330 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t328, i32 0, i32 1
+  store i64 0, i64* %t330
+  store { %NativeEnumVariantLayout*, i64 }* %t328, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t331 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t332 = extractvalue %EnumLayoutHeaderParse %t331, 1
+  store i8* %t332, i8** %l21
+  %t333 = load double, double* %l4
+  %t334 = sitofp i64 1 to double
+  %t335 = fadd double %t333, %t334
+  store double %t335, double* %l4
+  %t336 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t337 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t338 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t339 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t340 = load double, double* %l4
+  %t341 = load i8*, i8** %l5
+  %t342 = load i8*, i8** %l6
+  %t343 = load i8*, i8** %l17
+  %t344 = load i8*, i8** %l18
+  %t345 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t346 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t347 = load i8*, i8** %l21
   br label %loop.header33
 loop.header33:
-  %t552 = phi double [ %t339, %then30 ], [ %t548, %loop.latch35 ]
-  %t553 = phi i8* [ %t342, %then30 ], [ %t549, %loop.latch35 ]
-  %t554 = phi { i8**, i64 }* [ %t336, %then30 ], [ %t550, %loop.latch35 ]
-  %t555 = phi { %NativeEnumVariantLayout*, i64 }* [ %t345, %then30 ], [ %t551, %loop.latch35 ]
-  store double %t552, double* %l4
-  store i8* %t553, i8** %l17
-  store { i8**, i64 }* %t554, { i8**, i64 }** %l1
-  store { %NativeEnumVariantLayout*, i64 }* %t555, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t553 = phi double [ %t340, %then30 ], [ %t549, %loop.latch35 ]
+  %t554 = phi i8* [ %t343, %then30 ], [ %t550, %loop.latch35 ]
+  %t555 = phi { i8**, i64 }* [ %t337, %then30 ], [ %t551, %loop.latch35 ]
+  %t556 = phi { %NativeEnumVariantLayout*, i64 }* [ %t346, %then30 ], [ %t552, %loop.latch35 ]
+  store double %t553, double* %l4
+  store i8* %t554, i8** %l17
+  store { i8**, i64 }* %t555, { i8**, i64 }** %l1
+  store { %NativeEnumVariantLayout*, i64 }* %t556, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %loop.body34
 loop.body34:
-  %t347 = load double, double* %l4
-  %t348 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t349 = load { i8**, i64 }, { i8**, i64 }* %t348
-  %t350 = extractvalue { i8**, i64 } %t349, 1
-  %t351 = sitofp i64 %t350 to double
-  %t352 = fcmp oge double %t347, %t351
-  %t353 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t354 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t355 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t356 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t357 = load double, double* %l4
-  %t358 = load i8*, i8** %l5
-  %t359 = load i8*, i8** %l6
-  %t360 = load i8*, i8** %l17
-  %t361 = load i8*, i8** %l18
-  %t362 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t363 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t364 = load i8*, i8** %l21
-  br i1 %t352, label %then37, label %merge38
+  %t348 = load double, double* %l4
+  %t349 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t350 = load { i8**, i64 }, { i8**, i64 }* %t349
+  %t351 = extractvalue { i8**, i64 } %t350, 1
+  %t352 = sitofp i64 %t351 to double
+  %t353 = fcmp oge double %t348, %t352
+  %t354 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t355 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t356 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t357 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t358 = load double, double* %l4
+  %t359 = load i8*, i8** %l5
+  %t360 = load i8*, i8** %l6
+  %t361 = load i8*, i8** %l17
+  %t362 = load i8*, i8** %l18
+  %t363 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t364 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t365 = load i8*, i8** %l21
+  br i1 %t353, label %then37, label %merge38
 then37:
   br label %afterloop36
 merge38:
-  %t365 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t366 = load double, double* %l4
-  %t367 = fptosi double %t366 to i64
-  %t368 = load { i8**, i64 }, { i8**, i64 }* %t365
-  %t369 = extractvalue { i8**, i64 } %t368, 0
-  %t370 = extractvalue { i8**, i64 } %t368, 1
-  %t371 = icmp uge i64 %t367, %t370
-  ; bounds check: %t371 (if true, out of bounds)
-  %t372 = getelementptr i8*, i8** %t369, i64 %t367
-  %t373 = load i8*, i8** %t372
-  %t374 = call i8* @trim_text(i8* %t373)
-  store i8* %t374, i8** %l22
-  %t375 = load i8*, i8** %l22
-  %t376 = call i64 @sailfin_runtime_string_length(i8* %t375)
-  %t377 = icmp eq i64 %t376, 0
-  %t378 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t379 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t380 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t381 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t382 = load double, double* %l4
-  %t383 = load i8*, i8** %l5
-  %t384 = load i8*, i8** %l6
-  %t385 = load i8*, i8** %l17
-  %t386 = load i8*, i8** %l18
-  %t387 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t388 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t389 = load i8*, i8** %l21
-  %t390 = load i8*, i8** %l22
-  br i1 %t377, label %then39, label %merge40
+  %t366 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t367 = load double, double* %l4
+  %t368 = fptosi double %t367 to i64
+  %t369 = load { i8**, i64 }, { i8**, i64 }* %t366
+  %t370 = extractvalue { i8**, i64 } %t369, 0
+  %t371 = extractvalue { i8**, i64 } %t369, 1
+  %t372 = icmp uge i64 %t368, %t371
+  ; bounds check: %t372 (if true, out of bounds)
+  %t373 = getelementptr i8*, i8** %t370, i64 %t368
+  %t374 = load i8*, i8** %t373
+  %t375 = call i8* @trim_text(i8* %t374)
+  store i8* %t375, i8** %l22
+  %t376 = load i8*, i8** %l22
+  %t377 = call i64 @sailfin_runtime_string_length(i8* %t376)
+  %t378 = icmp eq i64 %t377, 0
+  %t379 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t380 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t381 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t382 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t383 = load double, double* %l4
+  %t384 = load i8*, i8** %l5
+  %t385 = load i8*, i8** %l6
+  %t386 = load i8*, i8** %l17
+  %t387 = load i8*, i8** %l18
+  %t388 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t389 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t390 = load i8*, i8** %l21
+  %t391 = load i8*, i8** %l22
+  br i1 %t378, label %then39, label %merge40
 then39:
-  %t391 = load double, double* %l4
-  %t392 = sitofp i64 1 to double
-  %t393 = fadd double %t391, %t392
-  store double %t393, double* %l4
+  %t392 = load double, double* %l4
+  %t393 = sitofp i64 1 to double
+  %t394 = fadd double %t392, %t393
+  store double %t394, double* %l4
   br label %afterloop36
 merge40:
-  %t395 = load i8*, i8** %l22
-  %s396 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.396, i32 0, i32 0
-  %t397 = call i1 @starts_with(i8* %t395, i8* %s396)
-  br label %logical_and_entry_394
+  %t396 = load i8*, i8** %l22
+  %s397 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.397, i32 0, i32 0
+  %t398 = call i1 @starts_with(i8* %t396, i8* %s397)
+  br label %logical_and_entry_395
 
-logical_and_entry_394:
-  br i1 %t397, label %logical_and_right_394, label %logical_and_merge_394
+logical_and_entry_395:
+  br i1 %t398, label %logical_and_right_395, label %logical_and_merge_395
 
-logical_and_right_394:
-  %t398 = load i8*, i8** %l22
-  %s399 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.399, i32 0, i32 0
-  %t400 = call i1 @starts_with(i8* %t398, i8* %s399)
-  %t401 = xor i1 %t400, 1
-  br label %logical_and_right_end_394
+logical_and_right_395:
+  %t399 = load i8*, i8** %l22
+  %s400 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.400, i32 0, i32 0
+  %t401 = call i1 @starts_with(i8* %t399, i8* %s400)
+  %t402 = xor i1 %t401, 1
+  br label %logical_and_right_end_395
 
-logical_and_right_end_394:
-  br label %logical_and_merge_394
+logical_and_right_end_395:
+  br label %logical_and_merge_395
 
-logical_and_merge_394:
-  %t402 = phi i1 [ false, %logical_and_entry_394 ], [ %t401, %logical_and_right_end_394 ]
-  %t403 = xor i1 %t402, 1
-  %t404 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t405 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t406 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t407 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t408 = load double, double* %l4
-  %t409 = load i8*, i8** %l5
-  %t410 = load i8*, i8** %l6
-  %t411 = load i8*, i8** %l17
-  %t412 = load i8*, i8** %l18
-  %t413 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t414 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t415 = load i8*, i8** %l21
-  %t416 = load i8*, i8** %l22
-  br i1 %t403, label %then41, label %merge42
+logical_and_merge_395:
+  %t403 = phi i1 [ false, %logical_and_entry_395 ], [ %t402, %logical_and_right_end_395 ]
+  %t404 = xor i1 %t403, 1
+  %t405 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t406 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t407 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t408 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t409 = load double, double* %l4
+  %t410 = load i8*, i8** %l5
+  %t411 = load i8*, i8** %l6
+  %t412 = load i8*, i8** %l17
+  %t413 = load i8*, i8** %l18
+  %t414 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t415 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t416 = load i8*, i8** %l21
+  %t417 = load i8*, i8** %l22
+  br i1 %t404, label %then41, label %merge42
 then41:
   br label %afterloop36
 merge42:
-  %t417 = load i8*, i8** %l22
-  %s418 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.418, i32 0, i32 0
-  %t419 = call i1 @starts_with(i8* %t417, i8* %s418)
-  %t420 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t421 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t422 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t423 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t424 = load double, double* %l4
-  %t425 = load i8*, i8** %l5
-  %t426 = load i8*, i8** %l6
-  %t427 = load i8*, i8** %l17
-  %t428 = load i8*, i8** %l18
-  %t429 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t430 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t431 = load i8*, i8** %l21
-  %t432 = load i8*, i8** %l22
-  br i1 %t419, label %then43, label %else44
-then43:
+  %t418 = load i8*, i8** %l22
+  %s419 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.419, i32 0, i32 0
+  %t420 = call i1 @starts_with(i8* %t418, i8* %s419)
+  %t421 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t422 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t423 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t424 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t425 = load double, double* %l4
+  %t426 = load i8*, i8** %l5
+  %t427 = load i8*, i8** %l6
+  %t428 = load i8*, i8** %l17
+  %t429 = load i8*, i8** %l18
+  %t430 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t431 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t432 = load i8*, i8** %l21
   %t433 = load i8*, i8** %l22
-  %s434 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.434, i32 0, i32 0
-  %t435 = call i8* @strip_prefix(i8* %t433, i8* %s434)
-  store i8* %t435, i8** %l23
-  %t436 = load i8*, i8** %l17
-  %s437 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.437, i32 0, i32 0
-  %t438 = call i8* @strip_prefix(i8* %t436, i8* %s437)
-  store i8* %t438, i8** %l24
-  %t439 = load i8*, i8** %l24
-  %t440 = load i8*, i8** %l21
-  %t441 = call %EnumLayoutVariantParse @parse_enum_variant_layout(i8* %t439, i8* %t440)
-  store %EnumLayoutVariantParse %t441, %EnumLayoutVariantParse* %l25
-  %t442 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t443 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
-  %t444 = extractvalue %EnumLayoutVariantParse %t443, 2
-  %t445 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t442, { i8**, i64 }* %t444)
-  store { i8**, i64 }* %t445, { i8**, i64 }** %l1
-  %t446 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
-  %t447 = extractvalue %EnumLayoutVariantParse %t446, 0
-  %t448 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t449 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t450 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t451 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t452 = load double, double* %l4
-  %t453 = load i8*, i8** %l5
-  %t454 = load i8*, i8** %l6
-  %t455 = load i8*, i8** %l17
-  %t456 = load i8*, i8** %l18
-  %t457 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t458 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t459 = load i8*, i8** %l21
-  %t460 = load i8*, i8** %l22
-  %t461 = load i8*, i8** %l23
-  %t462 = load i8*, i8** %l24
-  %t463 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
-  br i1 %t447, label %then46, label %merge47
+  br i1 %t420, label %then43, label %else44
+then43:
+  %t434 = load i8*, i8** %l22
+  %s435 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.435, i32 0, i32 0
+  %t436 = call i8* @strip_prefix(i8* %t434, i8* %s435)
+  store i8* %t436, i8** %l23
+  %t437 = load i8*, i8** %l17
+  %s438 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.438, i32 0, i32 0
+  %t439 = call i8* @strip_prefix(i8* %t437, i8* %s438)
+  store i8* %t439, i8** %l24
+  %t440 = load i8*, i8** %l24
+  %t441 = load i8*, i8** %l21
+  %t442 = call %EnumLayoutVariantParse @parse_enum_variant_layout(i8* %t440, i8* %t441)
+  store %EnumLayoutVariantParse %t442, %EnumLayoutVariantParse* %l25
+  %t443 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t444 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
+  %t445 = extractvalue %EnumLayoutVariantParse %t444, 2
+  %t446 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t443, { i8**, i64 }* %t445)
+  store { i8**, i64 }* %t446, { i8**, i64 }** %l1
+  %t447 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
+  %t448 = extractvalue %EnumLayoutVariantParse %t447, 0
+  %t449 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t450 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t451 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t452 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t453 = load double, double* %l4
+  %t454 = load i8*, i8** %l5
+  %t455 = load i8*, i8** %l6
+  %t456 = load i8*, i8** %l17
+  %t457 = load i8*, i8** %l18
+  %t458 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t459 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t460 = load i8*, i8** %l21
+  %t461 = load i8*, i8** %l22
+  %t462 = load i8*, i8** %l23
+  %t463 = load i8*, i8** %l24
+  %t464 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
+  br i1 %t448, label %then46, label %merge47
 then46:
-  %t464 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t465 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
-  %t466 = extractvalue %EnumLayoutVariantParse %t465, 1
-  %t467 = call { %NativeEnumVariantLayout*, i64 }* @append_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t464, %NativeEnumVariantLayout %t466)
-  store { %NativeEnumVariantLayout*, i64 }* %t467, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t465 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t466 = load %EnumLayoutVariantParse, %EnumLayoutVariantParse* %l25
+  %t467 = extractvalue %EnumLayoutVariantParse %t466, 1
+  %t468 = call { %NativeEnumVariantLayout*, i64 }* @append_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %t465, %NativeEnumVariantLayout %t467)
+  store { %NativeEnumVariantLayout*, i64 }* %t468, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %merge47
 merge47:
-  %t468 = phi { %NativeEnumVariantLayout*, i64 }* [ %t467, %then46 ], [ %t458, %then43 ]
-  store { %NativeEnumVariantLayout*, i64 }* %t468, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t469 = phi { %NativeEnumVariantLayout*, i64 }* [ %t468, %then46 ], [ %t459, %then43 ]
+  store { %NativeEnumVariantLayout*, i64 }* %t469, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %merge45
 else44:
-  %t469 = load i8*, i8** %l22
-  %s470 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.470, i32 0, i32 0
-  %t471 = call i1 @starts_with(i8* %t469, i8* %s470)
-  %t472 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t473 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t474 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t475 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t476 = load double, double* %l4
-  %t477 = load i8*, i8** %l5
-  %t478 = load i8*, i8** %l6
-  %t479 = load i8*, i8** %l17
-  %t480 = load i8*, i8** %l18
-  %t481 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t482 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t483 = load i8*, i8** %l21
-  %t484 = load i8*, i8** %l22
-  br i1 %t471, label %then48, label %merge49
-then48:
+  %t470 = load i8*, i8** %l22
+  %s471 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.471, i32 0, i32 0
+  %t472 = call i1 @starts_with(i8* %t470, i8* %s471)
+  %t473 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t474 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t475 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t476 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t477 = load double, double* %l4
+  %t478 = load i8*, i8** %l5
+  %t479 = load i8*, i8** %l6
+  %t480 = load i8*, i8** %l17
+  %t481 = load i8*, i8** %l18
+  %t482 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t483 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t484 = load i8*, i8** %l21
   %t485 = load i8*, i8** %l22
-  %s486 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.486, i32 0, i32 0
-  %t487 = call i8* @strip_prefix(i8* %t485, i8* %s486)
-  store i8* %t487, i8** %l26
-  %t488 = load i8*, i8** %l17
-  %s489 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.489, i32 0, i32 0
-  %t490 = call i8* @strip_prefix(i8* %t488, i8* %s489)
-  store i8* %t490, i8** %l27
-  %t491 = load i8*, i8** %l27
-  %t492 = load i8*, i8** %l21
-  %t493 = call %EnumLayoutPayloadParse @parse_enum_payload_layout(i8* %t491, i8* %t492)
-  store %EnumLayoutPayloadParse %t493, %EnumLayoutPayloadParse* %l28
-  %t494 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t495 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
-  %t496 = extractvalue %EnumLayoutPayloadParse %t495, 3
-  %t497 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t494, { i8**, i64 }* %t496)
-  store { i8**, i64 }* %t497, { i8**, i64 }** %l1
-  %t499 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
-  %t500 = extractvalue %EnumLayoutPayloadParse %t499, 0
-  br label %logical_and_entry_498
+  br i1 %t472, label %then48, label %merge49
+then48:
+  %t486 = load i8*, i8** %l22
+  %s487 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.487, i32 0, i32 0
+  %t488 = call i8* @strip_prefix(i8* %t486, i8* %s487)
+  store i8* %t488, i8** %l26
+  %t489 = load i8*, i8** %l17
+  %s490 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.490, i32 0, i32 0
+  %t491 = call i8* @strip_prefix(i8* %t489, i8* %s490)
+  store i8* %t491, i8** %l27
+  %t492 = load i8*, i8** %l27
+  %t493 = load i8*, i8** %l21
+  %t494 = call %EnumLayoutPayloadParse @parse_enum_payload_layout(i8* %t492, i8* %t493)
+  store %EnumLayoutPayloadParse %t494, %EnumLayoutPayloadParse* %l28
+  %t495 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t496 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
+  %t497 = extractvalue %EnumLayoutPayloadParse %t496, 3
+  %t498 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t495, { i8**, i64 }* %t497)
+  store { i8**, i64 }* %t498, { i8**, i64 }** %l1
+  %t500 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
+  %t501 = extractvalue %EnumLayoutPayloadParse %t500, 0
+  br label %logical_and_entry_499
 
-logical_and_entry_498:
-  br i1 %t500, label %logical_and_right_498, label %logical_and_merge_498
+logical_and_entry_499:
+  br i1 %t501, label %logical_and_right_499, label %logical_and_merge_499
 
-logical_and_right_498:
-  %t501 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t502 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t501
-  %t503 = extractvalue { %NativeEnumVariantLayout*, i64 } %t502, 1
-  %t504 = icmp sgt i64 %t503, 0
-  br label %logical_and_right_end_498
+logical_and_right_499:
+  %t502 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t503 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t502
+  %t504 = extractvalue { %NativeEnumVariantLayout*, i64 } %t503, 1
+  %t505 = icmp sgt i64 %t504, 0
+  br label %logical_and_right_end_499
 
-logical_and_right_end_498:
-  br label %logical_and_merge_498
+logical_and_right_end_499:
+  br label %logical_and_merge_499
 
-logical_and_merge_498:
-  %t505 = phi i1 [ false, %logical_and_entry_498 ], [ %t504, %logical_and_right_end_498 ]
-  %t506 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t507 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t508 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t509 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t510 = load double, double* %l4
-  %t511 = load i8*, i8** %l5
-  %t512 = load i8*, i8** %l6
-  %t513 = load i8*, i8** %l17
-  %t514 = load i8*, i8** %l18
-  %t515 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t516 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t517 = load i8*, i8** %l21
-  %t518 = load i8*, i8** %l22
-  %t519 = load i8*, i8** %l26
-  %t520 = load i8*, i8** %l27
-  %t521 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
-  br i1 %t505, label %then50, label %merge51
+logical_and_merge_499:
+  %t506 = phi i1 [ false, %logical_and_entry_499 ], [ %t505, %logical_and_right_end_499 ]
+  %t507 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t508 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t509 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t510 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t511 = load double, double* %l4
+  %t512 = load i8*, i8** %l5
+  %t513 = load i8*, i8** %l6
+  %t514 = load i8*, i8** %l17
+  %t515 = load i8*, i8** %l18
+  %t516 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t517 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t518 = load i8*, i8** %l21
+  %t519 = load i8*, i8** %l22
+  %t520 = load i8*, i8** %l26
+  %t521 = load i8*, i8** %l27
+  %t522 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
+  br i1 %t506, label %then50, label %merge51
 then50:
-  %t522 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t523 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t522
-  %t524 = extractvalue { %NativeEnumVariantLayout*, i64 } %t523, 1
-  %t525 = sub i64 %t524, 1
-  store i64 %t525, i64* %l29
-  %t526 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t527 = load i64, i64* %l29
-  %t528 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t526
-  %t529 = extractvalue { %NativeEnumVariantLayout*, i64 } %t528, 0
-  %t530 = extractvalue { %NativeEnumVariantLayout*, i64 } %t528, 1
-  %t531 = icmp uge i64 %t527, %t530
-  ; bounds check: %t531 (if true, out of bounds)
-  %t532 = getelementptr %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t529, i64 %t527
-  %t533 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t532
-  store %NativeEnumVariantLayout %t533, %NativeEnumVariantLayout* %l30
-  %t534 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
-  %t535 = extractvalue %NativeEnumVariantLayout %t534, 5
-  %t536 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
-  %t537 = extractvalue %EnumLayoutPayloadParse %t536, 2
-  %t538 = bitcast { %NativeStructLayoutField**, i64 }* %t535 to { %NativeStructLayoutField*, i64 }*
-  %t539 = call { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %t538, %NativeStructLayoutField %t537)
-  store { %NativeStructLayoutField*, i64 }* %t539, { %NativeStructLayoutField*, i64 }** %l31
+  %t523 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t524 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t523
+  %t525 = extractvalue { %NativeEnumVariantLayout*, i64 } %t524, 1
+  %t526 = sub i64 %t525, 1
+  store i64 %t526, i64* %l29
+  %t527 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t528 = load i64, i64* %l29
+  %t529 = load { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t527
+  %t530 = extractvalue { %NativeEnumVariantLayout*, i64 } %t529, 0
+  %t531 = extractvalue { %NativeEnumVariantLayout*, i64 } %t529, 1
+  %t532 = icmp uge i64 %t528, %t531
+  ; bounds check: %t532 (if true, out of bounds)
+  %t533 = getelementptr %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t530, i64 %t528
+  %t534 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t533
+  store %NativeEnumVariantLayout %t534, %NativeEnumVariantLayout* %l30
+  %t535 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t536 = extractvalue %NativeEnumVariantLayout %t535, 5
+  %t537 = load %EnumLayoutPayloadParse, %EnumLayoutPayloadParse* %l28
+  %t538 = extractvalue %EnumLayoutPayloadParse %t537, 2
+  %t539 = bitcast { %NativeStructLayoutField**, i64 }* %t536 to { %NativeStructLayoutField*, i64 }*
+  %t540 = call { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %t539, %NativeStructLayoutField %t538)
+  store { %NativeStructLayoutField*, i64 }* %t540, { %NativeStructLayoutField*, i64 }** %l31
   br label %merge51
 merge51:
   br label %merge49
 merge49:
-  %t540 = phi i8* [ %t487, %then48 ], [ %t479, %else44 ]
-  %t541 = phi { i8**, i64 }* [ %t497, %then48 ], [ %t473, %else44 ]
-  store i8* %t540, i8** %l17
-  store { i8**, i64 }* %t541, { i8**, i64 }** %l1
+  %t541 = phi i8* [ %t488, %then48 ], [ %t480, %else44 ]
+  %t542 = phi { i8**, i64 }* [ %t498, %then48 ], [ %t474, %else44 ]
+  store i8* %t541, i8** %l17
+  store { i8**, i64 }* %t542, { i8**, i64 }** %l1
   br label %merge45
 merge45:
-  %t542 = phi i8* [ %t435, %then43 ], [ %t487, %else44 ]
-  %t543 = phi { i8**, i64 }* [ %t445, %then43 ], [ %t497, %else44 ]
-  %t544 = phi { %NativeEnumVariantLayout*, i64 }* [ %t467, %then43 ], [ %t430, %else44 ]
-  store i8* %t542, i8** %l17
-  store { i8**, i64 }* %t543, { i8**, i64 }** %l1
-  store { %NativeEnumVariantLayout*, i64 }* %t544, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t545 = load double, double* %l4
-  %t546 = sitofp i64 1 to double
-  %t547 = fadd double %t545, %t546
-  store double %t547, double* %l4
+  %t543 = phi i8* [ %t436, %then43 ], [ %t488, %else44 ]
+  %t544 = phi { i8**, i64 }* [ %t446, %then43 ], [ %t498, %else44 ]
+  %t545 = phi { %NativeEnumVariantLayout*, i64 }* [ %t468, %then43 ], [ %t431, %else44 ]
+  store i8* %t543, i8** %l17
+  store { i8**, i64 }* %t544, { i8**, i64 }** %l1
+  store { %NativeEnumVariantLayout*, i64 }* %t545, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t546 = load double, double* %l4
+  %t547 = sitofp i64 1 to double
+  %t548 = fadd double %t546, %t547
+  store double %t548, double* %l4
   br label %loop.latch35
 loop.latch35:
-  %t548 = load double, double* %l4
-  %t549 = load i8*, i8** %l17
-  %t550 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t551 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t549 = load double, double* %l4
+  %t550 = load i8*, i8** %l17
+  %t551 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t552 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %loop.header33
 afterloop36:
-  %t556 = load i8*, i8** %l21
-  %t557 = insertvalue %NativeEnum undef, i8* %t556, 0
-  %t558 = alloca [0 x %NativeEnumVariant*]
-  %t559 = getelementptr [0 x %NativeEnumVariant*], [0 x %NativeEnumVariant*]* %t558, i32 0, i32 0
-  %t560 = alloca { %NativeEnumVariant**, i64 }
-  %t561 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t560, i32 0, i32 0
-  store %NativeEnumVariant** %t559, %NativeEnumVariant*** %t561
-  %t562 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t560, i32 0, i32 1
-  store i64 0, i64* %t562
-  %t563 = insertvalue %NativeEnum %t557, { %NativeEnumVariant**, i64 }* %t560, 1
-  %t564 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t565 = extractvalue %EnumLayoutHeaderParse %t564, 2
-  %t566 = insertvalue %NativeEnumLayout undef, double %t565, 0
-  %t567 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t568 = extractvalue %EnumLayoutHeaderParse %t567, 3
-  %t569 = insertvalue %NativeEnumLayout %t566, double %t568, 1
-  %t570 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t571 = extractvalue %EnumLayoutHeaderParse %t570, 4
-  %t572 = insertvalue %NativeEnumLayout %t569, i8* %t571, 2
-  %t573 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t574 = extractvalue %EnumLayoutHeaderParse %t573, 5
-  %t575 = insertvalue %NativeEnumLayout %t572, double %t574, 3
-  %t576 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t577 = extractvalue %EnumLayoutHeaderParse %t576, 6
-  %t578 = insertvalue %NativeEnumLayout %t575, double %t577, 4
-  %t579 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t580 = bitcast { %NativeEnumVariantLayout*, i64 }* %t579 to { %NativeEnumVariantLayout**, i64 }*
-  %t581 = insertvalue %NativeEnumLayout %t578, { %NativeEnumVariantLayout**, i64 }* %t580, 5
-  %t582 = insertvalue %NativeEnum %t563, %NativeEnumLayout* null, 2
-  store %NativeEnum %t582, %NativeEnum* %l32
-  %t583 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t584 = load %NativeEnum, %NativeEnum* %l32
-  %t585 = call { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }* %t583, %NativeEnum %t584)
-  store { %NativeEnum*, i64 }* %t585, { %NativeEnum*, i64 }** %l3
+  %t557 = load i8*, i8** %l21
+  %t558 = insertvalue %NativeEnum undef, i8* %t557, 0
+  %t559 = alloca [0 x %NativeEnumVariant*]
+  %t560 = getelementptr [0 x %NativeEnumVariant*], [0 x %NativeEnumVariant*]* %t559, i32 0, i32 0
+  %t561 = alloca { %NativeEnumVariant**, i64 }
+  %t562 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t561, i32 0, i32 0
+  store %NativeEnumVariant** %t560, %NativeEnumVariant*** %t562
+  %t563 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t561, i32 0, i32 1
+  store i64 0, i64* %t563
+  %t564 = insertvalue %NativeEnum %t558, { %NativeEnumVariant**, i64 }* %t561, 1
+  %t565 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t566 = extractvalue %EnumLayoutHeaderParse %t565, 2
+  %t567 = insertvalue %NativeEnumLayout undef, double %t566, 0
+  %t568 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t569 = extractvalue %EnumLayoutHeaderParse %t568, 3
+  %t570 = insertvalue %NativeEnumLayout %t567, double %t569, 1
+  %t571 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t572 = extractvalue %EnumLayoutHeaderParse %t571, 4
+  %t573 = insertvalue %NativeEnumLayout %t570, i8* %t572, 2
+  %t574 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t575 = extractvalue %EnumLayoutHeaderParse %t574, 5
+  %t576 = insertvalue %NativeEnumLayout %t573, double %t575, 3
+  %t577 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t578 = extractvalue %EnumLayoutHeaderParse %t577, 6
+  %t579 = insertvalue %NativeEnumLayout %t576, double %t578, 4
+  %t580 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t581 = bitcast { %NativeEnumVariantLayout*, i64 }* %t580 to { %NativeEnumVariantLayout**, i64 }*
+  %t582 = insertvalue %NativeEnumLayout %t579, { %NativeEnumVariantLayout**, i64 }* %t581, 5
+  %t583 = alloca %NativeEnumLayout
+  store %NativeEnumLayout %t582, %NativeEnumLayout* %t583
+  %t584 = insertvalue %NativeEnum %t564, %NativeEnumLayout* %t583, 2
+  store %NativeEnum %t584, %NativeEnum* %l32
+  %t585 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t586 = load %NativeEnum, %NativeEnum* %l32
+  %t587 = call { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }* %t585, %NativeEnum %t586)
+  store { %NativeEnum*, i64 }* %t587, { %NativeEnum*, i64 }** %l3
   br label %merge32
 else31:
-  %t586 = load double, double* %l4
-  %t587 = sitofp i64 1 to double
-  %t588 = fadd double %t586, %t587
-  store double %t588, double* %l4
+  %t588 = load double, double* %l4
+  %t589 = sitofp i64 1 to double
+  %t590 = fadd double %t588, %t589
+  store double %t590, double* %l4
   br label %merge32
 merge32:
-  %t589 = phi double [ %t334, %then30 ], [ %t588, %else31 ]
-  %t590 = phi i8* [ %t435, %then30 ], [ %t322, %else31 ]
-  %t591 = phi { i8**, i64 }* [ %t445, %then30 ], [ %t316, %else31 ]
-  %t592 = phi { %NativeEnum*, i64 }* [ %t585, %then30 ], [ %t318, %else31 ]
-  store double %t589, double* %l4
-  store i8* %t590, i8** %l17
-  store { i8**, i64 }* %t591, { i8**, i64 }** %l1
-  store { %NativeEnum*, i64 }* %t592, { %NativeEnum*, i64 }** %l3
+  %t591 = phi double [ %t335, %then30 ], [ %t590, %else31 ]
+  %t592 = phi i8* [ %t436, %then30 ], [ %t323, %else31 ]
+  %t593 = phi { i8**, i64 }* [ %t446, %then30 ], [ %t317, %else31 ]
+  %t594 = phi { %NativeEnum*, i64 }* [ %t587, %then30 ], [ %t319, %else31 ]
+  store double %t591, double* %l4
+  store i8* %t592, i8** %l17
+  store { i8**, i64 }* %t593, { i8**, i64 }** %l1
+  store { %NativeEnum*, i64 }* %t594, { %NativeEnum*, i64 }** %l3
   br label %loop.latch2
 merge29:
-  %t593 = load double, double* %l4
-  %t594 = sitofp i64 1 to double
-  %t595 = fadd double %t593, %t594
-  store double %t595, double* %l4
+  %t595 = load double, double* %l4
+  %t596 = sitofp i64 1 to double
+  %t597 = fadd double %t595, %t596
+  store double %t597, double* %l4
   br label %loop.latch2
 loop.latch2:
-  %t596 = load double, double* %l4
-  %t597 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t598 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t599 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t598 = load double, double* %l4
+  %t599 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t600 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t601 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
   br label %loop.header0
 afterloop3:
-  %t604 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t605 = bitcast { %NativeStruct*, i64 }* %t604 to { %NativeStruct**, i64 }*
-  %t606 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t605, 0
-  %t607 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t608 = bitcast { %NativeEnum*, i64 }* %t607 to { %NativeEnum**, i64 }*
-  %t609 = insertvalue %LayoutManifest %t606, { %NativeEnum**, i64 }* %t608, 1
-  %t610 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t611 = insertvalue %LayoutManifest %t609, { i8**, i64 }* %t610, 2
-  ret %LayoutManifest %t611
+  %t606 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t607 = bitcast { %NativeStruct*, i64 }* %t606 to { %NativeStruct**, i64 }*
+  %t608 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t607, 0
+  %t609 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t610 = bitcast { %NativeEnum*, i64 }* %t609 to { %NativeEnum**, i64 }*
+  %t611 = insertvalue %LayoutManifest %t608, { %NativeEnum**, i64 }* %t610, 1
+  %t612 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t613 = insertvalue %LayoutManifest %t611, { i8**, i64 }* %t612, 2
+  ret %LayoutManifest %t613
 }
 
 define i1 @is_trim_char(i8* %ch) {

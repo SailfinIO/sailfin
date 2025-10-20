@@ -9936,6 +9936,19 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
+    // Handle struct value to pointer: allocate, store, return pointer
+    // This handles cases like: return StructName { field: value } where return type is StructName*
+    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
+        let expected_value_type = strip_pointer_suffix(target_type);
+        if expected_value_type == operand.llvm_type {
+            // Allocate space for the struct, store the value, return the pointer
+            let alloca_temp = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type);
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp);
+            let coerced = LLVMOperand { llvm_type: target_type, value: alloca_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
     // Handle array struct pointer variance: allow bitcast between pointers whose layouts match
     if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
         let source_element = array_pointer_element_type(operand.llvm_type);
