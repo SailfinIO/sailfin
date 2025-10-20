@@ -4197,6 +4197,53 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                                 current_lines = append_string(current_lines, "  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 " + number_to_string(field_index))
                                 current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + field_ptr_temp)
             return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
+        index_parse = parse_index_expression(parsed_assignment.target)
+        if index_parse.success:
+            effective_value = parsed_assignment.value
+            if len(parsed_assignment.operator) > 0:
+                effective_value = parsed_assignment.target + " " + parsed_assignment.operator + " " + parsed_assignment.value
+            lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            string_constants = lowered.string_constants
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            if lowered.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for array index `" + parsed_assignment.target + "`")
+            else:
+                base_result = lower_expression(index_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+                diagnostics = (diagnostics) + (base_result.diagnostics)
+                current_lines = base_result.lines
+                current_temp = base_result.temp_index
+                if base_result.operand == None:
+                    diagnostics = append_string(diagnostics, "llvm lowering: array index assignment base `" + index_parse.base + "` produced no value")
+                else:
+                    index_result = lower_expression(index_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
+                    diagnostics = (diagnostics) + (index_result.diagnostics)
+                    current_lines = index_result.lines
+                    current_temp = index_result.temp_index
+                    if index_result.operand == None:
+                        diagnostics = append_string(diagnostics, "llvm lowering: array index `" + index_parse.index + "` produced no value")
+                    else:
+                        element_type = array_pointer_element_type(base_result.operand.llvm_type)
+                        if len(element_type) == 0:
+                            diagnostics = append_string(diagnostics, "llvm lowering: cannot determine element type for array assignment `" + base_result.operand.llvm_type + "`")
+                        else:
+                            coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines)
+                            diagnostics = (diagnostics) + (coerced.diagnostics)
+                            current_lines = coerced.lines
+                            current_temp = coerced.temp_index
+                            if coerced.operand != None:
+                                data_ptr_temp = format_temp_name(current_temp)
+                                current_temp += 1
+                                elem_ptr_temp = format_temp_name(current_temp)
+                                current_temp += 1
+                                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = getelementptr " + array_struct_type_for_element(element_type) + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 0")
+                                data_ptr_loaded = format_temp_name(current_temp)
+                                current_temp += 1
+                                current_lines = append_string(current_lines, "  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp)
+                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + index_result.operand.value)
+                                current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp)
+            return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
         binding = find_local_binding(current_locals, parsed_assignment.target)
         if binding == None:
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`")
@@ -4275,22 +4322,32 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
 
 def parse_assignment_expression(expression):
     trimmed = trim_text(expression)
-    depth = 0
+    paren_depth = 0
+    bracket_depth = 0
     index = 0
     while True:
         if index >= len(trimmed):
             break
         ch = trimmed[index]
         if ch == "(":
-            depth += 1
+            paren_depth += 1
             index += 1
             continue
         if ch == ")":
-            if depth > 0:
-                depth -= 1
+            if paren_depth > 0:
+                paren_depth -= 1
             index += 1
             continue
-        if depth > 0:
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if paren_depth > 0  or  bracket_depth > 0:
             index += 1
             continue
         if ch == "=":

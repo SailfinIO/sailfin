@@ -6050,7 +6050,82 @@ fn lower_expression_statement(
             return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
         }
         
-        // Not a member access, try simple local assignment
+        // Check if this is an array index assignment (e.g., arr[i] = value)
+        let index_parse = parse_index_expression(parsed_assignment.target);
+        if index_parse.success {
+            // Handle array index assignment: arr[index] = value
+            let mut effective_value -> string = parsed_assignment.value;
+            if parsed_assignment.operator.length > 0 {
+                // Desugar compound assignments: "arr[i] += y" becomes "arr[i] = arr[i] + y"
+                effective_value = parsed_assignment.target + " " + parsed_assignment.operator + " " + parsed_assignment.value;
+            }
+            
+            // Lower the RHS value
+            let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            string_constants = lowered.string_constants;
+            current_lines = lowered.lines;
+            current_temp = lowered.temp_index;
+            
+            if lowered.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for array index `" + parsed_assignment.target + "`");
+            } else {
+                // Lower the base array to get a pointer
+                let base_result = lower_expression(index_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(base_result.diagnostics);
+                current_lines = base_result.lines;
+                current_temp = base_result.temp_index;
+                
+                if base_result.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: array index assignment base `" + index_parse.base + "` produced no value");
+                } else {
+                    // Lower the index
+                    let index_result = lower_expression(index_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+                    diagnostics = diagnostics.concat(index_result.diagnostics);
+                    current_lines = index_result.lines;
+                    current_temp = index_result.temp_index;
+                    
+                    if index_result.operand == null {
+                        diagnostics = append_string(diagnostics, "llvm lowering: array index `" + index_parse.index + "` produced no value");
+                    } else {
+                        // Get the element type from the array pointer type
+                        let element_type = array_pointer_element_type(base_result.operand.llvm_type);
+                        if element_type.length == 0 {
+                            diagnostics = append_string(diagnostics, "llvm lowering: cannot determine element type for array assignment `" + base_result.operand.llvm_type + "`");
+                        } else {
+                            // Coerce the value to the element type
+                            let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines);
+                            diagnostics = diagnostics.concat(coerced.diagnostics);
+                            current_lines = coerced.lines;
+                            current_temp = coerced.temp_index;
+                            
+                            if coerced.operand != null {
+                                // Get array data pointer and compute element address
+                                let data_ptr_temp = format_temp_name(current_temp);
+                                current_temp += 1;
+                                let elem_ptr_temp = format_temp_name(current_temp);
+                                current_temp += 1;
+                                
+                                // Load the data pointer from the array struct (first field)
+                                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = getelementptr " + array_struct_type_for_element(element_type) + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 0");
+                                let data_ptr_loaded = format_temp_name(current_temp);
+                                current_temp += 1;
+                                current_lines = append_string(current_lines, "  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp);
+                                
+                                // Compute element pointer using getelementptr
+                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + index_result.operand.value);
+                                
+                                // Store the value
+                                current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp);
+                            }
+                        }
+                    }
+                }
+            }
+            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
+        }
+        
+        // Not a member or array access, try simple local assignment
         let binding = find_local_binding(current_locals, parsed_assignment.target);
         if binding == null {
             diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + parsed_assignment.target + "`");
@@ -6173,7 +6248,8 @@ fn lower_expression_statement(
 
 fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
-    let mut depth -> number = 0;
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= trimmed.length {
@@ -6181,18 +6257,30 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
         }
         let ch = trimmed[index];
         if ch == "(" {
-            depth += 1;
+            paren_depth += 1;
             index += 1;
             continue;
         }
         if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
+            if paren_depth > 0 {
+                paren_depth -= 1;
             }
             index += 1;
             continue;
         }
-        if depth > 0 {
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if paren_depth > 0 || bracket_depth > 0 {
             index += 1;
             continue;
         }

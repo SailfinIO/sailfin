@@ -17259,14 +17259,14 @@ entry:
   %t21 = load double, double* %l4
   br label %loop.header0
 loop.header0:
-  %t602 = phi double [ %t21, %entry ], [ %t598, %loop.latch2 ]
-  %t603 = phi { i8**, i64 }* [ %t18, %entry ], [ %t599, %loop.latch2 ]
-  %t604 = phi { %NativeStruct*, i64 }* [ %t19, %entry ], [ %t600, %loop.latch2 ]
-  %t605 = phi { %NativeEnum*, i64 }* [ %t20, %entry ], [ %t601, %loop.latch2 ]
-  store double %t602, double* %l4
-  store { i8**, i64 }* %t603, { i8**, i64 }** %l1
-  store { %NativeStruct*, i64 }* %t604, { %NativeStruct*, i64 }** %l2
-  store { %NativeEnum*, i64 }* %t605, { %NativeEnum*, i64 }** %l3
+  %t625 = phi double [ %t21, %entry ], [ %t621, %loop.latch2 ]
+  %t626 = phi { i8**, i64 }* [ %t18, %entry ], [ %t622, %loop.latch2 ]
+  %t627 = phi { %NativeStruct*, i64 }* [ %t19, %entry ], [ %t623, %loop.latch2 ]
+  %t628 = phi { %NativeEnum*, i64 }* [ %t20, %entry ], [ %t624, %loop.latch2 ]
+  store double %t625, double* %l4
+  store { i8**, i64 }* %t626, { i8**, i64 }** %l1
+  store { %NativeStruct*, i64 }* %t627, { %NativeStruct*, i64 }** %l2
+  store { %NativeEnum*, i64 }* %t628, { %NativeEnum*, i64 }** %l3
   br label %loop.body1
 loop.body1:
   %t22 = load double, double* %l4
@@ -17703,14 +17703,14 @@ then30:
   %t347 = load i8*, i8** %l21
   br label %loop.header33
 loop.header33:
-  %t553 = phi double [ %t340, %then30 ], [ %t549, %loop.latch35 ]
-  %t554 = phi i8* [ %t343, %then30 ], [ %t550, %loop.latch35 ]
-  %t555 = phi { i8**, i64 }* [ %t337, %then30 ], [ %t551, %loop.latch35 ]
-  %t556 = phi { %NativeEnumVariantLayout*, i64 }* [ %t346, %then30 ], [ %t552, %loop.latch35 ]
-  store double %t553, double* %l4
-  store i8* %t554, i8** %l17
-  store { i8**, i64 }* %t555, { i8**, i64 }** %l1
-  store { %NativeEnumVariantLayout*, i64 }* %t556, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t576 = phi double [ %t340, %then30 ], [ %t572, %loop.latch35 ]
+  %t577 = phi i8* [ %t343, %then30 ], [ %t573, %loop.latch35 ]
+  %t578 = phi { i8**, i64 }* [ %t337, %then30 ], [ %t574, %loop.latch35 ]
+  %t579 = phi { %NativeEnumVariantLayout*, i64 }* [ %t346, %then30 ], [ %t575, %loop.latch35 ]
+  store double %t576, double* %l4
+  store i8* %t577, i8** %l17
+  store { i8**, i64 }* %t578, { i8**, i64 }** %l1
+  store { %NativeEnumVariantLayout*, i64 }* %t579, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %loop.body34
 loop.body34:
   %t348 = load double, double* %l4
@@ -17969,109 +17969,133 @@ then50:
   %t539 = bitcast { %NativeStructLayoutField**, i64 }* %t536 to { %NativeStructLayoutField*, i64 }*
   %t540 = call { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %t539, %NativeStructLayoutField %t538)
   store { %NativeStructLayoutField*, i64 }* %t540, { %NativeStructLayoutField*, i64 }** %l31
+  %t541 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t542 = extractvalue %NativeEnumVariantLayout %t541, 0
+  %t543 = insertvalue %NativeEnumVariantLayout undef, i8* %t542, 0
+  %t544 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t545 = extractvalue %NativeEnumVariantLayout %t544, 1
+  %t546 = insertvalue %NativeEnumVariantLayout %t543, double %t545, 1
+  %t547 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t548 = extractvalue %NativeEnumVariantLayout %t547, 2
+  %t549 = insertvalue %NativeEnumVariantLayout %t546, double %t548, 2
+  %t550 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t551 = extractvalue %NativeEnumVariantLayout %t550, 3
+  %t552 = insertvalue %NativeEnumVariantLayout %t549, double %t551, 3
+  %t553 = load %NativeEnumVariantLayout, %NativeEnumVariantLayout* %l30
+  %t554 = extractvalue %NativeEnumVariantLayout %t553, 4
+  %t555 = insertvalue %NativeEnumVariantLayout %t552, double %t554, 4
+  %t556 = load { %NativeStructLayoutField*, i64 }*, { %NativeStructLayoutField*, i64 }** %l31
+  %t557 = bitcast { %NativeStructLayoutField*, i64 }* %t556 to { %NativeStructLayoutField**, i64 }*
+  %t558 = insertvalue %NativeEnumVariantLayout %t555, { %NativeStructLayoutField**, i64 }* %t557, 5
+  %t559 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t560 = load i64, i64* %l29
+  %t561 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t559, i32 0, i32 0
+  %t563 = load %NativeEnumVariantLayout*, %NativeEnumVariantLayout** %t561
+  %t562 = getelementptr %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t563, i64 %t560
+  store %NativeEnumVariantLayout %t558, %NativeEnumVariantLayout* %t562
   br label %merge51
 merge51:
   br label %merge49
 merge49:
-  %t541 = phi i8* [ %t488, %then48 ], [ %t480, %else44 ]
-  %t542 = phi { i8**, i64 }* [ %t498, %then48 ], [ %t474, %else44 ]
-  store i8* %t541, i8** %l17
-  store { i8**, i64 }* %t542, { i8**, i64 }** %l1
+  %t564 = phi i8* [ %t488, %then48 ], [ %t480, %else44 ]
+  %t565 = phi { i8**, i64 }* [ %t498, %then48 ], [ %t474, %else44 ]
+  store i8* %t564, i8** %l17
+  store { i8**, i64 }* %t565, { i8**, i64 }** %l1
   br label %merge45
 merge45:
-  %t543 = phi i8* [ %t436, %then43 ], [ %t488, %else44 ]
-  %t544 = phi { i8**, i64 }* [ %t446, %then43 ], [ %t498, %else44 ]
-  %t545 = phi { %NativeEnumVariantLayout*, i64 }* [ %t468, %then43 ], [ %t431, %else44 ]
-  store i8* %t543, i8** %l17
-  store { i8**, i64 }* %t544, { i8**, i64 }** %l1
-  store { %NativeEnumVariantLayout*, i64 }* %t545, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t546 = load double, double* %l4
-  %t547 = sitofp i64 1 to double
-  %t548 = fadd double %t546, %t547
-  store double %t548, double* %l4
+  %t566 = phi i8* [ %t436, %then43 ], [ %t488, %else44 ]
+  %t567 = phi { i8**, i64 }* [ %t446, %then43 ], [ %t498, %else44 ]
+  %t568 = phi { %NativeEnumVariantLayout*, i64 }* [ %t468, %then43 ], [ %t431, %else44 ]
+  store i8* %t566, i8** %l17
+  store { i8**, i64 }* %t567, { i8**, i64 }** %l1
+  store { %NativeEnumVariantLayout*, i64 }* %t568, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t569 = load double, double* %l4
+  %t570 = sitofp i64 1 to double
+  %t571 = fadd double %t569, %t570
+  store double %t571, double* %l4
   br label %loop.latch35
 loop.latch35:
-  %t549 = load double, double* %l4
-  %t550 = load i8*, i8** %l17
-  %t551 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t552 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t572 = load double, double* %l4
+  %t573 = load i8*, i8** %l17
+  %t574 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t575 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
   br label %loop.header33
 afterloop36:
-  %t557 = load i8*, i8** %l21
-  %t558 = insertvalue %NativeEnum undef, i8* %t557, 0
-  %t559 = alloca [0 x %NativeEnumVariant*]
-  %t560 = getelementptr [0 x %NativeEnumVariant*], [0 x %NativeEnumVariant*]* %t559, i32 0, i32 0
-  %t561 = alloca { %NativeEnumVariant**, i64 }
-  %t562 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t561, i32 0, i32 0
-  store %NativeEnumVariant** %t560, %NativeEnumVariant*** %t562
-  %t563 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t561, i32 0, i32 1
-  store i64 0, i64* %t563
-  %t564 = insertvalue %NativeEnum %t558, { %NativeEnumVariant**, i64 }* %t561, 1
-  %t565 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t566 = extractvalue %EnumLayoutHeaderParse %t565, 2
-  %t567 = insertvalue %NativeEnumLayout undef, double %t566, 0
-  %t568 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t569 = extractvalue %EnumLayoutHeaderParse %t568, 3
-  %t570 = insertvalue %NativeEnumLayout %t567, double %t569, 1
-  %t571 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t572 = extractvalue %EnumLayoutHeaderParse %t571, 4
-  %t573 = insertvalue %NativeEnumLayout %t570, i8* %t572, 2
-  %t574 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t575 = extractvalue %EnumLayoutHeaderParse %t574, 5
-  %t576 = insertvalue %NativeEnumLayout %t573, double %t575, 3
-  %t577 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
-  %t578 = extractvalue %EnumLayoutHeaderParse %t577, 6
-  %t579 = insertvalue %NativeEnumLayout %t576, double %t578, 4
-  %t580 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
-  %t581 = bitcast { %NativeEnumVariantLayout*, i64 }* %t580 to { %NativeEnumVariantLayout**, i64 }*
-  %t582 = insertvalue %NativeEnumLayout %t579, { %NativeEnumVariantLayout**, i64 }* %t581, 5
-  %t583 = alloca %NativeEnumLayout
-  store %NativeEnumLayout %t582, %NativeEnumLayout* %t583
-  %t584 = insertvalue %NativeEnum %t564, %NativeEnumLayout* %t583, 2
-  store %NativeEnum %t584, %NativeEnum* %l32
-  %t585 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t586 = load %NativeEnum, %NativeEnum* %l32
-  %t587 = call { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }* %t585, %NativeEnum %t586)
-  store { %NativeEnum*, i64 }* %t587, { %NativeEnum*, i64 }** %l3
+  %t580 = load i8*, i8** %l21
+  %t581 = insertvalue %NativeEnum undef, i8* %t580, 0
+  %t582 = alloca [0 x %NativeEnumVariant*]
+  %t583 = getelementptr [0 x %NativeEnumVariant*], [0 x %NativeEnumVariant*]* %t582, i32 0, i32 0
+  %t584 = alloca { %NativeEnumVariant**, i64 }
+  %t585 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t584, i32 0, i32 0
+  store %NativeEnumVariant** %t583, %NativeEnumVariant*** %t585
+  %t586 = getelementptr { %NativeEnumVariant**, i64 }, { %NativeEnumVariant**, i64 }* %t584, i32 0, i32 1
+  store i64 0, i64* %t586
+  %t587 = insertvalue %NativeEnum %t581, { %NativeEnumVariant**, i64 }* %t584, 1
+  %t588 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t589 = extractvalue %EnumLayoutHeaderParse %t588, 2
+  %t590 = insertvalue %NativeEnumLayout undef, double %t589, 0
+  %t591 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t592 = extractvalue %EnumLayoutHeaderParse %t591, 3
+  %t593 = insertvalue %NativeEnumLayout %t590, double %t592, 1
+  %t594 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t595 = extractvalue %EnumLayoutHeaderParse %t594, 4
+  %t596 = insertvalue %NativeEnumLayout %t593, i8* %t595, 2
+  %t597 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t598 = extractvalue %EnumLayoutHeaderParse %t597, 5
+  %t599 = insertvalue %NativeEnumLayout %t596, double %t598, 3
+  %t600 = load %EnumLayoutHeaderParse, %EnumLayoutHeaderParse* %l19
+  %t601 = extractvalue %EnumLayoutHeaderParse %t600, 6
+  %t602 = insertvalue %NativeEnumLayout %t599, double %t601, 4
+  %t603 = load { %NativeEnumVariantLayout*, i64 }*, { %NativeEnumVariantLayout*, i64 }** %l20
+  %t604 = bitcast { %NativeEnumVariantLayout*, i64 }* %t603 to { %NativeEnumVariantLayout**, i64 }*
+  %t605 = insertvalue %NativeEnumLayout %t602, { %NativeEnumVariantLayout**, i64 }* %t604, 5
+  %t606 = alloca %NativeEnumLayout
+  store %NativeEnumLayout %t605, %NativeEnumLayout* %t606
+  %t607 = insertvalue %NativeEnum %t587, %NativeEnumLayout* %t606, 2
+  store %NativeEnum %t607, %NativeEnum* %l32
+  %t608 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t609 = load %NativeEnum, %NativeEnum* %l32
+  %t610 = call { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }* %t608, %NativeEnum %t609)
+  store { %NativeEnum*, i64 }* %t610, { %NativeEnum*, i64 }** %l3
   br label %merge32
 else31:
-  %t588 = load double, double* %l4
-  %t589 = sitofp i64 1 to double
-  %t590 = fadd double %t588, %t589
-  store double %t590, double* %l4
+  %t611 = load double, double* %l4
+  %t612 = sitofp i64 1 to double
+  %t613 = fadd double %t611, %t612
+  store double %t613, double* %l4
   br label %merge32
 merge32:
-  %t591 = phi double [ %t335, %then30 ], [ %t590, %else31 ]
-  %t592 = phi i8* [ %t436, %then30 ], [ %t323, %else31 ]
-  %t593 = phi { i8**, i64 }* [ %t446, %then30 ], [ %t317, %else31 ]
-  %t594 = phi { %NativeEnum*, i64 }* [ %t587, %then30 ], [ %t319, %else31 ]
-  store double %t591, double* %l4
-  store i8* %t592, i8** %l17
-  store { i8**, i64 }* %t593, { i8**, i64 }** %l1
-  store { %NativeEnum*, i64 }* %t594, { %NativeEnum*, i64 }** %l3
+  %t614 = phi double [ %t335, %then30 ], [ %t613, %else31 ]
+  %t615 = phi i8* [ %t436, %then30 ], [ %t323, %else31 ]
+  %t616 = phi { i8**, i64 }* [ %t446, %then30 ], [ %t317, %else31 ]
+  %t617 = phi { %NativeEnum*, i64 }* [ %t610, %then30 ], [ %t319, %else31 ]
+  store double %t614, double* %l4
+  store i8* %t615, i8** %l17
+  store { i8**, i64 }* %t616, { i8**, i64 }** %l1
+  store { %NativeEnum*, i64 }* %t617, { %NativeEnum*, i64 }** %l3
   br label %loop.latch2
 merge29:
-  %t595 = load double, double* %l4
-  %t596 = sitofp i64 1 to double
-  %t597 = fadd double %t595, %t596
-  store double %t597, double* %l4
+  %t618 = load double, double* %l4
+  %t619 = sitofp i64 1 to double
+  %t620 = fadd double %t618, %t619
+  store double %t620, double* %l4
   br label %loop.latch2
 loop.latch2:
-  %t598 = load double, double* %l4
-  %t599 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t600 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t601 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t621 = load double, double* %l4
+  %t622 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t623 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t624 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
   br label %loop.header0
 afterloop3:
-  %t606 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
-  %t607 = bitcast { %NativeStruct*, i64 }* %t606 to { %NativeStruct**, i64 }*
-  %t608 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t607, 0
-  %t609 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
-  %t610 = bitcast { %NativeEnum*, i64 }* %t609 to { %NativeEnum**, i64 }*
-  %t611 = insertvalue %LayoutManifest %t608, { %NativeEnum**, i64 }* %t610, 1
-  %t612 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t613 = insertvalue %LayoutManifest %t611, { i8**, i64 }* %t612, 2
-  ret %LayoutManifest %t613
+  %t629 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l2
+  %t630 = bitcast { %NativeStruct*, i64 }* %t629 to { %NativeStruct**, i64 }*
+  %t631 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t630, 0
+  %t632 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l3
+  %t633 = bitcast { %NativeEnum*, i64 }* %t632 to { %NativeEnum**, i64 }*
+  %t634 = insertvalue %LayoutManifest %t631, { %NativeEnum**, i64 }* %t633, 1
+  %t635 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t636 = insertvalue %LayoutManifest %t634, { i8**, i64 }* %t635, 2
+  ret %LayoutManifest %t636
 }
 
 define i1 @is_trim_char(i8* %ch) {
