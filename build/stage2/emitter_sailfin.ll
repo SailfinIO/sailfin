@@ -83,9 +83,9 @@ declare noalias i8* @malloc(i64)
 @.str.48 = private unnamed_addr constant [3 x i8] c" }\00"
 @.str.38 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.57 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.8 = private unnamed_addr constant [4 x i8] c" = \00"
+@.str.3 = private unnamed_addr constant [5 x i8] c" -> \00"
+@.str.10 = private unnamed_addr constant [4 x i8] c" = \00"
 @.str.1420 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.10 = private unnamed_addr constant [4 x i8] c"fn \00"
 @.str.53 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.56 = private unnamed_addr constant [3 x i8] c"\0A}\00"
 @.str.432 = private unnamed_addr constant [40 x i8] c"// TODO: unsupported lambda statement: \00"
@@ -2016,36 +2016,34 @@ merge1:
   %t68 = load %TypeAnnotation*, %TypeAnnotation** %t67
   %t69 = icmp eq i32 %t62, 2
   %t70 = select i1 %t69, %TypeAnnotation* %t68, %TypeAnnotation* null
-  %t71 = bitcast %TypeAnnotation* %t70 to i8*
-  %t72 = call i8* @format_type_annotation(i8* %t71)
-  %t73 = add i8* %t61, %t72
-  store i8* %t73, i8** %l0
-  %t74 = load i8*, i8** %l0
-  %t75 = extractvalue %Statement %statement, 0
-  %t76 = alloca %Statement
-  store %Statement %statement, %Statement* %t76
-  %t77 = getelementptr inbounds %Statement, %Statement* %t76, i32 0, i32 1
-  %t78 = bitcast [48 x i8]* %t77 to i8*
-  %t79 = getelementptr inbounds i8, i8* %t78, i64 24
-  %t80 = bitcast i8* %t79 to %Expression**
-  %t81 = load %Expression*, %Expression** %t80
-  %t82 = icmp eq i32 %t75, 2
-  %t83 = select i1 %t82, %Expression* %t81, %Expression* null
-  %t84 = bitcast %Expression* %t83 to i8*
-  %t85 = call i8* @format_initializer(i8* %t84)
-  %t86 = add i8* %t74, %t85
-  store i8* %t86, i8** %l0
-  %t87 = load i8*, i8** %l0
-  %t88 = load i8, i8* %t87
-  %t89 = add i8 %t88, 59
-  %t90 = alloca [2 x i8], align 1
-  %t91 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 0
-  store i8 %t89, i8* %t91
-  %t92 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 1
-  store i8 0, i8* %t92
-  %t93 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 0
-  %t94 = call %TextBuilder @builder_emit_line(%TextBuilder %builder, i8* %t93)
-  ret %TextBuilder %t94
+  %t71 = call i8* @format_type_annotation(%TypeAnnotation* %t70)
+  %t72 = add i8* %t61, %t71
+  store i8* %t72, i8** %l0
+  %t73 = load i8*, i8** %l0
+  %t74 = extractvalue %Statement %statement, 0
+  %t75 = alloca %Statement
+  store %Statement %statement, %Statement* %t75
+  %t76 = getelementptr inbounds %Statement, %Statement* %t75, i32 0, i32 1
+  %t77 = bitcast [48 x i8]* %t76 to i8*
+  %t78 = getelementptr inbounds i8, i8* %t77, i64 24
+  %t79 = bitcast i8* %t78 to %Expression**
+  %t80 = load %Expression*, %Expression** %t79
+  %t81 = icmp eq i32 %t74, 2
+  %t82 = select i1 %t81, %Expression* %t80, %Expression* null
+  %t83 = call i8* @format_initializer(%Expression* %t82)
+  %t84 = add i8* %t73, %t83
+  store i8* %t84, i8** %l0
+  %t85 = load i8*, i8** %l0
+  %t86 = load i8, i8* %t85
+  %t87 = add i8 %t86, 59
+  %t88 = alloca [2 x i8], align 1
+  %t89 = getelementptr [2 x i8], [2 x i8]* %t88, i32 0, i32 0
+  store i8 %t87, i8* %t89
+  %t90 = getelementptr [2 x i8], [2 x i8]* %t88, i32 0, i32 1
+  store i8 0, i8* %t90
+  %t91 = getelementptr [2 x i8], [2 x i8]* %t88, i32 0, i32 0
+  %t92 = call %TextBuilder @builder_emit_line(%TextBuilder %builder, i8* %t91)
+  ret %TextBuilder %t92
 }
 
 define %TextBuilder @emit_function(%TextBuilder %builder, %FunctionSignature %signature, %Block %body, { %Decorator*, i64 }* %decorators) {
@@ -7531,42 +7529,48 @@ afterloop5:
   ret i8* %t65
 }
 
-define i8* @format_type_annotation(i8* %annotation) {
+define i8* @format_type_annotation(%TypeAnnotation* %annotation) {
 entry:
-  %t0 = icmp eq i8* %annotation, null
-  br i1 %t0, label %then0, label %merge1
+  %t0 = bitcast i8* null to %TypeAnnotation*
+  %t1 = icmp eq %TypeAnnotation* %annotation, %t0
+  br i1 %t1, label %then0, label %merge1
 then0:
-  %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1, i32 0, i32 0
-  ret i8* %s1
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  ret i8* %s2
 merge1:
-  %s2 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.2, i32 0, i32 0
-  ret i8* null
+  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
+  %t4 = getelementptr %TypeAnnotation, %TypeAnnotation* %annotation, i32 0, i32 0
+  %t5 = load i8*, i8** %t4
+  %t6 = add i8* %s3, %t5
+  ret i8* %t6
 }
 
-define i8* @format_initializer(i8* %initializer) {
+define i8* @format_initializer(%Expression* %initializer) {
 entry:
   %l0 = alloca i8*
-  %t0 = icmp eq i8* %initializer, null
-  br i1 %t0, label %then0, label %merge1
+  %t0 = bitcast i8* null to %Expression*
+  %t1 = icmp eq %Expression* %initializer, %t0
+  br i1 %t1, label %then0, label %merge1
 then0:
-  %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1, i32 0, i32 0
-  ret i8* %s1
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  ret i8* %s2
 merge1:
-  %t2 = call i8* @format_expression(i8* null)
-  store i8* %t2, i8** %l0
-  %t3 = load i8*, i8** %l0
-  %t4 = call i64 @sailfin_runtime_string_length(i8* %t3)
-  %t5 = icmp eq i64 %t4, 0
-  %t6 = load i8*, i8** %l0
-  br i1 %t5, label %then2, label %merge3
+  %t3 = load %Expression, %Expression* %initializer
+  %t4 = call i8* @format_expression(%Expression %t3)
+  store i8* %t4, i8** %l0
+  %t5 = load i8*, i8** %l0
+  %t6 = call i64 @sailfin_runtime_string_length(i8* %t5)
+  %t7 = icmp eq i64 %t6, 0
+  %t8 = load i8*, i8** %l0
+  br i1 %t7, label %then2, label %merge3
 then2:
-  %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.7, i32 0, i32 0
-  ret i8* %s7
+  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.9, i32 0, i32 0
+  ret i8* %s9
 merge3:
-  %s8 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.8, i32 0, i32 0
-  %t9 = load i8*, i8** %l0
-  %t10 = add i8* %s8, %t9
-  ret i8* %t10
+  %s10 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.10, i32 0, i32 0
+  %t11 = load i8*, i8** %l0
+  %t12 = add i8* %s10, %t11
+  ret i8* %t12
 }
 
 define i8* @format_effects({ i8**, i64 }* %effects) {

@@ -6463,6 +6463,46 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     return "";
 }
 
+fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    // Check if this is an optional type (ends with ?)
+    if trimmed[trimmed.length - 1] != "?" {
+        return "";
+    }
+    // Extract the inner type (everything before the ?)
+    let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 1));
+    if inner_annotation.length == 0 {
+        return "";
+    }
+    // For optional types, try the context-aware mapping first for structs/enums
+    let struct_type = map_struct_type_annotation(context, inner_annotation);
+    if struct_type.length > 0 {
+        // Return pointer to the struct (null = None, non-null = Some)
+        return struct_type + "*";
+    }
+    let enum_type = map_enum_type_annotation(context, inner_annotation);
+    if enum_type.length > 0 {
+        return enum_type + "*";
+    }
+    let interface_type = map_interface_type_annotation(context, inner_annotation);
+    if interface_type.length > 0 {
+        return interface_type + "*";
+    }
+    // For primitive types and others, use the simple mapper
+    let inner_type = map_type_annotation(inner_annotation);
+    if inner_type.length == 0 || inner_type == "void" {
+        return "i8*";
+    }
+    // If already a pointer, return as-is, otherwise make it a pointer
+    if inner_type[inner_type.length - 1] == "*" {
+        return inner_type;
+    }
+    return inner_type + "*";
+}
+
 fn map_reference_inner_type(context -> TypeContext, annotation -> string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
@@ -6762,6 +6802,11 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    // Try optional type first
+    let optional_type = map_optional_type(context, normalized);
+    if optional_type.length > 0 {
+        return optional_type;
+    }
     let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
@@ -6779,6 +6824,11 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    // Try optional type first
+    let optional_type = map_optional_type(context, normalized);
+    if optional_type.length > 0 {
+        return optional_type;
+    }
     let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
@@ -6801,6 +6851,11 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    // Try optional type first
+    let optional_type = map_optional_type(context, normalized);
+    if optional_type.length > 0 {
+        return optional_type;
+    }
     let reference_type = map_reference_type(context, normalized);
     if reference_type.length > 0 {
         return reference_type;
@@ -8299,7 +8354,10 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
             
-            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            // Suppress diagnostic for fallback types (double, i8) which indicate earlier failures
+            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
         pointer_available = true;
@@ -8310,7 +8368,10 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            // Suppress diagnostic for fallback types (double, i8) which indicate earlier failures
+            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
     }

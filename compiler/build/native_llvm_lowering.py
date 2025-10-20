@@ -4483,6 +4483,31 @@ def map_primitive_type(context, annotation):
         return "i8*"
     return ""
 
+def map_optional_type(context, annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return ""
+    if trimmed[len(trimmed) - 1] != "?":
+        return ""
+    inner_annotation = trim_text(substring(trimmed, 0, len(trimmed) - 1))
+    if len(inner_annotation) == 0:
+        return ""
+    struct_type = map_struct_type_annotation(context, inner_annotation)
+    if len(struct_type) > 0:
+        return struct_type + "*"
+    enum_type = map_enum_type_annotation(context, inner_annotation)
+    if len(enum_type) > 0:
+        return enum_type + "*"
+    interface_type = map_interface_type_annotation(context, inner_annotation)
+    if len(interface_type) > 0:
+        return interface_type + "*"
+    inner_type = map_type_annotation(inner_annotation)
+    if len(inner_type) == 0  or  inner_type == "void":
+        return "i8*"
+    if inner_type[len(inner_type) - 1] == "*":
+        return inner_type
+    return inner_type + "*"
+
 def map_reference_inner_type(context, annotation):
     trimmed = trim_text(annotation)
     if len(trimmed) == 0:
@@ -4707,6 +4732,9 @@ def map_return_type(context, return_type):
     if len(trimmed) == 0  or  trimmed == "void":
         return "void"
     normalized = unwrap_move_wrapper(trimmed)
+    optional_type = map_optional_type(context, normalized)
+    if len(optional_type) > 0:
+        return optional_type
     reference_type = map_reference_type(context, normalized)
     if len(reference_type) > 0:
         return reference_type
@@ -4720,6 +4748,9 @@ def map_parameter_type(context, parameter_type):
     if len(trimmed) == 0:
         return "double"
     normalized = unwrap_move_wrapper(trimmed)
+    optional_type = map_optional_type(context, normalized)
+    if len(optional_type) > 0:
+        return optional_type
     reference_type = map_reference_type(context, normalized)
     if len(reference_type) > 0:
         return reference_type
@@ -4736,6 +4767,9 @@ def map_local_type(context, type_annotation):
     if len(trimmed) == 0:
         return "double"
     normalized = unwrap_move_wrapper(trimmed)
+    optional_type = map_optional_type(context, normalized)
+    if len(optional_type) > 0:
+        return optional_type
     reference_type = map_reference_type(context, normalized)
     if len(reference_type) > 0:
         return reference_type
@@ -5740,7 +5774,8 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
             if base_operand.llvm_type == "i8*":
                 diagnostics = append_string(diagnostics, "llvm lowering: member access on opaque type `i8*` (field `" + parse.field + "`) - layout information not available (check if layout manifest exists)")
                 return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
-            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
+            if base_operand.llvm_type != "double"  and  base_operand.llvm_type != "i8":
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         pointer_available = True
     else:
@@ -5749,7 +5784,8 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
             enum_info_candidate = find_enum_info_by_llvm_type(context, base_operand.llvm_type)
             if enum_info_candidate != None:
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, False, current_temp, current_lines, diagnostics, collected_string_constants, expected_type)
-            diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
+            if base_operand.llvm_type != "double"  and  base_operand.llvm_type != "i8":
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     info = struct_info
     field_info = find_struct_field_info(info, parse.field)

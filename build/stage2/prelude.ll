@@ -310,91 +310,251 @@ entry:
   ret %EnumType %t17
 }
 
-define { %EnumField*, i64 }* @enum_normalize_fields(i8* %definition, { %EnumField*, i64 }* %provided) {
+define %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %fields, i8* %name) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca i64
+  %l1 = alloca %EnumField
+  store i64 0, i64* %l0
+  %t0 = load i64, i64* %l0
+  br label %loop.header0
+loop.header0:
+  %t22 = phi i64 [ %t0, %entry ], [ %t21, %loop.latch2 ]
+  store i64 %t22, i64* %l0
+  br label %loop.body1
+loop.body1:
+  %t1 = load i64, i64* %l0
+  %t2 = load { %EnumField*, i64 }, { %EnumField*, i64 }* %fields
+  %t3 = extractvalue { %EnumField*, i64 } %t2, 1
+  %t4 = icmp sge i64 %t1, %t3
+  %t5 = load i64, i64* %l0
+  br i1 %t4, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t6 = load i64, i64* %l0
+  %t7 = load { %EnumField*, i64 }, { %EnumField*, i64 }* %fields
+  %t8 = extractvalue { %EnumField*, i64 } %t7, 0
+  %t9 = extractvalue { %EnumField*, i64 } %t7, 1
+  %t10 = icmp uge i64 %t6, %t9
+  ; bounds check: %t10 (if true, out of bounds)
+  %t11 = getelementptr %EnumField, %EnumField* %t8, i64 %t6
+  %t12 = load %EnumField, %EnumField* %t11
+  store %EnumField %t12, %EnumField* %l1
+  %t13 = load %EnumField, %EnumField* %l1
+  %t14 = extractvalue %EnumField %t13, 0
+  %t15 = icmp eq i8* %t14, %name
+  %t16 = load i64, i64* %l0
+  %t17 = load %EnumField, %EnumField* %l1
+  br i1 %t15, label %then6, label %merge7
+then6:
+  %t18 = load %EnumField, %EnumField* %l1
+  ret %EnumField* null
+merge7:
+  %t19 = load i64, i64* %l0
+  %t20 = add i64 %t19, 1
+  store i64 %t20, i64* %l0
+  br label %loop.latch2
+loop.latch2:
+  %t21 = load i64, i64* %l0
+  br label %loop.header0
+afterloop3:
+  %t23 = bitcast i8* null to %EnumField*
+  ret %EnumField* %t23
+}
+
+define %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name) {
+entry:
+  %l0 = alloca i64
+  %l1 = alloca %EnumVariantDefinition*
+  store i64 0, i64* %l0
+  %t0 = load i64, i64* %l0
+  br label %loop.header0
+loop.header0:
+  %t25 = phi i64 [ %t0, %entry ], [ %t24, %loop.latch2 ]
+  store i64 %t25, i64* %l0
+  br label %loop.body1
+loop.body1:
+  %t1 = load i64, i64* %l0
+  %t2 = extractvalue %EnumType %enum_type, 1
+  %t3 = load { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t2
+  %t4 = extractvalue { %EnumVariantDefinition**, i64 } %t3, 1
+  %t5 = icmp sge i64 %t1, %t4
+  %t6 = load i64, i64* %l0
+  br i1 %t5, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t7 = extractvalue %EnumType %enum_type, 1
+  %t8 = load i64, i64* %l0
+  %t9 = load { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t7
+  %t10 = extractvalue { %EnumVariantDefinition**, i64 } %t9, 0
+  %t11 = extractvalue { %EnumVariantDefinition**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr %EnumVariantDefinition*, %EnumVariantDefinition** %t10, i64 %t8
+  %t14 = load %EnumVariantDefinition*, %EnumVariantDefinition** %t13
+  store %EnumVariantDefinition* %t14, %EnumVariantDefinition** %l1
+  %t15 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l1
+  %t16 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %t15, i32 0, i32 0
+  %t17 = load i8*, i8** %t16
+  %t18 = icmp eq i8* %t17, %variant_name
+  %t19 = load i64, i64* %l0
+  %t20 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l1
+  br i1 %t18, label %then6, label %merge7
+then6:
+  %t21 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l1
+  ret %EnumVariantDefinition* %t21
+merge7:
+  %t22 = load i64, i64* %l0
+  %t23 = add i64 %t22, 1
+  store i64 %t23, i64* %l0
+  br label %loop.latch2
+loop.latch2:
+  %t24 = load i64, i64* %l0
+  br label %loop.header0
+afterloop3:
+  %t26 = bitcast i8* null to %EnumVariantDefinition*
+  ret %EnumVariantDefinition* %t26
+}
+
+define { %EnumField*, i64 }* @enum_normalize_fields(%EnumVariantDefinition* %definition, { %EnumField*, i64 }* %provided) {
+entry:
+  %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %EnumField*, i64 }*
   %l2 = alloca i64
-  %l3 = alloca double
-  %l4 = alloca double
+  %l3 = alloca i8*
+  %l4 = alloca %EnumField*
   %l5 = alloca i8*
-  %t0 = icmp eq i8* %definition, null
-  br i1 %t0, label %then0, label %merge1
+  %t0 = bitcast i8* null to %EnumVariantDefinition*
+  %t1 = icmp eq %EnumVariantDefinition* %definition, %t0
+  br i1 %t1, label %then0, label %merge1
 then0:
   ret { %EnumField*, i64 }* %provided
 merge1:
-  store double 0.0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = alloca [0 x %EnumField]
-  %t3 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t2, i32 0, i32 0
-  %t4 = alloca { %EnumField*, i64 }
-  %t5 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t4, i32 0, i32 0
-  store %EnumField* %t3, %EnumField** %t5
-  %t6 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t4, i32 0, i32 1
-  store i64 0, i64* %t6
-  store { %EnumField*, i64 }* %t4, { %EnumField*, i64 }** %l1
+  %t2 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %definition, i32 0, i32 1
+  %t3 = load { i8**, i64 }*, { i8**, i64 }** %t2
+  store { i8**, i64 }* %t3, { i8**, i64 }** %l0
+  %t4 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t5 = load { i8**, i64 }, { i8**, i64 }* %t4
+  %t6 = extractvalue { i8**, i64 } %t5, 1
+  %t7 = icmp eq i64 %t6, 0
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br i1 %t7, label %then2, label %merge3
+then2:
+  %t9 = alloca [0 x %EnumField]
+  %t10 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t9, i32 0, i32 0
+  %t11 = alloca { %EnumField*, i64 }
+  %t12 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t11, i32 0, i32 0
+  store %EnumField* %t10, %EnumField** %t12
+  %t13 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t11, i32 0, i32 1
+  store i64 0, i64* %t13
+  ret { %EnumField*, i64 }* %t11
+merge3:
+  %t14 = alloca [0 x %EnumField]
+  %t15 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t14, i32 0, i32 0
+  %t16 = alloca { %EnumField*, i64 }
+  %t17 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t16, i32 0, i32 0
+  store %EnumField* %t15, %EnumField** %t17
+  %t18 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t16, i32 0, i32 1
+  store i64 0, i64* %t18
+  store { %EnumField*, i64 }* %t16, { %EnumField*, i64 }** %l1
   store i64 0, i64* %l2
-  %t7 = load double, double* %l0
-  %t8 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t9 = load i64, i64* %l2
-  br label %loop.header2
-loop.header2:
-  %t36 = phi { %EnumField*, i64 }* [ %t8, %entry ], [ %t34, %loop.latch4 ]
-  %t37 = phi i64 [ %t9, %entry ], [ %t35, %loop.latch4 ]
-  store { %EnumField*, i64 }* %t36, { %EnumField*, i64 }** %l1
-  store i64 %t37, i64* %l2
-  br label %loop.body3
-loop.body3:
-  %t10 = load i64, i64* %l2
-  %t11 = load double, double* %l0
-  %t12 = load double, double* %l0
-  %t13 = load i64, i64* %l2
-  store double 0.0, double* %l3
-  %t14 = load double, double* %l3
-  %t15 = call double @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* null)
-  store double %t15, double* %l4
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t20 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t21 = load i64, i64* %l2
+  br label %loop.header4
+loop.header4:
+  %t72 = phi { %EnumField*, i64 }* [ %t20, %entry ], [ %t70, %loop.latch6 ]
+  %t73 = phi i64 [ %t21, %entry ], [ %t71, %loop.latch6 ]
+  store { %EnumField*, i64 }* %t72, { %EnumField*, i64 }** %l1
+  store i64 %t73, i64* %l2
+  br label %loop.body5
+loop.body5:
+  %t22 = load i64, i64* %l2
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load { i8**, i64 }, { i8**, i64 }* %t23
+  %t25 = extractvalue { i8**, i64 } %t24, 1
+  %t26 = icmp sge i64 %t22, %t25
+  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t28 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t29 = load i64, i64* %l2
+  br i1 %t26, label %then8, label %merge9
+then8:
+  br label %afterloop7
+merge9:
+  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t31 = load i64, i64* %l2
+  %t32 = load { i8**, i64 }, { i8**, i64 }* %t30
+  %t33 = extractvalue { i8**, i64 } %t32, 0
+  %t34 = extractvalue { i8**, i64 } %t32, 1
+  %t35 = icmp uge i64 %t31, %t34
+  ; bounds check: %t35 (if true, out of bounds)
+  %t36 = getelementptr i8*, i8** %t33, i64 %t31
+  %t37 = load i8*, i8** %t36
+  store i8* %t37, i8** %l3
+  %t38 = load i8*, i8** %l3
+  %t39 = call %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* %t38)
+  store %EnumField* %t39, %EnumField** %l4
   store i8* null, i8** %l5
-  %t16 = load double, double* %l4
-  %t17 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t18 = load double, double* %l3
-  %t19 = insertvalue %EnumField undef, i8* null, 0
-  %t20 = load i8*, i8** %l5
-  %t21 = insertvalue %EnumField %t19, i8* %t20, 1
-  %t22 = alloca [1 x %EnumField]
-  %t23 = getelementptr [1 x %EnumField], [1 x %EnumField]* %t22, i32 0, i32 0
-  %t24 = getelementptr %EnumField, %EnumField* %t23, i64 0
-  store %EnumField %t21, %EnumField* %t24
-  %t25 = alloca { %EnumField*, i64 }
-  %t26 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t25, i32 0, i32 0
-  store %EnumField* %t23, %EnumField** %t26
-  %t27 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t25, i32 0, i32 1
-  store i64 1, i64* %t27
-  %t28 = bitcast { %EnumField*, i64 }* %t17 to { i8**, i64 }*
-  %t29 = bitcast { %EnumField*, i64 }* %t25 to { i8**, i64 }*
-  %t30 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t29)
-  %t31 = bitcast { i8**, i64 }* %t30 to { %EnumField*, i64 }*
-  store { %EnumField*, i64 }* %t31, { %EnumField*, i64 }** %l1
-  %t32 = load i64, i64* %l2
-  %t33 = add i64 %t32, 1
-  store i64 %t33, i64* %l2
-  br label %loop.latch4
-loop.latch4:
-  %t34 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t35 = load i64, i64* %l2
-  br label %loop.header2
-afterloop5:
-  %t38 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  ret { %EnumField*, i64 }* %t38
+  %t40 = load %EnumField*, %EnumField** %l4
+  %t41 = bitcast i8* null to %EnumField*
+  %t42 = icmp ne %EnumField* %t40, %t41
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t44 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t45 = load i64, i64* %l2
+  %t46 = load i8*, i8** %l3
+  %t47 = load %EnumField*, %EnumField** %l4
+  %t48 = load i8*, i8** %l5
+  br i1 %t42, label %then10, label %merge11
+then10:
+  %t49 = load %EnumField*, %EnumField** %l4
+  %t50 = getelementptr %EnumField, %EnumField* %t49, i32 0, i32 1
+  %t51 = load i8*, i8** %t50
+  store i8* %t51, i8** %l5
+  br label %merge11
+merge11:
+  %t52 = phi i8* [ %t51, %then10 ], [ %t48, %loop.body5 ]
+  store i8* %t52, i8** %l5
+  %t53 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t54 = load i8*, i8** %l3
+  %t55 = insertvalue %EnumField undef, i8* %t54, 0
+  %t56 = load i8*, i8** %l5
+  %t57 = insertvalue %EnumField %t55, i8* %t56, 1
+  %t58 = alloca [1 x %EnumField]
+  %t59 = getelementptr [1 x %EnumField], [1 x %EnumField]* %t58, i32 0, i32 0
+  %t60 = getelementptr %EnumField, %EnumField* %t59, i64 0
+  store %EnumField %t57, %EnumField* %t60
+  %t61 = alloca { %EnumField*, i64 }
+  %t62 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t61, i32 0, i32 0
+  store %EnumField* %t59, %EnumField** %t62
+  %t63 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t61, i32 0, i32 1
+  store i64 1, i64* %t63
+  %t64 = bitcast { %EnumField*, i64 }* %t53 to { i8**, i64 }*
+  %t65 = bitcast { %EnumField*, i64 }* %t61 to { i8**, i64 }*
+  %t66 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t64, { i8**, i64 }* %t65)
+  %t67 = bitcast { i8**, i64 }* %t66 to { %EnumField*, i64 }*
+  store { %EnumField*, i64 }* %t67, { %EnumField*, i64 }** %l1
+  %t68 = load i64, i64* %l2
+  %t69 = add i64 %t68, 1
+  store i64 %t69, i64* %l2
+  br label %loop.latch6
+loop.latch6:
+  %t70 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t71 = load i64, i64* %l2
+  br label %loop.header4
+afterloop7:
+  %t74 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  ret { %EnumField*, i64 }* %t74
 }
 
 define %EnumInstance @enum_instantiate(%EnumType %enum_type, i8* %variant_name, { %EnumField*, i64 }* %provided) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca %EnumVariantDefinition*
   %l1 = alloca { %EnumField*, i64 }*
-  %t0 = call double @enum_find_variant(%EnumType %enum_type, i8* %variant_name)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(i8* null, { %EnumField*, i64 }* %provided)
+  %t0 = call %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name)
+  store %EnumVariantDefinition* %t0, %EnumVariantDefinition** %l0
+  %t1 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l0
+  %t2 = call { %EnumField*, i64 }* @enum_normalize_fields(%EnumVariantDefinition* %t1, { %EnumField*, i64 }* %provided)
   store { %EnumField*, i64 }* %t2, { %EnumField*, i64 }** %l1
   %t3 = insertvalue %EnumInstance undef, %EnumType %enum_type, 0
   %t4 = insertvalue %EnumInstance %t3, i8* %variant_name, 1
