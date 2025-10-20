@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
 from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest
-from compiler.build.string_utils import substring, char_code, sanitize_symbol
+from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -8326,4 +8326,46 @@ def escape_string_for_llvm(content):
                         else:
                             result = result + ch
         index += 1
+    return result
+
+def is_symbol_char(ch):
+    if len(ch) == 0:
+        return False
+    if ch == "_":
+        return True
+    code = char_code(ch)
+    lower_a = char_code("a")
+    lower_z = char_code("z")
+    if code >= lower_a  and  code <= lower_z:
+        return True
+    upper_a = char_code("A")
+    upper_z = char_code("Z")
+    if code >= upper_a  and  code <= upper_z:
+        return True
+    zero = char_code("0")
+    nine = char_code("9")
+    if code >= zero  and  code <= nine:
+        return True
+    return False
+
+def sanitize_symbol(name):
+    if len(name) == 0:
+        return "_"
+    result = ""
+    index = 0
+    while True:
+        if index >= len(name):
+            break
+        ch = name[index]
+        if is_symbol_char(ch):
+            result = result + ch
+        index += 1
+    if len(result) == 0:
+        return "_"
+    first = result[0]
+    first_code = char_code(first)
+    zero = char_code("0")
+    nine = char_code("9")
+    if first_code >= zero  and  first_code <= nine:
+        result = "_" + result
     return result

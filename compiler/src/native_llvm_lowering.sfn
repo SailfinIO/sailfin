@@ -6,7 +6,7 @@
 
 import { NativeModule } from "./emit_native";
 import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
-import { substring, char_code, sanitize_symbol } from "./string_utils";
+import { substring, char_code } from "./string_utils";
 
 struct TraitImplementationDescriptor {
     struct_name -> string;
@@ -11811,6 +11811,62 @@ fn escape_string_for_llvm(content -> string) -> string {
             result = result + ch;
         }
         index += 1;
+    }
+    return result;
+}
+
+// Duplicated from string_utils to avoid cross-module function call issues in Stage2
+fn is_symbol_char(ch -> string) -> boolean {
+    if ch.length == 0 {
+        return false;
+    }
+    if ch == "_" {
+        return true;
+    }
+    let code = char_code(ch);
+    let lower_a = char_code("a");
+    let lower_z = char_code("z");
+    if code >= lower_a && code <= lower_z {
+        return true;
+    }
+    let upper_a = char_code("A");
+    let upper_z = char_code("Z");
+    if code >= upper_a && code <= upper_z {
+        return true;
+    }
+    let zero = char_code("0");
+    let nine = char_code("9");
+    if code >= zero && code <= nine {
+        return true;
+    }
+    return false;
+}
+
+fn sanitize_symbol(name -> string) -> string {
+    if name.length == 0 {
+        return "_";
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_symbol_char(ch) {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if result.length == 0 {
+        return "_";
+    }
+    let first = result[0];
+    let first_code = char_code(first);
+    let zero = char_code("0");
+    let nine = char_code("9");
+    if first_code >= zero && first_code <= nine {
+        result = "_" + result;
     }
     return result;
 }
