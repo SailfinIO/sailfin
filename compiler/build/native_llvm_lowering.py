@@ -2158,6 +2158,21 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.get", symbol="sailfin_intrinsic_http_get", return_type="i8*", parameter_types=["i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.post", symbol="sailfin_intrinsic_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_sleep_fn", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_channel_fn", symbol="sailfin_runtime_channel", return_type="i8*", parameter_types=["double"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_spawn_fn", symbol="sailfin_runtime_spawn", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_to_debug_string_fn", symbol="sailfin_runtime_to_debug_string", return_type="i8*", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_raise_value_error_fn", symbol="sailfin_runtime_raise_value_error", return_type="void", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_string_fn", symbol="sailfin_runtime_is_string", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_number_fn", symbol="sailfin_runtime_is_number", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_boolean_fn", symbol="sailfin_runtime_is_boolean", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_void_fn", symbol="sailfin_runtime_is_void", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_array_fn", symbol="sailfin_runtime_is_array", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_callable_fn", symbol="sailfin_runtime_is_callable", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_resolve_runtime_type_fn", symbol="sailfin_runtime_resolve_type", return_type="i8*", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_instance_of_fn", symbol="sailfin_runtime_instance_of", return_type="i1", parameter_types=["i8*", "i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_serve_fn", symbol="sailfin_runtime_serve", return_type="void", parameter_types=["i8*", "i8*"], effects=["io", "net"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_char_code_fn", symbol="sailfin_runtime_char_code", return_type="double", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_read_file", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.readFile", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_file", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
@@ -4980,7 +4995,10 @@ def map_return_type(context, return_type):
     array_type = map_array_pointer_type(context, normalized)
     if len(array_type) > 0:
         return array_type
-    return map_primitive_type(context, normalized)
+    primitive_type = map_primitive_type(context, normalized)
+    if len(primitive_type) > 0:
+        return primitive_type
+    return "i8*"
 
 def map_parameter_type(context, parameter_type):
     trimmed = trim_text(parameter_type)

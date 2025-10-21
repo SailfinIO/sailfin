@@ -136,9 +136,6 @@ def parallel(tasks):
 
 def spawn(task, name = ""):
     # effects: io
-    if len(name) == 0:
-        runtime_spawn_fn(task)
-        return
     runtime_spawn_fn(task, name)
 
 def logExecution(callable):

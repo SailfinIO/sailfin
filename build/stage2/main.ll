@@ -219,19 +219,19 @@ declare noalias i8* @malloc(i64)
 ; fn compile_to_sailfin effects: ![io]
 define i8* @compile_to_sailfin(i8* %source) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca i8*
   %l1 = alloca %TypecheckResult
-  %t0 = call double @parse_program(i8* %source)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = call %TypecheckResult @typecheck_program(i8* null)
+  %t0 = call i8* @parse_program(i8* %source)
+  store i8* %t0, i8** %l0
+  %t1 = load i8*, i8** %l0
+  %t2 = call %TypecheckResult @typecheck_program(i8* %t1)
   store %TypecheckResult %t2, %TypecheckResult* %l1
   %t3 = load %TypecheckResult, %TypecheckResult* %l1
   %t4 = extractvalue %TypecheckResult %t3, 0
   %t5 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t4
   %t6 = extractvalue { %Diagnostic**, i64 } %t5, 1
   %t7 = icmp sgt i64 %t6, 0
-  %t8 = load double, double* %l0
+  %t8 = load i8*, i8** %l0
   %t9 = load %TypecheckResult, %TypecheckResult* %l1
   br i1 %t7, label %then0, label %merge1
 then0:
@@ -242,27 +242,27 @@ then0:
   %s13 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.13, i32 0, i32 0
   ret i8* %s13
 merge1:
-  %t14 = load double, double* %l0
-  %t15 = call i8* @emit_program(i8* null)
+  %t14 = load i8*, i8** %l0
+  %t15 = call i8* @emit_program(i8* %t14)
   ret i8* %t15
 }
 
 ; fn compile_to_native effects: ![io]
 define %EmitNativeResult @compile_to_native(i8* %source) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca i8*
   %l1 = alloca %TypecheckResult
-  %t0 = call double @parse_program(i8* %source)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  %t2 = call %TypecheckResult @typecheck_program(i8* null)
+  %t0 = call i8* @parse_program(i8* %source)
+  store i8* %t0, i8** %l0
+  %t1 = load i8*, i8** %l0
+  %t2 = call %TypecheckResult @typecheck_program(i8* %t1)
   store %TypecheckResult %t2, %TypecheckResult* %l1
   %t3 = load %TypecheckResult, %TypecheckResult* %l1
   %t4 = extractvalue %TypecheckResult %t3, 0
   %t5 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t4
   %t6 = extractvalue { %Diagnostic**, i64 } %t5, 1
   %t7 = icmp sgt i64 %t6, 0
-  %t8 = load double, double* %l0
+  %t8 = load i8*, i8** %l0
   %t9 = load %TypecheckResult, %TypecheckResult* %l1
   br i1 %t7, label %then0, label %merge1
 then0:
@@ -279,8 +279,8 @@ then0:
   %t19 = insertvalue %EmitNativeResult %t14, { i8**, i64 }* %t18, 1
   ret %EmitNativeResult %t19
 merge1:
-  %t20 = load double, double* %l0
-  %t21 = call %EmitNativeResult @emit_native(i8* null)
+  %t20 = load i8*, i8** %l0
+  %t21 = call %EmitNativeResult @emit_native(i8* %t20)
   ret %EmitNativeResult %t21
 }
 
@@ -1024,7 +1024,7 @@ afterfor3:
 define %ModuleCompilationResult @compile_source_at_path(i8* %source_path) {
 entry:
   %l0 = alloca i8*
-  %l1 = alloca double
+  %l1 = alloca i8*
   %l2 = alloca %TypecheckResult
   %l3 = alloca %EmitNativeResult
   %l4 = alloca %LoweredPythonResult
@@ -1035,10 +1035,10 @@ entry:
   %t0 = call i8* @sailfin_adapter_fs_read_file(i8* %source_path)
   store i8* %t0, i8** %l0
   %t1 = load i8*, i8** %l0
-  %t2 = call double @parse_program(i8* %t1)
-  store double %t2, double* %l1
-  %t3 = load double, double* %l1
-  %t4 = call %TypecheckResult @typecheck_program(i8* null)
+  %t2 = call i8* @parse_program(i8* %t1)
+  store i8* %t2, i8** %l1
+  %t3 = load i8*, i8** %l1
+  %t4 = call %TypecheckResult @typecheck_program(i8* %t3)
   store %TypecheckResult %t4, %TypecheckResult* %l2
   %t5 = load %TypecheckResult, %TypecheckResult* %l2
   %t6 = extractvalue %TypecheckResult %t5, 0
@@ -1046,7 +1046,7 @@ entry:
   %t8 = extractvalue { %Diagnostic**, i64 } %t7, 1
   %t9 = icmp sgt i64 %t8, 0
   %t10 = load i8*, i8** %l0
-  %t11 = load double, double* %l1
+  %t11 = load i8*, i8** %l1
   %t12 = load %TypecheckResult, %TypecheckResult* %l2
   br i1 %t9, label %then0, label %merge1
 then0:
@@ -1073,8 +1073,8 @@ then0:
   %t30 = insertvalue %ModuleCompilationResult %t14, { %ModuleDiagnostics**, i64 }* %t29, 1
   ret %ModuleCompilationResult %t30
 merge1:
-  %t31 = load double, double* %l1
-  %t32 = call %EmitNativeResult @emit_native(i8* null)
+  %t31 = load i8*, i8** %l1
+  %t32 = call %EmitNativeResult @emit_native(i8* %t31)
   store %EmitNativeResult %t32, %EmitNativeResult* %l3
   %t33 = load %EmitNativeResult, %EmitNativeResult* %l3
   %t34 = extractvalue %EmitNativeResult %t33, 0
@@ -1094,7 +1094,7 @@ merge1:
   store i1 %t44, i1* %l7
   %t45 = load i1, i1* %l7
   %t46 = load i8*, i8** %l0
-  %t47 = load double, double* %l1
+  %t47 = load i8*, i8** %l1
   %t48 = load %TypecheckResult, %TypecheckResult* %l2
   %t49 = load %EmitNativeResult, %EmitNativeResult* %l3
   %t50 = load %LoweredPythonResult, %LoweredPythonResult* %l4
@@ -1148,7 +1148,7 @@ merge3:
   %t84 = extractvalue { i8**, i64 } %t83, 1
   %t85 = icmp sgt i64 %t84, 0
   %t86 = load i8*, i8** %l0
-  %t87 = load double, double* %l1
+  %t87 = load i8*, i8** %l1
   %t88 = load %TypecheckResult, %TypecheckResult* %l2
   %t89 = load %EmitNativeResult, %EmitNativeResult* %l3
   %t90 = load %LoweredPythonResult, %LoweredPythonResult* %l4

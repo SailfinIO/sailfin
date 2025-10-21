@@ -239,129 +239,197 @@ declare noalias i8* @malloc(i64)
 @.str.382 = private unnamed_addr constant [5 x i8] c"void\00"
 @.str.384 = private unnamed_addr constant [7 x i8] c"double\00"
 @.str.392 = private unnamed_addr constant [6 x i8] c"clock\00"
-@.str.402 = private unnamed_addr constant [13 x i8] c"fs_read_file\00"
-@.str.404 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_fs_read_file\00"
-@.str.406 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.408 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.416 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.426 = private unnamed_addr constant [12 x i8] c"fs.readFile\00"
-@.str.428 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_fs_read_file\00"
+@.str.402 = private unnamed_addr constant [17 x i8] c"runtime_sleep_fn\00"
+@.str.404 = private unnamed_addr constant [22 x i8] c"sailfin_runtime_sleep\00"
+@.str.406 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.408 = private unnamed_addr constant [7 x i8] c"double\00"
+@.str.416 = private unnamed_addr constant [6 x i8] c"clock\00"
+@.str.426 = private unnamed_addr constant [19 x i8] c"runtime_channel_fn\00"
+@.str.428 = private unnamed_addr constant [24 x i8] c"sailfin_runtime_channel\00"
 @.str.430 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.432 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.432 = private unnamed_addr constant [7 x i8] c"double\00"
 @.str.440 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.450 = private unnamed_addr constant [14 x i8] c"fs_write_file\00"
-@.str.452 = private unnamed_addr constant [30 x i8] c"sailfin_adapter_fs_write_file\00"
+@.str.450 = private unnamed_addr constant [17 x i8] c"runtime_spawn_fn\00"
+@.str.452 = private unnamed_addr constant [22 x i8] c"sailfin_runtime_spawn\00"
 @.str.454 = private unnamed_addr constant [5 x i8] c"void\00"
 @.str.456 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.457 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.466 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.476 = private unnamed_addr constant [13 x i8] c"fs.writeFile\00"
-@.str.478 = private unnamed_addr constant [30 x i8] c"sailfin_adapter_fs_write_file\00"
-@.str.480 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.476 = private unnamed_addr constant [27 x i8] c"runtime_to_debug_string_fn\00"
+@.str.478 = private unnamed_addr constant [32 x i8] c"sailfin_runtime_to_debug_string\00"
+@.str.480 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.482 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.483 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.492 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.502 = private unnamed_addr constant [18 x i8] c"fs_list_directory\00"
-@.str.504 = private unnamed_addr constant [34 x i8] c"sailfin_adapter_fs_list_directory\00"
-@.str.506 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.508 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.516 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.526 = private unnamed_addr constant [17 x i8] c"fs.listDirectory\00"
-@.str.528 = private unnamed_addr constant [34 x i8] c"sailfin_adapter_fs_list_directory\00"
-@.str.530 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.532 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.540 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.550 = private unnamed_addr constant [9 x i8] c"http_get\00"
-@.str.552 = private unnamed_addr constant [25 x i8] c"sailfin_adapter_http_get\00"
-@.str.554 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.556 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.564 = private unnamed_addr constant [4 x i8] c"net\00"
-@.str.574 = private unnamed_addr constant [10 x i8] c"http_post\00"
-@.str.576 = private unnamed_addr constant [26 x i8] c"sailfin_adapter_http_post\00"
-@.str.578 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.580 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.581 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.590 = private unnamed_addr constant [4 x i8] c"net\00"
-@.str.600 = private unnamed_addr constant [25 x i8] c"model_invoke_with_prompt\00"
-@.str.602 = private unnamed_addr constant [41 x i8] c"sailfin_adapter_model_invoke_with_prompt\00"
-@.str.604 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.606 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.607 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.616 = private unnamed_addr constant [6 x i8] c"model\00"
-@.str.626 = private unnamed_addr constant [12 x i8] c"serve_start\00"
-@.str.628 = private unnamed_addr constant [28 x i8] c"sailfin_adapter_serve_start\00"
-@.str.630 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.632 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.633 = private unnamed_addr constant [4 x i8] c"i32\00"
-@.str.642 = private unnamed_addr constant [4 x i8] c"net\00"
-@.str.643 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.654 = private unnamed_addr constant [23 x i8] c"serve_handler_dispatch\00"
-@.str.656 = private unnamed_addr constant [39 x i8] c"sailfin_adapter_serve_handler_dispatch\00"
+@.str.498 = private unnamed_addr constant [29 x i8] c"runtime_raise_value_error_fn\00"
+@.str.500 = private unnamed_addr constant [34 x i8] c"sailfin_runtime_raise_value_error\00"
+@.str.502 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.504 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.520 = private unnamed_addr constant [21 x i8] c"runtime_is_string_fn\00"
+@.str.522 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_is_string\00"
+@.str.524 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.526 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.542 = private unnamed_addr constant [21 x i8] c"runtime_is_number_fn\00"
+@.str.544 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_is_number\00"
+@.str.546 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.548 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.564 = private unnamed_addr constant [22 x i8] c"runtime_is_boolean_fn\00"
+@.str.566 = private unnamed_addr constant [27 x i8] c"sailfin_runtime_is_boolean\00"
+@.str.568 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.570 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.586 = private unnamed_addr constant [19 x i8] c"runtime_is_void_fn\00"
+@.str.588 = private unnamed_addr constant [24 x i8] c"sailfin_runtime_is_void\00"
+@.str.590 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.592 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.608 = private unnamed_addr constant [20 x i8] c"runtime_is_array_fn\00"
+@.str.610 = private unnamed_addr constant [25 x i8] c"sailfin_runtime_is_array\00"
+@.str.612 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.614 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.630 = private unnamed_addr constant [23 x i8] c"runtime_is_callable_fn\00"
+@.str.632 = private unnamed_addr constant [28 x i8] c"sailfin_runtime_is_callable\00"
+@.str.634 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.636 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.652 = private unnamed_addr constant [32 x i8] c"runtime_resolve_runtime_type_fn\00"
+@.str.654 = private unnamed_addr constant [29 x i8] c"sailfin_runtime_resolve_type\00"
+@.str.656 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.658 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.660 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.661 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.670 = private unnamed_addr constant [4 x i8] c"net\00"
-@.str.671 = private unnamed_addr constant [3 x i8] c"io\00"
-@.str.682 = private unnamed_addr constant [11 x i8] c"spawn_task\00"
-@.str.684 = private unnamed_addr constant [27 x i8] c"sailfin_adapter_spawn_task\00"
-@.str.686 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.688 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.696 = private unnamed_addr constant [6 x i8] c"spawn\00"
-@.str.706 = private unnamed_addr constant [15 x i8] c"channel_create\00"
-@.str.708 = private unnamed_addr constant [31 x i8] c"sailfin_adapter_channel_create\00"
-@.str.710 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.712 = private unnamed_addr constant [4 x i8] c"i32\00"
-@.str.728 = private unnamed_addr constant [13 x i8] c"channel_send\00"
-@.str.730 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_channel_send\00"
-@.str.732 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.734 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.735 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.744 = private unnamed_addr constant [8 x i8] c"channel\00"
-@.str.754 = private unnamed_addr constant [16 x i8] c"channel_receive\00"
-@.str.756 = private unnamed_addr constant [32 x i8] c"sailfin_adapter_channel_receive\00"
-@.str.758 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.760 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.768 = private unnamed_addr constant [8 x i8] c"channel\00"
-@.str.778 = private unnamed_addr constant [10 x i8] c"substring\00"
-@.str.780 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_substring\00"
-@.str.782 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.784 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.785 = private unnamed_addr constant [4 x i8] c"i64\00"
-@.str.786 = private unnamed_addr constant [4 x i8] c"i64\00"
-@.str.804 = private unnamed_addr constant [14 x i8] c"string.length\00"
-@.str.806 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_string_length\00"
-@.str.808 = private unnamed_addr constant [4 x i8] c"i64\00"
-@.str.810 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.826 = private unnamed_addr constant [10 x i8] c"char_code\00"
-@.str.828 = private unnamed_addr constant [10 x i8] c"char_code\00"
-@.str.830 = private unnamed_addr constant [7 x i8] c"double\00"
-@.str.832 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.850 = private unnamed_addr constant [35 x i8] c"sailfin_runtime_is_whitespace_char\00"
-@.str.852 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.854 = private unnamed_addr constant [3 x i8] c"i8\00"
-@.str.870 = private unnamed_addr constant [17 x i8] c"is_decimal_digit\00"
-@.str.872 = private unnamed_addr constant [33 x i8] c"sailfin_runtime_is_decimal_digit\00"
-@.str.874 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.876 = private unnamed_addr constant [3 x i8] c"i8\00"
-@.str.892 = private unnamed_addr constant [14 x i8] c"is_alpha_char\00"
-@.str.894 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_is_alpha_char\00"
-@.str.896 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.898 = private unnamed_addr constant [3 x i8] c"i8\00"
-@.str.914 = private unnamed_addr constant [14 x i8] c"append_string\00"
-@.str.916 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_append_string\00"
-@.str.918 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
-@.str.920 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
-@.str.921 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.938 = private unnamed_addr constant [7 x i8] c"concat\00"
-@.str.940 = private unnamed_addr constant [23 x i8] c"sailfin_runtime_concat\00"
-@.str.942 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
-@.str.944 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
-@.str.945 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
-@.str.962 = private unnamed_addr constant [10 x i8] c"get_field\00"
-@.str.964 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_get_field\00"
-@.str.966 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.968 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.969 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.674 = private unnamed_addr constant [23 x i8] c"runtime_instance_of_fn\00"
+@.str.676 = private unnamed_addr constant [28 x i8] c"sailfin_runtime_instance_of\00"
+@.str.678 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.680 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.681 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.698 = private unnamed_addr constant [17 x i8] c"runtime_serve_fn\00"
+@.str.700 = private unnamed_addr constant [22 x i8] c"sailfin_runtime_serve\00"
+@.str.702 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.704 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.705 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.714 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.715 = private unnamed_addr constant [4 x i8] c"net\00"
+@.str.726 = private unnamed_addr constant [21 x i8] c"runtime_char_code_fn\00"
+@.str.728 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_char_code\00"
+@.str.730 = private unnamed_addr constant [7 x i8] c"double\00"
+@.str.732 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.748 = private unnamed_addr constant [13 x i8] c"fs_read_file\00"
+@.str.750 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_fs_read_file\00"
+@.str.752 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.754 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.762 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.772 = private unnamed_addr constant [12 x i8] c"fs.readFile\00"
+@.str.774 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_fs_read_file\00"
+@.str.776 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.778 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.786 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.796 = private unnamed_addr constant [14 x i8] c"fs_write_file\00"
+@.str.798 = private unnamed_addr constant [30 x i8] c"sailfin_adapter_fs_write_file\00"
+@.str.800 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.802 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.803 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.812 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.822 = private unnamed_addr constant [13 x i8] c"fs.writeFile\00"
+@.str.824 = private unnamed_addr constant [30 x i8] c"sailfin_adapter_fs_write_file\00"
+@.str.826 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.828 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.829 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.838 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.850 = private unnamed_addr constant [34 x i8] c"sailfin_adapter_fs_list_directory\00"
+@.str.852 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.854 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.862 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.872 = private unnamed_addr constant [17 x i8] c"fs.listDirectory\00"
+@.str.874 = private unnamed_addr constant [34 x i8] c"sailfin_adapter_fs_list_directory\00"
+@.str.876 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.878 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.886 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.896 = private unnamed_addr constant [9 x i8] c"http_get\00"
+@.str.898 = private unnamed_addr constant [25 x i8] c"sailfin_adapter_http_get\00"
+@.str.900 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.902 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.910 = private unnamed_addr constant [4 x i8] c"net\00"
+@.str.920 = private unnamed_addr constant [10 x i8] c"http_post\00"
+@.str.922 = private unnamed_addr constant [26 x i8] c"sailfin_adapter_http_post\00"
+@.str.924 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.926 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.927 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.936 = private unnamed_addr constant [4 x i8] c"net\00"
+@.str.946 = private unnamed_addr constant [25 x i8] c"model_invoke_with_prompt\00"
+@.str.948 = private unnamed_addr constant [41 x i8] c"sailfin_adapter_model_invoke_with_prompt\00"
+@.str.950 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.952 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.953 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.962 = private unnamed_addr constant [6 x i8] c"model\00"
+@.str.972 = private unnamed_addr constant [12 x i8] c"serve_start\00"
+@.str.974 = private unnamed_addr constant [28 x i8] c"sailfin_adapter_serve_start\00"
+@.str.976 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.978 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.979 = private unnamed_addr constant [4 x i8] c"i32\00"
+@.str.988 = private unnamed_addr constant [4 x i8] c"net\00"
+@.str.989 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.1000 = private unnamed_addr constant [23 x i8] c"serve_handler_dispatch\00"
+@.str.1002 = private unnamed_addr constant [39 x i8] c"sailfin_adapter_serve_handler_dispatch\00"
+@.str.1004 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1006 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1007 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1016 = private unnamed_addr constant [4 x i8] c"net\00"
+@.str.1017 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.1028 = private unnamed_addr constant [11 x i8] c"spawn_task\00"
+@.str.1030 = private unnamed_addr constant [27 x i8] c"sailfin_adapter_spawn_task\00"
+@.str.1032 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1034 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1042 = private unnamed_addr constant [6 x i8] c"spawn\00"
+@.str.1052 = private unnamed_addr constant [15 x i8] c"channel_create\00"
+@.str.1054 = private unnamed_addr constant [31 x i8] c"sailfin_adapter_channel_create\00"
+@.str.1056 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1058 = private unnamed_addr constant [4 x i8] c"i32\00"
+@.str.1074 = private unnamed_addr constant [13 x i8] c"channel_send\00"
+@.str.1076 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_channel_send\00"
+@.str.1078 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.1080 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1081 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1090 = private unnamed_addr constant [8 x i8] c"channel\00"
+@.str.1100 = private unnamed_addr constant [16 x i8] c"channel_receive\00"
+@.str.1102 = private unnamed_addr constant [32 x i8] c"sailfin_adapter_channel_receive\00"
+@.str.1104 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1106 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1114 = private unnamed_addr constant [8 x i8] c"channel\00"
+@.str.1124 = private unnamed_addr constant [10 x i8] c"substring\00"
+@.str.1126 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_substring\00"
+@.str.1128 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1130 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1131 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.1132 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.1150 = private unnamed_addr constant [14 x i8] c"string.length\00"
+@.str.1152 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_string_length\00"
+@.str.1154 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.1156 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1172 = private unnamed_addr constant [10 x i8] c"char_code\00"
+@.str.1174 = private unnamed_addr constant [10 x i8] c"char_code\00"
+@.str.1176 = private unnamed_addr constant [7 x i8] c"double\00"
+@.str.1178 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1194 = private unnamed_addr constant [19 x i8] c"is_whitespace_char\00"
+@.str.1196 = private unnamed_addr constant [35 x i8] c"sailfin_runtime_is_whitespace_char\00"
+@.str.1198 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.1200 = private unnamed_addr constant [3 x i8] c"i8\00"
+@.str.1216 = private unnamed_addr constant [17 x i8] c"is_decimal_digit\00"
+@.str.1218 = private unnamed_addr constant [33 x i8] c"sailfin_runtime_is_decimal_digit\00"
+@.str.1220 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.1222 = private unnamed_addr constant [3 x i8] c"i8\00"
+@.str.1238 = private unnamed_addr constant [14 x i8] c"is_alpha_char\00"
+@.str.1240 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_is_alpha_char\00"
+@.str.1242 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.1244 = private unnamed_addr constant [3 x i8] c"i8\00"
+@.str.1260 = private unnamed_addr constant [14 x i8] c"append_string\00"
+@.str.1262 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_append_string\00"
+@.str.1264 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
+@.str.1266 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
+@.str.1267 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1284 = private unnamed_addr constant [7 x i8] c"concat\00"
+@.str.1286 = private unnamed_addr constant [23 x i8] c"sailfin_runtime_concat\00"
+@.str.1288 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
+@.str.1290 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
+@.str.1291 = private unnamed_addr constant [15 x i8] c"{ i8**, i64 }*\00"
+@.str.1308 = private unnamed_addr constant [10 x i8] c"get_field\00"
+@.str.1310 = private unnamed_addr constant [26 x i8] c"sailfin_runtime_get_field\00"
+@.str.1312 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1314 = private unnamed_addr constant [4 x i8] c"i8*\00"
+@.str.1315 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.79 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.81 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.95 = private unnamed_addr constant [8 x i8] c"define \00"
@@ -371,7 +439,6 @@ declare noalias i8* @malloc(i64)
 @.str.119 = private unnamed_addr constant [12 x i8] c"loop.header\00"
 @.str.133 = private unnamed_addr constant [11 x i8] c"loop.latch\00"
 @.str.148 = private unnamed_addr constant [13 x i8] c"  br label %\00"
-@.str.522 = private unnamed_addr constant [13 x i8] c"  br label %\00"
 @.str.777 = private unnamed_addr constant [13 x i8] c"  br label %\00"
 @.str.1814 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.1978 = private unnamed_addr constant [3 x i8] c"  \00"
@@ -454,15 +521,16 @@ declare noalias i8* @malloc(i64)
 @.str.339 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.341 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.210 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.483 = private unnamed_addr constant [7 x i8] c"  ret \00"
 @.str.7 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.42 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.15 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.47 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.39 = private unnamed_addr constant [10 x i8] c"*, i64 }*\00"
+@.str.55 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.50 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.244 = private unnamed_addr constant [3 x i8] c"+-\00"
 @.str.260 = private unnamed_addr constant [4 x i8] c"*/%\00"
-@.str.972 = private unnamed_addr constant [40 x i8] c"llvm lowering: unsupported expression `\00"
 @.str.9 = private unnamed_addr constant [35 x i8] c"llvm lowering: use-after-move of `\00"
 @.str.11 = private unnamed_addr constant [6 x i8] c"` at \00"
 @.str.23 = private unnamed_addr constant [3 x i8] c", \00"
@@ -505,14 +573,14 @@ declare noalias i8* @malloc(i64)
 @.str.346 = private unnamed_addr constant [4 x i8] c", %\00"
 @.str.350 = private unnamed_addr constant [3 x i8] c" ]\00"
 @.str.353 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.546 = private unnamed_addr constant [7 x i8] c"double\00"
 @.str.1874 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.2765 = private unnamed_addr constant [3 x i8] c"  \00"
 @.str.2768 = private unnamed_addr constant [9 x i8] c" = call \00"
 @.str.2772 = private unnamed_addr constant [3 x i8] c" @\00"
+@.str.604 = private unnamed_addr constant [3 x i8] c"  \00"
+@.str.607 = private unnamed_addr constant [17 x i8] c" = extractvalue \00"
 @.str.620 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.52 = private unnamed_addr constant [3 x i8] c"  \00"
-@.str.55 = private unnamed_addr constant [44 x i8] c" = call i8* @sailfin_runtime_get_field(i8* \00"
 @.str.73 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.5 = private unnamed_addr constant [27 x i8] c" = load i8*, i8** @runtime\00"
 @.str.31 = private unnamed_addr constant [15 x i8] c", i32 0, i32 0\00"
@@ -521,10 +589,9 @@ declare noalias i8* @malloc(i64)
 @.str.536 = private unnamed_addr constant [4 x i8] c" x \00"
 @.str.549 = private unnamed_addr constant [11 x i8] c" = alloca \00"
 @.str.565 = private unnamed_addr constant [3 x i8] c"  \00"
-@.str.568 = private unnamed_addr constant [18 x i8] c" = getelementptr \00"
 @.str.573 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.578 = private unnamed_addr constant [3 x i8] c"* \00"
 @.str.584 = private unnamed_addr constant [15 x i8] c", i32 0, i32 0\00"
-@.str.750 = private unnamed_addr constant [3 x i8] c"  \00"
 @.str.753 = private unnamed_addr constant [11 x i8] c" = alloca \00"
 @.str.764 = private unnamed_addr constant [3 x i8] c"  \00"
 @.str.767 = private unnamed_addr constant [18 x i8] c" = getelementptr \00"
@@ -538,7 +605,6 @@ declare noalias i8* @malloc(i64)
 @.str.823 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.827 = private unnamed_addr constant [3 x i8] c"* \00"
 @.str.831 = private unnamed_addr constant [15 x i8] c", i32 0, i32 1\00"
-@.str.838 = private unnamed_addr constant [13 x i8] c"  store i64 \00"
 @.str.841 = private unnamed_addr constant [8 x i8] c", i64* \00"
 @.str.83 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.65 = private unnamed_addr constant [3 x i8] c"  \00"
@@ -12952,13 +13018,13 @@ entry:
   %t400 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t377, %RuntimeHelperDescriptor %t399)
   store { %RuntimeHelperDescriptor*, i64 }* %t400, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t401 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s402 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.402, i32 0, i32 0
+  %s402 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.402, i32 0, i32 0
   %t403 = insertvalue %RuntimeHelperDescriptor undef, i8* %s402, 0
-  %s404 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.404, i32 0, i32 0
+  %s404 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.404, i32 0, i32 0
   %t405 = insertvalue %RuntimeHelperDescriptor %t403, i8* %s404, 1
-  %s406 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.406, i32 0, i32 0
+  %s406 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.406, i32 0, i32 0
   %t407 = insertvalue %RuntimeHelperDescriptor %t405, i8* %s406, 2
-  %s408 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.408, i32 0, i32 0
+  %s408 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.408, i32 0, i32 0
   %t409 = alloca [1 x i8*]
   %t410 = getelementptr [1 x i8*], [1 x i8*]* %t409, i32 0, i32 0
   %t411 = getelementptr i8*, i8** %t410, i64 0
@@ -12969,7 +13035,7 @@ entry:
   %t414 = getelementptr { i8**, i64 }, { i8**, i64 }* %t412, i32 0, i32 1
   store i64 1, i64* %t414
   %t415 = insertvalue %RuntimeHelperDescriptor %t407, { i8**, i64 }* %t412, 3
-  %s416 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.416, i32 0, i32 0
+  %s416 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.416, i32 0, i32 0
   %t417 = alloca [1 x i8*]
   %t418 = getelementptr [1 x i8*], [1 x i8*]* %t417, i32 0, i32 0
   %t419 = getelementptr i8*, i8** %t418, i64 0
@@ -12983,13 +13049,13 @@ entry:
   %t424 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t401, %RuntimeHelperDescriptor %t423)
   store { %RuntimeHelperDescriptor*, i64 }* %t424, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t425 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s426 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.426, i32 0, i32 0
+  %s426 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.426, i32 0, i32 0
   %t427 = insertvalue %RuntimeHelperDescriptor undef, i8* %s426, 0
-  %s428 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.428, i32 0, i32 0
+  %s428 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.428, i32 0, i32 0
   %t429 = insertvalue %RuntimeHelperDescriptor %t427, i8* %s428, 1
   %s430 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.430, i32 0, i32 0
   %t431 = insertvalue %RuntimeHelperDescriptor %t429, i8* %s430, 2
-  %s432 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.432, i32 0, i32 0
+  %s432 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.432, i32 0, i32 0
   %t433 = alloca [1 x i8*]
   %t434 = getelementptr [1 x i8*], [1 x i8*]* %t433, i32 0, i32 0
   %t435 = getelementptr i8*, i8** %t434, i64 0
@@ -13014,9 +13080,9 @@ entry:
   %t448 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t425, %RuntimeHelperDescriptor %t447)
   store { %RuntimeHelperDescriptor*, i64 }* %t448, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t449 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s450 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.450, i32 0, i32 0
+  %s450 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.450, i32 0, i32 0
   %t451 = insertvalue %RuntimeHelperDescriptor undef, i8* %s450, 0
-  %s452 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.452, i32 0, i32 0
+  %s452 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.452, i32 0, i32 0
   %t453 = insertvalue %RuntimeHelperDescriptor %t451, i8* %s452, 1
   %s454 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.454, i32 0, i32 0
   %t455 = insertvalue %RuntimeHelperDescriptor %t453, i8* %s454, 2
@@ -13048,496 +13114,491 @@ entry:
   %t474 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t449, %RuntimeHelperDescriptor %t473)
   store { %RuntimeHelperDescriptor*, i64 }* %t474, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t475 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s476 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.476, i32 0, i32 0
+  %s476 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.476, i32 0, i32 0
   %t477 = insertvalue %RuntimeHelperDescriptor undef, i8* %s476, 0
-  %s478 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.478, i32 0, i32 0
+  %s478 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.478, i32 0, i32 0
   %t479 = insertvalue %RuntimeHelperDescriptor %t477, i8* %s478, 1
-  %s480 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.480, i32 0, i32 0
+  %s480 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.480, i32 0, i32 0
   %t481 = insertvalue %RuntimeHelperDescriptor %t479, i8* %s480, 2
   %s482 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.482, i32 0, i32 0
-  %s483 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.483, i32 0, i32 0
-  %t484 = alloca [2 x i8*]
-  %t485 = getelementptr [2 x i8*], [2 x i8*]* %t484, i32 0, i32 0
-  %t486 = getelementptr i8*, i8** %t485, i64 0
-  store i8* %s482, i8** %t486
-  %t487 = getelementptr i8*, i8** %t485, i64 1
-  store i8* %s483, i8** %t487
-  %t488 = alloca { i8**, i64 }
-  %t489 = getelementptr { i8**, i64 }, { i8**, i64 }* %t488, i32 0, i32 0
-  store i8** %t485, i8*** %t489
-  %t490 = getelementptr { i8**, i64 }, { i8**, i64 }* %t488, i32 0, i32 1
-  store i64 2, i64* %t490
-  %t491 = insertvalue %RuntimeHelperDescriptor %t481, { i8**, i64 }* %t488, 3
-  %s492 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.492, i32 0, i32 0
-  %t493 = alloca [1 x i8*]
-  %t494 = getelementptr [1 x i8*], [1 x i8*]* %t493, i32 0, i32 0
-  %t495 = getelementptr i8*, i8** %t494, i64 0
-  store i8* %s492, i8** %t495
-  %t496 = alloca { i8**, i64 }
-  %t497 = getelementptr { i8**, i64 }, { i8**, i64 }* %t496, i32 0, i32 0
-  store i8** %t494, i8*** %t497
-  %t498 = getelementptr { i8**, i64 }, { i8**, i64 }* %t496, i32 0, i32 1
-  store i64 1, i64* %t498
-  %t499 = insertvalue %RuntimeHelperDescriptor %t491, { i8**, i64 }* %t496, 4
-  %t500 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t475, %RuntimeHelperDescriptor %t499)
-  store { %RuntimeHelperDescriptor*, i64 }* %t500, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t501 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s502 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.502, i32 0, i32 0
-  %t503 = insertvalue %RuntimeHelperDescriptor undef, i8* %s502, 0
-  %s504 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.504, i32 0, i32 0
-  %t505 = insertvalue %RuntimeHelperDescriptor %t503, i8* %s504, 1
-  %s506 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.506, i32 0, i32 0
-  %t507 = insertvalue %RuntimeHelperDescriptor %t505, i8* %s506, 2
-  %s508 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.508, i32 0, i32 0
-  %t509 = alloca [1 x i8*]
-  %t510 = getelementptr [1 x i8*], [1 x i8*]* %t509, i32 0, i32 0
-  %t511 = getelementptr i8*, i8** %t510, i64 0
-  store i8* %s508, i8** %t511
-  %t512 = alloca { i8**, i64 }
-  %t513 = getelementptr { i8**, i64 }, { i8**, i64 }* %t512, i32 0, i32 0
-  store i8** %t510, i8*** %t513
-  %t514 = getelementptr { i8**, i64 }, { i8**, i64 }* %t512, i32 0, i32 1
-  store i64 1, i64* %t514
-  %t515 = insertvalue %RuntimeHelperDescriptor %t507, { i8**, i64 }* %t512, 3
-  %s516 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.516, i32 0, i32 0
-  %t517 = alloca [1 x i8*]
-  %t518 = getelementptr [1 x i8*], [1 x i8*]* %t517, i32 0, i32 0
-  %t519 = getelementptr i8*, i8** %t518, i64 0
-  store i8* %s516, i8** %t519
-  %t520 = alloca { i8**, i64 }
-  %t521 = getelementptr { i8**, i64 }, { i8**, i64 }* %t520, i32 0, i32 0
-  store i8** %t518, i8*** %t521
-  %t522 = getelementptr { i8**, i64 }, { i8**, i64 }* %t520, i32 0, i32 1
-  store i64 1, i64* %t522
-  %t523 = insertvalue %RuntimeHelperDescriptor %t515, { i8**, i64 }* %t520, 4
-  %t524 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t501, %RuntimeHelperDescriptor %t523)
-  store { %RuntimeHelperDescriptor*, i64 }* %t524, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t525 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s526 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.526, i32 0, i32 0
-  %t527 = insertvalue %RuntimeHelperDescriptor undef, i8* %s526, 0
-  %s528 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.528, i32 0, i32 0
-  %t529 = insertvalue %RuntimeHelperDescriptor %t527, i8* %s528, 1
-  %s530 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.530, i32 0, i32 0
-  %t531 = insertvalue %RuntimeHelperDescriptor %t529, i8* %s530, 2
-  %s532 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.532, i32 0, i32 0
-  %t533 = alloca [1 x i8*]
-  %t534 = getelementptr [1 x i8*], [1 x i8*]* %t533, i32 0, i32 0
-  %t535 = getelementptr i8*, i8** %t534, i64 0
-  store i8* %s532, i8** %t535
+  %t483 = alloca [1 x i8*]
+  %t484 = getelementptr [1 x i8*], [1 x i8*]* %t483, i32 0, i32 0
+  %t485 = getelementptr i8*, i8** %t484, i64 0
+  store i8* %s482, i8** %t485
+  %t486 = alloca { i8**, i64 }
+  %t487 = getelementptr { i8**, i64 }, { i8**, i64 }* %t486, i32 0, i32 0
+  store i8** %t484, i8*** %t487
+  %t488 = getelementptr { i8**, i64 }, { i8**, i64 }* %t486, i32 0, i32 1
+  store i64 1, i64* %t488
+  %t489 = insertvalue %RuntimeHelperDescriptor %t481, { i8**, i64 }* %t486, 3
+  %t490 = alloca [0 x i8*]
+  %t491 = getelementptr [0 x i8*], [0 x i8*]* %t490, i32 0, i32 0
+  %t492 = alloca { i8**, i64 }
+  %t493 = getelementptr { i8**, i64 }, { i8**, i64 }* %t492, i32 0, i32 0
+  store i8** %t491, i8*** %t493
+  %t494 = getelementptr { i8**, i64 }, { i8**, i64 }* %t492, i32 0, i32 1
+  store i64 0, i64* %t494
+  %t495 = insertvalue %RuntimeHelperDescriptor %t489, { i8**, i64 }* %t492, 4
+  %t496 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t475, %RuntimeHelperDescriptor %t495)
+  store { %RuntimeHelperDescriptor*, i64 }* %t496, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t497 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s498 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.498, i32 0, i32 0
+  %t499 = insertvalue %RuntimeHelperDescriptor undef, i8* %s498, 0
+  %s500 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.500, i32 0, i32 0
+  %t501 = insertvalue %RuntimeHelperDescriptor %t499, i8* %s500, 1
+  %s502 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.502, i32 0, i32 0
+  %t503 = insertvalue %RuntimeHelperDescriptor %t501, i8* %s502, 2
+  %s504 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.504, i32 0, i32 0
+  %t505 = alloca [1 x i8*]
+  %t506 = getelementptr [1 x i8*], [1 x i8*]* %t505, i32 0, i32 0
+  %t507 = getelementptr i8*, i8** %t506, i64 0
+  store i8* %s504, i8** %t507
+  %t508 = alloca { i8**, i64 }
+  %t509 = getelementptr { i8**, i64 }, { i8**, i64 }* %t508, i32 0, i32 0
+  store i8** %t506, i8*** %t509
+  %t510 = getelementptr { i8**, i64 }, { i8**, i64 }* %t508, i32 0, i32 1
+  store i64 1, i64* %t510
+  %t511 = insertvalue %RuntimeHelperDescriptor %t503, { i8**, i64 }* %t508, 3
+  %t512 = alloca [0 x i8*]
+  %t513 = getelementptr [0 x i8*], [0 x i8*]* %t512, i32 0, i32 0
+  %t514 = alloca { i8**, i64 }
+  %t515 = getelementptr { i8**, i64 }, { i8**, i64 }* %t514, i32 0, i32 0
+  store i8** %t513, i8*** %t515
+  %t516 = getelementptr { i8**, i64 }, { i8**, i64 }* %t514, i32 0, i32 1
+  store i64 0, i64* %t516
+  %t517 = insertvalue %RuntimeHelperDescriptor %t511, { i8**, i64 }* %t514, 4
+  %t518 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t497, %RuntimeHelperDescriptor %t517)
+  store { %RuntimeHelperDescriptor*, i64 }* %t518, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t519 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s520 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.520, i32 0, i32 0
+  %t521 = insertvalue %RuntimeHelperDescriptor undef, i8* %s520, 0
+  %s522 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.522, i32 0, i32 0
+  %t523 = insertvalue %RuntimeHelperDescriptor %t521, i8* %s522, 1
+  %s524 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.524, i32 0, i32 0
+  %t525 = insertvalue %RuntimeHelperDescriptor %t523, i8* %s524, 2
+  %s526 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.526, i32 0, i32 0
+  %t527 = alloca [1 x i8*]
+  %t528 = getelementptr [1 x i8*], [1 x i8*]* %t527, i32 0, i32 0
+  %t529 = getelementptr i8*, i8** %t528, i64 0
+  store i8* %s526, i8** %t529
+  %t530 = alloca { i8**, i64 }
+  %t531 = getelementptr { i8**, i64 }, { i8**, i64 }* %t530, i32 0, i32 0
+  store i8** %t528, i8*** %t531
+  %t532 = getelementptr { i8**, i64 }, { i8**, i64 }* %t530, i32 0, i32 1
+  store i64 1, i64* %t532
+  %t533 = insertvalue %RuntimeHelperDescriptor %t525, { i8**, i64 }* %t530, 3
+  %t534 = alloca [0 x i8*]
+  %t535 = getelementptr [0 x i8*], [0 x i8*]* %t534, i32 0, i32 0
   %t536 = alloca { i8**, i64 }
   %t537 = getelementptr { i8**, i64 }, { i8**, i64 }* %t536, i32 0, i32 0
-  store i8** %t534, i8*** %t537
+  store i8** %t535, i8*** %t537
   %t538 = getelementptr { i8**, i64 }, { i8**, i64 }* %t536, i32 0, i32 1
-  store i64 1, i64* %t538
-  %t539 = insertvalue %RuntimeHelperDescriptor %t531, { i8**, i64 }* %t536, 3
-  %s540 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.540, i32 0, i32 0
-  %t541 = alloca [1 x i8*]
-  %t542 = getelementptr [1 x i8*], [1 x i8*]* %t541, i32 0, i32 0
-  %t543 = getelementptr i8*, i8** %t542, i64 0
-  store i8* %s540, i8** %t543
-  %t544 = alloca { i8**, i64 }
-  %t545 = getelementptr { i8**, i64 }, { i8**, i64 }* %t544, i32 0, i32 0
-  store i8** %t542, i8*** %t545
-  %t546 = getelementptr { i8**, i64 }, { i8**, i64 }* %t544, i32 0, i32 1
-  store i64 1, i64* %t546
-  %t547 = insertvalue %RuntimeHelperDescriptor %t539, { i8**, i64 }* %t544, 4
-  %t548 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t525, %RuntimeHelperDescriptor %t547)
-  store { %RuntimeHelperDescriptor*, i64 }* %t548, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t549 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s550 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.550, i32 0, i32 0
-  %t551 = insertvalue %RuntimeHelperDescriptor undef, i8* %s550, 0
-  %s552 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.552, i32 0, i32 0
-  %t553 = insertvalue %RuntimeHelperDescriptor %t551, i8* %s552, 1
-  %s554 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.554, i32 0, i32 0
-  %t555 = insertvalue %RuntimeHelperDescriptor %t553, i8* %s554, 2
-  %s556 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.556, i32 0, i32 0
-  %t557 = alloca [1 x i8*]
-  %t558 = getelementptr [1 x i8*], [1 x i8*]* %t557, i32 0, i32 0
-  %t559 = getelementptr i8*, i8** %t558, i64 0
-  store i8* %s556, i8** %t559
-  %t560 = alloca { i8**, i64 }
-  %t561 = getelementptr { i8**, i64 }, { i8**, i64 }* %t560, i32 0, i32 0
-  store i8** %t558, i8*** %t561
-  %t562 = getelementptr { i8**, i64 }, { i8**, i64 }* %t560, i32 0, i32 1
-  store i64 1, i64* %t562
-  %t563 = insertvalue %RuntimeHelperDescriptor %t555, { i8**, i64 }* %t560, 3
-  %s564 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.564, i32 0, i32 0
-  %t565 = alloca [1 x i8*]
-  %t566 = getelementptr [1 x i8*], [1 x i8*]* %t565, i32 0, i32 0
-  %t567 = getelementptr i8*, i8** %t566, i64 0
-  store i8* %s564, i8** %t567
-  %t568 = alloca { i8**, i64 }
-  %t569 = getelementptr { i8**, i64 }, { i8**, i64 }* %t568, i32 0, i32 0
-  store i8** %t566, i8*** %t569
-  %t570 = getelementptr { i8**, i64 }, { i8**, i64 }* %t568, i32 0, i32 1
-  store i64 1, i64* %t570
-  %t571 = insertvalue %RuntimeHelperDescriptor %t563, { i8**, i64 }* %t568, 4
-  %t572 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t549, %RuntimeHelperDescriptor %t571)
-  store { %RuntimeHelperDescriptor*, i64 }* %t572, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t573 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s574 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.574, i32 0, i32 0
-  %t575 = insertvalue %RuntimeHelperDescriptor undef, i8* %s574, 0
-  %s576 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.576, i32 0, i32 0
-  %t577 = insertvalue %RuntimeHelperDescriptor %t575, i8* %s576, 1
-  %s578 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.578, i32 0, i32 0
-  %t579 = insertvalue %RuntimeHelperDescriptor %t577, i8* %s578, 2
-  %s580 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.580, i32 0, i32 0
-  %s581 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.581, i32 0, i32 0
-  %t582 = alloca [2 x i8*]
-  %t583 = getelementptr [2 x i8*], [2 x i8*]* %t582, i32 0, i32 0
-  %t584 = getelementptr i8*, i8** %t583, i64 0
-  store i8* %s580, i8** %t584
-  %t585 = getelementptr i8*, i8** %t583, i64 1
-  store i8* %s581, i8** %t585
-  %t586 = alloca { i8**, i64 }
-  %t587 = getelementptr { i8**, i64 }, { i8**, i64 }* %t586, i32 0, i32 0
-  store i8** %t583, i8*** %t587
-  %t588 = getelementptr { i8**, i64 }, { i8**, i64 }* %t586, i32 0, i32 1
-  store i64 2, i64* %t588
-  %t589 = insertvalue %RuntimeHelperDescriptor %t579, { i8**, i64 }* %t586, 3
-  %s590 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.590, i32 0, i32 0
-  %t591 = alloca [1 x i8*]
-  %t592 = getelementptr [1 x i8*], [1 x i8*]* %t591, i32 0, i32 0
-  %t593 = getelementptr i8*, i8** %t592, i64 0
-  store i8* %s590, i8** %t593
-  %t594 = alloca { i8**, i64 }
-  %t595 = getelementptr { i8**, i64 }, { i8**, i64 }* %t594, i32 0, i32 0
-  store i8** %t592, i8*** %t595
-  %t596 = getelementptr { i8**, i64 }, { i8**, i64 }* %t594, i32 0, i32 1
-  store i64 1, i64* %t596
-  %t597 = insertvalue %RuntimeHelperDescriptor %t589, { i8**, i64 }* %t594, 4
-  %t598 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t573, %RuntimeHelperDescriptor %t597)
-  store { %RuntimeHelperDescriptor*, i64 }* %t598, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t599 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s600 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.600, i32 0, i32 0
-  %t601 = insertvalue %RuntimeHelperDescriptor undef, i8* %s600, 0
-  %s602 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.602, i32 0, i32 0
-  %t603 = insertvalue %RuntimeHelperDescriptor %t601, i8* %s602, 1
-  %s604 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.604, i32 0, i32 0
-  %t605 = insertvalue %RuntimeHelperDescriptor %t603, i8* %s604, 2
-  %s606 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.606, i32 0, i32 0
-  %s607 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.607, i32 0, i32 0
-  %t608 = alloca [2 x i8*]
-  %t609 = getelementptr [2 x i8*], [2 x i8*]* %t608, i32 0, i32 0
-  %t610 = getelementptr i8*, i8** %t609, i64 0
-  store i8* %s606, i8** %t610
-  %t611 = getelementptr i8*, i8** %t609, i64 1
-  store i8* %s607, i8** %t611
-  %t612 = alloca { i8**, i64 }
-  %t613 = getelementptr { i8**, i64 }, { i8**, i64 }* %t612, i32 0, i32 0
-  store i8** %t609, i8*** %t613
-  %t614 = getelementptr { i8**, i64 }, { i8**, i64 }* %t612, i32 0, i32 1
-  store i64 2, i64* %t614
-  %t615 = insertvalue %RuntimeHelperDescriptor %t605, { i8**, i64 }* %t612, 3
-  %s616 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.616, i32 0, i32 0
-  %t617 = alloca [1 x i8*]
-  %t618 = getelementptr [1 x i8*], [1 x i8*]* %t617, i32 0, i32 0
-  %t619 = getelementptr i8*, i8** %t618, i64 0
-  store i8* %s616, i8** %t619
-  %t620 = alloca { i8**, i64 }
-  %t621 = getelementptr { i8**, i64 }, { i8**, i64 }* %t620, i32 0, i32 0
-  store i8** %t618, i8*** %t621
-  %t622 = getelementptr { i8**, i64 }, { i8**, i64 }* %t620, i32 0, i32 1
-  store i64 1, i64* %t622
-  %t623 = insertvalue %RuntimeHelperDescriptor %t615, { i8**, i64 }* %t620, 4
-  %t624 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t599, %RuntimeHelperDescriptor %t623)
-  store { %RuntimeHelperDescriptor*, i64 }* %t624, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t625 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s626 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.626, i32 0, i32 0
-  %t627 = insertvalue %RuntimeHelperDescriptor undef, i8* %s626, 0
-  %s628 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.628, i32 0, i32 0
-  %t629 = insertvalue %RuntimeHelperDescriptor %t627, i8* %s628, 1
-  %s630 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.630, i32 0, i32 0
-  %t631 = insertvalue %RuntimeHelperDescriptor %t629, i8* %s630, 2
-  %s632 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.632, i32 0, i32 0
-  %s633 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.633, i32 0, i32 0
-  %t634 = alloca [2 x i8*]
-  %t635 = getelementptr [2 x i8*], [2 x i8*]* %t634, i32 0, i32 0
-  %t636 = getelementptr i8*, i8** %t635, i64 0
-  store i8* %s632, i8** %t636
-  %t637 = getelementptr i8*, i8** %t635, i64 1
-  store i8* %s633, i8** %t637
-  %t638 = alloca { i8**, i64 }
-  %t639 = getelementptr { i8**, i64 }, { i8**, i64 }* %t638, i32 0, i32 0
-  store i8** %t635, i8*** %t639
-  %t640 = getelementptr { i8**, i64 }, { i8**, i64 }* %t638, i32 0, i32 1
-  store i64 2, i64* %t640
-  %t641 = insertvalue %RuntimeHelperDescriptor %t631, { i8**, i64 }* %t638, 3
-  %s642 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.642, i32 0, i32 0
-  %s643 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.643, i32 0, i32 0
-  %t644 = alloca [2 x i8*]
-  %t645 = getelementptr [2 x i8*], [2 x i8*]* %t644, i32 0, i32 0
-  %t646 = getelementptr i8*, i8** %t645, i64 0
-  store i8* %s642, i8** %t646
-  %t647 = getelementptr i8*, i8** %t645, i64 1
-  store i8* %s643, i8** %t647
-  %t648 = alloca { i8**, i64 }
-  %t649 = getelementptr { i8**, i64 }, { i8**, i64 }* %t648, i32 0, i32 0
-  store i8** %t645, i8*** %t649
-  %t650 = getelementptr { i8**, i64 }, { i8**, i64 }* %t648, i32 0, i32 1
-  store i64 2, i64* %t650
-  %t651 = insertvalue %RuntimeHelperDescriptor %t641, { i8**, i64 }* %t648, 4
-  %t652 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t625, %RuntimeHelperDescriptor %t651)
-  store { %RuntimeHelperDescriptor*, i64 }* %t652, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t653 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s654 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.654, i32 0, i32 0
-  %t655 = insertvalue %RuntimeHelperDescriptor undef, i8* %s654, 0
-  %s656 = getelementptr inbounds [39 x i8], [39 x i8]* @.str.656, i32 0, i32 0
-  %t657 = insertvalue %RuntimeHelperDescriptor %t655, i8* %s656, 1
+  store i64 0, i64* %t538
+  %t539 = insertvalue %RuntimeHelperDescriptor %t533, { i8**, i64 }* %t536, 4
+  %t540 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t519, %RuntimeHelperDescriptor %t539)
+  store { %RuntimeHelperDescriptor*, i64 }* %t540, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t541 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s542 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.542, i32 0, i32 0
+  %t543 = insertvalue %RuntimeHelperDescriptor undef, i8* %s542, 0
+  %s544 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.544, i32 0, i32 0
+  %t545 = insertvalue %RuntimeHelperDescriptor %t543, i8* %s544, 1
+  %s546 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.546, i32 0, i32 0
+  %t547 = insertvalue %RuntimeHelperDescriptor %t545, i8* %s546, 2
+  %s548 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.548, i32 0, i32 0
+  %t549 = alloca [1 x i8*]
+  %t550 = getelementptr [1 x i8*], [1 x i8*]* %t549, i32 0, i32 0
+  %t551 = getelementptr i8*, i8** %t550, i64 0
+  store i8* %s548, i8** %t551
+  %t552 = alloca { i8**, i64 }
+  %t553 = getelementptr { i8**, i64 }, { i8**, i64 }* %t552, i32 0, i32 0
+  store i8** %t550, i8*** %t553
+  %t554 = getelementptr { i8**, i64 }, { i8**, i64 }* %t552, i32 0, i32 1
+  store i64 1, i64* %t554
+  %t555 = insertvalue %RuntimeHelperDescriptor %t547, { i8**, i64 }* %t552, 3
+  %t556 = alloca [0 x i8*]
+  %t557 = getelementptr [0 x i8*], [0 x i8*]* %t556, i32 0, i32 0
+  %t558 = alloca { i8**, i64 }
+  %t559 = getelementptr { i8**, i64 }, { i8**, i64 }* %t558, i32 0, i32 0
+  store i8** %t557, i8*** %t559
+  %t560 = getelementptr { i8**, i64 }, { i8**, i64 }* %t558, i32 0, i32 1
+  store i64 0, i64* %t560
+  %t561 = insertvalue %RuntimeHelperDescriptor %t555, { i8**, i64 }* %t558, 4
+  %t562 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t541, %RuntimeHelperDescriptor %t561)
+  store { %RuntimeHelperDescriptor*, i64 }* %t562, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t563 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s564 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.564, i32 0, i32 0
+  %t565 = insertvalue %RuntimeHelperDescriptor undef, i8* %s564, 0
+  %s566 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.566, i32 0, i32 0
+  %t567 = insertvalue %RuntimeHelperDescriptor %t565, i8* %s566, 1
+  %s568 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.568, i32 0, i32 0
+  %t569 = insertvalue %RuntimeHelperDescriptor %t567, i8* %s568, 2
+  %s570 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.570, i32 0, i32 0
+  %t571 = alloca [1 x i8*]
+  %t572 = getelementptr [1 x i8*], [1 x i8*]* %t571, i32 0, i32 0
+  %t573 = getelementptr i8*, i8** %t572, i64 0
+  store i8* %s570, i8** %t573
+  %t574 = alloca { i8**, i64 }
+  %t575 = getelementptr { i8**, i64 }, { i8**, i64 }* %t574, i32 0, i32 0
+  store i8** %t572, i8*** %t575
+  %t576 = getelementptr { i8**, i64 }, { i8**, i64 }* %t574, i32 0, i32 1
+  store i64 1, i64* %t576
+  %t577 = insertvalue %RuntimeHelperDescriptor %t569, { i8**, i64 }* %t574, 3
+  %t578 = alloca [0 x i8*]
+  %t579 = getelementptr [0 x i8*], [0 x i8*]* %t578, i32 0, i32 0
+  %t580 = alloca { i8**, i64 }
+  %t581 = getelementptr { i8**, i64 }, { i8**, i64 }* %t580, i32 0, i32 0
+  store i8** %t579, i8*** %t581
+  %t582 = getelementptr { i8**, i64 }, { i8**, i64 }* %t580, i32 0, i32 1
+  store i64 0, i64* %t582
+  %t583 = insertvalue %RuntimeHelperDescriptor %t577, { i8**, i64 }* %t580, 4
+  %t584 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t563, %RuntimeHelperDescriptor %t583)
+  store { %RuntimeHelperDescriptor*, i64 }* %t584, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t585 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s586 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.586, i32 0, i32 0
+  %t587 = insertvalue %RuntimeHelperDescriptor undef, i8* %s586, 0
+  %s588 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.588, i32 0, i32 0
+  %t589 = insertvalue %RuntimeHelperDescriptor %t587, i8* %s588, 1
+  %s590 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.590, i32 0, i32 0
+  %t591 = insertvalue %RuntimeHelperDescriptor %t589, i8* %s590, 2
+  %s592 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.592, i32 0, i32 0
+  %t593 = alloca [1 x i8*]
+  %t594 = getelementptr [1 x i8*], [1 x i8*]* %t593, i32 0, i32 0
+  %t595 = getelementptr i8*, i8** %t594, i64 0
+  store i8* %s592, i8** %t595
+  %t596 = alloca { i8**, i64 }
+  %t597 = getelementptr { i8**, i64 }, { i8**, i64 }* %t596, i32 0, i32 0
+  store i8** %t594, i8*** %t597
+  %t598 = getelementptr { i8**, i64 }, { i8**, i64 }* %t596, i32 0, i32 1
+  store i64 1, i64* %t598
+  %t599 = insertvalue %RuntimeHelperDescriptor %t591, { i8**, i64 }* %t596, 3
+  %t600 = alloca [0 x i8*]
+  %t601 = getelementptr [0 x i8*], [0 x i8*]* %t600, i32 0, i32 0
+  %t602 = alloca { i8**, i64 }
+  %t603 = getelementptr { i8**, i64 }, { i8**, i64 }* %t602, i32 0, i32 0
+  store i8** %t601, i8*** %t603
+  %t604 = getelementptr { i8**, i64 }, { i8**, i64 }* %t602, i32 0, i32 1
+  store i64 0, i64* %t604
+  %t605 = insertvalue %RuntimeHelperDescriptor %t599, { i8**, i64 }* %t602, 4
+  %t606 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t585, %RuntimeHelperDescriptor %t605)
+  store { %RuntimeHelperDescriptor*, i64 }* %t606, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t607 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s608 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.608, i32 0, i32 0
+  %t609 = insertvalue %RuntimeHelperDescriptor undef, i8* %s608, 0
+  %s610 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.610, i32 0, i32 0
+  %t611 = insertvalue %RuntimeHelperDescriptor %t609, i8* %s610, 1
+  %s612 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.612, i32 0, i32 0
+  %t613 = insertvalue %RuntimeHelperDescriptor %t611, i8* %s612, 2
+  %s614 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.614, i32 0, i32 0
+  %t615 = alloca [1 x i8*]
+  %t616 = getelementptr [1 x i8*], [1 x i8*]* %t615, i32 0, i32 0
+  %t617 = getelementptr i8*, i8** %t616, i64 0
+  store i8* %s614, i8** %t617
+  %t618 = alloca { i8**, i64 }
+  %t619 = getelementptr { i8**, i64 }, { i8**, i64 }* %t618, i32 0, i32 0
+  store i8** %t616, i8*** %t619
+  %t620 = getelementptr { i8**, i64 }, { i8**, i64 }* %t618, i32 0, i32 1
+  store i64 1, i64* %t620
+  %t621 = insertvalue %RuntimeHelperDescriptor %t613, { i8**, i64 }* %t618, 3
+  %t622 = alloca [0 x i8*]
+  %t623 = getelementptr [0 x i8*], [0 x i8*]* %t622, i32 0, i32 0
+  %t624 = alloca { i8**, i64 }
+  %t625 = getelementptr { i8**, i64 }, { i8**, i64 }* %t624, i32 0, i32 0
+  store i8** %t623, i8*** %t625
+  %t626 = getelementptr { i8**, i64 }, { i8**, i64 }* %t624, i32 0, i32 1
+  store i64 0, i64* %t626
+  %t627 = insertvalue %RuntimeHelperDescriptor %t621, { i8**, i64 }* %t624, 4
+  %t628 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t607, %RuntimeHelperDescriptor %t627)
+  store { %RuntimeHelperDescriptor*, i64 }* %t628, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t629 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s630 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.630, i32 0, i32 0
+  %t631 = insertvalue %RuntimeHelperDescriptor undef, i8* %s630, 0
+  %s632 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.632, i32 0, i32 0
+  %t633 = insertvalue %RuntimeHelperDescriptor %t631, i8* %s632, 1
+  %s634 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.634, i32 0, i32 0
+  %t635 = insertvalue %RuntimeHelperDescriptor %t633, i8* %s634, 2
+  %s636 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.636, i32 0, i32 0
+  %t637 = alloca [1 x i8*]
+  %t638 = getelementptr [1 x i8*], [1 x i8*]* %t637, i32 0, i32 0
+  %t639 = getelementptr i8*, i8** %t638, i64 0
+  store i8* %s636, i8** %t639
+  %t640 = alloca { i8**, i64 }
+  %t641 = getelementptr { i8**, i64 }, { i8**, i64 }* %t640, i32 0, i32 0
+  store i8** %t638, i8*** %t641
+  %t642 = getelementptr { i8**, i64 }, { i8**, i64 }* %t640, i32 0, i32 1
+  store i64 1, i64* %t642
+  %t643 = insertvalue %RuntimeHelperDescriptor %t635, { i8**, i64 }* %t640, 3
+  %t644 = alloca [0 x i8*]
+  %t645 = getelementptr [0 x i8*], [0 x i8*]* %t644, i32 0, i32 0
+  %t646 = alloca { i8**, i64 }
+  %t647 = getelementptr { i8**, i64 }, { i8**, i64 }* %t646, i32 0, i32 0
+  store i8** %t645, i8*** %t647
+  %t648 = getelementptr { i8**, i64 }, { i8**, i64 }* %t646, i32 0, i32 1
+  store i64 0, i64* %t648
+  %t649 = insertvalue %RuntimeHelperDescriptor %t643, { i8**, i64 }* %t646, 4
+  %t650 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t629, %RuntimeHelperDescriptor %t649)
+  store { %RuntimeHelperDescriptor*, i64 }* %t650, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t651 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s652 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.652, i32 0, i32 0
+  %t653 = insertvalue %RuntimeHelperDescriptor undef, i8* %s652, 0
+  %s654 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.654, i32 0, i32 0
+  %t655 = insertvalue %RuntimeHelperDescriptor %t653, i8* %s654, 1
+  %s656 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.656, i32 0, i32 0
+  %t657 = insertvalue %RuntimeHelperDescriptor %t655, i8* %s656, 2
   %s658 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.658, i32 0, i32 0
-  %t659 = insertvalue %RuntimeHelperDescriptor %t657, i8* %s658, 2
-  %s660 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.660, i32 0, i32 0
-  %s661 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.661, i32 0, i32 0
-  %t662 = alloca [2 x i8*]
-  %t663 = getelementptr [2 x i8*], [2 x i8*]* %t662, i32 0, i32 0
-  %t664 = getelementptr i8*, i8** %t663, i64 0
-  store i8* %s660, i8** %t664
-  %t665 = getelementptr i8*, i8** %t663, i64 1
-  store i8* %s661, i8** %t665
-  %t666 = alloca { i8**, i64 }
-  %t667 = getelementptr { i8**, i64 }, { i8**, i64 }* %t666, i32 0, i32 0
-  store i8** %t663, i8*** %t667
-  %t668 = getelementptr { i8**, i64 }, { i8**, i64 }* %t666, i32 0, i32 1
-  store i64 2, i64* %t668
-  %t669 = insertvalue %RuntimeHelperDescriptor %t659, { i8**, i64 }* %t666, 3
-  %s670 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.670, i32 0, i32 0
-  %s671 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.671, i32 0, i32 0
-  %t672 = alloca [2 x i8*]
-  %t673 = getelementptr [2 x i8*], [2 x i8*]* %t672, i32 0, i32 0
-  %t674 = getelementptr i8*, i8** %t673, i64 0
-  store i8* %s670, i8** %t674
-  %t675 = getelementptr i8*, i8** %t673, i64 1
-  store i8* %s671, i8** %t675
-  %t676 = alloca { i8**, i64 }
-  %t677 = getelementptr { i8**, i64 }, { i8**, i64 }* %t676, i32 0, i32 0
-  store i8** %t673, i8*** %t677
-  %t678 = getelementptr { i8**, i64 }, { i8**, i64 }* %t676, i32 0, i32 1
-  store i64 2, i64* %t678
-  %t679 = insertvalue %RuntimeHelperDescriptor %t669, { i8**, i64 }* %t676, 4
-  %t680 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t653, %RuntimeHelperDescriptor %t679)
-  store { %RuntimeHelperDescriptor*, i64 }* %t680, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t681 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s682 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.682, i32 0, i32 0
-  %t683 = insertvalue %RuntimeHelperDescriptor undef, i8* %s682, 0
-  %s684 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.684, i32 0, i32 0
-  %t685 = insertvalue %RuntimeHelperDescriptor %t683, i8* %s684, 1
-  %s686 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.686, i32 0, i32 0
-  %t687 = insertvalue %RuntimeHelperDescriptor %t685, i8* %s686, 2
-  %s688 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.688, i32 0, i32 0
-  %t689 = alloca [1 x i8*]
-  %t690 = getelementptr [1 x i8*], [1 x i8*]* %t689, i32 0, i32 0
-  %t691 = getelementptr i8*, i8** %t690, i64 0
-  store i8* %s688, i8** %t691
+  %t659 = alloca [1 x i8*]
+  %t660 = getelementptr [1 x i8*], [1 x i8*]* %t659, i32 0, i32 0
+  %t661 = getelementptr i8*, i8** %t660, i64 0
+  store i8* %s658, i8** %t661
+  %t662 = alloca { i8**, i64 }
+  %t663 = getelementptr { i8**, i64 }, { i8**, i64 }* %t662, i32 0, i32 0
+  store i8** %t660, i8*** %t663
+  %t664 = getelementptr { i8**, i64 }, { i8**, i64 }* %t662, i32 0, i32 1
+  store i64 1, i64* %t664
+  %t665 = insertvalue %RuntimeHelperDescriptor %t657, { i8**, i64 }* %t662, 3
+  %t666 = alloca [0 x i8*]
+  %t667 = getelementptr [0 x i8*], [0 x i8*]* %t666, i32 0, i32 0
+  %t668 = alloca { i8**, i64 }
+  %t669 = getelementptr { i8**, i64 }, { i8**, i64 }* %t668, i32 0, i32 0
+  store i8** %t667, i8*** %t669
+  %t670 = getelementptr { i8**, i64 }, { i8**, i64 }* %t668, i32 0, i32 1
+  store i64 0, i64* %t670
+  %t671 = insertvalue %RuntimeHelperDescriptor %t665, { i8**, i64 }* %t668, 4
+  %t672 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t651, %RuntimeHelperDescriptor %t671)
+  store { %RuntimeHelperDescriptor*, i64 }* %t672, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t673 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s674 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.674, i32 0, i32 0
+  %t675 = insertvalue %RuntimeHelperDescriptor undef, i8* %s674, 0
+  %s676 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.676, i32 0, i32 0
+  %t677 = insertvalue %RuntimeHelperDescriptor %t675, i8* %s676, 1
+  %s678 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.678, i32 0, i32 0
+  %t679 = insertvalue %RuntimeHelperDescriptor %t677, i8* %s678, 2
+  %s680 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.680, i32 0, i32 0
+  %s681 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.681, i32 0, i32 0
+  %t682 = alloca [2 x i8*]
+  %t683 = getelementptr [2 x i8*], [2 x i8*]* %t682, i32 0, i32 0
+  %t684 = getelementptr i8*, i8** %t683, i64 0
+  store i8* %s680, i8** %t684
+  %t685 = getelementptr i8*, i8** %t683, i64 1
+  store i8* %s681, i8** %t685
+  %t686 = alloca { i8**, i64 }
+  %t687 = getelementptr { i8**, i64 }, { i8**, i64 }* %t686, i32 0, i32 0
+  store i8** %t683, i8*** %t687
+  %t688 = getelementptr { i8**, i64 }, { i8**, i64 }* %t686, i32 0, i32 1
+  store i64 2, i64* %t688
+  %t689 = insertvalue %RuntimeHelperDescriptor %t679, { i8**, i64 }* %t686, 3
+  %t690 = alloca [0 x i8*]
+  %t691 = getelementptr [0 x i8*], [0 x i8*]* %t690, i32 0, i32 0
   %t692 = alloca { i8**, i64 }
   %t693 = getelementptr { i8**, i64 }, { i8**, i64 }* %t692, i32 0, i32 0
-  store i8** %t690, i8*** %t693
+  store i8** %t691, i8*** %t693
   %t694 = getelementptr { i8**, i64 }, { i8**, i64 }* %t692, i32 0, i32 1
-  store i64 1, i64* %t694
-  %t695 = insertvalue %RuntimeHelperDescriptor %t687, { i8**, i64 }* %t692, 3
-  %s696 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.696, i32 0, i32 0
-  %t697 = alloca [1 x i8*]
-  %t698 = getelementptr [1 x i8*], [1 x i8*]* %t697, i32 0, i32 0
-  %t699 = getelementptr i8*, i8** %t698, i64 0
-  store i8* %s696, i8** %t699
-  %t700 = alloca { i8**, i64 }
-  %t701 = getelementptr { i8**, i64 }, { i8**, i64 }* %t700, i32 0, i32 0
-  store i8** %t698, i8*** %t701
-  %t702 = getelementptr { i8**, i64 }, { i8**, i64 }* %t700, i32 0, i32 1
-  store i64 1, i64* %t702
-  %t703 = insertvalue %RuntimeHelperDescriptor %t695, { i8**, i64 }* %t700, 4
-  %t704 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t681, %RuntimeHelperDescriptor %t703)
-  store { %RuntimeHelperDescriptor*, i64 }* %t704, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t705 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s706 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.706, i32 0, i32 0
-  %t707 = insertvalue %RuntimeHelperDescriptor undef, i8* %s706, 0
-  %s708 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.708, i32 0, i32 0
-  %t709 = insertvalue %RuntimeHelperDescriptor %t707, i8* %s708, 1
-  %s710 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.710, i32 0, i32 0
-  %t711 = insertvalue %RuntimeHelperDescriptor %t709, i8* %s710, 2
-  %s712 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.712, i32 0, i32 0
-  %t713 = alloca [1 x i8*]
-  %t714 = getelementptr [1 x i8*], [1 x i8*]* %t713, i32 0, i32 0
-  %t715 = getelementptr i8*, i8** %t714, i64 0
-  store i8* %s712, i8** %t715
-  %t716 = alloca { i8**, i64 }
-  %t717 = getelementptr { i8**, i64 }, { i8**, i64 }* %t716, i32 0, i32 0
-  store i8** %t714, i8*** %t717
-  %t718 = getelementptr { i8**, i64 }, { i8**, i64 }* %t716, i32 0, i32 1
-  store i64 1, i64* %t718
-  %t719 = insertvalue %RuntimeHelperDescriptor %t711, { i8**, i64 }* %t716, 3
-  %t720 = alloca [0 x i8*]
-  %t721 = getelementptr [0 x i8*], [0 x i8*]* %t720, i32 0, i32 0
-  %t722 = alloca { i8**, i64 }
-  %t723 = getelementptr { i8**, i64 }, { i8**, i64 }* %t722, i32 0, i32 0
-  store i8** %t721, i8*** %t723
-  %t724 = getelementptr { i8**, i64 }, { i8**, i64 }* %t722, i32 0, i32 1
-  store i64 0, i64* %t724
-  %t725 = insertvalue %RuntimeHelperDescriptor %t719, { i8**, i64 }* %t722, 4
-  %t726 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t705, %RuntimeHelperDescriptor %t725)
-  store { %RuntimeHelperDescriptor*, i64 }* %t726, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t727 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s728 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.728, i32 0, i32 0
-  %t729 = insertvalue %RuntimeHelperDescriptor undef, i8* %s728, 0
-  %s730 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.730, i32 0, i32 0
-  %t731 = insertvalue %RuntimeHelperDescriptor %t729, i8* %s730, 1
-  %s732 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.732, i32 0, i32 0
-  %t733 = insertvalue %RuntimeHelperDescriptor %t731, i8* %s732, 2
-  %s734 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.734, i32 0, i32 0
-  %s735 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.735, i32 0, i32 0
-  %t736 = alloca [2 x i8*]
-  %t737 = getelementptr [2 x i8*], [2 x i8*]* %t736, i32 0, i32 0
-  %t738 = getelementptr i8*, i8** %t737, i64 0
-  store i8* %s734, i8** %t738
-  %t739 = getelementptr i8*, i8** %t737, i64 1
-  store i8* %s735, i8** %t739
-  %t740 = alloca { i8**, i64 }
-  %t741 = getelementptr { i8**, i64 }, { i8**, i64 }* %t740, i32 0, i32 0
-  store i8** %t737, i8*** %t741
-  %t742 = getelementptr { i8**, i64 }, { i8**, i64 }* %t740, i32 0, i32 1
-  store i64 2, i64* %t742
-  %t743 = insertvalue %RuntimeHelperDescriptor %t733, { i8**, i64 }* %t740, 3
-  %s744 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.744, i32 0, i32 0
-  %t745 = alloca [1 x i8*]
-  %t746 = getelementptr [1 x i8*], [1 x i8*]* %t745, i32 0, i32 0
-  %t747 = getelementptr i8*, i8** %t746, i64 0
-  store i8* %s744, i8** %t747
-  %t748 = alloca { i8**, i64 }
-  %t749 = getelementptr { i8**, i64 }, { i8**, i64 }* %t748, i32 0, i32 0
-  store i8** %t746, i8*** %t749
-  %t750 = getelementptr { i8**, i64 }, { i8**, i64 }* %t748, i32 0, i32 1
-  store i64 1, i64* %t750
-  %t751 = insertvalue %RuntimeHelperDescriptor %t743, { i8**, i64 }* %t748, 4
-  %t752 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t727, %RuntimeHelperDescriptor %t751)
-  store { %RuntimeHelperDescriptor*, i64 }* %t752, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t753 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s754 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.754, i32 0, i32 0
-  %t755 = insertvalue %RuntimeHelperDescriptor undef, i8* %s754, 0
-  %s756 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.756, i32 0, i32 0
-  %t757 = insertvalue %RuntimeHelperDescriptor %t755, i8* %s756, 1
-  %s758 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.758, i32 0, i32 0
-  %t759 = insertvalue %RuntimeHelperDescriptor %t757, i8* %s758, 2
-  %s760 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.760, i32 0, i32 0
-  %t761 = alloca [1 x i8*]
-  %t762 = getelementptr [1 x i8*], [1 x i8*]* %t761, i32 0, i32 0
-  %t763 = getelementptr i8*, i8** %t762, i64 0
-  store i8* %s760, i8** %t763
-  %t764 = alloca { i8**, i64 }
-  %t765 = getelementptr { i8**, i64 }, { i8**, i64 }* %t764, i32 0, i32 0
-  store i8** %t762, i8*** %t765
-  %t766 = getelementptr { i8**, i64 }, { i8**, i64 }* %t764, i32 0, i32 1
-  store i64 1, i64* %t766
-  %t767 = insertvalue %RuntimeHelperDescriptor %t759, { i8**, i64 }* %t764, 3
-  %s768 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.768, i32 0, i32 0
-  %t769 = alloca [1 x i8*]
-  %t770 = getelementptr [1 x i8*], [1 x i8*]* %t769, i32 0, i32 0
-  %t771 = getelementptr i8*, i8** %t770, i64 0
-  store i8* %s768, i8** %t771
-  %t772 = alloca { i8**, i64 }
-  %t773 = getelementptr { i8**, i64 }, { i8**, i64 }* %t772, i32 0, i32 0
-  store i8** %t770, i8*** %t773
-  %t774 = getelementptr { i8**, i64 }, { i8**, i64 }* %t772, i32 0, i32 1
-  store i64 1, i64* %t774
-  %t775 = insertvalue %RuntimeHelperDescriptor %t767, { i8**, i64 }* %t772, 4
-  %t776 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t753, %RuntimeHelperDescriptor %t775)
-  store { %RuntimeHelperDescriptor*, i64 }* %t776, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t777 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s778 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.778, i32 0, i32 0
-  %t779 = insertvalue %RuntimeHelperDescriptor undef, i8* %s778, 0
-  %s780 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.780, i32 0, i32 0
-  %t781 = insertvalue %RuntimeHelperDescriptor %t779, i8* %s780, 1
-  %s782 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.782, i32 0, i32 0
-  %t783 = insertvalue %RuntimeHelperDescriptor %t781, i8* %s782, 2
-  %s784 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.784, i32 0, i32 0
-  %s785 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.785, i32 0, i32 0
-  %s786 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.786, i32 0, i32 0
-  %t787 = alloca [3 x i8*]
-  %t788 = getelementptr [3 x i8*], [3 x i8*]* %t787, i32 0, i32 0
+  store i64 0, i64* %t694
+  %t695 = insertvalue %RuntimeHelperDescriptor %t689, { i8**, i64 }* %t692, 4
+  %t696 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t673, %RuntimeHelperDescriptor %t695)
+  store { %RuntimeHelperDescriptor*, i64 }* %t696, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t697 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s698 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.698, i32 0, i32 0
+  %t699 = insertvalue %RuntimeHelperDescriptor undef, i8* %s698, 0
+  %s700 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.700, i32 0, i32 0
+  %t701 = insertvalue %RuntimeHelperDescriptor %t699, i8* %s700, 1
+  %s702 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.702, i32 0, i32 0
+  %t703 = insertvalue %RuntimeHelperDescriptor %t701, i8* %s702, 2
+  %s704 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.704, i32 0, i32 0
+  %s705 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.705, i32 0, i32 0
+  %t706 = alloca [2 x i8*]
+  %t707 = getelementptr [2 x i8*], [2 x i8*]* %t706, i32 0, i32 0
+  %t708 = getelementptr i8*, i8** %t707, i64 0
+  store i8* %s704, i8** %t708
+  %t709 = getelementptr i8*, i8** %t707, i64 1
+  store i8* %s705, i8** %t709
+  %t710 = alloca { i8**, i64 }
+  %t711 = getelementptr { i8**, i64 }, { i8**, i64 }* %t710, i32 0, i32 0
+  store i8** %t707, i8*** %t711
+  %t712 = getelementptr { i8**, i64 }, { i8**, i64 }* %t710, i32 0, i32 1
+  store i64 2, i64* %t712
+  %t713 = insertvalue %RuntimeHelperDescriptor %t703, { i8**, i64 }* %t710, 3
+  %s714 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.714, i32 0, i32 0
+  %s715 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.715, i32 0, i32 0
+  %t716 = alloca [2 x i8*]
+  %t717 = getelementptr [2 x i8*], [2 x i8*]* %t716, i32 0, i32 0
+  %t718 = getelementptr i8*, i8** %t717, i64 0
+  store i8* %s714, i8** %t718
+  %t719 = getelementptr i8*, i8** %t717, i64 1
+  store i8* %s715, i8** %t719
+  %t720 = alloca { i8**, i64 }
+  %t721 = getelementptr { i8**, i64 }, { i8**, i64 }* %t720, i32 0, i32 0
+  store i8** %t717, i8*** %t721
+  %t722 = getelementptr { i8**, i64 }, { i8**, i64 }* %t720, i32 0, i32 1
+  store i64 2, i64* %t722
+  %t723 = insertvalue %RuntimeHelperDescriptor %t713, { i8**, i64 }* %t720, 4
+  %t724 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t697, %RuntimeHelperDescriptor %t723)
+  store { %RuntimeHelperDescriptor*, i64 }* %t724, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t725 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s726 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.726, i32 0, i32 0
+  %t727 = insertvalue %RuntimeHelperDescriptor undef, i8* %s726, 0
+  %s728 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.728, i32 0, i32 0
+  %t729 = insertvalue %RuntimeHelperDescriptor %t727, i8* %s728, 1
+  %s730 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.730, i32 0, i32 0
+  %t731 = insertvalue %RuntimeHelperDescriptor %t729, i8* %s730, 2
+  %s732 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.732, i32 0, i32 0
+  %t733 = alloca [1 x i8*]
+  %t734 = getelementptr [1 x i8*], [1 x i8*]* %t733, i32 0, i32 0
+  %t735 = getelementptr i8*, i8** %t734, i64 0
+  store i8* %s732, i8** %t735
+  %t736 = alloca { i8**, i64 }
+  %t737 = getelementptr { i8**, i64 }, { i8**, i64 }* %t736, i32 0, i32 0
+  store i8** %t734, i8*** %t737
+  %t738 = getelementptr { i8**, i64 }, { i8**, i64 }* %t736, i32 0, i32 1
+  store i64 1, i64* %t738
+  %t739 = insertvalue %RuntimeHelperDescriptor %t731, { i8**, i64 }* %t736, 3
+  %t740 = alloca [0 x i8*]
+  %t741 = getelementptr [0 x i8*], [0 x i8*]* %t740, i32 0, i32 0
+  %t742 = alloca { i8**, i64 }
+  %t743 = getelementptr { i8**, i64 }, { i8**, i64 }* %t742, i32 0, i32 0
+  store i8** %t741, i8*** %t743
+  %t744 = getelementptr { i8**, i64 }, { i8**, i64 }* %t742, i32 0, i32 1
+  store i64 0, i64* %t744
+  %t745 = insertvalue %RuntimeHelperDescriptor %t739, { i8**, i64 }* %t742, 4
+  %t746 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t725, %RuntimeHelperDescriptor %t745)
+  store { %RuntimeHelperDescriptor*, i64 }* %t746, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t747 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s748 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.748, i32 0, i32 0
+  %t749 = insertvalue %RuntimeHelperDescriptor undef, i8* %s748, 0
+  %s750 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.750, i32 0, i32 0
+  %t751 = insertvalue %RuntimeHelperDescriptor %t749, i8* %s750, 1
+  %s752 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.752, i32 0, i32 0
+  %t753 = insertvalue %RuntimeHelperDescriptor %t751, i8* %s752, 2
+  %s754 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.754, i32 0, i32 0
+  %t755 = alloca [1 x i8*]
+  %t756 = getelementptr [1 x i8*], [1 x i8*]* %t755, i32 0, i32 0
+  %t757 = getelementptr i8*, i8** %t756, i64 0
+  store i8* %s754, i8** %t757
+  %t758 = alloca { i8**, i64 }
+  %t759 = getelementptr { i8**, i64 }, { i8**, i64 }* %t758, i32 0, i32 0
+  store i8** %t756, i8*** %t759
+  %t760 = getelementptr { i8**, i64 }, { i8**, i64 }* %t758, i32 0, i32 1
+  store i64 1, i64* %t760
+  %t761 = insertvalue %RuntimeHelperDescriptor %t753, { i8**, i64 }* %t758, 3
+  %s762 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.762, i32 0, i32 0
+  %t763 = alloca [1 x i8*]
+  %t764 = getelementptr [1 x i8*], [1 x i8*]* %t763, i32 0, i32 0
+  %t765 = getelementptr i8*, i8** %t764, i64 0
+  store i8* %s762, i8** %t765
+  %t766 = alloca { i8**, i64 }
+  %t767 = getelementptr { i8**, i64 }, { i8**, i64 }* %t766, i32 0, i32 0
+  store i8** %t764, i8*** %t767
+  %t768 = getelementptr { i8**, i64 }, { i8**, i64 }* %t766, i32 0, i32 1
+  store i64 1, i64* %t768
+  %t769 = insertvalue %RuntimeHelperDescriptor %t761, { i8**, i64 }* %t766, 4
+  %t770 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t747, %RuntimeHelperDescriptor %t769)
+  store { %RuntimeHelperDescriptor*, i64 }* %t770, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t771 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s772 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.772, i32 0, i32 0
+  %t773 = insertvalue %RuntimeHelperDescriptor undef, i8* %s772, 0
+  %s774 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.774, i32 0, i32 0
+  %t775 = insertvalue %RuntimeHelperDescriptor %t773, i8* %s774, 1
+  %s776 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.776, i32 0, i32 0
+  %t777 = insertvalue %RuntimeHelperDescriptor %t775, i8* %s776, 2
+  %s778 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.778, i32 0, i32 0
+  %t779 = alloca [1 x i8*]
+  %t780 = getelementptr [1 x i8*], [1 x i8*]* %t779, i32 0, i32 0
+  %t781 = getelementptr i8*, i8** %t780, i64 0
+  store i8* %s778, i8** %t781
+  %t782 = alloca { i8**, i64 }
+  %t783 = getelementptr { i8**, i64 }, { i8**, i64 }* %t782, i32 0, i32 0
+  store i8** %t780, i8*** %t783
+  %t784 = getelementptr { i8**, i64 }, { i8**, i64 }* %t782, i32 0, i32 1
+  store i64 1, i64* %t784
+  %t785 = insertvalue %RuntimeHelperDescriptor %t777, { i8**, i64 }* %t782, 3
+  %s786 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.786, i32 0, i32 0
+  %t787 = alloca [1 x i8*]
+  %t788 = getelementptr [1 x i8*], [1 x i8*]* %t787, i32 0, i32 0
   %t789 = getelementptr i8*, i8** %t788, i64 0
-  store i8* %s784, i8** %t789
-  %t790 = getelementptr i8*, i8** %t788, i64 1
-  store i8* %s785, i8** %t790
-  %t791 = getelementptr i8*, i8** %t788, i64 2
-  store i8* %s786, i8** %t791
-  %t792 = alloca { i8**, i64 }
-  %t793 = getelementptr { i8**, i64 }, { i8**, i64 }* %t792, i32 0, i32 0
-  store i8** %t788, i8*** %t793
-  %t794 = getelementptr { i8**, i64 }, { i8**, i64 }* %t792, i32 0, i32 1
-  store i64 3, i64* %t794
-  %t795 = insertvalue %RuntimeHelperDescriptor %t783, { i8**, i64 }* %t792, 3
-  %t796 = alloca [0 x i8*]
-  %t797 = getelementptr [0 x i8*], [0 x i8*]* %t796, i32 0, i32 0
-  %t798 = alloca { i8**, i64 }
-  %t799 = getelementptr { i8**, i64 }, { i8**, i64 }* %t798, i32 0, i32 0
-  store i8** %t797, i8*** %t799
-  %t800 = getelementptr { i8**, i64 }, { i8**, i64 }* %t798, i32 0, i32 1
-  store i64 0, i64* %t800
-  %t801 = insertvalue %RuntimeHelperDescriptor %t795, { i8**, i64 }* %t798, 4
-  %t802 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t777, %RuntimeHelperDescriptor %t801)
-  store { %RuntimeHelperDescriptor*, i64 }* %t802, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t803 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s804 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.804, i32 0, i32 0
-  %t805 = insertvalue %RuntimeHelperDescriptor undef, i8* %s804, 0
-  %s806 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.806, i32 0, i32 0
-  %t807 = insertvalue %RuntimeHelperDescriptor %t805, i8* %s806, 1
-  %s808 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.808, i32 0, i32 0
-  %t809 = insertvalue %RuntimeHelperDescriptor %t807, i8* %s808, 2
-  %s810 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.810, i32 0, i32 0
-  %t811 = alloca [1 x i8*]
-  %t812 = getelementptr [1 x i8*], [1 x i8*]* %t811, i32 0, i32 0
-  %t813 = getelementptr i8*, i8** %t812, i64 0
-  store i8* %s810, i8** %t813
-  %t814 = alloca { i8**, i64 }
-  %t815 = getelementptr { i8**, i64 }, { i8**, i64 }* %t814, i32 0, i32 0
-  store i8** %t812, i8*** %t815
-  %t816 = getelementptr { i8**, i64 }, { i8**, i64 }* %t814, i32 0, i32 1
-  store i64 1, i64* %t816
-  %t817 = insertvalue %RuntimeHelperDescriptor %t809, { i8**, i64 }* %t814, 3
-  %t818 = alloca [0 x i8*]
-  %t819 = getelementptr [0 x i8*], [0 x i8*]* %t818, i32 0, i32 0
-  %t820 = alloca { i8**, i64 }
-  %t821 = getelementptr { i8**, i64 }, { i8**, i64 }* %t820, i32 0, i32 0
-  store i8** %t819, i8*** %t821
-  %t822 = getelementptr { i8**, i64 }, { i8**, i64 }* %t820, i32 0, i32 1
-  store i64 0, i64* %t822
-  %t823 = insertvalue %RuntimeHelperDescriptor %t817, { i8**, i64 }* %t820, 4
-  %t824 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t803, %RuntimeHelperDescriptor %t823)
-  store { %RuntimeHelperDescriptor*, i64 }* %t824, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t825 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s826 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.826, i32 0, i32 0
-  %t827 = insertvalue %RuntimeHelperDescriptor undef, i8* %s826, 0
-  %s828 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.828, i32 0, i32 0
-  %t829 = insertvalue %RuntimeHelperDescriptor %t827, i8* %s828, 1
-  %s830 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.830, i32 0, i32 0
-  %t831 = insertvalue %RuntimeHelperDescriptor %t829, i8* %s830, 2
-  %s832 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.832, i32 0, i32 0
-  %t833 = alloca [1 x i8*]
-  %t834 = getelementptr [1 x i8*], [1 x i8*]* %t833, i32 0, i32 0
-  %t835 = getelementptr i8*, i8** %t834, i64 0
-  store i8* %s832, i8** %t835
-  %t836 = alloca { i8**, i64 }
-  %t837 = getelementptr { i8**, i64 }, { i8**, i64 }* %t836, i32 0, i32 0
-  store i8** %t834, i8*** %t837
-  %t838 = getelementptr { i8**, i64 }, { i8**, i64 }* %t836, i32 0, i32 1
-  store i64 1, i64* %t838
-  %t839 = insertvalue %RuntimeHelperDescriptor %t831, { i8**, i64 }* %t836, 3
-  %t840 = alloca [0 x i8*]
-  %t841 = getelementptr [0 x i8*], [0 x i8*]* %t840, i32 0, i32 0
+  store i8* %s786, i8** %t789
+  %t790 = alloca { i8**, i64 }
+  %t791 = getelementptr { i8**, i64 }, { i8**, i64 }* %t790, i32 0, i32 0
+  store i8** %t788, i8*** %t791
+  %t792 = getelementptr { i8**, i64 }, { i8**, i64 }* %t790, i32 0, i32 1
+  store i64 1, i64* %t792
+  %t793 = insertvalue %RuntimeHelperDescriptor %t785, { i8**, i64 }* %t790, 4
+  %t794 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t771, %RuntimeHelperDescriptor %t793)
+  store { %RuntimeHelperDescriptor*, i64 }* %t794, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t795 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s796 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.796, i32 0, i32 0
+  %t797 = insertvalue %RuntimeHelperDescriptor undef, i8* %s796, 0
+  %s798 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.798, i32 0, i32 0
+  %t799 = insertvalue %RuntimeHelperDescriptor %t797, i8* %s798, 1
+  %s800 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.800, i32 0, i32 0
+  %t801 = insertvalue %RuntimeHelperDescriptor %t799, i8* %s800, 2
+  %s802 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.802, i32 0, i32 0
+  %s803 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.803, i32 0, i32 0
+  %t804 = alloca [2 x i8*]
+  %t805 = getelementptr [2 x i8*], [2 x i8*]* %t804, i32 0, i32 0
+  %t806 = getelementptr i8*, i8** %t805, i64 0
+  store i8* %s802, i8** %t806
+  %t807 = getelementptr i8*, i8** %t805, i64 1
+  store i8* %s803, i8** %t807
+  %t808 = alloca { i8**, i64 }
+  %t809 = getelementptr { i8**, i64 }, { i8**, i64 }* %t808, i32 0, i32 0
+  store i8** %t805, i8*** %t809
+  %t810 = getelementptr { i8**, i64 }, { i8**, i64 }* %t808, i32 0, i32 1
+  store i64 2, i64* %t810
+  %t811 = insertvalue %RuntimeHelperDescriptor %t801, { i8**, i64 }* %t808, 3
+  %s812 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.812, i32 0, i32 0
+  %t813 = alloca [1 x i8*]
+  %t814 = getelementptr [1 x i8*], [1 x i8*]* %t813, i32 0, i32 0
+  %t815 = getelementptr i8*, i8** %t814, i64 0
+  store i8* %s812, i8** %t815
+  %t816 = alloca { i8**, i64 }
+  %t817 = getelementptr { i8**, i64 }, { i8**, i64 }* %t816, i32 0, i32 0
+  store i8** %t814, i8*** %t817
+  %t818 = getelementptr { i8**, i64 }, { i8**, i64 }* %t816, i32 0, i32 1
+  store i64 1, i64* %t818
+  %t819 = insertvalue %RuntimeHelperDescriptor %t811, { i8**, i64 }* %t816, 4
+  %t820 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t795, %RuntimeHelperDescriptor %t819)
+  store { %RuntimeHelperDescriptor*, i64 }* %t820, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t821 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s822 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.822, i32 0, i32 0
+  %t823 = insertvalue %RuntimeHelperDescriptor undef, i8* %s822, 0
+  %s824 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.824, i32 0, i32 0
+  %t825 = insertvalue %RuntimeHelperDescriptor %t823, i8* %s824, 1
+  %s826 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.826, i32 0, i32 0
+  %t827 = insertvalue %RuntimeHelperDescriptor %t825, i8* %s826, 2
+  %s828 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.828, i32 0, i32 0
+  %s829 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.829, i32 0, i32 0
+  %t830 = alloca [2 x i8*]
+  %t831 = getelementptr [2 x i8*], [2 x i8*]* %t830, i32 0, i32 0
+  %t832 = getelementptr i8*, i8** %t831, i64 0
+  store i8* %s828, i8** %t832
+  %t833 = getelementptr i8*, i8** %t831, i64 1
+  store i8* %s829, i8** %t833
+  %t834 = alloca { i8**, i64 }
+  %t835 = getelementptr { i8**, i64 }, { i8**, i64 }* %t834, i32 0, i32 0
+  store i8** %t831, i8*** %t835
+  %t836 = getelementptr { i8**, i64 }, { i8**, i64 }* %t834, i32 0, i32 1
+  store i64 2, i64* %t836
+  %t837 = insertvalue %RuntimeHelperDescriptor %t827, { i8**, i64 }* %t834, 3
+  %s838 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.838, i32 0, i32 0
+  %t839 = alloca [1 x i8*]
+  %t840 = getelementptr [1 x i8*], [1 x i8*]* %t839, i32 0, i32 0
+  %t841 = getelementptr i8*, i8** %t840, i64 0
+  store i8* %s838, i8** %t841
   %t842 = alloca { i8**, i64 }
   %t843 = getelementptr { i8**, i64 }, { i8**, i64 }* %t842, i32 0, i32 0
-  store i8** %t841, i8*** %t843
+  store i8** %t840, i8*** %t843
   %t844 = getelementptr { i8**, i64 }, { i8**, i64 }* %t842, i32 0, i32 1
-  store i64 0, i64* %t844
-  %t845 = insertvalue %RuntimeHelperDescriptor %t839, { i8**, i64 }* %t842, 4
-  %t846 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t825, %RuntimeHelperDescriptor %t845)
+  store i64 1, i64* %t844
+  %t845 = insertvalue %RuntimeHelperDescriptor %t837, { i8**, i64 }* %t842, 4
+  %t846 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t821, %RuntimeHelperDescriptor %t845)
   store { %RuntimeHelperDescriptor*, i64 }* %t846, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t847 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s848 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.848, i32 0, i32 0
+  %s848 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.848, i32 0, i32 0
   %t849 = insertvalue %RuntimeHelperDescriptor undef, i8* %s848, 0
-  %s850 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.850, i32 0, i32 0
+  %s850 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.850, i32 0, i32 0
   %t851 = insertvalue %RuntimeHelperDescriptor %t849, i8* %s850, 1
-  %s852 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.852, i32 0, i32 0
+  %s852 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.852, i32 0, i32 0
   %t853 = insertvalue %RuntimeHelperDescriptor %t851, i8* %s852, 2
-  %s854 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.854, i32 0, i32 0
+  %s854 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.854, i32 0, i32 0
   %t855 = alloca [1 x i8*]
   %t856 = getelementptr [1 x i8*], [1 x i8*]* %t855, i32 0, i32 0
   %t857 = getelementptr i8*, i8** %t856, i64 0
@@ -13548,167 +13609,616 @@ entry:
   %t860 = getelementptr { i8**, i64 }, { i8**, i64 }* %t858, i32 0, i32 1
   store i64 1, i64* %t860
   %t861 = insertvalue %RuntimeHelperDescriptor %t853, { i8**, i64 }* %t858, 3
-  %t862 = alloca [0 x i8*]
-  %t863 = getelementptr [0 x i8*], [0 x i8*]* %t862, i32 0, i32 0
-  %t864 = alloca { i8**, i64 }
-  %t865 = getelementptr { i8**, i64 }, { i8**, i64 }* %t864, i32 0, i32 0
-  store i8** %t863, i8*** %t865
-  %t866 = getelementptr { i8**, i64 }, { i8**, i64 }* %t864, i32 0, i32 1
-  store i64 0, i64* %t866
-  %t867 = insertvalue %RuntimeHelperDescriptor %t861, { i8**, i64 }* %t864, 4
-  %t868 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t847, %RuntimeHelperDescriptor %t867)
-  store { %RuntimeHelperDescriptor*, i64 }* %t868, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t869 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s870 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.870, i32 0, i32 0
-  %t871 = insertvalue %RuntimeHelperDescriptor undef, i8* %s870, 0
-  %s872 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.872, i32 0, i32 0
-  %t873 = insertvalue %RuntimeHelperDescriptor %t871, i8* %s872, 1
-  %s874 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.874, i32 0, i32 0
-  %t875 = insertvalue %RuntimeHelperDescriptor %t873, i8* %s874, 2
-  %s876 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.876, i32 0, i32 0
-  %t877 = alloca [1 x i8*]
-  %t878 = getelementptr [1 x i8*], [1 x i8*]* %t877, i32 0, i32 0
-  %t879 = getelementptr i8*, i8** %t878, i64 0
-  store i8* %s876, i8** %t879
-  %t880 = alloca { i8**, i64 }
-  %t881 = getelementptr { i8**, i64 }, { i8**, i64 }* %t880, i32 0, i32 0
-  store i8** %t878, i8*** %t881
-  %t882 = getelementptr { i8**, i64 }, { i8**, i64 }* %t880, i32 0, i32 1
-  store i64 1, i64* %t882
-  %t883 = insertvalue %RuntimeHelperDescriptor %t875, { i8**, i64 }* %t880, 3
-  %t884 = alloca [0 x i8*]
-  %t885 = getelementptr [0 x i8*], [0 x i8*]* %t884, i32 0, i32 0
-  %t886 = alloca { i8**, i64 }
-  %t887 = getelementptr { i8**, i64 }, { i8**, i64 }* %t886, i32 0, i32 0
-  store i8** %t885, i8*** %t887
-  %t888 = getelementptr { i8**, i64 }, { i8**, i64 }* %t886, i32 0, i32 1
-  store i64 0, i64* %t888
-  %t889 = insertvalue %RuntimeHelperDescriptor %t883, { i8**, i64 }* %t886, 4
-  %t890 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t869, %RuntimeHelperDescriptor %t889)
-  store { %RuntimeHelperDescriptor*, i64 }* %t890, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t891 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s892 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.892, i32 0, i32 0
-  %t893 = insertvalue %RuntimeHelperDescriptor undef, i8* %s892, 0
-  %s894 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.894, i32 0, i32 0
-  %t895 = insertvalue %RuntimeHelperDescriptor %t893, i8* %s894, 1
-  %s896 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.896, i32 0, i32 0
-  %t897 = insertvalue %RuntimeHelperDescriptor %t895, i8* %s896, 2
-  %s898 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.898, i32 0, i32 0
-  %t899 = alloca [1 x i8*]
-  %t900 = getelementptr [1 x i8*], [1 x i8*]* %t899, i32 0, i32 0
-  %t901 = getelementptr i8*, i8** %t900, i64 0
-  store i8* %s898, i8** %t901
-  %t902 = alloca { i8**, i64 }
-  %t903 = getelementptr { i8**, i64 }, { i8**, i64 }* %t902, i32 0, i32 0
-  store i8** %t900, i8*** %t903
-  %t904 = getelementptr { i8**, i64 }, { i8**, i64 }* %t902, i32 0, i32 1
-  store i64 1, i64* %t904
-  %t905 = insertvalue %RuntimeHelperDescriptor %t897, { i8**, i64 }* %t902, 3
-  %t906 = alloca [0 x i8*]
-  %t907 = getelementptr [0 x i8*], [0 x i8*]* %t906, i32 0, i32 0
-  %t908 = alloca { i8**, i64 }
-  %t909 = getelementptr { i8**, i64 }, { i8**, i64 }* %t908, i32 0, i32 0
-  store i8** %t907, i8*** %t909
-  %t910 = getelementptr { i8**, i64 }, { i8**, i64 }* %t908, i32 0, i32 1
-  store i64 0, i64* %t910
-  %t911 = insertvalue %RuntimeHelperDescriptor %t905, { i8**, i64 }* %t908, 4
-  %t912 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t891, %RuntimeHelperDescriptor %t911)
-  store { %RuntimeHelperDescriptor*, i64 }* %t912, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t913 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s914 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.914, i32 0, i32 0
-  %t915 = insertvalue %RuntimeHelperDescriptor undef, i8* %s914, 0
-  %s916 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.916, i32 0, i32 0
-  %t917 = insertvalue %RuntimeHelperDescriptor %t915, i8* %s916, 1
-  %s918 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.918, i32 0, i32 0
-  %t919 = insertvalue %RuntimeHelperDescriptor %t917, i8* %s918, 2
-  %s920 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.920, i32 0, i32 0
-  %s921 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.921, i32 0, i32 0
-  %t922 = alloca [2 x i8*]
-  %t923 = getelementptr [2 x i8*], [2 x i8*]* %t922, i32 0, i32 0
-  %t924 = getelementptr i8*, i8** %t923, i64 0
-  store i8* %s920, i8** %t924
-  %t925 = getelementptr i8*, i8** %t923, i64 1
-  store i8* %s921, i8** %t925
-  %t926 = alloca { i8**, i64 }
-  %t927 = getelementptr { i8**, i64 }, { i8**, i64 }* %t926, i32 0, i32 0
-  store i8** %t923, i8*** %t927
-  %t928 = getelementptr { i8**, i64 }, { i8**, i64 }* %t926, i32 0, i32 1
-  store i64 2, i64* %t928
-  %t929 = insertvalue %RuntimeHelperDescriptor %t919, { i8**, i64 }* %t926, 3
-  %t930 = alloca [0 x i8*]
-  %t931 = getelementptr [0 x i8*], [0 x i8*]* %t930, i32 0, i32 0
+  %s862 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.862, i32 0, i32 0
+  %t863 = alloca [1 x i8*]
+  %t864 = getelementptr [1 x i8*], [1 x i8*]* %t863, i32 0, i32 0
+  %t865 = getelementptr i8*, i8** %t864, i64 0
+  store i8* %s862, i8** %t865
+  %t866 = alloca { i8**, i64 }
+  %t867 = getelementptr { i8**, i64 }, { i8**, i64 }* %t866, i32 0, i32 0
+  store i8** %t864, i8*** %t867
+  %t868 = getelementptr { i8**, i64 }, { i8**, i64 }* %t866, i32 0, i32 1
+  store i64 1, i64* %t868
+  %t869 = insertvalue %RuntimeHelperDescriptor %t861, { i8**, i64 }* %t866, 4
+  %t870 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t847, %RuntimeHelperDescriptor %t869)
+  store { %RuntimeHelperDescriptor*, i64 }* %t870, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t871 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s872 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.872, i32 0, i32 0
+  %t873 = insertvalue %RuntimeHelperDescriptor undef, i8* %s872, 0
+  %s874 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.874, i32 0, i32 0
+  %t875 = insertvalue %RuntimeHelperDescriptor %t873, i8* %s874, 1
+  %s876 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.876, i32 0, i32 0
+  %t877 = insertvalue %RuntimeHelperDescriptor %t875, i8* %s876, 2
+  %s878 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.878, i32 0, i32 0
+  %t879 = alloca [1 x i8*]
+  %t880 = getelementptr [1 x i8*], [1 x i8*]* %t879, i32 0, i32 0
+  %t881 = getelementptr i8*, i8** %t880, i64 0
+  store i8* %s878, i8** %t881
+  %t882 = alloca { i8**, i64 }
+  %t883 = getelementptr { i8**, i64 }, { i8**, i64 }* %t882, i32 0, i32 0
+  store i8** %t880, i8*** %t883
+  %t884 = getelementptr { i8**, i64 }, { i8**, i64 }* %t882, i32 0, i32 1
+  store i64 1, i64* %t884
+  %t885 = insertvalue %RuntimeHelperDescriptor %t877, { i8**, i64 }* %t882, 3
+  %s886 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.886, i32 0, i32 0
+  %t887 = alloca [1 x i8*]
+  %t888 = getelementptr [1 x i8*], [1 x i8*]* %t887, i32 0, i32 0
+  %t889 = getelementptr i8*, i8** %t888, i64 0
+  store i8* %s886, i8** %t889
+  %t890 = alloca { i8**, i64 }
+  %t891 = getelementptr { i8**, i64 }, { i8**, i64 }* %t890, i32 0, i32 0
+  store i8** %t888, i8*** %t891
+  %t892 = getelementptr { i8**, i64 }, { i8**, i64 }* %t890, i32 0, i32 1
+  store i64 1, i64* %t892
+  %t893 = insertvalue %RuntimeHelperDescriptor %t885, { i8**, i64 }* %t890, 4
+  %t894 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t871, %RuntimeHelperDescriptor %t893)
+  store { %RuntimeHelperDescriptor*, i64 }* %t894, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t895 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s896 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.896, i32 0, i32 0
+  %t897 = insertvalue %RuntimeHelperDescriptor undef, i8* %s896, 0
+  %s898 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.898, i32 0, i32 0
+  %t899 = insertvalue %RuntimeHelperDescriptor %t897, i8* %s898, 1
+  %s900 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.900, i32 0, i32 0
+  %t901 = insertvalue %RuntimeHelperDescriptor %t899, i8* %s900, 2
+  %s902 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.902, i32 0, i32 0
+  %t903 = alloca [1 x i8*]
+  %t904 = getelementptr [1 x i8*], [1 x i8*]* %t903, i32 0, i32 0
+  %t905 = getelementptr i8*, i8** %t904, i64 0
+  store i8* %s902, i8** %t905
+  %t906 = alloca { i8**, i64 }
+  %t907 = getelementptr { i8**, i64 }, { i8**, i64 }* %t906, i32 0, i32 0
+  store i8** %t904, i8*** %t907
+  %t908 = getelementptr { i8**, i64 }, { i8**, i64 }* %t906, i32 0, i32 1
+  store i64 1, i64* %t908
+  %t909 = insertvalue %RuntimeHelperDescriptor %t901, { i8**, i64 }* %t906, 3
+  %s910 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.910, i32 0, i32 0
+  %t911 = alloca [1 x i8*]
+  %t912 = getelementptr [1 x i8*], [1 x i8*]* %t911, i32 0, i32 0
+  %t913 = getelementptr i8*, i8** %t912, i64 0
+  store i8* %s910, i8** %t913
+  %t914 = alloca { i8**, i64 }
+  %t915 = getelementptr { i8**, i64 }, { i8**, i64 }* %t914, i32 0, i32 0
+  store i8** %t912, i8*** %t915
+  %t916 = getelementptr { i8**, i64 }, { i8**, i64 }* %t914, i32 0, i32 1
+  store i64 1, i64* %t916
+  %t917 = insertvalue %RuntimeHelperDescriptor %t909, { i8**, i64 }* %t914, 4
+  %t918 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t895, %RuntimeHelperDescriptor %t917)
+  store { %RuntimeHelperDescriptor*, i64 }* %t918, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t919 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s920 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.920, i32 0, i32 0
+  %t921 = insertvalue %RuntimeHelperDescriptor undef, i8* %s920, 0
+  %s922 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.922, i32 0, i32 0
+  %t923 = insertvalue %RuntimeHelperDescriptor %t921, i8* %s922, 1
+  %s924 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.924, i32 0, i32 0
+  %t925 = insertvalue %RuntimeHelperDescriptor %t923, i8* %s924, 2
+  %s926 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.926, i32 0, i32 0
+  %s927 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.927, i32 0, i32 0
+  %t928 = alloca [2 x i8*]
+  %t929 = getelementptr [2 x i8*], [2 x i8*]* %t928, i32 0, i32 0
+  %t930 = getelementptr i8*, i8** %t929, i64 0
+  store i8* %s926, i8** %t930
+  %t931 = getelementptr i8*, i8** %t929, i64 1
+  store i8* %s927, i8** %t931
   %t932 = alloca { i8**, i64 }
   %t933 = getelementptr { i8**, i64 }, { i8**, i64 }* %t932, i32 0, i32 0
-  store i8** %t931, i8*** %t933
+  store i8** %t929, i8*** %t933
   %t934 = getelementptr { i8**, i64 }, { i8**, i64 }* %t932, i32 0, i32 1
-  store i64 0, i64* %t934
-  %t935 = insertvalue %RuntimeHelperDescriptor %t929, { i8**, i64 }* %t932, 4
-  %t936 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t913, %RuntimeHelperDescriptor %t935)
-  store { %RuntimeHelperDescriptor*, i64 }* %t936, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t937 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s938 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.938, i32 0, i32 0
-  %t939 = insertvalue %RuntimeHelperDescriptor undef, i8* %s938, 0
-  %s940 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.940, i32 0, i32 0
-  %t941 = insertvalue %RuntimeHelperDescriptor %t939, i8* %s940, 1
-  %s942 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.942, i32 0, i32 0
-  %t943 = insertvalue %RuntimeHelperDescriptor %t941, i8* %s942, 2
-  %s944 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.944, i32 0, i32 0
-  %s945 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.945, i32 0, i32 0
-  %t946 = alloca [2 x i8*]
-  %t947 = getelementptr [2 x i8*], [2 x i8*]* %t946, i32 0, i32 0
-  %t948 = getelementptr i8*, i8** %t947, i64 0
-  store i8* %s944, i8** %t948
-  %t949 = getelementptr i8*, i8** %t947, i64 1
-  store i8* %s945, i8** %t949
-  %t950 = alloca { i8**, i64 }
-  %t951 = getelementptr { i8**, i64 }, { i8**, i64 }* %t950, i32 0, i32 0
-  store i8** %t947, i8*** %t951
-  %t952 = getelementptr { i8**, i64 }, { i8**, i64 }* %t950, i32 0, i32 1
-  store i64 2, i64* %t952
-  %t953 = insertvalue %RuntimeHelperDescriptor %t943, { i8**, i64 }* %t950, 3
-  %t954 = alloca [0 x i8*]
-  %t955 = getelementptr [0 x i8*], [0 x i8*]* %t954, i32 0, i32 0
-  %t956 = alloca { i8**, i64 }
-  %t957 = getelementptr { i8**, i64 }, { i8**, i64 }* %t956, i32 0, i32 0
-  store i8** %t955, i8*** %t957
-  %t958 = getelementptr { i8**, i64 }, { i8**, i64 }* %t956, i32 0, i32 1
-  store i64 0, i64* %t958
-  %t959 = insertvalue %RuntimeHelperDescriptor %t953, { i8**, i64 }* %t956, 4
-  %t960 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t937, %RuntimeHelperDescriptor %t959)
-  store { %RuntimeHelperDescriptor*, i64 }* %t960, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t961 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s962 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.962, i32 0, i32 0
-  %t963 = insertvalue %RuntimeHelperDescriptor undef, i8* %s962, 0
-  %s964 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.964, i32 0, i32 0
-  %t965 = insertvalue %RuntimeHelperDescriptor %t963, i8* %s964, 1
-  %s966 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.966, i32 0, i32 0
-  %t967 = insertvalue %RuntimeHelperDescriptor %t965, i8* %s966, 2
-  %s968 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.968, i32 0, i32 0
-  %s969 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.969, i32 0, i32 0
-  %t970 = alloca [2 x i8*]
-  %t971 = getelementptr [2 x i8*], [2 x i8*]* %t970, i32 0, i32 0
-  %t972 = getelementptr i8*, i8** %t971, i64 0
-  store i8* %s968, i8** %t972
-  %t973 = getelementptr i8*, i8** %t971, i64 1
-  store i8* %s969, i8** %t973
-  %t974 = alloca { i8**, i64 }
-  %t975 = getelementptr { i8**, i64 }, { i8**, i64 }* %t974, i32 0, i32 0
-  store i8** %t971, i8*** %t975
-  %t976 = getelementptr { i8**, i64 }, { i8**, i64 }* %t974, i32 0, i32 1
-  store i64 2, i64* %t976
-  %t977 = insertvalue %RuntimeHelperDescriptor %t967, { i8**, i64 }* %t974, 3
-  %t978 = alloca [0 x i8*]
-  %t979 = getelementptr [0 x i8*], [0 x i8*]* %t978, i32 0, i32 0
-  %t980 = alloca { i8**, i64 }
-  %t981 = getelementptr { i8**, i64 }, { i8**, i64 }* %t980, i32 0, i32 0
-  store i8** %t979, i8*** %t981
-  %t982 = getelementptr { i8**, i64 }, { i8**, i64 }* %t980, i32 0, i32 1
-  store i64 0, i64* %t982
-  %t983 = insertvalue %RuntimeHelperDescriptor %t977, { i8**, i64 }* %t980, 4
-  %t984 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t961, %RuntimeHelperDescriptor %t983)
-  store { %RuntimeHelperDescriptor*, i64 }* %t984, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t985 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  ret { %RuntimeHelperDescriptor*, i64 }* %t985
+  store i64 2, i64* %t934
+  %t935 = insertvalue %RuntimeHelperDescriptor %t925, { i8**, i64 }* %t932, 3
+  %s936 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.936, i32 0, i32 0
+  %t937 = alloca [1 x i8*]
+  %t938 = getelementptr [1 x i8*], [1 x i8*]* %t937, i32 0, i32 0
+  %t939 = getelementptr i8*, i8** %t938, i64 0
+  store i8* %s936, i8** %t939
+  %t940 = alloca { i8**, i64 }
+  %t941 = getelementptr { i8**, i64 }, { i8**, i64 }* %t940, i32 0, i32 0
+  store i8** %t938, i8*** %t941
+  %t942 = getelementptr { i8**, i64 }, { i8**, i64 }* %t940, i32 0, i32 1
+  store i64 1, i64* %t942
+  %t943 = insertvalue %RuntimeHelperDescriptor %t935, { i8**, i64 }* %t940, 4
+  %t944 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t919, %RuntimeHelperDescriptor %t943)
+  store { %RuntimeHelperDescriptor*, i64 }* %t944, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t945 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s946 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.946, i32 0, i32 0
+  %t947 = insertvalue %RuntimeHelperDescriptor undef, i8* %s946, 0
+  %s948 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.948, i32 0, i32 0
+  %t949 = insertvalue %RuntimeHelperDescriptor %t947, i8* %s948, 1
+  %s950 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.950, i32 0, i32 0
+  %t951 = insertvalue %RuntimeHelperDescriptor %t949, i8* %s950, 2
+  %s952 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.952, i32 0, i32 0
+  %s953 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.953, i32 0, i32 0
+  %t954 = alloca [2 x i8*]
+  %t955 = getelementptr [2 x i8*], [2 x i8*]* %t954, i32 0, i32 0
+  %t956 = getelementptr i8*, i8** %t955, i64 0
+  store i8* %s952, i8** %t956
+  %t957 = getelementptr i8*, i8** %t955, i64 1
+  store i8* %s953, i8** %t957
+  %t958 = alloca { i8**, i64 }
+  %t959 = getelementptr { i8**, i64 }, { i8**, i64 }* %t958, i32 0, i32 0
+  store i8** %t955, i8*** %t959
+  %t960 = getelementptr { i8**, i64 }, { i8**, i64 }* %t958, i32 0, i32 1
+  store i64 2, i64* %t960
+  %t961 = insertvalue %RuntimeHelperDescriptor %t951, { i8**, i64 }* %t958, 3
+  %s962 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.962, i32 0, i32 0
+  %t963 = alloca [1 x i8*]
+  %t964 = getelementptr [1 x i8*], [1 x i8*]* %t963, i32 0, i32 0
+  %t965 = getelementptr i8*, i8** %t964, i64 0
+  store i8* %s962, i8** %t965
+  %t966 = alloca { i8**, i64 }
+  %t967 = getelementptr { i8**, i64 }, { i8**, i64 }* %t966, i32 0, i32 0
+  store i8** %t964, i8*** %t967
+  %t968 = getelementptr { i8**, i64 }, { i8**, i64 }* %t966, i32 0, i32 1
+  store i64 1, i64* %t968
+  %t969 = insertvalue %RuntimeHelperDescriptor %t961, { i8**, i64 }* %t966, 4
+  %t970 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t945, %RuntimeHelperDescriptor %t969)
+  store { %RuntimeHelperDescriptor*, i64 }* %t970, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t971 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s972 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.972, i32 0, i32 0
+  %t973 = insertvalue %RuntimeHelperDescriptor undef, i8* %s972, 0
+  %s974 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.974, i32 0, i32 0
+  %t975 = insertvalue %RuntimeHelperDescriptor %t973, i8* %s974, 1
+  %s976 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.976, i32 0, i32 0
+  %t977 = insertvalue %RuntimeHelperDescriptor %t975, i8* %s976, 2
+  %s978 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.978, i32 0, i32 0
+  %s979 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.979, i32 0, i32 0
+  %t980 = alloca [2 x i8*]
+  %t981 = getelementptr [2 x i8*], [2 x i8*]* %t980, i32 0, i32 0
+  %t982 = getelementptr i8*, i8** %t981, i64 0
+  store i8* %s978, i8** %t982
+  %t983 = getelementptr i8*, i8** %t981, i64 1
+  store i8* %s979, i8** %t983
+  %t984 = alloca { i8**, i64 }
+  %t985 = getelementptr { i8**, i64 }, { i8**, i64 }* %t984, i32 0, i32 0
+  store i8** %t981, i8*** %t985
+  %t986 = getelementptr { i8**, i64 }, { i8**, i64 }* %t984, i32 0, i32 1
+  store i64 2, i64* %t986
+  %t987 = insertvalue %RuntimeHelperDescriptor %t977, { i8**, i64 }* %t984, 3
+  %s988 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.988, i32 0, i32 0
+  %s989 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.989, i32 0, i32 0
+  %t990 = alloca [2 x i8*]
+  %t991 = getelementptr [2 x i8*], [2 x i8*]* %t990, i32 0, i32 0
+  %t992 = getelementptr i8*, i8** %t991, i64 0
+  store i8* %s988, i8** %t992
+  %t993 = getelementptr i8*, i8** %t991, i64 1
+  store i8* %s989, i8** %t993
+  %t994 = alloca { i8**, i64 }
+  %t995 = getelementptr { i8**, i64 }, { i8**, i64 }* %t994, i32 0, i32 0
+  store i8** %t991, i8*** %t995
+  %t996 = getelementptr { i8**, i64 }, { i8**, i64 }* %t994, i32 0, i32 1
+  store i64 2, i64* %t996
+  %t997 = insertvalue %RuntimeHelperDescriptor %t987, { i8**, i64 }* %t994, 4
+  %t998 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t971, %RuntimeHelperDescriptor %t997)
+  store { %RuntimeHelperDescriptor*, i64 }* %t998, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t999 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1000 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.1000, i32 0, i32 0
+  %t1001 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1000, 0
+  %s1002 = getelementptr inbounds [39 x i8], [39 x i8]* @.str.1002, i32 0, i32 0
+  %t1003 = insertvalue %RuntimeHelperDescriptor %t1001, i8* %s1002, 1
+  %s1004 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1004, i32 0, i32 0
+  %t1005 = insertvalue %RuntimeHelperDescriptor %t1003, i8* %s1004, 2
+  %s1006 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1006, i32 0, i32 0
+  %s1007 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1007, i32 0, i32 0
+  %t1008 = alloca [2 x i8*]
+  %t1009 = getelementptr [2 x i8*], [2 x i8*]* %t1008, i32 0, i32 0
+  %t1010 = getelementptr i8*, i8** %t1009, i64 0
+  store i8* %s1006, i8** %t1010
+  %t1011 = getelementptr i8*, i8** %t1009, i64 1
+  store i8* %s1007, i8** %t1011
+  %t1012 = alloca { i8**, i64 }
+  %t1013 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1012, i32 0, i32 0
+  store i8** %t1009, i8*** %t1013
+  %t1014 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1012, i32 0, i32 1
+  store i64 2, i64* %t1014
+  %t1015 = insertvalue %RuntimeHelperDescriptor %t1005, { i8**, i64 }* %t1012, 3
+  %s1016 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1016, i32 0, i32 0
+  %s1017 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1017, i32 0, i32 0
+  %t1018 = alloca [2 x i8*]
+  %t1019 = getelementptr [2 x i8*], [2 x i8*]* %t1018, i32 0, i32 0
+  %t1020 = getelementptr i8*, i8** %t1019, i64 0
+  store i8* %s1016, i8** %t1020
+  %t1021 = getelementptr i8*, i8** %t1019, i64 1
+  store i8* %s1017, i8** %t1021
+  %t1022 = alloca { i8**, i64 }
+  %t1023 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1022, i32 0, i32 0
+  store i8** %t1019, i8*** %t1023
+  %t1024 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1022, i32 0, i32 1
+  store i64 2, i64* %t1024
+  %t1025 = insertvalue %RuntimeHelperDescriptor %t1015, { i8**, i64 }* %t1022, 4
+  %t1026 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t999, %RuntimeHelperDescriptor %t1025)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1026, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1027 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1028 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.1028, i32 0, i32 0
+  %t1029 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1028, 0
+  %s1030 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.1030, i32 0, i32 0
+  %t1031 = insertvalue %RuntimeHelperDescriptor %t1029, i8* %s1030, 1
+  %s1032 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1032, i32 0, i32 0
+  %t1033 = insertvalue %RuntimeHelperDescriptor %t1031, i8* %s1032, 2
+  %s1034 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1034, i32 0, i32 0
+  %t1035 = alloca [1 x i8*]
+  %t1036 = getelementptr [1 x i8*], [1 x i8*]* %t1035, i32 0, i32 0
+  %t1037 = getelementptr i8*, i8** %t1036, i64 0
+  store i8* %s1034, i8** %t1037
+  %t1038 = alloca { i8**, i64 }
+  %t1039 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1038, i32 0, i32 0
+  store i8** %t1036, i8*** %t1039
+  %t1040 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1038, i32 0, i32 1
+  store i64 1, i64* %t1040
+  %t1041 = insertvalue %RuntimeHelperDescriptor %t1033, { i8**, i64 }* %t1038, 3
+  %s1042 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1042, i32 0, i32 0
+  %t1043 = alloca [1 x i8*]
+  %t1044 = getelementptr [1 x i8*], [1 x i8*]* %t1043, i32 0, i32 0
+  %t1045 = getelementptr i8*, i8** %t1044, i64 0
+  store i8* %s1042, i8** %t1045
+  %t1046 = alloca { i8**, i64 }
+  %t1047 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1046, i32 0, i32 0
+  store i8** %t1044, i8*** %t1047
+  %t1048 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1046, i32 0, i32 1
+  store i64 1, i64* %t1048
+  %t1049 = insertvalue %RuntimeHelperDescriptor %t1041, { i8**, i64 }* %t1046, 4
+  %t1050 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1027, %RuntimeHelperDescriptor %t1049)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1050, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1051 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1052 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1052, i32 0, i32 0
+  %t1053 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1052, 0
+  %s1054 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.1054, i32 0, i32 0
+  %t1055 = insertvalue %RuntimeHelperDescriptor %t1053, i8* %s1054, 1
+  %s1056 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1056, i32 0, i32 0
+  %t1057 = insertvalue %RuntimeHelperDescriptor %t1055, i8* %s1056, 2
+  %s1058 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1058, i32 0, i32 0
+  %t1059 = alloca [1 x i8*]
+  %t1060 = getelementptr [1 x i8*], [1 x i8*]* %t1059, i32 0, i32 0
+  %t1061 = getelementptr i8*, i8** %t1060, i64 0
+  store i8* %s1058, i8** %t1061
+  %t1062 = alloca { i8**, i64 }
+  %t1063 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1062, i32 0, i32 0
+  store i8** %t1060, i8*** %t1063
+  %t1064 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1062, i32 0, i32 1
+  store i64 1, i64* %t1064
+  %t1065 = insertvalue %RuntimeHelperDescriptor %t1057, { i8**, i64 }* %t1062, 3
+  %t1066 = alloca [0 x i8*]
+  %t1067 = getelementptr [0 x i8*], [0 x i8*]* %t1066, i32 0, i32 0
+  %t1068 = alloca { i8**, i64 }
+  %t1069 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1068, i32 0, i32 0
+  store i8** %t1067, i8*** %t1069
+  %t1070 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1068, i32 0, i32 1
+  store i64 0, i64* %t1070
+  %t1071 = insertvalue %RuntimeHelperDescriptor %t1065, { i8**, i64 }* %t1068, 4
+  %t1072 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1051, %RuntimeHelperDescriptor %t1071)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1072, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1073 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1074 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1074, i32 0, i32 0
+  %t1075 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1074, 0
+  %s1076 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.1076, i32 0, i32 0
+  %t1077 = insertvalue %RuntimeHelperDescriptor %t1075, i8* %s1076, 1
+  %s1078 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1078, i32 0, i32 0
+  %t1079 = insertvalue %RuntimeHelperDescriptor %t1077, i8* %s1078, 2
+  %s1080 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1080, i32 0, i32 0
+  %s1081 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1081, i32 0, i32 0
+  %t1082 = alloca [2 x i8*]
+  %t1083 = getelementptr [2 x i8*], [2 x i8*]* %t1082, i32 0, i32 0
+  %t1084 = getelementptr i8*, i8** %t1083, i64 0
+  store i8* %s1080, i8** %t1084
+  %t1085 = getelementptr i8*, i8** %t1083, i64 1
+  store i8* %s1081, i8** %t1085
+  %t1086 = alloca { i8**, i64 }
+  %t1087 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1086, i32 0, i32 0
+  store i8** %t1083, i8*** %t1087
+  %t1088 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1086, i32 0, i32 1
+  store i64 2, i64* %t1088
+  %t1089 = insertvalue %RuntimeHelperDescriptor %t1079, { i8**, i64 }* %t1086, 3
+  %s1090 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1090, i32 0, i32 0
+  %t1091 = alloca [1 x i8*]
+  %t1092 = getelementptr [1 x i8*], [1 x i8*]* %t1091, i32 0, i32 0
+  %t1093 = getelementptr i8*, i8** %t1092, i64 0
+  store i8* %s1090, i8** %t1093
+  %t1094 = alloca { i8**, i64 }
+  %t1095 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1094, i32 0, i32 0
+  store i8** %t1092, i8*** %t1095
+  %t1096 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1094, i32 0, i32 1
+  store i64 1, i64* %t1096
+  %t1097 = insertvalue %RuntimeHelperDescriptor %t1089, { i8**, i64 }* %t1094, 4
+  %t1098 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1073, %RuntimeHelperDescriptor %t1097)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1098, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1099 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1100 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1100, i32 0, i32 0
+  %t1101 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1100, 0
+  %s1102 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.1102, i32 0, i32 0
+  %t1103 = insertvalue %RuntimeHelperDescriptor %t1101, i8* %s1102, 1
+  %s1104 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1104, i32 0, i32 0
+  %t1105 = insertvalue %RuntimeHelperDescriptor %t1103, i8* %s1104, 2
+  %s1106 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1106, i32 0, i32 0
+  %t1107 = alloca [1 x i8*]
+  %t1108 = getelementptr [1 x i8*], [1 x i8*]* %t1107, i32 0, i32 0
+  %t1109 = getelementptr i8*, i8** %t1108, i64 0
+  store i8* %s1106, i8** %t1109
+  %t1110 = alloca { i8**, i64 }
+  %t1111 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1110, i32 0, i32 0
+  store i8** %t1108, i8*** %t1111
+  %t1112 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1110, i32 0, i32 1
+  store i64 1, i64* %t1112
+  %t1113 = insertvalue %RuntimeHelperDescriptor %t1105, { i8**, i64 }* %t1110, 3
+  %s1114 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1114, i32 0, i32 0
+  %t1115 = alloca [1 x i8*]
+  %t1116 = getelementptr [1 x i8*], [1 x i8*]* %t1115, i32 0, i32 0
+  %t1117 = getelementptr i8*, i8** %t1116, i64 0
+  store i8* %s1114, i8** %t1117
+  %t1118 = alloca { i8**, i64 }
+  %t1119 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1118, i32 0, i32 0
+  store i8** %t1116, i8*** %t1119
+  %t1120 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1118, i32 0, i32 1
+  store i64 1, i64* %t1120
+  %t1121 = insertvalue %RuntimeHelperDescriptor %t1113, { i8**, i64 }* %t1118, 4
+  %t1122 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1099, %RuntimeHelperDescriptor %t1121)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1122, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1123 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1124 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1124, i32 0, i32 0
+  %t1125 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1124, 0
+  %s1126 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.1126, i32 0, i32 0
+  %t1127 = insertvalue %RuntimeHelperDescriptor %t1125, i8* %s1126, 1
+  %s1128 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1128, i32 0, i32 0
+  %t1129 = insertvalue %RuntimeHelperDescriptor %t1127, i8* %s1128, 2
+  %s1130 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1130, i32 0, i32 0
+  %s1131 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1131, i32 0, i32 0
+  %s1132 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1132, i32 0, i32 0
+  %t1133 = alloca [3 x i8*]
+  %t1134 = getelementptr [3 x i8*], [3 x i8*]* %t1133, i32 0, i32 0
+  %t1135 = getelementptr i8*, i8** %t1134, i64 0
+  store i8* %s1130, i8** %t1135
+  %t1136 = getelementptr i8*, i8** %t1134, i64 1
+  store i8* %s1131, i8** %t1136
+  %t1137 = getelementptr i8*, i8** %t1134, i64 2
+  store i8* %s1132, i8** %t1137
+  %t1138 = alloca { i8**, i64 }
+  %t1139 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1138, i32 0, i32 0
+  store i8** %t1134, i8*** %t1139
+  %t1140 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1138, i32 0, i32 1
+  store i64 3, i64* %t1140
+  %t1141 = insertvalue %RuntimeHelperDescriptor %t1129, { i8**, i64 }* %t1138, 3
+  %t1142 = alloca [0 x i8*]
+  %t1143 = getelementptr [0 x i8*], [0 x i8*]* %t1142, i32 0, i32 0
+  %t1144 = alloca { i8**, i64 }
+  %t1145 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1144, i32 0, i32 0
+  store i8** %t1143, i8*** %t1145
+  %t1146 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1144, i32 0, i32 1
+  store i64 0, i64* %t1146
+  %t1147 = insertvalue %RuntimeHelperDescriptor %t1141, { i8**, i64 }* %t1144, 4
+  %t1148 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1123, %RuntimeHelperDescriptor %t1147)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1148, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1149 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1150 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.1150, i32 0, i32 0
+  %t1151 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1150, 0
+  %s1152 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1152, i32 0, i32 0
+  %t1153 = insertvalue %RuntimeHelperDescriptor %t1151, i8* %s1152, 1
+  %s1154 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1154, i32 0, i32 0
+  %t1155 = insertvalue %RuntimeHelperDescriptor %t1153, i8* %s1154, 2
+  %s1156 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1156, i32 0, i32 0
+  %t1157 = alloca [1 x i8*]
+  %t1158 = getelementptr [1 x i8*], [1 x i8*]* %t1157, i32 0, i32 0
+  %t1159 = getelementptr i8*, i8** %t1158, i64 0
+  store i8* %s1156, i8** %t1159
+  %t1160 = alloca { i8**, i64 }
+  %t1161 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1160, i32 0, i32 0
+  store i8** %t1158, i8*** %t1161
+  %t1162 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1160, i32 0, i32 1
+  store i64 1, i64* %t1162
+  %t1163 = insertvalue %RuntimeHelperDescriptor %t1155, { i8**, i64 }* %t1160, 3
+  %t1164 = alloca [0 x i8*]
+  %t1165 = getelementptr [0 x i8*], [0 x i8*]* %t1164, i32 0, i32 0
+  %t1166 = alloca { i8**, i64 }
+  %t1167 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1166, i32 0, i32 0
+  store i8** %t1165, i8*** %t1167
+  %t1168 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1166, i32 0, i32 1
+  store i64 0, i64* %t1168
+  %t1169 = insertvalue %RuntimeHelperDescriptor %t1163, { i8**, i64 }* %t1166, 4
+  %t1170 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1149, %RuntimeHelperDescriptor %t1169)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1170, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1171 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1172 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1172, i32 0, i32 0
+  %t1173 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1172, 0
+  %s1174 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1174, i32 0, i32 0
+  %t1175 = insertvalue %RuntimeHelperDescriptor %t1173, i8* %s1174, 1
+  %s1176 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1176, i32 0, i32 0
+  %t1177 = insertvalue %RuntimeHelperDescriptor %t1175, i8* %s1176, 2
+  %s1178 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1178, i32 0, i32 0
+  %t1179 = alloca [1 x i8*]
+  %t1180 = getelementptr [1 x i8*], [1 x i8*]* %t1179, i32 0, i32 0
+  %t1181 = getelementptr i8*, i8** %t1180, i64 0
+  store i8* %s1178, i8** %t1181
+  %t1182 = alloca { i8**, i64 }
+  %t1183 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1182, i32 0, i32 0
+  store i8** %t1180, i8*** %t1183
+  %t1184 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1182, i32 0, i32 1
+  store i64 1, i64* %t1184
+  %t1185 = insertvalue %RuntimeHelperDescriptor %t1177, { i8**, i64 }* %t1182, 3
+  %t1186 = alloca [0 x i8*]
+  %t1187 = getelementptr [0 x i8*], [0 x i8*]* %t1186, i32 0, i32 0
+  %t1188 = alloca { i8**, i64 }
+  %t1189 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1188, i32 0, i32 0
+  store i8** %t1187, i8*** %t1189
+  %t1190 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1188, i32 0, i32 1
+  store i64 0, i64* %t1190
+  %t1191 = insertvalue %RuntimeHelperDescriptor %t1185, { i8**, i64 }* %t1188, 4
+  %t1192 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1171, %RuntimeHelperDescriptor %t1191)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1192, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1193 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1194 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.1194, i32 0, i32 0
+  %t1195 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1194, 0
+  %s1196 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.1196, i32 0, i32 0
+  %t1197 = insertvalue %RuntimeHelperDescriptor %t1195, i8* %s1196, 1
+  %s1198 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1198, i32 0, i32 0
+  %t1199 = insertvalue %RuntimeHelperDescriptor %t1197, i8* %s1198, 2
+  %s1200 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1200, i32 0, i32 0
+  %t1201 = alloca [1 x i8*]
+  %t1202 = getelementptr [1 x i8*], [1 x i8*]* %t1201, i32 0, i32 0
+  %t1203 = getelementptr i8*, i8** %t1202, i64 0
+  store i8* %s1200, i8** %t1203
+  %t1204 = alloca { i8**, i64 }
+  %t1205 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1204, i32 0, i32 0
+  store i8** %t1202, i8*** %t1205
+  %t1206 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1204, i32 0, i32 1
+  store i64 1, i64* %t1206
+  %t1207 = insertvalue %RuntimeHelperDescriptor %t1199, { i8**, i64 }* %t1204, 3
+  %t1208 = alloca [0 x i8*]
+  %t1209 = getelementptr [0 x i8*], [0 x i8*]* %t1208, i32 0, i32 0
+  %t1210 = alloca { i8**, i64 }
+  %t1211 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1210, i32 0, i32 0
+  store i8** %t1209, i8*** %t1211
+  %t1212 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1210, i32 0, i32 1
+  store i64 0, i64* %t1212
+  %t1213 = insertvalue %RuntimeHelperDescriptor %t1207, { i8**, i64 }* %t1210, 4
+  %t1214 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1193, %RuntimeHelperDescriptor %t1213)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1214, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1215 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1216 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.1216, i32 0, i32 0
+  %t1217 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1216, 0
+  %s1218 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.1218, i32 0, i32 0
+  %t1219 = insertvalue %RuntimeHelperDescriptor %t1217, i8* %s1218, 1
+  %s1220 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1220, i32 0, i32 0
+  %t1221 = insertvalue %RuntimeHelperDescriptor %t1219, i8* %s1220, 2
+  %s1222 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1222, i32 0, i32 0
+  %t1223 = alloca [1 x i8*]
+  %t1224 = getelementptr [1 x i8*], [1 x i8*]* %t1223, i32 0, i32 0
+  %t1225 = getelementptr i8*, i8** %t1224, i64 0
+  store i8* %s1222, i8** %t1225
+  %t1226 = alloca { i8**, i64 }
+  %t1227 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1226, i32 0, i32 0
+  store i8** %t1224, i8*** %t1227
+  %t1228 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1226, i32 0, i32 1
+  store i64 1, i64* %t1228
+  %t1229 = insertvalue %RuntimeHelperDescriptor %t1221, { i8**, i64 }* %t1226, 3
+  %t1230 = alloca [0 x i8*]
+  %t1231 = getelementptr [0 x i8*], [0 x i8*]* %t1230, i32 0, i32 0
+  %t1232 = alloca { i8**, i64 }
+  %t1233 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1232, i32 0, i32 0
+  store i8** %t1231, i8*** %t1233
+  %t1234 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1232, i32 0, i32 1
+  store i64 0, i64* %t1234
+  %t1235 = insertvalue %RuntimeHelperDescriptor %t1229, { i8**, i64 }* %t1232, 4
+  %t1236 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1215, %RuntimeHelperDescriptor %t1235)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1236, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1237 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1238 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.1238, i32 0, i32 0
+  %t1239 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1238, 0
+  %s1240 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1240, i32 0, i32 0
+  %t1241 = insertvalue %RuntimeHelperDescriptor %t1239, i8* %s1240, 1
+  %s1242 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1242, i32 0, i32 0
+  %t1243 = insertvalue %RuntimeHelperDescriptor %t1241, i8* %s1242, 2
+  %s1244 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1244, i32 0, i32 0
+  %t1245 = alloca [1 x i8*]
+  %t1246 = getelementptr [1 x i8*], [1 x i8*]* %t1245, i32 0, i32 0
+  %t1247 = getelementptr i8*, i8** %t1246, i64 0
+  store i8* %s1244, i8** %t1247
+  %t1248 = alloca { i8**, i64 }
+  %t1249 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1248, i32 0, i32 0
+  store i8** %t1246, i8*** %t1249
+  %t1250 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1248, i32 0, i32 1
+  store i64 1, i64* %t1250
+  %t1251 = insertvalue %RuntimeHelperDescriptor %t1243, { i8**, i64 }* %t1248, 3
+  %t1252 = alloca [0 x i8*]
+  %t1253 = getelementptr [0 x i8*], [0 x i8*]* %t1252, i32 0, i32 0
+  %t1254 = alloca { i8**, i64 }
+  %t1255 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1254, i32 0, i32 0
+  store i8** %t1253, i8*** %t1255
+  %t1256 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1254, i32 0, i32 1
+  store i64 0, i64* %t1256
+  %t1257 = insertvalue %RuntimeHelperDescriptor %t1251, { i8**, i64 }* %t1254, 4
+  %t1258 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1237, %RuntimeHelperDescriptor %t1257)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1258, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1259 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1260 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.1260, i32 0, i32 0
+  %t1261 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1260, 0
+  %s1262 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1262, i32 0, i32 0
+  %t1263 = insertvalue %RuntimeHelperDescriptor %t1261, i8* %s1262, 1
+  %s1264 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1264, i32 0, i32 0
+  %t1265 = insertvalue %RuntimeHelperDescriptor %t1263, i8* %s1264, 2
+  %s1266 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1266, i32 0, i32 0
+  %s1267 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1267, i32 0, i32 0
+  %t1268 = alloca [2 x i8*]
+  %t1269 = getelementptr [2 x i8*], [2 x i8*]* %t1268, i32 0, i32 0
+  %t1270 = getelementptr i8*, i8** %t1269, i64 0
+  store i8* %s1266, i8** %t1270
+  %t1271 = getelementptr i8*, i8** %t1269, i64 1
+  store i8* %s1267, i8** %t1271
+  %t1272 = alloca { i8**, i64 }
+  %t1273 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1272, i32 0, i32 0
+  store i8** %t1269, i8*** %t1273
+  %t1274 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1272, i32 0, i32 1
+  store i64 2, i64* %t1274
+  %t1275 = insertvalue %RuntimeHelperDescriptor %t1265, { i8**, i64 }* %t1272, 3
+  %t1276 = alloca [0 x i8*]
+  %t1277 = getelementptr [0 x i8*], [0 x i8*]* %t1276, i32 0, i32 0
+  %t1278 = alloca { i8**, i64 }
+  %t1279 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1278, i32 0, i32 0
+  store i8** %t1277, i8*** %t1279
+  %t1280 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1278, i32 0, i32 1
+  store i64 0, i64* %t1280
+  %t1281 = insertvalue %RuntimeHelperDescriptor %t1275, { i8**, i64 }* %t1278, 4
+  %t1282 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1259, %RuntimeHelperDescriptor %t1281)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1282, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1283 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1284 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1284, i32 0, i32 0
+  %t1285 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1284, 0
+  %s1286 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.1286, i32 0, i32 0
+  %t1287 = insertvalue %RuntimeHelperDescriptor %t1285, i8* %s1286, 1
+  %s1288 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1288, i32 0, i32 0
+  %t1289 = insertvalue %RuntimeHelperDescriptor %t1287, i8* %s1288, 2
+  %s1290 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1290, i32 0, i32 0
+  %s1291 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.1291, i32 0, i32 0
+  %t1292 = alloca [2 x i8*]
+  %t1293 = getelementptr [2 x i8*], [2 x i8*]* %t1292, i32 0, i32 0
+  %t1294 = getelementptr i8*, i8** %t1293, i64 0
+  store i8* %s1290, i8** %t1294
+  %t1295 = getelementptr i8*, i8** %t1293, i64 1
+  store i8* %s1291, i8** %t1295
+  %t1296 = alloca { i8**, i64 }
+  %t1297 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1296, i32 0, i32 0
+  store i8** %t1293, i8*** %t1297
+  %t1298 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1296, i32 0, i32 1
+  store i64 2, i64* %t1298
+  %t1299 = insertvalue %RuntimeHelperDescriptor %t1289, { i8**, i64 }* %t1296, 3
+  %t1300 = alloca [0 x i8*]
+  %t1301 = getelementptr [0 x i8*], [0 x i8*]* %t1300, i32 0, i32 0
+  %t1302 = alloca { i8**, i64 }
+  %t1303 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1302, i32 0, i32 0
+  store i8** %t1301, i8*** %t1303
+  %t1304 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1302, i32 0, i32 1
+  store i64 0, i64* %t1304
+  %t1305 = insertvalue %RuntimeHelperDescriptor %t1299, { i8**, i64 }* %t1302, 4
+  %t1306 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1283, %RuntimeHelperDescriptor %t1305)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1306, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1307 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s1308 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1308, i32 0, i32 0
+  %t1309 = insertvalue %RuntimeHelperDescriptor undef, i8* %s1308, 0
+  %s1310 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.1310, i32 0, i32 0
+  %t1311 = insertvalue %RuntimeHelperDescriptor %t1309, i8* %s1310, 1
+  %s1312 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1312, i32 0, i32 0
+  %t1313 = insertvalue %RuntimeHelperDescriptor %t1311, i8* %s1312, 2
+  %s1314 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1314, i32 0, i32 0
+  %s1315 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1315, i32 0, i32 0
+  %t1316 = alloca [2 x i8*]
+  %t1317 = getelementptr [2 x i8*], [2 x i8*]* %t1316, i32 0, i32 0
+  %t1318 = getelementptr i8*, i8** %t1317, i64 0
+  store i8* %s1314, i8** %t1318
+  %t1319 = getelementptr i8*, i8** %t1317, i64 1
+  store i8* %s1315, i8** %t1319
+  %t1320 = alloca { i8**, i64 }
+  %t1321 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1320, i32 0, i32 0
+  store i8** %t1317, i8*** %t1321
+  %t1322 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1320, i32 0, i32 1
+  store i64 2, i64* %t1322
+  %t1323 = insertvalue %RuntimeHelperDescriptor %t1313, { i8**, i64 }* %t1320, 3
+  %t1324 = alloca [0 x i8*]
+  %t1325 = getelementptr [0 x i8*], [0 x i8*]* %t1324, i32 0, i32 0
+  %t1326 = alloca { i8**, i64 }
+  %t1327 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1326, i32 0, i32 0
+  store i8** %t1325, i8*** %t1327
+  %t1328 = getelementptr { i8**, i64 }, { i8**, i64 }* %t1326, i32 0, i32 1
+  store i64 0, i64* %t1328
+  %t1329 = insertvalue %RuntimeHelperDescriptor %t1323, { i8**, i64 }* %t1326, 4
+  %t1330 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t1307, %RuntimeHelperDescriptor %t1329)
+  store { %RuntimeHelperDescriptor*, i64 }* %t1330, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t1331 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  ret { %RuntimeHelperDescriptor*, i64 }* %t1331
 }
 
 define { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %values, %RuntimeHelperDescriptor %value) {
@@ -40440,6 +40950,7 @@ entry:
   %l2 = alloca i8*
   %l3 = alloca i8*
   %l4 = alloca i8*
+  %l5 = alloca i8*
   %t0 = call i8* @trim_text(i8* %return_type)
   store i8* %t0, i8** %l0
   %t2 = load i8*, i8** %l0
@@ -40517,7 +41028,23 @@ then6:
 merge7:
   %t43 = load i8*, i8** %l1
   %t44 = call i8* @map_primitive_type(%TypeContext %context, i8* %t43)
-  ret i8* %t44
+  store i8* %t44, i8** %l5
+  %t45 = load i8*, i8** %l5
+  %t46 = call i64 @sailfin_runtime_string_length(i8* %t45)
+  %t47 = icmp sgt i64 %t46, 0
+  %t48 = load i8*, i8** %l0
+  %t49 = load i8*, i8** %l1
+  %t50 = load i8*, i8** %l2
+  %t51 = load i8*, i8** %l3
+  %t52 = load i8*, i8** %l4
+  %t53 = load i8*, i8** %l5
+  br i1 %t47, label %then8, label %merge9
+then8:
+  %t54 = load i8*, i8** %l5
+  ret i8* %t54
+merge9:
+  %s55 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.55, i32 0, i32 0
+  ret i8* %s55
 }
 
 define i8* @map_parameter_type(%TypeContext %context, i8* %parameter_type) {

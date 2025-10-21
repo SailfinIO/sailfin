@@ -8,6 +8,25 @@ source_filename = "sailfin"
 %StructField = type { i8*, i8* }
 %TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
 
+; intrinsic sailfin_runtime_sleep requires capabilities: ![clock]
+declare void @sailfin_runtime_sleep(double)
+; intrinsic sailfin_runtime_channel requires capabilities: ![io]
+declare i8* @sailfin_runtime_channel(double)
+; intrinsic sailfin_runtime_spawn requires capabilities: ![io]
+declare void @sailfin_runtime_spawn(i8*, i8*)
+declare i8* @sailfin_runtime_to_debug_string(i8*)
+declare void @sailfin_runtime_raise_value_error(i8*)
+declare i1 @sailfin_runtime_is_string(i8*)
+declare i1 @sailfin_runtime_is_number(i8*)
+declare i1 @sailfin_runtime_is_boolean(i8*)
+declare i1 @sailfin_runtime_is_void(i8*)
+declare i1 @sailfin_runtime_is_array(i8*)
+declare i1 @sailfin_runtime_is_callable(i8*)
+declare i8* @sailfin_runtime_resolve_type(i8*)
+declare i1 @sailfin_runtime_instance_of(i8*, i8*)
+; intrinsic sailfin_runtime_serve requires capabilities: ![io, net]
+declare void @sailfin_runtime_serve(i8*, i8*)
+declare double @sailfin_runtime_char_code(i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare double @char_code(i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -22,17 +41,41 @@ declare noalias i8* @malloc(i64)
 @.str.19 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.35 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
 
+define i8* @capability_grant({ i8**, i64 }* %effects) {
+entry:
+  %t0 = call double @runtime_create_capability_grant({ i8**, i64 }* %effects)
+  ret i8* null
+}
+
+define i8* @fs_bridge(i8* %grant) {
+entry:
+  %t0 = call double @runtime_create_filesystem_bridge(i8* %grant)
+  ret i8* null
+}
+
+define i8* @http_bridge(i8* %grant) {
+entry:
+  %t0 = call double @runtime_create_http_bridge(i8* %grant)
+  ret i8* null
+}
+
+define i8* @model_bridge(i8* %grant) {
+entry:
+  %t0 = call double @runtime_create_model_bridge(i8* %grant)
+  ret i8* null
+}
+
 ; fn sleep effects: ![clock]
 define void @sleep(double %milliseconds) {
 entry:
-  %t0 = call double @runtime_sleep_fn(double %milliseconds)
+  call void @sailfin_runtime_sleep(double %milliseconds)
   ret void
 }
 
 ; fn channel effects: ![io]
 define void @channel(double %capacity) {
 entry:
-  %t0 = call double @runtime_channel_fn(double %capacity)
+  %t0 = call i8* @sailfin_runtime_channel(double %capacity)
   ret void
 }
 
@@ -100,15 +143,14 @@ afterfor3:
 ; fn spawn effects: ![io]
 define void @spawn(i8* %task, i8* %name) {
 entry:
-  %t0 = call i64 @sailfin_runtime_string_length(i8* %name)
-  %t1 = icmp eq i64 %t0, 0
-  br i1 %t1, label %then0, label %merge1
-then0:
-  %t2 = call double @runtime_spawn_fn(i8* %task)
+  call void @sailfin_runtime_spawn(i8* %task, i8* %name)
   ret void
-merge1:
-  %t3 = call double @runtime_spawn_fn(i8* %task, i8* %name)
-  ret void
+}
+
+define i8* @logExecution(i8* %callable) {
+entry:
+  %t0 = call double @runtime_log_execution_fn(i8* %callable)
+  ret i8* null
 }
 
 define { i8**, i64 }* @array_map({ i8**, i64 }* %items, i8* %mapper) {
@@ -237,6 +279,43 @@ afterfor3:
   %t33 = load { double*, i64 }*, { double*, i64 }** %l0
   %t34 = bitcast { double*, i64 }* %t33 to { i8**, i64 }*
   ret { i8**, i64 }* %t34
+}
+
+define i8* @array_reduce({ i8**, i64 }* %items, i8* %initial, i8* %reducer) {
+entry:
+  %l0 = alloca i8*
+  %l1 = alloca i64
+  %l2 = alloca i8*
+  store i8* %initial, i8** %l0
+  %t0 = getelementptr { i8**, i64 }, { i8**, i64 }* %items, i32 0, i32 1
+  %t1 = load i64, i64* %t0
+  %t2 = getelementptr { i8**, i64 }, { i8**, i64 }* %items, i32 0, i32 0
+  %t3 = load i8**, i8*** %t2
+  store i64 0, i64* %l1
+  store i8* null, i8** %l2
+  br label %for0
+for0:
+  %t4 = load i64, i64* %l1
+  %t5 = icmp slt i64 %t4, %t1
+  br i1 %t5, label %forbody1, label %afterfor3
+forbody1:
+  %t6 = load i64, i64* %l1
+  %t7 = getelementptr i8*, i8** %t3, i64 %t6
+  %t8 = load i8*, i8** %t7
+  store i8* %t8, i8** %l2
+  %t9 = load i8*, i8** %l0
+  %t10 = load i8*, i8** %l2
+  %t11 = call double @reducer(i8* %t9, i8* %t10)
+  store i8* null, i8** %l0
+  br label %forinc2
+forinc2:
+  %t12 = load i64, i64* %l1
+  %t13 = add i64 %t12, 1
+  store i64 %t13, i64* %l1
+  br label %for0
+afterfor3:
+  %t14 = load i8*, i8** %l0
+  ret i8* %t14
 }
 
 define i8* @char_at(i8* %value, double %index) {
@@ -584,6 +663,62 @@ entry:
   ret %EnumInstance %t7
 }
 
+define i8* @enum_get_field(%EnumInstance %instance, i8* %name) {
+entry:
+  %l0 = alloca i64
+  %l1 = alloca %EnumField*
+  store i64 0, i64* %l0
+  %t0 = load i64, i64* %l0
+  br label %loop.header0
+loop.header0:
+  %t27 = phi i64 [ %t0, %entry ], [ %t26, %loop.latch2 ]
+  store i64 %t27, i64* %l0
+  br label %loop.body1
+loop.body1:
+  %t1 = load i64, i64* %l0
+  %t2 = extractvalue %EnumInstance %instance, 2
+  %t3 = load { %EnumField**, i64 }, { %EnumField**, i64 }* %t2
+  %t4 = extractvalue { %EnumField**, i64 } %t3, 1
+  %t5 = icmp sge i64 %t1, %t4
+  %t6 = load i64, i64* %l0
+  br i1 %t5, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t7 = extractvalue %EnumInstance %instance, 2
+  %t8 = load i64, i64* %l0
+  %t9 = load { %EnumField**, i64 }, { %EnumField**, i64 }* %t7
+  %t10 = extractvalue { %EnumField**, i64 } %t9, 0
+  %t11 = extractvalue { %EnumField**, i64 } %t9, 1
+  %t12 = icmp uge i64 %t8, %t11
+  ; bounds check: %t12 (if true, out of bounds)
+  %t13 = getelementptr %EnumField*, %EnumField** %t10, i64 %t8
+  %t14 = load %EnumField*, %EnumField** %t13
+  store %EnumField* %t14, %EnumField** %l1
+  %t15 = load %EnumField*, %EnumField** %l1
+  %t16 = getelementptr %EnumField, %EnumField* %t15, i32 0, i32 0
+  %t17 = load i8*, i8** %t16
+  %t18 = icmp eq i8* %t17, %name
+  %t19 = load i64, i64* %l0
+  %t20 = load %EnumField*, %EnumField** %l1
+  br i1 %t18, label %then6, label %merge7
+then6:
+  %t21 = load %EnumField*, %EnumField** %l1
+  %t22 = getelementptr %EnumField, %EnumField* %t21, i32 0, i32 1
+  %t23 = load i8*, i8** %t22
+  ret i8* %t23
+merge7:
+  %t24 = load i64, i64* %l0
+  %t25 = add i64 %t24, 1
+  store i64 %t25, i64* %l0
+  br label %loop.latch2
+loop.latch2:
+  %t26 = load i64, i64* %l0
+  br label %loop.header0
+afterloop3:
+  ret i8* null
+}
+
 define %StructField @struct_field(i8* %name, i8* %value) {
 entry:
   %t0 = insertvalue %StructField undef, i8* %name, 0
@@ -683,8 +818,8 @@ afterloop3:
 
 define i8* @to_debug_string(i8* %value) {
 entry:
-  %t0 = call double @runtime_to_debug_string_fn(i8* %value)
-  ret i8* null
+  %t0 = call i8* @sailfin_runtime_to_debug_string(i8* %value)
+  ret i8* %t0
 }
 
 define i8* @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values) {
@@ -2528,33 +2663,29 @@ entry:
   %t1 = icmp eq i8* %name, %s0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %t2 = call double @runtime_is_string_fn(i8* %value)
-  %t3 = fcmp one double %t2, 0.0
-  ret i1 %t3
+  %t2 = call i1 @sailfin_runtime_is_string(i8* %value)
+  ret i1 %t2
 merge1:
-  %s4 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.4, i32 0, i32 0
-  %t5 = icmp eq i8* %name, %s4
-  br i1 %t5, label %then2, label %merge3
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %t4 = icmp eq i8* %name, %s3
+  br i1 %t4, label %then2, label %merge3
 then2:
-  %t6 = call double @runtime_is_number_fn(i8* %value)
-  %t7 = fcmp one double %t6, 0.0
-  ret i1 %t7
+  %t5 = call i1 @sailfin_runtime_is_number(i8* %value)
+  ret i1 %t5
 merge3:
-  %s8 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.8, i32 0, i32 0
-  %t9 = icmp eq i8* %name, %s8
-  br i1 %t9, label %then4, label %merge5
+  %s6 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.6, i32 0, i32 0
+  %t7 = icmp eq i8* %name, %s6
+  br i1 %t7, label %then4, label %merge5
 then4:
-  %t10 = call double @runtime_is_boolean_fn(i8* %value)
-  %t11 = fcmp one double %t10, 0.0
-  ret i1 %t11
+  %t8 = call i1 @sailfin_runtime_is_boolean(i8* %value)
+  ret i1 %t8
 merge5:
-  %s12 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.12, i32 0, i32 0
-  %t13 = icmp eq i8* %name, %s12
-  br i1 %t13, label %then6, label %merge7
+  %s9 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.9, i32 0, i32 0
+  %t10 = icmp eq i8* %name, %s9
+  br i1 %t10, label %then6, label %merge7
 then6:
-  %t14 = call double @runtime_is_void_fn(i8* %value)
-  %t15 = fcmp one double %t14, 0.0
-  ret i1 %t15
+  %t11 = call i1 @sailfin_runtime_is_void(i8* %value)
+  ret i1 %t11
 merge7:
   ret i1 0
 }
@@ -2565,7 +2696,7 @@ entry:
   %l1 = alloca i64
   %l2 = alloca %TypeDescriptor*
   %l3 = alloca i64
-  %l4 = alloca double
+  %l4 = alloca i8*
   %t0 = extractvalue %TypeDescriptor %descriptor, 0
   %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1, i32 0, i32 0
   %t2 = icmp eq i8* %t0, %s1
@@ -2695,105 +2826,101 @@ then24:
   %t68 = icmp eq i64 %t67, 0
   br i1 %t68, label %then26, label %merge27
 then26:
-  %t69 = call double @runtime_is_array_fn(i8* %value)
-  %t70 = fcmp one double %t69, 0.0
-  ret i1 %t70
+  %t69 = call i1 @sailfin_runtime_is_array(i8* %value)
+  ret i1 %t69
 merge27:
-  %t71 = call double @runtime_is_array_fn(i8* %value)
-  %t72 = fcmp one double %t71, 0.0
-  %t73 = xor i1 %t72, 1
-  br i1 %t73, label %then28, label %merge29
+  %t70 = call i1 @sailfin_runtime_is_array(i8* %value)
+  %t71 = xor i1 %t70, 1
+  br i1 %t71, label %then28, label %merge29
 then28:
   ret i1 0
 merge29:
-  %t74 = extractvalue %TypeDescriptor %descriptor, 2
-  %t75 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t74
-  %t76 = extractvalue { %TypeDescriptor**, i64 } %t75, 0
-  %t77 = extractvalue { %TypeDescriptor**, i64 } %t75, 1
-  %t78 = icmp uge i64 0, %t77
-  ; bounds check: %t78 (if true, out of bounds)
-  %t79 = getelementptr %TypeDescriptor*, %TypeDescriptor** %t76, i64 0
-  %t80 = load %TypeDescriptor*, %TypeDescriptor** %t79
-  store %TypeDescriptor* %t80, %TypeDescriptor** %l2
+  %t72 = extractvalue %TypeDescriptor %descriptor, 2
+  %t73 = load { %TypeDescriptor**, i64 }, { %TypeDescriptor**, i64 }* %t72
+  %t74 = extractvalue { %TypeDescriptor**, i64 } %t73, 0
+  %t75 = extractvalue { %TypeDescriptor**, i64 } %t73, 1
+  %t76 = icmp uge i64 0, %t75
+  ; bounds check: %t76 (if true, out of bounds)
+  %t77 = getelementptr %TypeDescriptor*, %TypeDescriptor** %t74, i64 0
+  %t78 = load %TypeDescriptor*, %TypeDescriptor** %t77
+  store %TypeDescriptor* %t78, %TypeDescriptor** %l2
   store i64 0, i64* %l3
-  %t81 = load %TypeDescriptor*, %TypeDescriptor** %l2
-  %t82 = load i64, i64* %l3
+  %t79 = load %TypeDescriptor*, %TypeDescriptor** %l2
+  %t80 = load i64, i64* %l3
   br label %loop.header30
 loop.header30:
-  %t104 = phi i64 [ %t82, %then24 ], [ %t103, %loop.latch32 ]
-  store i64 %t104, i64* %l3
+  %t102 = phi i64 [ %t80, %then24 ], [ %t101, %loop.latch32 ]
+  store i64 %t102, i64* %l3
   br label %loop.body31
 loop.body31:
-  %t83 = load i64, i64* %l3
-  %t84 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t85 = icmp sge i64 %t83, %t84
-  %t86 = load %TypeDescriptor*, %TypeDescriptor** %l2
-  %t87 = load i64, i64* %l3
-  br i1 %t85, label %then34, label %merge35
+  %t81 = load i64, i64* %l3
+  %t82 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t83 = icmp sge i64 %t81, %t82
+  %t84 = load %TypeDescriptor*, %TypeDescriptor** %l2
+  %t85 = load i64, i64* %l3
+  br i1 %t83, label %then34, label %merge35
 then34:
   br label %afterloop33
 merge35:
-  %t88 = load i64, i64* %l3
-  %t89 = getelementptr i8, i8* %value, i64 %t88
-  %t90 = load i8, i8* %t89
-  %t91 = load %TypeDescriptor*, %TypeDescriptor** %l2
-  %t92 = alloca [2 x i8], align 1
-  %t93 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 0
-  store i8 %t90, i8* %t93
-  %t94 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 1
-  store i8 0, i8* %t94
-  %t95 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 0
-  %t96 = load %TypeDescriptor, %TypeDescriptor* %t91
-  %t97 = call i1 @check_type_descriptor(i8* %t95, %TypeDescriptor %t96)
-  %t98 = xor i1 %t97, 1
-  %t99 = load %TypeDescriptor*, %TypeDescriptor** %l2
-  %t100 = load i64, i64* %l3
-  br i1 %t98, label %then36, label %merge37
+  %t86 = load i64, i64* %l3
+  %t87 = getelementptr i8, i8* %value, i64 %t86
+  %t88 = load i8, i8* %t87
+  %t89 = load %TypeDescriptor*, %TypeDescriptor** %l2
+  %t90 = alloca [2 x i8], align 1
+  %t91 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 0
+  store i8 %t88, i8* %t91
+  %t92 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 1
+  store i8 0, i8* %t92
+  %t93 = getelementptr [2 x i8], [2 x i8]* %t90, i32 0, i32 0
+  %t94 = load %TypeDescriptor, %TypeDescriptor* %t89
+  %t95 = call i1 @check_type_descriptor(i8* %t93, %TypeDescriptor %t94)
+  %t96 = xor i1 %t95, 1
+  %t97 = load %TypeDescriptor*, %TypeDescriptor** %l2
+  %t98 = load i64, i64* %l3
+  br i1 %t96, label %then36, label %merge37
 then36:
   ret i1 0
 merge37:
-  %t101 = load i64, i64* %l3
-  %t102 = add i64 %t101, 1
-  store i64 %t102, i64* %l3
+  %t99 = load i64, i64* %l3
+  %t100 = add i64 %t99, 1
+  store i64 %t100, i64* %l3
   br label %loop.latch32
 loop.latch32:
-  %t103 = load i64, i64* %l3
+  %t101 = load i64, i64* %l3
   br label %loop.header30
 afterloop33:
   ret i1 1
 merge25:
-  %t105 = extractvalue %TypeDescriptor %descriptor, 0
-  %s106 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.106, i32 0, i32 0
-  %t107 = icmp eq i8* %t105, %s106
-  br i1 %t107, label %then38, label %merge39
+  %t103 = extractvalue %TypeDescriptor %descriptor, 0
+  %s104 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.104, i32 0, i32 0
+  %t105 = icmp eq i8* %t103, %s104
+  br i1 %t105, label %then38, label %merge39
 then38:
-  %t108 = call double @runtime_is_callable_fn(i8* %value)
-  %t109 = fcmp one double %t108, 0.0
-  ret i1 %t109
+  %t106 = call i1 @sailfin_runtime_is_callable(i8* %value)
+  ret i1 %t106
 merge39:
-  %t110 = extractvalue %TypeDescriptor %descriptor, 0
-  %s111 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.111, i32 0, i32 0
-  %t112 = icmp eq i8* %t110, %s111
-  br i1 %t112, label %then40, label %merge41
+  %t107 = extractvalue %TypeDescriptor %descriptor, 0
+  %s108 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.108, i32 0, i32 0
+  %t109 = icmp eq i8* %t107, %s108
+  br i1 %t109, label %then40, label %merge41
 then40:
-  %t113 = extractvalue %TypeDescriptor %descriptor, 1
-  %t114 = icmp eq i8* %t113, null
-  br i1 %t114, label %then42, label %merge43
+  %t110 = extractvalue %TypeDescriptor %descriptor, 1
+  %t111 = icmp eq i8* %t110, null
+  br i1 %t111, label %then42, label %merge43
 then42:
   ret i1 0
 merge43:
-  %t115 = extractvalue %TypeDescriptor %descriptor, 1
-  %t116 = call double @runtime_resolve_runtime_type_fn(i8* %t115)
-  store double %t116, double* %l4
-  %t117 = load double, double* %l4
-  %t118 = call double @runtime_instance_of_fn(i8* %value, double %t117)
-  %t119 = fcmp one double %t118, 0.0
-  ret i1 %t119
+  %t112 = extractvalue %TypeDescriptor %descriptor, 1
+  %t113 = call i8* @sailfin_runtime_resolve_type(i8* %t112)
+  store i8* %t113, i8** %l4
+  %t114 = load i8*, i8** %l4
+  %t115 = call i1 @sailfin_runtime_instance_of(i8* %value, i8* %t114)
+  ret i1 %t115
 merge41:
-  %t120 = extractvalue %TypeDescriptor %descriptor, 0
-  %s121 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.121, i32 0, i32 0
-  %t122 = icmp eq i8* %t120, %s121
-  br i1 %t122, label %then44, label %merge45
+  %t116 = extractvalue %TypeDescriptor %descriptor, 0
+  %s117 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.117, i32 0, i32 0
+  %t118 = icmp eq i8* %t116, %s117
+  br i1 %t118, label %then44, label %merge45
 then44:
   ret i1 0
 merge45:
@@ -2813,7 +2940,7 @@ entry:
 ; fn serve effects: ![io, net]
 define void @serve(i8* %handler, i8* %config) {
 entry:
-  %t0 = call double @runtime_serve_fn(i8* %handler, i8* %config)
+  call void @sailfin_runtime_serve(i8* %handler, i8* %config)
   ret void
 }
 
@@ -3128,7 +3255,7 @@ entry:
   %s0 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.0, i32 0, i32 0
   store i8* %s0, i8** %l0
   %t1 = load i8*, i8** %l0
-  %t2 = call double @runtime_raise_value_error_fn(i8* %t1)
+  call void @sailfin_runtime_raise_value_error(i8* %t1)
   ret void
 }
 
@@ -3323,7 +3450,7 @@ then20:
   ret double %t129
 merge21:
   %t130 = load i8*, i8** %l0
-  %t131 = call double @runtime_char_code_fn(i8* %t130)
+  %t131 = call double @sailfin_runtime_char_code(i8* %t130)
   ret double %t131
 }
 

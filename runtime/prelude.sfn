@@ -96,10 +96,6 @@ fn parallel(tasks -> any[]) -> any[] ![io] {
 }
 
 fn spawn(task -> any, name -> string = "") -> void ![io] {
-    if name.length == 0 {
-        runtime_spawn_fn(task);
-        return;
-    }
     runtime_spawn_fn(task, name);
 }
 
