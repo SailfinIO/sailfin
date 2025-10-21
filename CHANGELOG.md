@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.63 (2025-10-21)
+
+### Bug Fixes
+
+- Pointer related references
+  ([`617dbe9`](https://github.com/SailfinIO/sailfin/commit/617dbe9a17095b9d95cbe644d01926774029b29d))
+
+
 ## v0.1.1-alpha.62 (2025-10-21)
 
 ### Bug Fixes
