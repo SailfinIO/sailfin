@@ -46032,72 +46032,58 @@ merge3:
   %t46 = load %LocalBinding*, %LocalBinding** %l2
   br i1 %t43, label %then4, label %merge5
 then4:
-  %t47 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s48 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.48, i32 0, i32 0
-  %t49 = load i8*, i8** %l1
-  %t50 = add i8* %s48, %t49
-  %t51 = load i8, i8* %t50
-  %t52 = add i8 %t51, 96
-  %t53 = alloca [2 x i8], align 1
-  %t54 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  store i8 %t52, i8* %t54
-  %t55 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 1
-  store i8 0, i8* %t55
-  %t56 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  %t57 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t47, i8* %t56)
-  store { i8**, i64 }* %t57, { i8**, i64 }** %l0
-  %t58 = insertvalue %ExpressionResult undef, { i8**, i64 }* %lines, 0
-  %t59 = insertvalue %ExpressionResult %t58, double %temp_index, 1
-  %t60 = bitcast i8* null to %LLVMOperand*
-  %t61 = insertvalue %ExpressionResult %t59, %LLVMOperand* %t60, 2
-  %t62 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t63 = insertvalue %ExpressionResult %t61, { i8**, i64 }* %t62, 3
-  %t64 = alloca [0 x %StringConstant*]
-  %t65 = getelementptr [0 x %StringConstant*], [0 x %StringConstant*]* %t64, i32 0, i32 0
-  %t66 = alloca { %StringConstant**, i64 }
-  %t67 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t66, i32 0, i32 0
-  store %StringConstant** %t65, %StringConstant*** %t67
-  %t68 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t66, i32 0, i32 1
-  store i64 0, i64* %t68
-  %t69 = insertvalue %ExpressionResult %t63, { %StringConstant**, i64 }* %t66, 4
-  ret %ExpressionResult %t69
+  %t47 = insertvalue %ExpressionResult undef, { i8**, i64 }* %lines, 0
+  %t48 = insertvalue %ExpressionResult %t47, double %temp_index, 1
+  %t49 = bitcast i8* null to %LLVMOperand*
+  %t50 = insertvalue %ExpressionResult %t48, %LLVMOperand* %t49, 2
+  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t52 = insertvalue %ExpressionResult %t50, { i8**, i64 }* %t51, 3
+  %t53 = alloca [0 x %StringConstant*]
+  %t54 = getelementptr [0 x %StringConstant*], [0 x %StringConstant*]* %t53, i32 0, i32 0
+  %t55 = alloca { %StringConstant**, i64 }
+  %t56 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t55, i32 0, i32 0
+  store %StringConstant** %t54, %StringConstant*** %t56
+  %t57 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t55, i32 0, i32 1
+  store i64 0, i64* %t57
+  %t58 = insertvalue %ExpressionResult %t52, { %StringConstant**, i64 }* %t55, 4
+  ret %ExpressionResult %t58
 merge5:
+  %t59 = load %LocalBinding*, %LocalBinding** %l2
+  %t60 = getelementptr %LocalBinding, %LocalBinding* %t59, i32 0, i32 2
+  %t61 = load i8*, i8** %t60
+  %t62 = load i8, i8* %t61
+  %t63 = add i8 %t62, 42
+  store i8 %t63, i8* %l3
+  %t64 = load i8, i8* %l3
+  %t65 = alloca [2 x i8], align 1
+  %t66 = getelementptr [2 x i8], [2 x i8]* %t65, i32 0, i32 0
+  store i8 %t64, i8* %t66
+  %t67 = getelementptr [2 x i8], [2 x i8]* %t65, i32 0, i32 1
+  store i8 0, i8* %t67
+  %t68 = getelementptr [2 x i8], [2 x i8]* %t65, i32 0, i32 0
+  %t69 = insertvalue %LLVMOperand undef, i8* %t68, 0
   %t70 = load %LocalBinding*, %LocalBinding** %l2
-  %t71 = getelementptr %LocalBinding, %LocalBinding* %t70, i32 0, i32 2
+  %t71 = getelementptr %LocalBinding, %LocalBinding* %t70, i32 0, i32 1
   %t72 = load i8*, i8** %t71
-  %t73 = load i8, i8* %t72
-  %t74 = add i8 %t73, 42
-  store i8 %t74, i8* %l3
-  %t75 = load i8, i8* %l3
-  %t76 = alloca [2 x i8], align 1
-  %t77 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 0
-  store i8 %t75, i8* %t77
-  %t78 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 1
-  store i8 0, i8* %t78
-  %t79 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 0
-  %t80 = insertvalue %LLVMOperand undef, i8* %t79, 0
-  %t81 = load %LocalBinding*, %LocalBinding** %l2
-  %t82 = getelementptr %LocalBinding, %LocalBinding* %t81, i32 0, i32 1
-  %t83 = load i8*, i8** %t82
-  %t84 = insertvalue %LLVMOperand %t80, i8* %t83, 1
-  store %LLVMOperand %t84, %LLVMOperand* %l4
-  %t85 = insertvalue %ExpressionResult undef, { i8**, i64 }* %lines, 0
-  %t86 = insertvalue %ExpressionResult %t85, double %temp_index, 1
-  %t87 = load %LLVMOperand, %LLVMOperand* %l4
-  %t88 = alloca %LLVMOperand
-  store %LLVMOperand %t87, %LLVMOperand* %t88
-  %t89 = insertvalue %ExpressionResult %t86, %LLVMOperand* %t88, 2
-  %t90 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t91 = insertvalue %ExpressionResult %t89, { i8**, i64 }* %t90, 3
-  %t92 = alloca [0 x %StringConstant*]
-  %t93 = getelementptr [0 x %StringConstant*], [0 x %StringConstant*]* %t92, i32 0, i32 0
-  %t94 = alloca { %StringConstant**, i64 }
-  %t95 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t94, i32 0, i32 0
-  store %StringConstant** %t93, %StringConstant*** %t95
-  %t96 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t94, i32 0, i32 1
-  store i64 0, i64* %t96
-  %t97 = insertvalue %ExpressionResult %t91, { %StringConstant**, i64 }* %t94, 4
-  ret %ExpressionResult %t97
+  %t73 = insertvalue %LLVMOperand %t69, i8* %t72, 1
+  store %LLVMOperand %t73, %LLVMOperand* %l4
+  %t74 = insertvalue %ExpressionResult undef, { i8**, i64 }* %lines, 0
+  %t75 = insertvalue %ExpressionResult %t74, double %temp_index, 1
+  %t76 = load %LLVMOperand, %LLVMOperand* %l4
+  %t77 = alloca %LLVMOperand
+  store %LLVMOperand %t76, %LLVMOperand* %t77
+  %t78 = insertvalue %ExpressionResult %t75, %LLVMOperand* %t77, 2
+  %t79 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t80 = insertvalue %ExpressionResult %t78, { i8**, i64 }* %t79, 3
+  %t81 = alloca [0 x %StringConstant*]
+  %t82 = getelementptr [0 x %StringConstant*], [0 x %StringConstant*]* %t81, i32 0, i32 0
+  %t83 = alloca { %StringConstant**, i64 }
+  %t84 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t83, i32 0, i32 0
+  store %StringConstant** %t82, %StringConstant*** %t84
+  %t85 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t83, i32 0, i32 1
+  store i64 0, i64* %t85
+  %t86 = insertvalue %ExpressionResult %t80, { %StringConstant**, i64 }* %t83, 4
+  ret %ExpressionResult %t86
 }
 
 define %ExpressionResult @lower_ternary_expression(%TernaryParseResult %parse, { %ParameterBinding*, i64 }* %bindings, { %LocalBinding*, i64 }* %locals, double %temp_index, { i8**, i64 }* %lines, { %NativeFunction*, i64 }* %functions, %TypeContext %context, i8* %expected_type) {

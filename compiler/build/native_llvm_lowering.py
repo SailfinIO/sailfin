@@ -5581,7 +5581,6 @@ def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     local = find_local_binding(locals, target)
     if local == None:
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow requires local binding `" + target + "`")
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=[])
     pointer_type = local.llvm_type + "*"
     operand = LLVMOperand(llvm_type=pointer_type, value=local.pointer)

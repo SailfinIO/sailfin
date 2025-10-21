@@ -8214,7 +8214,6 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
 
     let local = find_local_binding(locals, target);
     if local == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow requires local binding `" + target + "`");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
