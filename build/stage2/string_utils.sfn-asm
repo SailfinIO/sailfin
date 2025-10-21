@@ -1,0 +1,118 @@
+; Sailfin Native Prototype
+.module main
+
+.import "runtime/prelude" { clamp, substring, find_char, grapheme_count, grapheme_at, char_code }
+
+.fn char_at(value -> string, index -> number) -> string
+.meta return string
+.meta effects none
+    .span 8 12 8 27
+    .param value -> string
+    .span 8 29 8 44
+    .param index -> number
+    .if value.length == 0
+        .span 10 3 10 13
+        ret ""
+    .endif
+    .if index < 0
+        .span 13 3 13 13
+        ret ""
+    .endif
+    .if index >= value.length
+        .span 16 3 16 13
+        ret ""
+    .endif
+    .span 18 2 18 44
+    ret substring(value, index, index + 1)
+.endfn
+
+.fn is_symbol_char(ch -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 21 19 21 31
+    .param ch -> string
+    .if ch.length == 0
+        .span 23 3 23 16
+        ret false
+    .endif
+    .if ch == "_"
+        .span 26 3 26 15
+        ret true
+    .endif
+    .span 28 2 28 27
+    eval let code = char_code(ch)
+    .span 29 2 29 31
+    eval let lower_a = char_code("a")
+    .span 30 2 30 31
+    eval let lower_z = char_code("z")
+    .if code >= lower_a && code <= lower_z
+        .span 32 3 32 15
+        ret true
+    .endif
+    .span 34 2 34 31
+    eval let upper_a = char_code("A")
+    .span 35 2 35 31
+    eval let upper_z = char_code("Z")
+    .if code >= upper_a && code <= upper_z
+        .span 37 3 37 15
+        ret true
+    .endif
+    .span 39 2 39 28
+    eval let zero = char_code("0")
+    .span 40 2 40 28
+    eval let nine = char_code("9")
+    .if code >= zero && code <= nine
+        .span 42 3 42 15
+        ret true
+    .endif
+    .span 44 2 44 15
+    ret false
+.endfn
+
+.fn sanitize_symbol(name -> string) -> string
+.meta return string
+.meta effects none
+    .span 47 20 47 34
+    .param name -> string
+    .if name.length == 0
+        .span 49 3 49 14
+        ret "_"
+    .endif
+    .span 51 2 51 32
+    eval let mut result -> string = ""
+    .span 52 2 52 30
+    eval let mut index -> number = 0
+    .loop
+        .if index >= name.length
+            break
+        .endif
+        .span 57 3 57 24
+        eval let ch = name[index]
+        .if is_symbol_char(ch)
+            .span 59 4 59 25
+            eval result = result + ch
+        .endif
+        .span 61 3 61 14
+        eval index += 1
+    .endloop
+    .if result.length == 0
+        .span 64 3 64 14
+        ret "_"
+    .endif
+    .span 66 2 66 24
+    eval let first = result[0]
+    .span 67 2 67 36
+    eval let first_code = char_code(first)
+    .span 68 2 68 28
+    eval let zero = char_code("0")
+    .span 69 2 69 28
+    eval let nine = char_code("9")
+    .if first_code >= zero && first_code <= nine
+        .span 71 3 71 25
+        eval result = "_" + result
+    .endif
+    .span 73 2 73 16
+    ret result
+.endfn
+
+.export "" { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol }

@@ -1,0 +1,1276 @@
+; Sailfin Native Prototype
+.module main
+
+.import "./ast" { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation, SourceSpan }
+
+.import "./token" { Token, TokenKind }
+
+.import "./effect_checker" { validate_effects, EffectRequirement, EffectViolation }
+
+.struct Diagnostic
+    .layout struct name=Diagnostic size=24 align=8
+    .layout field code type=string offset=0 size=8 align=8
+    .layout field message type=string offset=8 size=8 align=8
+    .layout field primary type=Token? offset=16 size=8 align=8
+    .field code -> string
+    .field message -> string
+    .field primary -> Token?
+.endstruct
+
+.struct SymbolEntry
+    .layout struct name=SymbolEntry size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field kind type=string offset=8 size=8 align=8
+    .layout field span type=SourceSpan? offset=16 size=8 align=8
+    .field name -> string
+    .field kind -> string
+    .field span -> SourceSpan?
+.endstruct
+
+.struct TypecheckResult
+    .layout struct name=TypecheckResult size=16 align=8
+    .layout field diagnostics type=Diagnostic[] offset=0 size=8 align=8
+    .layout field symbols type=SymbolEntry[] offset=8 size=8 align=8
+    .field diagnostics -> Diagnostic[]
+    .field symbols -> SymbolEntry[]
+.endstruct
+
+.struct SymbolCollectionResult
+    .layout struct name=SymbolCollectionResult size=16 align=8
+    .layout field symbols type=SymbolEntry[] offset=0 size=8 align=8
+    .layout field diagnostics type=Diagnostic[] offset=8 size=8 align=8
+    .field symbols -> SymbolEntry[]
+    .field diagnostics -> Diagnostic[]
+.endstruct
+
+.struct ScopeResult
+    .layout struct name=ScopeResult size=16 align=8
+    .layout field bindings type=SymbolEntry[] offset=0 size=8 align=8
+    .layout field diagnostics type=Diagnostic[] offset=8 size=8 align=8
+    .field bindings -> SymbolEntry[]
+    .field diagnostics -> Diagnostic[]
+.endstruct
+
+.fn typecheck_program(program -> Program) -> TypecheckResult
+.meta return TypecheckResult
+.meta effects none
+    .span 37 22 37 40
+    .param program -> Program
+    .span 38 5 38 56
+    eval let top_level = collect_top_level_symbols(program)
+    .span 39 5 39 61
+    eval let interfaces = collect_interface_definitions(program)
+    .span 40 5 40 72
+    eval let scoped_diagnostics = check_program_scopes(program, interfaces)
+    .span 41 5 41 64
+    eval let effect_diagnostics = build_effect_diagnostics(program)
+    .span 43 5 46 7
+    ret TypecheckResult { diagnostics: top_level.diagnostics.concat(scoped_diagnostics).concat(effect_diagnostics), symbols: top_level.symbols }
+.endfn
+
+.fn collect_interface_definitions(program -> Program) -> Statement[]
+.meta return Statement[]
+.meta effects none
+    .span 49 34 49 52
+    .param program -> Program
+    .span 50 5 50 44
+    eval let mut interfaces -> Statement[] = []
+    .for statement in program.statements
+        .if statement.variant == "InterfaceDeclaration"
+            .span 54 13 54 57
+            eval interfaces = interfaces.concat([statement])
+        .endif
+    .endfor
+    .span 57 5 57 23
+    ret interfaces
+.endfn
+
+.fn collect_top_level_symbols(program -> Program) -> SymbolCollectionResult
+.meta return SymbolCollectionResult
+.meta effects none
+    .span 60 30 60 48
+    .param program -> Program
+    .span 61 5 61 43
+    eval let mut symbols -> SymbolEntry[] = []
+    .span 62 5 62 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for statement in program.statements
+        .span 65 9 65 68
+        eval let result = register_top_level_symbol(statement, symbols)
+        .span 66 9 66 34
+        eval symbols = result.symbols
+        .span 67 9 67 62
+        eval diagnostics = diagnostics.concat(result.diagnostics)
+    .endfor
+    .span 70 5 73 7
+    ret SymbolCollectionResult { symbols: symbols, diagnostics: diagnostics }
+.endfn
+
+.fn register_top_level_symbol(statement -> Statement, existing -> SymbolEntry[]) -> SymbolCollectionResult
+.meta return SymbolCollectionResult
+.meta effects none
+    .span 76 30 76 52
+    .param statement -> Statement
+    .span 76 54 76 79
+    .param existing -> SymbolEntry[]
+    .if statement.variant == "FunctionDeclaration"
+        .span 78 9 78 111
+        ret register_symbol(statement.signature.name, "function", statement.signature.name_span, existing)
+    .endif
+    .if statement.variant == "StructDeclaration"
+        .span 81 9 81 89
+        ret register_symbol(statement.name, "struct", statement.name_span, existing)
+    .endif
+    .if statement.variant == "EnumDeclaration"
+        .span 84 9 84 87
+        ret register_symbol(statement.name, "enum", statement.name_span, existing)
+    .endif
+    .if statement.variant == "InterfaceDeclaration"
+        .span 87 9 87 92
+        ret register_symbol(statement.name, "interface", statement.name_span, existing)
+    .endif
+    .if statement.variant == "ModelDeclaration"
+        .span 90 9 90 88
+        ret register_symbol(statement.name, "model", statement.name_span, existing)
+    .endif
+    .if statement.variant == "PipelineDeclaration"
+        .span 93 9 93 111
+        ret register_symbol(statement.signature.name, "pipeline", statement.signature.name_span, existing)
+    .endif
+    .if statement.variant == "ToolDeclaration"
+        .span 96 9 96 107
+        ret register_symbol(statement.signature.name, "tool", statement.signature.name_span, existing)
+    .endif
+    .if statement.variant == "TestDeclaration"
+        .span 99 9 99 87
+        ret register_symbol(statement.name, "test", statement.name_span, existing)
+    .endif
+    .if statement.variant == "TypeAliasDeclaration"
+        .span 102 9 102 87
+        ret register_symbol(statement.name, "type", statement.name_span, existing)
+    .endif
+    .if statement.variant == "VariableDeclaration"
+        .span 105 9 105 86
+        ret register_symbol(statement.name, "variable", statement.span, existing)
+    .endif
+    .span 107 5 110 7
+    ret SymbolCollectionResult { symbols: existing, diagnostics: [] }
+.endfn
+
+.fn check_program_scopes(program -> Program, interfaces -> Statement[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 113 25 113 43
+    .param program -> Program
+    .span 113 45 113 70
+    .param interfaces -> Statement[]
+    .span 114 5 114 44
+    eval let mut bindings -> SymbolEntry[] = []
+    .span 115 5 115 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for statement in program.statements
+        .span 118 9 118 71
+        eval let result = check_statement(statement, bindings, interfaces)
+        .span 119 9 119 36
+        eval bindings = result.bindings
+        .span 120 9 120 62
+        eval diagnostics = diagnostics.concat(result.diagnostics)
+    .endfor
+    .span 123 5 123 24
+    ret diagnostics
+.endfn
+
+.fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces -> Statement[]) -> ScopeResult
+.meta return ScopeResult
+.meta effects none
+    .span 126 20 126 42
+    .param statement -> Statement
+    .span 126 44 126 69
+    .param bindings -> SymbolEntry[]
+    .span 126 71 126 96
+    .param interfaces -> Statement[]
+    .if statement.variant == "VariableDeclaration"
+        .span 128 9 128 92
+        ret register_local_symbol(bindings, statement.name, "variable", statement.span)
+    .endif
+    .if statement.variant == "FunctionDeclaration"
+        .span 131 9 131 129
+        eval let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span)
+        .span 132 9 132 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 133 9 133 89
+        eval diagnostics = diagnostics.concat(check_function_signature(statement.signature))
+        .span 134 9 134 105
+        eval let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces)
+        .span 135 9 138 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics.concat(function_diagnostics) }
+    .endif
+    .if statement.variant == "StructDeclaration"
+        .span 141 9 141 107
+        eval let registration = register_local_symbol(bindings, statement.name, "struct", statement.name_span)
+        .span 142 9 142 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 143 9 143 92
+        eval diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters))
+        .span 144 9 144 81
+        eval diagnostics = diagnostics.concat(check_struct_fields(statement.fields))
+        .span 145 9 145 83
+        eval diagnostics = diagnostics.concat(check_struct_methods(statement.methods))
+        .span 146 9 146 101
+        eval diagnostics = diagnostics.concat(check_struct_implements_interfaces(statement, interfaces))
+        .span 147 9 147 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= statement.methods.length
+                break
+            .endif
+            .span 152 13 152 51
+            eval let method = statement.methods[index]
+            .span 153 13 153 110
+            eval diagnostics = diagnostics.concat(check_function_body(method.signature, method.body, interfaces))
+            .span 154 13 154 24
+            eval index += 1
+        .endloop
+        .span 156 9 159 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "EnumDeclaration"
+        .span 162 9 162 105
+        eval let registration = register_local_symbol(bindings, statement.name, "enum", statement.name_span)
+        .span 163 9 163 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 164 9 164 92
+        eval diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters))
+        .span 165 9 165 83
+        eval diagnostics = diagnostics.concat(check_enum_variants(statement.variants))
+        .span 166 9 169 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "InterfaceDeclaration"
+        .span 172 9 172 110
+        eval let registration = register_local_symbol(bindings, statement.name, "interface", statement.name_span)
+        .span 173 9 173 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 174 9 174 92
+        eval diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters))
+        .span 175 9 175 86
+        eval diagnostics = diagnostics.concat(check_interface_members(statement.members))
+        .span 176 9 179 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "ModelDeclaration"
+        .span 182 9 182 106
+        eval let registration = register_local_symbol(bindings, statement.name, "model", statement.name_span)
+        .span 183 9 183 105
+        eval let diagnostics = registration.diagnostics.concat(check_model_properties(statement.properties))
+        .span 184 9 187 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "PipelineDeclaration"
+        .span 190 9 190 129
+        eval let registration = register_local_symbol(bindings, statement.signature.name, "pipeline", statement.signature.name_span)
+        .span 191 9 191 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 192 9 192 89
+        eval diagnostics = diagnostics.concat(check_function_signature(statement.signature))
+        .span 193 9 193 112
+        eval diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces))
+        .span 194 9 197 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "ToolDeclaration"
+        .span 200 9 200 125
+        eval let registration = register_local_symbol(bindings, statement.signature.name, "tool", statement.signature.name_span)
+        .span 201 9 201 56
+        eval let mut diagnostics = registration.diagnostics
+        .span 202 9 202 89
+        eval diagnostics = diagnostics.concat(check_function_signature(statement.signature))
+        .span 203 9 203 112
+        eval diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces))
+        .span 204 9 207 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "TestDeclaration"
+        .span 210 9 210 105
+        eval let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span)
+        .span 211 9 211 104
+        eval let diagnostics = registration.diagnostics.concat(check_block(statement.body, [], interfaces))
+        .span 212 9 215 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "WithStatement"
+        .span 218 9 221 11
+        ret ScopeResult { bindings: bindings, diagnostics: check_block(statement.body, bindings, interfaces) }
+    .endif
+    .if statement.variant == "ForStatement"
+        .span 224 9 227 11
+        ret ScopeResult { bindings: bindings, diagnostics: check_block(statement.body, bindings, interfaces) }
+    .endif
+    .if statement.variant == "MatchStatement"
+        .span 230 9 230 50
+        eval let mut diagnostics -> Diagnostic[] = []
+        .span 231 9 231 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= statement.cases.length
+                break
+            .endif
+            .span 236 13 236 47
+            eval let case = statement.cases[index]
+            .span 237 13 237 92
+            eval diagnostics = diagnostics.concat(check_block(case.body, bindings, interfaces))
+            .span 238 13 238 24
+            eval index += 1
+        .endloop
+        .span 240 9 243 11
+        ret ScopeResult { bindings: bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "IfStatement"
+        .span 246 9 246 87
+        eval let mut diagnostics = check_block(statement.then_block, bindings, interfaces)
+        .if statement.else_branch != null
+            .span 248 13 248 48
+            eval let branch = statement.else_branch
+            .if branch.body != null
+                .span 250 17 250 98
+                eval diagnostics = diagnostics.concat(check_block(branch.body, bindings, interfaces))
+            .endif
+            .if branch.statement != null
+                .span 253 17 253 86
+                eval let result = check_statement(branch.statement, bindings, interfaces)
+                .span 254 17 254 70
+                eval diagnostics = diagnostics.concat(result.diagnostics)
+            .endif
+        .endif
+        .span 257 9 260 11
+        ret ScopeResult { bindings: bindings, diagnostics: diagnostics }
+    .endif
+    .if statement.variant == "PromptStatement"
+        .span 263 9 266 11
+        ret ScopeResult { bindings: bindings, diagnostics: check_block(statement.body, bindings, interfaces) }
+    .endif
+    .if statement.variant == "TypeAliasDeclaration"
+        .span 269 9 269 105
+        eval let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span)
+        .span 270 9 270 109
+        eval let diagnostics = registration.diagnostics.concat(check_type_parameters(statement.type_parameters))
+        .span 271 9 274 11
+        ret ScopeResult { bindings: registration.bindings, diagnostics: diagnostics }
+    .endif
+    .span 276 5 279 7
+    ret ScopeResult { bindings: bindings, diagnostics: [] }
+.endfn
+
+.fn check_function_body(signature -> FunctionSignature, body -> Block, interfaces -> Statement[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 282 24 282 54
+    .param signature -> FunctionSignature
+    .span 282 56 282 69
+    .param body -> Block
+    .span 282 71 282 96
+    .param interfaces -> Statement[]
+    .span 283 5 283 59
+    eval let parameter_scope = seed_parameter_scope(signature)
+    .span 284 5 284 84
+    eval let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces)
+    .span 285 5 285 65
+    ret parameter_scope.diagnostics.concat(body_diagnostics)
+.endfn
+
+.fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult
+.meta return ScopeResult
+.meta effects none
+    .span 288 25 288 55
+    .param signature -> FunctionSignature
+    .span 289 5 289 44
+    eval let mut bindings -> SymbolEntry[] = []
+    .span 290 5 290 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for parameter in signature.parameters
+        .span 293 9 293 105
+        eval let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span)
+        .span 294 9 294 42
+        eval bindings = registration.bindings
+        .span 295 9 295 68
+        eval diagnostics = diagnostics.concat(registration.diagnostics)
+    .endfor
+    .span 298 5 301 7
+    ret ScopeResult { bindings: bindings, diagnostics: diagnostics }
+.endfn
+
+.fn check_block(block -> Block, parent_bindings -> SymbolEntry[], interfaces -> Statement[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 304 16 304 30
+    .param block -> Block
+    .span 304 32 304 64
+    .param parent_bindings -> SymbolEntry[]
+    .span 304 66 304 91
+    .param interfaces -> Statement[]
+    .span 305 5 305 56
+    eval let mut bindings = clone_bindings(parent_bindings)
+    .span 306 5 306 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for statement in block.statements
+        .span 309 9 309 71
+        eval let result = check_statement(statement, bindings, interfaces)
+        .span 310 9 310 36
+        eval bindings = result.bindings
+        .span 311 9 311 62
+        eval diagnostics = diagnostics.concat(result.diagnostics)
+    .endfor
+    .span 314 5 314 24
+    ret diagnostics
+.endfn
+
+.fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Statement[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 317 39 317 61
+    .param statement -> Statement
+    .span 317 63 317 88
+    .param interfaces -> Statement[]
+    .if statement.implements_types.length == 0
+        .span 319 9 319 19
+        ret []
+    .endif
+    .span 322 5 322 43
+    eval let mut method_names -> string[] = []
+    .for method in statement.methods
+        .span 324 9 324 69
+        eval method_names = method_names.concat([method.signature.name])
+    .endfor
+    .span 327 5 327 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for annotation in statement.implements_types
+        .span 329 9 329 89
+        eval let interface_definition = resolve_interface_annotation(annotation, interfaces)
+        .if interface_definition == null
+            continue
+        .endif
+        .span 333 9 333 56
+        eval let interface_name = interface_definition.name
+        .span 334 9 336 11
+        eval diagnostics = diagnostics.concat(
+            validate_interface_annotation(statement.name, interface_definition, annotation)
+        )
+        .for member in interface_definition.members
+            .if !contains_string(method_names, member.name)
+                .span 339 17 341 20
+                eval diagnostics = diagnostics.concat([
+                    make_missing_interface_member_diagnostic(statement.name, interface_name, member.name)
+                ])
+            .endif
+        .endfor
+    .endfor
+    .span 346 5 346 24
+    ret diagnostics
+.endfn
+
+.fn resolve_interface_annotation(annotation -> TypeAnnotation, interfaces -> Statement[]) -> Statement?
+.meta return Statement?
+.meta effects none
+    .span 349 33 349 61
+    .param annotation -> TypeAnnotation
+    .span 349 63 349 88
+    .param interfaces -> Statement[]
+    .span 350 5 350 32
+    eval let text = annotation.text
+    .for interface in interfaces
+        .span 352 9 352 35
+        eval let name = interface.name
+        .if text == name
+            .span 354 13 354 30
+            ret interface
+        .endif
+        .span 356 9 356 41
+        eval let generic_prefix = name + "<"
+        .if starts_with(text, generic_prefix)
+            .span 358 13 358 30
+            ret interface
+        .endif
+    .endfor
+    .span 361 5 361 17
+    ret null
+.endfn
+
+.fn check_struct_fields(fields -> FieldDeclaration[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 364 24 364 52
+    .param fields -> FieldDeclaration[]
+    .span 365 5 365 35
+    eval let mut seen -> string[] = []
+    .span 366 5 366 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for field in fields
+        .span 369 9 369 31
+        eval let name = field.name
+        .if contains_string(seen, name)
+            .span 371 13 373 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span))
+            ])
+        .else
+            .span 375 13 375 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 379 5 379 24
+    ret diagnostics
+.endfn
+
+.fn validate_interface_annotation(struct_name -> string, interface_definition -> Statement, annotation -> TypeAnnotation) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 382 34 382 55
+    .param struct_name -> string
+    .span 382 57 382 90
+    .param interface_definition -> Statement
+    .span 382 92 382 120
+    .param annotation -> TypeAnnotation
+    .span 383 5 383 70
+    eval let expected_count = interface_definition.type_parameters.length
+    .span 384 5 384 68
+    eval let provided_arguments = parse_type_arguments(annotation.text)
+    .if expected_count == 0
+        .if provided_arguments.length > 0
+            .span 387 13 393 15
+            ret [make_interface_no_type_arguments_diagnostic(struct_name, trim_text(annotation.text), interface_definition.name)]
+        .endif
+        .span 395 9 395 19
+        ret []
+    .endif
+    .if provided_arguments.length == 0
+        .span 399 9 405 11
+        ret [make_interface_missing_type_arguments_diagnostic(struct_name, interface_definition.name, format_interface_signature(interface_definition))]
+    .endif
+    .if provided_arguments.length != expected_count
+        .span 409 9 415 11
+        ret [make_interface_type_argument_mismatch_diagnostic(struct_name, trim_text(annotation.text), format_interface_signature(interface_definition))]
+    .endif
+    .span 418 5 418 15
+    ret []
+.endfn
+
+.fn format_interface_signature(interface_definition -> Statement) -> string
+.meta return string
+.meta effects none
+    .span 421 31 421 64
+    .param interface_definition -> Statement
+    .span 422 5 422 36
+    eval let mut names -> string[] = []
+    .for parameter in interface_definition.type_parameters
+        .span 424 9 424 48
+        eval names = names.concat([parameter.name])
+    .endfor
+    .if names.length == 0
+        .span 427 9 427 42
+        ret interface_definition.name
+    .endif
+    .span 429 5 429 85
+    ret interface_definition.name + "<" + join_with_separator(names, ", ") + ">"
+.endfn
+
+.fn join_with_separator(items -> string[], separator -> string) -> string
+.meta return string
+.meta effects none
+    .span 432 24 432 41
+    .param items -> string[]
+    .span 432 43 432 62
+    .param separator -> string
+    .if items.length == 0
+        .span 434 9 434 19
+        ret ""
+    .endif
+    .span 436 5 436 31
+    eval let mut result = items[0]
+    .span 437 5 437 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= items.length
+            break
+        .endif
+        .span 442 9 442 52
+        eval result = result + separator + items[index]
+        .span 443 9 443 20
+        eval index += 1
+    .endloop
+    .span 445 5 445 19
+    ret result
+.endfn
+
+.fn parse_type_arguments(annotation_text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 448 25 448 50
+    .param annotation_text -> string
+    .span 449 5 449 65
+    eval let block = extract_generic_argument_block(annotation_text)
+    .if block == null
+        .span 451 9 451 19
+        ret []
+    .endif
+    .span 453 5 453 47
+    ret split_generic_argument_list(block)
+.endfn
+
+.fn extract_generic_argument_block(annotation_text -> string) -> string?
+.meta return string?
+.meta effects none
+    .span 456 35 456 60
+    .param annotation_text -> string
+    .span 457 5 457 46
+    eval let trimmed = trim_text(annotation_text)
+    .span 458 5 458 33
+    eval let mut index -> number = 0
+    .span 459 5 459 33
+    eval let mut depth -> number = 0
+    .span 460 5 460 40
+    eval let mut start_index -> number = -1
+    .loop
+        .if index >= trimmed.length
+            break
+        .endif
+        .span 465 9 465 33
+        eval let ch = trimmed[index]
+        .if ch == "<"
+            .if depth == 0
+                .span 468 17 468 41
+                eval start_index = index + 1
+            .endif
+            .span 470 13 470 24
+            eval depth += 1
+        .else
+            .if ch == ">"
+                .if depth == 0
+                    .span 473 17 473 29
+                    ret null
+                .endif
+                .span 475 13 475 24
+                eval depth -= 1
+                .if depth == 0
+                    .span 477 17 477 64
+                    ret slice_text(trimmed, start_index, index)
+                .endif
+            .endif
+        .endif
+        .span 480 9 480 20
+        eval index += 1
+    .endloop
+    .span 482 5 482 17
+    ret null
+.endfn
+
+.fn split_generic_argument_list(block -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 485 32 485 47
+    .param block -> string
+    .span 486 5 486 40
+    eval let mut arguments -> string[] = []
+    .span 487 5 487 36
+    eval let mut current -> string = ""
+    .span 488 5 488 33
+    eval let mut depth -> number = 0
+    .span 489 5 489 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= block.length
+            break
+        .endif
+        .span 494 9 494 31
+        eval let ch = block[index]
+        .if ch == "<"
+            .span 496 13 496 24
+            eval depth += 1
+            .span 497 13 497 36
+            eval current = current + ch
+        .else
+            .if ch == ">"
+                .if depth > 0
+                    .span 500 17 500 28
+                    eval depth -= 1
+                .endif
+                .span 502 13 502 36
+                eval current = current + ch
+            .else
+                .if ch == ","
+                    .if depth == 0
+                        .span 505 17 505 50
+                        eval let trimmed = trim_text(current)
+                        .if trimmed.length > 0
+                            .span 507 21 507 61
+                            eval arguments = arguments.concat([trimmed])
+                        .endif
+                        .span 509 17 509 30
+                        eval current = ""
+                        .span 510 17 510 28
+                        eval index += 1
+                        continue
+                    .endif
+                    .span 513 13 513 36
+                    eval current = current + ch
+                .else
+                    .span 515 13 515 36
+                    eval current = current + ch
+                .endif
+            .endif
+        .endif
+        .span 517 9 517 20
+        eval index += 1
+    .endloop
+    .span 519 5 519 35
+    eval let tail = trim_text(current)
+    .if tail.length > 0
+        .span 521 9 521 46
+        eval arguments = arguments.concat([tail])
+    .endif
+    .span 523 5 523 22
+    ret arguments
+.endfn
+
+.fn trim_text(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 526 14 526 29
+    .param value -> string
+    .span 527 5 527 33
+    eval let mut start -> number = 0
+    .span 528 5 528 42
+    eval let mut end -> number = value.length
+    .loop
+        .if start >= end
+            break
+        .endif
+        .if is_whitespace(value[start])
+            .span 534 13 534 24
+            eval start += 1
+            continue
+        .endif
+        break
+    .endloop
+    .loop
+        .if end <= start
+            break
+        .endif
+        .if is_whitespace(value[end - 1])
+            .span 544 13 544 22
+            eval end -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .span 549 5 549 42
+    ret slice_text(value, start, end)
+.endfn
+
+.fn slice_text(value -> string, start -> number, end -> number) -> string
+.meta return string
+.meta effects none
+    .span 552 15 552 30
+    .param value -> string
+    .span 552 32 552 47
+    .param start -> number
+    .span 552 49 552 62
+    .param end -> number
+    .if start < 0
+        .span 554 9 554 19
+        eval start = 0
+    .endif
+    .if end > value.length
+        .span 557 9 557 28
+        eval end = value.length
+    .endif
+    .if end <= start
+        .span 560 9 560 19
+        ret ""
+    .endif
+    .span 562 5 562 35
+    eval let mut result -> string = ""
+    .span 563 5 563 27
+    eval let mut index = start
+    .loop
+        .if index >= end
+            break
+        .endif
+        .span 568 9 568 40
+        eval result = result + value[index]
+        .span 569 9 569 20
+        eval index += 1
+    .endloop
+    .span 571 5 571 19
+    ret result
+.endfn
+
+.fn is_whitespace(ch -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 574 18 574 30
+    .param ch -> string
+    .span 575 5 575 64
+    ret ch == " " || ch == "\n" || ch == "\t" || ch == "\r"
+.endfn
+
+.fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 578 25 578 55
+    .param methods -> MethodDeclaration[]
+    .span 579 5 579 35
+    eval let mut seen -> string[] = []
+    .span 580 5 580 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for method in methods
+        .span 583 9 583 86
+        eval diagnostics = diagnostics.concat(check_function_signature(method.signature))
+        .span 584 9 584 42
+        eval let name = method.signature.name
+        .if contains_string(seen, name)
+            .span 586 13 588 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span))
+            ])
+        .else
+            .span 590 13 590 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 594 5 594 24
+    ret diagnostics
+.endfn
+
+.fn check_enum_variants(variants -> EnumVariant[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 597 24 597 49
+    .param variants -> EnumVariant[]
+    .span 598 5 598 35
+    eval let mut seen -> string[] = []
+    .span 599 5 599 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for variant in variants
+        .span 602 9 602 33
+        eval let name = variant.name
+        .if contains_string(seen, name)
+            .span 604 13 606 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span))
+            ])
+        .else
+            .span 608 13 608 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 612 5 612 24
+    ret diagnostics
+.endfn
+
+.fn check_interface_members(members -> FunctionSignature[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 615 28 615 58
+    .param members -> FunctionSignature[]
+    .span 616 5 616 35
+    eval let mut seen -> string[] = []
+    .span 617 5 617 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for member in members
+        .span 620 9 620 76
+        eval diagnostics = diagnostics.concat(check_function_signature(member))
+        .span 621 9 621 32
+        eval let name = member.name
+        .if contains_string(seen, name)
+            .span 623 13 625 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span))
+            ])
+        .else
+            .span 627 13 627 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 631 5 631 24
+    ret diagnostics
+.endfn
+
+.fn check_model_properties(properties -> ModelProperty[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 634 27 634 56
+    .param properties -> ModelProperty[]
+    .span 635 5 635 35
+    eval let mut seen -> string[] = []
+    .span 636 5 636 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for property in properties
+        .span 639 9 639 34
+        eval let name = property.name
+        .if contains_string(seen, name)
+            .span 641 13 643 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span))
+            ])
+        .else
+            .span 645 13 645 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 649 5 649 24
+    ret diagnostics
+.endfn
+
+.fn check_function_signature(signature -> FunctionSignature) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 652 29 652 59
+    .param signature -> FunctionSignature
+    .span 653 5 653 61
+    ret check_type_parameters(signature.type_parameters)
+.endfn
+
+.fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 656 26 656 60
+    .param type_parameters -> TypeParameter[]
+    .span 657 5 657 35
+    eval let mut seen -> string[] = []
+    .span 658 5 658 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .for type_parameter in type_parameters
+        .span 661 9 661 40
+        eval let name = type_parameter.name
+        .if contains_string(seen, name)
+            .span 663 13 665 16
+            eval diagnostics = diagnostics.concat([
+                make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span))
+            ])
+        .else
+            .span 667 13 667 40
+            eval seen = seen.concat([name])
+        .endif
+    .endfor
+    .span 671 5 671 24
+    ret diagnostics
+.endfn
+
+.fn build_effect_diagnostics(program -> Program) -> Diagnostic[]
+.meta return Diagnostic[]
+.meta effects none
+    .span 674 29 674 47
+    .param program -> Program
+    .span 675 5 675 48
+    eval let violations = validate_effects(program)
+    .span 676 5 676 46
+    eval let mut diagnostics -> Diagnostic[] = []
+    .span 677 5 677 43
+    eval let mut violation_index -> number = 0
+    .loop
+        .if violation_index >= violations.length
+            break
+        .endif
+        .span 682 9 682 53
+        eval let violation = violations[violation_index]
+        .span 683 9 683 44
+        eval let mut effect_index -> number = 0
+        .loop
+            .if effect_index >= violation.missing_effects.length
+                break
+            .endif
+            .span 688 13 688 66
+            eval let effect = violation.missing_effects[effect_index]
+            .span 689 13 689 93
+            eval let requirement = select_requirement_for_effect(violation.requirements, effect)
+            .span 690 13 696 16
+            eval diagnostics = diagnostics.concat([
+                Diagnostic {
+                    code: "effects.missing",
+                    message: format_effect_message(violation.routine_name, effect, requirement),
+                    primary: requirement_primary_token(requirement),
+                }
+            ])
+            .span 697 13 697 31
+            eval effect_index += 1
+        .endloop
+        .span 699 9 699 30
+        eval violation_index += 1
+    .endloop
+    .span 701 5 701 24
+    ret diagnostics
+.endfn
+
+.fn select_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> EffectRequirement?
+.meta return EffectRequirement?
+.meta effects none
+    .span 704 34 704 69
+    .param requirements -> EffectRequirement[]
+    .span 704 71 704 87
+    .param effect -> string
+    .span 705 5 705 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= requirements.length
+            break
+        .endif
+        .span 710 9 710 47
+        eval let requirement = requirements[index]
+        .if requirement.effect == effect
+            .span 712 13 712 32
+            ret requirement
+        .endif
+        .span 714 9 714 20
+        eval index += 1
+    .endloop
+    .span 716 5 716 17
+    ret null
+.endfn
+
+.fn requirement_primary_token(requirement -> EffectRequirement?) -> Token?
+.meta return Token?
+.meta effects none
+    .span 719 30 719 63
+    .param requirement -> EffectRequirement?
+    .if requirement == null
+        .span 721 9 721 21
+        ret null
+    .endif
+    .span 723 5 723 31
+    ret requirement.origin
+.endfn
+
+.fn format_effect_message(routine_name -> string, effect -> string, requirement -> EffectRequirement?) -> string
+.meta return string
+.meta effects none
+    .span 726 26 726 48
+    .param routine_name -> string
+    .span 726 50 726 66
+    .param effect -> string
+    .span 726 68 726 101
+    .param requirement -> EffectRequirement?
+    .span 727 5 727 76
+    eval let mut message = routine_name + " is missing effect '" + effect + "'"
+    .if requirement != null
+        .span 729 9 729 72
+        eval message = message + "; required by " + requirement.description
+    .endif
+    .span 731 5 731 116
+    eval message = message + ". hint: add ![" + effect + "] to the signature or accept the CLI fix prompt when offered"
+    .span 732 5 732 20
+    ret message
+.endfn
+
+.fn contains_string(items -> string[], candidate -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 735 20 735 37
+    .param items -> string[]
+    .span 735 39 735 58
+    .param candidate -> string
+    .for item in items
+        .if item == candidate
+            .span 738 13 738 25
+            ret true
+        .endif
+    .endfor
+    .span 741 5 741 18
+    ret false
+.endfn
+
+.fn register_local_symbol(bindings -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> ScopeResult
+.meta return ScopeResult
+.meta effects none
+    .span 744 26 744 51
+    .param bindings -> SymbolEntry[]
+    .span 744 53 744 67
+    .param name -> string
+    .span 744 69 744 83
+    .param kind -> string
+    .span 744 85 744 104
+    .param span -> SourceSpan?
+    .if has_symbol(bindings, name)
+        .span 746 9 749 11
+        ret ScopeResult { bindings: bindings, diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))] }
+    .endif
+    .span 752 5 752 61
+    eval let updated = append_symbol(bindings, name, kind, span)
+    .span 753 5 756 7
+    ret ScopeResult { bindings: updated, diagnostics: [] }
+.endfn
+
+.fn register_symbol(name -> string, kind -> string, span -> SourceSpan?, existing -> SymbolEntry[]) -> SymbolCollectionResult
+.meta return SymbolCollectionResult
+.meta effects none
+    .span 759 20 759 34
+    .param name -> string
+    .span 759 36 759 50
+    .param kind -> string
+    .span 759 52 759 71
+    .param span -> SourceSpan?
+    .span 759 73 759 98
+    .param existing -> SymbolEntry[]
+    .if has_symbol(existing, name)
+        .span 761 9 764 11
+        ret SymbolCollectionResult { symbols: existing, diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))] }
+    .endif
+    .span 767 5 770 7
+    ret SymbolCollectionResult { symbols: append_symbol(existing, name, kind, span), diagnostics: [] }
+.endfn
+
+.fn append_symbol(symbols -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> SymbolEntry[]
+.meta return SymbolEntry[]
+.meta effects none
+    .span 773 18 773 42
+    .param symbols -> SymbolEntry[]
+    .span 773 44 773 58
+    .param name -> string
+    .span 773 60 773 74
+    .param kind -> string
+    .span 773 76 773 95
+    .param span -> SourceSpan?
+    .span 774 5 774 64
+    eval let mut updated -> SymbolEntry[] = clone_bindings(symbols)
+    .span 775 5 775 81
+    ret updated.concat([#element:SymbolEntry, SymbolEntry { name: name, kind: kind, span: span }])
+.endfn
+
+.fn clone_bindings(source -> SymbolEntry[]) -> SymbolEntry[]
+.meta return SymbolEntry[]
+.meta effects none
+    .span 778 19 778 42
+    .param source -> SymbolEntry[]
+    .span 779 5 779 40
+    eval let mut copy -> SymbolEntry[] = []
+    .for entry in source
+        .span 781 9 781 37
+        eval copy = copy.concat([entry])
+    .endfor
+    .span 783 5 783 17
+    ret copy
+.endfn
+
+.fn has_symbol(symbols -> SymbolEntry[], name -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 786 15 786 39
+    .param symbols -> SymbolEntry[]
+    .span 786 41 786 55
+    .param name -> string
+    .for entry in symbols
+        .if entry.name == name
+            .span 789 13 789 25
+            ret true
+        .endif
+    .endfor
+    .span 792 5 792 18
+    ret false
+.endfn
+
+.fn make_interface_missing_type_arguments_diagnostic(struct_name -> string, interface_name -> string, interface_signature -> string) -> Diagnostic
+.meta return Diagnostic
+.meta effects none
+    .span 795 53 795 74
+    .param struct_name -> string
+    .span 795 76 795 100
+    .param interface_name -> string
+    .span 795 102 795 131
+    .param interface_signature -> string
+    .span 796 5 800 7
+    ret Diagnostic { code: "E0302", message: "struct " + struct_name + " implements " + interface_name + " but must specify " + interface_signature + " type arguments", primary: null }
+.endfn
+
+.fn make_interface_type_argument_mismatch_diagnostic(struct_name -> string, annotation_text -> string, interface_signature -> string) -> Diagnostic
+.meta return Diagnostic
+.meta effects none
+    .span 803 53 803 74
+    .param struct_name -> string
+    .span 803 76 803 101
+    .param annotation_text -> string
+    .span 803 103 803 132
+    .param interface_signature -> string
+    .span 804 5 808 7
+    ret Diagnostic { code: "E0302", message: "struct " + struct_name + " implements " + annotation_text + " but must match " + interface_signature + " type arguments", primary: null }
+.endfn
+
+.fn make_interface_no_type_arguments_diagnostic(struct_name -> string, annotation_text -> string, interface_name -> string) -> Diagnostic
+.meta return Diagnostic
+.meta effects none
+    .span 811 48 811 69
+    .param struct_name -> string
+    .span 811 71 811 96
+    .param annotation_text -> string
+    .span 811 98 811 122
+    .param interface_name -> string
+    .span 812 5 816 7
+    ret Diagnostic { code: "E0302", message: "struct " + struct_name + " implements " + annotation_text + " but " + interface_name + " does not take type arguments", primary: null }
+.endfn
+
+.fn token_from_name(name -> string, span -> SourceSpan?) -> Token?
+.meta return Token?
+.meta effects none
+    .span 819 20 819 34
+    .param name -> string
+    .span 819 36 819 55
+    .param span -> SourceSpan?
+    .if span == null
+        .span 821 9 821 21
+        ret null
+    .endif
+    .span 823 5 828 7
+    ret Token { kind: TokenKind.Identifier { value: name }, lexeme: name, line: span.start_line, column: span.start_column }
+.endfn
+
+.fn make_duplicate_symbol_diagnostic(name -> string, kind -> string, token -> Token?) -> Diagnostic
+.meta return Diagnostic
+.meta effects none
+    .span 831 37 831 51
+    .param name -> string
+    .span 831 53 831 67
+    .param kind -> string
+    .span 831 69 831 84
+    .param token -> Token?
+    .span 832 5 836 7
+    ret Diagnostic { code: "E0001", message: "duplicate " + kind + " `" + name + "` declared", primary: token }
+.endfn
+
+.fn make_missing_interface_member_diagnostic(struct_name -> string, interface_name -> string, member_name -> string) -> Diagnostic
+.meta return Diagnostic
+.meta effects none
+    .span 839 45 839 66
+    .param struct_name -> string
+    .span 839 68 839 92
+    .param interface_name -> string
+    .span 839 94 839 115
+    .param member_name -> string
+    .span 840 5 844 7
+    ret Diagnostic { code: "E0301", message: "struct " + struct_name + " implements " + interface_name + " but is missing member `" + member_name + "`", primary: null }
+.endfn
+
+.fn starts_with(value -> string, prefix -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 847 16 847 31
+    .param value -> string
+    .span 847 33 847 49
+    .param prefix -> string
+    .if prefix.length > value.length
+        .span 849 9 849 22
+        ret false
+    .endif
+    .span 851 5 851 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= prefix.length
+            break
+        .endif
+        .if value[index] != prefix[index]
+            .span 857 13 857 26
+            ret false
+        .endif
+        .span 859 9 859 20
+        eval index += 1
+    .endloop
+    .span 861 5 861 17
+    ret true
+.endfn

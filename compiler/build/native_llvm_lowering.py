@@ -784,9 +784,12 @@ def apply_layout_manifest_entries(structs, enums, manifest):
     return LayoutManifestApplication(structs=updated_structs, enums=updated_enums, diagnostics=diagnostics)
 
 def lower_to_llvm(native_module):
-    return lower_to_llvm_with_manifests(native_module, [])
+    return lower_to_llvm_with_context(native_module, [], [])
 
 def lower_to_llvm_with_manifests(native_module, imported_manifests):
+    return lower_to_llvm_with_context(native_module, imported_manifests, [])
+
+def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
@@ -804,15 +807,63 @@ def lower_to_llvm_with_manifests(native_module, imported_manifests):
     diagnostics = (diagnostics) + (manifest_application.diagnostics)
     module_structs = manifest_application.structs
     module_enums = manifest_application.enums
-    trait_metadata = build_trait_metadata(parse.interfaces, module_structs)
-    type_build = build_type_context_with_imports(module_structs, module_enums, parse.interfaces, imported_manifests)
+    imported_structs = []
+    imported_enums = []
+    imported_interfaces = []
+    imported_functions = []
+    imported_struct_methods = []
+    manifest_count = len(imported_manifests)
+    text_index = 0
+    while True:
+        if text_index >= len(imported_native_texts):
+            break
+        native_text = imported_native_texts[text_index]
+        manifest_for_module = None
+        if text_index < manifest_count:
+            candidate_manifest = imported_manifests[text_index]
+            diagnostics = (diagnostics) + (candidate_manifest.diagnostics)
+            manifest_for_module = candidate_manifest
+        if len(native_text) == 0:
+            if manifest_for_module != None:
+                manifest_only = manifest_for_module
+                imported_structs = (imported_structs) + (manifest_only.structs)
+                imported_enums = (imported_enums) + (manifest_only.enums)
+            text_index += 1
+            continue
+        imported_parse = parse_native_artifact(native_text)
+        applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module)
+        diagnostics = (diagnostics) + (applied_import.diagnostics)
+        imported_structs = (imported_structs) + (applied_import.structs)
+        imported_enums = (imported_enums) + (applied_import.enums)
+        imported_interfaces = (imported_interfaces) + (imported_parse.interfaces)
+        imported_functions = (imported_functions) + (imported_parse.functions)
+        imported_methods = flatten_struct_methods(applied_import.structs)
+        imported_struct_methods = (imported_struct_methods) + (imported_methods)
+        text_index += 1
+    if len(imported_native_texts) < manifest_count:
+        manifest_index = len(imported_native_texts)
+        while True:
+            if manifest_index >= manifest_count:
+                break
+            leftover_manifest = imported_manifests[manifest_index]
+            diagnostics = (diagnostics) + (leftover_manifest.diagnostics)
+            imported_structs = (imported_structs) + (leftover_manifest.structs)
+            imported_enums = (imported_enums) + (leftover_manifest.enums)
+            manifest_index += 1
+    combined_structs = (module_structs) + (imported_structs)
+    combined_enums = (module_enums) + (imported_enums)
+    combined_interfaces = (parse.interfaces) + (imported_interfaces)
+    trait_metadata = build_trait_metadata(combined_interfaces, combined_structs)
+    type_build = build_type_context(combined_structs, combined_enums, combined_interfaces)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
-    struct_methods = flatten_struct_methods(module_structs)
-    all_functions = concat_native_functions(parse.functions, struct_methods)
-    runtime_helpers = collect_runtime_helper_targets(all_functions)
-    direct_effects = collect_direct_function_effects(all_functions)
-    call_graph = collect_function_call_graph(all_functions)
+    module_struct_methods = flatten_struct_methods(module_structs)
+    local_functions = concat_native_functions(parse.functions, module_struct_methods)
+    context_functions = concat_native_functions(local_functions, imported_functions)
+    context_functions = concat_native_functions(context_functions, imported_struct_methods)
+    runtime_helpers = collect_runtime_helper_targets(local_functions)
+    direct_effects = collect_direct_function_effects(context_functions)
+    call_graph = collect_function_call_graph(context_functions)
     aggregated_effects = propagate_function_effects(direct_effects, call_graph)
     function_effects = []
     lifetime_regions = []
@@ -858,15 +909,15 @@ def lower_to_llvm_with_manifests(native_module, imported_manifests):
     has_add_function = False
     all_string_constants = []
     while True:
-        if index >= len(all_functions):
+        if index >= len(local_functions):
             break
-        current_function = all_functions[index]
+        current_function = local_functions[index]
         aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name)
         effective_effects = []
         if aggregated_entry != None:
             effective_effects = aggregated_entry.effects
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, all_functions, effective_effects, type_context)
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context)
         if sanitize_symbol(current_function.name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -874,7 +925,7 @@ def lower_to_llvm_with_manifests(native_module, imported_manifests):
         all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
         if len(lowered.lines) > 0:
             function_lines = (function_lines) + (lowered.lines)
-            if index + 1 < len(all_functions):
+            if index + 1 < len(local_functions):
                 function_lines = append_string(function_lines, "")
         index += 1
     if not has_add_function:
@@ -986,19 +1037,6 @@ def render_runtime_helper_declarations(used_targets):
 
 def empty_type_context():
     return TypeContext(structs=[], enums=[], interfaces=[], vtables=[])
-
-def build_type_context_with_imports(structs, enums, interfaces, imported_manifests):
-    all_structs = structs
-    all_enums = enums
-    manifest_index = 0
-    while True:
-        if manifest_index >= len(imported_manifests):
-            break
-        manifest = imported_manifests[manifest_index]
-        all_structs = (all_structs) + (manifest.structs)
-        all_enums = (all_enums) + (manifest.enums)
-        manifest_index += 1
-    return build_type_context(all_structs, all_enums, interfaces)
 
 def build_type_context(structs, enums, interfaces):
     diagnostics = []
@@ -6445,10 +6483,43 @@ def parse_struct_literal(text):
     angle_depth = 0
     index = 0
     open_index = -1
+    in_single = False
+    in_double = False
+    escape = False
     while True:
         if index >= len(trimmed):
             break
         ch = trimmed[index]
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
         if ch == "(":
             paren_depth += 1
         else:
@@ -6481,6 +6552,10 @@ def parse_struct_literal(text):
     close_index = find_matching_closing_brace(trimmed, open_index)
     if close_index < 0:
         diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing closing `}`")
+        snippet = trimmed
+        if len(snippet) > 120:
+            snippet = substring(snippet, 0, 117) + "..."
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal context `" + snippet + "`")
         fatal = True
     type_name = trim_text(substring(trimmed, 0, open_index))
     if len(type_name) == 0:
@@ -6544,10 +6619,43 @@ def parse_enum_literal(text):
     angle_depth = 0
     index = dot_index + 1
     open_index = -1
+    in_single = False
+    in_double = False
+    escape = False
     while True:
         if index >= len(trimmed):
             break
         ch = trimmed[index]
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
         if ch == "(":
             paren_depth += 1
         else:
@@ -7136,17 +7244,21 @@ def strip_enclosing_parentheses(expression):
     return trimmed
 
 def find_top_level_operator(expression, operators):
-    depth = 0
-    index = 0
-    in_string = False
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    angle_depth = 0
+    in_single = False
+    in_double = False
     escape_next = False
     candidate_index = -1
     candidate_symbol = ""
+    index = 0
     while True:
         if index >= len(expression):
             break
         ch = expression[index]
-        if in_string:
+        if in_double:
             if escape_next:
                 escape_next = False
                 index += 1
@@ -7156,23 +7268,67 @@ def find_top_level_operator(expression, operators):
                 index += 1
                 continue
             if ch == "\"":
-                in_string = False
+                in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "'":
+                in_single = False
             index += 1
             continue
         if ch == "\"":
-            in_string = True
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
             index += 1
             continue
         if ch == "(":
-            depth += 1
+            paren_depth += 1
             index += 1
             continue
         if ch == ")":
-            if depth > 0:
-                depth -= 1
+            if paren_depth > 0:
+                paren_depth -= 1
             index += 1
             continue
-        if depth == 0  and  contains_char(operators, ch):
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if ch == "{":
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        if ch == "<":
+            angle_depth += 1
+            index += 1
+            continue
+        if ch == ">":
+            if angle_depth > 0:
+                angle_depth -= 1
+            index += 1
+            continue
+        if paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0  and  angle_depth == 0  and  contains_char(operators, ch):
             if ch == "-":
                 if is_binary_minus(expression, index):
                     candidate_index = index
@@ -7475,10 +7631,47 @@ def split_array_elements(text):
     bracket_depth = 0
     brace_depth = 0
     index = 0
+    in_single = False
+    in_double = False
+    escape = False
     while True:
         if index >= len(text):
             break
         ch = text[index]
+        if in_double:
+            current = current + ch
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            current = current + ch
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            current = current + ch
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            current = current + ch
+            index += 1
+            continue
         if ch == "(":
             paren_depth += 1
         else:

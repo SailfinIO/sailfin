@@ -1,0 +1,1240 @@
+; Sailfin Native Prototype
+.module main
+
+.import "./parser" { parse_program }
+
+.import "./emitter_sailfin" { emit_program }
+
+.import "./emit_native" { emit_native, EmitNativeResult, NativeModule }
+
+.import "./native_lowering" { lower_to_python, LoweredPythonResult }
+
+.import "./native_llvm_lowering" { lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult }
+
+.import "./native_ir" { LayoutManifest, parse_layout_manifest }
+
+.import "./typecheck" { typecheck_program }
+
+.struct CompiledModule
+    .layout struct name=CompiledModule size=16 align=8
+    .layout field source_path type=string offset=0 size=8 align=8
+    .layout field python_source type=string offset=8 size=8 align=8
+    .field source_path -> string
+    .field python_source -> string
+.endstruct
+
+.struct ModuleDiagnostics
+    .layout struct name=ModuleDiagnostics size=24 align=8
+    .layout field source_path type=string offset=0 size=8 align=8
+    .layout field messages type=string[] offset=8 size=8 align=8
+    .layout field fatal type=boolean offset=16 size=1 align=1
+    .field source_path -> string
+    .field messages -> string[]
+    .field fatal -> boolean
+.endstruct
+
+.struct ModuleCompilationResult
+    .layout struct name=ModuleCompilationResult size=16 align=8
+    .layout field module type=CompiledModule? offset=0 size=8 align=8
+    .layout field diagnostics type=ModuleDiagnostics[] offset=8 size=8 align=8
+    .field module -> CompiledModule?
+    .field diagnostics -> ModuleDiagnostics[]
+.endstruct
+
+.struct ProjectCompilation
+    .layout struct name=ProjectCompilation size=16 align=8
+    .layout field modules type=CompiledModule[] offset=0 size=8 align=8
+    .layout field diagnostics type=ModuleDiagnostics[] offset=8 size=8 align=8
+    .field modules -> CompiledModule[]
+    .field diagnostics -> ModuleDiagnostics[]
+.endstruct
+
+.fn compile_to_sailfin(source -> string) -> string ![io]
+.meta return string
+.meta effects io
+    .span 33 23 33 39
+    .param source -> string
+    .span 34 5 34 41
+    eval let program = parse_program(source)
+    .span 35 5 35 54
+    eval let analysis_result = typecheck_program(program)
+    .if analysis_result.diagnostics.length > 0
+        .span 37 9 37 70
+        eval report_typecheck_errors(analysis_result.diagnostics, source)
+        .span 38 9 38 19
+        ret ""
+    .endif
+    .span 40 5 40 34
+    ret emit_program(program)
+.endfn
+
+.fn compile_to_native(source -> string) -> EmitNativeResult ![io]
+.meta return EmitNativeResult
+.meta effects io
+    .span 43 22 43 38
+    .param source -> string
+    .span 44 5 44 41
+    eval let program = parse_program(source)
+    .span 45 5 45 54
+    eval let analysis_result = typecheck_program(program)
+    .if analysis_result.diagnostics.length > 0
+        .span 47 9 47 70
+        eval report_typecheck_errors(analysis_result.diagnostics, source)
+        .span 48 9 51 11
+        ret EmitNativeResult { module: empty_native_module(), diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics, source) }
+    .endif
+    .span 53 5 53 33
+    ret emit_native(program)
+.endfn
+
+.fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io]
+.meta return LoweredPythonResult
+.meta effects io
+    .span 56 29 56 45
+    .param source -> string
+    .span 57 5 57 51
+    eval let native_result = compile_to_native(source)
+    .span 58 5 58 57
+    eval let lowered = lower_to_python(native_result.module)
+    .span 59 5 59 39
+    eval let mut combined -> string[] = []
+    .span 60 5 60 59
+    eval combined = combined.concat(native_result.diagnostics)
+    .span 61 5 61 53
+    eval combined = combined.concat(lowered.diagnostics)
+    .if combined.length > 0
+        .span 63 9 63 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= combined.length
+                break
+            .endif
+            .span 68 13 68 55
+            eval print.warn("[native] " + combined[index])
+            .span 69 13 69 24
+            eval index += 1
+        .endloop
+    .endif
+    .span 72 5 75 7
+    ret LoweredPythonResult { source: lowered.source, diagnostics: combined }
+.endfn
+
+.struct LLVMCompilationResult
+    .layout struct name=LLVMCompilationResult size=16 align=8
+    .layout field llvm type=LoweredLLVMResult offset=0 size=8 align=8
+    .layout field native_module type=NativeModule offset=8 size=8 align=8
+    .field llvm -> LoweredLLVMResult
+    .field native_module -> NativeModule
+.endstruct
+
+.fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io]
+.meta return LoweredLLVMResult
+.meta effects io
+    .span 83 27 83 43
+    .param source -> string
+    .span 84 5 84 51
+    eval let native_result = compile_to_native(source)
+    .span 85 5 85 55
+    eval let lowered = lower_to_llvm(native_result.module)
+    .span 86 5 86 39
+    eval let mut combined -> string[] = []
+    .span 87 5 87 59
+    eval combined = combined.concat(native_result.diagnostics)
+    .span 88 5 88 53
+    eval combined = combined.concat(lowered.diagnostics)
+    .if combined.length > 0
+        .span 90 9 90 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= combined.length
+                break
+            .endif
+            .span 95 13 95 60
+            eval print.warn("[native-llvm] " + combined[index])
+            .span 96 13 96 24
+            eval index += 1
+        .endloop
+    .endif
+    .span 99 5 107 7
+    ret LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }
+.endfn
+
+.fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io]
+.meta return LLVMCompilationResult
+.meta effects io
+    .span 110 32 110 48
+    .param source -> string
+    .span 111 5 111 51
+    eval let native_result = compile_to_native(source)
+    .span 112 5 112 55
+    eval let lowered = lower_to_llvm(native_result.module)
+    .span 113 5 113 39
+    eval let mut combined -> string[] = []
+    .span 114 5 114 59
+    eval combined = combined.concat(native_result.diagnostics)
+    .span 115 5 115 53
+    eval combined = combined.concat(lowered.diagnostics)
+    .if combined.length > 0
+        .span 117 9 117 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= combined.length
+                break
+            .endif
+            .span 122 13 122 60
+            eval print.warn("[native-llvm] " + combined[index])
+            .span 123 13 123 24
+            eval index += 1
+        .endloop
+    .endif
+    .span 126 5 137 7
+    ret LLVMCompilationResult { llvm: LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }, native_module: native_result.module }
+.endfn
+
+.fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io]
+.meta return LoweredLLVMResult
+.meta effects io
+    .span 141 40 141 56
+    .param source -> string
+    .span 141 58 141 87
+    .param manifest_contents -> string[]
+    .span 141 89 141 117
+    .param native_artifacts -> string[]
+    .span 142 5 142 51
+    eval let native_result = compile_to_native(source)
+    .span 145 5 145 48
+    eval let mut manifests -> LayoutManifest[] = []
+    .span 146 5 146 42
+    eval let mut manifest_index -> number = 0
+    .loop
+        .if manifest_index >= manifest_contents.length
+            break
+        .endif
+        .span 151 9 151 63
+        eval let manifest_text = manifest_contents[manifest_index]
+        .if manifest_text.length == 0
+            .span 153 13 153 104
+            eval manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }])
+        .else
+            .span 155 13 155 63
+            eval let parsed = parse_layout_manifest(manifest_text)
+            .span 156 13 156 52
+            eval manifests = manifests.concat([parsed])
+        .endif
+        .span 158 9 158 29
+        eval manifest_index += 1
+    .endloop
+    .span 161 5 161 97
+    eval let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts)
+    .span 162 5 162 39
+    eval let mut combined -> string[] = []
+    .span 163 5 163 59
+    eval combined = combined.concat(native_result.diagnostics)
+    .span 164 5 164 53
+    eval combined = combined.concat(lowered.diagnostics)
+    .if combined.length > 0
+        .span 166 9 166 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= combined.length
+                break
+            .endif
+            .span 171 13 171 60
+            eval print.warn("[native-llvm] " + combined[index])
+            .span 172 13 172 24
+            eval index += 1
+        .endloop
+    .endif
+    .span 175 5 183 7
+    ret LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }
+.endfn
+
+.fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io]
+.meta return LoweredLLVMResult
+.meta effects io
+    .span 187 42 187 58
+    .param source -> string
+    .span 187 60 187 89
+    .param manifest_contents -> string[]
+    .span 188 5 188 79
+    ret compile_to_native_llvm_with_context(source, manifest_contents, [])
+.endfn
+
+.fn main() ![io]
+.meta return void
+.meta effects io
+    .span 192 5 192 46
+    eval print.info("Sailfin compiler (stage 0)")
+.endfn
+
+.fn compile_project(sources -> string[]) -> ProjectCompilation ![io]
+.meta return ProjectCompilation
+.meta effects io
+    .span 195 20 195 39
+    .param sources -> string[]
+    .span 196 5 196 46
+    eval let mut modules -> CompiledModule[] = []
+    .span 197 5 197 53
+    eval let mut diagnostics -> ModuleDiagnostics[] = []
+    .for source_path in sources
+        .span 200 9 200 58
+        eval let result = compile_source_at_path(source_path)
+        .if result.module != null
+            .span 202 13 202 55
+            eval modules = modules.concat([result.module])
+        .endif
+        .if result.diagnostics.length > 0
+            .span 205 13 205 66
+            eval diagnostics = diagnostics.concat(result.diagnostics)
+        .endif
+    .endfor
+    .span 209 5 212 7
+    ret ProjectCompilation { modules: modules, diagnostics: diagnostics }
+.endfn
+
+.fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io]
+.meta return ModuleCompilationResult
+.meta effects io
+    .span 215 27 215 48
+    .param source_path -> string
+    .span 216 5 216 43
+    eval let source = fs.readFile(source_path)
+    .span 217 5 217 41
+    eval let program = parse_program(source)
+    .span 218 5 218 47
+    eval let analysis = typecheck_program(program)
+    .if analysis.diagnostics.length > 0
+        .span 220 9 227 11
+        ret ModuleCompilationResult { module: null, diagnostics: [#element:ModuleDiagnostics, ModuleDiagnostics { source_path: source_path, messages: format_typecheck_diagnostics(analysis.diagnostics, source), fatal: true }] }
+    .endif
+    .span 230 5 230 46
+    eval let native_result = emit_native(program)
+    .span 231 5 231 57
+    eval let lowered = lower_to_python(native_result.module)
+    .span 232 5 232 90
+    eval let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics)
+    .span 233 5 233 40
+    eval let python_source = lowered.source
+    .span 234 5 234 64
+    eval let fallback_needed = needs_python_fallback(python_source)
+    .if fallback_needed
+        .span 236 5 236 123
+        eval messages = messages.concat(["native backend: lowering produced unsupported python output; stage0 fallback disabled"])
+        .span 237 9 244 11
+        ret ModuleCompilationResult { module: null, diagnostics: [#element:ModuleDiagnostics, ModuleDiagnostics { source_path: source_path, messages: messages, fatal: true }] }
+    .endif
+    .span 247 5 247 52
+    eval let mut entry_list -> ModuleDiagnostics[] = []
+    .if messages.length > 0
+        .span 249 9 253 12
+        eval entry_list = [ModuleDiagnostics {
+            source_path: source_path,
+            messages: messages,
+            fatal: false,
+        }]
+    .endif
+    .span 256 5 262 7
+    ret ModuleCompilationResult { module: CompiledModule { source_path: source_path, python_source: python_source }, diagnostics: entry_list }
+.endfn
+
+.fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 265 33 265 56
+    .param entries -> Diagnostic[]
+    .span 265 58 265 74
+    .param source -> string
+    .span 266 5 266 44
+    eval let lines = split_source_lines(source)
+    .span 267 5 267 77
+    eval let mut padding_width -> number = number_to_string(lines.length).length
+    .if padding_width < 1
+        .span 269 9 269 27
+        eval padding_width = 1
+    .endif
+    .span 271 5 271 39
+    eval let mut messages -> string[] = []
+    .span 272 5 272 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= entries.length
+            break
+        .endif
+        .span 277 9 277 91
+        eval let formatted = format_typecheck_diagnostic(entries[index], lines, padding_width)
+        .span 278 9 278 55
+        eval messages = append_string(messages, formatted)
+        .span 279 9 279 20
+        eval index += 1
+    .endloop
+    .span 281 5 281 21
+    ret messages
+.endfn
+
+.fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io]
+.meta return void
+.meta effects io
+    .span 284 28 284 51
+    .param entries -> Diagnostic[]
+    .span 284 53 284 69
+    .param source -> string
+    .span 285 5 285 67
+    eval let formatted = format_typecheck_diagnostics(entries, source)
+    .span 286 5 286 33
+    eval let prefix = "[typecheck] "
+    .span 287 5 287 56
+    eval let padding = repeat_character(" ", prefix.length)
+    .span 288 5 288 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= formatted.length
+            break
+        .endif
+        .span 293 9 293 40
+        eval let message = formatted[index]
+        .span 294 9 294 49
+        eval let lines = split_source_lines(message)
+        .if lines.length == 0
+            .span 296 13 296 33
+            eval print.error(prefix)
+            .span 297 13 297 24
+            eval index += 1
+            continue
+        .endif
+        .span 300 9 300 42
+        eval let mut line_index -> number = 0
+        .loop
+            .if line_index >= lines.length
+                break
+            .endif
+            .if line_index == 0
+                .span 306 17 306 57
+                eval print.error(prefix + lines[line_index])
+            .else
+                .span 308 17 308 58
+                eval print.error(padding + lines[line_index])
+            .endif
+            .span 310 13 310 29
+            eval line_index += 1
+        .endloop
+        .span 312 9 312 20
+        eval index += 1
+    .endloop
+.endfn
+
+.fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], line_padding -> number) -> string
+.meta return string
+.meta effects none
+    .span 316 32 316 51
+    .param entry -> Diagnostic
+    .span 316 53 316 77
+    .param source_lines -> string[]
+    .span 316 79 316 101
+    .param line_padding -> number
+    .if entry.primary == null
+        .span 318 9 318 30
+        ret entry.message
+    .endif
+    .span 320 5 320 36
+    eval let mut parts -> string[] = []
+    .span 321 5 321 49
+    eval parts = append_string(parts, entry.message)
+    .span 322 5 322 31
+    eval let token = entry.primary
+    .span 323 5 323 34
+    eval let line_number = token.line
+    .span 324 5 324 38
+    eval let column_number = token.column
+    .span 325 5 325 114
+    eval let location = "  --> line " + number_to_string(line_number) + ", column " + number_to_string(column_number)
+    .span 326 5 326 44
+    eval parts = append_string(parts, location)
+    .if line_number < 1 || line_number > source_lines.length
+        .span 328 9 328 34
+        ret join_lines(parts)
+    .endif
+    .span 330 5 330 51
+    eval let line_text = source_lines[line_number - 1]
+    .span 331 5 331 61
+    eval let gutter_spaces = repeat_character(" ", line_padding)
+    .span 332 5 332 62
+    eval parts = append_string(parts, " " + gutter_spaces + " |")
+    .span 333 5 333 58
+    eval let line_number_text = number_to_string(line_number)
+    .span 334 5 334 43
+    eval let mut prefix_padding -> string = ""
+    .span 335 5 335 74
+    eval let mut pad_count -> number = line_padding - line_number_text.length
+    .if pad_count < 0
+        .span 337 9 337 23
+        eval pad_count = 0
+    .endif
+    .if pad_count > 0
+        .span 340 9 340 59
+        eval prefix_padding = repeat_character(" ", pad_count)
+    .endif
+    .span 342 5 342 95
+    eval parts = append_string(parts, " " + prefix_padding + line_number_text + " | " + line_text)
+    .span 343 5 343 78
+    eval let pointer = build_pointer_line(column_number, token.lexeme, line_text)
+    .span 344 5 344 73
+    eval parts = append_string(parts, " " + gutter_spaces + " | " + pointer)
+    .span 345 5 345 30
+    ret join_lines(parts)
+.endfn
+
+.fn split_source_lines(source -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 348 23 348 39
+    .param source -> string
+    .span 349 5 349 36
+    eval let mut lines -> string[] = []
+    .span 350 5 350 36
+    eval let mut current -> string = ""
+    .span 351 5 351 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= source.length
+            break
+        .endif
+        .span 356 9 356 32
+        eval let ch = source[index]
+        .if ch == "\r"
+            .span 358 13 358 51
+            eval lines = append_string(lines, current)
+            .span 359 13 359 26
+            eval current = ""
+            .if index + 1 < source.length
+                .if source[index + 1] == "\n"
+                    .span 362 21 362 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+            .span 366 13 366 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\n"
+            .span 370 13 370 51
+            eval lines = append_string(lines, current)
+            .span 371 13 371 26
+            eval current = ""
+            .span 372 13 372 24
+            eval index += 1
+            continue
+        .endif
+        .span 375 9 375 32
+        eval current = current + ch
+        .span 376 9 376 20
+        eval index += 1
+    .endloop
+    .span 378 5 378 43
+    eval lines = append_string(lines, current)
+    .span 379 5 379 18
+    ret lines
+.endfn
+
+.fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -> string
+.meta return string
+.meta effects none
+    .span 382 23 382 39
+    .param column -> number
+    .span 382 41 382 57
+    .param lexeme -> string
+    .span 382 59 382 78
+    .param line_text -> string
+    .if line_text.length == 0
+        .span 384 9 384 20
+        ret "^"
+    .endif
+    .span 386 5 386 45
+    eval let mut start_column -> number = column
+    .if start_column < 1
+        .span 388 9 388 26
+        eval start_column = 1
+    .endif
+    .if start_column > line_text.length
+        .span 391 9 391 41
+        eval start_column = line_text.length
+    .endif
+    .span 393 5 393 36
+    eval let mut pointer -> string = ""
+    .span 394 5 394 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= start_column
+            break
+        .endif
+        .if index <= line_text.length
+            .span 400 13 400 48
+            eval let current = line_text[index - 1]
+            .if current == "\t"
+                .span 402 17 402 42
+                eval pointer = pointer + "\t"
+            .else
+                .span 404 17 404 41
+                eval pointer = pointer + " "
+            .endif
+        .else
+            .span 407 13 407 37
+            eval pointer = pointer + " "
+        .endif
+        .span 409 9 409 20
+        eval index += 1
+    .endloop
+    .span 411 5 411 56
+    eval let mut highlight_length -> number = lexeme.length
+    .if highlight_length <= 0
+        .span 413 9 413 30
+        eval highlight_length = 1
+    .endif
+    .span 415 5 415 73
+    eval let mut remaining -> number = line_text.length - (start_column - 1)
+    .if remaining <= 0
+        .span 417 9 417 23
+        eval remaining = 1
+    .endif
+    .if highlight_length > remaining
+        .span 420 9 420 38
+        eval highlight_length = remaining
+    .endif
+    .span 422 5 422 43
+    eval let mut highlight_index -> number = 0
+    .loop
+        .if highlight_index >= highlight_length
+            break
+        .endif
+        .span 427 9 427 33
+        eval pointer = pointer + "^"
+        .span 428 9 428 30
+        eval highlight_index += 1
+    .endloop
+    .span 430 5 430 20
+    ret pointer
+.endfn
+
+.fn join_lines(lines -> string[]) -> string
+.meta return string
+.meta effects none
+    .span 433 15 433 32
+    .param lines -> string[]
+    .if lines.length == 0
+        .span 435 9 435 19
+        ret ""
+    .endif
+    .span 437 5 437 41
+    eval let mut result -> string = lines[0]
+    .span 438 5 438 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= lines.length
+            break
+        .endif
+        .span 443 9 443 47
+        eval result = result + "\n" + lines[index]
+        .span 444 9 444 20
+        eval index += 1
+    .endloop
+    .span 446 5 446 19
+    ret result
+.endfn
+
+.fn append_string(values -> string[], value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 449 18 449 36
+    .param values -> string[]
+    .span 449 38 449 53
+    .param value -> string
+    .span 450 5 450 35
+    ret values.concat([value])
+.endfn
+
+.fn number_to_string(value -> number) -> string
+.meta return string
+.meta effects none
+    .span 453 21 453 36
+    .param value -> number
+    .if value == 0
+        .span 455 9 455 20
+        ret "0"
+    .endif
+    .span 457 5 457 39
+    eval let mut working -> number = value
+    .span 458 5 458 41
+    eval let mut negative -> boolean = false
+    .if working < 0
+        .span 460 9 460 25
+        eval negative = true
+        .span 461 9 461 28
+        eval working = -working
+    .endif
+    .span 463 5 463 31
+    eval let digits = "0123456789"
+    .span 464 5 464 43
+    eval let mut remaining -> number = working
+    .span 465 5 465 35
+    eval let mut output -> string = ""
+    .loop
+        .if remaining <= 0
+            break
+        .endif
+        .span 470 9 470 44
+        eval let mut temp -> number = remaining
+        .span 471 9 471 40
+        eval let mut quotient -> number = 0
+        .loop
+            .if temp < 10
+                break
+            .endif
+            .span 476 13 476 24
+            eval temp -= 10
+            .span 477 13 477 27
+            eval quotient += 1
+        .endloop
+        .span 479 9 479 55
+        eval let ch = slice_string(digits, temp, temp + 1)
+        .span 480 9 480 30
+        eval output = ch + output
+        .span 481 9 481 30
+        eval remaining = quotient
+    .endloop
+    .if negative
+        .span 484 9 484 31
+        eval output = "-" + output
+    .endif
+    .span 486 5 486 19
+    ret output
+.endfn
+
+.fn empty_native_module() -> NativeModule
+.meta return NativeModule
+.meta effects none
+    .span 490 5 494 7
+    ret NativeModule { artifacts: [], entry_points: [], symbol_count: 0 }
+.endfn
+
+.fn has_prefix(value -> string, prefix -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 497 15 497 30
+    .param value -> string
+    .span 497 32 497 48
+    .param prefix -> string
+    .if prefix.length > value.length
+        .span 499 9 499 22
+        ret false
+    .endif
+    .span 501 5 501 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= prefix.length
+            break
+        .endif
+        .if value[index] != prefix[index]
+            .span 507 13 507 26
+            ret false
+        .endif
+        .span 509 9 509 20
+        eval index += 1
+    .endloop
+    .span 511 5 511 17
+    ret true
+.endfn
+
+.fn needs_python_fallback(source -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 514 26 514 42
+    .param source -> string
+    .if source.length == 0
+        .span 516 9 516 21
+        ret true
+    .endif
+    .span 518 5 518 66
+    eval let sanitized = strip_needs_python_fallback_literals(source)
+    .span 519 5 519 59
+    eval let cleaned = strip_python_string_literals(sanitized)
+    .span 520 5 520 49
+    eval let mut analysis_target -> string = cleaned
+    .if analysis_target.length == 0
+        .span 522 9 522 37
+        eval analysis_target = sanitized
+    .endif
+    .span 524 5 524 34
+    eval let target = analysis_target
+    .if target.length == 0
+        .span 526 9 526 21
+        ret true
+    .endif
+    .if string_contains(target, "\nlet ")
+        .span 529 9 529 21
+        ret true
+    .endif
+    .if string_contains(target, " let ")
+        .span 532 9 532 21
+        ret true
+    .endif
+    .if string_contains(target, " mut ")
+        .span 535 9 535 21
+        ret true
+    .endif
+    .if string_contains(target, "TokenKind.variant('Identifier', [])")
+        .span 538 9 538 21
+        ret true
+    .endif
+    .if string_contains(target, "TokenKind.variant('NumberLiteral', [])")
+        .span 541 9 541 21
+        ret true
+    .endif
+    .if string_contains(target, "TokenKind.variant('StringLiteral', [])")
+        .span 544 9 544 21
+        ret true
+    .endif
+    .if string_contains(target, "TokenKind.variant('BooleanLiteral', [])")
+        .span 547 9 547 21
+        ret true
+    .endif
+    .if string_contains(target, "TokenKind.variant('Symbol', [])")
+        .span 550 9 550 21
+        ret true
+    .endif
+    .if string_contains(target, "Expression.Identifier()")
+        .span 553 9 553 21
+        ret true
+    .endif
+    .if string_contains(target, "Expression.Raw()")
+        .span 556 9 556 21
+        ret true
+    .endif
+    .if string_contains(target, "ExpressionIdentifier(")
+        .span 559 9 559 21
+        ret true
+    .endif
+    .if string_contains(target, "ExpressionRaw(")
+        .span 562 9 562 21
+        ret true
+    .endif
+    .span 564 5 564 18
+    ret false
+.endfn
+
+.fn string_contains(value -> string, pattern -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 567 20 567 35
+    .param value -> string
+    .span 567 37 567 54
+    .param pattern -> string
+    .if pattern.length == 0
+        .span 569 9 569 21
+        ret true
+    .endif
+    .if value.length < pattern.length
+        .span 572 9 572 22
+        ret false
+    .endif
+    .span 574 5 574 33
+    eval let mut index -> number = 0
+    .loop
+        .if index + pattern.length > value.length
+            break
+        .endif
+        .span 579 9 579 46
+        eval let mut match_flag -> boolean = true
+        .span 580 9 580 38
+        eval let mut offset -> number = 0
+        .loop
+            .if offset >= pattern.length
+                break
+            .endif
+            .if value[index + offset] != pattern[offset]
+                .span 586 17 586 36
+                eval match_flag = false
+                break
+            .endif
+            .span 589 13 589 25
+            eval offset += 1
+        .endloop
+        .if match_flag
+            .span 592 13 592 25
+            ret true
+        .endif
+        .span 594 9 594 20
+        eval index += 1
+    .endloop
+    .span 596 5 596 18
+    ret false
+.endfn
+
+.fn strip_needs_python_fallback_literals(source -> string) -> string
+.meta return string
+.meta effects none
+    .span 599 41 599 57
+    .param source -> string
+    .span 600 5 600 46
+    eval let marker = "def needs_python_fallback"
+    .span 601 5 601 48
+    eval let start = find_substring(source, marker)
+    .if start < 0
+        .span 603 9 603 23
+        ret source
+    .endif
+    .span 605 5 605 38
+    eval let tail_marker = "return False"
+    .span 606 5 606 70
+    eval let tail_index = find_substring_from(source, tail_marker, start)
+    .if tail_index < 0
+        .span 608 9 608 23
+        ret source
+    .endif
+    .span 610 5 610 52
+    eval let tail_end = tail_index + tail_marker.length
+    .span 611 5 611 54
+    eval tail_end = advance_to_line_end(source, tail_end)
+    .span 612 5 612 49
+    eval let prefix = slice_string(source, 0, start)
+    .span 613 5 613 64
+    eval let suffix = slice_string(source, tail_end, source.length)
+    .span 614 5 614 28
+    ret prefix + suffix
+.endfn
+
+.fn strip_python_string_literals(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 617 33 617 48
+    .param value -> string
+    .span 618 5 618 33
+    eval let mut index -> number = 0
+    .span 619 5 619 35
+    eval let mut result -> string = ""
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 624 9 624 31
+        eval let ch = value[index]
+        .if ch == "'"
+            .span 626 13 626 71
+            eval let quote_length = python_quote_length(value, index, "'")
+            .span 627 13 627 62
+            eval let quotes = repeat_character("'", quote_length)
+            .span 628 13 628 38
+            eval result = result + quotes
+            .span 629 13 629 96
+            eval index = skip_python_string_literal(value, index + quote_length, "'", quote_length)
+            .span 630 13 630 38
+            eval result = result + quotes
+            continue
+        .endif
+        .if ch == "\""
+            .span 634 13 634 72
+            eval let quote_length = python_quote_length(value, index, "\"")
+            .span 635 13 635 63
+            eval let quotes = repeat_character("\"", quote_length)
+            .span 636 13 636 38
+            eval result = result + quotes
+            .span 637 13 637 97
+            eval index = skip_python_string_literal(value, index + quote_length, "\"", quote_length)
+            .span 638 13 638 38
+            eval result = result + quotes
+            continue
+        .endif
+        .span 641 9 641 30
+        eval result = result + ch
+        .span 642 9 642 20
+        eval index += 1
+    .endloop
+    .span 644 5 644 19
+    ret result
+.endfn
+
+.fn python_quote_length(value -> string, start -> number, delimiter -> string) -> number
+.meta return number
+.meta effects none
+    .span 647 24 647 39
+    .param value -> string
+    .span 647 41 647 56
+    .param start -> number
+    .span 647 58 647 77
+    .param delimiter -> string
+    .if start + 2 < value.length
+        .if value[start + 1] == delimiter
+            .if value[start + 2] == delimiter
+                .span 651 17 651 26
+                ret 3
+            .endif
+        .endif
+    .endif
+    .span 655 5 655 14
+    ret 1
+.endfn
+
+.fn skip_python_string_literal(value -> string, position -> number, delimiter -> string, quote_length -> number) -> number
+.meta return number
+.meta effects none
+    .span 658 31 658 46
+    .param value -> string
+    .span 658 48 658 66
+    .param position -> number
+    .span 658 68 658 87
+    .param delimiter -> string
+    .span 658 89 658 111
+    .param quote_length -> number
+    .if quote_length == 1
+        .span 660 9 660 44
+        eval let mut index -> number = position
+        .span 661 9 661 44
+        eval let mut escaped -> boolean = false
+        .loop
+            .if index >= value.length
+                .span 664 17 664 30
+                ret index
+            .endif
+            .span 666 13 666 40
+            eval let current = value[index]
+            .span 667 13 667 24
+            eval index += 1
+            .if escaped
+                .span 669 17 669 33
+                eval escaped = false
+                continue
+            .endif
+            .if current == "\\"
+                .span 673 17 673 32
+                eval escaped = true
+                continue
+            .endif
+            .if current == delimiter
+                .span 677 17 677 30
+                ret index
+            .endif
+        .endloop
+    .endif
+    .span 681 5 681 47
+    eval let mut search_index -> number = position
+    .loop
+        .if search_index + quote_length > value.length
+            .span 684 13 684 33
+            ret value.length
+        .endif
+        .span 686 9 686 43
+        eval let mut matches -> boolean = true
+        .span 687 9 687 38
+        eval let mut offset -> number = 0
+        .loop
+            .if offset >= quote_length
+                break
+            .endif
+            .if value[search_index + offset] != delimiter
+                .span 693 17 693 33
+                eval matches = false
+                break
+            .endif
+            .span 696 13 696 25
+            eval offset += 1
+        .endloop
+        .if matches
+            .span 699 13 699 48
+            ret search_index + quote_length
+        .endif
+        .span 701 9 701 27
+        eval search_index += 1
+    .endloop
+.endfn
+
+.fn repeat_character(ch -> string, count -> number) -> string
+.meta return string
+.meta effects none
+    .span 705 21 705 33
+    .param ch -> string
+    .span 705 35 705 50
+    .param count -> number
+    .if count <= 0
+        .span 707 9 707 19
+        ret ""
+    .endif
+    .span 709 5 709 33
+    eval let mut index -> number = 0
+    .span 710 5 710 35
+    eval let mut result -> string = ""
+    .loop
+        .if index >= count
+            break
+        .endif
+        .span 715 9 715 30
+        eval result = result + ch
+        .span 716 9 716 20
+        eval index += 1
+    .endloop
+    .span 718 5 718 19
+    ret result
+.endfn
+
+.fn find_substring(value -> string, pattern -> string) -> number
+.meta return number
+.meta effects none
+    .span 721 19 721 34
+    .param value -> string
+    .span 721 36 721 53
+    .param pattern -> string
+    .if pattern.length == 0
+        .span 723 9 723 18
+        ret 0
+    .endif
+    .if value.length < pattern.length
+        .span 726 9 726 19
+        ret -1
+    .endif
+    .span 728 5 728 33
+    eval let mut index -> number = 0
+    .loop
+        .if index + pattern.length > value.length
+            break
+        .endif
+        .span 733 9 733 46
+        eval let mut match_flag -> boolean = true
+        .span 734 9 734 38
+        eval let mut offset -> number = 0
+        .loop
+            .if offset >= pattern.length
+                break
+            .endif
+            .if value[index + offset] != pattern[offset]
+                .span 740 17 740 36
+                eval match_flag = false
+                break
+            .endif
+            .span 743 13 743 25
+            eval offset += 1
+        .endloop
+        .if match_flag
+            .span 746 13 746 26
+            ret index
+        .endif
+        .span 748 9 748 20
+        eval index += 1
+    .endloop
+    .span 750 5 750 15
+    ret -1
+.endfn
+
+.fn find_substring_from(value -> string, pattern -> string, start -> number) -> number
+.meta return number
+.meta effects none
+    .span 753 24 753 39
+    .param value -> string
+    .span 753 41 753 58
+    .param pattern -> string
+    .span 753 60 753 75
+    .param start -> number
+    .if start < 0
+        .span 755 9 755 47
+        ret find_substring(value, pattern)
+    .endif
+    .if start >= value.length
+        .span 758 9 758 19
+        ret -1
+    .endif
+    .span 760 5 760 37
+    eval let mut index -> number = start
+    .loop
+        .if index + pattern.length > value.length
+            break
+        .endif
+        .span 765 9 765 46
+        eval let mut match_flag -> boolean = true
+        .span 766 9 766 38
+        eval let mut offset -> number = 0
+        .loop
+            .if offset >= pattern.length
+                break
+            .endif
+            .if value[index + offset] != pattern[offset]
+                .span 772 17 772 36
+                eval match_flag = false
+                break
+            .endif
+            .span 775 13 775 25
+            eval offset += 1
+        .endloop
+        .if match_flag
+            .span 778 13 778 26
+            ret index
+        .endif
+        .span 780 9 780 20
+        eval index += 1
+    .endloop
+    .span 782 5 782 15
+    ret -1
+.endfn
+
+.fn advance_to_line_end(value -> string, position -> number) -> number
+.meta return number
+.meta effects none
+    .span 785 24 785 39
+    .param value -> string
+    .span 785 41 785 59
+    .param position -> number
+    .span 786 5 786 40
+    eval let mut index -> number = position
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 791 9 791 31
+        eval let ch = value[index]
+        .span 792 9 792 20
+        eval index += 1
+        .if ch == "\n"
+            break
+        .endif
+    .endloop
+    .span 797 5 797 18
+    ret index
+.endfn
+
+.fn slice_string(value -> string, start -> number, end -> number) -> string
+.meta return string
+.meta effects none
+    .span 800 17 800 32
+    .param value -> string
+    .span 800 34 800 49
+    .param start -> number
+    .span 800 51 800 64
+    .param end -> number
+    .if start < 0
+        .span 802 9 802 19
+        eval start = 0
+    .endif
+    .if end < start
+        .span 805 9 805 21
+        eval end = start
+    .endif
+    .if start >= value.length
+        .span 808 9 808 19
+        ret ""
+    .endif
+    .if end > value.length
+        .span 811 9 811 28
+        eval end = value.length
+    .endif
+    .span 813 5 813 37
+    eval let mut index -> number = start
+    .span 814 5 814 35
+    eval let mut result -> string = ""
+    .loop
+        .if index >= end
+            break
+        .endif
+        .span 819 9 819 40
+        eval result = result + value[index]
+        .span 820 9 820 20
+        eval index += 1
+    .endloop
+    .span 822 5 822 19
+    ret result
+.endfn

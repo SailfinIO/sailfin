@@ -563,10 +563,14 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
 }
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
-    return lower_to_llvm_with_manifests(native_module, []);
+    return lower_to_llvm_with_context(native_module, [], []);
 }
 
 fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
+    return lower_to_llvm_with_context(native_module, imported_manifests, []);
+}
+
+fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[]) -> LoweredLLVMResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
@@ -598,17 +602,80 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
     let module_structs = manifest_application.structs;
     let module_enums = manifest_application.enums;
 
-    // Use the provided imported_manifests for cross-module type resolution
-    
-    let trait_metadata = build_trait_metadata(parse.interfaces, module_structs);
-    let type_build = build_type_context_with_imports(module_structs, module_enums, parse.interfaces, imported_manifests);
+    // Gather imported module context (layout + signatures) to improve lowering fidelity
+    let mut imported_structs -> NativeStruct[] = [];
+    let mut imported_enums -> NativeEnum[] = [];
+    let mut imported_interfaces -> NativeInterface[] = [];
+    let mut imported_functions -> NativeFunction[] = [];
+    let mut imported_struct_methods -> NativeFunction[] = [];
+
+    let manifest_count = imported_manifests.length;
+    let mut text_index -> number = 0;
+    loop {
+        if text_index >= imported_native_texts.length {
+            break;
+        }
+        let native_text = imported_native_texts[text_index];
+        let mut manifest_for_module -> LayoutManifest? = null;
+        if text_index < manifest_count {
+            let candidate_manifest = imported_manifests[text_index];
+            diagnostics = diagnostics.concat(candidate_manifest.diagnostics);
+            manifest_for_module = candidate_manifest;
+        }
+        if native_text.length == 0 {
+            if manifest_for_module != null {
+                let manifest_only = manifest_for_module;
+                imported_structs = imported_structs.concat(manifest_only.structs);
+                imported_enums = imported_enums.concat(manifest_only.enums);
+            }
+            text_index += 1;
+            continue;
+        }
+
+    let imported_parse = parse_native_artifact(native_text);
+        let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
+        diagnostics = diagnostics.concat(applied_import.diagnostics);
+
+        imported_structs = imported_structs.concat(applied_import.structs);
+        imported_enums = imported_enums.concat(applied_import.enums);
+        imported_interfaces = imported_interfaces.concat(imported_parse.interfaces);
+        imported_functions = imported_functions.concat(imported_parse.functions);
+        let imported_methods = flatten_struct_methods(applied_import.structs);
+        imported_struct_methods = imported_struct_methods.concat(imported_methods);
+        text_index += 1;
+    }
+
+    if imported_native_texts.length < manifest_count {
+        let mut manifest_index -> number = imported_native_texts.length;
+        loop {
+            if manifest_index >= manifest_count {
+                break;
+            }
+            let leftover_manifest = imported_manifests[manifest_index];
+            diagnostics = diagnostics.concat(leftover_manifest.diagnostics);
+            imported_structs = imported_structs.concat(leftover_manifest.structs);
+            imported_enums = imported_enums.concat(leftover_manifest.enums);
+            manifest_index += 1;
+        }
+    }
+
+    let combined_structs = module_structs.concat(imported_structs);
+    let combined_enums = module_enums.concat(imported_enums);
+    let combined_interfaces = parse.interfaces.concat(imported_interfaces);
+
+    let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
+    let type_build = build_type_context(combined_structs, combined_enums, combined_interfaces);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
-    let struct_methods = flatten_struct_methods(module_structs);
-    let all_functions = concat_native_functions(parse.functions, struct_methods);
-    let runtime_helpers = collect_runtime_helper_targets(all_functions);
-    let direct_effects = collect_direct_function_effects(all_functions);
-    let call_graph = collect_function_call_graph(all_functions);
+
+    let module_struct_methods = flatten_struct_methods(module_structs);
+    let local_functions = concat_native_functions(parse.functions, module_struct_methods);
+    let mut context_functions = concat_native_functions(local_functions, imported_functions);
+    context_functions = concat_native_functions(context_functions, imported_struct_methods);
+
+    let runtime_helpers = collect_runtime_helper_targets(local_functions);
+    let direct_effects = collect_direct_function_effects(context_functions);
+    let call_graph = collect_function_call_graph(context_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
 
     let mut function_effects -> FunctionEffectEntry[] = [];
@@ -675,10 +742,10 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
     let mut has_add_function -> boolean = false;
     let mut all_string_constants -> StringConstant[] = [];
     loop {
-        if index >= all_functions.length {
+        if index >= local_functions.length {
             break;
         }
-        let current_function = all_functions[index];
+        let current_function = local_functions[index];
         let aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name);
         let mut effective_effects -> string[] = [];
         if aggregated_entry != null {
@@ -688,7 +755,7 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
             name: current_function.name,
             effects: effective_effects,
         });
-        let lowered = emit_function(current_function, all_functions, effective_effects, type_context);
+        let lowered = emit_function(current_function, context_functions, effective_effects, type_context);
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
@@ -697,7 +764,7 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
         all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants);
         if lowered.lines.length > 0 {
             function_lines = function_lines.concat(lowered.lines);
-            if index + 1 < all_functions.length {
+            if index + 1 < local_functions.length {
                 function_lines = append_string(function_lines, "");
             }
         }
@@ -874,25 +941,6 @@ fn render_runtime_helper_declarations(used_targets -> string[]) -> string[] {
 
 fn empty_type_context() -> TypeContext {
     return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
-}
-
-fn build_type_context_with_imports(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[], imported_manifests -> LayoutManifest[]) -> TypeContextBuild {
-    // Merge imported structs and enums with local ones
-    let mut all_structs -> NativeStruct[] = structs;
-    let mut all_enums -> NativeEnum[] = enums;
-    
-    let mut manifest_index -> number = 0;
-    loop {
-        if manifest_index >= imported_manifests.length {
-            break;
-        }
-        let manifest = imported_manifests[manifest_index];
-        all_structs = all_structs.concat(manifest.structs);
-        all_enums = all_enums.concat(manifest.enums);
-        manifest_index += 1;
-    }
-    
-    return build_type_context(all_structs, all_enums, interfaces);
 }
 
 fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
@@ -9279,11 +9327,46 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     let mut angle_depth -> number = 0;
     let mut index -> number = 0;
     let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
         if ch == "(" {
             paren_depth += 1;
         } else if ch == ")" {
@@ -9319,6 +9402,11 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     let close_index = find_matching_closing_brace(trimmed, open_index);
     if close_index < 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing closing `}`");
+        let mut snippet -> string = trimmed;
+        if snippet.length > 120 {
+            snippet = substring(snippet, 0, 117) + "...";
+        }
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal context `" + snippet + "`");
         fatal = true;
     }
 
@@ -9410,11 +9498,46 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     let mut angle_depth -> number = 0;
     let mut index -> number = dot_index + 1;
     let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
         if ch == "(" {
             paren_depth += 1;
         } else if ch == ")" {
@@ -10276,18 +10399,22 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
 }
 
 fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch {
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
-    let mut in_string -> boolean = false;
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
     let mut escape_next -> boolean = false;
     let mut candidate_index -> number = -1;
     let mut candidate_symbol -> string = "";
+    let mut index -> number = 0;
     loop {
         if index >= expression.length {
             break;
         }
         let ch = expression[index];
-        if in_string {
+        if in_double {
             if escape_next {
                 escape_next = false;
                 index += 1;
@@ -10299,29 +10426,87 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
                 continue;
             }
             if ch == "\"" {
-                in_string = false;
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "'" {
+                in_single = false;
             }
             index += 1;
             continue;
         }
         if ch == "\"" {
-            in_string = true;
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
             index += 1;
             continue;
         }
         if ch == "(" {
-            depth += 1;
+            paren_depth += 1;
             index += 1;
             continue;
         }
         if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
+            if paren_depth > 0 {
+                paren_depth -= 1;
             }
             index += 1;
             continue;
         }
-        if depth == 0 && contains_char(operators, ch) {
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 && contains_char(operators, ch) {
             if ch == "-" {
                 if is_binary_minus(expression, index) {
                     candidate_index = index;
@@ -10699,11 +10884,50 @@ fn split_array_elements(text -> string) -> string[] {
     let mut bracket_depth -> number = 0;
     let mut brace_depth -> number = 0;
     let mut index -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
     loop {
         if index >= text.length {
             break;
         }
         let ch = text[index];
+        if in_double {
+            current = current + ch;
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            current = current + ch;
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
         if ch == "(" {
             paren_depth += 1;
         } else if ch == ")" {

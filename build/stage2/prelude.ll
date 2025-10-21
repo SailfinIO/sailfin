@@ -3696,8 +3696,8 @@ entry:
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t26 = phi i64 [ %t0, %entry ], [ %t25, %loop.latch2 ]
-  store i64 %t26, i64* %l0
+  %t34 = phi i64 [ %t0, %entry ], [ %t33, %loop.latch2 ]
+  store i64 %t34, i64* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load i64, i64* %l0
@@ -3718,31 +3718,40 @@ merge5:
   %t11 = getelementptr double, double* %t8, i64 %t6
   %t12 = load double, double* %t11
   store double %t12, double* %l1
-  store double 0.0, double* %l2
-  %t13 = load double, double* %l1
-  %t14 = fcmp olt double %codepoint, %t13
-  %t15 = load i64, i64* %l0
-  %t16 = load double, double* %l1
-  %t17 = load double, double* %l2
-  br i1 %t14, label %then6, label %merge7
+  %t13 = load i64, i64* %l0
+  %t14 = add i64 %t13, 1
+  %t15 = load { double*, i64 }, { double*, i64 }* %ranges
+  %t16 = extractvalue { double*, i64 } %t15, 0
+  %t17 = extractvalue { double*, i64 } %t15, 1
+  %t18 = icmp uge i64 %t14, %t17
+  ; bounds check: %t18 (if true, out of bounds)
+  %t19 = getelementptr double, double* %t16, i64 %t14
+  %t20 = load double, double* %t19
+  store double %t20, double* %l2
+  %t21 = load double, double* %l1
+  %t22 = fcmp olt double %codepoint, %t21
+  %t23 = load i64, i64* %l0
+  %t24 = load double, double* %l1
+  %t25 = load double, double* %l2
+  br i1 %t22, label %then6, label %merge7
 then6:
   br label %afterloop3
 merge7:
-  %t18 = load double, double* %l2
-  %t19 = fcmp ole double %codepoint, %t18
-  %t20 = load i64, i64* %l0
-  %t21 = load double, double* %l1
-  %t22 = load double, double* %l2
-  br i1 %t19, label %then8, label %merge9
+  %t26 = load double, double* %l2
+  %t27 = fcmp ole double %codepoint, %t26
+  %t28 = load i64, i64* %l0
+  %t29 = load double, double* %l1
+  %t30 = load double, double* %l2
+  br i1 %t27, label %then8, label %merge9
 then8:
   ret i1 1
 merge9:
-  %t23 = load i64, i64* %l0
-  %t24 = add i64 %t23, 2
-  store i64 %t24, i64* %l0
+  %t31 = load i64, i64* %l0
+  %t32 = add i64 %t31, 2
+  store i64 %t32, i64* %l0
   br label %loop.latch2
 loop.latch2:
-  %t25 = load i64, i64* %l0
+  %t33 = load i64, i64* %l0
   br label %loop.header0
 afterloop3:
   ret i1 0

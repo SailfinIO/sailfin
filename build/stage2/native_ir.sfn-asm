@@ -1,0 +1,4953 @@
+; Sailfin Native Prototype
+.module main
+
+.import "./emit_native" { NativeArtifact }
+
+.import "./string_utils" { substring, char_code }
+
+.enum NativeInstruction
+    .layout enum name=NativeInstruction size=56 align=8 tag_type=i32 tag_size=4 tag_align=4
+    .layout variant Return tag=0 offset=8 size=16 align=8
+    .layout payload Return.expression type=string offset=8 size=8 align=8
+    .layout payload Return.span type=NativeSourceSpan? offset=16 size=8 align=8
+    .layout variant Expression tag=1 offset=8 size=16 align=8
+    .layout payload Expression.expression type=string offset=8 size=8 align=8
+    .layout payload Expression.span type=NativeSourceSpan? offset=16 size=8 align=8
+    .layout variant Let tag=2 offset=8 size=48 align=8
+    .layout payload Let.name type=string offset=8 size=8 align=8
+    .layout payload Let.mutable type=boolean offset=16 size=1 align=1
+    .layout payload Let.type_annotation type=string offset=24 size=8 align=8
+    .layout payload Let.value type=string? offset=32 size=8 align=8
+    .layout payload Let.span type=NativeSourceSpan? offset=40 size=8 align=8
+    .layout payload Let.value_span type=NativeSourceSpan? offset=48 size=8 align=8
+    .layout variant If tag=3 offset=8 size=8 align=8
+    .layout payload If.condition type=string offset=8 size=8 align=8
+    .layout variant Else tag=4 offset=4 size=0 align=1
+    .layout variant EndIf tag=5 offset=4 size=0 align=1
+    .layout variant For tag=6 offset=8 size=16 align=8
+    .layout payload For.target type=string offset=8 size=8 align=8
+    .layout payload For.iterable type=string offset=16 size=8 align=8
+    .layout variant EndFor tag=7 offset=4 size=0 align=1
+    .layout variant Loop tag=8 offset=4 size=0 align=1
+    .layout variant EndLoop tag=9 offset=4 size=0 align=1
+    .layout variant Break tag=10 offset=4 size=0 align=1
+    .layout variant Continue tag=11 offset=4 size=0 align=1
+    .layout variant Match tag=12 offset=8 size=8 align=8
+    .layout payload Match.expression type=string offset=8 size=8 align=8
+    .layout variant Case tag=13 offset=8 size=16 align=8
+    .layout payload Case.pattern type=string offset=8 size=8 align=8
+    .layout payload Case.guard type=string? offset=16 size=8 align=8
+    .layout variant EndMatch tag=14 offset=4 size=0 align=1
+    .layout variant Noop tag=15 offset=4 size=0 align=1
+    .layout variant Unknown tag=16 offset=8 size=8 align=8
+    .layout payload Unknown.text type=string offset=8 size=8 align=8
+    .variant Return { expression -> string; span -> NativeSourceSpan? }
+    .variant Expression { expression -> string; span -> NativeSourceSpan? }
+    .variant Let { name -> string; mutable -> boolean; type_annotation -> string; value -> string?; span -> NativeSourceSpan?; value_span -> NativeSourceSpan? }
+    .variant If { condition -> string }
+    .variant Else
+    .variant EndIf
+    .variant For { target -> string; iterable -> string }
+    .variant EndFor
+    .variant Loop
+    .variant EndLoop
+    .variant Break
+    .variant Continue
+    .variant Match { expression -> string }
+    .variant Case { pattern -> string; guard -> string? }
+    .variant EndMatch
+    .variant Noop
+    .variant Unknown { text -> string }
+.endenum
+
+.struct NativeSourceSpan
+    .layout struct name=NativeSourceSpan size=32 align=8
+    .layout field start_line type=number offset=0 size=8 align=8
+    .layout field start_column type=number offset=8 size=8 align=8
+    .layout field end_line type=number offset=16 size=8 align=8
+    .layout field end_column type=number offset=24 size=8 align=8
+    .field start_line -> number
+    .field start_column -> number
+    .field end_line -> number
+    .field end_column -> number
+.endstruct
+
+.struct NativeParameter
+    .layout struct name=NativeParameter size=40 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_annotation type=string offset=8 size=8 align=8
+    .layout field mutable type=boolean offset=16 size=1 align=1
+    .layout field default_value type=string? offset=24 size=8 align=8
+    .layout field span type=NativeSourceSpan? offset=32 size=8 align=8
+    .field name -> string
+    .field type_annotation -> string
+    .field mutable -> boolean
+    .field default_value -> string?
+    .field span -> NativeSourceSpan?
+.endstruct
+
+.struct NativeFunction
+    .layout struct name=NativeFunction size=40 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field parameters type=NativeParameter[] offset=8 size=8 align=8
+    .layout field return_type type=string offset=16 size=8 align=8
+    .layout field effects type=string[] offset=24 size=8 align=8
+    .layout field instructions type=NativeInstruction[] offset=32 size=8 align=8
+    .field name -> string
+    .field parameters -> NativeParameter[]
+    .field return_type -> string
+    .field effects -> string[]
+    .field instructions -> NativeInstruction[]
+.endstruct
+
+.struct NativeImportSpecifier
+    .layout struct name=NativeImportSpecifier size=16 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field alias type=string? offset=8 size=8 align=8
+    .field name -> string
+    .field alias -> string?
+.endstruct
+
+.struct NativeImport
+    .layout struct name=NativeImport size=24 align=8
+    .layout field kind type=string offset=0 size=8 align=8
+    .layout field module type=string offset=8 size=8 align=8
+    .layout field specifiers type=NativeImportSpecifier[] offset=16 size=8 align=8
+    .field kind -> string
+    .field module -> string
+    .field specifiers -> NativeImportSpecifier[]
+.endstruct
+
+.struct NativeStructField
+    .layout struct name=NativeStructField size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_annotation type=string offset=8 size=8 align=8
+    .layout field mutable type=boolean offset=16 size=1 align=1
+    .field name -> string
+    .field type_annotation -> string
+    .field mutable -> boolean
+.endstruct
+
+.struct NativeStructLayoutField
+    .layout struct name=NativeStructLayoutField size=40 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_annotation type=string offset=8 size=8 align=8
+    .layout field offset type=number offset=16 size=8 align=8
+    .layout field size type=number offset=24 size=8 align=8
+    .layout field align type=number offset=32 size=8 align=8
+    .field name -> string
+    .field type_annotation -> string
+    .field offset -> number
+    .field size -> number
+    .field align -> number
+.endstruct
+
+.struct NativeStructLayout
+    .layout struct name=NativeStructLayout size=24 align=8
+    .layout field size type=number offset=0 size=8 align=8
+    .layout field align type=number offset=8 size=8 align=8
+    .layout field fields type=NativeStructLayoutField[] offset=16 size=8 align=8
+    .field size -> number
+    .field align -> number
+    .field fields -> NativeStructLayoutField[]
+.endstruct
+
+.struct NativeStruct
+    .layout struct name=NativeStruct size=40 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field fields type=NativeStructField[] offset=8 size=8 align=8
+    .layout field methods type=NativeFunction[] offset=16 size=8 align=8
+    .layout field implements type=string[] offset=24 size=8 align=8
+    .layout field layout type=NativeStructLayout? offset=32 size=8 align=8
+    .field name -> string
+    .field fields -> NativeStructField[]
+    .field methods -> NativeFunction[]
+    .field implements -> string[]
+    .field layout -> NativeStructLayout?
+.endstruct
+
+.struct NativeInterfaceSignature
+    .layout struct name=NativeInterfaceSignature size=48 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field is_async type=boolean offset=8 size=1 align=1
+    .layout field type_parameters type=string[] offset=16 size=8 align=8
+    .layout field parameters type=NativeParameter[] offset=24 size=8 align=8
+    .layout field return_type type=string offset=32 size=8 align=8
+    .layout field effects type=string[] offset=40 size=8 align=8
+    .field name -> string
+    .field is_async -> boolean
+    .field type_parameters -> string[]
+    .field parameters -> NativeParameter[]
+    .field return_type -> string
+    .field effects -> string[]
+.endstruct
+
+.struct NativeInterface
+    .layout struct name=NativeInterface size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_parameters type=string[] offset=8 size=8 align=8
+    .layout field signatures type=NativeInterfaceSignature[] offset=16 size=8 align=8
+    .field name -> string
+    .field type_parameters -> string[]
+    .field signatures -> NativeInterfaceSignature[]
+.endstruct
+
+.struct NativeEnumVariantField
+    .layout struct name=NativeEnumVariantField size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_annotation type=string offset=8 size=8 align=8
+    .layout field mutable type=boolean offset=16 size=1 align=1
+    .field name -> string
+    .field type_annotation -> string
+    .field mutable -> boolean
+.endstruct
+
+.struct NativeEnumVariant
+    .layout struct name=NativeEnumVariant size=16 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field fields type=NativeEnumVariantField[] offset=8 size=8 align=8
+    .field name -> string
+    .field fields -> NativeEnumVariantField[]
+.endstruct
+
+.struct NativeEnumVariantLayout
+    .layout struct name=NativeEnumVariantLayout size=48 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field tag type=number offset=8 size=8 align=8
+    .layout field offset type=number offset=16 size=8 align=8
+    .layout field size type=number offset=24 size=8 align=8
+    .layout field align type=number offset=32 size=8 align=8
+    .layout field fields type=NativeStructLayoutField[] offset=40 size=8 align=8
+    .field name -> string
+    .field tag -> number
+    .field offset -> number
+    .field size -> number
+    .field align -> number
+    .field fields -> NativeStructLayoutField[]
+.endstruct
+
+.struct NativeEnumLayout
+    .layout struct name=NativeEnumLayout size=48 align=8
+    .layout field size type=number offset=0 size=8 align=8
+    .layout field align type=number offset=8 size=8 align=8
+    .layout field tag_type type=string offset=16 size=8 align=8
+    .layout field tag_size type=number offset=24 size=8 align=8
+    .layout field tag_align type=number offset=32 size=8 align=8
+    .layout field variants type=NativeEnumVariantLayout[] offset=40 size=8 align=8
+    .field size -> number
+    .field align -> number
+    .field tag_type -> string
+    .field tag_size -> number
+    .field tag_align -> number
+    .field variants -> NativeEnumVariantLayout[]
+.endstruct
+
+.struct NativeEnum
+    .layout struct name=NativeEnum size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field variants type=NativeEnumVariant[] offset=8 size=8 align=8
+    .layout field layout type=NativeEnumLayout? offset=16 size=8 align=8
+    .field name -> string
+    .field variants -> NativeEnumVariant[]
+    .field layout -> NativeEnumLayout?
+.endstruct
+
+.struct NativeBinding
+    .layout struct name=NativeBinding size=32 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field mutable type=boolean offset=8 size=1 align=1
+    .layout field type_annotation type=string offset=16 size=8 align=8
+    .layout field value type=string? offset=24 size=8 align=8
+    .field name -> string
+    .field mutable -> boolean
+    .field type_annotation -> string
+    .field value -> string?
+.endstruct
+
+.struct EnumParseResult
+    .layout struct name=EnumParseResult size=24 align=8
+    .layout field definition type=NativeEnum? offset=0 size=8 align=8
+    .layout field next_index type=number offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field definition -> NativeEnum?
+    .field next_index -> number
+    .field diagnostics -> string[]
+.endstruct
+
+.struct CaseComponents
+    .layout struct name=CaseComponents size=16 align=8
+    .layout field pattern type=string offset=0 size=8 align=8
+    .layout field guard type=string? offset=8 size=8 align=8
+    .field pattern -> string
+    .field guard -> string?
+.endstruct
+
+.struct InstructionParseResult
+    .layout struct name=InstructionParseResult size=16 align=8
+    .layout field instructions type=NativeInstruction[] offset=0 size=8 align=8
+    .layout field span_consumed type=boolean offset=8 size=1 align=1
+    .layout field value_span_consumed type=boolean offset=9 size=1 align=1
+    .field instructions -> NativeInstruction[]
+    .field span_consumed -> boolean
+    .field value_span_consumed -> boolean
+.endstruct
+
+.struct InstructionGatherResult
+    .layout struct name=InstructionGatherResult size=16 align=8
+    .layout field text type=string offset=0 size=8 align=8
+    .layout field lines_consumed type=number offset=8 size=8 align=8
+    .field text -> string
+    .field lines_consumed -> number
+.endstruct
+
+.struct InstructionDepthState
+    .layout struct name=InstructionDepthState size=32 align=8
+    .layout field paren_depth type=number offset=0 size=8 align=8
+    .layout field bracket_depth type=number offset=8 size=8 align=8
+    .layout field brace_depth type=number offset=16 size=8 align=8
+    .layout field in_string type=boolean offset=24 size=1 align=1
+    .layout field escaping type=boolean offset=25 size=1 align=1
+    .field paren_depth -> number
+    .field bracket_depth -> number
+    .field brace_depth -> number
+    .field in_string -> boolean
+    .field escaping -> boolean
+.endstruct
+
+.struct StructParseResult
+    .layout struct name=StructParseResult size=24 align=8
+    .layout field definition type=NativeStruct? offset=0 size=8 align=8
+    .layout field next_index type=number offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field definition -> NativeStruct?
+    .field next_index -> number
+    .field diagnostics -> string[]
+.endstruct
+
+.struct InterfaceParseResult
+    .layout struct name=InterfaceParseResult size=24 align=8
+    .layout field definition type=NativeInterface? offset=0 size=8 align=8
+    .layout field next_index type=number offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field definition -> NativeInterface?
+    .field next_index -> number
+    .field diagnostics -> string[]
+.endstruct
+
+.struct InterfaceSignatureParse
+    .layout struct name=InterfaceSignatureParse size=64 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field signature type=NativeInterfaceSignature offset=8 size=48 align=8
+    .layout field diagnostics type=string[] offset=56 size=8 align=8
+    .field success -> boolean
+    .field signature -> NativeInterfaceSignature
+    .field diagnostics -> string[]
+.endstruct
+
+.struct StructHeaderParse
+    .layout struct name=StructHeaderParse size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field implements type=string[] offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field name -> string
+    .field implements -> string[]
+    .field diagnostics -> string[]
+.endstruct
+
+.struct InterfaceHeaderParse
+    .layout struct name=InterfaceHeaderParse size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_parameters type=string[] offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field name -> string
+    .field type_parameters -> string[]
+    .field diagnostics -> string[]
+.endstruct
+
+.struct HeaderNameParse
+    .layout struct name=HeaderNameParse size=32 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_parameters type=string[] offset=8 size=8 align=8
+    .layout field remainder type=string offset=16 size=8 align=8
+    .layout field diagnostics type=string[] offset=24 size=8 align=8
+    .field name -> string
+    .field type_parameters -> string[]
+    .field remainder -> string
+    .field diagnostics -> string[]
+.endstruct
+
+.struct StructLayoutHeaderParse
+    .layout struct name=StructLayoutHeaderParse size=40 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field name type=string offset=8 size=8 align=8
+    .layout field size type=number offset=16 size=8 align=8
+    .layout field align type=number offset=24 size=8 align=8
+    .layout field diagnostics type=string[] offset=32 size=8 align=8
+    .field success -> boolean
+    .field name -> string
+    .field size -> number
+    .field align -> number
+    .field diagnostics -> string[]
+.endstruct
+
+.struct StructLayoutFieldParse
+    .layout struct name=StructLayoutFieldParse size=56 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field field type=NativeStructLayoutField offset=8 size=40 align=8
+    .layout field diagnostics type=string[] offset=48 size=8 align=8
+    .field success -> boolean
+    .field field -> NativeStructLayoutField
+    .field diagnostics -> string[]
+.endstruct
+
+.struct ParseNativeResult
+    .layout struct name=ParseNativeResult size=56 align=8
+    .layout field functions type=NativeFunction[] offset=0 size=8 align=8
+    .layout field imports type=NativeImport[] offset=8 size=8 align=8
+    .layout field structs type=NativeStruct[] offset=16 size=8 align=8
+    .layout field interfaces type=NativeInterface[] offset=24 size=8 align=8
+    .layout field enums type=NativeEnum[] offset=32 size=8 align=8
+    .layout field bindings type=NativeBinding[] offset=40 size=8 align=8
+    .layout field diagnostics type=string[] offset=48 size=8 align=8
+    .field functions -> NativeFunction[]
+    .field imports -> NativeImport[]
+    .field structs -> NativeStruct[]
+    .field interfaces -> NativeInterface[]
+    .field enums -> NativeEnum[]
+    .field bindings -> NativeBinding[]
+    .field diagnostics -> string[]
+.endstruct
+
+.struct EnumLayoutHeaderParse
+    .layout struct name=EnumLayoutHeaderParse size=64 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field name type=string offset=8 size=8 align=8
+    .layout field size type=number offset=16 size=8 align=8
+    .layout field align type=number offset=24 size=8 align=8
+    .layout field tag_type type=string offset=32 size=8 align=8
+    .layout field tag_size type=number offset=40 size=8 align=8
+    .layout field tag_align type=number offset=48 size=8 align=8
+    .layout field diagnostics type=string[] offset=56 size=8 align=8
+    .field success -> boolean
+    .field name -> string
+    .field size -> number
+    .field align -> number
+    .field tag_type -> string
+    .field tag_size -> number
+    .field tag_align -> number
+    .field diagnostics -> string[]
+.endstruct
+
+.struct EnumLayoutVariantParse
+    .layout struct name=EnumLayoutVariantParse size=64 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field variant type=NativeEnumVariantLayout offset=8 size=48 align=8
+    .layout field diagnostics type=string[] offset=56 size=8 align=8
+    .field success -> boolean
+    .field variant -> NativeEnumVariantLayout
+    .field diagnostics -> string[]
+.endstruct
+
+.struct EnumLayoutPayloadParse
+    .layout struct name=EnumLayoutPayloadParse size=64 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field variant_name type=string offset=8 size=8 align=8
+    .layout field field type=NativeStructLayoutField offset=16 size=40 align=8
+    .layout field diagnostics type=string[] offset=56 size=8 align=8
+    .field success -> boolean
+    .field variant_name -> string
+    .field field -> NativeStructLayoutField
+    .field diagnostics -> string[]
+.endstruct
+
+.struct NumberParseResult
+    .layout struct name=NumberParseResult size=16 align=8
+    .layout field success type=boolean offset=0 size=1 align=1
+    .layout field value type=number offset=8 size=8 align=8
+    .field success -> boolean
+    .field value -> number
+.endstruct
+
+.struct LayoutManifest
+    .layout struct name=LayoutManifest size=24 align=8
+    .layout field structs type=NativeStruct[] offset=0 size=8 align=8
+    .layout field enums type=NativeEnum[] offset=8 size=8 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field structs -> NativeStruct[]
+    .field enums -> NativeEnum[]
+    .field diagnostics -> string[]
+.endstruct
+
+.fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact?
+.meta return NativeArtifact?
+.meta effects none
+    .span 294 25 294 54
+    .param artifacts -> NativeArtifact[]
+    .span 295 5 295 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= artifacts.length
+            break
+        .endif
+        .span 300 9 300 41
+        eval let artifact = artifacts[index]
+        .if artifact.format == "sailfin-native-text"
+            .span 302 13 302 29
+            ret artifact
+        .endif
+        .span 304 9 304 20
+        eval index += 1
+    .endloop
+    .span 306 5 306 17
+    ret null
+.endfn
+
+.fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact?
+.meta return NativeArtifact?
+.meta effects none
+    .span 309 36 309 65
+    .param artifacts -> NativeArtifact[]
+    .span 310 5 310 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= artifacts.length
+            break
+        .endif
+        .span 315 9 315 41
+        eval let artifact = artifacts[index]
+        .if artifact.format == "sailfin-layout-manifest"
+            .span 317 13 317 29
+            ret artifact
+        .endif
+        .span 319 9 319 20
+        eval index += 1
+    .endloop
+    .span 321 5 321 17
+    ret null
+.endfn
+
+.fn parse_native_artifact(text -> string) -> ParseNativeResult
+.meta return ParseNativeResult
+.meta effects none
+    .span 324 26 324 40
+    .param text -> string
+    .span 325 5 325 35
+    eval let lines = split_lines(text)
+    .span 326 5 326 42
+    eval let mut diagnostics -> string[] = []
+    .span 327 5 327 48
+    eval let mut functions -> NativeFunction[] = []
+    .span 328 5 328 44
+    eval let mut imports -> NativeImport[] = []
+    .span 329 5 329 44
+    eval let mut structs -> NativeStruct[] = []
+    .span 330 5 330 50
+    eval let mut interfaces -> NativeInterface[] = []
+    .span 331 5 331 40
+    eval let mut enums -> NativeEnum[] = []
+    .span 332 5 332 46
+    eval let mut bindings -> NativeBinding[] = []
+    .span 333 5 333 47
+    eval let mut current -> NativeFunction? = null
+    .span 334 5 334 54
+    eval let mut pending_span -> NativeSourceSpan? = null
+    .span 335 5 335 60
+    eval let mut pending_value_span -> NativeSourceSpan? = null
+    .span 337 5 337 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= lines.length
+            break
+        .endif
+        .span 342 9 342 37
+        eval let raw_line = lines[index]
+        .span 343 9 343 40
+        eval let line = trim_text(raw_line)
+        .if line.length == 0
+            .span 345 13 345 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ";")
+            .span 349 13 349 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".module ")
+            .span 353 13 353 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".import ")
+            .span 357 13 357 94
+            eval let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "))
+            .if parsed_import == null
+                .span 359 17 359 93
+                eval diagnostics = append_string(diagnostics, "unable to parse import: " + line)
+            .else
+                .span 361 17 361 65
+                eval imports = append_import(imports, parsed_import)
+            .endif
+            .span 363 13 363 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".export ")
+            .span 367 13 367 94
+            eval let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "))
+            .if parsed_export == null
+                .span 369 17 369 93
+                eval diagnostics = append_string(diagnostics, "unable to parse export: " + line)
+            .else
+                .span 371 17 371 65
+                eval imports = append_import(imports, parsed_export)
+            .endif
+            .span 373 13 373 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".span ")
+            .span 377 13 377 79
+            eval let parsed_span = parse_source_span(strip_prefix(line, ".span "))
+            .if parsed_span == null
+                .span 379 17 379 100
+                eval diagnostics = append_string(diagnostics, "unable to parse span metadata: " + line)
+            .else
+                .span 381 17 381 44
+                eval pending_span = parsed_span
+            .endif
+            .span 383 13 383 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".init-span ")
+            .span 387 13 387 89
+            eval let parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "))
+            .if parsed_init_span == null
+                .span 389 17 389 112
+                eval diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + line)
+            .else
+                .span 391 17 391 55
+                eval pending_value_span = parsed_init_span
+            .endif
+            .span 393 13 393 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".struct ")
+            .span 397 13 397 71
+            eval let struct_result = parse_struct_definition(lines, index)
+            .span 398 13 398 73
+            eval diagnostics = diagnostics.concat(struct_result.diagnostics)
+            .if struct_result.definition != null
+                .span 400 17 400 76
+                eval structs = append_struct(structs, struct_result.definition)
+            .endif
+            .span 402 13 402 46
+            eval index = struct_result.next_index
+            continue
+        .endif
+        .if starts_with(line, ".interface ")
+            .span 406 13 406 77
+            eval let interface_result = parse_interface_definition(lines, index)
+            .span 407 13 407 76
+            eval diagnostics = diagnostics.concat(interface_result.diagnostics)
+            .if interface_result.definition != null
+                .span 409 17 409 88
+                eval interfaces = append_interface(interfaces, interface_result.definition)
+            .endif
+            .span 411 13 411 49
+            eval index = interface_result.next_index
+            continue
+        .endif
+        .if starts_with(line, ".enum ")
+            .span 415 13 415 67
+            eval let enum_result = parse_enum_definition(lines, index)
+            .span 416 13 416 71
+            eval diagnostics = diagnostics.concat(enum_result.diagnostics)
+            .if enum_result.definition != null
+                .span 418 17 418 68
+                eval enums = append_enum(enums, enum_result.definition)
+            .endif
+            .span 420 13 420 44
+            eval index = enum_result.next_index
+            continue
+        .endif
+        .if starts_with(line, ".fn ")
+            .if current != null
+                .span 425 17 425 119
+                eval diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open")
+            .endif
+            .span 427 13 433 15
+            eval current = NativeFunction {
+                name: parse_function_name(strip_prefix(line, ".fn ")),
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            }
+            .span 434 13 434 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".endfn")
+            .if current == null
+                .span 439 17 439 104
+                eval diagnostics = append_string(diagnostics, "encountered .endfn without active function")
+            .else
+                .span 441 17 441 65
+                eval functions = append_function(functions, current)
+                .span 442 17 442 32
+                eval current = null
+            .endif
+            .span 444 13 444 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".meta ")
+            .if current != null
+                .span 449 17 449 77
+                eval current = apply_meta(current, strip_prefix(line, ".meta "))
+            .else
+                .span 451 17 451 101
+                eval diagnostics = append_string(diagnostics, "metadata outside function body: " + line)
+            .endif
+            .span 453 13 453 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".param ")
+            .if current != null
+                .span 458 17 458 76
+                eval let mut combined -> string = strip_prefix(line, ".param ")
+                .span 459 17 459 57
+                eval let mut lookahead -> number = index + 1
+                .loop
+                    .if lookahead >= lines.length
+                        break
+                    .endif
+                    .span 464 21 464 61
+                    eval let continuation_raw = lines[lookahead]
+                    .if continuation_raw.length == 0
+                        break
+                    .endif
+                    .span 468 21 468 76
+                    eval let continuation_trimmed = trim_text(continuation_raw)
+                    .if continuation_trimmed.length == 0
+                        .span 470 25 470 40
+                        eval lookahead += 1
+                        continue
+                    .endif
+                    .if !line_looks_like_parameter_entry(continuation_trimmed)
+                        break
+                    .endif
+                    .span 476 21 476 70
+                    eval combined = combined + " " + continuation_trimmed
+                    .span 477 21 477 36
+                    eval lookahead += 1
+                .endloop
+                .span 480 17 480 65
+                eval let entries = split_parameter_entries(combined)
+                .if entries.length == 0
+                    .span 482 21 482 105
+                    eval diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line)
+                    .span 483 21 483 41
+                    eval pending_span = null
+                .else
+                    .span 485 21 485 55
+                    eval let mut entry_index -> number = 0
+                    .span 486 21 486 62
+                    eval let mut span_consumed -> boolean = false
+                    .loop
+                        .if entry_index >= entries.length
+                            break
+                        .endif
+                        .span 491 25 491 58
+                        eval let entry = entries[entry_index]
+                        .span 492 25 492 84
+                        eval let mut parameter_span -> NativeSourceSpan? = pending_span
+                        .if span_consumed
+                            .span 494 29 494 51
+                            eval parameter_span = null
+                        .endif
+                        .span 496 25 496 86
+                        eval let parameter = parse_parameter_entry(entry, parameter_span)
+                        .if parameter == null
+                            .span 498 29 498 115
+                            eval diagnostics = append_string(diagnostics, "unable to parse parameter entry: " + entry)
+                        .else
+                            .span 500 29 500 76
+                            eval current = append_parameter(current, parameter)
+                            .if parameter.span != null
+                                .span 502 33 502 54
+                                eval span_consumed = true
+                            .endif
+                        .endif
+                        .span 505 25 505 42
+                        eval entry_index += 1
+                    .endloop
+                    .span 507 21 507 41
+                    eval pending_span = null
+                .endif
+                .span 509 17 509 39
+                eval index = lookahead - 1
+            .else
+                .span 511 17 511 102
+                eval diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
+            .endif
+            .span 513 13 513 24
+            eval index += 1
+            continue
+        .endif
+        .span 516 5 516 51
+        eval let gather = gather_instruction(lines, index)
+        .span 517 5 517 24
+        eval line = gather.text
+        .span 518 5 518 36
+        eval index += gather.lines_consumed
+        .span 519 5 519 88
+        eval let instruction_result = parse_instruction(line, pending_span, pending_value_span)
+        .span 520 9 520 60
+        eval let instructions = instruction_result.instructions
+        .if instruction_result.span_consumed
+            .span 522 13 522 33
+            eval pending_span = null
+        .else
+            .if pending_span != null
+                .span 524 13 524 94
+                eval diagnostics = append_string(diagnostics, "unused span metadata before: " + line)
+                .span 525 13 525 33
+                eval pending_span = null
+            .endif
+        .endif
+        .if instruction_result.value_span_consumed
+            .span 528 13 528 39
+            eval pending_value_span = null
+        .else
+            .if pending_value_span != null
+                .span 530 13 530 106
+                eval diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line)
+                .span 531 13 531 39
+                eval pending_value_span = null
+            .endif
+        .endif
+        .if current == null
+            .if instructions.length == 1 && instructions[0].variant == "Let"
+                .span 536 17 536 96
+                eval bindings = append_binding(bindings, binding_from_instruction(instructions[0]))
+            .else
+                .span 538 17 538 116
+                eval diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
+            .endif
+            .span 540 13 540 24
+            eval index += 1
+            continue
+        .endif
+        .span 543 9 543 49
+        eval let mut instruction_index -> number = 0
+        .loop
+            .if instruction_index >= instructions.length
+                break
+            .endif
+            .span 548 13 548 84
+            eval current = append_instruction(current, instructions[instruction_index])
+            .span 549 13 549 36
+            eval instruction_index += 1
+        .endloop
+        .span 551 9 551 20
+        eval index += 1
+    .endloop
+    .if current != null
+        .span 555 9 555 94
+        eval diagnostics = append_string(diagnostics, "unterminated function at end of artifact")
+    .endif
+    .span 558 5 558 175
+    ret ParseNativeResult { functions: functions, imports: imports, structs: structs, interfaces: interfaces, enums: enums, bindings: bindings, diagnostics: diagnostics }
+.endfn
+
+.fn parse_source_span(text -> string) -> NativeSourceSpan?
+.meta return NativeSourceSpan?
+.meta effects none
+    .span 561 22 561 36
+    .param text -> string
+    .span 562 5 562 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 564 9 564 21
+        ret null
+    .endif
+    .span 566 5 566 43
+    eval let parts = split_whitespace(trimmed)
+    .if parts.length != 4
+        .span 568 9 568 21
+        ret null
+    .endif
+    .span 570 5 570 53
+    eval let start_line = parse_decimal_number(parts[0])
+    .if !start_line.success
+        .span 572 9 572 21
+        ret null
+    .endif
+    .span 574 5 574 55
+    eval let start_column = parse_decimal_number(parts[1])
+    .if !start_column.success
+        .span 576 9 576 21
+        ret null
+    .endif
+    .span 578 5 578 51
+    eval let end_line = parse_decimal_number(parts[2])
+    .if !end_line.success
+        .span 580 9 580 21
+        ret null
+    .endif
+    .span 582 5 582 53
+    eval let end_column = parse_decimal_number(parts[3])
+    .if !end_column.success
+        .span 584 9 584 21
+        ret null
+    .endif
+    .span 586 5 591 7
+    ret NativeSourceSpan { start_line: start_line.value, start_column: start_column.value, end_line: end_line.value, end_column: end_column.value }
+.endfn
+
+.fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[]
+.meta return NativeFunction[]
+.meta effects none
+    .span 594 20 594 49
+    .param functions -> NativeFunction[]
+    .span 594 51 594 74
+    .param value -> NativeFunction
+    .span 595 5 595 38
+    ret functions.concat([value])
+.endfn
+
+.fn append_binding(bindings -> NativeBinding[], value -> NativeBinding) -> NativeBinding[]
+.meta return NativeBinding[]
+.meta effects none
+    .span 598 19 598 46
+    .param bindings -> NativeBinding[]
+    .span 598 48 598 70
+    .param value -> NativeBinding
+    .span 599 5 599 37
+    ret bindings.concat([value])
+.endfn
+
+.fn append_import(imports -> NativeImport[], value -> NativeImport) -> NativeImport[]
+.meta return NativeImport[]
+.meta effects none
+    .span 602 18 602 43
+    .param imports -> NativeImport[]
+    .span 602 45 602 66
+    .param value -> NativeImport
+    .span 603 5 603 36
+    ret imports.concat([value])
+.endfn
+
+.fn append_struct(structs -> NativeStruct[], value -> NativeStruct) -> NativeStruct[]
+.meta return NativeStruct[]
+.meta effects none
+    .span 606 18 606 43
+    .param structs -> NativeStruct[]
+    .span 606 45 606 66
+    .param value -> NativeStruct
+    .span 607 5 607 36
+    ret structs.concat([value])
+.endfn
+
+.fn append_interface(interfaces -> NativeInterface[], value -> NativeInterface) -> NativeInterface[]
+.meta return NativeInterface[]
+.meta effects none
+    .span 610 21 610 52
+    .param interfaces -> NativeInterface[]
+    .span 610 54 610 78
+    .param value -> NativeInterface
+    .span 611 5 611 39
+    ret interfaces.concat([value])
+.endfn
+
+.fn append_enum(enums -> NativeEnum[], value -> NativeEnum) -> NativeEnum[]
+.meta return NativeEnum[]
+.meta effects none
+    .span 614 16 614 37
+    .param enums -> NativeEnum[]
+    .span 614 39 614 58
+    .param value -> NativeEnum
+    .span 615 5 615 34
+    ret enums.concat([value])
+.endfn
+
+.fn append_enum_variant(variants -> NativeEnumVariant[], value -> NativeEnumVariant) -> NativeEnumVariant[]
+.meta return NativeEnumVariant[]
+.meta effects none
+    .span 618 24 618 55
+    .param variants -> NativeEnumVariant[]
+    .span 618 57 618 83
+    .param value -> NativeEnumVariant
+    .span 619 5 619 37
+    ret variants.concat([value])
+.endfn
+
+.fn append_enum_variant_field(fields -> NativeEnumVariantField[], value -> NativeEnumVariantField) -> NativeEnumVariantField[]
+.meta return NativeEnumVariantField[]
+.meta effects none
+    .span 622 30 622 64
+    .param fields -> NativeEnumVariantField[]
+    .span 622 66 622 97
+    .param value -> NativeEnumVariantField
+    .span 623 5 623 35
+    ret fields.concat([value])
+.endfn
+
+.fn append_struct_field(fields -> NativeStructField[], field -> NativeStructField) -> NativeStructField[]
+.meta return NativeStructField[]
+.meta effects none
+    .span 626 24 626 53
+    .param fields -> NativeStructField[]
+    .span 626 55 626 81
+    .param field -> NativeStructField
+    .span 627 5 627 35
+    ret fields.concat([field])
+.endfn
+
+.fn append_struct_layout_field(fields -> NativeStructLayoutField[], field -> NativeStructLayoutField) -> NativeStructLayoutField[]
+.meta return NativeStructLayoutField[]
+.meta effects none
+    .span 630 31 630 66
+    .param fields -> NativeStructLayoutField[]
+    .span 630 68 630 100
+    .param field -> NativeStructLayoutField
+    .span 631 5 631 35
+    ret fields.concat([field])
+.endfn
+
+.fn append_enum_variant_layout(variants -> NativeEnumVariantLayout[], value -> NativeEnumVariantLayout) -> NativeEnumVariantLayout[]
+.meta return NativeEnumVariantLayout[]
+.meta effects none
+    .span 634 31 634 68
+    .param variants -> NativeEnumVariantLayout[]
+    .span 634 70 634 102
+    .param value -> NativeEnumVariantLayout
+    .span 635 5 635 37
+    ret variants.concat([value])
+.endfn
+
+.fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> string) -> number
+.meta return number
+.meta effects none
+    .span 638 29 638 66
+    .param variants -> NativeEnumVariantLayout[]
+    .span 638 68 638 82
+    .param name -> string
+    .span 639 5 639 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= variants.length
+            break
+        .endif
+        .if variants[index].name == name
+            .span 645 13 645 26
+            ret index
+        .endif
+        .span 647 9 647 20
+        eval index += 1
+    .endloop
+    .span 649 5 649 15
+    ret -1
+.endfn
+
+.fn update_enum_variant_fields(variants -> NativeEnumVariantLayout[], index -> number, field -> NativeStructLayoutField) -> NativeEnumVariantLayout[]
+.meta return NativeEnumVariantLayout[]
+.meta effects none
+    .span 652 31 652 68
+    .param variants -> NativeEnumVariantLayout[]
+    .span 652 70 652 85
+    .param index -> number
+    .span 652 87 652 119
+    .param field -> NativeStructLayoutField
+    .span 653 5 653 54
+    eval let mut result -> NativeEnumVariantLayout[] = []
+    .span 654 5 654 41
+    eval let mut current_index -> number = 0
+    .loop
+        .if current_index >= variants.length
+            break
+        .endif
+        .if current_index == index
+            .span 660 13 660 51
+            eval let variant = variants[current_index]
+            .span 661 13 668 15
+            eval let updated = NativeEnumVariantLayout {
+                name: variant.name,
+                tag: variant.tag,
+                offset: variant.offset,
+                size: variant.size,
+                align: variant.align,
+                fields: append_struct_layout_field(variant.fields, field),
+            }
+            .span 669 13 669 66
+            eval result = append_enum_variant_layout(result, updated)
+        .else
+            .span 671 13 671 82
+            eval result = append_enum_variant_layout(result, variants[current_index])
+        .endif
+        .span 673 9 673 28
+        eval current_index += 1
+    .endloop
+    .span 675 5 675 19
+    ret result
+.endfn
+
+.fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) -> NativeFunction
+.meta return NativeFunction
+.meta effects none
+    .span 678 21 678 47
+    .param function -> NativeFunction
+    .span 678 49 678 77
+    .param parameter -> NativeParameter
+    .span 679 5 679 77
+    eval let parameters = append_parameter_array(function.parameters, parameter)
+    .span 680 5 686 7
+    ret NativeFunction { name: function.name, parameters: parameters, return_type: function.return_type, effects: function.effects, instructions: function.instructions }
+.endfn
+
+.fn append_instruction(function -> NativeFunction, instruction -> NativeInstruction) -> NativeFunction
+.meta return NativeFunction
+.meta effects none
+    .span 689 23 689 49
+    .param function -> NativeFunction
+    .span 689 51 689 83
+    .param instruction -> NativeInstruction
+    .span 690 5 690 68
+    eval let instructions = function.instructions.concat([instruction])
+    .span 691 5 697 7
+    ret NativeFunction { name: function.name, parameters: function.parameters, return_type: function.return_type, effects: function.effects, instructions: instructions }
+.endfn
+
+.fn binding_from_instruction(instruction -> NativeInstruction) -> NativeBinding
+.meta return NativeBinding
+.meta effects none
+    .span 700 29 700 61
+    .param instruction -> NativeInstruction
+    .span 701 5 706 7
+    ret NativeBinding { name: instruction.name, mutable: instruction.mutable, type_annotation: instruction.type_annotation, value: instruction.value }
+.endfn
+
+.fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction
+.meta return NativeFunction
+.meta effects none
+    .span 709 15 709 41
+    .param function -> NativeFunction
+    .span 709 43 709 58
+    .param entry -> string
+    .span 710 5 710 36
+    eval let trimmed = trim_text(entry)
+    .if starts_with(trimmed, "return ")
+        .span 712 9 712 71
+        eval let return_type = trim_text(strip_prefix(trimmed, "return "))
+        .span 713 9 713 78
+        ret update_function_meta(function, return_type, function.effects)
+    .endif
+    .if starts_with(trimmed, "effects ")
+        .span 716 9 716 65
+        eval let list = trim_text(strip_prefix(trimmed, "effects "))
+        .span 717 9 717 47
+        eval let effects = parse_effect_list(list)
+        .span 718 9 718 78
+        ret update_function_meta(function, function.return_type, effects)
+    .endif
+    .span 720 5 720 21
+    ret function
+.endfn
+
+.fn update_function_meta(function -> NativeFunction, return_type -> string, effects -> string[]) -> NativeFunction
+.meta return NativeFunction
+.meta effects none
+    .span 723 25 723 51
+    .param function -> NativeFunction
+    .span 723 53 723 74
+    .param return_type -> string
+    .span 723 76 723 95
+    .param effects -> string[]
+    .span 724 5 730 7
+    ret NativeFunction { name: function.name, parameters: function.parameters, return_type: return_type, effects: effects, instructions: function.instructions }
+.endfn
+
+.fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGatherResult
+.meta return InstructionGatherResult
+.meta effects none
+    .span 733 23 733 40
+    .param lines -> string[]
+    .span 733 42 733 63
+    .param start_index -> number
+    .if start_index >= lines.length
+        .span 735 9 735 72
+        ret InstructionGatherResult { text: "", lines_consumed: 0 }
+    .endif
+    .span 737 5 737 52
+    eval let first_line = trim_text(lines[start_index])
+    .if first_line.length == 0
+        .span 739 9 739 80
+        ret InstructionGatherResult { text: first_line, lines_consumed: 0 }
+    .endif
+    .if !instruction_supports_multiline(first_line)
+        .span 742 9 742 80
+        ret InstructionGatherResult { text: first_line, lines_consumed: 0 }
+    .endif
+    .span 745 5 745 99
+    eval let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line)
+    .if !instruction_requires_continuation(state)
+        .span 747 9 747 80
+        ret InstructionGatherResult { text: first_line, lines_consumed: 0 }
+    .endif
+    .span 750 5 750 45
+    eval let mut combined -> string = first_line
+    .span 751 5 751 36
+    eval let mut consumed -> number = 0
+    .span 752 5 752 37
+    eval let mut index = start_index + 1
+    .loop
+        .if index >= lines.length
+            break
+        .endif
+        .span 757 9 757 52
+        eval let continuation = trim_text(lines[index])
+        .if continuation.length == 0
+            .span 760 13 760 40
+            eval combined = combined + "\n"
+        .else
+            .span 762 13 762 55
+            eval combined = combined + "\n" + continuation
+            .span 763 13 763 73
+            eval state = update_instruction_depth_state(state, continuation)
+        .endif
+        .span 765 9 765 23
+        eval consumed += 1
+        .span 766 9 766 20
+        eval index += 1
+        .if !instruction_requires_continuation(state)
+            break
+        .endif
+    .endloop
+    .span 771 5 771 42
+    eval let normalized = trim_text(combined)
+    .span 772 5 772 83
+    ret InstructionGatherResult { text: normalized, lines_consumed: consumed }
+.endfn
+
+.fn instruction_supports_multiline(line -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 775 35 775 49
+    .param line -> string
+    .if starts_with(line, "eval ")
+        .span 777 9 777 21
+        ret true
+    .endif
+    .if starts_with(line, "ret ")
+        .span 780 9 780 21
+        ret true
+    .endif
+    .span 782 5 782 18
+    ret false
+.endfn
+
+.fn instruction_requires_continuation(state -> InstructionDepthState) -> boolean
+.meta return boolean
+.meta effects none
+    .span 785 38 785 68
+    .param state -> InstructionDepthState
+    .if state.in_string
+        .span 787 9 787 21
+        ret true
+    .endif
+    .if state.paren_depth > 0
+        .span 790 9 790 21
+        ret true
+    .endif
+    .if state.bracket_depth > 0
+        .span 793 9 793 21
+        ret true
+    .endif
+    .if state.brace_depth > 0
+        .span 796 9 796 21
+        ret true
+    .endif
+    .span 798 5 798 18
+    ret false
+.endfn
+
+.fn initial_instruction_depth_state() -> InstructionDepthState
+.meta return InstructionDepthState
+.meta effects none
+    .span 802 5 802 122
+    ret InstructionDepthState { paren_depth: 0, bracket_depth: 0, brace_depth: 0, in_string: false, escaping: false }
+.endfn
+
+.fn update_instruction_depth_state(state -> InstructionDepthState, text -> string) -> InstructionDepthState
+.meta return InstructionDepthState
+.meta effects none
+    .span 805 35 805 65
+    .param state -> InstructionDepthState
+    .span 805 67 805 81
+    .param text -> string
+    .span 806 5 806 45
+    eval let mut paren_depth = state.paren_depth
+    .span 807 5 807 49
+    eval let mut bracket_depth = state.bracket_depth
+    .span 808 5 808 45
+    eval let mut brace_depth = state.brace_depth
+    .span 809 5 809 41
+    eval let mut in_string = state.in_string
+    .span 810 5 810 39
+    eval let mut escaping = state.escaping
+    .span 812 5 812 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 817 9 817 30
+        eval let ch = text[index]
+        .if in_string
+            .if escaping
+                .span 820 17 820 34
+                eval escaping = false
+                .span 821 17 821 28
+                eval index += 1
+                continue
+            .endif
+            .if ch == "\\"
+                .span 825 17 825 33
+                eval escaping = true
+                .span 826 17 826 28
+                eval index += 1
+                continue
+            .endif
+            .if ch == "\""
+                .span 830 17 830 35
+                eval in_string = false
+            .endif
+            .span 832 13 832 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\""
+            .span 837 13 837 30
+            eval in_string = true
+            .span 838 13 838 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "("
+            .span 842 13 842 30
+            eval paren_depth += 1
+            .span 843 13 843 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ")"
+            .if paren_depth > 0
+                .span 848 17 848 34
+                eval paren_depth -= 1
+            .endif
+            .span 850 13 850 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "["
+            .span 854 13 854 32
+            eval bracket_depth += 1
+            .span 855 13 855 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "]"
+            .if bracket_depth > 0
+                .span 860 17 860 36
+                eval bracket_depth -= 1
+            .endif
+            .span 862 13 862 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{"
+            .span 866 13 866 30
+            eval brace_depth += 1
+            .span 867 13 867 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "}"
+            .if brace_depth > 0
+                .span 872 17 872 34
+                eval brace_depth -= 1
+            .endif
+            .span 874 13 874 24
+            eval index += 1
+            continue
+        .endif
+        .span 877 9 877 20
+        eval index += 1
+    .endloop
+    .span 880 5 886 7
+    ret InstructionDepthState { paren_depth: paren_depth, bracket_depth: bracket_depth, brace_depth: brace_depth, in_string: in_string, escaping: escaping }
+.endfn
+
+.fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> InstructionParseResult
+.meta return InstructionParseResult
+.meta effects none
+    .span 889 22 889 36
+    .param line -> string
+    .span 889 38 889 63
+    .param span -> NativeSourceSpan?
+    .span 889 65 889 96
+    .param value_span -> NativeSourceSpan?
+    .if line == "noop"
+        .span 891 9 891 134
+        ret InstructionParseResult { instructions: [NativeInstruction.Noop()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if starts_with(line, ".if ")
+        .span 894 9 894 63
+        eval let condition = trim_text(strip_prefix(line, ".if "))
+        .span 895 9 895 155
+        ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.If { condition: condition }], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == ".else"
+        .span 898 9 898 134
+        ret InstructionParseResult { instructions: [NativeInstruction.Else()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == ".endif"
+        .span 901 9 901 135
+        ret InstructionParseResult { instructions: [NativeInstruction.EndIf()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if starts_with(line, ".for ")
+        .span 904 9 904 59
+        eval let body = trim_text(strip_prefix(line, ".for "))
+        .span 905 9 905 32
+        eval let separator = " in "
+        .span 906 9 906 47
+        eval let index = index_of(body, separator)
+        .if index >= 0
+            .span 908 13 908 63
+            eval let target = trim_text(substring(body, 0, index))
+            .span 909 13 909 94
+            eval let iterable = trim_text(substring(body, index + separator.length, body.length))
+            .span 910 13 910 174
+            ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.For { target: target, iterable: iterable }], span_consumed: false, value_span_consumed: false }
+        .endif
+    .endif
+    .if line == ".endfor"
+        .span 914 9 914 136
+        ret InstructionParseResult { instructions: [NativeInstruction.EndFor()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == ".loop"
+        .span 917 9 917 134
+        ret InstructionParseResult { instructions: [NativeInstruction.Loop()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == ".endloop"
+        .span 920 9 920 137
+        ret InstructionParseResult { instructions: [NativeInstruction.EndLoop()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == "break"
+        .span 923 9 923 135
+        ret InstructionParseResult { instructions: [NativeInstruction.Break()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == "continue"
+        .span 926 9 926 138
+        ret InstructionParseResult { instructions: [NativeInstruction.Continue()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if starts_with(line, ".match ")
+        .span 929 9 929 67
+        eval let expression = trim_text(strip_prefix(line, ".match "))
+        .span 930 9 930 160
+        ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Match { expression: expression }], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if starts_with(line, ".case ")
+        .span 933 9 933 138
+        ret InstructionParseResult { instructions: [parse_case_instruction(line)], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if line == ".endmatch"
+        .span 936 9 936 138
+        ret InstructionParseResult { instructions: [NativeInstruction.EndMatch()], span_consumed: false, value_span_consumed: false }
+    .endif
+    .if starts_with(line, ".let ")
+        .span 939 9 943 11
+        ret InstructionParseResult { instructions: [parse_let_instruction(line, span, value_span)], span_consumed: true, value_span_consumed: true }
+    .endif
+    .if starts_with(line, "ret")
+        .if line.length == 3
+            .span 947 13 951 15
+            ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Return { expression: "", span: span }], span_consumed: true, value_span_consumed: false }
+        .endif
+        .span 953 9 953 33
+        eval let separator = line[3]
+        .if separator == " " || separator == "\t"
+            .span 955 13 955 72
+            eval let remainder = trim_text(substring(line, 3, line.length))
+            .if remainder.length == 0
+                .span 957 17 961 19
+                ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Return { expression: "", span: span }], span_consumed: true, value_span_consumed: false }
+            .endif
+            .span 963 13 967 15
+            ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Return { expression: trim_trailing_delimiters(remainder), span: span }], span_consumed: true, value_span_consumed: false }
+        .endif
+    .endif
+    .if starts_with(line, "eval let ")
+        .span 971 9 971 63
+        eval let body = trim_text(strip_prefix(line, "eval let "))
+        .span 972 9 972 47
+        eval let mut is_mutable -> boolean = false
+        .if starts_with(body, "mut ")
+            .span 974 13 974 31
+            eval is_mutable = true
+            .span 975 13 975 58
+            eval body = trim_text(strip_prefix(body, "mut "))
+        .endif
+        .span 977 9 977 53
+        eval let parsed = parse_binding_components(body)
+        .span 978 9 989 11
+        ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Let { name: parsed.name, mutable: is_mutable, type_annotation: parsed.type_annotation, value: maybe_trim_trailing(parsed.value), span: span, value_span: value_span }], span_consumed: true, value_span_consumed: true }
+    .endif
+    .if starts_with(line, "eval ")
+        .span 992 9 996 11
+        ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))), span: span }], span_consumed: true, value_span_consumed: false }
+    .endif
+    .if index_of(line, "=>") >= 0
+        .span 999 9 999 143
+        ret InstructionParseResult { instructions: parse_inline_case_instruction(line), span_consumed: false, value_span_consumed: false }
+    .endif
+    .span 1001 5 1001 146
+    ret InstructionParseResult { instructions: [#element:NativeInstruction, NativeInstruction.Unknown { text: line }], span_consumed: false, value_span_consumed: false }
+.endfn
+
+.fn parse_case_instruction(line -> string) -> NativeInstruction
+.meta return NativeInstruction
+.meta effects none
+    .span 1004 27 1004 41
+    .param line -> string
+    .span 1005 5 1005 56
+    eval let body = trim_text(strip_prefix(line, ".case "))
+    .span 1006 5 1006 45
+    eval let split = split_case_components(body)
+    .span 1007 5 1007 82
+    ret NativeInstruction.Case { pattern: split.pattern, guard: split.guard }
+.endfn
+
+.fn parse_inline_case_instruction(line -> string) -> NativeInstruction[]
+.meta return NativeInstruction[]
+.meta effects none
+    .span 1010 34 1010 48
+    .param line -> string
+    .span 1011 5 1011 61
+    eval let trimmed = trim_trailing_delimiters(trim_text(line))
+    .span 1012 5 1012 47
+    eval let arrow_index = index_of(trimmed, "=>")
+    .if arrow_index < 0
+        .span 1014 9 1014 59
+        ret [#element:NativeInstruction, NativeInstruction.Unknown { text: line }]
+    .endif
+    .span 1016 5 1016 62
+    eval let head = trim_text(substring(trimmed, 0, arrow_index))
+    .span 1017 5 1017 110
+    eval let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index + 2, trimmed.length)))
+    .span 1018 5 1018 45
+    eval let split = split_case_components(head)
+    .span 1019 5 1019 54
+    eval let mut instructions -> NativeInstruction[] = []
+    .span 1020 5 1020 113
+    eval instructions = instructions.concat([NativeInstruction.Case { pattern: split.pattern, guard: split.guard }])
+    .if remainder.length == 0
+        .span 1022 9 1022 72
+        eval instructions = instructions.concat([NativeInstruction.Noop()])
+        .span 1023 9 1023 29
+        ret instructions
+    .endif
+    .span 1025 5 1025 74
+    eval let body_instruction = parse_inline_case_body_instruction(remainder)
+    .span 1026 5 1026 60
+    eval instructions = instructions.concat([body_instruction])
+    .span 1027 5 1027 25
+    ret instructions
+.endfn
+
+.fn parse_inline_case_body_instruction(body -> string) -> NativeInstruction
+.meta return NativeInstruction
+.meta effects none
+    .span 1030 39 1030 53
+    .param body -> string
+    .span 1031 5 1031 50
+    eval let lowered = trim_trailing_delimiters(body)
+    .if starts_with(lowered, "return ")
+        .span 1033 9 1033 91
+        eval let value = trim_trailing_delimiters(trim_text(strip_prefix(lowered, "return ")))
+        .span 1034 9 1034 75
+        ret NativeInstruction.Return { expression: value, span: null }
+    .endif
+    .if starts_with(lowered, "eval ")
+        .span 1037 9 1037 141
+        ret NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))), span: null }
+    .endif
+    .span 1039 5 1039 77
+    ret NativeInstruction.Expression { expression: lowered, span: null }
+.endfn
+
+.fn split_case_components(text -> string) -> CaseComponents
+.meta return CaseComponents
+.meta effects none
+    .span 1042 26 1042 40
+    .param text -> string
+    .span 1043 5 1043 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1045 9 1045 65
+        ret CaseComponents { pattern: trimmed, guard: null }
+    .endif
+    .span 1047 5 1047 28
+    eval let separator = " if "
+    .span 1048 5 1048 51
+    eval let index = last_index_of(trimmed, separator)
+    .if index < 0
+        .span 1050 9 1050 65
+        ret CaseComponents { pattern: trimmed, guard: null }
+    .endif
+    .span 1052 5 1052 59
+    eval let pattern = trim_text(substring(trimmed, 0, index))
+    .span 1053 5 1053 94
+    eval let guard_text = trim_text(substring(trimmed, index + separator.length, trimmed.length))
+    .if guard_text.length == 0
+        .span 1055 9 1055 65
+        ret CaseComponents { pattern: pattern, guard: null }
+    .endif
+    .span 1057 5 1057 67
+    ret CaseComponents { pattern: pattern, guard: guard_text }
+.endfn
+
+.fn parse_import_entry(kind -> string, entry -> string) -> NativeImport?
+.meta return NativeImport?
+.meta effects none
+    .span 1060 23 1060 37
+    .param kind -> string
+    .span 1060 39 1060 54
+    .param entry -> string
+    .span 1061 5 1061 36
+    eval let trimmed = trim_text(entry)
+    .if trimmed.length == 0
+        .span 1063 9 1063 21
+        ret null
+    .endif
+    .span 1065 5 1065 45
+    eval let mut module_text -> string = trimmed
+    .span 1066 5 1066 56
+    eval let mut specifiers -> NativeImportSpecifier[] = []
+    .span 1067 5 1067 46
+    eval let brace_index = index_of(trimmed, "{")
+    .if brace_index >= 0
+        .span 1069 9 1069 55
+        eval let close_index = last_index_of(trimmed, "}")
+        .if close_index < 0 || close_index <= brace_index
+            .span 1071 13 1071 25
+            ret null
+        .endif
+        .span 1073 9 1073 69
+        eval module_text = trim_text(substring(trimmed, 0, brace_index))
+        .span 1074 9 1074 78
+        eval let names_segment = substring(trimmed, brace_index + 1, close_index)
+        .span 1075 9 1075 61
+        eval specifiers = parse_import_specifiers(names_segment)
+    .endif
+    .span 1077 5 1077 56
+    eval module_text = strip_quotes(trim_text(module_text))
+    .span 1078 5 1078 85
+    ret NativeImport { kind: kind, module: module_text, specifiers: specifiers }
+.endfn
+
+.fn parse_import_specifiers(text -> string) -> NativeImportSpecifier[]
+.meta return NativeImportSpecifier[]
+.meta effects none
+    .span 1081 28 1081 42
+    .param text -> string
+    .span 1082 5 1082 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1084 9 1084 19
+        ret []
+    .endif
+    .span 1086 5 1086 50
+    eval let entries = split_comma_separated(trimmed)
+    .span 1087 5 1087 56
+    eval let mut specifiers -> NativeImportSpecifier[] = []
+    .span 1088 5 1088 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= entries.length
+            break
+        .endif
+        .span 1093 9 1093 61
+        eval let parsed = parse_single_specifier(entries[index])
+        .if parsed.name.length > 0
+            .span 1095 13 1095 54
+            eval specifiers = specifiers.concat([parsed])
+        .endif
+        .span 1097 9 1097 20
+        eval index += 1
+    .endloop
+    .span 1099 5 1099 23
+    ret specifiers
+.endfn
+
+.fn parse_single_specifier(entry -> string) -> NativeImportSpecifier
+.meta return NativeImportSpecifier
+.meta effects none
+    .span 1102 27 1102 42
+    .param entry -> string
+    .span 1103 5 1103 36
+    eval let trimmed = trim_text(entry)
+    .if trimmed.length == 0
+        .span 1105 9 1105 64
+        ret NativeImportSpecifier { name: "", alias: null }
+    .endif
+    .span 1107 5 1107 28
+    eval let separator = " as "
+    .span 1108 5 1108 46
+    eval let index = index_of(trimmed, separator)
+    .if index < 0
+        .span 1110 9 1110 69
+        ret NativeImportSpecifier { name: trimmed, alias: null }
+    .endif
+    .span 1112 5 1112 56
+    eval let name = trim_text(substring(trimmed, 0, index))
+    .span 1113 5 1113 94
+    eval let alias_text = trim_text(substring(trimmed, index + separator.length, trimmed.length))
+    .if alias_text.length == 0
+        .span 1115 9 1115 66
+        ret NativeImportSpecifier { name: name, alias: null }
+    .endif
+    .span 1117 5 1117 68
+    ret NativeImportSpecifier { name: name, alias: alias_text }
+.endfn
+
+.fn parse_struct_definition(lines -> string[], start_index -> number) -> StructParseResult
+.meta return StructParseResult
+.meta effects none
+    .span 1120 28 1120 45
+    .param lines -> string[]
+    .span 1120 47 1120 68
+    .param start_index -> number
+    .span 1121 5 1121 42
+    eval let mut diagnostics -> string[] = []
+    .span 1122 5 1122 48
+    eval let header = trim_text(lines[start_index])
+    .span 1123 5 1123 65
+    eval let name_text = trim_text(strip_prefix(header, ".struct "))
+    .span 1124 5 1124 55
+    eval let header_parse = parse_struct_header(name_text)
+    .span 1125 5 1125 64
+    eval diagnostics = diagnostics.concat(header_parse.diagnostics)
+    .span 1126 5 1126 41
+    eval let struct_name = header_parse.name
+    .span 1127 5 1127 50
+    eval let mut implements = header_parse.implements
+    .if struct_name.length == 0
+        .span 1129 9 1129 94
+        eval diagnostics = append_string(diagnostics, "unable to parse struct header: " + header)
+        .span 1130 9 1130 110
+        ret StructParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics }
+    .endif
+    .span 1133 5 1133 48
+    eval let mut fields -> NativeStructField[] = []
+    .span 1134 5 1134 46
+    eval let mut methods -> NativeFunction[] = []
+    .span 1135 5 1135 54
+    eval let mut current_method -> NativeFunction? = null
+    .span 1136 5 1136 61
+    eval let mut method_pending_span -> NativeSourceSpan? = null
+    .span 1137 5 1137 67
+    eval let mut method_pending_value_span -> NativeSourceSpan? = null
+    .span 1138 5 1138 68
+    eval let mut struct_layout_fields -> NativeStructLayoutField[] = []
+    .span 1139 5 1139 46
+    eval let mut struct_layout_size -> number = 0
+    .span 1140 5 1140 47
+    eval let mut struct_layout_align -> number = 0
+    .span 1141 5 1141 61
+    eval let mut struct_layout_header_success -> boolean = false
+    .span 1142 5 1142 70
+    eval let mut struct_layout_reported_missing_header -> boolean = false
+    .span 1143 5 1143 37
+    eval let mut index = start_index + 1
+    .loop
+        .if index >= lines.length
+            .span 1146 13 1146 92
+            eval diagnostics = append_string(diagnostics, "unterminated struct " + struct_name)
+            .span 1147 13 1147 71
+            eval let mut struct_layout_value -> NativeStructLayout? = null
+            .if struct_layout_header_success
+                .span 1149 17 1149 145
+                eval struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields }
+            .endif
+            .span 1151 13 1155 15
+            ret StructParseResult { definition: NativeStruct { name: struct_name, fields: fields, methods: methods, implements: implements, layout: struct_layout_value }, next_index: index, diagnostics: diagnostics }
+        .endif
+        .span 1157 9 1157 48
+        eval let raw_line = trim_text(lines[index])
+        .if raw_line.length == 0 || starts_with(raw_line, ";")
+            .span 1159 13 1159 24
+            eval index += 1
+            continue
+        .endif
+        .if raw_line == ".endstruct"
+            .if current_method != null
+                .span 1164 17 1164 106
+                eval diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name)
+                .span 1165 17 1165 68
+                eval methods = append_function(methods, current_method)
+                .span 1166 17 1166 39
+                eval current_method = null
+                .span 1167 17 1167 44
+                eval method_pending_span = null
+                .span 1168 17 1168 50
+                eval method_pending_value_span = null
+            .endif
+            .span 1170 13 1170 24
+            eval index += 1
+            break
+        .endif
+        .if current_method != null
+            .if raw_line == ".endmethod"
+                .span 1175 17 1175 68
+                eval methods = append_function(methods, current_method)
+                .span 1176 17 1176 39
+                eval current_method = null
+                .span 1177 17 1177 44
+                eval method_pending_span = null
+                .span 1178 17 1178 50
+                eval method_pending_value_span = null
+                .span 1179 17 1179 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(raw_line, ".meta ")
+                .span 1183 17 1183 95
+                eval current_method = apply_meta(current_method, strip_prefix(raw_line, ".meta "))
+                .span 1184 17 1184 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(raw_line, ".param ")
+                .span 1188 17 1188 111
+                eval let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span)
+                .if parameter == null
+                    .span 1190 21 1190 111
+                    eval diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line)
+                .else
+                    .span 1192 21 1192 82
+                    eval current_method = append_parameter(current_method, parameter)
+                .endif
+                .span 1194 17 1194 44
+                eval method_pending_span = null
+                .span 1195 17 1195 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(raw_line, ".method ")
+                .span 1199 17 1199 112
+                eval diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
+                .span 1200 17 1200 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(raw_line, ".span ")
+                .span 1204 17 1204 94
+                eval let parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "))
+                .if parsed_method_span == null
+                    .span 1206 21 1206 108
+                    eval diagnostics = append_string(diagnostics, "unable to parse span metadata: " + raw_line)
+                .else
+                    .span 1208 21 1208 62
+                    eval method_pending_span = parsed_method_span
+                .endif
+                .span 1210 17 1210 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(raw_line, ".init-span ")
+                .span 1214 17 1214 104
+                eval let parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "))
+                .if parsed_method_init_span == null
+                    .span 1216 21 1216 120
+                    eval diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + raw_line)
+                .else
+                    .span 1218 21 1218 73
+                    eval method_pending_value_span = parsed_method_init_span
+                .endif
+                .span 1220 17 1220 28
+                eval index += 1
+                continue
+            .endif
+            .span 1223 13 1223 121
+            eval let method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span)
+            .if method_instruction_result.span_consumed
+                .span 1225 17 1225 44
+                eval method_pending_span = null
+            .else
+                .if method_pending_span != null
+                    .span 1227 17 1227 102
+                    eval diagnostics = append_string(diagnostics, "unused span metadata before: " + raw_line)
+                    .span 1228 17 1228 44
+                    eval method_pending_span = null
+                .endif
+            .endif
+            .if method_instruction_result.value_span_consumed
+                .span 1231 17 1231 50
+                eval method_pending_value_span = null
+            .else
+                .if method_pending_value_span != null
+                    .span 1233 17 1233 114
+                    eval diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + raw_line)
+                    .span 1234 17 1234 50
+                    eval method_pending_value_span = null
+                .endif
+            .endif
+            .span 1236 13 1236 53
+            eval let mut instruction_index -> number = 0
+            .loop
+                .if instruction_index >= method_instruction_result.instructions.length
+                    break
+                .endif
+                .span 1241 17 1241 128
+                eval current_method = append_instruction(current_method, method_instruction_result.instructions[instruction_index])
+                .span 1242 17 1242 40
+                eval instruction_index += 1
+            .endloop
+            .span 1244 13 1244 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(raw_line, ".layout ")
+            .span 1248 13 1248 59
+            eval let body = strip_prefix(raw_line, ".layout ")
+            .if starts_with(body, "struct ")
+                .span 1250 17 1250 95
+                eval let header_result = parse_struct_layout_header(strip_prefix(body, "struct "))
+                .span 1251 17 1251 77
+                eval diagnostics = diagnostics.concat(header_result.diagnostics)
+                .if header_result.success
+                    .if struct_layout_header_success
+                        .span 1254 25 1254 118
+                        eval diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name)
+                    .else
+                        .span 1256 25 1256 65
+                        eval struct_layout_size = header_result.size
+                        .span 1257 25 1257 67
+                        eval struct_layout_align = header_result.align
+                        .span 1258 25 1258 61
+                        eval struct_layout_header_success = true
+                    .endif
+                .endif
+                .span 1261 17 1261 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(body, "field ")
+                .span 1265 17 1265 105
+                eval let field_result = parse_struct_layout_field(strip_prefix(body, "field "), struct_name)
+                .span 1266 17 1266 76
+                eval diagnostics = diagnostics.concat(field_result.diagnostics)
+                .if field_result.success
+                    .span 1268 21 1268 113
+                    eval struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field)
+                    .if !struct_layout_header_success
+                        .if !struct_layout_reported_missing_header
+                            .span 1271 29 1271 146
+                            eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field encountered before layout header")
+                            .span 1272 29 1272 74
+                            eval struct_layout_reported_missing_header = true
+                        .endif
+                    .endif
+                .endif
+                .span 1276 17 1276 28
+                eval index += 1
+                continue
+            .endif
+            .span 1279 13 1279 106
+            eval diagnostics = append_string(diagnostics, "unsupported struct layout directive: " + raw_line)
+            .span 1280 13 1280 24
+            eval index += 1
+            continue
+        .endif
+        .if raw_line == "noop"
+            .span 1284 13 1284 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(raw_line, ".field ")
+            .span 1288 13 1288 91
+            eval let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "))
+            .if parsed_field == null
+                .span 1290 17 1290 103
+                eval diagnostics = append_string(diagnostics, "unable to parse struct field: " + raw_line)
+            .else
+                .span 1292 17 1292 68
+                eval fields = append_struct_field(fields, parsed_field)
+            .endif
+            .span 1294 13 1294 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(raw_line, ".method ")
+            .if current_method != null
+                .span 1299 17 1299 112
+                eval diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
+            .endif
+            .span 1301 13 1301 87
+            eval let method_name = parse_function_name(strip_prefix(raw_line, ".method "))
+            .span 1302 13 1308 15
+            eval current_method = NativeFunction {
+                name: method_name,
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            }
+            .span 1309 13 1309 40
+            eval method_pending_span = null
+            .span 1310 13 1310 46
+            eval method_pending_value_span = null
+            .span 1311 13 1311 24
+            eval index += 1
+            continue
+        .endif
+        .span 1314 9 1314 95
+        eval diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line)
+        .span 1315 9 1315 20
+        eval index += 1
+    .endloop
+    .span 1318 5 1318 63
+    eval let mut struct_layout_value -> NativeStructLayout? = null
+    .if struct_layout_header_success
+        .span 1320 9 1320 137
+        eval struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields }
+    .endif
+    .span 1323 5 1327 7
+    ret StructParseResult { definition: NativeStruct { name: struct_name, fields: fields, methods: methods, implements: implements, layout: struct_layout_value }, next_index: index, diagnostics: diagnostics }
+.endfn
+
+.fn parse_interface_definition(lines -> string[], start_index -> number) -> InterfaceParseResult
+.meta return InterfaceParseResult
+.meta effects none
+    .span 1330 31 1330 48
+    .param lines -> string[]
+    .span 1330 50 1330 71
+    .param start_index -> number
+    .span 1331 5 1331 42
+    eval let mut diagnostics -> string[] = []
+    .span 1332 5 1332 48
+    eval let header = trim_text(lines[start_index])
+    .span 1333 5 1333 68
+    eval let name_text = trim_text(strip_prefix(header, ".interface "))
+    .span 1334 5 1334 58
+    eval let header_parse = parse_interface_header(name_text)
+    .span 1335 5 1335 64
+    eval diagnostics = diagnostics.concat(header_parse.diagnostics)
+    .span 1336 5 1336 44
+    eval let interface_name = header_parse.name
+    .if interface_name.length == 0
+        .span 1338 9 1338 97
+        eval diagnostics = append_string(diagnostics, "unable to parse interface header: " + header)
+        .span 1339 9 1339 113
+        ret InterfaceParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics }
+    .endif
+    .span 1342 5 1342 59
+    eval let mut signatures -> NativeInterfaceSignature[] = []
+    .span 1343 5 1343 37
+    eval let mut index = start_index + 1
+    .loop
+        .if index >= lines.length
+            .span 1346 13 1346 98
+            eval diagnostics = append_string(diagnostics, "unterminated interface " + interface_name)
+            .span 1347 13 1351 15
+            ret InterfaceParseResult { definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures }, next_index: index, diagnostics: diagnostics }
+        .endif
+        .span 1353 9 1353 48
+        eval let raw_line = trim_text(lines[index])
+        .if raw_line.length == 0 || starts_with(raw_line, ";")
+            .span 1355 13 1355 24
+            eval index += 1
+            continue
+        .endif
+        .if raw_line == ".endinterface"
+            .span 1359 13 1359 24
+            eval index += 1
+            break
+        .endif
+        .if raw_line == "noop"
+            .span 1363 13 1363 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(raw_line, ".sig ")
+            .span 1367 13 1367 110
+            eval let signature_parse = parse_interface_signature(strip_prefix(raw_line, ".sig "), interface_name)
+            .span 1368 13 1368 75
+            eval diagnostics = diagnostics.concat(signature_parse.diagnostics)
+            .if signature_parse.success
+                .span 1370 17 1370 77
+                eval signatures = signatures.concat([signature_parse.signature])
+            .endif
+            .span 1372 13 1372 24
+            eval index += 1
+            continue
+        .endif
+        .span 1375 9 1375 98
+        eval diagnostics = append_string(diagnostics, "unsupported interface directive: " + raw_line)
+        .span 1376 9 1376 20
+        eval index += 1
+    .endloop
+    .span 1379 5 1383 7
+    ret InterfaceParseResult { definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures }, next_index: index, diagnostics: diagnostics }
+.endfn
+
+.fn parse_struct_header(text -> string) -> StructHeaderParse
+.meta return StructHeaderParse
+.meta effects none
+    .span 1386 24 1386 38
+    .param text -> string
+    .span 1387 5 1387 54
+    eval let base = parse_header_name_and_remainder(text)
+    .span 1388 5 1388 56
+    eval let mut diagnostics -> string[] = base.diagnostics
+    .span 1389 5 1389 41
+    eval let mut implements -> string[] = []
+    .if base.remainder.length > 0
+        .if starts_with(base.remainder, "implements ")
+            .span 1392 13 1392 84
+            eval let list_text = trim_text(strip_prefix(base.remainder, "implements "))
+            .if list_text.length == 0
+                .span 1394 17 1394 117
+                eval diagnostics = append_string(diagnostics, "struct " + base.name + " header missing implements list")
+            .else
+                .span 1396 17 1396 63
+                eval implements = parse_implements_list(list_text)
+            .endif
+        .else
+            .span 1399 13 1399 138
+            eval diagnostics = append_string(diagnostics, "struct " + base.name + " header has unsupported segment `" + base.remainder + "`")
+        .endif
+    .endif
+    .span 1402 5 1402 100
+    ret StructHeaderParse { name: base.name, implements: implements, diagnostics: diagnostics }
+.endfn
+
+.fn parse_interface_header(text -> string) -> InterfaceHeaderParse
+.meta return InterfaceHeaderParse
+.meta effects none
+    .span 1405 27 1405 41
+    .param text -> string
+    .span 1406 5 1406 54
+    eval let base = parse_header_name_and_remainder(text)
+    .span 1407 5 1407 56
+    eval let mut diagnostics -> string[] = base.diagnostics
+    .if base.remainder.length > 0
+        .span 1409 9 1409 137
+        eval diagnostics = append_string(diagnostics, "interface " + base.name + " header has unsupported segment `" + base.remainder + "`")
+    .endif
+    .span 1411 5 1411 118
+    ret InterfaceHeaderParse { name: base.name, type_parameters: base.type_parameters, diagnostics: diagnostics }
+.endfn
+
+.fn parse_interface_signature(text -> string, interface_name -> string) -> InterfaceSignatureParse
+.meta return InterfaceSignatureParse
+.meta effects none
+    .span 1414 30 1414 44
+    .param text -> string
+    .span 1414 46 1414 70
+    .param interface_name -> string
+    .span 1415 5 1415 42
+    eval let mut diagnostics -> string[] = []
+    .span 1416 5 1423 7
+    eval let default_signature = NativeInterfaceSignature {
+        name: "",
+        is_async: false,
+        type_parameters: [],
+        parameters: [],
+        return_type: "void",
+        effects: [],
+    }
+    .span 1425 5 1425 61
+    eval let trimmed = trim_trailing_delimiters(trim_text(text))
+    .if trimmed.length == 0
+        .span 1427 9 1427 112
+        eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing content")
+        .span 1428 9 1428 115
+        ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
+    .endif
+    .span 1431 5 1431 43
+    eval let mut remainder -> string = trimmed
+    .span 1432 5 1432 41
+    eval let mut is_async -> boolean = false
+    .if starts_with(remainder, "async ")
+        .span 1434 9 1434 25
+        eval is_async = true
+        .span 1435 9 1435 66
+        eval remainder = trim_text(strip_prefix(remainder, "async "))
+    .endif
+    .span 1438 5 1438 48
+    eval let paren_index = index_of(remainder, "(")
+    .if paren_index < 0
+        .span 1440 9 1440 131
+        eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing parameter list: " + trimmed)
+        .span 1441 9 1441 115
+        ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
+    .endif
+    .span 1444 5 1444 67
+    eval let close_index = find_matching_paren(remainder, paren_index)
+    .if close_index < 0
+        .span 1446 9 1446 140
+        eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature has unterminated parameter list: " + trimmed)
+        .span 1447 9 1447 115
+        ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
+    .endif
+    .span 1450 5 1450 64
+    eval let head = trim_text(substring(remainder, 0, paren_index))
+    .span 1451 5 1451 60
+    eval let name_parse = parse_header_name_and_remainder(head)
+    .span 1452 5 1452 62
+    eval diagnostics = diagnostics.concat(name_parse.diagnostics)
+    .if name_parse.remainder.length > 0
+        .span 1454 9 1454 169
+        eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`")
+    .endif
+    .span 1456 5 1456 39
+    eval let method_name = name_parse.name
+    .if method_name.length == 0
+        .span 1458 9 1458 127
+        eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` missing name")
+    .endif
+    .span 1461 5 1461 81
+    eval let parameters_section = substring(remainder, paren_index + 1, close_index)
+    .span 1462 5 1462 50
+    eval let mut parameters -> NativeParameter[] = []
+    .span 1463 5 1463 56
+    eval let parameter_text = trim_text(parameters_section)
+    .if parameter_text.length > 0
+        .span 1465 9 1465 63
+        eval let entries = split_parameter_entries(parameter_text)
+        .span 1466 9 1466 43
+        eval let mut entry_index -> number = 0
+        .loop
+            .if entry_index >= entries.length
+                break
+            .endif
+            .span 1471 13 1471 76
+            eval let parsed = parse_parameter_entry(entries[entry_index], null)
+            .if parsed == null
+                .span 1473 17 1473 179
+                eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`")
+            .else
+                .span 1475 17 1475 73
+                eval parameters = append_parameter_array(parameters, parsed)
+            .endif
+            .span 1477 13 1477 30
+            eval entry_index += 1
+        .endloop
+    .endif
+    .span 1481 5 1481 44
+    eval let mut return_type -> string = "void"
+    .span 1482 5 1482 38
+    eval let mut effects -> string[] = []
+    .span 1483 5 1483 89
+    eval let mut suffix = trim_text(substring(remainder, close_index + 1, remainder.length))
+    .if suffix.length > 0
+        .span 1485 9 1485 51
+        eval let effect_index = index_of(suffix, "![")
+        .span 1486 9 1486 47
+        eval let mut effect_segment -> string = ""
+        .if effect_index >= 0
+            .span 1488 13 1488 88
+            eval effect_segment = trim_text(substring(suffix, effect_index, suffix.length))
+            .span 1489 13 1489 68
+            eval suffix = trim_text(substring(suffix, 0, effect_index))
+        .endif
+        .if suffix.length > 0
+            .if starts_with(suffix, "->")
+                .span 1493 17 1493 71
+                eval let type_text = trim_text(strip_prefix(suffix, "->"))
+                .if type_text.length > 0
+                    .span 1495 21 1495 45
+                    eval return_type = type_text
+                .endif
+            .else
+                .span 1498 17 1498 166
+                eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`")
+            .endif
+        .endif
+        .if effect_segment.length > 0
+            .if starts_with(effect_segment, "![") && effect_segment[effect_segment.length - 1] == "]"
+                .span 1503 17 1503 84
+                eval let body = substring(effect_segment, 2, effect_segment.length - 1)
+                .span 1504 17 1504 51
+                eval effects = parse_effect_list(body)
+            .else
+                .span 1506 17 1506 182
+                eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`")
+            .endif
+        .endif
+    .endif
+    .span 1511 5 1518 7
+    eval let signature = NativeInterfaceSignature {
+        name: method_name,
+        is_async: is_async,
+        type_parameters: name_parse.type_parameters,
+        parameters: parameters,
+        return_type: return_type,
+        effects: effects,
+    }
+    .span 1519 5 1519 69
+    eval let success = method_name.length > 0 && diagnostics.length == 0
+    .span 1520 5 1520 105
+    ret InterfaceSignatureParse { success: success, signature: signature, diagnostics: diagnostics }
+.endfn
+
+.fn parse_header_name_and_remainder(text -> string) -> HeaderNameParse
+.meta return HeaderNameParse
+.meta effects none
+    .span 1523 36 1523 50
+    .param text -> string
+    .span 1524 5 1524 42
+    eval let mut diagnostics -> string[] = []
+    .span 1525 5 1525 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1527 9 1527 107
+        ret HeaderNameParse { name: "", type_parameters: [], remainder: "", diagnostics: diagnostics }
+    .endif
+    .span 1529 5 1529 38
+    eval let mut name -> string = trimmed
+    .span 1530 5 1530 38
+    eval let mut remainder -> string = ""
+    .span 1531 5 1531 46
+    eval let mut type_parameters -> string[] = []
+    .span 1532 5 1532 49
+    eval let generics_index = index_of(trimmed, "<")
+    .if generics_index >= 0
+        .span 1534 9 1534 72
+        eval let close_index = find_matching_angle(trimmed, generics_index)
+        .if close_index < 0
+            .span 1536 13 1536 99
+            eval diagnostics = append_string(diagnostics, "header `" + text + "` missing closing `>`")
+            .span 1537 13 1537 44
+            eval name = strip_generics(trimmed)
+            .span 1538 13 1538 133
+            ret HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics }
+        .endif
+        .span 1540 9 1540 65
+        eval name = trim_text(substring(trimmed, 0, generics_index))
+        .span 1541 9 1541 81
+        eval let generics_text = substring(trimmed, generics_index + 1, close_index)
+        .span 1542 9 1542 71
+        eval type_parameters = parse_type_parameter_entries(generics_text)
+        .span 1543 9 1543 84
+        eval remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length))
+    .else
+        .span 1545 9 1545 50
+        eval let space_index = index_of(trimmed, " ")
+        .if space_index >= 0
+            .span 1547 13 1547 66
+            eval name = trim_text(substring(trimmed, 0, space_index))
+            .span 1548 13 1548 88
+            eval remainder = trim_text(substring(trimmed, space_index + 1, trimmed.length))
+        .endif
+    .endif
+    .span 1551 5 1551 33
+    eval name = strip_generics(name)
+    .span 1552 5 1552 125
+    ret HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics }
+.endfn
+
+.fn parse_type_parameter_entries(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1555 33 1555 47
+    .param text -> string
+    .span 1556 5 1556 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1558 9 1558 19
+        ret []
+    .endif
+    .span 1560 5 1560 44
+    ret split_top_level_commas(trimmed)
+.endfn
+
+.fn parse_implements_list(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1563 26 1563 40
+    .param text -> string
+    .span 1564 5 1564 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1566 9 1566 19
+        ret []
+    .endif
+    .span 1568 5 1568 44
+    ret split_top_level_commas(trimmed)
+.endfn
+
+.fn split_top_level_commas(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1571 27 1571 41
+    .param text -> string
+    .span 1572 5 1572 38
+    eval let mut entries -> string[] = []
+    .span 1573 5 1573 36
+    eval let mut current -> string = ""
+    .span 1574 5 1574 33
+    eval let mut index -> number = 0
+    .span 1575 5 1575 34
+    eval let mut quote -> string = ""
+    .span 1576 5 1576 39
+    eval let mut angle_depth -> number = 0
+    .span 1577 5 1577 39
+    eval let mut paren_depth -> number = 0
+    .span 1578 5 1578 41
+    eval let mut bracket_depth -> number = 0
+    .span 1579 5 1579 39
+    eval let mut brace_depth -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1584 9 1584 30
+        eval let ch = text[index]
+        .if quote.length > 0
+            .span 1586 13 1586 36
+            eval current = current + ch
+            .if ch == "\\"
+                .if index + 1 < text.length
+                    .span 1589 21 1589 57
+                    eval current = current + text[index + 1]
+                    .span 1590 21 1590 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+            .if ch == quote
+                .span 1595 17 1595 28
+                eval quote = ""
+            .endif
+            .span 1597 13 1597 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\"" || ch == "'"
+            .span 1601 13 1601 24
+            eval quote = ch
+            .span 1602 13 1602 36
+            eval current = current + ch
+            .span 1603 13 1603 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "<"
+            .span 1607 13 1607 30
+            eval angle_depth += 1
+            .span 1608 13 1608 36
+            eval current = current + ch
+            .span 1609 13 1609 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ">"
+            .if angle_depth > 0
+                .span 1614 17 1614 34
+                eval angle_depth -= 1
+            .endif
+            .span 1616 13 1616 36
+            eval current = current + ch
+            .span 1617 13 1617 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "("
+            .span 1621 13 1621 30
+            eval paren_depth += 1
+            .span 1622 13 1622 36
+            eval current = current + ch
+            .span 1623 13 1623 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ")"
+            .if paren_depth > 0
+                .span 1628 17 1628 34
+                eval paren_depth -= 1
+            .endif
+            .span 1630 13 1630 36
+            eval current = current + ch
+            .span 1631 13 1631 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "["
+            .span 1635 13 1635 32
+            eval bracket_depth += 1
+            .span 1636 13 1636 36
+            eval current = current + ch
+            .span 1637 13 1637 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "]"
+            .if bracket_depth > 0
+                .span 1642 17 1642 36
+                eval bracket_depth -= 1
+            .endif
+            .span 1644 13 1644 36
+            eval current = current + ch
+            .span 1645 13 1645 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{"
+            .span 1649 13 1649 30
+            eval brace_depth += 1
+            .span 1650 13 1650 36
+            eval current = current + ch
+            .span 1651 13 1651 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "}"
+            .if brace_depth > 0
+                .span 1656 17 1656 34
+                eval brace_depth -= 1
+            .endif
+            .span 1658 13 1658 36
+            eval current = current + ch
+            .span 1659 13 1659 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ","
+            .if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
+                .span 1664 17 1664 50
+                eval let segment = trim_text(current)
+                .if segment.length > 0
+                    .span 1666 21 1666 63
+                    eval entries = append_string(entries, segment)
+                .endif
+                .span 1668 17 1668 30
+                eval current = ""
+                .span 1669 17 1669 28
+                eval index += 1
+                continue
+            .endif
+        .endif
+        .span 1673 9 1673 32
+        eval current = current + ch
+        .span 1674 9 1674 20
+        eval index += 1
+    .endloop
+    .span 1676 5 1676 38
+    eval let segment = trim_text(current)
+    .if segment.length > 0
+        .span 1678 9 1678 51
+        eval entries = append_string(entries, segment)
+    .endif
+    .span 1680 5 1680 20
+    ret entries
+.endfn
+
+.fn find_matching_angle(text -> string, start_index -> number) -> number
+.meta return number
+.meta effects none
+    .span 1683 24 1683 38
+    .param text -> string
+    .span 1683 40 1683 61
+    .param start_index -> number
+    .span 1684 5 1684 33
+    eval let mut depth -> number = 0
+    .span 1685 5 1685 43
+    eval let mut index -> number = start_index
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1690 9 1690 30
+        eval let ch = text[index]
+        .if ch == "<"
+            .span 1692 13 1692 24
+            eval depth += 1
+        .else
+            .if ch == ">"
+                .if depth > 0
+                    .span 1695 17 1695 28
+                    eval depth -= 1
+                    .if depth == 0
+                        .span 1697 21 1697 34
+                        ret index
+                    .endif
+                .else
+                    .span 1700 17 1700 30
+                    ret index
+                .endif
+            .endif
+        .endif
+        .span 1703 9 1703 20
+        eval index += 1
+    .endloop
+    .span 1705 5 1705 15
+    ret -1
+.endfn
+
+.fn find_matching_paren(text -> string, start_index -> number) -> number
+.meta return number
+.meta effects none
+    .span 1708 24 1708 38
+    .param text -> string
+    .span 1708 40 1708 61
+    .param start_index -> number
+    .span 1709 5 1709 33
+    eval let mut depth -> number = 0
+    .span 1710 5 1710 43
+    eval let mut index -> number = start_index
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1715 9 1715 30
+        eval let ch = text[index]
+        .if ch == "\"" || ch == "'"
+            .span 1717 13 1717 43
+            eval let mut lookahead = index + 1
+            .loop
+                .if lookahead >= text.length
+                    .span 1720 21 1720 31
+                    ret -1
+                .endif
+                .span 1722 17 1722 47
+                eval let current = text[lookahead]
+                .if current == "\\"
+                    .span 1724 21 1724 36
+                    eval lookahead += 2
+                    continue
+                .endif
+                .if current == ch
+                    .span 1728 21 1728 39
+                    eval index = lookahead
+                    break
+                .endif
+                .span 1731 17 1731 32
+                eval lookahead += 1
+            .endloop
+        .else
+            .if ch == "("
+                .span 1734 13 1734 24
+                eval depth += 1
+            .else
+                .if ch == ")"
+                    .if depth > 0
+                        .span 1737 17 1737 28
+                        eval depth -= 1
+                        .if depth == 0
+                            .span 1739 21 1739 34
+                            ret index
+                        .endif
+                    .else
+                        .span 1742 17 1742 27
+                        ret -1
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 1745 9 1745 20
+        eval index += 1
+    .endloop
+    .span 1747 5 1747 15
+    ret -1
+.endfn
+
+.fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseResult
+.meta return EnumParseResult
+.meta effects none
+    .span 1750 26 1750 43
+    .param lines -> string[]
+    .span 1750 45 1750 66
+    .param start_index -> number
+    .span 1751 5 1751 42
+    eval let mut diagnostics -> string[] = []
+    .span 1752 5 1752 48
+    eval let header = trim_text(lines[start_index])
+    .span 1753 5 1753 63
+    eval let name_text = trim_text(strip_prefix(header, ".enum "))
+    .span 1754 5 1754 45
+    eval let mut enum_name -> string = name_text
+    .span 1755 5 1755 48
+    eval let space_index = index_of(enum_name, " ")
+    .if space_index >= 0
+        .span 1757 5 1757 65
+        eval enum_name = trim_text(substring(enum_name, 0, space_index))
+    .endif
+    .span 1759 5 1759 43
+    eval enum_name = strip_generics(enum_name)
+    .if enum_name.length == 0
+        .span 1761 9 1761 92
+        eval diagnostics = append_string(diagnostics, "unable to parse enum header: " + header)
+        .span 1762 9 1762 108
+        ret EnumParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics }
+    .endif
+    .span 1765 5 1765 50
+    eval let mut variants -> NativeEnumVariant[] = []
+    .span 1766 5 1766 68
+    eval let mut enum_layout_variants -> NativeEnumVariantLayout[] = []
+    .span 1767 5 1767 44
+    eval let mut enum_layout_size -> number = 0
+    .span 1768 5 1768 45
+    eval let mut enum_layout_align -> number = 0
+    .span 1769 5 1769 49
+    eval let mut enum_layout_tag_type -> string = ""
+    .span 1770 5 1770 48
+    eval let mut enum_layout_tag_size -> number = 0
+    .span 1771 5 1771 49
+    eval let mut enum_layout_tag_align -> number = 0
+    .span 1772 5 1772 59
+    eval let mut enum_layout_header_success -> boolean = false
+    .span 1773 5 1773 68
+    eval let mut enum_layout_reported_missing_header -> boolean = false
+    .span 1774 5 1774 37
+    eval let mut index = start_index + 1
+    .loop
+        .if index >= lines.length
+            .span 1777 13 1777 88
+            eval diagnostics = append_string(diagnostics, "unterminated enum " + enum_name)
+            .span 1778 13 1778 67
+            eval let mut enum_layout_value -> NativeEnumLayout? = null
+            .if enum_layout_header_success
+                .span 1780 17 1787 19
+                eval enum_layout_value = NativeEnumLayout {
+                    size: enum_layout_size,
+                    align: enum_layout_align,
+                    tag_type: enum_layout_tag_type,
+                    tag_size: enum_layout_tag_size,
+                    tag_align: enum_layout_tag_align,
+                    variants: enum_layout_variants,
+                }
+            .endif
+            .span 1789 13 1793 15
+            ret EnumParseResult { definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value }, next_index: index, diagnostics: diagnostics }
+        .endif
+        .span 1795 9 1795 48
+        eval let raw_line = trim_text(lines[index])
+        .if raw_line.length == 0 || starts_with(raw_line, ";")
+            .span 1797 13 1797 24
+            eval index += 1
+            continue
+        .endif
+        .if raw_line == "noop"
+            .span 1801 13 1801 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(raw_line, ".layout ")
+            .span 1805 13 1805 59
+            eval let body = strip_prefix(raw_line, ".layout ")
+            .if starts_with(body, "enum ")
+                .span 1807 17 1807 91
+                eval let header_result = parse_enum_layout_header(strip_prefix(body, "enum "))
+                .span 1808 17 1808 77
+                eval diagnostics = diagnostics.concat(header_result.diagnostics)
+                .if header_result.success
+                    .if enum_layout_header_success
+                        .span 1811 25 1811 114
+                        eval diagnostics = append_string(diagnostics, "duplicate enum layout header in " + enum_name)
+                    .else
+                        .span 1813 25 1813 63
+                        eval enum_layout_size = header_result.size
+                        .span 1814 25 1814 65
+                        eval enum_layout_align = header_result.align
+                        .span 1815 25 1815 71
+                        eval enum_layout_tag_type = header_result.tag_type
+                        .span 1816 25 1816 71
+                        eval enum_layout_tag_size = header_result.tag_size
+                        .span 1817 25 1817 73
+                        eval enum_layout_tag_align = header_result.tag_align
+                        .span 1818 25 1818 59
+                        eval enum_layout_header_success = true
+                    .endif
+                .endif
+                .span 1821 17 1821 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(body, "variant ")
+                .span 1825 17 1825 107
+                eval let variant_result = parse_enum_variant_layout(strip_prefix(body, "variant "), enum_name)
+                .span 1826 17 1826 78
+                eval diagnostics = diagnostics.concat(variant_result.diagnostics)
+                .if variant_result.success
+                    .span 1828 21 1828 118
+                    eval let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name)
+                    .if existing_index >= 0
+                        .span 1830 25 1830 153
+                        eval diagnostics = append_string(diagnostics, "duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name)
+                    .else
+                        .span 1832 25 1832 121
+                        eval enum_layout_variants = append_enum_variant_layout(enum_layout_variants, variant_result.variant)
+                    .endif
+                    .if !enum_layout_header_success
+                        .if !enum_layout_reported_missing_header
+                            .span 1836 29 1836 144
+                            eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant encountered before layout header")
+                            .span 1837 29 1837 72
+                            eval enum_layout_reported_missing_header = true
+                        .endif
+                    .endif
+                .endif
+                .span 1841 17 1841 28
+                eval index += 1
+                continue
+            .endif
+            .if starts_with(body, "payload ")
+                .span 1845 17 1845 107
+                eval let payload_result = parse_enum_payload_layout(strip_prefix(body, "payload "), enum_name)
+                .span 1846 17 1846 78
+                eval diagnostics = diagnostics.concat(payload_result.diagnostics)
+                .if payload_result.success
+                    .span 1848 21 1848 116
+                    eval let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name)
+                    .if target_index < 0
+                        .span 1850 25 1850 172
+                        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`")
+                    .else
+                        .span 1852 25 1852 133
+                        eval enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field)
+                    .endif
+                    .if !enum_layout_header_success
+                        .if !enum_layout_reported_missing_header
+                            .span 1856 29 1856 144
+                            eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload encountered before layout header")
+                            .span 1857 29 1857 72
+                            eval enum_layout_reported_missing_header = true
+                        .endif
+                    .endif
+                .endif
+                .span 1861 17 1861 28
+                eval index += 1
+                continue
+            .endif
+            .span 1864 13 1864 104
+            eval diagnostics = append_string(diagnostics, "unsupported enum layout directive: " + raw_line)
+            .span 1865 13 1865 24
+            eval index += 1
+            continue
+        .endif
+        .if raw_line == ".endenum"
+            .span 1869 13 1869 24
+            eval index += 1
+            break
+        .endif
+        .if starts_with(raw_line, ".variant ")
+            .span 1873 13 1873 95
+            eval let parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "))
+            .if parsed_variant == null
+                .span 1875 17 1875 103
+                eval diagnostics = append_string(diagnostics, "unable to parse enum variant: " + raw_line)
+            .else
+                .span 1877 17 1877 74
+                eval variants = append_enum_variant(variants, parsed_variant)
+            .endif
+            .span 1879 13 1879 24
+            eval index += 1
+            continue
+        .endif
+        .span 1882 9 1882 93
+        eval diagnostics = append_string(diagnostics, "unsupported enum directive: " + raw_line)
+        .span 1883 9 1883 20
+        eval index += 1
+    .endloop
+    .span 1886 5 1886 59
+    eval let mut enum_layout_value -> NativeEnumLayout? = null
+    .if enum_layout_header_success
+        .span 1888 9 1895 11
+        eval enum_layout_value = NativeEnumLayout {
+            size: enum_layout_size,
+            align: enum_layout_align,
+            tag_type: enum_layout_tag_type,
+            tag_size: enum_layout_tag_size,
+            tag_align: enum_layout_tag_align,
+            variants: enum_layout_variants,
+        }
+    .endif
+    .span 1898 5 1902 7
+    ret EnumParseResult { definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value }, next_index: index, diagnostics: diagnostics }
+.endfn
+
+.fn parse_enum_variant_line(text -> string) -> NativeEnumVariant?
+.meta return NativeEnumVariant?
+.meta effects none
+    .span 1905 28 1905 42
+    .param text -> string
+    .span 1906 5 1906 61
+    eval let trimmed = trim_trailing_delimiters(trim_text(text))
+    .if trimmed.length == 0
+        .span 1908 9 1908 21
+        ret null
+    .endif
+    .span 1910 5 1910 46
+    eval let brace_index = index_of(trimmed, "{")
+    .if brace_index < 0
+        .span 1912 9 1912 80
+        ret NativeEnumVariant { name: strip_generics(trimmed), fields: [] }
+    .endif
+    .span 1914 5 1914 51
+    eval let close_index = last_index_of(trimmed, "}")
+    .if close_index < 0 || close_index <= brace_index
+        .span 1916 9 1916 21
+        ret null
+    .endif
+    .span 1918 5 1918 83
+    eval let name_text = strip_generics(trim_text(substring(trimmed, 0, brace_index)))
+    .if name_text.length == 0
+        .span 1920 9 1920 21
+        ret null
+    .endif
+    .span 1922 5 1922 75
+    eval let fields_segment = substring(trimmed, brace_index + 1, close_index)
+    .span 1923 5 1923 60
+    eval let entries = split_enum_field_entries(fields_segment)
+    .span 1924 5 1924 53
+    eval let mut fields -> NativeEnumVariantField[] = []
+    .span 1925 5 1925 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= entries.length
+            break
+        .endif
+        .span 1930 9 1930 73
+        eval let entry = trim_trailing_delimiters(trim_text(entries[index]))
+        .if entry.length == 0
+            .span 1932 13 1932 24
+            eval index += 1
+            continue
+        .endif
+        .span 1935 9 1935 60
+        eval let parsed_field = parse_enum_variant_field(entry)
+        .if parsed_field == null
+            .span 1937 13 1937 25
+            ret null
+        .endif
+        .span 1939 9 1939 66
+        eval fields = append_enum_variant_field(fields, parsed_field)
+        .span 1940 9 1940 20
+        eval index += 1
+    .endloop
+    .span 1942 5 1942 66
+    ret NativeEnumVariant { name: name_text, fields: fields }
+.endfn
+
+.fn split_enum_field_entries(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1945 29 1945 43
+    .param text -> string
+    .span 1946 5 1946 38
+    eval let mut entries -> string[] = []
+    .span 1947 5 1947 36
+    eval let mut current -> string = ""
+    .span 1948 5 1948 33
+    eval let mut depth -> number = 0
+    .span 1949 5 1949 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1954 9 1954 30
+        eval let ch = text[index]
+        .if ch == "{" || ch == "[" || ch == "("
+            .span 1956 13 1956 24
+            eval depth += 1
+        .else
+            .if ch == "}" || ch == "]" || ch == ")"
+                .if depth > 0
+                    .span 1959 17 1959 28
+                    eval depth -= 1
+                .endif
+            .endif
+        .endif
+        .if ch == ";" && depth == 0
+            .span 1963 13 1963 55
+            eval entries = append_string(entries, current)
+            .span 1964 13 1964 26
+            eval current = ""
+        .else
+            .span 1966 13 1966 36
+            eval current = current + ch
+        .endif
+        .span 1968 9 1968 20
+        eval index += 1
+    .endloop
+    .if current.length > 0
+        .span 1971 9 1971 51
+        eval entries = append_string(entries, current)
+    .endif
+    .span 1973 5 1973 20
+    ret entries
+.endfn
+
+.fn parse_enum_variant_field(text -> string) -> NativeEnumVariantField?
+.meta return NativeEnumVariantField?
+.meta effects none
+    .span 1976 29 1976 43
+    .param text -> string
+    .span 1977 5 1977 39
+    eval let mut trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 1979 9 1979 21
+        ret null
+    .endif
+    .span 1981 5 1981 43
+    eval let mut is_mutable -> boolean = false
+    .if starts_with(trimmed, "mut ")
+        .span 1983 9 1983 27
+        eval is_mutable = true
+        .span 1984 9 1984 60
+        eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
+    .endif
+    .span 1986 5 1986 47
+    eval let arrow_index = index_of(trimmed, "->")
+    .if arrow_index < 0
+        .span 1988 9 1988 21
+        ret null
+    .endif
+    .span 1990 5 1990 62
+    eval let name = trim_text(substring(trimmed, 0, arrow_index))
+    .if name.length == 0
+        .span 1992 9 1992 21
+        ret null
+    .endif
+    .span 1994 5 1994 84
+    eval let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length))
+    .span 1995 5 1995 99
+    ret NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable }
+.endfn
+
+.fn text_char_at(value -> string, index -> number) -> string
+.meta return string
+.meta effects none
+    .span 1998 17 1998 32
+    .param value -> string
+    .span 1998 34 1998 49
+    .param index -> number
+    .if index < 0
+        .span 2000 9 2000 19
+        ret ""
+    .endif
+    .if index >= value.length
+        .span 2003 9 2003 19
+        ret ""
+    .endif
+    .span 2005 5 2005 47
+    ret substring(value, index, index + 1)
+.endfn
+
+.fn trim_trailing_delimiters(text -> string) -> string
+.meta return string
+.meta effects none
+    .span 2008 29 2008 43
+    .param text -> string
+    .span 2009 5 2009 41
+    eval let mut end -> number = text.length
+    .loop
+        .if end <= 0
+            break
+        .endif
+        .span 2014 9 2014 46
+        eval let ch = text_char_at(text, end - 1)
+        .if ch == "," || ch == ";"
+            .span 2016 13 2016 22
+            eval end -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .if end == text.length
+        .span 2022 9 2022 21
+        ret text
+    .endif
+    .span 2024 5 2024 36
+    ret substring(text, 0, end)
+.endfn
+
+.fn maybe_trim_trailing(value -> string?) -> string?
+.meta return string?
+.meta effects none
+    .span 2027 24 2027 40
+    .param value -> string?
+    .if value == null
+        .span 2029 9 2029 21
+        ret null
+    .endif
+    .span 2031 5 2031 51
+    eval let trimmed = trim_trailing_delimiters(value)
+    .span 2032 5 2032 20
+    ret trimmed
+.endfn
+
+.fn parse_struct_field_line(text -> string) -> NativeStructField?
+.meta return NativeStructField?
+.meta effects none
+    .span 2035 28 2035 42
+    .param text -> string
+    .span 2036 5 2036 39
+    eval let mut trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 2038 9 2038 21
+        ret null
+    .endif
+    .span 2040 5 2040 43
+    eval let mut is_mutable -> boolean = false
+    .if starts_with(trimmed, "mut ")
+        .span 2042 9 2042 27
+        eval is_mutable = true
+        .span 2043 9 2043 60
+        eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
+    .endif
+    .span 2045 5 2045 47
+    eval let arrow_index = index_of(trimmed, "->")
+    .if arrow_index < 0
+        .span 2047 9 2047 21
+        ret null
+    .endif
+    .span 2049 5 2049 62
+    eval let name = trim_text(substring(trimmed, 0, arrow_index))
+    .if name.length == 0
+        .span 2051 9 2051 21
+        ret null
+    .endif
+    .span 2053 5 2053 84
+    eval let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length))
+    .span 2054 5 2054 94
+    ret NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable }
+.endfn
+
+.fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse
+.meta return StructLayoutHeaderParse
+.meta effects none
+    .span 2057 31 2057 45
+    .param text -> string
+    .span 2058 5 2058 52
+    eval let tokens = split_whitespace(trim_text(text))
+    .span 2059 5 2059 42
+    eval let mut diagnostics -> string[] = []
+    .if tokens.length == 0
+        .span 2061 9 2061 90
+        eval diagnostics = append_string(diagnostics, "struct layout header missing entries")
+        .span 2062 9 2062 114
+        ret StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics }
+    .endif
+    .span 2064 5 2064 43
+    eval let mut name_found -> boolean = false
+    .span 2065 5 2065 43
+    eval let mut size_found -> boolean = false
+    .span 2066 5 2066 44
+    eval let mut align_found -> boolean = false
+    .span 2067 5 2067 39
+    eval let mut name_value -> string = ""
+    .span 2068 5 2068 38
+    eval let mut size_value -> number = 0
+    .span 2069 5 2069 39
+    eval let mut align_value -> number = 0
+    .span 2070 5 2070 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 2075 9 2075 35
+        eval let token = tokens[index]
+        .if starts_with(token, "name=")
+            .span 2077 13 2077 60
+            eval name_value = substring(token, 5, token.length)
+            .span 2078 13 2078 31
+            eval name_found = true
+        .else
+            .if starts_with(token, "size=")
+                .span 2080 13 2080 64
+                eval let value_text = substring(token, 5, token.length)
+                .span 2081 13 2081 59
+                eval let parsed = parse_decimal_number(value_text)
+                .if parsed.success
+                    .span 2083 17 2083 35
+                    eval size_found = true
+                    .span 2084 17 2084 43
+                    eval size_value = parsed.value
+                .else
+                    .span 2086 17 2086 120
+                    eval diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`")
+                .endif
+            .else
+                .if starts_with(token, "align=")
+                    .span 2089 13 2089 64
+                    eval let value_text = substring(token, 6, token.length)
+                    .span 2090 13 2090 59
+                    eval let parsed = parse_decimal_number(value_text)
+                    .if parsed.success
+                        .span 2092 17 2092 36
+                        eval align_found = true
+                        .span 2093 17 2093 44
+                        eval align_value = parsed.value
+                    .else
+                        .span 2095 17 2095 121
+                        eval diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`")
+                    .endif
+                .else
+                    .span 2098 13 2098 113
+                    eval diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`")
+                .endif
+            .endif
+        .endif
+        .span 2100 9 2100 20
+        eval index += 1
+    .endloop
+    .if !size_found
+        .span 2103 9 2103 93
+        eval diagnostics = append_string(diagnostics, "struct layout header missing size entry")
+    .endif
+    .if !align_found
+        .span 2106 9 2106 94
+        eval diagnostics = append_string(diagnostics, "struct layout header missing align entry")
+    .endif
+    .span 2108 5 2108 72
+    eval let success = size_found && align_found && diagnostics.length == 0
+    .span 2109 5 2109 139
+    ret StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics }
+.endfn
+
+.fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse
+.meta return StructLayoutFieldParse
+.meta effects none
+    .span 2112 30 2112 44
+    .param text -> string
+    .span 2112 46 2112 67
+    .param struct_name -> string
+    .span 2113 5 2113 35
+    eval let trimmed = trim_text(text)
+    .span 2114 5 2114 42
+    eval let mut diagnostics -> string[] = []
+    .span 2115 5 2115 113
+    eval let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 }
+    .if trimmed.length == 0
+        .span 2117 9 2117 109
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing content")
+        .span 2118 9 2118 106
+        ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2120 5 2120 44
+    eval let tokens = split_whitespace(trimmed)
+    .if tokens.length == 0
+        .span 2122 9 2122 109
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing entries")
+        .span 2123 9 2123 106
+        ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2125 5 2125 32
+    eval let field_name = tokens[0]
+    .if field_name.length == 0
+        .span 2127 9 2127 106
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing name")
+        .span 2128 9 2128 106
+        ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2130 5 2130 38
+    eval let mut type_text -> string = ""
+    .span 2131 5 2131 45
+    eval let mut offset_found -> boolean = false
+    .span 2132 5 2132 43
+    eval let mut size_found -> boolean = false
+    .span 2133 5 2133 44
+    eval let mut align_found -> boolean = false
+    .span 2134 5 2134 40
+    eval let mut offset_value -> number = 0
+    .span 2135 5 2135 38
+    eval let mut size_value -> number = 0
+    .span 2136 5 2136 39
+    eval let mut align_value -> number = 0
+    .span 2137 5 2137 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 2142 9 2142 35
+        eval let token = tokens[index]
+        .if starts_with(token, "type=")
+            .span 2144 13 2144 59
+            eval type_text = substring(token, 5, token.length)
+        .else
+            .if starts_with(token, "offset=")
+                .span 2146 13 2146 64
+                eval let value_text = substring(token, 7, token.length)
+                .span 2147 13 2147 59
+                eval let parsed = parse_decimal_number(value_text)
+                .if parsed.success
+                    .span 2149 17 2149 37
+                    eval offset_found = true
+                    .span 2150 17 2150 45
+                    eval offset_value = parsed.value
+                .else
+                    .span 2152 17 2152 162
+                    eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`")
+                .endif
+            .else
+                .if starts_with(token, "size=")
+                    .span 2155 13 2155 64
+                    eval let value_text = substring(token, 5, token.length)
+                    .span 2156 13 2156 59
+                    eval let parsed = parse_decimal_number(value_text)
+                    .if parsed.success
+                        .span 2158 17 2158 35
+                        eval size_found = true
+                        .span 2159 17 2159 43
+                        eval size_value = parsed.value
+                    .else
+                        .span 2161 17 2161 160
+                        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`")
+                    .endif
+                .else
+                    .if starts_with(token, "align=")
+                        .span 2164 13 2164 64
+                        eval let value_text = substring(token, 6, token.length)
+                        .span 2165 13 2165 59
+                        eval let parsed = parse_decimal_number(value_text)
+                        .if parsed.success
+                            .span 2167 17 2167 36
+                            eval align_found = true
+                            .span 2168 17 2168 44
+                            eval align_value = parsed.value
+                        .else
+                            .span 2170 17 2170 161
+                            eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`")
+                        .endif
+                    .else
+                        .span 2173 13 2173 153
+                        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`")
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 2175 9 2175 20
+        eval index += 1
+    .endloop
+    .if type_text.length == 0
+        .span 2178 9 2178 133
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing type entry")
+    .endif
+    .if !offset_found
+        .span 2181 9 2181 135
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing offset entry")
+    .endif
+    .if !size_found
+        .span 2184 9 2184 133
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing size entry")
+    .endif
+    .if !align_found
+        .span 2187 9 2187 134
+        eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing align entry")
+    .endif
+    .span 2189 5 2189 112
+    eval let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0
+    .span 2190 5 2190 150
+    eval let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value }
+    .span 2191 5 2191 96
+    ret StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics }
+.endfn
+
+.fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse
+.meta return EnumLayoutHeaderParse
+.meta effects none
+    .span 2194 29 2194 43
+    .param text -> string
+    .span 2195 5 2195 52
+    eval let tokens = split_whitespace(trim_text(text))
+    .span 2196 5 2196 42
+    eval let mut diagnostics -> string[] = []
+    .if tokens.length == 0
+        .span 2198 9 2198 88
+        eval diagnostics = append_string(diagnostics, "enum layout header missing entries")
+        .span 2199 9 2199 153
+        ret EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics }
+    .endif
+    .span 2201 5 2201 43
+    eval let mut name_found -> boolean = false
+    .span 2202 5 2202 43
+    eval let mut size_found -> boolean = false
+    .span 2203 5 2203 44
+    eval let mut align_found -> boolean = false
+    .span 2204 5 2204 39
+    eval let mut name_value -> string = ""
+    .span 2205 5 2205 37
+    eval let mut tag_type -> string = ""
+    .span 2206 5 2206 47
+    eval let mut tag_size_found -> boolean = false
+    .span 2207 5 2207 48
+    eval let mut tag_align_found -> boolean = false
+    .span 2208 5 2208 38
+    eval let mut size_value -> number = 0
+    .span 2209 5 2209 39
+    eval let mut align_value -> number = 0
+    .span 2210 5 2210 42
+    eval let mut tag_size_value -> number = 0
+    .span 2211 5 2211 43
+    eval let mut tag_align_value -> number = 0
+    .span 2212 5 2212 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 2217 9 2217 35
+        eval let token = tokens[index]
+        .if starts_with(token, "name=")
+            .span 2219 13 2219 60
+            eval name_value = substring(token, 5, token.length)
+            .span 2220 13 2220 31
+            eval name_found = true
+        .else
+            .if starts_with(token, "size=")
+                .span 2222 13 2222 64
+                eval let value_text = substring(token, 5, token.length)
+                .span 2223 13 2223 59
+                eval let parsed = parse_decimal_number(value_text)
+                .if parsed.success
+                    .span 2225 17 2225 35
+                    eval size_found = true
+                    .span 2226 17 2226 43
+                    eval size_value = parsed.value
+                .else
+                    .span 2228 17 2228 118
+                    eval diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`")
+                .endif
+            .else
+                .if starts_with(token, "align=")
+                    .span 2231 13 2231 64
+                    eval let value_text = substring(token, 6, token.length)
+                    .span 2232 13 2232 59
+                    eval let parsed = parse_decimal_number(value_text)
+                    .if parsed.success
+                        .span 2234 17 2234 36
+                        eval align_found = true
+                        .span 2235 17 2235 44
+                        eval align_value = parsed.value
+                    .else
+                        .span 2237 17 2237 119
+                        eval diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`")
+                    .endif
+                .else
+                    .if starts_with(token, "tag_type=")
+                        .span 2240 13 2240 58
+                        eval tag_type = substring(token, 9, token.length)
+                    .else
+                        .if starts_with(token, "tag_size=")
+                            .span 2242 13 2242 64
+                            eval let value_text = substring(token, 9, token.length)
+                            .span 2243 13 2243 59
+                            eval let parsed = parse_decimal_number(value_text)
+                            .if parsed.success
+                                .span 2245 17 2245 39
+                                eval tag_size_found = true
+                                .span 2246 17 2246 47
+                                eval tag_size_value = parsed.value
+                            .else
+                                .span 2248 17 2248 122
+                                eval diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`")
+                            .endif
+                        .else
+                            .if starts_with(token, "tag_align=")
+                                .span 2251 13 2251 65
+                                eval let value_text = substring(token, 10, token.length)
+                                .span 2252 13 2252 59
+                                eval let parsed = parse_decimal_number(value_text)
+                                .if parsed.success
+                                    .span 2254 17 2254 40
+                                    eval tag_align_found = true
+                                    .span 2255 17 2255 48
+                                    eval tag_align_value = parsed.value
+                                .else
+                                    .span 2257 17 2257 123
+                                    eval diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`")
+                                .endif
+                            .else
+                                .span 2260 13 2260 111
+                                eval diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`")
+                            .endif
+                        .endif
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 2262 9 2262 20
+        eval index += 1
+    .endloop
+    .if !size_found
+        .span 2265 9 2265 91
+        eval diagnostics = append_string(diagnostics, "enum layout header missing size entry")
+    .endif
+    .if !align_found
+        .span 2268 9 2268 92
+        eval diagnostics = append_string(diagnostics, "enum layout header missing align entry")
+    .endif
+    .if tag_type.length == 0
+        .span 2271 9 2271 95
+        eval diagnostics = append_string(diagnostics, "enum layout header missing tag_type entry")
+    .endif
+    .if !tag_size_found
+        .span 2274 9 2274 95
+        eval diagnostics = append_string(diagnostics, "enum layout header missing tag_size entry")
+    .endif
+    .if !tag_align_found
+        .span 2277 9 2277 96
+        eval diagnostics = append_string(diagnostics, "enum layout header missing tag_align entry")
+    .endif
+    .span 2279 5 2279 132
+    eval let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0
+    .span 2280 5 2289 7
+    ret EnumLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, tag_type: tag_type, tag_size: tag_size_value, tag_align: tag_align_value, diagnostics: diagnostics }
+.endfn
+
+.fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutVariantParse
+.meta return EnumLayoutVariantParse
+.meta effects none
+    .span 2292 30 2292 44
+    .param text -> string
+    .span 2292 46 2292 65
+    .param enum_name -> string
+    .span 2293 5 2293 35
+    eval let trimmed = trim_text(text)
+    .span 2294 5 2294 42
+    eval let mut diagnostics -> string[] = []
+    .span 2295 5 2295 114
+    eval let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] }
+    .if trimmed.length == 0
+        .span 2297 9 2297 107
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing content")
+        .span 2298 9 2298 110
+        ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
+    .endif
+    .span 2300 5 2300 44
+    eval let tokens = split_whitespace(trimmed)
+    .if tokens.length == 0
+        .span 2302 9 2302 107
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing entries")
+        .span 2303 9 2303 110
+        ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
+    .endif
+    .span 2305 5 2305 34
+    eval let variant_name = tokens[0]
+    .if variant_name.length == 0
+        .span 2307 9 2307 104
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing name")
+        .span 2308 9 2308 110
+        ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
+    .endif
+    .span 2310 5 2310 42
+    eval let mut tag_found -> boolean = false
+    .span 2311 5 2311 45
+    eval let mut offset_found -> boolean = false
+    .span 2312 5 2312 43
+    eval let mut size_found -> boolean = false
+    .span 2313 5 2313 44
+    eval let mut align_found -> boolean = false
+    .span 2314 5 2314 37
+    eval let mut tag_value -> number = 0
+    .span 2315 5 2315 40
+    eval let mut offset_value -> number = 0
+    .span 2316 5 2316 38
+    eval let mut size_value -> number = 0
+    .span 2317 5 2317 39
+    eval let mut align_value -> number = 0
+    .span 2318 5 2318 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 2323 9 2323 35
+        eval let token = tokens[index]
+        .if starts_with(token, "tag=")
+            .span 2325 13 2325 64
+            eval let value_text = substring(token, 4, token.length)
+            .span 2326 13 2326 59
+            eval let parsed = parse_decimal_number(value_text)
+            .if parsed.success
+                .span 2328 17 2328 34
+                eval tag_found = true
+                .span 2329 17 2329 42
+                eval tag_value = parsed.value
+            .else
+                .span 2331 17 2331 159
+                eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`")
+            .endif
+        .else
+            .if starts_with(token, "offset=")
+                .span 2334 13 2334 64
+                eval let value_text = substring(token, 7, token.length)
+                .span 2335 13 2335 59
+                eval let parsed = parse_decimal_number(value_text)
+                .if parsed.success
+                    .span 2337 17 2337 37
+                    eval offset_found = true
+                    .span 2338 17 2338 45
+                    eval offset_value = parsed.value
+                .else
+                    .span 2340 17 2340 162
+                    eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`")
+                .endif
+            .else
+                .if starts_with(token, "size=")
+                    .span 2343 13 2343 64
+                    eval let value_text = substring(token, 5, token.length)
+                    .span 2344 13 2344 59
+                    eval let parsed = parse_decimal_number(value_text)
+                    .if parsed.success
+                        .span 2346 17 2346 35
+                        eval size_found = true
+                        .span 2347 17 2347 43
+                        eval size_value = parsed.value
+                    .else
+                        .span 2349 17 2349 160
+                        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`")
+                    .endif
+                .else
+                    .if starts_with(token, "align=")
+                        .span 2352 13 2352 64
+                        eval let value_text = substring(token, 6, token.length)
+                        .span 2353 13 2353 59
+                        eval let parsed = parse_decimal_number(value_text)
+                        .if parsed.success
+                            .span 2355 17 2355 36
+                            eval align_found = true
+                            .span 2356 17 2356 44
+                            eval align_value = parsed.value
+                        .else
+                            .span 2358 17 2358 161
+                            eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`")
+                        .endif
+                    .else
+                        .span 2361 13 2361 153
+                        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`")
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 2363 9 2363 20
+        eval index += 1
+    .endloop
+    .if !tag_found
+        .span 2366 9 2366 132
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry")
+    .endif
+    .if !offset_found
+        .span 2369 9 2369 135
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry")
+    .endif
+    .if !size_found
+        .span 2372 9 2372 133
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing size entry")
+    .endif
+    .if !align_found
+        .span 2375 9 2375 134
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing align entry")
+    .endif
+    .span 2377 5 2377 101
+    eval let success = tag_found && offset_found && size_found && align_found && diagnostics.length == 0
+    .span 2378 5 2378 154
+    eval let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] }
+    .span 2379 5 2379 100
+    ret EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics }
+.endfn
+
+.fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutPayloadParse
+.meta return EnumLayoutPayloadParse
+.meta effects none
+    .span 2382 30 2382 44
+    .param text -> string
+    .span 2382 46 2382 65
+    .param enum_name -> string
+    .span 2383 5 2383 35
+    eval let trimmed = trim_text(text)
+    .span 2384 5 2384 42
+    eval let mut diagnostics -> string[] = []
+    .span 2385 5 2385 113
+    eval let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 }
+    .if trimmed.length == 0
+        .span 2387 9 2387 107
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing content")
+        .span 2388 9 2388 124
+        ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2390 5 2390 44
+    eval let tokens = split_whitespace(trimmed)
+    .if tokens.length == 0
+        .span 2392 9 2392 107
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing entries")
+        .span 2393 9 2393 124
+        ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2395 5 2395 32
+    eval let identifier = tokens[0]
+    .span 2396 5 2396 47
+    eval let dot_index = index_of(identifier, ".")
+    .if dot_index <= 0 || dot_index + 1 >= identifier.length
+        .span 2398 9 2398 131
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload identifier `" + identifier + "` invalid")
+        .span 2399 9 2399 124
+        ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
+    .endif
+    .span 2401 5 2401 60
+    eval let variant_name = substring(identifier, 0, dot_index)
+    .span 2402 5 2402 78
+    eval let field_name = substring(identifier, dot_index + 1, identifier.length)
+    .span 2403 5 2403 38
+    eval let mut type_text -> string = ""
+    .span 2404 5 2404 45
+    eval let mut offset_found -> boolean = false
+    .span 2405 5 2405 43
+    eval let mut size_found -> boolean = false
+    .span 2406 5 2406 44
+    eval let mut align_found -> boolean = false
+    .span 2407 5 2407 40
+    eval let mut offset_value -> number = 0
+    .span 2408 5 2408 38
+    eval let mut size_value -> number = 0
+    .span 2409 5 2409 39
+    eval let mut align_value -> number = 0
+    .span 2410 5 2410 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 2415 9 2415 35
+        eval let token = tokens[index]
+        .if starts_with(token, "type=")
+            .span 2417 13 2417 59
+            eval type_text = substring(token, 5, token.length)
+        .else
+            .if starts_with(token, "offset=")
+                .span 2419 13 2419 64
+                eval let value_text = substring(token, 7, token.length)
+                .span 2420 13 2420 59
+                eval let parsed = parse_decimal_number(value_text)
+                .if parsed.success
+                    .span 2422 17 2422 37
+                    eval offset_found = true
+                    .span 2423 17 2423 45
+                    eval offset_value = parsed.value
+                .else
+                    .span 2425 17 2425 160
+                    eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`")
+                .endif
+            .else
+                .if starts_with(token, "size=")
+                    .span 2428 13 2428 64
+                    eval let value_text = substring(token, 5, token.length)
+                    .span 2429 13 2429 59
+                    eval let parsed = parse_decimal_number(value_text)
+                    .if parsed.success
+                        .span 2431 17 2431 35
+                        eval size_found = true
+                        .span 2432 17 2432 43
+                        eval size_value = parsed.value
+                    .else
+                        .span 2434 17 2434 158
+                        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`")
+                    .endif
+                .else
+                    .if starts_with(token, "align=")
+                        .span 2437 13 2437 64
+                        eval let value_text = substring(token, 6, token.length)
+                        .span 2438 13 2438 59
+                        eval let parsed = parse_decimal_number(value_text)
+                        .if parsed.success
+                            .span 2440 17 2440 36
+                            eval align_found = true
+                            .span 2441 17 2441 44
+                            eval align_value = parsed.value
+                        .else
+                            .span 2443 17 2443 159
+                            eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`")
+                        .endif
+                    .else
+                        .span 2446 13 2446 151
+                        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`")
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 2448 9 2448 20
+        eval index += 1
+    .endloop
+    .if type_text.length == 0
+        .span 2451 9 2451 131
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing type entry")
+    .endif
+    .if !offset_found
+        .span 2454 9 2454 133
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing offset entry")
+    .endif
+    .if !size_found
+        .span 2457 9 2457 131
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing size entry")
+    .endif
+    .if !align_found
+        .span 2460 9 2460 132
+        eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing align entry")
+    .endif
+    .span 2462 5 2462 112
+    eval let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0
+    .span 2463 5 2463 150
+    eval let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value }
+    .span 2464 5 2464 124
+    ret EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics }
+.endfn
+
+.fn parse_let_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> NativeInstruction
+.meta return NativeInstruction
+.meta effects none
+    .span 2467 26 2467 40
+    .param line -> string
+    .span 2467 42 2467 67
+    .param span -> NativeSourceSpan?
+    .span 2467 69 2467 100
+    .param value_span -> NativeSourceSpan?
+    .span 2468 5 2468 55
+    eval let body = trim_text(strip_prefix(line, ".let "))
+    .span 2469 5 2469 43
+    eval let mut is_mutable -> boolean = false
+    .span 2470 5 2470 40
+    eval let mut remainder -> string = body
+    .if starts_with(remainder, "mut ")
+        .span 2472 9 2472 27
+        eval is_mutable = true
+        .span 2473 9 2473 64
+        eval remainder = trim_text(strip_prefix(remainder, "mut "))
+    .endif
+    .span 2475 5 2475 54
+    eval let parsed = parse_binding_components(remainder)
+    .span 2476 5 2483 7
+    ret NativeInstruction.Let { name: parsed.name, mutable: is_mutable, type_annotation: parsed.type_annotation, value: parsed.value, span: span, value_span: value_span }
+.endfn
+
+.struct BindingComponents
+    .layout struct name=BindingComponents size=24 align=8
+    .layout field name type=string offset=0 size=8 align=8
+    .layout field type_annotation type=string offset=8 size=8 align=8
+    .layout field value type=string? offset=16 size=8 align=8
+    .field name -> string
+    .field type_annotation -> string
+    .field value -> string?
+.endstruct
+
+.fn parse_binding_components(text -> string) -> BindingComponents
+.meta return BindingComponents
+.meta effects none
+    .span 2492 29 2492 43
+    .param text -> string
+    .span 2493 5 2493 33
+    eval let mut name -> string = ""
+    .span 2494 5 2494 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 2499 9 2499 30
+        eval let ch = text[index]
+        .if ch == " " || ch == ":" || ch == "="
+            break
+        .endif
+        .span 2503 9 2503 26
+        eval name = name + ch
+        .span 2504 9 2504 20
+        eval index += 1
+    .endloop
+    .span 2506 5 2506 28
+    eval name = trim_text(name)
+    .span 2507 5 2507 44
+    eval let mut type_annotation -> string = ""
+    .span 2508 5 2508 37
+    eval let mut value -> string? = null
+    .span 2509 5 2509 82
+    eval let mut remainder -> string = trim_text(substring(text, index, text.length))
+    .if remainder.length > 0
+        .if starts_with(remainder, "->")
+            .span 2512 13 2512 66
+            eval remainder = trim_text(strip_prefix(remainder, "->"))
+            .span 2513 13 2513 57
+            eval let assign_index = index_of(remainder, "=")
+            .if assign_index >= 0
+                .span 2515 17 2515 84
+                eval type_annotation = trim_text(substring(remainder, 0, assign_index))
+                .span 2516 17 2516 102
+                eval let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
+                .if value_text.length > 0
+                    .span 2518 21 2518 40
+                    eval value = value_text
+                .endif
+            .else
+                .span 2521 17 2521 56
+                eval type_annotation = trim_text(remainder)
+            .endif
+        .else
+            .if starts_with(remainder, ":")
+                .span 2524 13 2524 65
+                eval remainder = trim_text(strip_prefix(remainder, ":"))
+                .span 2525 13 2525 57
+                eval let assign_index = index_of(remainder, "=")
+                .if assign_index >= 0
+                    .span 2527 17 2527 84
+                    eval type_annotation = trim_text(substring(remainder, 0, assign_index))
+                    .span 2528 17 2528 102
+                    eval let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
+                    .if value_text.length > 0
+                        .span 2530 21 2530 40
+                        eval value = value_text
+                    .endif
+                .else
+                    .span 2533 17 2533 56
+                    eval type_annotation = trim_text(remainder)
+                .endif
+            .else
+                .if starts_with(remainder, "=")
+                    .span 2536 13 2536 70
+                    eval let value_text = trim_text(strip_prefix(remainder, "="))
+                    .if value_text.length > 0
+                        .span 2538 17 2538 36
+                        eval value = value_text
+                    .endif
+                .else
+                    .span 2542 13 2542 31
+                    eval value = remainder
+                .endif
+            .endif
+        .endif
+    .endif
+    .span 2545 5 2545 93
+    ret BindingComponents { name: name, type_annotation: type_annotation, value: value }
+.endfn
+
+.fn parse_function_name(header -> string) -> string
+.meta return string
+.meta effects none
+    .span 2548 24 2548 40
+    .param header -> string
+    .span 2549 5 2549 41
+    eval let mut trimmed = trim_text(header)
+    .if starts_with(trimmed, "async ")
+        .span 2551 9 2551 62
+        eval trimmed = trim_text(strip_prefix(trimmed, "async "))
+    .endif
+    .span 2553 5 2553 46
+    eval let paren_index = index_of(trimmed, "(")
+    .span 2554 5 2554 38
+    eval let mut name -> string = trimmed
+    .if paren_index >= 0
+        .span 2556 9 2556 62
+        eval name = trim_text(substring(trimmed, 0, paren_index))
+    .endif
+    .span 2558 5 2558 52
+    eval let separator_index = last_index_of(name, ".")
+    .if separator_index >= 0
+        .span 2560 9 2560 77
+        eval name = trim_text(substring(name, separator_index + 1, name.length))
+    .endif
+    .span 2562 5 2562 33
+    ret strip_generics(name)
+.endfn
+
+.fn parse_parameter_entry(body -> string, span -> NativeSourceSpan?) -> NativeParameter?
+.meta return NativeParameter?
+.meta effects none
+    .span 2565 26 2565 40
+    .param body -> string
+    .span 2565 42 2565 67
+    .param span -> NativeSourceSpan?
+    .span 2566 5 2566 39
+    eval let mut trimmed = trim_text(body)
+    .if trimmed.length == 0
+        .span 2568 9 2568 21
+        ret null
+    .endif
+    .span 2570 5 2570 43
+    eval let mut is_mutable -> boolean = false
+    .if starts_with(trimmed, "mut ")
+        .span 2572 9 2572 27
+        eval is_mutable = true
+        .span 2573 9 2573 60
+        eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
+    .endif
+    .span 2575 5 2575 33
+    eval let mut name -> string = ""
+    .span 2576 5 2576 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= trimmed.length
+            break
+        .endif
+        .span 2581 9 2581 33
+        eval let ch = trimmed[index]
+        .if ch == " " || ch == "-" || ch == "="
+            break
+        .endif
+        .span 2585 9 2585 26
+        eval name = name + ch
+        .span 2586 9 2586 20
+        eval index += 1
+    .endloop
+    .span 2588 5 2588 28
+    eval name = trim_text(name)
+    .if name.length == 0
+        .span 2590 9 2590 21
+        ret null
+    .endif
+    .span 2592 5 2592 44
+    eval let mut type_annotation -> string = ""
+    .span 2593 5 2593 45
+    eval let mut default_value -> string? = null
+    .span 2594 5 2594 78
+    eval let mut remainder = trim_text(substring(trimmed, index, trimmed.length))
+    .if remainder.length > 0
+        .if starts_with(remainder, "->")
+            .span 2597 13 2597 66
+            eval remainder = trim_text(strip_prefix(remainder, "->"))
+            .span 2598 13 2598 57
+            eval let assign_index = index_of(remainder, "=")
+            .if assign_index >= 0
+                .span 2600 17 2600 84
+                eval type_annotation = trim_text(substring(remainder, 0, assign_index))
+                .span 2601 17 2601 104
+                eval let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
+                .if default_text.length > 0
+                    .span 2603 21 2603 50
+                    eval default_value = default_text
+                .endif
+            .else
+                .span 2606 17 2606 56
+                eval type_annotation = trim_text(remainder)
+            .endif
+        .else
+            .if starts_with(remainder, "=")
+                .span 2609 13 2609 72
+                eval let default_text = trim_text(strip_prefix(remainder, "="))
+                .if default_text.length > 0
+                    .span 2611 17 2611 46
+                    eval default_value = default_text
+                .endif
+            .endif
+        .endif
+    .endif
+    .span 2615 5 2621 7
+    ret NativeParameter { name: name, type_annotation: type_annotation, mutable: is_mutable, default_value: default_value, span: span }
+.endfn
+
+.fn line_looks_like_parameter_entry(text -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 2624 36 2624 50
+    .param text -> string
+    .span 2625 5 2625 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 2627 9 2627 22
+        ret false
+    .endif
+    .if starts_with(trimmed, ".")
+        .span 2630 9 2630 22
+        ret false
+    .endif
+    .if starts_with(trimmed, ";")
+        .span 2633 9 2633 22
+        ret false
+    .endif
+    .span 2635 5 2635 47
+    eval let arrow_index = index_of(trimmed, "->")
+    .if arrow_index >= 0
+        .span 2637 9 2637 70
+        eval let mut head = trim_text(substring(trimmed, 0, arrow_index))
+        .if head.length == 0
+            .span 2639 13 2639 26
+            ret false
+        .endif
+        .if starts_with(head, "mut ")
+            .span 2642 13 2642 58
+            eval head = trim_text(strip_prefix(head, "mut "))
+        .endif
+        .if head.length == 0
+            .span 2645 13 2645 26
+            ret false
+        .endif
+        .if index_of(head, " ") >= 0
+            .span 2648 13 2648 26
+            ret false
+        .endif
+        .if index_of(head, "\t") >= 0
+            .span 2651 13 2651 26
+            ret false
+        .endif
+        .span 2653 9 2653 21
+        ret true
+    .endif
+    .span 2655 5 2655 47
+    eval let assign_index = index_of(trimmed, "=")
+    .if assign_index >= 0
+        .span 2657 9 2657 71
+        eval let mut head = trim_text(substring(trimmed, 0, assign_index))
+        .if head.length == 0
+            .span 2659 13 2659 26
+            ret false
+        .endif
+        .if starts_with(head, "mut ")
+            .span 2662 13 2662 58
+            eval head = trim_text(strip_prefix(head, "mut "))
+        .endif
+        .if head.length == 0
+            .span 2665 13 2665 26
+            ret false
+        .endif
+        .if index_of(head, " ") >= 0
+            .span 2668 13 2668 26
+            ret false
+        .endif
+        .if index_of(head, "\t") >= 0
+            .span 2671 13 2671 26
+            ret false
+        .endif
+        .span 2673 9 2673 21
+        ret true
+    .endif
+    .span 2675 5 2675 18
+    ret false
+.endfn
+
+.fn split_parameter_entries(body -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2678 28 2678 42
+    .param body -> string
+    .span 2679 5 2679 38
+    eval let mut entries -> string[] = []
+    .span 2680 5 2680 36
+    eval let mut current -> string = ""
+    .span 2681 5 2681 33
+    eval let mut index -> number = 0
+    .span 2682 5 2682 33
+    eval let mut depth -> number = 0
+    .span 2683 5 2683 34
+    eval let mut quote -> string = ""
+    .loop
+        .if index >= body.length
+            break
+        .endif
+        .span 2689 9 2689 30
+        eval let ch = body[index]
+        .if quote.length > 0
+            .span 2692 13 2692 36
+            eval current = current + ch
+            .if ch == "\\"
+                .if index + 1 < body.length
+                    .span 2695 21 2695 57
+                    eval current = current + body[index + 1]
+                    .span 2696 21 2696 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+            .if ch == quote
+                .span 2701 17 2701 28
+                eval quote = ""
+            .endif
+            .span 2703 13 2703 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\"" || ch == "'"
+            .span 2708 13 2708 24
+            eval quote = ch
+            .span 2709 13 2709 36
+            eval current = current + ch
+            .span 2710 13 2710 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "(" || ch == "[" || ch == "{"
+            .span 2715 13 2715 24
+            eval depth += 1
+            .span 2716 13 2716 36
+            eval current = current + ch
+            .span 2717 13 2717 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ")" || ch == "]" || ch == "}"
+            .if depth > 0
+                .span 2723 17 2723 28
+                eval depth -= 1
+            .endif
+            .span 2725 13 2725 36
+            eval current = current + ch
+            .span 2726 13 2726 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ","
+            .if depth == 0
+                .span 2732 17 2732 50
+                eval let segment = trim_text(current)
+                .if segment.length > 0
+                    .span 2734 21 2734 63
+                    eval entries = append_string(entries, segment)
+                .endif
+                .span 2736 17 2736 30
+                eval current = ""
+                .span 2737 17 2737 28
+                eval index += 1
+                continue
+            .endif
+        .endif
+        .span 2742 9 2742 32
+        eval current = current + ch
+        .span 2743 9 2743 20
+        eval index += 1
+    .endloop
+    .span 2746 5 2746 38
+    eval let segment = trim_text(current)
+    .if segment.length > 0
+        .span 2748 9 2748 51
+        eval entries = append_string(entries, segment)
+    .endif
+    .span 2751 5 2751 20
+    ret entries
+.endfn
+
+.fn parse_effect_list(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2754 22 2754 36
+    .param text -> string
+    .span 2755 5 2755 35
+    eval let trimmed = trim_text(text)
+    .if trimmed == "none"
+        .span 2757 9 2757 19
+        ret []
+    .endif
+    .span 2759 5 2759 43
+    ret split_comma_separated(trimmed)
+.endfn
+
+.fn split_whitespace(value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2762 21 2762 36
+    .param value -> string
+    .span 2763 5 2763 36
+    eval let mut parts -> string[] = []
+    .if value.length == 0
+        .span 2765 9 2765 22
+        ret parts
+    .endif
+    .span 2767 5 2767 34
+    eval let mut start -> number = -1
+    .span 2768 5 2768 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 2773 9 2773 45
+        eval let ch = text_char_at(value, index)
+        .span 2774 9 2774 76
+        eval let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r"
+        .if is_space
+            .if start >= 0
+                .span 2777 17 2777 78
+                eval parts = append_string(parts, substring(value, start, index))
+                .span 2778 17 2778 28
+                eval start = -1
+            .endif
+        .else
+            .if start < 0
+                .span 2781 13 2781 27
+                eval start = index
+            .endif
+        .endif
+        .span 2783 9 2783 20
+        eval index += 1
+    .endloop
+    .if start >= 0
+        .span 2786 9 2786 77
+        eval parts = append_string(parts, substring(value, start, value.length))
+    .endif
+    .span 2788 5 2788 18
+    ret parts
+.endfn
+
+.fn parse_decimal_number(text -> string) -> NumberParseResult
+.meta return NumberParseResult
+.meta effects none
+    .span 2791 25 2791 39
+    .param text -> string
+    .span 2792 5 2792 35
+    eval let trimmed = trim_text(text)
+    .if trimmed.length == 0
+        .span 2794 9 2794 63
+        ret NumberParseResult { success: false, value: 0 }
+    .endif
+    .span 2796 5 2796 31
+    eval let zero = char_code("0")
+    .span 2797 5 2797 31
+    eval let nine = char_code("9")
+    .span 2798 5 2798 33
+    eval let mut index -> number = 0
+    .span 2799 5 2799 33
+    eval let mut value -> number = 0
+    .loop
+        .if index >= trimmed.length
+            break
+        .endif
+        .span 2804 9 2804 33
+        eval let ch = trimmed[index]
+        .span 2805 9 2805 34
+        eval let code = char_code(ch)
+        .if code < zero || code > nine
+            .span 2807 13 2807 67
+            ret NumberParseResult { success: false, value: 0 }
+        .endif
+        .span 2809 9 2809 33
+        eval let digit = code - zero
+        .span 2810 9 2810 36
+        eval value = value * 10 + digit
+        .span 2811 9 2811 20
+        eval index += 1
+    .endloop
+    .span 2813 5 2813 62
+    ret NumberParseResult { success: true, value: value }
+.endfn
+
+.fn split_lines(value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2816 16 2816 31
+    .param value -> string
+    .span 2817 5 2817 36
+    eval let mut lines -> string[] = []
+    .span 2818 5 2818 36
+    eval let mut current -> string = ""
+    .span 2819 5 2819 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 2824 9 2824 31
+        eval let ch = value[index]
+        .if ch == "\n"
+            .span 2826 13 2826 51
+            eval lines = append_string(lines, current)
+            .span 2827 13 2827 26
+            eval current = ""
+        .else
+            .span 2829 13 2829 36
+            eval current = current + ch
+        .endif
+        .span 2831 9 2831 20
+        eval index += 1
+    .endloop
+    .span 2833 5 2833 43
+    eval lines = append_string(lines, current)
+    .span 2834 5 2834 18
+    ret lines
+.endfn
+
+.fn split_comma_separated(value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2837 26 2837 41
+    .param value -> string
+    .span 2838 5 2838 38
+    eval let mut results -> string[] = []
+    .span 2839 5 2839 36
+    eval let mut current -> string = ""
+    .span 2840 5 2840 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 2845 9 2845 31
+        eval let ch = value[index]
+        .if ch == ","
+            .span 2847 13 2847 66
+            eval results = append_string(results, trim_text(current))
+            .span 2848 13 2848 26
+            eval current = ""
+        .else
+            .span 2850 13 2850 36
+            eval current = current + ch
+        .endif
+        .span 2852 9 2852 20
+        eval index += 1
+    .endloop
+    .if current.length > 0
+        .span 2855 9 2855 62
+        eval results = append_string(results, trim_text(current))
+    .endif
+    .span 2857 5 2857 39
+    eval let mut filtered -> string[] = []
+    .span 2858 5 2858 15
+    eval index = 0
+    .loop
+        .if index >= results.length
+            break
+        .endif
+        .span 2863 9 2863 36
+        eval let entry = results[index]
+        .if entry.length > 0
+            .span 2865 13 2865 55
+            eval filtered = append_string(filtered, entry)
+        .endif
+        .span 2867 9 2867 20
+        eval index += 1
+    .endloop
+    .span 2869 5 2869 21
+    ret filtered
+.endfn
+
+.fn strip_generics(name -> string) -> string
+.meta return string
+.meta effects none
+    .span 2872 19 2872 33
+    .param name -> string
+    .span 2873 5 2873 35
+    eval let mut result -> string = ""
+    .span 2874 5 2874 33
+    eval let mut depth -> number = 0
+    .span 2875 5 2875 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= name.length
+            break
+        .endif
+        .span 2880 9 2880 30
+        eval let ch = name[index]
+        .if ch == "<"
+            .span 2882 13 2882 24
+            eval depth += 1
+            .span 2883 13 2883 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == ">"
+            .if depth > 0
+                .span 2888 17 2888 28
+                eval depth -= 1
+            .endif
+            .span 2890 13 2890 24
+            eval index += 1
+            continue
+        .endif
+        .if depth == 0
+            .span 2894 13 2894 34
+            eval result = result + ch
+        .endif
+        .span 2896 9 2896 20
+        eval index += 1
+    .endloop
+    .span 2898 5 2898 30
+    ret trim_text(result)
+.endfn
+
+.fn trim_text(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 2901 14 2901 29
+    .param value -> string
+    .span 2902 5 2902 33
+    eval let mut start -> number = 0
+    .span 2903 5 2903 42
+    eval let mut end -> number = value.length
+    .loop
+        .if start >= end
+            break
+        .endif
+        .span 2908 9 2908 31
+        eval let ch = value[start]
+        .if is_trim_char(ch)
+            .span 2910 13 2910 24
+            eval start += 1
+            continue
+        .endif
+        break
+    .endloop
+    .loop
+        .if end <= start
+            break
+        .endif
+        .span 2919 9 2919 33
+        eval let ch = value[end - 1]
+        .if is_trim_char(ch)
+            .span 2921 13 2921 22
+            eval end -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .if start == 0 && end == value.length
+        .span 2927 9 2927 22
+        ret value
+    .endif
+    .span 2929 5 2929 41
+    ret substring(value, start, end)
+.endfn
+
+.fn parse_layout_manifest(text -> string) -> LayoutManifest
+.meta return LayoutManifest
+.meta effects none
+    .span 2932 26 2932 40
+    .param text -> string
+    .span 2933 5 2933 35
+    eval let lines = split_lines(text)
+    .span 2934 5 2934 42
+    eval let mut diagnostics -> string[] = []
+    .span 2935 5 2935 44
+    eval let mut structs -> NativeStruct[] = []
+    .span 2936 5 2936 40
+    eval let mut enums -> NativeEnum[] = []
+    .span 2937 5 2937 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= lines.length
+            break
+        .endif
+        .span 2943 9 2943 37
+        eval let raw_line = lines[index]
+        .span 2944 9 2944 40
+        eval let line = trim_text(raw_line)
+        .if line.length == 0
+            .span 2946 13 2946 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ";")
+            .span 2950 13 2950 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".manifest ")
+            .span 2954 13 2954 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".layout struct ")
+            .span 2960 13 2960 55
+            eval let body = strip_prefix(line, ".layout ")
+            .span 2961 13 2961 63
+            eval let struct_header = strip_prefix(body, "struct ")
+            .span 2962 13 2962 75
+            eval let header_result = parse_struct_layout_header(struct_header)
+            .span 2963 13 2963 73
+            eval diagnostics = diagnostics.concat(header_result.diagnostics)
+            .if header_result.success
+                .span 2966 17 2966 66
+                eval let mut fields -> NativeStructLayoutField[] = []
+                .span 2967 17 2967 54
+                eval let struct_name = header_result.name
+                .span 2970 17 2970 28
+                eval index += 1
+                .loop
+                    .if index >= lines.length
+                        break
+                    .endif
+                    .span 2975 21 2975 62
+                    eval let field_line = trim_text(lines[index])
+                    .if field_line.length == 0
+                        break
+                    .endif
+                    .if !starts_with(field_line, ".layout field ")
+                        break
+                    .endif
+                    .span 2986 21 2986 69
+                    eval let body = strip_prefix(field_line, ".layout ")
+                    .span 2987 21 2987 67
+                    eval let field_text = strip_prefix(body, "field ")
+                    .span 2988 21 2988 91
+                    eval let field_result = parse_struct_layout_field(field_text, struct_name)
+                    .span 2989 21 2989 80
+                    eval diagnostics = diagnostics.concat(field_result.diagnostics)
+                    .if field_result.success
+                        .span 2992 25 2992 89
+                        eval fields = append_struct_layout_field(fields, field_result.field)
+                    .endif
+                    .span 2994 21 2994 32
+                    eval index += 1
+                .endloop
+                .span 2998 17 3008 19
+                eval let struct_def = NativeStruct {
+                    name: struct_name,
+                    fields: [],
+                    methods: [],
+                    implements: [],
+                    layout: NativeStructLayout {
+                        size: header_result.size,
+                        align: header_result.align,
+                        fields: fields,
+                    },
+                }
+                .span 3009 17 3009 62
+                eval structs = append_struct(structs, struct_def)
+            .endif
+            .span 3011 13 3011 24
+            eval index += 1
+            continue
+        .endif
+        .if starts_with(line, ".layout enum ")
+            .span 3017 13 3017 55
+            eval let body = strip_prefix(line, ".layout ")
+            .span 3018 13 3018 59
+            eval let enum_header = strip_prefix(body, "enum ")
+            .span 3019 13 3019 71
+            eval let header_result = parse_enum_layout_header(enum_header)
+            .span 3020 13 3020 73
+            eval diagnostics = diagnostics.concat(header_result.diagnostics)
+            .if header_result.success
+                .span 3023 17 3023 68
+                eval let mut variants -> NativeEnumVariantLayout[] = []
+                .span 3024 17 3024 52
+                eval let enum_name = header_result.name
+                .span 3025 17 3025 28
+                eval index += 1
+                .loop
+                    .if index >= lines.length
+                        break
+                    .endif
+                    .span 3032 21 3032 64
+                    eval let variant_line = trim_text(lines[index])
+                    .if variant_line.length == 0
+                        .span 3034 25 3034 36
+                        eval index += 1
+                        break
+                    .endif
+                    .if !starts_with(variant_line, ".layout variant ") && !starts_with(variant_line, ".layout payload ")
+                        break
+                    .endif
+                    .if starts_with(variant_line, ".layout variant ")
+                        .span 3042 25 3042 75
+                        eval let body = strip_prefix(variant_line, ".layout ")
+                        .span 3043 25 3043 75
+                        eval let variant_text = strip_prefix(body, "variant ")
+                        .span 3044 25 3044 97
+                        eval let variant_result = parse_enum_variant_layout(variant_text, enum_name)
+                        .span 3045 25 3045 86
+                        eval diagnostics = diagnostics.concat(variant_result.diagnostics)
+                        .if variant_result.success
+                            .span 3048 29 3048 101
+                            eval variants = append_enum_variant_layout(variants, variant_result.variant)
+                        .endif
+                    .else
+                        .if starts_with(variant_line, ".layout payload ")
+                            .span 3051 25 3051 75
+                            eval let body = strip_prefix(variant_line, ".layout ")
+                            .span 3052 25 3052 75
+                            eval let payload_text = strip_prefix(body, "payload ")
+                            .span 3053 25 3053 97
+                            eval let payload_result = parse_enum_payload_layout(payload_text, enum_name)
+                            .span 3054 25 3054 86
+                            eval diagnostics = diagnostics.concat(payload_result.diagnostics)
+                            .if payload_result.success && variants.length > 0
+                                .span 3058 29 3058 66
+                                eval let last_index = variants.length - 1
+                                .span 3059 29 3059 69
+                                eval let last_variant = variants[last_index]
+                                .span 3060 29 3060 120
+                                eval let updated_fields = append_struct_layout_field(last_variant.fields, payload_result.field)
+                                .span 3061 29 3068 31
+                                eval variants[last_index] = NativeEnumVariantLayout {
+                                name: last_variant.name,
+                                tag: last_variant.tag,
+                                offset: last_variant.offset,
+                                size: last_variant.size,
+                                align: last_variant.align,
+                                fields: updated_fields,
+                            }
+                            .endif
+                        .endif
+                    .endif
+                    .span 3071 21 3071 32
+                    eval index += 1
+                .endloop
+                .span 3075 17 3086 19
+                eval let enum_def = NativeEnum {
+                    name: enum_name,
+                    variants: [],
+                    layout: NativeEnumLayout {
+                        size: header_result.size,
+                        align: header_result.align,
+                        tag_type: header_result.tag_type,
+                        tag_size: header_result.tag_size,
+                        tag_align: header_result.tag_align,
+                        variants: variants,
+                    },
+                }
+                .span 3087 17 3087 54
+                eval enums = append_enum(enums, enum_def)
+            .else
+                .span 3089 17 3089 28
+                eval index += 1
+            .endif
+            continue
+        .endif
+        .span 3094 9 3094 20
+        eval index += 1
+    .endloop
+    .span 3097 5 3101 7
+    ret LayoutManifest { structs: structs, enums: enums, diagnostics: diagnostics }
+.endfn
+
+.fn is_trim_char(ch -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 3104 17 3104 29
+    .param ch -> string
+    .span 3105 5 3105 64
+    ret ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
+.endfn
+
+.fn starts_with(value -> string, prefix -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 3108 16 3108 31
+    .param value -> string
+    .span 3108 33 3108 49
+    .param prefix -> string
+    .if prefix.length == 0
+        .span 3110 9 3110 21
+        ret true
+    .endif
+    .if value.length < prefix.length
+        .span 3113 9 3113 22
+        ret false
+    .endif
+    .span 3115 5 3115 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= prefix.length
+            break
+        .endif
+        .if value[index] != prefix[index]
+            .span 3121 13 3121 26
+            ret false
+        .endif
+        .span 3123 9 3123 20
+        eval index += 1
+    .endloop
+    .span 3125 5 3125 17
+    ret true
+.endfn
+
+.fn strip_prefix(value -> string, prefix -> string) -> string
+.meta return string
+.meta effects none
+    .span 3128 17 3128 32
+    .param value -> string
+    .span 3128 34 3128 50
+    .param prefix -> string
+    .if !starts_with(value, prefix)
+        .span 3130 9 3130 22
+        ret value
+    .endif
+    .span 3132 5 3132 58
+    ret substring(value, prefix.length, value.length)
+.endfn
+
+.fn index_of(value -> string, target -> string) -> number
+.meta return number
+.meta effects none
+    .span 3135 13 3135 28
+    .param value -> string
+    .span 3135 30 3135 46
+    .param target -> string
+    .if target.length == 0
+        .span 3137 9 3137 18
+        ret 0
+    .endif
+    .span 3139 5 3139 33
+    eval let mut index -> number = 0
+    .loop
+        .if index + target.length > value.length
+            break
+        .endif
+        .span 3144 9 3144 43
+        eval let mut match_index -> number = 0
+        .span 3145 9 3145 43
+        eval let mut matches -> boolean = true
+        .loop
+            .if match_index >= target.length
+                break
+            .endif
+            .if value[index + match_index] != target[match_index]
+                .span 3151 17 3151 33
+                eval matches = false
+                break
+            .endif
+            .span 3154 13 3154 30
+            eval match_index += 1
+        .endloop
+        .if matches
+            .span 3157 13 3157 26
+            ret index
+        .endif
+        .span 3159 9 3159 20
+        eval index += 1
+    .endloop
+    .span 3161 5 3161 15
+    ret -1
+.endfn
+
+.fn last_index_of(value -> string, target -> string) -> number
+.meta return number
+.meta effects none
+    .span 3164 18 3164 33
+    .param value -> string
+    .span 3164 35 3164 51
+    .param target -> string
+    .if target.length == 0
+        .span 3166 9 3166 29
+        ret value.length
+    .endif
+    .span 3168 5 3168 60
+    eval let mut index -> number = value.length - target.length
+    .loop
+        .if index < 0
+            break
+        .endif
+        .span 3173 9 3173 43
+        eval let mut match_index -> number = 0
+        .span 3174 9 3174 43
+        eval let mut matches -> boolean = true
+        .loop
+            .if match_index >= target.length
+                break
+            .endif
+            .if value[index + match_index] != target[match_index]
+                .span 3180 17 3180 33
+                eval matches = false
+                break
+            .endif
+            .span 3183 13 3183 30
+            eval match_index += 1
+        .endloop
+        .if matches
+            .span 3186 13 3186 26
+            ret index
+        .endif
+        .span 3188 9 3188 20
+        eval index -= 1
+    .endloop
+    .span 3190 5 3190 15
+    ret -1
+.endfn
+
+.fn strip_quotes(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 3193 17 3193 32
+    .param value -> string
+    .if value.length >= 2
+        .span 3195 9 3195 30
+        eval let first = value[0]
+        .span 3196 9 3196 44
+        eval let last = value[value.length - 1]
+        .span 3197 9 3197 55
+        eval let is_double = first == "\"" && last == "\""
+        .span 3198 9 3198 53
+        eval let is_single = first == "'" && last == "'"
+        .if is_double || is_single
+            .span 3200 13 3200 58
+            ret substring(value, 1, value.length - 1)
+        .endif
+    .endif
+    .span 3203 5 3203 18
+    ret value
+.endfn
+
+.fn append_string(values -> string[], value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 3206 18 3206 36
+    .param values -> string[]
+    .span 3206 38 3206 53
+    .param value -> string
+    .span 3207 5 3207 35
+    ret values.concat([value])
+.endfn
+
+.fn split_text(value -> string, delimiter -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 3210 15 3210 30
+    .param value -> string
+    .span 3210 32 3210 51
+    .param delimiter -> string
+    .if delimiter.length == 0
+        .span 3212 9 3212 24
+        ret [value]
+    .endif
+    .span 3214 5 3214 36
+    eval let mut parts -> string[] = []
+    .span 3215 5 3215 33
+    eval let mut start -> number = 0
+    .span 3216 5 3216 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 3222 9 3222 78
+        eval let pos = index_of(substring(value, index, value.length), delimiter)
+        .if pos < 0
+            break
+        .endif
+        .span 3226 9 3226 38
+        eval let actual_pos = index + pos
+        .span 3227 9 3227 75
+        eval parts = append_string(parts, substring(value, start, actual_pos))
+        .span 3228 9 3228 47
+        eval start = actual_pos + delimiter.length
+        .span 3229 9 3229 23
+        eval index = start
+    .endloop
+    .if start < value.length
+        .span 3233 9 3233 77
+        eval parts = append_string(parts, substring(value, start, value.length))
+    .else
+        .if start == value.length
+            .span 3235 9 3235 42
+            eval parts = append_string(parts, "")
+        .endif
+    .endif
+    .span 3238 5 3238 18
+    ret parts
+.endfn
+
+.fn append_parameter_array(values -> NativeParameter[], parameter -> NativeParameter) -> NativeParameter[]
+.meta return NativeParameter[]
+.meta effects none
+    .span 3241 27 3241 54
+    .param values -> NativeParameter[]
+    .span 3241 56 3241 84
+    .param parameter -> NativeParameter
+    .span 3242 5 3242 39
+    ret values.concat([parameter])
+.endfn

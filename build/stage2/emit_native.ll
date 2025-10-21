@@ -9650,7 +9650,7 @@ entry:
   %l12 = alloca { %StructFieldLayoutDescriptor*, i64 }*
   %l13 = alloca double
   %l14 = alloca %StructFieldLayoutDescriptor*
-  %l15 = alloca double
+  %l15 = alloca %StructFieldLayoutDescriptor
   %l16 = alloca double
   %l17 = alloca double
   %l18 = alloca double
@@ -9689,16 +9689,16 @@ entry:
   %t21 = load double, double* %l6
   br label %loop.header0
 loop.header0:
-  %t210 = phi { i8**, i64 }* [ %t19, %entry ], [ %t205, %loop.latch2 ]
-  %t211 = phi double [ %t17, %entry ], [ %t206, %loop.latch2 ]
-  %t212 = phi double [ %t18, %entry ], [ %t207, %loop.latch2 ]
-  %t213 = phi { %EnumVariantLayoutDescriptor*, i64 }* [ %t20, %entry ], [ %t208, %loop.latch2 ]
-  %t214 = phi double [ %t21, %entry ], [ %t209, %loop.latch2 ]
-  store { i8**, i64 }* %t210, { i8**, i64 }** %l4
-  store double %t211, double* %l2
-  store double %t212, double* %l3
-  store { %EnumVariantLayoutDescriptor*, i64 }* %t213, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  store double %t214, double* %l6
+  %t232 = phi { i8**, i64 }* [ %t19, %entry ], [ %t227, %loop.latch2 ]
+  %t233 = phi double [ %t17, %entry ], [ %t228, %loop.latch2 ]
+  %t234 = phi double [ %t18, %entry ], [ %t229, %loop.latch2 ]
+  %t235 = phi { %EnumVariantLayoutDescriptor*, i64 }* [ %t20, %entry ], [ %t230, %loop.latch2 ]
+  %t236 = phi double [ %t21, %entry ], [ %t231, %loop.latch2 ]
+  store { i8**, i64 }* %t232, { i8**, i64 }** %l4
+  store double %t233, double* %l2
+  store double %t234, double* %l3
+  store { %EnumVariantLayoutDescriptor*, i64 }* %t235, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  store double %t236, double* %l6
   br label %loop.body1
 loop.body1:
   %t22 = load double, double* %l6
@@ -9830,10 +9830,10 @@ merge9:
   %t119 = load double, double* %l13
   br label %loop.header10
 loop.header10:
-  %t159 = phi { %StructFieldLayoutDescriptor*, i64 }* [ %t118, %loop.body1 ], [ %t157, %loop.latch12 ]
-  %t160 = phi double [ %t119, %loop.body1 ], [ %t158, %loop.latch12 ]
-  store { %StructFieldLayoutDescriptor*, i64 }* %t159, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  store double %t160, double* %l13
+  %t181 = phi { %StructFieldLayoutDescriptor*, i64 }* [ %t118, %loop.body1 ], [ %t179, %loop.latch12 ]
+  %t182 = phi double [ %t119, %loop.body1 ], [ %t180, %loop.latch12 ]
+  store { %StructFieldLayoutDescriptor*, i64 }* %t181, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  store double %t182, double* %l13
   br label %loop.body11
 loop.body11:
   %t120 = load double, double* %l13
@@ -9873,164 +9873,186 @@ merge15:
   %t149 = getelementptr %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %t146, i64 %t144
   %t150 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %t149
   store %StructFieldLayoutDescriptor* %t150, %StructFieldLayoutDescriptor** %l14
-  store double 0.0, double* %l15
-  %t151 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  %t152 = load double, double* %l15
-  %t153 = call { %StructFieldLayoutDescriptor*, i64 }* @append_struct_field_layout({ %StructFieldLayoutDescriptor*, i64 }* %t151, i8* null)
-  store { %StructFieldLayoutDescriptor*, i64 }* %t153, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  %t154 = load double, double* %l13
-  %t155 = sitofp i64 1 to double
-  %t156 = fadd double %t154, %t155
-  store double %t156, double* %l13
+  %t151 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %l14
+  %t152 = getelementptr %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %t151, i32 0, i32 0
+  %t153 = load i8*, i8** %t152
+  %t154 = insertvalue %StructFieldLayoutDescriptor undef, i8* %t153, 0
+  %t155 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %l14
+  %t156 = getelementptr %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %t155, i32 0, i32 1
+  %t157 = load i8*, i8** %t156
+  %t158 = insertvalue %StructFieldLayoutDescriptor %t154, i8* %t157, 1
+  %t159 = load double, double* %l11
+  %t160 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %l14
+  %t161 = getelementptr %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %t160, i32 0, i32 2
+  %t162 = load double, double* %t161
+  %t163 = fadd double %t159, %t162
+  %t164 = insertvalue %StructFieldLayoutDescriptor %t158, double %t163, 2
+  %t165 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %l14
+  %t166 = getelementptr %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %t165, i32 0, i32 3
+  %t167 = load double, double* %t166
+  %t168 = insertvalue %StructFieldLayoutDescriptor %t164, double %t167, 3
+  %t169 = load %StructFieldLayoutDescriptor*, %StructFieldLayoutDescriptor** %l14
+  %t170 = getelementptr %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %t169, i32 0, i32 4
+  %t171 = load double, double* %t170
+  %t172 = insertvalue %StructFieldLayoutDescriptor %t168, double %t171, 4
+  store %StructFieldLayoutDescriptor %t172, %StructFieldLayoutDescriptor* %l15
+  %t173 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  %t174 = load %StructFieldLayoutDescriptor, %StructFieldLayoutDescriptor* %l15
+  %t175 = call { %StructFieldLayoutDescriptor*, i64 }* @append_struct_field_layout({ %StructFieldLayoutDescriptor*, i64 }* %t173, %StructFieldLayoutDescriptor %t174)
+  store { %StructFieldLayoutDescriptor*, i64 }* %t175, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  %t176 = load double, double* %l13
+  %t177 = sitofp i64 1 to double
+  %t178 = fadd double %t176, %t177
+  store double %t178, double* %l13
   br label %loop.latch12
 loop.latch12:
-  %t157 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  %t158 = load double, double* %l13
+  %t179 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  %t180 = load double, double* %l13
   br label %loop.header10
 afterloop13:
-  %t161 = load double, double* %l11
-  %t162 = load %RecordLayoutResult, %RecordLayoutResult* %l9
-  %t163 = extractvalue %RecordLayoutResult %t162, 0
-  %t164 = fadd double %t161, %t163
-  store double %t164, double* %l16
-  %t165 = load double, double* %l16
-  %t166 = load double, double* %l3
-  %t167 = fcmp ogt double %t165, %t166
-  %t168 = load double, double* %l0
-  %t169 = load double, double* %l1
-  %t170 = load double, double* %l2
-  %t171 = load double, double* %l3
-  %t172 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t173 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t174 = load double, double* %l6
-  %t175 = load %LayoutEnumVariantDefinition, %LayoutEnumVariantDefinition* %l7
-  %t176 = load i8, i8* %l8
-  %t177 = load %RecordLayoutResult, %RecordLayoutResult* %l9
-  %t178 = load double, double* %l10
-  %t179 = load double, double* %l11
-  %t180 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  %t181 = load double, double* %l13
-  %t182 = load double, double* %l16
-  br i1 %t167, label %then16, label %merge17
+  %t183 = load double, double* %l11
+  %t184 = load %RecordLayoutResult, %RecordLayoutResult* %l9
+  %t185 = extractvalue %RecordLayoutResult %t184, 0
+  %t186 = fadd double %t183, %t185
+  store double %t186, double* %l16
+  %t187 = load double, double* %l16
+  %t188 = load double, double* %l3
+  %t189 = fcmp ogt double %t187, %t188
+  %t190 = load double, double* %l0
+  %t191 = load double, double* %l1
+  %t192 = load double, double* %l2
+  %t193 = load double, double* %l3
+  %t194 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t195 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t196 = load double, double* %l6
+  %t197 = load %LayoutEnumVariantDefinition, %LayoutEnumVariantDefinition* %l7
+  %t198 = load i8, i8* %l8
+  %t199 = load %RecordLayoutResult, %RecordLayoutResult* %l9
+  %t200 = load double, double* %l10
+  %t201 = load double, double* %l11
+  %t202 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  %t203 = load double, double* %l13
+  %t204 = load double, double* %l16
+  br i1 %t189, label %then16, label %merge17
 then16:
-  %t183 = load double, double* %l16
-  store double %t183, double* %l3
+  %t205 = load double, double* %l16
+  store double %t205, double* %l3
   br label %merge17
 merge17:
-  %t184 = phi double [ %t183, %then16 ], [ %t171, %loop.body1 ]
-  store double %t184, double* %l3
-  %t185 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t186 = load %LayoutEnumVariantDefinition, %LayoutEnumVariantDefinition* %l7
-  %t187 = extractvalue %LayoutEnumVariantDefinition %t186, 0
-  %t188 = insertvalue %EnumVariantLayoutDescriptor undef, i8* %t187, 0
-  %t189 = load double, double* %l6
-  %t190 = insertvalue %EnumVariantLayoutDescriptor %t188, double %t189, 1
-  %t191 = load double, double* %l11
-  %t192 = insertvalue %EnumVariantLayoutDescriptor %t190, double %t191, 2
-  %t193 = load %RecordLayoutResult, %RecordLayoutResult* %l9
-  %t194 = extractvalue %RecordLayoutResult %t193, 0
-  %t195 = insertvalue %EnumVariantLayoutDescriptor %t192, double %t194, 3
-  %t196 = load double, double* %l10
-  %t197 = insertvalue %EnumVariantLayoutDescriptor %t195, double %t196, 4
-  %t198 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
-  %t199 = bitcast { %StructFieldLayoutDescriptor*, i64 }* %t198 to { %StructFieldLayoutDescriptor**, i64 }*
-  %t200 = insertvalue %EnumVariantLayoutDescriptor %t197, { %StructFieldLayoutDescriptor**, i64 }* %t199, 5
-  %t201 = call { %EnumVariantLayoutDescriptor*, i64 }* @append_enum_variant_layout({ %EnumVariantLayoutDescriptor*, i64 }* %t185, %EnumVariantLayoutDescriptor %t200)
-  store { %EnumVariantLayoutDescriptor*, i64 }* %t201, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t202 = load double, double* %l6
-  %t203 = sitofp i64 1 to double
-  %t204 = fadd double %t202, %t203
-  store double %t204, double* %l6
+  %t206 = phi double [ %t205, %then16 ], [ %t193, %loop.body1 ]
+  store double %t206, double* %l3
+  %t207 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t208 = load %LayoutEnumVariantDefinition, %LayoutEnumVariantDefinition* %l7
+  %t209 = extractvalue %LayoutEnumVariantDefinition %t208, 0
+  %t210 = insertvalue %EnumVariantLayoutDescriptor undef, i8* %t209, 0
+  %t211 = load double, double* %l6
+  %t212 = insertvalue %EnumVariantLayoutDescriptor %t210, double %t211, 1
+  %t213 = load double, double* %l11
+  %t214 = insertvalue %EnumVariantLayoutDescriptor %t212, double %t213, 2
+  %t215 = load %RecordLayoutResult, %RecordLayoutResult* %l9
+  %t216 = extractvalue %RecordLayoutResult %t215, 0
+  %t217 = insertvalue %EnumVariantLayoutDescriptor %t214, double %t216, 3
+  %t218 = load double, double* %l10
+  %t219 = insertvalue %EnumVariantLayoutDescriptor %t217, double %t218, 4
+  %t220 = load { %StructFieldLayoutDescriptor*, i64 }*, { %StructFieldLayoutDescriptor*, i64 }** %l12
+  %t221 = bitcast { %StructFieldLayoutDescriptor*, i64 }* %t220 to { %StructFieldLayoutDescriptor**, i64 }*
+  %t222 = insertvalue %EnumVariantLayoutDescriptor %t219, { %StructFieldLayoutDescriptor**, i64 }* %t221, 5
+  %t223 = call { %EnumVariantLayoutDescriptor*, i64 }* @append_enum_variant_layout({ %EnumVariantLayoutDescriptor*, i64 }* %t207, %EnumVariantLayoutDescriptor %t222)
+  store { %EnumVariantLayoutDescriptor*, i64 }* %t223, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t224 = load double, double* %l6
+  %t225 = sitofp i64 1 to double
+  %t226 = fadd double %t224, %t225
+  store double %t226, double* %l6
   br label %loop.latch2
 loop.latch2:
-  %t205 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t206 = load double, double* %l2
-  %t207 = load double, double* %l3
-  %t208 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t209 = load double, double* %l6
+  %t227 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t228 = load double, double* %l2
+  %t229 = load double, double* %l3
+  %t230 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t231 = load double, double* %l6
   br label %loop.header0
 afterloop3:
-  %t215 = load { %LayoutEnumVariantDefinition*, i64 }, { %LayoutEnumVariantDefinition*, i64 }* %variants
-  %t216 = extractvalue { %LayoutEnumVariantDefinition*, i64 } %t215, 1
-  %t217 = icmp eq i64 %t216, 0
-  %t218 = load double, double* %l0
-  %t219 = load double, double* %l1
-  %t220 = load double, double* %l2
-  %t221 = load double, double* %l3
-  %t222 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t223 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t224 = load double, double* %l6
-  br i1 %t217, label %then18, label %merge19
+  %t237 = load { %LayoutEnumVariantDefinition*, i64 }, { %LayoutEnumVariantDefinition*, i64 }* %variants
+  %t238 = extractvalue { %LayoutEnumVariantDefinition*, i64 } %t237, 1
+  %t239 = icmp eq i64 %t238, 0
+  %t240 = load double, double* %l0
+  %t241 = load double, double* %l1
+  %t242 = load double, double* %l2
+  %t243 = load double, double* %l3
+  %t244 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t245 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t246 = load double, double* %l6
+  br i1 %t239, label %then18, label %merge19
 then18:
-  %t225 = load double, double* %l1
-  store double %t225, double* %l2
-  %t226 = load double, double* %l0
-  store double %t226, double* %l3
+  %t247 = load double, double* %l1
+  store double %t247, double* %l2
+  %t248 = load double, double* %l0
+  store double %t248, double* %l3
   br label %merge19
 merge19:
-  %t227 = phi double [ %t225, %then18 ], [ %t220, %entry ]
-  %t228 = phi double [ %t226, %then18 ], [ %t221, %entry ]
-  store double %t227, double* %l2
-  store double %t228, double* %l3
-  %t229 = load double, double* %l2
-  store double %t229, double* %l17
-  %t230 = load double, double* %l17
-  %t231 = sitofp i64 0 to double
-  %t232 = fcmp ole double %t230, %t231
-  %t233 = load double, double* %l0
-  %t234 = load double, double* %l1
-  %t235 = load double, double* %l2
-  %t236 = load double, double* %l3
-  %t237 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t238 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t239 = load double, double* %l6
-  %t240 = load double, double* %l17
-  br i1 %t232, label %then20, label %merge21
+  %t249 = phi double [ %t247, %then18 ], [ %t242, %entry ]
+  %t250 = phi double [ %t248, %then18 ], [ %t243, %entry ]
+  store double %t249, double* %l2
+  store double %t250, double* %l3
+  %t251 = load double, double* %l2
+  store double %t251, double* %l17
+  %t252 = load double, double* %l17
+  %t253 = sitofp i64 0 to double
+  %t254 = fcmp ole double %t252, %t253
+  %t255 = load double, double* %l0
+  %t256 = load double, double* %l1
+  %t257 = load double, double* %l2
+  %t258 = load double, double* %l3
+  %t259 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t260 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t261 = load double, double* %l6
+  %t262 = load double, double* %l17
+  br i1 %t254, label %then20, label %merge21
 then20:
-  %t241 = sitofp i64 1 to double
-  store double %t241, double* %l17
+  %t263 = sitofp i64 1 to double
+  store double %t263, double* %l17
   br label %merge21
 merge21:
-  %t242 = phi double [ %t241, %then20 ], [ %t240, %entry ]
-  store double %t242, double* %l17
-  %t243 = load double, double* %l3
-  store double %t243, double* %l18
-  %t244 = load double, double* %l17
-  %t245 = sitofp i64 1 to double
-  %t246 = fcmp ogt double %t244, %t245
-  %t247 = load double, double* %l0
-  %t248 = load double, double* %l1
-  %t249 = load double, double* %l2
-  %t250 = load double, double* %l3
-  %t251 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t252 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t253 = load double, double* %l6
-  %t254 = load double, double* %l17
-  %t255 = load double, double* %l18
-  br i1 %t246, label %then22, label %merge23
+  %t264 = phi double [ %t263, %then20 ], [ %t262, %entry ]
+  store double %t264, double* %l17
+  %t265 = load double, double* %l3
+  store double %t265, double* %l18
+  %t266 = load double, double* %l17
+  %t267 = sitofp i64 1 to double
+  %t268 = fcmp ogt double %t266, %t267
+  %t269 = load double, double* %l0
+  %t270 = load double, double* %l1
+  %t271 = load double, double* %l2
+  %t272 = load double, double* %l3
+  %t273 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t274 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t275 = load double, double* %l6
+  %t276 = load double, double* %l17
+  %t277 = load double, double* %l18
+  br i1 %t268, label %then22, label %merge23
 then22:
-  %t256 = load double, double* %l3
-  %t257 = load double, double* %l17
-  %t258 = call double @align_to(double %t256, double %t257)
-  store double %t258, double* %l18
+  %t278 = load double, double* %l3
+  %t279 = load double, double* %l17
+  %t280 = call double @align_to(double %t278, double %t279)
+  store double %t280, double* %l18
   br label %merge23
 merge23:
-  %t259 = phi double [ %t258, %then22 ], [ %t255, %entry ]
-  store double %t259, double* %l18
-  %t260 = load double, double* %l18
-  %t261 = insertvalue %EnumAggregateLayout undef, double %t260, 0
-  %t262 = load double, double* %l17
-  %t263 = insertvalue %EnumAggregateLayout %t261, double %t262, 1
-  %t264 = load double, double* %l0
-  %t265 = insertvalue %EnumAggregateLayout %t263, double %t264, 2
-  %t266 = load double, double* %l1
-  %t267 = insertvalue %EnumAggregateLayout %t265, double %t266, 3
-  %t268 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
-  %t269 = bitcast { %EnumVariantLayoutDescriptor*, i64 }* %t268 to { %EnumVariantLayoutDescriptor**, i64 }*
-  %t270 = insertvalue %EnumAggregateLayout %t267, { %EnumVariantLayoutDescriptor**, i64 }* %t269, 4
-  %t271 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t272 = insertvalue %EnumAggregateLayout %t270, { i8**, i64 }* %t271, 5
-  ret %EnumAggregateLayout %t272
+  %t281 = phi double [ %t280, %then22 ], [ %t277, %entry ]
+  store double %t281, double* %l18
+  %t282 = load double, double* %l18
+  %t283 = insertvalue %EnumAggregateLayout undef, double %t282, 0
+  %t284 = load double, double* %l17
+  %t285 = insertvalue %EnumAggregateLayout %t283, double %t284, 1
+  %t286 = load double, double* %l0
+  %t287 = insertvalue %EnumAggregateLayout %t285, double %t286, 2
+  %t288 = load double, double* %l1
+  %t289 = insertvalue %EnumAggregateLayout %t287, double %t288, 3
+  %t290 = load { %EnumVariantLayoutDescriptor*, i64 }*, { %EnumVariantLayoutDescriptor*, i64 }** %l5
+  %t291 = bitcast { %EnumVariantLayoutDescriptor*, i64 }* %t290 to { %EnumVariantLayoutDescriptor**, i64 }*
+  %t292 = insertvalue %EnumAggregateLayout %t289, { %EnumVariantLayoutDescriptor**, i64 }* %t291, 4
+  %t293 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t294 = insertvalue %EnumAggregateLayout %t292, { i8**, i64 }* %t293, 5
+  ret %EnumAggregateLayout %t294
 }
 
 define %RecordLayoutResult @calculate_record_layout(%LayoutContext %context, { %LayoutFieldInput*, i64 }* %inputs, i8* %container_kind, i8* %container_name, { i8**, i64 }* %visiting) {
@@ -11475,8 +11497,8 @@ merge3:
   %t10 = load double, double* %l1
   br label %loop.header4
 loop.header4:
-  %t21 = phi double [ %t10, %entry ], [ %t20, %loop.latch6 ]
-  store double %t21, double* %l1
+  %t35 = phi double [ %t10, %entry ], [ %t34, %loop.latch6 ]
+  store double %t35, double* %l1
   br label %loop.body5
 loop.body5:
   %t11 = load double, double* %l1
@@ -11489,13 +11511,31 @@ loop.body5:
 then8:
   br label %afterloop7
 merge9:
-  %t17 = load double, double* %l1
-  %t18 = sitofp i64 1 to double
-  %t19 = fadd double %t17, %t18
-  store double %t19, double* %l1
+  %t17 = load i64, i64* %l0
+  %t18 = load double, double* %l1
+  %t19 = sitofp i64 %t17 to double
+  %t20 = fadd double %t19, %t18
+  %t21 = fptosi double %t20 to i64
+  %t22 = getelementptr i8, i8* %value, i64 %t21
+  %t23 = load i8, i8* %t22
+  %t24 = load double, double* %l1
+  %t25 = fptosi double %t24 to i64
+  %t26 = getelementptr i8, i8* %suffix, i64 %t25
+  %t27 = load i8, i8* %t26
+  %t28 = icmp ne i8 %t23, %t27
+  %t29 = load i64, i64* %l0
+  %t30 = load double, double* %l1
+  br i1 %t28, label %then10, label %merge11
+then10:
+  ret i1 0
+merge11:
+  %t31 = load double, double* %l1
+  %t32 = sitofp i64 1 to double
+  %t33 = fadd double %t31, %t32
+  store double %t33, double* %l1
   br label %loop.latch6
 loop.latch6:
-  %t20 = load double, double* %l1
+  %t34 = load double, double* %l1
   br label %loop.header4
 afterloop7:
   ret i1 1
@@ -14141,7 +14181,7 @@ entry:
   %l0 = alloca double
   %l1 = alloca double
   %l2 = alloca i8
-  %l3 = alloca double
+  %l3 = alloca i8
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = call i64 @sailfin_runtime_string_length(i8* %value)
@@ -14197,8 +14237,8 @@ afterloop3:
   %t29 = load double, double* %l1
   br label %loop.header8
 loop.header8:
-  %t44 = phi double [ %t29, %entry ], [ %t43, %loop.latch10 ]
-  store double %t44, double* %l1
+  %t54 = phi double [ %t29, %entry ], [ %t53, %loop.latch10 ]
+  store double %t54, double* %l1
   br label %loop.body9
 loop.body9:
   %t30 = load double, double* %l1
@@ -14210,57 +14250,69 @@ loop.body9:
 then12:
   br label %afterloop11
 merge13:
-  store double 0.0, double* %l3
-  %t35 = load double, double* %l3
-  %t36 = call i1 @is_trim_char(i8* null)
-  %t37 = load double, double* %l0
-  %t38 = load double, double* %l1
-  %t39 = load double, double* %l3
-  br i1 %t36, label %then14, label %merge15
+  %t35 = load double, double* %l1
+  %t36 = sitofp i64 1 to double
+  %t37 = fsub double %t35, %t36
+  %t38 = fptosi double %t37 to i64
+  %t39 = getelementptr i8, i8* %value, i64 %t38
+  %t40 = load i8, i8* %t39
+  store i8 %t40, i8* %l3
+  %t41 = load i8, i8* %l3
+  %t42 = alloca [2 x i8], align 1
+  %t43 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  store i8 %t41, i8* %t43
+  %t44 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 1
+  store i8 0, i8* %t44
+  %t45 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  %t46 = call i1 @is_trim_char(i8* %t45)
+  %t47 = load double, double* %l0
+  %t48 = load double, double* %l1
+  %t49 = load i8, i8* %l3
+  br i1 %t46, label %then14, label %merge15
 then14:
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fsub double %t40, %t41
-  store double %t42, double* %l1
+  %t50 = load double, double* %l1
+  %t51 = sitofp i64 1 to double
+  %t52 = fsub double %t50, %t51
+  store double %t52, double* %l1
   br label %loop.latch10
 merge15:
   br label %afterloop11
 loop.latch10:
-  %t43 = load double, double* %l1
+  %t53 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t46 = load double, double* %l0
-  %t47 = sitofp i64 0 to double
-  %t48 = fcmp oeq double %t46, %t47
-  br label %logical_and_entry_45
+  %t56 = load double, double* %l0
+  %t57 = sitofp i64 0 to double
+  %t58 = fcmp oeq double %t56, %t57
+  br label %logical_and_entry_55
 
-logical_and_entry_45:
-  br i1 %t48, label %logical_and_right_45, label %logical_and_merge_45
+logical_and_entry_55:
+  br i1 %t58, label %logical_and_right_55, label %logical_and_merge_55
 
-logical_and_right_45:
-  %t49 = load double, double* %l1
-  %t50 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t51 = sitofp i64 %t50 to double
-  %t52 = fcmp oeq double %t49, %t51
-  br label %logical_and_right_end_45
+logical_and_right_55:
+  %t59 = load double, double* %l1
+  %t60 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t61 = sitofp i64 %t60 to double
+  %t62 = fcmp oeq double %t59, %t61
+  br label %logical_and_right_end_55
 
-logical_and_right_end_45:
-  br label %logical_and_merge_45
+logical_and_right_end_55:
+  br label %logical_and_merge_55
 
-logical_and_merge_45:
-  %t53 = phi i1 [ false, %logical_and_entry_45 ], [ %t52, %logical_and_right_end_45 ]
-  %t54 = load double, double* %l0
-  %t55 = load double, double* %l1
-  br i1 %t53, label %then16, label %merge17
+logical_and_merge_55:
+  %t63 = phi i1 [ false, %logical_and_entry_55 ], [ %t62, %logical_and_right_end_55 ]
+  %t64 = load double, double* %l0
+  %t65 = load double, double* %l1
+  br i1 %t63, label %then16, label %merge17
 then16:
   ret i8* %value
 merge17:
-  %t56 = load double, double* %l0
-  %t57 = load double, double* %l1
-  %t58 = fptosi double %t56 to i64
-  %t59 = fptosi double %t57 to i64
-  %t60 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t58, i64 %t59)
-  ret i8* %t60
+  %t66 = load double, double* %l0
+  %t67 = load double, double* %l1
+  %t68 = fptosi double %t66 to i64
+  %t69 = fptosi double %t67 to i64
+  %t70 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t68, i64 %t69)
+  ret i8* %t70
 }
 
 define i1 @is_trim_char(i8* %ch) {
@@ -16300,7 +16352,13 @@ entry:
 
 define %TextBuilder @builder_push_indent(%TextBuilder %builder) {
 entry:
-  ret %TextBuilder zeroinitializer
+  %t0 = extractvalue %TextBuilder %builder, 0
+  %t1 = insertvalue %TextBuilder undef, { i8**, i64 }* %t0, 0
+  %t2 = extractvalue %TextBuilder %builder, 1
+  %t3 = sitofp i64 1 to double
+  %t4 = fadd double %t2, %t3
+  %t5 = insertvalue %TextBuilder %t1, double %t4, 1
+  ret %TextBuilder %t5
 }
 
 define %TextBuilder @builder_pop_indent(%TextBuilder %builder) {
@@ -16365,13 +16423,15 @@ merge1:
 define i8* @trim_right(i8* %value) {
 entry:
   %l0 = alloca double
-  %l1 = alloca double
+  %l1 = alloca i8
   %t0 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t1 = sitofp i64 %t0 to double
   store double %t1, double* %l0
   %t2 = load double, double* %l0
   br label %loop.header0
 loop.header0:
+  %t25 = phi double [ %t2, %entry ], [ %t24, %loop.latch2 ]
+  store double %t25, double* %l0
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l0
@@ -16382,25 +16442,58 @@ loop.body1:
 then4:
   br label %afterloop3
 merge5:
-  store double 0.0, double* %l1
-  %t8 = load double, double* %l1
+  %t7 = load double, double* %l0
+  %t8 = sitofp i64 1 to double
+  %t9 = fsub double %t7, %t8
+  %t10 = fptosi double %t9 to i64
+  %t11 = getelementptr i8, i8* %value, i64 %t10
+  %t12 = load i8, i8* %t11
+  store i8 %t12, i8* %l1
+  %t14 = load i8, i8* %l1
+  %t15 = icmp eq i8 %t14, 32
+  br label %logical_or_entry_13
+
+logical_or_entry_13:
+  br i1 %t15, label %logical_or_merge_13, label %logical_or_right_13
+
+logical_or_right_13:
+  %t16 = load i8, i8* %l1
+  %t17 = icmp eq i8 %t16, 9
+  br label %logical_or_right_end_13
+
+logical_or_right_end_13:
+  br label %logical_or_merge_13
+
+logical_or_merge_13:
+  %t18 = phi i1 [ true, %logical_or_entry_13 ], [ %t17, %logical_or_right_end_13 ]
+  %t19 = load double, double* %l0
+  %t20 = load i8, i8* %l1
+  br i1 %t18, label %then6, label %merge7
+then6:
+  %t21 = load double, double* %l0
+  %t22 = sitofp i64 1 to double
+  %t23 = fsub double %t21, %t22
+  store double %t23, double* %l0
+  br label %loop.latch2
+merge7:
   br label %afterloop3
 loop.latch2:
+  %t24 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t9 = load double, double* %l0
-  %t10 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t11 = sitofp i64 %t10 to double
-  %t12 = fcmp oeq double %t9, %t11
-  %t13 = load double, double* %l0
-  br i1 %t12, label %then6, label %merge7
-then6:
+  %t26 = load double, double* %l0
+  %t27 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t28 = sitofp i64 %t27 to double
+  %t29 = fcmp oeq double %t26, %t28
+  %t30 = load double, double* %l0
+  br i1 %t29, label %then8, label %merge9
+then8:
   ret i8* %value
-merge7:
-  %t14 = load double, double* %l0
-  %t15 = fptosi double %t14 to i64
-  %t16 = call i8* @sailfin_runtime_substring(i8* %value, i64 0, i64 %t15)
-  ret i8* %t16
+merge9:
+  %t31 = load double, double* %l0
+  %t32 = fptosi double %t31 to i64
+  %t33 = call i8* @sailfin_runtime_substring(i8* %value, i64 0, i64 %t32)
+  ret i8* %t33
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {

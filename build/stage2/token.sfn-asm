@@ -1,0 +1,50 @@
+; Sailfin Native Prototype
+.module main
+
+.enum TokenKind
+    .layout enum name=TokenKind size=16 align=8 tag_type=i32 tag_size=4 tag_align=4
+    .layout variant Identifier tag=0 offset=8 size=8 align=8
+    .layout payload Identifier.value type=string offset=8 size=8 align=8
+    .layout variant NumberLiteral tag=1 offset=8 size=8 align=8
+    .layout payload NumberLiteral.value type=string offset=8 size=8 align=8
+    .layout variant StringLiteral tag=2 offset=8 size=8 align=8
+    .layout payload StringLiteral.value type=string offset=8 size=8 align=8
+    .layout variant BooleanLiteral tag=3 offset=8 size=8 align=8
+    .layout payload BooleanLiteral.value type=string offset=8 size=8 align=8
+    .layout variant Symbol tag=4 offset=8 size=8 align=8
+    .layout payload Symbol.value type=string offset=8 size=8 align=8
+    .layout variant Whitespace tag=5 offset=4 size=0 align=1
+    .layout variant Comment tag=6 offset=4 size=0 align=1
+    .layout variant EndOfFile tag=7 offset=4 size=0 align=1
+    .variant Identifier { value -> string }
+    .variant NumberLiteral { value -> string }
+    .variant StringLiteral { value -> string }
+    .variant BooleanLiteral { value -> string }
+    .variant Symbol { value -> string }
+    .variant Whitespace
+    .variant Comment
+    .variant EndOfFile
+.endenum
+
+.struct Token
+    .layout struct name=Token size=32 align=8
+    .layout field kind type=TokenKind offset=0 size=8 align=8
+    .layout field lexeme type=string offset=8 size=8 align=8
+    .layout field line type=number offset=16 size=8 align=8
+    .layout field column type=number offset=24 size=8 align=8
+    .field kind -> TokenKind
+    .field lexeme -> string
+    .field line -> number
+    .field column -> number
+.endstruct
+
+.fn eof_token(line -> number, column -> number) -> Token
+.meta return Token
+.meta effects none
+    .span 25 14 25 28
+    .param line -> number
+    .span 25 30 25 46
+    .param column -> number
+    .span 26 5 31 7
+    ret Token { kind: TokenKind.EndOfFile(), lexeme: "", line: line, column: column }
+.endfn

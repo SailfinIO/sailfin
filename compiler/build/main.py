@@ -5,7 +5,7 @@ from compiler.build.parser import parse_program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
-from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_with_manifests, LoweredLLVMResult
+from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.typecheck import typecheck_program
 
@@ -132,7 +132,7 @@ def compile_to_native_llvm_full(source):
             index += 1
     return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
 
-def compile_to_native_llvm_with_manifests(source, manifest_contents):
+def compile_to_native_llvm_with_context(source, manifest_contents, native_artifacts):
     # effects: io
     native_result = compile_to_native(source)
     manifests = []
@@ -140,10 +140,14 @@ def compile_to_native_llvm_with_manifests(source, manifest_contents):
     while True:
         if manifest_index >= len(manifest_contents):
             break
-        parsed = parse_layout_manifest(manifest_contents[manifest_index])
-        manifests = (manifests) + ([parsed])
+        manifest_text = manifest_contents[manifest_index]
+        if len(manifest_text) == 0:
+            manifests = (manifests) + ([LayoutManifest(structs=[], enums=[], diagnostics=[])])
+        else:
+            parsed = parse_layout_manifest(manifest_text)
+            manifests = (manifests) + ([parsed])
         manifest_index += 1
-    lowered = lower_to_llvm_with_manifests(native_result.module, manifests)
+    lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts)
     combined = []
     combined = (combined) + (native_result.diagnostics)
     combined = (combined) + (lowered.diagnostics)
@@ -155,6 +159,10 @@ def compile_to_native_llvm_with_manifests(source, manifest_contents):
             print.warn("[native-llvm] " + combined[index])
             index += 1
     return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def compile_to_native_llvm_with_manifests(source, manifest_contents):
+    # effects: io
+    return compile_to_native_llvm_with_context(source, manifest_contents, [])
 
 def main():
     # effects: io

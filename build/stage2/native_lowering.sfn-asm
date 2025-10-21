@@ -1,0 +1,3945 @@
+; Sailfin Native Prototype
+.module main
+
+.import "./emit_native" { NativeModule }
+
+.import "./native_ir" { select_text_artifact, parse_native_artifact, NativeFunction, NativeInstruction, NativeParameter, NativeStruct, NativeStructField, NativeImport, NativeImportSpecifier, NativeEnum, NativeEnumVariantField, NativeBinding }
+
+.import "./string_utils" { substring, char_code }
+
+.struct LoweredPythonResult
+    .layout struct name=LoweredPythonResult size=16 align=8
+    .layout field source type=string offset=0 size=8 align=8
+    .layout field diagnostics type=string[] offset=8 size=8 align=8
+    .field source -> string
+    .field diagnostics -> string[]
+.endstruct
+
+.struct MatchContext
+    .layout struct name=MatchContext size=24 align=8
+    .layout field subject_name type=string offset=0 size=8 align=8
+    .layout field case_index type=number offset=8 size=8 align=8
+    .layout field has_active_case type=boolean offset=16 size=1 align=1
+    .field subject_name -> string
+    .field case_index -> number
+    .field has_active_case -> boolean
+.endstruct
+
+.struct LoweredCaseCondition
+    .layout struct name=LoweredCaseCondition size=16 align=8
+    .layout field condition type=string offset=0 size=8 align=8
+    .layout field is_default type=boolean offset=8 size=1 align=1
+    .layout field has_guard type=boolean offset=9 size=1 align=1
+    .field condition -> string
+    .field is_default -> boolean
+    .field has_guard -> boolean
+.endstruct
+
+.struct PythonModuleEmission
+    .layout struct name=PythonModuleEmission size=24 align=8
+    .layout field builder type=PythonBuilder offset=0 size=16 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field builder -> PythonBuilder
+    .field diagnostics -> string[]
+.endstruct
+
+.struct PythonFunctionEmission
+    .layout struct name=PythonFunctionEmission size=24 align=8
+    .layout field builder type=PythonBuilder offset=0 size=16 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field builder -> PythonBuilder
+    .field diagnostics -> string[]
+.endstruct
+
+.struct PythonImportEmission
+    .layout struct name=PythonImportEmission size=24 align=8
+    .layout field builder type=PythonBuilder offset=0 size=16 align=8
+    .layout field exports type=string[] offset=16 size=8 align=8
+    .field builder -> PythonBuilder
+    .field exports -> string[]
+.endstruct
+
+.struct PythonStructEmission
+    .layout struct name=PythonStructEmission size=24 align=8
+    .layout field builder type=PythonBuilder offset=0 size=16 align=8
+    .layout field diagnostics type=string[] offset=16 size=8 align=8
+    .field builder -> PythonBuilder
+    .field diagnostics -> string[]
+.endstruct
+
+.struct StructLiteralCapture
+    .layout struct name=StructLiteralCapture size=24 align=8
+    .layout field expression type=string offset=0 size=8 align=8
+    .layout field consumed type=number offset=8 size=8 align=8
+    .layout field success type=boolean offset=16 size=1 align=1
+    .field expression -> string
+    .field consumed -> number
+    .field success -> boolean
+.endstruct
+
+.struct ExpressionContinuationCapture
+    .layout struct name=ExpressionContinuationCapture size=24 align=8
+    .layout field expression type=string offset=0 size=8 align=8
+    .layout field consumed type=number offset=8 size=8 align=8
+    .layout field success type=boolean offset=16 size=1 align=1
+    .field expression -> string
+    .field consumed -> number
+    .field success -> boolean
+.endstruct
+
+.struct ExtractedSpan
+    .layout struct name=ExtractedSpan size=32 align=8
+    .layout field value type=string offset=0 size=8 align=8
+    .layout field start type=number offset=8 size=8 align=8
+    .layout field end type=number offset=16 size=8 align=8
+    .layout field success type=boolean offset=24 size=1 align=1
+    .field value -> string
+    .field start -> number
+    .field end -> number
+    .field success -> boolean
+.endstruct
+
+.fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult
+.meta return LoweredPythonResult
+.meta effects none
+    .span 67 20 67 49
+    .param native_module -> NativeModule
+    .span 68 5 68 42
+    eval let mut diagnostics -> string[] = []
+    .span 69 5 69 66
+    eval let artifact = select_text_artifact(native_module.artifacts)
+    .if artifact == null
+        .span 72 9 72 93
+        eval diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
+        .span 73 9 73 77
+        ret LoweredPythonResult { source: "", diagnostics: diagnostics }
+    .endif
+    .span 76 5 76 58
+    eval let parse = parse_native_artifact(artifact.contents)
+    .span 77 5 77 57
+    eval diagnostics = diagnostics.concat(parse.diagnostics)
+    .span 79 5 79 113
+    eval let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings)
+    .span 80 5 80 58
+    eval diagnostics = diagnostics.concat(module.diagnostics)
+    .span 82 5 82 59
+    eval let python_source = builder_to_string(module.builder)
+    .span 83 5 83 84
+    ret LoweredPythonResult { source: python_source, diagnostics: diagnostics }
+.endfn
+
+.fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[], bindings -> NativeBinding[]) -> PythonModuleEmission
+.meta return PythonModuleEmission
+.meta effects none
+    .span 85 23 85 52
+    .param functions -> NativeFunction[]
+    .span 85 54 85 79
+    .param imports -> NativeImport[]
+    .span 85 81 85 106
+    .param structs -> NativeStruct[]
+    .span 85 108 85 129
+    .param enums -> NativeEnum[]
+    .span 85 131 85 158
+    .param bindings -> NativeBinding[]
+    .span 87 5 87 54
+    eval let mut builder -> PythonBuilder = builder_new()
+    .span 88 5 88 42
+    eval let mut diagnostics -> string[] = []
+    .span 90 5 90 55
+    eval builder = builder_emit(builder, "import asyncio")
+    .span 91 5 91 87
+    eval builder = builder_emit(builder, "from runtime import runtime_support as runtime")
+    .span 93 5 93 43
+    eval let mut export_names -> string[] = []
+    .if imports.length > 0
+        .span 95 9 95 47
+        eval builder = builder_emit_blank(builder)
+        .span 96 9 96 69
+        eval let import_emission = emit_python_imports(builder, imports)
+        .span 97 9 97 43
+        eval builder = import_emission.builder
+        .span 98 9 98 48
+        eval export_names = import_emission.exports
+    .endif
+    .span 101 5 101 43
+    eval builder = builder_emit_blank(builder)
+    .span 102 5 102 45
+    eval builder = emit_runtime_aliases(builder)
+    .if bindings.length > 0
+        .span 105 9 105 47
+        eval builder = builder_emit_blank(builder)
+        .span 106 9 106 62
+        eval builder = emit_top_level_bindings(builder, bindings)
+    .endif
+    .if enums.length > 0
+        .span 110 9 110 47
+        eval builder = builder_emit_blank(builder)
+        .span 111 9 111 57
+        eval builder = emit_enum_definitions(builder, enums)
+    .endif
+    .if structs.length > 0
+        .span 115 9 115 47
+        eval builder = builder_emit_blank(builder)
+        .span 116 9 116 73
+        eval let struct_emission = emit_struct_definitions(builder, structs)
+        .span 117 9 117 43
+        eval builder = struct_emission.builder
+        .span 118 9 118 71
+        eval diagnostics = diagnostics.concat(struct_emission.diagnostics)
+    .endif
+    .span 121 5 121 43
+    eval builder = builder_emit_blank(builder)
+    .span 123 5 123 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= functions.length
+            break
+        .endif
+        .span 130 13 130 76
+        eval let emission = emit_python_function(builder, functions[index])
+        .span 131 9 131 36
+        eval builder = emission.builder
+        .span 132 9 132 64
+        eval diagnostics = diagnostics.concat(emission.diagnostics)
+        .if index + 1 < functions.length
+            .span 135 13 135 51
+            eval builder = builder_emit_blank(builder)
+        .endif
+        .span 137 9 137 20
+        eval index += 1
+    .endloop
+    .if export_names.length > 0
+        .span 141 9 141 47
+        eval builder = builder_emit_blank(builder)
+        .span 142 9 142 59
+        eval builder = emit_export_list(builder, export_names)
+    .endif
+    .span 145 5 145 80
+    ret PythonModuleEmission { builder: builder, diagnostics: diagnostics }
+.endfn
+
+.fn emit_runtime_aliases(builder -> PythonBuilder) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 148 25 148 49
+    .param builder -> PythonBuilder
+    .span 149 5 149 31
+    eval let mut current = builder
+    .span 151 5 151 64
+    eval current = builder_emit(current, "print = runtime.console")
+    .span 152 5 152 62
+    eval current = builder_emit(current, "sleep = runtime.sleep")
+    .span 153 5 153 66
+    eval current = builder_emit(current, "channel = runtime.channel")
+    .span 154 5 154 68
+    eval current = builder_emit(current, "parallel = runtime.parallel")
+    .span 155 5 155 62
+    eval current = builder_emit(current, "spawn = runtime.spawn")
+    .span 156 5 156 56
+    eval current = builder_emit(current, "fs = runtime.fs")
+    .span 157 5 157 62
+    eval current = builder_emit(current, "serve = runtime.serve")
+    .span 158 5 158 60
+    eval current = builder_emit(current, "http = runtime.http")
+    .span 159 5 159 70
+    eval current = builder_emit(current, "websocket = runtime.websocket")
+    .span 160 5 160 76
+    eval current = builder_emit(current, "logExecution = runtime.logExecution")
+    .span 161 5 161 70
+    eval current = builder_emit(current, "array_map = runtime.array_map")
+    .span 162 5 162 76
+    eval current = builder_emit(current, "array_filter = runtime.array_filter")
+    .span 163 5 163 76
+    eval current = builder_emit(current, "array_reduce = runtime.array_reduce")
+    .span 164 5 164 70
+    eval current = builder_emit(current, "globals()['t' + 'rue'] = True")
+    .span 165 5 165 72
+    eval current = builder_emit(current, "globals()['f' + 'alse'] = False")
+    .span 167 5 167 20
+    ret current
+.endfn
+
+.fn emit_top_level_bindings(builder -> PythonBuilder, bindings -> NativeBinding[]) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 170 28 170 52
+    .param builder -> PythonBuilder
+    .span 170 54 170 81
+    .param bindings -> NativeBinding[]
+    .span 171 5 171 31
+    eval let mut current = builder
+    .span 172 5 172 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= bindings.length
+            break
+        .endif
+        .span 179 9 179 39
+        eval let binding = bindings[index]
+        .span 180 9 180 54
+        eval let name = sanitize_identifier(binding.name)
+        .span 181 9 181 47
+        eval let mut line -> string = name + " = "
+        .if binding.value != null
+            .span 184 13 184 58
+            eval let mut value_text -> string = binding.value
+            .span 185 13 185 56
+            eval line = line + lower_expression(value_text)
+        .else
+            .span 187 13 187 34
+            eval line = line + "None"
+        .endif
+        .span 189 9 189 47
+        eval current = builder_emit(current, line)
+        .span 190 9 190 20
+        eval index += 1
+    .endloop
+    .span 193 5 193 20
+    ret current
+.endfn
+
+.fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> PythonImportEmission
+.meta return PythonImportEmission
+.meta effects none
+    .span 196 24 196 48
+    .param builder -> PythonBuilder
+    .span 196 50 196 75
+    .param imports -> NativeImport[]
+    .span 197 5 197 31
+    eval let mut current = builder
+    .span 198 5 198 38
+    eval let mut exports -> string[] = []
+    .span 199 5 199 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= imports.length
+            break
+        .endif
+        .span 204 9 204 36
+        eval let entry = imports[index]
+        .if entry.kind == "export"
+            .span 206 13 206 71
+            eval exports = collect_export_names(exports, entry.specifiers)
+            .span 207 13 207 55
+            eval let module_text = trim_text(entry.module)
+            .if module_text.length == 0
+                .span 209 17 209 28
+                eval index += 1
+                continue
+            .endif
+        .endif
+        .span 213 9 213 48
+        eval let line = render_python_import(entry)
+        .if line.length > 0
+            .span 215 13 215 51
+            eval current = builder_emit(current, line)
+        .endif
+        .span 217 9 217 20
+        eval index += 1
+    .endloop
+    .span 220 5 220 72
+    ret PythonImportEmission { builder: current, exports: exports }
+.endfn
+
+.fn emit_enum_definitions(builder -> PythonBuilder, enums -> NativeEnum[]) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 223 26 223 50
+    .param builder -> PythonBuilder
+    .span 223 52 223 73
+    .param enums -> NativeEnum[]
+    .span 224 5 224 31
+    eval let mut current = builder
+    .span 225 5 225 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= enums.length
+            break
+        .endif
+        .span 230 9 230 59
+        eval current = emit_single_enum(current, enums[index])
+        .if index + 1 < enums.length
+            .span 232 13 232 51
+            eval current = builder_emit_blank(current)
+        .endif
+        .span 234 9 234 20
+        eval index += 1
+    .endloop
+    .span 236 5 236 20
+    ret current
+.endfn
+
+.fn emit_single_enum(builder -> PythonBuilder, definition -> NativeEnum) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 239 21 239 45
+    .param builder -> PythonBuilder
+    .span 239 47 239 71
+    .param definition -> NativeEnum
+    .span 240 5 240 58
+    eval let enum_name = sanitize_identifier(definition.name)
+    .span 241 5 241 102
+    eval let mut current = builder_emit(builder, enum_name + " = runtime.enum_type('" + enum_name + "')")
+    .span 242 5 242 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= definition.variants.length
+            break
+        .endif
+        .span 247 9 247 50
+        eval let variant = definition.variants[index]
+        .span 248 9 248 62
+        eval let variant_name = sanitize_identifier(variant.name)
+        .span 249 9 249 170
+        eval let variant_line = enum_name + " = runtime.enum_define_variant(" + enum_name + ", '" + variant_name + "', [" + render_enum_variant_fields(variant.fields) + "])"
+        .span 250 9 250 55
+        eval current = builder_emit(current, variant_line)
+        .span 251 9 251 20
+        eval index += 1
+    .endloop
+    .span 253 5 253 20
+    ret current
+.endfn
+
+.fn render_enum_variant_fields(fields -> NativeEnumVariantField[]) -> string
+.meta return string
+.meta effects none
+    .span 256 31 256 65
+    .param fields -> NativeEnumVariantField[]
+    .if fields.length == 0
+        .span 258 9 258 19
+        ret ""
+    .endif
+    .span 260 5 260 39
+    eval let mut rendered -> string[] = []
+    .span 261 5 261 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= fields.length
+            break
+        .endif
+        .span 266 9 266 97
+        eval rendered = append_string(rendered, "'" + sanitize_identifier(fields[index].name) + "'")
+        .span 267 9 267 20
+        eval index += 1
+    .endloop
+    .span 269 5 269 48
+    ret join_with_separator(rendered, ", ")
+.endfn
+
+.fn render_python_import(entry -> NativeImport) -> string
+.meta return string
+.meta effects none
+    .span 272 25 272 46
+    .param entry -> NativeImport
+    .span 273 5 273 61
+    eval let module_path = normalize_import_module(entry.module)
+    .if module_path.length == 0
+        .span 275 9 275 19
+        ret ""
+    .endif
+    .if entry.specifiers.length == 0
+        .span 278 9 278 40
+        ret "import " + module_path
+    .endif
+    .span 280 5 280 63
+    eval let rendered = render_python_specifiers(entry.specifiers)
+    .span 281 9 281 62
+    ret "from " + module_path + " import " + rendered
+.endfn
+
+.fn render_python_specifiers(specifiers -> NativeImportSpecifier[]) -> string
+.meta return string
+.meta effects none
+    .span 284 29 284 66
+    .param specifiers -> NativeImportSpecifier[]
+    .span 285 5 285 36
+    eval let mut parts -> string[] = []
+    .span 286 5 286 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= specifiers.length
+            break
+        .endif
+        .span 291 9 291 82
+        eval parts = append_string(parts, render_python_specifier(specifiers[index]))
+        .span 292 9 292 20
+        eval index += 1
+    .endloop
+    .span 294 5 294 45
+    ret join_with_separator(parts, ", ")
+.endfn
+
+.fn render_python_specifier(specifier -> NativeImportSpecifier) -> string
+.meta return string
+.meta effects none
+    .span 297 28 297 62
+    .param specifier -> NativeImportSpecifier
+    .span 298 5 298 52
+    eval let base = sanitize_identifier(specifier.name)
+    .if specifier.alias == null || specifier.alias.length == 0
+        .span 300 9 300 21
+        ret base
+    .endif
+    .span 302 5 302 65
+    ret base + " as " + sanitize_identifier(specifier.alias)
+.endfn
+
+.fn normalize_import_module(path -> string) -> string
+.meta return string
+.meta effects none
+    .span 305 28 305 42
+    .param path -> string
+    .span 306 5 306 35
+    eval let trimmed = trim_text(path)
+    .if trimmed.length == 0
+        .span 308 9 308 24
+        ret trimmed
+    .endif
+    .if starts_with(trimmed, "runtime/")
+        .span 311 9 311 56
+        eval let remainder = replace_all(trimmed, "/", ".")
+        .span 312 9 312 46
+        ret "compiler.build." + remainder
+    .endif
+    .if starts_with(trimmed, "./")
+        .span 315 9 315 63
+        eval let remainder = substring(trimmed, 2, trimmed.length)
+        .span 316 9 316 54
+        eval remainder = replace_all(remainder, "/", ".")
+        .span 317 9 317 46
+        ret "compiler.build." + remainder
+    .endif
+    .span 319 5 319 43
+    ret replace_all(trimmed, "/", ".")
+.endfn
+
+.fn emit_struct_definitions(builder -> PythonBuilder, structs -> NativeStruct[]) -> PythonStructEmission
+.meta return PythonStructEmission
+.meta effects none
+    .span 322 28 322 52
+    .param builder -> PythonBuilder
+    .span 322 54 322 79
+    .param structs -> NativeStruct[]
+    .span 323 5 323 31
+    eval let mut current = builder
+    .span 324 5 324 42
+    eval let mut diagnostics -> string[] = []
+    .span 325 5 325 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= structs.length
+            break
+        .endif
+        .span 330 9 330 68
+        eval let emission = emit_single_struct(current, structs[index])
+        .span 331 9 331 36
+        eval current = emission.builder
+        .span 332 9 332 64
+        eval diagnostics = diagnostics.concat(emission.diagnostics)
+        .if index + 1 < structs.length
+            .span 334 13 334 51
+            eval current = builder_emit_blank(current)
+        .endif
+        .span 336 9 336 20
+        eval index += 1
+    .endloop
+    .span 338 5 338 80
+    ret PythonStructEmission { builder: current, diagnostics: diagnostics }
+.endfn
+
+.fn emit_export_list(builder -> PythonBuilder, exports -> string[]) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 341 21 341 45
+    .param builder -> PythonBuilder
+    .span 341 47 341 66
+    .param exports -> string[]
+    .span 342 5 342 37
+    eval let mut unique -> string[] = []
+    .span 343 5 343 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= exports.length
+            break
+        .endif
+        .span 348 9 348 56
+        eval let name = sanitize_identifier(exports[index])
+        .span 349 9 349 41
+        eval let mut seen -> boolean = false
+        .span 350 9 350 46
+        eval let mut existing_index -> number = 0
+        .loop
+            .if existing_index >= unique.length
+                break
+            .endif
+            .if unique[existing_index] == name
+                .span 356 17 356 29
+                eval seen = true
+                break
+            .endif
+            .span 359 13 359 33
+            eval existing_index += 1
+        .endloop
+        .if !seen
+            .span 362 13 362 50
+            eval unique = append_string(unique, name)
+        .endif
+        .span 364 9 364 20
+        eval index += 1
+    .endloop
+    .span 366 5 366 37
+    eval let mut quoted -> string[] = []
+    .span 367 5 367 15
+    eval index = 0
+    .loop
+        .if index >= unique.length
+            break
+        .endif
+        .span 372 9 372 69
+        eval quoted = append_string(quoted, "\"" + unique[index] + "\"")
+        .span 373 9 373 20
+        eval index += 1
+    .endloop
+    .span 375 5 375 91
+    ret builder_emit(builder, "__all__ = [" + join_with_separator(quoted, ", ") + "]")
+.endfn
+
+.fn collect_export_names(existing -> string[], specifiers -> NativeImportSpecifier[]) -> string[]
+.meta return string[]
+.meta effects none
+    .span 378 25 378 45
+    .param existing -> string[]
+    .span 378 47 378 84
+    .param specifiers -> NativeImportSpecifier[]
+    .span 379 5 379 31
+    eval let mut result = existing
+    .span 380 5 380 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= specifiers.length
+            break
+        .endif
+        .span 385 9 385 43
+        eval let specifier = specifiers[index]
+        .span 386 9 386 54
+        eval let exported = select_export_name(specifier)
+        .if exported.length > 0
+            .span 388 13 388 54
+            eval result = append_string(result, exported)
+        .endif
+        .span 390 9 390 20
+        eval index += 1
+    .endloop
+    .span 392 5 392 19
+    ret result
+.endfn
+
+.fn select_export_name(specifier -> NativeImportSpecifier) -> string
+.meta return string
+.meta effects none
+    .span 395 23 395 57
+    .param specifier -> NativeImportSpecifier
+    .if specifier.alias != null && specifier.alias.length > 0
+        .span 397 9 397 32
+        ret specifier.alias
+    .endif
+    .span 399 5 399 27
+    ret specifier.name
+.endfn
+
+.fn emit_single_struct(builder -> PythonBuilder, definition -> NativeStruct) -> PythonStructEmission
+.meta return PythonStructEmission
+.meta effects none
+    .span 402 23 402 47
+    .param builder -> PythonBuilder
+    .span 402 49 402 75
+    .param definition -> NativeStruct
+    .span 403 5 403 59
+    eval let class_name = sanitize_identifier(definition.name)
+    .span 404 5 404 74
+    eval let mut current = builder_emit(builder, "class " + class_name + ":")
+    .span 405 5 405 44
+    eval current = builder_push_indent(current)
+    .span 406 5 406 42
+    eval let mut diagnostics -> string[] = []
+    .span 407 5 407 66
+    eval let parameters = render_struct_parameters(definition.fields)
+    .span 408 5 408 46
+    eval let init_signature = "def __init__(self"
+    .if parameters.length > 0
+        .span 410 9 410 88
+        eval init_signature = init_signature + ", " + join_with_separator(parameters, ", ")
+    .endif
+    .span 412 5 412 43
+    eval init_signature = init_signature + ")"
+    .span 413 5 413 59
+    eval current = builder_emit(current, init_signature + ":")
+    .span 414 5 414 44
+    eval current = builder_push_indent(current)
+    .if definition.fields.length == 0
+        .span 416 9 416 49
+        eval current = builder_emit(current, "pass")
+    .else
+        .span 418 5 418 33
+        eval let mut index -> number = 0
+        .loop
+            .if index >= definition.fields.length
+                break
+            .endif
+            .span 423 9 423 46
+            eval let field = definition.fields[index]
+            .span 424 9 424 57
+            eval let attr_name = sanitize_identifier(field.name)
+            .span 425 9 425 82
+            eval current = builder_emit(current, "self." + attr_name + " = " + attr_name)
+            .span 426 9 426 20
+            eval index += 1
+        .endloop
+    .endif
+    .span 429 5 429 43
+    eval current = builder_pop_indent(current)
+    .span 430 5 430 43
+    eval current = builder_emit_blank(current)
+    .span 431 5 431 60
+    eval current = builder_emit(current, "def __repr__(self):")
+    .span 432 5 432 44
+    eval current = builder_push_indent(current)
+    .span 433 5 433 80
+    eval let repr_fields = render_struct_repr_fields(class_name, definition.fields)
+    .span 434 5 434 50
+    eval current = builder_emit(current, repr_fields)
+    .span 435 5 435 43
+    eval current = builder_pop_indent(current)
+    .if class_name == "EnumInstance"
+        .span 437 9 437 47
+        eval current = builder_emit_blank(current)
+        .span 438 9 438 73
+        eval current = builder_emit(current, "def __getattr__(self, item):")
+        .span 439 9 439 48
+        eval current = builder_push_indent(current)
+        .span 440 9 440 54
+        eval current = builder_emit(current, "index = 0")
+        .span 441 9 441 56
+        eval current = builder_emit(current, "while True:")
+        .span 442 9 442 48
+        eval current = builder_push_indent(current)
+        .span 443 9 443 74
+        eval current = builder_emit(current, "if index >= len(self.fields):")
+        .span 444 9 444 48
+        eval current = builder_push_indent(current)
+        .span 445 9 445 50
+        eval current = builder_emit(current, "break")
+        .span 446 9 446 47
+        eval current = builder_pop_indent(current)
+        .span 447 9 447 71
+        eval current = builder_emit(current, "field = self.fields[index]")
+        .span 448 9 448 67
+        eval current = builder_emit(current, "if field.name == item:")
+        .span 449 9 449 48
+        eval current = builder_push_indent(current)
+        .span 450 9 450 63
+        eval current = builder_emit(current, "return field.value")
+        .span 451 9 451 47
+        eval current = builder_pop_indent(current)
+        .span 452 9 452 55
+        eval current = builder_emit(current, "index += 1")
+        .span 453 9 453 47
+        eval current = builder_pop_indent(current)
+        .span 454 9 454 71
+        eval current = builder_emit(current, "raise AttributeError(item)")
+        .span 455 9 455 47
+        eval current = builder_pop_indent(current)
+    .endif
+    .if definition.methods.length > 0
+        .span 458 9 458 47
+        eval current = builder_emit_blank(current)
+        .span 459 9 459 44
+        eval let mut method_index -> number = 0
+        .loop
+            .if method_index >= definition.methods.length
+                break
+            .endif
+            .span 464 13 464 59
+            eval let method = definition.methods[method_index]
+            .span 465 13 465 66
+            eval let emission = emit_python_function(current, method)
+            .span 466 13 466 40
+            eval current = emission.builder
+            .span 467 13 467 68
+            eval diagnostics = diagnostics.concat(emission.diagnostics)
+            .if method_index + 1 < definition.methods.length
+                .span 469 17 469 55
+                eval current = builder_emit_blank(current)
+            .endif
+            .span 471 13 471 31
+            eval method_index += 1
+        .endloop
+    .endif
+    .span 474 5 474 43
+    eval current = builder_pop_indent(current)
+    .span 475 5 475 80
+    ret PythonStructEmission { builder: current, diagnostics: diagnostics }
+.endfn
+
+.fn render_struct_parameters(fields -> NativeStructField[]) -> string[]
+.meta return string[]
+.meta effects none
+    .span 478 29 478 58
+    .param fields -> NativeStructField[]
+    .span 479 5 479 39
+    eval let mut required -> string[] = []
+    .span 480 5 480 39
+    eval let mut optional -> string[] = []
+    .span 481 5 481 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= fields.length
+            break
+        .endif
+        .span 486 9 486 35
+        eval let field = fields[index]
+        .span 487 9 487 52
+        eval let name = sanitize_identifier(field.name)
+        .span 488 9 488 40
+        eval let mut entry -> string = name
+        .if is_optional_type(field.type_annotation)
+            .span 490 13 490 37
+            eval entry = entry + "=None"
+            .span 491 13 491 55
+            eval optional = append_string(optional, entry)
+        .else
+            .span 493 13 493 55
+            eval required = append_string(required, entry)
+        .endif
+        .span 495 9 495 20
+        eval index += 1
+    .endloop
+    .span 497 5 497 38
+    ret required.concat(optional)
+.endfn
+
+.fn render_struct_repr_fields(class_name -> string, fields -> NativeStructField[]) -> string
+.meta return string
+.meta effects none
+    .span 500 30 500 50
+    .param class_name -> string
+    .span 500 52 500 81
+    .param fields -> NativeStructField[]
+    .if fields.length == 0
+        .span 502 9 502 71
+        ret "return runtime.struct_repr('" + class_name + "', [])"
+    .endif
+    .span 504 5 504 39
+    eval let mut rendered -> string[] = []
+    .span 505 5 505 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= fields.length
+            break
+        .endif
+        .span 510 9 510 35
+        eval let field = fields[index]
+        .span 511 9 511 52
+        eval let name = sanitize_identifier(field.name)
+        .span 512 9 512 103
+        eval rendered = append_string(rendered, "runtime.struct_field('" + name + "', self." + name + ")")
+        .span 513 9 513 20
+        eval index += 1
+    .endloop
+    .span 515 5 515 110
+    ret "return runtime.struct_repr('" + class_name + "', [" + join_with_separator(rendered, ", ") + "])"
+.endfn
+
+.fn is_optional_type(type_annotation -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 518 21 518 46
+    .param type_annotation -> string
+    .span 519 5 519 46
+    eval let trimmed = trim_text(type_annotation)
+    .if trimmed.length == 0
+        .span 521 9 521 21
+        ret true
+    .endif
+    .span 523 5 523 36
+    ret ends_with(trimmed, "?")
+.endfn
+
+.fn lower_expression(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 526 21 526 41
+    .param expression -> string
+    .span 527 5 527 55
+    ret lower_expression_with_depth(expression, 0)
+.endfn
+
+.fn lower_expression_with_depth(expression -> string, depth -> number) -> string
+.meta return string
+.meta effects none
+    .span 530 32 530 52
+    .param expression -> string
+    .span 530 54 530 69
+    .param depth -> number
+    .if depth > 8
+        .span 532 9 532 38
+        ret trim_text(expression)
+    .endif
+    .span 534 5 534 41
+    eval let trimmed = trim_text(expression)
+    .if trimmed.length == 0
+        .span 536 9 536 24
+        ret trimmed
+    .endif
+    .span 538 5 538 69
+    eval let interpolated = rewrite_interpolated_string_literal(trimmed)
+    .if interpolated != null
+        .span 540 9 540 29
+        ret interpolated
+    .endif
+    .span 542 5 542 74
+    eval let struct_literal = lower_struct_literal_expression(trimmed, depth)
+    .if struct_literal != null
+        .span 544 9 544 31
+        ret struct_literal
+    .endif
+    .span 546 5 546 72
+    eval let array_literal = lower_array_literal_expression(trimmed, depth)
+    .if array_literal != null
+        .span 548 9 548 30
+        ret array_literal
+    .endif
+    .span 550 5 550 60
+    eval let rewritten = rewrite_expression_intrinsics(trimmed)
+    .span 551 5 551 74
+    eval let arrays_lowered = rewrite_array_literals_inline(rewritten, depth)
+    .span 552 5 552 66
+    ret rewrite_struct_literals_inline(arrays_lowered, depth)
+.endfn
+
+.fn rewrite_interpolated_string_literal(expression -> string) -> string?
+.meta return string?
+.meta effects none
+    .span 555 40 555 60
+    .param expression -> string
+    .if expression.length < 2
+        .span 557 9 557 21
+        ret null
+    .endif
+    .span 559 5 559 53
+    eval let decoded = decode_string_literal(expression)
+    .if decoded == null
+        .span 561 9 561 21
+        ret null
+    .endif
+    .if find_substring(decoded, "{{") < 0
+        .span 564 9 564 21
+        ret null
+    .endif
+    .if find_substring(decoded, "}}") < 0
+        .span 567 9 567 21
+        ret null
+    .endif
+    .span 569 5 569 36
+    eval let mut parts -> string[] = []
+    .span 570 5 570 42
+    eval let mut expressions -> string[] = []
+    .span 571 5 571 23
+    eval let mut index = 0
+    .loop
+        .if index > decoded.length
+            break
+        .endif
+        .span 576 9 576 63
+        eval let start = find_substring_from(decoded, "{{", index)
+        .if start < 0
+            .span 578 13 578 66
+            eval let tail = substring(decoded, index, decoded.length)
+            .span 579 13 579 48
+            eval parts = append_string(parts, tail)
+            break
+        .endif
+        .span 582 9 582 55
+        eval let prefix = substring(decoded, index, start)
+        .span 583 9 583 46
+        eval parts = append_string(parts, prefix)
+        .span 584 9 584 65
+        eval let end = find_substring_from(decoded, "}}", start + 2)
+        .if end < 0
+            .span 586 13 586 25
+            ret null
+        .endif
+        .span 588 9 588 71
+        eval let expr_text = trim_text(substring(decoded, start + 2, end))
+        .if expr_text.length == 0
+            .span 590 13 590 25
+            ret null
+        .endif
+        .span 592 9 592 61
+        eval expressions = append_string(expressions, expr_text)
+        .span 593 9 593 25
+        eval index = end + 2
+    .endloop
+    .if expressions.length == 0
+        .span 596 9 596 21
+        ret null
+    .endif
+    .span 598 5 598 44
+    eval let mut encoded_parts -> string[] = []
+    .span 599 5 599 38
+    eval let mut part_index -> number = 0
+    .loop
+        .if part_index >= parts.length
+            break
+        .endif
+        .span 604 9 604 96
+        eval encoded_parts = append_string(encoded_parts, python_string_literal(parts[part_index]))
+        .span 605 9 605 37
+        eval part_index = part_index + 1
+    .endloop
+    .span 607 5 607 44
+    eval let mut value_entries -> string[] = []
+    .span 608 5 608 20
+    eval part_index = 0
+    .loop
+        .if part_index >= expressions.length
+            break
+        .endif
+        .span 613 9 613 91
+        eval value_entries = append_string(value_entries, "(" + expressions[part_index] + ")")
+        .span 614 9 614 37
+        eval part_index = part_index + 1
+    .endloop
+    .span 616 5 616 74
+    eval let part_list = "[" + join_with_separator(encoded_parts, ", ") + "]"
+    .span 617 5 617 75
+    eval let value_list = "[" + join_with_separator(value_entries, ", ") + "]"
+    .span 618 5 618 81
+    ret "runtime.format_interpolated(" + part_list + ", " + value_list + ")"
+.endfn
+
+.fn decode_string_literal(expression -> string) -> string?
+.meta return string?
+.meta effects none
+    .span 621 26 621 46
+    .param expression -> string
+    .if expression.length < 2
+        .span 623 9 623 21
+        ret null
+    .endif
+    .span 625 5 625 31
+    eval let quote = expression[0]
+    .if quote != "\"" && quote != "'"
+        .span 627 9 627 21
+        ret null
+    .endif
+    .if expression[expression.length - 1] != quote
+        .span 630 9 630 21
+        ret null
+    .endif
+    .span 632 5 632 25
+    eval let mut result = ""
+    .span 633 5 633 23
+    eval let mut index = 1
+    .loop
+        .if index >= expression.length - 1
+            break
+        .endif
+        .span 638 9 638 36
+        eval let ch = expression[index]
+        .if ch == "\\"
+            .span 640 13 640 31
+            eval index = index + 1
+            .if index >= expression.length - 1
+                .span 642 17 642 29
+                ret null
+            .endif
+            .span 644 13 644 44
+            eval let escape = expression[index]
+            .span 645 13 645 69
+            eval result = result + decode_escape_sequence(escape, quote)
+            .span 646 13 646 31
+            eval index = index + 1
+            continue
+        .endif
+        .span 649 9 649 30
+        eval result = result + ch
+        .span 650 9 650 27
+        eval index = index + 1
+    .endloop
+    .span 652 5 652 19
+    ret result
+.endfn
+
+.fn decode_escape_sequence(escape -> string, quote -> string) -> string
+.meta return string
+.meta effects none
+    .span 655 27 655 43
+    .param escape -> string
+    .span 655 45 655 60
+    .param quote -> string
+    .if escape == "n"
+        .span 657 9 657 21
+        ret "\n"
+    .endif
+    .if escape == "r"
+        .span 660 9 660 21
+        ret "\r"
+    .endif
+    .if escape == "t"
+        .span 663 9 663 21
+        ret "\t"
+    .endif
+    .if escape == "\\"
+        .span 666 9 666 21
+        ret "\\"
+    .endif
+    .if escape == quote
+        .span 669 9 669 22
+        ret quote
+    .endif
+    .span 671 5 671 19
+    ret escape
+.endfn
+
+.fn python_string_literal(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 674 26 674 41
+    .param value -> string
+    .span 675 5 675 26
+    eval let mut result = "'"
+    .span 676 5 676 23
+    eval let mut index = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .span 681 9 681 31
+        eval let ch = value[index]
+        .if ch == "\\"
+            .span 683 13 683 38
+            eval result = result + "\\\\"
+        .else
+            .if ch == "'"
+                .span 685 13 685 37
+                eval result = result + "\\'"
+            .else
+                .if ch == "\n"
+                    .span 687 13 687 37
+                    eval result = result + "\\n"
+                .else
+                    .if ch == "\r"
+                        .span 689 13 689 37
+                        eval result = result + "\\r"
+                    .else
+                        .if ch == "\t"
+                            .span 691 13 691 37
+                            eval result = result + "\\t"
+                        .else
+                            .span 693 13 693 34
+                            eval result = result + ch
+                        .endif
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 695 9 695 27
+        eval index = index + 1
+    .endloop
+    .span 697 5 697 27
+    eval result = result + "'"
+    .span 698 5 698 19
+    ret result
+.endfn
+
+.fn find_substring(value -> string, pattern -> string) -> number
+.meta return number
+.meta effects none
+    .span 701 19 701 34
+    .param value -> string
+    .span 701 36 701 53
+    .param pattern -> string
+    .if pattern.length == 0
+        .span 703 9 703 18
+        ret 0
+    .endif
+    .if value.length < pattern.length
+        .span 706 9 706 19
+        ret -1
+    .endif
+    .span 708 5 708 23
+    eval let mut index = 0
+    .loop
+        .if index + pattern.length > value.length
+            break
+        .endif
+        .span 713 9 713 32
+        eval let mut matches = true
+        .span 714 9 714 28
+        eval let mut offset = 0
+        .loop
+            .if offset >= pattern.length
+                break
+            .endif
+            .if value[index + offset] != pattern[offset]
+                .span 720 17 720 33
+                eval matches = false
+                break
+            .endif
+            .span 723 9 723 29
+            eval offset = offset + 1
+        .endloop
+        .if matches
+            .span 726 13 726 26
+            ret index
+        .endif
+        .span 728 9 728 27
+        eval index = index + 1
+    .endloop
+    .span 730 5 730 15
+    ret -1
+.endfn
+
+.fn lower_struct_literal_expression(expression -> string, depth -> number) -> string?
+.meta return string?
+.meta effects none
+    .span 733 36 733 56
+    .param expression -> string
+    .span 733 58 733 73
+    .param depth -> number
+    .span 734 5 734 49
+    eval let brace_index = index_of(expression, "{")
+    .if brace_index < 0
+        .span 736 9 736 21
+        ret null
+    .endif
+    .span 738 5 738 70
+    eval let closing_index = find_matching_brace(expression, brace_index)
+    .if closing_index < 0
+        .span 740 9 740 21
+        ret null
+    .endif
+    .span 742 5 742 70
+    eval let type_name = trim_text(substring(expression, 0, brace_index))
+    .if type_name.length == 0
+        .span 744 9 744 21
+        ret null
+    .endif
+    .if !is_struct_literal_type_candidate(type_name)
+        .span 747 9 747 21
+        ret null
+    .endif
+    .span 749 5 749 77
+    eval let fields_text = substring(expression, brace_index + 1, closing_index)
+    .span 750 5 750 59
+    eval let entries = split_struct_field_entries(fields_text)
+    .span 751 5 751 42
+    eval let mut assignments -> string[] = []
+    .span 752 5 752 42
+    eval let mut enum_fields -> string[] = []
+    .span 753 5 753 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= entries.length
+            break
+        .endif
+        .span 758 9 758 73
+        eval let entry = trim_trailing_delimiters(trim_text(entries[index]))
+        .if entry.length == 0
+            .span 760 13 760 24
+            eval index += 1
+            continue
+        .endif
+        .span 763 9 763 48
+        eval let colon_index = index_of(entry, ":")
+        .if colon_index < 0
+            .span 765 13 765 24
+            eval index += 1
+            continue
+        .endif
+        .span 768 9 768 64
+        eval let name = trim_text(substring(entry, 0, colon_index))
+        .span 769 9 769 85
+        eval let value_text = trim_text(substring(entry, colon_index + 1, entry.length))
+        .if name.length == 0
+            .span 771 13 771 24
+            eval index += 1
+            continue
+        .endif
+        .span 774 9 774 80
+        eval let lowered_value = lower_expression_with_depth(value_text, depth + 1)
+        .span 775 9 775 56
+        eval let sanitized_name = sanitize_identifier(name)
+        .span 776 9 776 88
+        eval assignments = append_string(assignments, sanitized_name + "=" + lowered_value)
+        .span 777 9 777 121
+        eval enum_fields = append_string(enum_fields, "runtime.enum_field('" + sanitized_name + "', " + lowered_value + ")")
+        .span 778 9 778 20
+        eval index += 1
+    .endloop
+    .span 780 5 780 67
+    eval let sanitized_type = sanitize_qualified_identifier(type_name)
+    .span 781 5 781 37
+    eval let mut last_dot -> number = -1
+    .span 782 5 782 15
+    eval index = 0
+    .loop
+        .if index >= sanitized_type.length
+            break
+        .endif
+        .if char_at(sanitized_type, index) == "."
+            .span 788 13 788 30
+            eval last_dot = index
+        .endif
+        .span 790 9 790 20
+        eval index += 1
+    .endloop
+    .if last_dot >= 0
+        .span 793 9 793 66
+        eval let enum_target = substring(sanitized_type, 0, last_dot)
+        .span 794 9 794 91
+        eval let variant_name = substring(sanitized_type, last_dot + 1, sanitized_type.length)
+        .span 795 9 795 77
+        eval let field_list = "[" + join_with_separator(enum_fields, ", ") + "]"
+        .span 796 9 796 108
+        ret "runtime.enum_instantiate(" + enum_target + ", '" + variant_name + "', " + field_list + ")"
+    .endif
+    .span 798 5 798 80
+    ret sanitized_type + "(" + join_with_separator(assignments, ", ") + ")"
+.endfn
+
+.fn is_struct_literal_type_candidate(text -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 801 37 801 51
+    .param text -> string
+    .if text.length == 0
+        .span 803 9 803 22
+        ret false
+    .endif
+    .span 805 5 805 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 810 9 810 52
+        eval let ch = substring(text, index, index + 1)
+        .if ch == "."
+            .span 812 13 812 24
+            eval index += 1
+            continue
+        .endif
+        .if is_identifier_char(ch)
+            .span 816 13 816 24
+            eval index += 1
+            continue
+        .endif
+        .span 819 9 819 22
+        ret false
+    .endloop
+    .span 821 5 821 17
+    ret true
+.endfn
+
+.fn lower_array_literal_expression(expression -> string, depth -> number) -> string?
+.meta return string?
+.meta effects none
+    .span 824 35 824 55
+    .param expression -> string
+    .span 824 57 824 72
+    .param depth -> number
+    .span 825 5 825 41
+    eval let trimmed = trim_text(expression)
+    .if trimmed.length < 2
+        .span 827 9 827 21
+        ret null
+    .endif
+    .if substring(trimmed, 0, 1) != "["
+        .span 830 9 830 21
+        ret null
+    .endif
+    .span 832 5 832 44
+    eval let closing_index = trimmed.length - 1
+    .if substring(trimmed, closing_index, closing_index + 1) != "]"
+        .span 834 9 834 21
+        ret null
+    .endif
+    .span 836 5 836 59
+    eval let inner = substring(trimmed, 1, trimmed.length - 1)
+    .span 837 5 837 46
+    eval let entries = split_array_entries(inner)
+    .span 838 5 838 38
+    eval let mut lowered -> string[] = []
+    .span 839 5 839 66
+    eval let mut index -> number = array_literal_start_index(entries)
+    .loop
+        .if index >= entries.length
+            break
+        .endif
+        .span 844 9 844 73
+        eval let entry = trim_trailing_delimiters(trim_text(entries[index]))
+        .if entry.length > 0
+            .span 846 13 846 93
+            eval lowered = append_string(lowered, lower_expression_with_depth(entry, depth + 1))
+        .endif
+        .span 848 9 848 20
+        eval index += 1
+    .endloop
+    .if lowered.length == 0
+        .span 851 9 851 21
+        ret "[]"
+    .endif
+    .span 853 5 853 51
+    eval let body = join_with_separator(lowered, ", ")
+    .span 854 5 854 29
+    ret "[" + body + "]"
+.endfn
+
+.fn array_literal_start_index(entries -> string[]) -> number
+.meta return number
+.meta effects none
+    .span 857 30 857 49
+    .param entries -> string[]
+    .if entries.length == 0
+        .span 859 9 859 18
+        ret 0
+    .endif
+    .span 861 5 861 65
+    eval let first = trim_trailing_delimiters(trim_text(entries[0]))
+    .if is_array_metadata_entry(first)
+        .span 863 9 863 18
+        ret 1
+    .endif
+    .span 865 5 865 14
+    ret 0
+.endfn
+
+.fn is_array_metadata_entry(entry -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 868 28 868 43
+    .param entry -> string
+    .span 869 5 869 36
+    eval let trimmed = trim_text(entry)
+    .if trimmed.length == 0
+        .span 871 9 871 22
+        ret false
+    .endif
+    .if !starts_with(trimmed, "#element:")
+        .span 874 9 874 22
+        ret false
+    .endif
+    .span 876 5 876 71
+    eval let annotation = trim_text(substring(trimmed, 9, trimmed.length))
+    .span 877 5 877 34
+    ret annotation.length > 0
+.endfn
+
+.fn rewrite_array_literals_inline(expression -> string, depth -> number) -> string
+.meta return string
+.meta effects none
+    .span 880 34 880 54
+    .param expression -> string
+    .span 880 56 880 71
+    .param depth -> number
+    .if expression.length == 0
+        .span 882 9 882 27
+        ret expression
+    .endif
+    .span 884 5 884 44
+    eval let mut current -> string = expression
+    .span 885 5 885 40
+    eval let mut search_start -> number = 0
+    .loop
+        .if search_start >= current.length
+            break
+        .endif
+        .span 890 9 890 71
+        eval let open_index = find_next_square_open(current, search_start)
+        .if open_index < 0
+            break
+        .endif
+        .span 894 9 894 71
+        eval let closing_index = find_matching_square(current, open_index)
+        .if closing_index < 0
+            break
+        .endif
+        .span 898 9 898 76
+        eval let array_text = substring(current, open_index, closing_index + 1)
+        .span 899 9 899 77
+        eval let lowered = lower_array_literal_expression(array_text, depth + 1)
+        .if lowered == null
+            .span 901 13 901 43
+            eval search_start = open_index + 1
+            continue
+        .endif
+        .span 904 9 904 56
+        eval let prefix = substring(current, 0, open_index)
+        .span 905 9 905 76
+        eval let suffix = substring(current, closing_index + 1, current.length)
+        .span 906 9 906 45
+        eval current = prefix + lowered + suffix
+        .span 907 9 907 52
+        eval search_start = open_index + lowered.length
+    .endloop
+    .span 909 5 909 20
+    ret current
+.endfn
+
+.fn rewrite_struct_literals_inline(expression -> string, depth -> number) -> string
+.meta return string
+.meta effects none
+    .span 912 35 912 55
+    .param expression -> string
+    .span 912 57 912 72
+    .param depth -> number
+    .if expression.length == 0
+        .span 914 9 914 27
+        ret expression
+    .endif
+    .span 916 5 916 44
+    eval let mut current -> string = expression
+    .span 917 5 917 40
+    eval let mut search_start -> number = 0
+    .loop
+        .if search_start >= current.length
+            break
+        .endif
+        .span 922 9 922 74
+        eval let open_index = find_substring_from(current, "{", search_start)
+        .if open_index < 0
+            break
+        .endif
+        .span 926 9 926 49
+        eval let mut type_end -> number = open_index
+        .loop
+            .if type_end <= 0
+                break
+            .endif
+            .span 931 13 931 67
+            eval let prev = substring(current, type_end - 1, type_end)
+            .if is_whitespace_char(prev)
+                .span 933 17 933 31
+                eval type_end -= 1
+                continue
+            .endif
+            break
+        .endloop
+        .span 938 9 938 49
+        eval let mut type_start -> number = type_end
+        .loop
+            .if type_start <= 0
+                break
+            .endif
+            .span 943 13 943 81
+            eval let candidate_char = substring(current, type_start - 1, type_start)
+            .if candidate_char == "."
+                .span 945 17 945 33
+                eval type_start -= 1
+                continue
+            .endif
+            .if is_identifier_char(candidate_char)
+                .span 949 17 949 33
+                eval type_start -= 1
+                continue
+            .endif
+            break
+        .endloop
+        .if type_start == type_end
+            .span 955 13 955 43
+            eval search_start = open_index + 1
+            continue
+        .endif
+        .span 958 9 958 66
+        eval let candidate = substring(current, type_start, type_end)
+        .if !is_struct_literal_type_candidate(candidate)
+            .span 960 13 960 43
+            eval search_start = open_index + 1
+            continue
+        .endif
+        .if type_start > 0
+            .span 964 13 964 78
+            eval let prefix_char = substring(current, type_start - 1, type_start)
+            .if is_identifier_char(prefix_char) || prefix_char == "."
+                .span 966 17 966 47
+                eval search_start = open_index + 1
+                continue
+            .endif
+        .endif
+        .span 970 9 970 70
+        eval let closing_index = find_matching_brace(current, open_index)
+        .if closing_index < 0
+            break
+        .endif
+        .span 974 9 974 77
+        eval let struct_text = substring(current, type_start, closing_index + 1)
+        .span 975 9 975 79
+        eval let lowered = lower_struct_literal_expression(struct_text, depth + 1)
+        .if lowered == null
+            .span 977 13 977 46
+            eval search_start = closing_index + 1
+            continue
+        .endif
+        .span 980 9 980 56
+        eval let prefix = substring(current, 0, type_start)
+        .span 981 9 981 76
+        eval let suffix = substring(current, closing_index + 1, current.length)
+        .span 982 9 982 45
+        eval current = prefix + lowered + suffix
+        .span 983 9 983 52
+        eval search_start = type_start + lowered.length
+    .endloop
+    .span 985 5 985 20
+    ret current
+.endfn
+
+.fn capture_struct_literal_expression(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> StructLiteralCapture
+.meta return StructLiteralCapture
+.meta effects none
+    .span 988 38 988 55
+    .param initial -> string
+    .span 988 57 988 92
+    .param instructions -> NativeInstruction[]
+    .span 988 94 988 115
+    .param start_index -> number
+    .span 989 5 989 38
+    eval let trimmed = trim_text(initial)
+    .if !ends_with(trimmed, "{")
+        .span 991 9 991 90
+        ret StructLiteralCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .span 993 5 993 44
+    eval let mut expression -> string = trimmed
+    .span 994 5 994 43
+    eval let mut index -> number = start_index
+    .span 995 5 995 36
+    eval let mut consumed -> number = 0
+    .span 996 5 996 62
+    eval let mut depth -> number = compute_brace_balance(trimmed)
+    .if depth <= 0
+        .span 998 9 998 90
+        ret StructLiteralCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .loop
+        .if index >= instructions.length
+            break
+        .endif
+        .span 1004 9 1004 45
+        eval let candidate = instructions[index]
+        .if candidate.variant != "Unknown"
+            break
+        .endif
+        .span 1008 9 1008 49
+        eval let segment = trim_text(candidate.text)
+        .if segment.length > 0
+            .span 1010 13 1010 53
+            eval expression = expression + " " + segment
+        .endif
+        .span 1012 9 1012 49
+        eval depth += compute_brace_balance(segment)
+        .span 1013 9 1013 23
+        eval consumed += 1
+        .span 1014 9 1014 20
+        eval index += 1
+        .if depth <= 0
+            break
+        .endif
+    .endloop
+    .if depth != 0
+        .span 1020 9 1020 90
+        ret StructLiteralCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .if consumed == 0
+        .span 1023 9 1023 90
+        ret StructLiteralCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .span 1025 5 1025 70
+    eval let normalized = trim_trailing_delimiters(trim_text(expression))
+    .if !ends_with(normalized, "}")
+        .span 1027 9 1027 90
+        ret StructLiteralCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .span 1029 5 1029 95
+    ret StructLiteralCapture { expression: normalized, consumed: consumed, success: true }
+.endfn
+
+.fn rewrite_expression_intrinsics(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1032 34 1032 54
+    .param expression -> string
+    .if expression.length == 0
+        .span 1034 9 1034 27
+        ret expression
+    .endif
+    .span 1036 5 1036 34
+    eval let mut current = expression
+    .span 1037 5 1037 47
+    eval current = rewrite_literal_tokens(current)
+    .span 1038 5 1038 50
+    eval current = rewrite_logical_operators(current)
+    .span 1039 5 1039 43
+    eval current = rewrite_push_calls(current)
+    .span 1040 5 1040 45
+    eval current = rewrite_concat_calls(current)
+    .span 1041 5 1041 48
+    eval current = rewrite_length_accesses(current)
+    .span 1042 5 1042 20
+    ret current
+.endfn
+
+.fn rewrite_logical_operators(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1045 30 1045 50
+    .param expression -> string
+    .if expression.length == 0
+        .span 1047 9 1047 27
+        ret expression
+    .endif
+    .span 1049 5 1049 35
+    eval let mut result -> string = ""
+    .span 1050 5 1050 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= expression.length
+            break
+        .endif
+        .span 1055 9 1055 58
+        eval let ch = substring(expression, index, index + 1)
+        .if ch == "'" || ch == "\""
+            .span 1057 13 1057 70
+            eval let literal_end = skip_string_literal(expression, index)
+            .span 1058 13 1058 73
+            eval result = result + substring(expression, index, literal_end)
+            .span 1059 13 1059 33
+            eval index = literal_end
+            continue
+        .endif
+        .if ch == "&"
+            .if index + 1 < expression.length
+                .span 1064 17 1064 72
+                eval let next = substring(expression, index + 1, index + 2)
+                .if next == "&"
+                    .span 1066 21 1066 47
+                    eval result = result + " and "
+                    .span 1067 21 1067 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+        .endif
+        .if ch == "|"
+            .if index + 1 < expression.length
+                .span 1074 17 1074 72
+                eval let next = substring(expression, index + 1, index + 2)
+                .if next == "|"
+                    .span 1076 21 1076 46
+                    eval result = result + " or "
+                    .span 1077 21 1077 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+        .endif
+        .if ch == "!"
+            .if index + 1 < expression.length
+                .span 1084 17 1084 72
+                eval let next = substring(expression, index + 1, index + 2)
+                .if next == "="
+                    .span 1086 21 1086 44
+                    eval result = result + "!="
+                    .span 1087 21 1087 32
+                    eval index += 2
+                    continue
+                .endif
+            .endif
+            .span 1091 13 1091 38
+            eval result = result + "not "
+            .span 1092 13 1092 24
+            eval index += 1
+            continue
+        .endif
+        .span 1095 9 1095 30
+        eval result = result + ch
+        .span 1096 9 1096 20
+        eval index += 1
+    .endloop
+    .span 1098 5 1098 19
+    ret result
+.endfn
+
+.fn rewrite_literal_tokens(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1101 27 1101 47
+    .param expression -> string
+    .if expression.length == 0
+        .span 1103 9 1103 27
+        ret expression
+    .endif
+    .span 1105 5 1105 35
+    eval let mut result -> string = ""
+    .span 1106 5 1106 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= expression.length
+            break
+        .endif
+        .span 1111 9 1111 58
+        eval let ch = substring(expression, index, index + 1)
+        .if ch == "'" || ch == "\""
+            .span 1113 13 1113 70
+            eval let literal_end = skip_string_literal(expression, index)
+            .span 1114 13 1114 73
+            eval result = result + substring(expression, index, literal_end)
+            .span 1115 13 1115 33
+            eval index = literal_end
+            continue
+        .endif
+        .if is_identifier_char(ch)
+            .span 1119 13 1119 31
+            eval let start = index
+            .loop
+                .span 1121 17 1121 28
+                eval index += 1
+                .if index >= expression.length
+                    break
+                .endif
+                .span 1125 17 1125 68
+                eval let next = substring(expression, index, index + 1)
+                .if !is_identifier_char(next)
+                    break
+                .endif
+            .endloop
+            .span 1130 13 1130 61
+            eval let token = substring(expression, start, index)
+            .if token == "null"
+                .span 1132 17 1132 42
+                eval result = result + "None"
+            .else
+                .if token == "true"
+                    .span 1134 17 1134 42
+                    eval result = result + "True"
+                .else
+                    .if token == "false"
+                        .span 1136 17 1136 43
+                        eval result = result + "False"
+                    .else
+                        .span 1138 17 1138 41
+                        eval result = result + token
+                    .endif
+                .endif
+            .endif
+            continue
+        .endif
+        .span 1142 9 1142 30
+        eval result = result + ch
+        .span 1143 9 1143 20
+        eval index += 1
+    .endloop
+    .span 1145 5 1145 19
+    ret result
+.endfn
+
+.fn rewrite_push_calls(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1148 23 1148 43
+    .param expression -> string
+    .if expression.length == 0
+        .span 1150 9 1150 27
+        ret expression
+    .endif
+    .span 1152 5 1152 27
+    eval let target = ".push("
+    .span 1153 5 1153 34
+    eval let replacement = ".append("
+    .span 1154 5 1154 35
+    eval let mut result -> string = ""
+    .span 1155 5 1155 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= expression.length
+            break
+        .endif
+        .span 1160 9 1160 58
+        eval let ch = substring(expression, index, index + 1)
+        .if ch == "'" || ch == "\""
+            .span 1162 13 1162 70
+            eval let literal_end = skip_string_literal(expression, index)
+            .span 1163 13 1163 73
+            eval result = result + substring(expression, index, literal_end)
+            .span 1164 13 1164 33
+            eval index = literal_end
+            continue
+        .endif
+        .if index + target.length <= expression.length
+            .span 1168 13 1168 77
+            eval let slice = substring(expression, index, index + target.length)
+            .if slice == target
+                .span 1170 17 1170 47
+                eval result = result + replacement
+                .span 1171 17 1171 40
+                eval index += target.length
+                continue
+            .endif
+        .endif
+        .span 1175 9 1175 30
+        eval result = result + ch
+        .span 1176 9 1176 20
+        eval index += 1
+    .endloop
+    .span 1178 5 1178 19
+    ret result
+.endfn
+
+.fn rewrite_concat_calls(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1181 25 1181 45
+    .param expression -> string
+    .span 1182 5 1182 34
+    eval let mut current = expression
+    .loop
+        .span 1184 9 1184 57
+        eval let match_index = index_of(current, ".concat(")
+        .if match_index < 0
+            break
+        .endif
+        .span 1188 9 1188 69
+        eval let object_span = extract_object_span(current, match_index)
+        .if !object_span.success
+            break
+        .endif
+        .span 1192 9 1192 43
+        eval let paren_index = match_index + 7
+        .span 1193 9 1193 74
+        eval let args_span = extract_parenthesized_span(current, paren_index)
+        .if !args_span.success
+            break
+        .endif
+        .span 1197 9 1197 63
+        eval let before = substring(current, 0, object_span.start)
+        .span 1198 9 1198 71
+        eval let after = substring(current, args_span.end, current.length)
+        .span 1199 9 1199 56
+        eval let object_expr = trim_text(object_span.value)
+        .span 1200 9 1200 56
+        eval let argument_expr = trim_text(args_span.value)
+        .span 1201 9 1201 77
+        eval let replacement = "(" + object_expr + ") + (" + argument_expr + ")"
+        .span 1202 9 1202 48
+        eval current = before + replacement + after
+    .endloop
+    .span 1204 5 1204 20
+    ret current
+.endfn
+
+.fn rewrite_length_accesses(expression -> string) -> string
+.meta return string
+.meta effects none
+    .span 1207 28 1207 48
+    .param expression -> string
+    .span 1208 5 1208 34
+    eval let mut current = expression
+    .loop
+        .span 1210 9 1210 56
+        eval let match_index = index_of(current, ".length")
+        .if match_index < 0
+            break
+        .endif
+        .span 1214 9 1214 69
+        eval let object_span = extract_object_span(current, match_index)
+        .if !object_span.success
+            break
+        .endif
+        .span 1218 9 1218 63
+        eval let before = substring(current, 0, object_span.start)
+        .span 1219 9 1219 73
+        eval let after = substring(current, match_index + 7, current.length)
+        .span 1220 9 1220 56
+        eval let object_expr = trim_text(object_span.value)
+        .if object_expr.length == 0
+            break
+        .endif
+        .span 1224 9 1224 63
+        eval current = before + "len(" + object_expr + ")" + after
+    .endloop
+    .span 1226 5 1226 20
+    ret current
+.endfn
+
+.fn extract_object_span(text -> string, dot_index -> number) -> ExtractedSpan
+.meta return ExtractedSpan
+.meta effects none
+    .span 1229 24 1229 38
+    .param text -> string
+    .span 1229 40 1229 59
+    .param dot_index -> number
+    .if dot_index <= 0
+        .span 1231 9 1231 78
+        ret ExtractedSpan { value: "", start: 0, end: 0, success: false }
+    .endif
+    .span 1233 5 1233 45
+    eval let mut index -> number = dot_index - 1
+    .span 1234 5 1234 40
+    eval let mut square_depth -> number = 0
+    .span 1235 5 1235 39
+    eval let mut paren_depth -> number = 0
+    .loop
+        .if index < 0
+            break
+        .endif
+        .span 1240 9 1240 52
+        eval let ch = substring(text, index, index + 1)
+        .if ch == "]"
+            .span 1242 13 1242 31
+            eval square_depth += 1
+            .span 1243 13 1243 24
+            eval index -= 1
+            continue
+        .endif
+        .if ch == "["
+            .if square_depth > 0
+                .span 1248 17 1248 35
+                eval square_depth -= 1
+                .span 1249 17 1249 28
+                eval index -= 1
+                continue
+            .endif
+            break
+        .endif
+        .if ch == ")"
+            .span 1255 13 1255 30
+            eval paren_depth += 1
+            .span 1256 13 1256 24
+            eval index -= 1
+            continue
+        .endif
+        .if ch == "("
+            .if paren_depth > 0
+                .span 1261 17 1261 34
+                eval paren_depth -= 1
+                .span 1262 17 1262 28
+                eval index -= 1
+                continue
+            .endif
+            break
+        .endif
+        .if square_depth > 0 || paren_depth > 0
+            .span 1268 13 1268 24
+            eval index -= 1
+            continue
+        .endif
+        .if is_identifier_char(ch) || ch == "."
+            .span 1272 13 1272 24
+            eval index -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .span 1277 5 1277 27
+    eval let start = index + 1
+    .if start >= dot_index
+        .span 1279 9 1279 90
+        ret ExtractedSpan { value: "", start: start, end: dot_index, success: false }
+    .endif
+    .span 1281 5 1281 51
+    eval let value = substring(text, start, dot_index)
+    .span 1282 5 1282 88
+    ret ExtractedSpan { value: value, start: start, end: dot_index, success: true }
+.endfn
+
+.fn extract_parenthesized_span(text -> string, open_index -> number) -> ExtractedSpan
+.meta return ExtractedSpan
+.meta effects none
+    .span 1285 31 1285 45
+    .param text -> string
+    .span 1285 47 1285 67
+    .param open_index -> number
+    .if open_index >= text.length
+        .span 1287 9 1287 96
+        ret ExtractedSpan { value: "", start: open_index, end: open_index, success: false }
+    .endif
+    .if substring(text, open_index, open_index + 1) != "("
+        .span 1290 9 1290 96
+        ret ExtractedSpan { value: "", start: open_index, end: open_index, success: false }
+    .endif
+    .span 1292 5 1292 46
+    eval let mut index -> number = open_index + 1
+    .span 1293 5 1293 33
+    eval let mut depth -> number = 1
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1298 9 1298 52
+        eval let ch = substring(text, index, index + 1)
+        .if ch == "("
+            .span 1300 13 1300 24
+            eval depth += 1
+        .else
+            .if ch == ")"
+                .span 1302 13 1302 24
+                eval depth -= 1
+                .if depth == 0
+                    .span 1304 17 1304 68
+                    eval let value = substring(text, open_index + 1, index)
+                    .span 1305 17 1305 109
+                    ret ExtractedSpan { value: value, start: open_index + 1, end: index + 1, success: true }
+                .endif
+            .else
+                .if ch == "\"" || ch == "'"
+                    .span 1308 13 1308 54
+                    eval index = skip_string_literal(text, index)
+                    continue
+                .endif
+            .endif
+        .endif
+        .span 1311 9 1311 20
+        eval index += 1
+    .endloop
+    .span 1313 5 1313 92
+    ret ExtractedSpan { value: "", start: open_index, end: open_index, success: false }
+.endfn
+
+.fn skip_string_literal(text -> string, quote_index -> number) -> number
+.meta return number
+.meta effects none
+    .span 1316 24 1316 38
+    .param text -> string
+    .span 1316 40 1316 61
+    .param quote_index -> number
+    .span 1317 5 1317 63
+    eval let quote = substring(text, quote_index, quote_index + 1)
+    .span 1318 5 1318 47
+    eval let mut index -> number = quote_index + 1
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1323 9 1323 52
+        eval let ch = substring(text, index, index + 1)
+        .if ch == "\\"
+            .span 1325 13 1325 24
+            eval index += 2
+            continue
+        .endif
+        .if ch == quote
+            .span 1329 13 1329 24
+            eval index += 1
+            break
+        .endif
+        .span 1332 9 1332 20
+        eval index += 1
+    .endloop
+    .span 1334 5 1334 18
+    ret index
+.endfn
+
+.fn capture_expression_continuation(initial -> string, instructions -> NativeInstruction[], start_index -> number) -> ExpressionContinuationCapture
+.meta return ExpressionContinuationCapture
+.meta effects none
+    .span 1337 36 1337 53
+    .param initial -> string
+    .span 1337 55 1337 90
+    .param instructions -> NativeInstruction[]
+    .span 1337 92 1337 113
+    .param start_index -> number
+    .span 1338 5 1338 38
+    eval let trimmed = trim_text(initial)
+    .if trimmed.length == 0
+        .span 1340 9 1340 99
+        ret ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .span 1342 5 1342 76
+    eval let mut paren_balance -> number = compute_parenthesis_balance(trimmed)
+    .span 1343 5 1343 70
+    eval let mut brace_balance -> number = compute_brace_balance(trimmed)
+    .span 1344 5 1344 74
+    eval let mut bracket_balance -> number = compute_bracket_balance(trimmed)
+    .span 1345 5 1345 44
+    eval let mut expression -> string = trimmed
+    .span 1346 5 1346 43
+    eval let mut index -> number = start_index
+    .span 1347 5 1347 36
+    eval let mut consumed -> number = 0
+    .span 1348 5 1348 99
+    eval let mut attempting -> boolean = paren_balance > 0 || brace_balance > 0 || bracket_balance > 0
+    .loop
+        .if index >= instructions.length
+            break
+        .endif
+        .span 1353 9 1353 70
+        eval let segment = continuation_segment_text(instructions[index])
+        .if segment == null
+            break
+        .endif
+        .span 1357 9 1357 53
+        eval let normalized_segment = trim_text(segment)
+        .if normalized_segment.length == 0
+            .span 1359 13 1359 24
+            eval index += 1
+            .span 1360 13 1360 27
+            eval consumed += 1
+            continue
+        .endif
+        .if !attempting
+            .if !segment_signals_expression_continuation(normalized_segment)
+                break
+            .endif
+            .span 1367 13 1367 31
+            eval attempting = true
+        .endif
+        .span 1369 9 1369 60
+        eval expression = expression + " " + normalized_segment
+        .span 1370 9 1370 74
+        eval paren_balance += compute_parenthesis_balance(normalized_segment)
+        .span 1371 9 1371 68
+        eval brace_balance += compute_brace_balance(normalized_segment)
+        .span 1372 9 1372 72
+        eval bracket_balance += compute_bracket_balance(normalized_segment)
+        .span 1373 9 1373 23
+        eval consumed += 1
+        .span 1374 9 1374 20
+        eval index += 1
+        .if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0
+            .span 1376 13 1376 55
+            eval let mut should_finalize -> boolean = true
+            .span 1377 13 1377 49
+            eval let mut lookahead -> number = index
+            .loop
+                .if lookahead >= instructions.length
+                    break
+                .endif
+                .span 1382 17 1382 83
+                eval let upcoming = continuation_segment_text(instructions[lookahead])
+                .if upcoming == null
+                    break
+                .endif
+                .span 1386 17 1386 63
+                eval let normalized_upcoming = trim_text(upcoming)
+                .if normalized_upcoming.length == 0
+                    .span 1388 21 1388 36
+                    eval lookahead += 1
+                    continue
+                .endif
+                .if segment_signals_expression_continuation(normalized_upcoming)
+                    .span 1392 21 1392 45
+                    eval should_finalize = false
+                .endif
+                break
+            .endloop
+            .if should_finalize
+                .span 1397 17 1397 81
+                eval let finalized = trim_trailing_delimiters(trim_text(expression))
+                .span 1398 17 1398 115
+                ret ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true }
+            .endif
+        .endif
+    .endloop
+    .if !attempting || consumed == 0
+        .span 1403 9 1403 99
+        ret ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false }
+    .endif
+    .if paren_balance <= 0 && brace_balance <= 0 && bracket_balance <= 0
+        .span 1406 9 1406 73
+        eval let finalized = trim_trailing_delimiters(trim_text(expression))
+        .span 1407 9 1407 107
+        ret ExpressionContinuationCapture { expression: finalized, consumed: consumed, success: true }
+    .endif
+    .span 1409 5 1409 95
+    ret ExpressionContinuationCapture { expression: trimmed, consumed: 0, success: false }
+.endfn
+
+.fn continuation_segment_text(instruction -> NativeInstruction) -> string?
+.meta return string?
+.meta effects none
+    .span 1412 30 1412 62
+    .param instruction -> NativeInstruction
+    .if instruction.variant == "Unknown"
+        .span 1414 9 1414 33
+        ret instruction.text
+    .endif
+    .if instruction.variant == "Expression"
+        .span 1417 9 1417 39
+        ret instruction.expression
+    .endif
+    .span 1419 5 1419 17
+    ret null
+.endfn
+
+.fn segment_signals_expression_continuation(segment -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 1422 44 1422 61
+    .param segment -> string
+    .if segment.length == 0
+        .span 1424 9 1424 22
+        ret false
+    .endif
+    .if starts_with(segment, "&&")
+        .span 1427 9 1427 21
+        ret true
+    .endif
+    .if starts_with(segment, "||")
+        .span 1430 9 1430 21
+        ret true
+    .endif
+    .span 1432 5 1432 37
+    eval let first = char_at(segment, 0)
+    .if first == "." || first == ")" || first == "]" || first == "}"
+        .span 1434 9 1434 21
+        ret true
+    .endif
+    .span 1436 5 1436 18
+    ret false
+.endfn
+
+.fn compute_brace_balance(text -> string) -> number
+.meta return number
+.meta effects none
+    .span 1439 26 1439 40
+    .param text -> string
+    .if text.length == 0
+        .span 1441 9 1441 18
+        ret 0
+    .endif
+    .span 1443 5 1443 35
+    eval let mut balance -> number = 0
+    .span 1444 5 1444 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1449 9 1449 39
+        eval let ch = char_at(text, index)
+        .if ch == "{"
+            .span 1451 13 1451 26
+            eval balance += 1
+        .else
+            .if ch == "}"
+                .span 1453 13 1453 26
+                eval balance -= 1
+            .endif
+        .endif
+        .span 1455 9 1455 20
+        eval index += 1
+    .endloop
+    .span 1457 5 1457 20
+    ret balance
+.endfn
+
+.fn compute_parenthesis_balance(text -> string) -> number
+.meta return number
+.meta effects none
+    .span 1460 32 1460 46
+    .param text -> string
+    .span 1461 5 1461 51
+    ret compute_symbol_balance(text, "(", ")")
+.endfn
+
+.fn compute_bracket_balance(text -> string) -> number
+.meta return number
+.meta effects none
+    .span 1464 28 1464 42
+    .param text -> string
+    .span 1465 5 1465 51
+    ret compute_symbol_balance(text, "[", "]")
+.endfn
+
+.fn compute_symbol_balance(text -> string, open -> string, close -> string) -> number
+.meta return number
+.meta effects none
+    .span 1468 27 1468 41
+    .param text -> string
+    .span 1468 43 1468 57
+    .param open -> string
+    .span 1468 59 1468 74
+    .param close -> string
+    .if text.length == 0
+        .span 1470 9 1470 18
+        ret 0
+    .endif
+    .span 1472 5 1472 35
+    eval let mut balance -> number = 0
+    .span 1473 5 1473 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1478 9 1478 39
+        eval let ch = char_at(text, index)
+        .if ch == open
+            .span 1480 13 1480 26
+            eval balance += 1
+        .else
+            .if ch == close
+                .span 1482 13 1482 26
+                eval balance -= 1
+            .endif
+        .endif
+        .span 1484 9 1484 20
+        eval index += 1
+    .endloop
+    .span 1486 5 1486 20
+    ret balance
+.endfn
+
+.fn split_struct_field_entries(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1489 31 1489 45
+    .param text -> string
+    .span 1490 5 1490 34
+    eval let entries -> string[] = []
+    .span 1491 5 1491 36
+    eval let mut current -> string = ""
+    .span 1492 5 1492 33
+    eval let mut depth -> number = 0
+    .span 1493 5 1493 33
+    eval let mut index -> number = 0
+    .span 1494 5 1494 42
+    eval let mut in_string -> boolean = false
+    .span 1495 5 1495 41
+    eval let mut string_quote -> string = ""
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1500 9 1500 39
+        eval let ch = char_at(text, index)
+        .if in_string
+            .span 1502 13 1502 36
+            eval current = current + ch
+            .if ch == "\\"
+                .span 1504 17 1504 28
+                eval index += 1
+                .if index < text.length
+                    .span 1506 21 1506 62
+                    eval current = current + char_at(text, index)
+                .endif
+            .else
+                .if ch == string_quote
+                    .span 1509 17 1509 35
+                    eval in_string = false
+                .endif
+            .endif
+            .span 1511 13 1511 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\"" || ch == "'"
+            .span 1515 13 1515 30
+            eval in_string = true
+            .span 1516 13 1516 31
+            eval string_quote = ch
+            .span 1517 13 1517 36
+            eval current = current + ch
+            .span 1518 13 1518 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{" || ch == "[" || ch == "("
+            .span 1522 13 1522 24
+            eval depth += 1
+        .else
+            .if ch == "}" || ch == "]" || ch == ")"
+                .if depth > 0
+                    .span 1525 17 1525 28
+                    eval depth -= 1
+                .endif
+            .endif
+        .endif
+        .if ch == "," && depth == 0
+            .span 1529 13 1529 55
+            eval entries = append_string(entries, current)
+            .span 1530 13 1530 26
+            eval current = ""
+        .else
+            .span 1532 13 1532 36
+            eval current = current + ch
+        .endif
+        .span 1534 9 1534 20
+        eval index += 1
+    .endloop
+    .if current.length > 0
+        .span 1537 9 1537 51
+        eval entries = append_string(entries, current)
+    .endif
+    .span 1539 5 1539 20
+    ret entries
+.endfn
+
+.fn split_array_entries(text -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 1542 24 1542 38
+    .param text -> string
+    .span 1543 5 1543 34
+    eval let entries -> string[] = []
+    .span 1544 5 1544 36
+    eval let mut current -> string = ""
+    .span 1545 5 1545 33
+    eval let mut depth -> number = 0
+    .span 1546 5 1546 33
+    eval let mut index -> number = 0
+    .span 1547 5 1547 42
+    eval let mut in_string -> boolean = false
+    .span 1548 5 1548 41
+    eval let mut string_quote -> string = ""
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1553 9 1553 39
+        eval let ch = char_at(text, index)
+        .if in_string
+            .span 1555 13 1555 36
+            eval current = current + ch
+            .if ch == "\\"
+                .span 1557 17 1557 28
+                eval index += 1
+                .if index < text.length
+                    .span 1559 21 1559 62
+                    eval current = current + char_at(text, index)
+                .endif
+            .else
+                .if ch == string_quote
+                    .span 1562 17 1562 35
+                    eval in_string = false
+                .endif
+            .endif
+            .span 1564 13 1564 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\"" || ch == "'"
+            .span 1568 13 1568 30
+            eval in_string = true
+            .span 1569 13 1569 31
+            eval string_quote = ch
+            .span 1570 13 1570 36
+            eval current = current + ch
+            .span 1571 13 1571 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{" || ch == "[" || ch == "("
+            .span 1575 13 1575 24
+            eval depth += 1
+        .else
+            .if ch == "}" || ch == "]" || ch == ")"
+                .if depth > 0
+                    .span 1578 17 1578 28
+                    eval depth -= 1
+                .endif
+            .endif
+        .endif
+        .if ch == "," && depth == 0
+            .span 1582 13 1582 55
+            eval entries = append_string(entries, current)
+            .span 1583 13 1583 26
+            eval current = ""
+        .else
+            .span 1585 13 1585 36
+            eval current = current + ch
+        .endif
+        .span 1587 9 1587 20
+        eval index += 1
+    .endloop
+    .if current.length > 0
+        .span 1590 9 1590 51
+        eval entries = append_string(entries, current)
+    .endif
+    .span 1592 5 1592 20
+    ret entries
+.endfn
+
+.fn trim_trailing_delimiters(text -> string) -> string
+.meta return string
+.meta effects none
+    .span 1595 29 1595 43
+    .param text -> string
+    .span 1596 5 1596 41
+    eval let mut end -> number = text.length
+    .loop
+        .if end <= 0
+            break
+        .endif
+        .span 1601 9 1601 41
+        eval let ch = char_at(text, end - 1)
+        .if ch == "," || ch == ";"
+            .span 1603 13 1603 22
+            eval end -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .if end == text.length
+        .span 1609 9 1609 21
+        ret text
+    .endif
+    .span 1611 5 1611 36
+    ret substring(text, 0, end)
+.endfn
+
+.fn index_of(value -> string, target -> string) -> number
+.meta return number
+.meta effects none
+    .span 1614 13 1614 28
+    .param value -> string
+    .span 1614 30 1614 46
+    .param target -> string
+    .if target.length == 0
+        .span 1616 9 1616 18
+        ret 0
+    .endif
+    .span 1618 5 1618 33
+    eval let mut index -> number = 0
+    .loop
+        .if index + target.length > value.length
+            break
+        .endif
+        .span 1623 9 1623 43
+        eval let mut match_index -> number = 0
+        .span 1624 9 1624 43
+        eval let mut matches -> boolean = true
+        .loop
+            .if match_index >= target.length
+                break
+            .endif
+            .span 1629 13 1629 64
+            eval let value_ch = char_at(value, index + match_index)
+            .span 1630 13 1630 58
+            eval let target_ch = char_at(target, match_index)
+            .if value_ch != target_ch
+                .span 1632 17 1632 33
+                eval matches = false
+                break
+            .endif
+            .span 1635 13 1635 30
+            eval match_index += 1
+        .endloop
+        .if matches
+            .span 1638 13 1638 26
+            ret index
+        .endif
+        .span 1640 9 1640 20
+        eval index += 1
+    .endloop
+    .span 1642 5 1642 15
+    ret -1
+.endfn
+
+.fn find_matching_brace(text -> string, open_index -> number) -> number
+.meta return number
+.meta effects none
+    .span 1645 24 1645 38
+    .param text -> string
+    .span 1645 40 1645 60
+    .param open_index -> number
+    .span 1646 5 1646 33
+    eval let mut depth -> number = 0
+    .span 1647 5 1647 42
+    eval let mut index -> number = open_index
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1652 5 1652 35
+        eval let ch = char_at(text, index)
+        .if ch == "{"
+            .span 1654 13 1654 24
+            eval depth += 1
+        .else
+            .if ch == "}"
+                .if depth <= 0
+                    .span 1657 17 1657 27
+                    ret -1
+                .endif
+                .span 1659 13 1659 24
+                eval depth -= 1
+                .if depth == 0
+                    .span 1661 17 1661 30
+                    ret index
+                .endif
+            .endif
+        .endif
+        .span 1664 9 1664 20
+        eval index += 1
+    .endloop
+    .span 1666 5 1666 15
+    ret -1
+.endfn
+
+.fn is_escaped_quote(text -> string, position -> number) -> boolean
+.meta return boolean
+.meta effects none
+    .span 1669 21 1669 35
+    .param text -> string
+    .span 1669 37 1669 55
+    .param position -> number
+    .if position <= 0
+        .span 1671 9 1671 22
+        ret false
+    .endif
+    .span 1673 5 1673 35
+    eval let mut escapes -> number = 0
+    .span 1674 5 1674 44
+    eval let mut index -> number = position - 1
+    .loop
+        .if index < 0
+            break
+        .endif
+        .if char_at(text, index) != "\\"
+            break
+        .endif
+        .span 1682 9 1682 22
+        eval escapes += 1
+        .span 1683 9 1683 20
+        eval index -= 1
+    .endloop
+    .if escapes % 2 == 1
+        .span 1686 9 1686 21
+        ret true
+    .endif
+    .span 1688 5 1688 18
+    ret false
+.endfn
+
+.fn find_next_square_open(text -> string, start -> number) -> number
+.meta return number
+.meta effects none
+    .span 1691 26 1691 40
+    .param text -> string
+    .span 1691 42 1691 57
+    .param start -> number
+    .span 1692 5 1692 37
+    eval let mut index -> number = start
+    .span 1693 5 1693 42
+    eval let mut in_single -> boolean = false
+    .span 1694 5 1694 42
+    eval let mut in_double -> boolean = false
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1699 5 1699 35
+        eval let ch = char_at(text, index)
+        .if ch == "'"
+            .if !in_double && !is_escaped_quote(text, index)
+                .span 1702 17 1702 40
+                eval in_single = !in_single
+            .endif
+            .span 1704 13 1704 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\""
+            .if !in_single && !is_escaped_quote(text, index)
+                .span 1709 17 1709 40
+                eval in_double = !in_double
+            .endif
+            .span 1711 13 1711 24
+            eval index += 1
+            continue
+        .endif
+        .if !in_single && !in_double
+            .if ch == "["
+                .span 1716 17 1716 30
+                ret index
+            .endif
+            .if ch == "]"
+                .span 1719 17 1719 27
+                ret -1
+            .endif
+        .endif
+        .span 1722 9 1722 20
+        eval index += 1
+    .endloop
+    .span 1724 5 1724 15
+    ret -1
+.endfn
+
+.fn find_matching_square(text -> string, open_index -> number) -> number
+.meta return number
+.meta effects none
+    .span 1727 25 1727 39
+    .param text -> string
+    .span 1727 41 1727 61
+    .param open_index -> number
+    .span 1728 5 1728 33
+    eval let mut depth -> number = 0
+    .span 1729 5 1729 42
+    eval let mut index -> number = open_index
+    .span 1730 5 1730 42
+    eval let mut in_single -> boolean = false
+    .span 1731 5 1731 42
+    eval let mut in_double -> boolean = false
+    .loop
+        .if index >= text.length
+            break
+        .endif
+        .span 1736 9 1736 30
+        eval let ch = text[index]
+        .if ch == "'"
+            .if !in_double && !is_escaped_quote(text, index)
+                .span 1739 17 1739 40
+                eval in_single = !in_single
+            .endif
+            .span 1741 13 1741 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "\""
+            .if !in_single && !is_escaped_quote(text, index)
+                .span 1746 17 1746 40
+                eval in_double = !in_double
+            .endif
+            .span 1748 13 1748 24
+            eval index += 1
+            continue
+        .endif
+        .if !in_single && !in_double
+            .if ch == "["
+                .span 1753 17 1753 28
+                eval depth += 1
+            .else
+                .if ch == "]"
+                    .if depth <= 0
+                        .span 1756 21 1756 31
+                        ret -1
+                    .endif
+                    .span 1758 17 1758 28
+                    eval depth -= 1
+                    .if depth == 0
+                        .span 1760 21 1760 34
+                        ret index
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 1764 9 1764 20
+        eval index += 1
+    .endloop
+    .span 1766 5 1766 15
+    ret -1
+.endfn
+
+.fn find_substring_from(value -> string, pattern -> string, start -> number) -> number
+.meta return number
+.meta effects none
+    .span 1769 24 1769 39
+    .param value -> string
+    .span 1769 41 1769 58
+    .param pattern -> string
+    .span 1769 60 1769 75
+    .param start -> number
+    .if pattern.length == 0
+        .if start < 0
+            .span 1772 13 1772 22
+            ret 0
+        .endif
+        .if start > value.length
+            .span 1775 13 1775 33
+            ret value.length
+        .endif
+        .span 1777 9 1777 22
+        ret start
+    .endif
+    .span 1779 5 1779 37
+    eval let mut index -> number = start
+    .if index < 0
+        .span 1781 9 1781 19
+        eval index = 0
+    .endif
+    .loop
+        .if index + pattern.length > value.length
+            break
+        .endif
+        .span 1787 9 1787 43
+        eval let mut matches -> boolean = true
+        .span 1788 9 1788 38
+        eval let mut offset -> number = 0
+        .loop
+            .if offset >= pattern.length
+                break
+            .endif
+            .if value[index + offset] != pattern[offset]
+                .span 1794 17 1794 33
+                eval matches = false
+                break
+            .endif
+            .span 1797 13 1797 25
+            eval offset += 1
+        .endloop
+        .if matches
+            .span 1800 13 1800 26
+            ret index
+        .endif
+        .span 1802 9 1802 20
+        eval index += 1
+    .endloop
+    .span 1804 5 1804 15
+    ret -1
+.endfn
+
+.fn emit_python_function(builder -> PythonBuilder, function -> NativeFunction) -> PythonFunctionEmission
+.meta return PythonFunctionEmission
+.meta effects none
+    .span 1807 25 1807 49
+    .param builder -> PythonBuilder
+    .span 1807 51 1807 77
+    .param function -> NativeFunction
+    .span 1808 1 1808 27
+    eval let mut current = builder
+    .span 1809 1 1809 38
+    eval let mut diagnostics -> string[] = []
+    .span 1810 1 1810 64
+    eval let parameters = render_python_parameters(function.parameters)
+    .span 1811 1 1811 111
+    eval let header = "def " + sanitize_identifier(function.name) + "(" + join_with_separator(parameters, ", ") + "):"
+    .span 1812 1 1812 41
+    eval current = builder_emit(current, header)
+    .span 1813 1 1813 40
+    eval current = builder_push_indent(current)
+    .if function.effects.length > 0
+        .span 1815 1 1815 94
+        eval current = builder_emit(current, "# effects: " + join_with_separator(function.effects, ", "))
+    .endif
+    .if function.instructions.length == 0
+        .span 1818 1 1818 41
+        eval current = builder_emit(current, "pass")
+        .span 1819 1 1819 39
+        eval current = builder_pop_indent(current)
+        .span 1820 1 1820 78
+        ret PythonFunctionEmission { builder: current, diagnostics: diagnostics }
+    .endif
+    .span 1822 1 1822 35
+    eval let mut block_depth -> number = 0
+    .span 1823 1 1823 44
+    eval let mut match_stack -> MatchContext[] = []
+    .span 1824 1 1824 37
+    eval let mut match_counter -> number = 0
+    .span 1825 1 1825 29
+    eval let mut index -> number = 0
+    .loop
+        .if index >= function.instructions.length
+            break
+        .endif
+        .span 1830 1 1830 48
+        eval let instruction = function.instructions[index]
+        .if instruction.variant == "Return"
+            .if instruction.expression.length == 0
+                .span 1833 1 1833 43
+                eval current = builder_emit(current, "return")
+            .else
+                .span 1835 1 1835 60
+                eval let mut expression_text -> string = instruction.expression
+                .span 1836 1 1836 107
+                eval let struct_capture = capture_struct_literal_expression(expression_text, function.instructions, index + 1)
+                .span 1837 1 1837 32
+                eval let mut consumed -> number = 0
+                .if struct_capture.success
+                    .span 1839 1 1839 45
+                    eval expression_text = struct_capture.expression
+                    .span 1840 1 1840 36
+                    eval consumed = struct_capture.consumed
+                .else
+                    .span 1842 1 1842 103
+                    eval let continuation = capture_expression_continuation(expression_text, function.instructions, index + 1)
+                    .if continuation.success
+                        .span 1844 1 1844 43
+                        eval expression_text = continuation.expression
+                        .span 1845 1 1845 34
+                        eval consumed = continuation.consumed
+                    .endif
+                .endif
+                .span 1848 1 1848 80
+                eval current = builder_emit(current, "return " + lower_expression(expression_text))
+                .span 1849 1 1849 19
+                eval index += consumed
+            .endif
+        .else
+            .if instruction.variant == "Expression"
+                .span 1852 1 1852 60
+                eval let mut expression_text -> string = instruction.expression
+                .span 1853 1 1853 107
+                eval let struct_capture = capture_struct_literal_expression(expression_text, function.instructions, index + 1)
+                .span 1854 1 1854 32
+                eval let mut consumed -> number = 0
+                .if struct_capture.success
+                    .span 1856 1 1856 45
+                    eval expression_text = struct_capture.expression
+                    .span 1857 1 1857 36
+                    eval consumed = struct_capture.consumed
+                .else
+                    .span 1859 1 1859 103
+                    eval let continuation = capture_expression_continuation(expression_text, function.instructions, index + 1)
+                    .if continuation.success
+                        .span 1861 1 1861 43
+                        eval expression_text = continuation.expression
+                        .span 1862 1 1862 34
+                        eval consumed = continuation.consumed
+                    .endif
+                .endif
+                .span 1865 1 1865 68
+                eval current = builder_emit(current, lower_expression(expression_text))
+                .span 1866 1 1866 19
+                eval index += consumed
+            .else
+                .if instruction.variant == "Let"
+                    .span 1868 1 1868 57
+                    eval let target_name = sanitize_identifier(instruction.name)
+                    .span 1869 1 1869 46
+                    eval let mut line -> string = target_name + " = "
+                    .if instruction.value != null
+                        .span 1871 1 1871 50
+                        eval let mut value_text -> string = instruction.value
+                        .span 1872 1 1872 102
+                        eval let struct_capture = capture_struct_literal_expression(value_text, function.instructions, index + 1)
+                        .span 1873 1 1873 32
+                        eval let mut consumed -> number = 0
+                        .if struct_capture.success
+                            .span 1875 1 1875 40
+                            eval value_text = struct_capture.expression
+                            .span 1876 1 1876 36
+                            eval consumed = struct_capture.consumed
+                        .else
+                            .span 1878 1 1878 98
+                            eval let continuation = capture_expression_continuation(value_text, function.instructions, index + 1)
+                            .if continuation.success
+                                .span 1880 1 1880 38
+                                eval value_text = continuation.expression
+                                .span 1881 1 1881 34
+                                eval consumed = continuation.consumed
+                            .endif
+                        .endif
+                        .span 1884 1 1884 44
+                        eval line = line + lower_expression(value_text)
+                        .span 1885 1 1885 19
+                        eval index += consumed
+                    .else
+                        .span 1887 1 1887 22
+                        eval line = line + "None"
+                    .endif
+                    .span 1889 1 1889 39
+                    eval current = builder_emit(current, line)
+                .else
+                    .if instruction.variant == "If"
+                        .span 1891 1 1891 89
+                        eval let lowered_condition = rewrite_expression_intrinsics(trim_text(instruction.condition))
+                        .span 1892 1 1892 66
+                        eval current = builder_emit(current, "if " + lowered_condition + ":")
+                        .span 1893 1 1893 40
+                        eval current = builder_push_indent(current)
+                        .span 1894 1 1894 18
+                        eval block_depth += 1
+                    .else
+                        .if instruction.variant == "Else"
+                            .if block_depth > 0
+                                .span 1897 1 1897 39
+                                eval current = builder_pop_indent(current)
+                            .else
+                                .span 1899 1 1899 98
+                                eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "else without matching if")
+                            .endif
+                            .span 1901 1 1901 42
+                            eval current = builder_emit(current, "else:")
+                            .span 1902 1 1902 40
+                            eval current = builder_push_indent(current)
+                        .else
+                            .if instruction.variant == "EndIf"
+                                .if block_depth > 0
+                                    .span 1905 1 1905 39
+                                    eval current = builder_pop_indent(current)
+                                    .span 1906 1 1906 18
+                                    eval block_depth -= 1
+                                .else
+                                    .span 1908 1 1908 99
+                                    eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endif without matching if")
+                                .endif
+                            .else
+                                .if instruction.variant == "For"
+                                    .span 1911 1 1911 87
+                                    eval let lowered_iterable = rewrite_expression_intrinsics(trim_text(instruction.iterable))
+                                    .span 1912 1 1912 96
+                                    eval current = builder_emit(current, "for " + instruction.target + " in " + lowered_iterable + ":")
+                                    .span 1913 1 1913 40
+                                    eval current = builder_push_indent(current)
+                                    .span 1914 1 1914 18
+                                    eval block_depth += 1
+                                .else
+                                    .if instruction.variant == "EndFor"
+                                        .if block_depth > 0
+                                            .span 1917 1 1917 39
+                                            eval current = builder_pop_indent(current)
+                                            .span 1918 1 1918 18
+                                            eval block_depth -= 1
+                                        .else
+                                            .span 1920 1 1920 106
+                                            eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endfor without matching for loop")
+                                        .endif
+                                    .else
+                                        .if instruction.variant == "Loop"
+                                            .span 1923 1 1923 48
+                                            eval current = builder_emit(current, "while True:")
+                                            .span 1924 1 1924 40
+                                            eval current = builder_push_indent(current)
+                                            .span 1925 1 1925 18
+                                            eval block_depth += 1
+                                        .else
+                                            .if instruction.variant == "EndLoop"
+                                                .if block_depth > 0
+                                                    .span 1928 1 1928 39
+                                                    eval current = builder_pop_indent(current)
+                                                    .span 1929 1 1929 18
+                                                    eval block_depth -= 1
+                                                .else
+                                                    .span 1931 1 1931 103
+                                                    eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endloop without matching loop")
+                                                .endif
+                                            .else
+                                                .if instruction.variant == "Break"
+                                                    .span 1934 1 1934 42
+                                                    eval current = builder_emit(current, "break")
+                                                .else
+                                                    .if instruction.variant == "Continue"
+                                                        .span 1936 1 1936 45
+                                                        eval current = builder_emit(current, "continue")
+                                                    .else
+                                                        .if instruction.variant == "Match"
+                                                            .span 1938 1 1938 63
+                                                            eval let subject_name = generate_match_subject_name(match_counter)
+                                                            .span 1939 1 1939 20
+                                                            eval match_counter += 1
+                                                            .span 1940 1 1940 64
+                                                            eval let lowered_subject = lower_expression(instruction.expression)
+                                                            .span 1941 1 1941 73
+                                                            eval current = builder_emit(current, subject_name + " = " + lowered_subject)
+                                                            .span 1942 1 1942 98
+                                                            eval let context = MatchContext { subject_name: subject_name, case_index: 0, has_active_case: false }
+                                                            .span 1943 1 1943 58
+                                                            eval match_stack = append_match_context(match_stack, context)
+                                                        .else
+                                                            .if instruction.variant == "Case"
+                                                                .if match_stack.length == 0
+                                                                    .span 1946 1 1946 54
+                                                                    eval let pattern_summary = trim_text(instruction.pattern)
+                                                                    .span 1947 1 1947 70
+                                                                    eval let mut detail -> string = "match case without active match context"
+                                                                    .if pattern_summary.length > 0
+                                                                        .span 1949 1 1949 57
+                                                                        eval detail = detail + " (pattern: " + pattern_summary + ")"
+                                                                    .endif
+                                                                    .span 1951 1 1951 78
+                                                                    eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, detail)
+                                                                    .span 1952 1 1952 78
+                                                                    eval current = builder_emit(current, "# unsupported: match case without context")
+                                                                .else
+                                                                    .span 1954 1 1954 40
+                                                                    eval let top_index = match_stack.length - 1
+                                                                    .span 1955 1 1955 38
+                                                                    eval let context = match_stack[top_index]
+                                                                    .if context.has_active_case
+                                                                        .span 1957 1 1957 39
+                                                                        eval current = builder_pop_indent(current)
+                                                                    .endif
+                                                                    .span 1959 1 1959 104
+                                                                    eval let lowered = lower_match_case_condition(context.subject_name, instruction.pattern, instruction.guard)
+                                                                    .if context.case_index == 0
+                                                                        .span 1961 1 1961 66
+                                                                        eval current = builder_emit(current, "if " + lowered.condition + ":")
+                                                                    .else
+                                                                        .if lowered.is_default && !lowered.has_guard
+                                                                            .span 1964 1 1964 42
+                                                                            eval current = builder_emit(current, "else:")
+                                                                        .else
+                                                                            .span 1966 1 1966 68
+                                                                            eval current = builder_emit(current, "elif " + lowered.condition + ":")
+                                                                        .endif
+                                                                    .endif
+                                                                    .span 1969 1 1969 40
+                                                                    eval current = builder_push_indent(current)
+                                                                    .span 1970 1 1974 3
+                                                                    eval let updated = MatchContext {
+subject_name: context.subject_name,
+case_index: context.case_index + 1,
+has_active_case: true,
+}
+                                                                    .span 1975 1 1975 70
+                                                                    eval match_stack = replace_match_context(match_stack, top_index, updated)
+                                                                .endif
+                                                            .else
+                                                                .if instruction.variant == "EndMatch"
+                                                                    .if match_stack.length == 0
+                                                                        .span 1979 1 1979 111
+                                                                        eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "endmatch without active match context")
+                                                                        .span 1980 1 1980 76
+                                                                        eval current = builder_emit(current, "# unsupported: endmatch without context")
+                                                                    .else
+                                                                        .span 1982 1 1982 40
+                                                                        eval let top_index = match_stack.length - 1
+                                                                        .span 1983 1 1983 38
+                                                                        eval let context = match_stack[top_index]
+                                                                        .if context.has_active_case
+                                                                            .span 1985 1 1985 39
+                                                                            eval current = builder_pop_indent(current)
+                                                                        .endif
+                                                                        .span 1987 1 1987 63
+                                                                        eval match_stack = truncate_match_contexts(match_stack, top_index)
+                                                                    .endif
+                                                                .else
+                                                                    .if instruction.variant == "Noop"
+                                                                        .span 1990 1 1990 41
+                                                                        eval current = builder_emit(current, "pass")
+                                                                    .else
+                                                                        .span 1992 1 1992 48
+                                                                        eval let trimmed_text = trim_text(instruction.text)
+                                                                        .span 1993 1 1993 73
+                                                                        eval let mut detail -> string = "unsupported instruction emitted as comment"
+                                                                        .if trimmed_text.length > 0
+                                                                            .span 1995 1 1995 39
+                                                                            eval detail = detail + ": " + trimmed_text
+                                                                        .endif
+                                                                        .span 1997 1 1997 78
+                                                                        eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, detail)
+                                                                        .span 1998 1 1998 71
+                                                                        eval current = builder_emit(current, "# unsupported: " + instruction.text)
+                                                                    .endif
+                                                                .endif
+                                                            .endif
+                                                        .endif
+                                                    .endif
+                                                .endif
+                                            .endif
+                                        .endif
+                                    .endif
+                                .endif
+                            .endif
+                        .endif
+                    .endif
+                .endif
+            .endif
+        .endif
+        .span 2000 1 2000 12
+        eval index += 1
+    .endloop
+    .loop
+        .if match_stack.length == 0
+            break
+        .endif
+        .span 2006 1 2006 40
+        eval let top_index = match_stack.length - 1
+        .span 2007 1 2007 38
+        eval let context = match_stack[top_index]
+        .if context.has_active_case
+            .span 2009 1 2009 39
+            eval current = builder_pop_indent(current)
+        .endif
+        .span 2011 1 2011 103
+        eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "unterminated match expression")
+        .span 2012 1 2012 63
+        eval match_stack = truncate_match_contexts(match_stack, top_index)
+    .endloop
+    .loop
+        .if block_depth <= 0
+            break
+        .endif
+        .span 2018 1 2018 39
+        eval current = builder_pop_indent(current)
+        .span 2019 1 2019 18
+        eval block_depth -= 1
+        .span 2020 1 2020 105
+        eval diagnostics = append_lowering_diagnostic(diagnostics, function.name, "unterminated control-flow block")
+    .endloop
+    .span 2022 1 2022 39
+    eval current = builder_pop_indent(current)
+    .span 2023 1 2023 78
+    ret PythonFunctionEmission { builder: current, diagnostics: diagnostics }
+.endfn
+
+.fn append_match_context(values -> MatchContext[], value -> MatchContext) -> MatchContext[]
+.meta return MatchContext[]
+.meta effects none
+    .span 2026 25 2026 49
+    .param values -> MatchContext[]
+    .span 2026 51 2026 72
+    .param value -> MatchContext
+    .span 2027 5 2027 35
+    ret values.concat([value])
+.endfn
+
+.fn replace_match_context(values -> MatchContext[], index -> number, replacement -> MatchContext) -> MatchContext[]
+.meta return MatchContext[]
+.meta effects none
+    .span 2030 26 2030 50
+    .param values -> MatchContext[]
+    .span 2030 52 2030 67
+    .param index -> number
+    .span 2030 69 2030 96
+    .param replacement -> MatchContext
+    .span 2031 5 2031 43
+    eval let mut result -> MatchContext[] = []
+    .span 2032 5 2032 36
+    eval let mut position -> number = 0
+    .loop
+        .if position >= values.length
+            break
+        .endif
+        .if position == index
+            .span 2038 13 2038 64
+            eval result = append_match_context(result, replacement)
+        .else
+            .span 2040 13 2040 69
+            eval result = append_match_context(result, values[position])
+        .endif
+        .span 2042 9 2042 23
+        eval position += 1
+    .endloop
+    .span 2044 5 2044 19
+    ret result
+.endfn
+
+.fn truncate_match_contexts(values -> MatchContext[], end_index -> number) -> MatchContext[]
+.meta return MatchContext[]
+.meta effects none
+    .span 2047 28 2047 52
+    .param values -> MatchContext[]
+    .span 2047 54 2047 73
+    .param end_index -> number
+    .if end_index <= 0
+        .span 2049 9 2049 19
+        ret []
+    .endif
+    .span 2051 5 2051 43
+    eval let mut result -> MatchContext[] = []
+    .span 2052 5 2052 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= end_index
+            break
+        .endif
+        .span 2057 9 2057 62
+        eval result = append_match_context(result, values[index])
+        .span 2058 9 2058 20
+        eval index += 1
+    .endloop
+    .span 2060 5 2060 19
+    ret result
+.endfn
+
+.fn generate_match_subject_name(counter -> number) -> string
+.meta return string
+.meta effects none
+    .span 2063 32 2063 49
+    .param counter -> number
+    .span 2064 5 2064 57
+    ret "__match_value_" + number_to_string(counter)
+.endfn
+
+.fn lower_match_case_condition(subject_name -> string, pattern -> string, guard -> string?) -> LoweredCaseCondition
+.meta return LoweredCaseCondition
+.meta effects none
+    .span 2067 31 2067 53
+    .param subject_name -> string
+    .span 2067 55 2067 72
+    .param pattern -> string
+    .span 2067 74 2067 90
+    .param guard -> string?
+    .span 2068 5 2068 46
+    eval let trimmed_pattern = trim_text(pattern)
+    .span 2069 5 2069 48
+    eval let mut normalized_guard -> string? = null
+    .if guard != null
+        .span 2071 9 2071 46
+        eval let trimmed_guard = trim_text(guard)
+        .if trimmed_guard.length > 0
+            .span 2073 13 2073 46
+            eval normalized_guard = trimmed_guard
+        .endif
+    .endif
+    .if trimmed_pattern.length == 0 || trimmed_pattern == "_"
+        .if normalized_guard == null
+            .span 2078 13 2078 99
+            ret LoweredCaseCondition { condition: "True", is_default: true, has_guard: false }
+        .endif
+        .span 2080 9 2080 64
+        eval let lowered_guard = lower_expression(normalized_guard)
+        .span 2081 9 2081 102
+        ret LoweredCaseCondition { condition: lowered_guard, is_default: false, has_guard: true }
+    .endif
+    .span 2083 5 2083 61
+    eval let lowered_pattern = lower_expression(trimmed_pattern)
+    .span 2084 5 2084 75
+    eval let mut condition -> string = subject_name + " == " + lowered_pattern
+    .span 2085 5 2085 42
+    eval let mut has_guard -> boolean = false
+    .if normalized_guard != null
+        .span 2087 9 2087 64
+        eval let lowered_guard = lower_expression(normalized_guard)
+        .span 2088 9 2088 71
+        eval condition = "(" + condition + ") and (" + lowered_guard + ")"
+        .span 2089 9 2089 26
+        eval has_guard = true
+    .endif
+    .span 2091 5 2091 99
+    ret LoweredCaseCondition { condition: condition, is_default: false, has_guard: has_guard }
+.endfn
+
+.fn number_to_string(value -> number) -> string
+.meta return string
+.meta effects none
+    .span 2094 21 2094 36
+    .param value -> number
+    .if value == 0
+        .span 2096 9 2096 20
+        ret "0"
+    .endif
+    .span 2098 5 2098 31
+    eval let digits = "0123456789"
+    .span 2099 5 2099 41
+    eval let mut remaining -> number = value
+    .span 2100 5 2100 35
+    eval let mut output -> string = ""
+    .loop
+        .if remaining <= 0
+            break
+        .endif
+        .span 2105 9 2105 44
+        eval let mut temp -> number = remaining
+        .span 2106 9 2106 40
+        eval let mut quotient -> number = 0
+        .loop
+            .if temp < 10
+                break
+            .endif
+            .span 2111 13 2111 24
+            eval temp -= 10
+            .span 2112 13 2112 27
+            eval quotient += 1
+        .endloop
+        .span 2114 9 2114 26
+        eval let digit = temp
+        .span 2115 9 2115 54
+        eval let ch = substring(digits, digit, digit + 1)
+        .span 2116 9 2116 30
+        eval output = ch + output
+        .span 2117 9 2117 30
+        eval remaining = quotient
+    .endloop
+    .span 2119 5 2119 19
+    ret output
+.endfn
+
+.fn render_python_parameters(parameters -> NativeParameter[]) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2122 29 2122 60
+    .param parameters -> NativeParameter[]
+    .if parameters.length == 0
+        .span 2124 9 2124 19
+        ret []
+    .endif
+    .span 2126 5 2126 39
+    eval let mut rendered -> string[] = []
+    .span 2127 5 2127 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= parameters.length
+            break
+        .endif
+        .span 2132 9 2132 43
+        eval let parameter = parameters[index]
+        .span 2133 9 2133 50
+        eval let mut entry -> string = parameter.name
+        .if parameter.default_value != null
+            .span 2135 13 2135 61
+            eval entry = entry + " = " + parameter.default_value
+        .endif
+        .span 2137 9 2137 51
+        eval rendered = append_string(rendered, entry)
+        .span 2138 9 2138 20
+        eval index += 1
+    .endloop
+    .span 2140 5 2140 21
+    ret rendered
+.endfn
+
+.struct PythonBuilder
+    .layout struct name=PythonBuilder size=16 align=8
+    .layout field lines type=string[] offset=0 size=8 align=8
+    .layout field indent type=number offset=8 size=8 align=8
+    .field lines -> string[]
+    .field indent -> number
+.endstruct
+
+.fn builder_new() -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 2149 5 2149 51
+    ret PythonBuilder { lines: [], indent: 0 }
+.endfn
+
+.fn builder_emit(builder -> PythonBuilder, line -> string) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 2152 17 2152 41
+    .param builder -> PythonBuilder
+    .span 2152 43 2152 57
+    .param line -> string
+    .if line.length == 0
+        .span 2154 9 2154 44
+        ret builder_emit_blank(builder)
+    .endif
+    .span 2156 5 2156 35
+    eval let mut prefix -> string = ""
+    .span 2157 5 2157 33
+    eval let mut count -> number = 0
+    .loop
+        .if count >= builder.indent
+            break
+        .endif
+        .span 2162 9 2162 34
+        eval prefix = prefix + "    "
+        .span 2163 9 2163 20
+        eval count += 1
+    .endloop
+    .span 2165 5 2165 35
+    eval let full_line = prefix + line
+    .span 2166 5 2166 57
+    eval let lines = append_string(builder.lines, full_line)
+    .span 2167 5 2167 67
+    ret PythonBuilder { lines: lines, indent: builder.indent }
+.endfn
+
+.fn builder_emit_blank(builder -> PythonBuilder) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 2170 23 2170 47
+    .param builder -> PythonBuilder
+    .span 2171 5 2171 50
+    eval let lines = append_string(builder.lines, "")
+    .span 2172 5 2172 67
+    ret PythonBuilder { lines: lines, indent: builder.indent }
+.endfn
+
+.fn builder_push_indent(builder -> PythonBuilder) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 2175 24 2175 48
+    .param builder -> PythonBuilder
+    .span 2176 5 2176 79
+    ret PythonBuilder { lines: builder.lines, indent: builder.indent + 1 }
+.endfn
+
+.fn builder_pop_indent(builder -> PythonBuilder) -> PythonBuilder
+.meta return PythonBuilder
+.meta effects none
+    .span 2179 23 2179 47
+    .param builder -> PythonBuilder
+    .span 2180 5 2180 37
+    eval let mut indent = builder.indent
+    .if indent > 0
+        .span 2182 9 2182 21
+        eval indent -= 1
+    .endif
+    .span 2184 5 2184 67
+    ret PythonBuilder { lines: builder.lines, indent: indent }
+.endfn
+
+.fn builder_to_string(builder -> PythonBuilder) -> string
+.meta return string
+.meta effects none
+    .span 2187 22 2187 46
+    .param builder -> PythonBuilder
+    .span 2188 5 2188 60
+    eval let content = join_with_separator(builder.lines, "\n")
+    .if content.length == 0
+        .span 2190 9 2190 19
+        ret ""
+    .endif
+    .span 2192 5 2192 27
+    ret content + "\n"
+.endfn
+
+.fn sanitize_identifier(name -> string) -> string
+.meta return string
+.meta effects none
+    .span 2195 24 2195 38
+    .param name -> string
+    .span 2196 5 2196 35
+    eval let mut result -> string = ""
+    .span 2197 5 2197 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= name.length
+            break
+        .endif
+        .span 2202 9 2202 30
+        eval let ch = name[index]
+        .if is_identifier_char(ch)
+            .span 2204 13 2204 34
+            eval result = result + ch
+        .else
+            .if ch == " "
+                .span 2207 17 2207 39
+                eval result = result + "_"
+            .endif
+        .endif
+        .span 2210 9 2210 20
+        eval index += 1
+    .endloop
+    .if result.length == 0
+        .span 2213 9 2213 37
+        ret "generated_function"
+    .endif
+    .span 2215 5 2215 19
+    ret result
+.endfn
+
+.fn sanitize_qualified_identifier(name -> string) -> string
+.meta return string
+.meta effects none
+    .span 2218 34 2218 48
+    .param name -> string
+    .span 2219 5 2219 35
+    eval let trimmed = trim_text(name)
+    .if trimmed.length == 0
+        .span 2221 9 2221 45
+        ret sanitize_identifier(trimmed)
+    .endif
+    .span 2223 5 2223 33
+    eval let mut part -> string = ""
+    .span 2224 5 2224 36
+    eval let mut parts -> string[] = []
+    .span 2225 5 2225 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= trimmed.length
+            break
+        .endif
+        .span 2230 9 2230 33
+        eval let ch = trimmed[index]
+        .if ch == "."
+            .if part.length > 0
+                .span 2233 17 2233 73
+                eval parts = append_string(parts, sanitize_identifier(part))
+                .span 2234 17 2234 27
+                eval part = ""
+            .endif
+        .else
+            .span 2237 13 2237 30
+            eval part = part + ch
+        .endif
+        .span 2239 9 2239 20
+        eval index += 1
+    .endloop
+    .if part.length > 0
+        .span 2242 9 2242 65
+        eval parts = append_string(parts, sanitize_identifier(part))
+    .endif
+    .if parts.length == 0
+        .span 2245 9 2245 45
+        ret sanitize_identifier(trimmed)
+    .endif
+    .span 2247 5 2247 44
+    ret join_with_separator(parts, ".")
+.endfn
+
+.fn is_identifier_char(ch -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 2250 23 2250 35
+    .param ch -> string
+    .if ch == "_"
+        .span 2252 9 2252 21
+        ret true
+    .endif
+    .span 2254 5 2254 30
+    eval let code = char_code(ch)
+    .if code >= char_code("a") && code <= char_code("z")
+        .span 2256 9 2256 21
+        ret true
+    .endif
+    .if code >= char_code("A") && code <= char_code("Z")
+        .span 2259 9 2259 21
+        ret true
+    .endif
+    .if code >= char_code("0") && code <= char_code("9")
+        .span 2262 9 2262 21
+        ret true
+    .endif
+    .span 2264 5 2264 18
+    ret false
+.endfn
+
+.fn is_whitespace_char(ch -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 2267 23 2267 35
+    .param ch -> string
+    .if ch == " "
+        .span 2269 9 2269 21
+        ret true
+    .endif
+    .if ch == "\n"
+        .span 2272 9 2272 21
+        ret true
+    .endif
+    .if ch == "\r"
+        .span 2275 9 2275 21
+        ret true
+    .endif
+    .if ch == "\t"
+        .span 2278 9 2278 21
+        ret true
+    .endif
+    .span 2280 5 2280 18
+    ret false
+.endfn
+
+.fn trim_text(value -> string) -> string
+.meta return string
+.meta effects none
+    .span 2283 14 2283 29
+    .param value -> string
+    .span 2284 5 2284 33
+    eval let mut start -> number = 0
+    .span 2285 5 2285 42
+    eval let mut end -> number = value.length
+    .loop
+        .if start >= end
+            break
+        .endif
+        .span 2290 9 2290 53
+        eval let ch = substring(value, start, start + 1)
+        .if ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
+            .span 2292 13 2292 24
+            eval start += 1
+            continue
+        .endif
+        break
+    .endloop
+    .loop
+        .if end <= start
+            break
+        .endif
+        .span 2301 9 2301 34
+        eval let look_index = end - 1
+        .span 2302 9 2302 63
+        eval let ch = substring(value, look_index, look_index + 1)
+        .if ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
+            .span 2304 13 2304 22
+            eval end -= 1
+            continue
+        .endif
+        break
+    .endloop
+    .if start == 0 && end == value.length
+        .span 2310 9 2310 22
+        ret value
+    .endif
+    .span 2312 5 2312 41
+    ret substring(value, start, end)
+.endfn
+
+.fn starts_with(value -> string, prefix -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 2315 16 2315 31
+    .param value -> string
+    .span 2315 33 2315 49
+    .param prefix -> string
+    .if prefix.length == 0
+        .span 2317 9 2317 21
+        ret true
+    .endif
+    .if value.length < prefix.length
+        .span 2320 9 2320 22
+        ret false
+    .endif
+    .span 2322 5 2322 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= prefix.length
+            break
+        .endif
+        .if value[index] != prefix[index]
+            .span 2328 13 2328 26
+            ret false
+        .endif
+        .span 2330 9 2330 20
+        eval index += 1
+    .endloop
+    .span 2332 5 2332 17
+    ret true
+.endfn
+
+.fn ends_with(value -> string, suffix -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 2335 14 2335 29
+    .param value -> string
+    .span 2335 31 2335 47
+    .param suffix -> string
+    .if suffix.length == 0
+        .span 2337 9 2337 21
+        ret true
+    .endif
+    .if value.length < suffix.length
+        .span 2340 9 2340 22
+        ret false
+    .endif
+    .span 2342 5 2342 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= suffix.length
+            break
+        .endif
+        .if value[value.length - suffix.length + index] != suffix[index]
+            .span 2348 13 2348 26
+            ret false
+        .endif
+        .span 2350 9 2350 20
+        eval index += 1
+    .endloop
+    .span 2352 5 2352 17
+    ret true
+.endfn
+
+.fn replace_all(value -> string, target -> string, replacement -> string) -> string
+.meta return string
+.meta effects none
+    .span 2355 16 2355 31
+    .param value -> string
+    .span 2355 33 2355 49
+    .param target -> string
+    .span 2355 51 2355 72
+    .param replacement -> string
+    .if target.length == 0
+        .span 2357 9 2357 22
+        ret value
+    .endif
+    .span 2359 5 2359 35
+    eval let mut result -> string = ""
+    .span 2360 5 2360 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= value.length
+            break
+        .endif
+        .if index + target.length <= value.length
+            .span 2366 13 2366 47
+            eval let mut matches -> boolean = true
+            .span 2367 13 2367 42
+            eval let mut offset -> number = 0
+            .loop
+                .if offset >= target.length
+                    break
+                .endif
+                .if value[index + offset] != target[offset]
+                    .span 2373 21 2373 37
+                    eval matches = false
+                    break
+                .endif
+                .span 2376 17 2376 29
+                eval offset += 1
+            .endloop
+            .if matches
+                .span 2379 17 2379 47
+                eval result = result + replacement
+                .span 2380 17 2380 40
+                eval index += target.length
+                continue
+            .endif
+        .endif
+        .span 2384 9 2384 49
+        eval result = result + char_at(value, index)
+        .span 2385 9 2385 20
+        eval index += 1
+    .endloop
+    .span 2387 5 2387 19
+    ret result
+.endfn
+
+.fn join_with_separator(values -> string[], separator -> string) -> string
+.meta return string
+.meta effects none
+    .span 2390 24 2390 42
+    .param values -> string[]
+    .span 2390 44 2390 63
+    .param separator -> string
+    .if values.length == 0
+        .span 2392 9 2392 19
+        ret ""
+    .endif
+    .span 2394 5 2394 42
+    eval let mut result -> string = values[0]
+    .span 2395 5 2395 33
+    eval let mut index -> number = 1
+    .loop
+        .if index >= values.length
+            break
+        .endif
+        .span 2400 9 2400 53
+        eval result = result + separator + values[index]
+        .span 2401 9 2401 20
+        eval index += 1
+    .endloop
+    .span 2403 5 2403 19
+    ret result
+.endfn
+
+.fn append_lowering_diagnostic(diagnostics -> string[], function_name -> string, detail -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2406 31 2406 54
+    .param diagnostics -> string[]
+    .span 2406 56 2406 79
+    .param function_name -> string
+    .span 2406 81 2406 97
+    .param detail -> string
+    .span 2407 5 2407 49
+    eval let trimmed_name = trim_text(function_name)
+    .span 2408 5 2408 45
+    eval let mut entry -> string = "[lowering] "
+    .if trimmed_name.length == 0
+        .span 2410 9 2410 32
+        eval entry = entry + detail
+    .else
+        .span 2412 9 2412 54
+        eval entry = entry + trimmed_name + ": " + detail
+    .endif
+    .span 2414 5 2414 46
+    ret append_string(diagnostics, entry)
+.endfn
+
+.fn append_string(values -> string[], value -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 2417 18 2417 36
+    .param values -> string[]
+    .span 2417 38 2417 53
+    .param value -> string
+    .span 2418 5 2418 35
+    ret values.concat([value])
+.endfn
+
+.fn char_at(value -> string, index -> number) -> string
+.meta return string
+.meta effects none
+    .span 2421 12 2421 27
+    .param value -> string
+    .span 2421 29 2421 44
+    .param index -> number
+    .span 2422 5 2422 47
+    ret substring(value, index, index + 1)
+.endfn

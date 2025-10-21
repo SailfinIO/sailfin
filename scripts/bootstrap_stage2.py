@@ -250,6 +250,15 @@ def extract_import_paths(source: str) -> List[str]:
     return import_paths
 
 
+def _import_basename(import_path: str) -> str:
+    if import_path.startswith("./"):
+        return import_path[2:]
+    if import_path.startswith("../"):
+        parts = import_path.split("/")
+        return parts[-1] if parts else import_path
+    return import_path
+
+
 def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
     """Load a layout manifest for an imported module.
 
@@ -264,14 +273,7 @@ def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
     # "./ast" -> "ast.layout-manifest"
     # "../runtime/prelude" -> "prelude.layout-manifest"
 
-    if import_path.startswith("./"):
-        module_name = import_path[2:]
-    elif import_path.startswith("../"):
-        # Extract just the module name from parent imports
-        parts = import_path.split("/")
-        module_name = parts[-1] if parts else import_path
-    else:
-        module_name = import_path
+    module_name = _import_basename(import_path)
 
     manifest_path = output_dir / f"{module_name}.layout-manifest"
 
@@ -281,6 +283,24 @@ def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
     if "/" in module_name:
         fallback = module_name.split("/")[-1]
         fallback_path = output_dir / f"{fallback}.layout-manifest"
+        if fallback_path.exists():
+            return fallback_path.read_text(encoding="utf-8")
+
+    return ""
+
+
+def load_native_text_for_import(import_path: str, output_dir: pathlib.Path) -> str:
+    """Load the native text artifact for an imported module."""
+
+    module_name = _import_basename(import_path)
+    text_path = output_dir / f"{module_name}.sfn-asm"
+
+    if text_path.exists():
+        return text_path.read_text(encoding="utf-8")
+
+    if "/" in module_name:
+        fallback = module_name.split("/")[-1]
+        fallback_path = output_dir / f"{fallback}.sfn-asm"
         if fallback_path.exists():
             return fallback_path.read_text(encoding="utf-8")
 
@@ -335,6 +355,8 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
     has_manifest = hasattr(
         stage1_main, "compile_to_native_llvm_with_manifests")
+    has_context = hasattr(
+        stage1_main, "compile_to_native_llvm_with_context")
 
     source_cache: Dict[pathlib.Path, str] = {}
     import_cache: Dict[pathlib.Path, List[str]] = {}
@@ -371,6 +393,16 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                                 rel_path = manifest_path.relative_to(REPO_ROOT)
                                 print(
                                     f"[stage2-bootstrap]     wrote {rel_path}")
+                        elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
+                            text_path = output_dir / \
+                                source_path.with_suffix(".sfn-asm").name
+                            text_content = getattr(artifact, "contents", "")
+                            text_path.write_text(
+                                text_content, encoding="utf-8")
+                            if debug:
+                                rel_text = text_path.relative_to(REPO_ROOT)
+                                print(
+                                    f"[stage2-bootstrap]     wrote {rel_text}")
             else:
                 lowered = stage1_main.compile_to_native_llvm(source)
                 first_pass_results[source_path] = lowered
@@ -388,23 +420,42 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
             source = source_cache[source_path]
             import_paths = import_cache.get(source_path, [])
 
-            manifest_contents: List[str] = []
+            import_contexts: List[Tuple[str, str]] = []
             if has_manifest:
                 for import_path in import_paths:
                     manifest_content = load_manifest_for_import(
                         import_path, output_dir)
-                    if manifest_content:
-                        manifest_contents.append(manifest_content)
-                        if debug:
-                            print(
-                                f"[stage2-bootstrap]   using manifest for {import_path}")
+                    native_text_content = load_native_text_for_import(
+                        import_path, output_dir)
+                    import_contexts.append((manifest_content,
+                                            native_text_content))
+                    if debug and manifest_content:
+                        print(
+                            f"[stage2-bootstrap]   using manifest for {import_path}")
 
             result = None
             native_module = None
 
-            if has_manifest and manifest_contents:
-                result = stage1_main.compile_to_native_llvm_with_manifests(
-                    source, manifest_contents)
+            if has_context and import_contexts and any(ctx[0] for ctx in import_contexts):
+                manifests_payload = [ctx[0] for ctx in import_contexts]
+                native_payload = [""] * len(import_contexts)
+                result = stage1_main.compile_to_native_llvm_with_context(
+                    source, manifests_payload, native_payload)
+            elif has_manifest:
+                manifest_payload = [ctx[0]
+                                    for ctx in import_contexts if ctx[0]]
+                if manifest_payload:
+                    result = stage1_main.compile_to_native_llvm_with_manifests(
+                        source, manifest_payload)
+                else:
+                    cached = first_pass_results[source_path]
+                    if has_full:
+                        full_result = cached
+                        result = full_result.llvm
+                        native_module = getattr(
+                            full_result, "native_module", None)
+                    else:
+                        result = cached
             else:
                 cached = first_pass_results[source_path]
                 if has_full:
@@ -448,6 +499,15 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                             rel_path = manifest_path.relative_to(REPO_ROOT)
                             print(
                                 f"[stage2-bootstrap]     refreshed {rel_path}")
+                    elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
+                        text_path = output_dir / \
+                            source_path.with_suffix(".sfn-asm").name
+                        text_content = getattr(artifact, "contents", "")
+                        text_path.write_text(text_content, encoding="utf-8")
+                        if debug:
+                            rel_text = text_path.relative_to(REPO_ROOT)
+                            print(
+                                f"[stage2-bootstrap]     refreshed {rel_text}")
 
             if debug:
                 rel_ir = output_path.relative_to(REPO_ROOT)

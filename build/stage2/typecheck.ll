@@ -50,6 +50,9 @@ declare noalias i8* @malloc(i64)
 @.str.0 = private unnamed_addr constant [21 x i8] c" is missing effect '\00"
 @.str.18 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
 @.str.23 = private unnamed_addr constant [61 x i8] c"] to the signature or accept the CLI fix prompt when offered\00"
+@.str.2 = private unnamed_addr constant [8 x i8] c"struct \00"
+@.str.4 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.10 = private unnamed_addr constant [16 x i8] c" type arguments\00"
 
 define %TypecheckResult @typecheck_program(%Program %program) {
 entry:
@@ -6808,6 +6811,8 @@ afterloop3:
   %t27 = load double, double* %l1
   br label %loop.header8
 loop.header8:
+  %t50 = phi double [ %t27, %entry ], [ %t49, %loop.latch10 ]
+  store double %t50, double* %l1
   br label %loop.body9
 loop.body9:
   %t28 = load double, double* %l1
@@ -6819,14 +6824,38 @@ loop.body9:
 then12:
   br label %afterloop11
 merge13:
+  %t33 = load double, double* %l1
+  %t34 = sitofp i64 1 to double
+  %t35 = fsub double %t33, %t34
+  %t36 = fptosi double %t35 to i64
+  %t37 = getelementptr i8, i8* %value, i64 %t36
+  %t38 = load i8, i8* %t37
+  %t39 = alloca [2 x i8], align 1
+  %t40 = getelementptr [2 x i8], [2 x i8]* %t39, i32 0, i32 0
+  store i8 %t38, i8* %t40
+  %t41 = getelementptr [2 x i8], [2 x i8]* %t39, i32 0, i32 1
+  store i8 0, i8* %t41
+  %t42 = getelementptr [2 x i8], [2 x i8]* %t39, i32 0, i32 0
+  %t43 = call i1 @is_whitespace(i8* %t42)
+  %t44 = load double, double* %l0
+  %t45 = load double, double* %l1
+  br i1 %t43, label %then14, label %merge15
+then14:
+  %t46 = load double, double* %l1
+  %t47 = sitofp i64 1 to double
+  %t48 = fsub double %t46, %t47
+  store double %t48, double* %l1
+  br label %loop.latch10
+merge15:
   br label %afterloop11
 loop.latch10:
+  %t49 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t33 = load double, double* %l0
-  %t34 = load double, double* %l1
-  %t35 = call i8* @slice_text(i8* %value, double %t33, double %t34)
-  ret i8* %t35
+  %t51 = load double, double* %l0
+  %t52 = load double, double* %l1
+  %t53 = call i8* @slice_text(i8* %value, double %t51, double %t52)
+  ret i8* %t53
 }
 
 define i8* @slice_text(i8* %value, double %start, double %end) {
@@ -7971,17 +8000,62 @@ afterfor3:
 
 define %Diagnostic @make_interface_missing_type_arguments_diagnostic(i8* %struct_name, i8* %interface_name, i8* %interface_signature) {
 entry:
-  ret %Diagnostic zeroinitializer
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %s2, %struct_name
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
+  %t5 = add i8* %t3, %s4
+  %t6 = add i8* %t5, %interface_name
+  %s7 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.7, i32 0, i32 0
+  %t8 = add i8* %t6, %s7
+  %t9 = add i8* %t8, %interface_signature
+  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.10, i32 0, i32 0
+  %t11 = add i8* %t9, %s10
+  %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
+  %t13 = bitcast i8* null to %Token*
+  %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
+  ret %Diagnostic %t14
 }
 
 define %Diagnostic @make_interface_type_argument_mismatch_diagnostic(i8* %struct_name, i8* %annotation_text, i8* %interface_signature) {
 entry:
-  ret %Diagnostic zeroinitializer
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %s2, %struct_name
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
+  %t5 = add i8* %t3, %s4
+  %t6 = add i8* %t5, %annotation_text
+  %s7 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.7, i32 0, i32 0
+  %t8 = add i8* %t6, %s7
+  %t9 = add i8* %t8, %interface_signature
+  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.10, i32 0, i32 0
+  %t11 = add i8* %t9, %s10
+  %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
+  %t13 = bitcast i8* null to %Token*
+  %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
+  ret %Diagnostic %t14
 }
 
 define %Diagnostic @make_interface_no_type_arguments_diagnostic(i8* %struct_name, i8* %annotation_text, i8* %interface_name) {
 entry:
-  ret %Diagnostic zeroinitializer
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %s2, %struct_name
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
+  %t5 = add i8* %t3, %s4
+  %t6 = add i8* %t5, %annotation_text
+  %s7 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.7, i32 0, i32 0
+  %t8 = add i8* %t6, %s7
+  %t9 = add i8* %t8, %interface_name
+  %s10 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.10, i32 0, i32 0
+  %t11 = add i8* %t9, %s10
+  %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
+  %t13 = bitcast i8* null to %Token*
+  %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
+  ret %Diagnostic %t14
 }
 
 define %Token* @token_from_name(i8* %name, %SourceSpan* %span) {
@@ -8016,12 +8090,44 @@ merge1:
 
 define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, %Token* %token) {
 entry:
-  ret %Diagnostic zeroinitializer
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
+  %s2 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %s2, %kind
+  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.4, i32 0, i32 0
+  %t5 = add i8* %t3, %s4
+  %t6 = add i8* %t5, %name
+  %s7 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.7, i32 0, i32 0
+  %t8 = add i8* %t6, %s7
+  %t9 = insertvalue %Diagnostic %t1, i8* %t8, 1
+  %t10 = insertvalue %Diagnostic %t9, %Token* %token, 2
+  ret %Diagnostic %t10
 }
 
 define %Diagnostic @make_missing_interface_member_diagnostic(i8* %struct_name, i8* %interface_name, i8* %member_name) {
 entry:
-  ret %Diagnostic zeroinitializer
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
+  %t3 = add i8* %s2, %struct_name
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
+  %t5 = add i8* %t3, %s4
+  %t6 = add i8* %t5, %interface_name
+  %s7 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.7, i32 0, i32 0
+  %t8 = add i8* %t6, %s7
+  %t9 = add i8* %t8, %member_name
+  %t10 = load i8, i8* %t9
+  %t11 = add i8 %t10, 96
+  %t12 = alloca [2 x i8], align 1
+  %t13 = getelementptr [2 x i8], [2 x i8]* %t12, i32 0, i32 0
+  store i8 %t11, i8* %t13
+  %t14 = getelementptr [2 x i8], [2 x i8]* %t12, i32 0, i32 1
+  store i8 0, i8* %t14
+  %t15 = getelementptr [2 x i8], [2 x i8]* %t12, i32 0, i32 0
+  %t16 = insertvalue %Diagnostic %t1, i8* %t15, 1
+  %t17 = bitcast i8* null to %Token*
+  %t18 = insertvalue %Diagnostic %t16, %Token* %t17, 2
+  ret %Diagnostic %t18
 }
 
 define i1 @starts_with(i8* %value, i8* %prefix) {

@@ -1,0 +1,1003 @@
+; Sailfin Native Prototype
+.module main
+
+.import "./ast" { Block, Decorator, ElseBranch, Expression, MatchCase, FunctionSignature, MethodDeclaration, Program, Statement }
+
+.import "./token" { Token }
+
+.import "./decorator_semantics" { evaluate_decorators }
+
+.struct EffectRequirement
+    .layout struct name=EffectRequirement size=24 align=8
+    .layout field effect type=string offset=0 size=8 align=8
+    .layout field origin type=Token? offset=8 size=8 align=8
+    .layout field description type=string offset=16 size=8 align=8
+    .field effect -> string
+    .field origin -> Token?
+    .field description -> string
+.endstruct
+
+.struct EffectViolation
+    .layout struct name=EffectViolation size=24 align=8
+    .layout field routine_name type=string offset=0 size=8 align=8
+    .layout field missing_effects type=string[] offset=8 size=8 align=8
+    .layout field requirements type=EffectRequirement[] offset=16 size=8 align=8
+    .field routine_name -> string
+    .field missing_effects -> string[]
+    .field requirements -> EffectRequirement[]
+.endstruct
+
+.fn validate_effects(program -> Program) -> EffectViolation[]
+.meta return EffectViolation[]
+.meta effects none
+    .span 33 21 33 39
+    .param program -> Program
+    .span 34 5 34 50
+    eval let mut violations -> EffectViolation[] = []
+    .span 35 5 35 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= program.statements.length
+            break
+        .endif
+        .span 40 9 40 51
+        eval let statement = program.statements[index]
+        .span 41 9 41 82
+        eval violations = append_violations(violations, analyze_statement(statement))
+        .span 42 9 42 20
+        eval index += 1
+    .endloop
+    .span 44 5 44 23
+    ret violations
+.endfn
+
+.fn analyze_statement(statement -> Statement) -> EffectViolation[]
+.meta return EffectViolation[]
+.meta effects none
+    .span 47 22 47 44
+    .param statement -> Statement
+    .if statement.variant == "FunctionDeclaration"
+        .span 49 9 49 117
+        ret analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name)
+    .endif
+    .if statement.variant == "PipelineDeclaration"
+        .span 52 9 52 45
+        eval let signature = statement.signature
+        .span 53 9 53 54
+        eval let qualified = "pipeline " + signature.name
+        .span 54 9 54 92
+        ret analyze_routine(signature, statement.body, statement.decorators, qualified)
+    .endif
+    .if statement.variant == "ToolDeclaration"
+        .span 57 9 57 45
+        eval let signature = statement.signature
+        .span 58 9 58 50
+        eval let qualified = "tool " + signature.name
+        .span 59 9 59 92
+        ret analyze_routine(signature, statement.body, statement.decorators, qualified)
+    .endif
+    .if statement.variant == "TestDeclaration"
+        .span 62 9 70 11
+        eval let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: null,
+        }
+        .span 71 9 71 50
+        eval let qualified = "test " + statement.name
+        .span 72 9 72 92
+        ret analyze_routine(signature, statement.body, statement.decorators, qualified)
+    .endif
+    .if statement.variant == "StructDeclaration"
+        .span 75 9 75 50
+        eval let mut issues -> EffectViolation[] = []
+        .span 76 9 76 37
+        eval let mut index -> number = 0
+        .loop
+            .if index >= statement.methods.length
+                break
+            .endif
+            .span 81 13 81 51
+            eval let method = statement.methods[index]
+            .span 82 13 82 74
+            eval let qualified = statement.name + "." + method.signature.name
+            .span 83 13 86 15
+            eval issues = append_violations(
+                issues,
+                analyze_routine(method.signature, method.body, method.decorators, qualified)
+            )
+            .span 87 13 87 24
+            eval index += 1
+        .endloop
+        .span 89 9 89 23
+        ret issues
+    .endif
+    .span 91 5 91 15
+    ret []
+.endfn
+
+.fn analyze_routine(signature -> FunctionSignature, body -> Block, decorators -> Decorator[], name -> string) -> EffectViolation[]
+.meta return EffectViolation[]
+.meta effects none
+    .span 95 5 95 35
+    .param signature -> FunctionSignature
+    .span 96 5 96 18
+    .param body -> Block
+    .span 97 5 97 30
+    .param decorators -> Decorator[]
+    .span 98 5 98 19
+    .param name -> string
+    .span 100 5 100 58
+    eval let decorator_info = evaluate_decorators(decorators)
+    .span 101 5 101 39
+    eval let mut declared -> string[] = []
+    .span 102 5 102 42
+    eval let mut declared_index -> number = 0
+    .loop
+        .if declared_index >= signature.effects.length
+            break
+        .endif
+        .span 107 9 107 86
+        eval declared = append_unique_effect(declared, signature.effects[declared_index])
+        .span 108 9 108 29
+        eval declared_index += 1
+    .endloop
+    .span 110 5 110 60
+    eval let mut requires_io_from_decorators -> boolean = false
+    .span 111 5 111 43
+    eval let mut decorator_index -> number = 0
+    .loop
+        .if decorator_index >= decorator_info.length
+            break
+        .endif
+        .span 116 9 116 63
+        eval let decorator_entry = decorator_info[decorator_index]
+        .if decorator_entry.name == "trace" || decorator_entry.name == "logExecution" || decorator_entry.name == "logexecution"
+            .span 118 13 118 48
+            eval requires_io_from_decorators = true
+            break
+        .endif
+        .span 121 9 121 30
+        eval decorator_index += 1
+    .endloop
+    .if requires_io_from_decorators
+        .span 124 9 124 57
+        eval declared = append_unique_effect(declared, "io")
+    .endif
+    .span 126 5 126 43
+    eval let required = required_effects(body)
+    .span 127 5 127 38
+    eval let mut missing -> string[] = []
+    .span 128 5 128 62
+    eval let mut missing_requirements -> EffectRequirement[] = []
+    .span 129 5 129 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= required.length
+            break
+        .endif
+        .span 134 9 134 43
+        eval let requirement = required[index]
+        .span 135 9 135 41
+        eval let effect = requirement.effect
+        .if effect == "io" && requires_io_from_decorators
+            .span 137 13 137 24
+            eval index += 1
+            continue
+        .endif
+        .if contains_effect(declared, effect)
+            .span 141 13 141 24
+            eval index += 1
+            continue
+        .endif
+        .span 144 9 144 57
+        eval missing = append_unique_effect(missing, effect)
+        .if !contains_requirement_for_effect(missing_requirements, effect)
+            .span 146 13 146 90
+            eval missing_requirements = append_requirement(missing_requirements, requirement)
+        .endif
+        .span 148 9 148 20
+        eval index += 1
+    .endloop
+    .if missing.length == 0
+        .span 151 9 151 19
+        ret []
+    .endif
+    .span 153 5 153 46
+    eval let mut result -> EffectViolation[] = []
+    .span 154 5 161 7
+    eval result = append_violation(
+        result,
+        EffectViolation {
+            routine_name: name,
+            missing_effects: missing,
+            requirements: missing_requirements,
+        }
+    )
+    .span 162 5 162 19
+    ret result
+.endfn
+
+.fn required_effects(body -> Block) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 165 21 165 34
+    .param body -> Block
+    .span 166 5 166 45
+    ret collect_effects_from_block(body)
+.endfn
+
+.fn collect_effects_from_block(block -> Block) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 169 31 169 45
+    .param block -> Block
+    .span 170 5 170 66
+    eval let mut required = collect_effects_from_tokens(block.tokens)
+    .span 171 5 171 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= block.statements.length
+            break
+        .endif
+        .span 176 9 176 106
+        eval required = merge_requirements(required, collect_effects_from_statement(block.statements[index]))
+        .span 177 9 177 20
+        eval index += 1
+    .endloop
+    .span 179 5 179 21
+    ret required
+.endfn
+
+.fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 182 35 182 57
+    .param statement -> Statement
+    .if statement.variant == "PromptStatement"
+        .span 184 9 184 71
+        eval let mut required = collect_effects_from_block(statement.body)
+        .span 185 9 192 11
+        eval required = append_requirement(
+            required,
+            EffectRequirement {
+                effect: "model",
+                origin: statement.keyword_token,
+                description: "prompt \"" + statement.channel + "\"",
+            }
+        )
+        .span 193 9 193 25
+        ret required
+    .endif
+    .if statement.variant == "WithStatement"
+        .span 196 9 196 71
+        eval let mut required = collect_effects_from_block(statement.body)
+        .span 197 9 197 44
+        eval let mut clause_index -> number = 0
+        .loop
+            .if clause_index >= statement.clauses.length
+                break
+            .endif
+            .span 202 13 202 58
+            eval let clause = statement.clauses[clause_index]
+            .span 203 13 203 105
+            eval required = merge_requirements(required, collect_effects_from_expression(clause.expression))
+            .span 204 13 204 31
+            eval clause_index += 1
+        .endloop
+        .span 206 9 206 25
+        ret required
+    .endif
+    .if statement.variant == "ForStatement"
+        .span 209 9 209 71
+        eval let mut required = collect_effects_from_block(statement.body)
+        .if statement.clause.target != null
+            .span 211 13 211 111
+            eval required = merge_requirements(required, collect_effects_from_expression(statement.clause.target))
+        .endif
+        .span 213 9 213 109
+        eval required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable))
+        .span 214 9 214 25
+        ret required
+    .endif
+    .if statement.variant == "LoopStatement"
+        .span 217 9 217 59
+        ret collect_effects_from_block(statement.body)
+    .endif
+    .if statement.variant == "MatchStatement"
+        .span 220 9 220 82
+        eval let mut required = collect_effects_from_expression(statement.expression)
+        .span 221 9 221 42
+        eval let mut case_index -> number = 0
+        .loop
+            .if case_index >= statement.cases.length
+                break
+            .endif
+            .span 226 13 226 115
+            eval required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index]))
+            .span 227 13 227 29
+            eval case_index += 1
+        .endloop
+        .span 229 9 229 25
+        ret required
+    .endif
+    .if statement.variant == "IfStatement"
+        .span 232 9 232 81
+        eval let mut required = collect_effects_from_expression(statement.condition)
+        .span 233 9 233 99
+        eval required = merge_requirements(required, collect_effects_from_block(statement.then_block))
+        .if statement.else_branch != null
+            .span 235 13 235 110
+            eval required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch))
+        .endif
+        .span 237 9 237 25
+        ret required
+    .endif
+    .if statement.variant == "ReturnStatement"
+        .span 240 9 240 70
+        ret collect_effects_from_expression(statement.expression)
+    .endif
+    .if statement.variant == "ExpressionStatement"
+        .span 243 9 243 70
+        ret collect_effects_from_expression(statement.expression)
+    .endif
+    .if statement.variant == "VariableDeclaration"
+        .span 246 9 246 71
+        ret collect_effects_from_expression(statement.initializer)
+    .endif
+    .if statement.variant == "FunctionDeclaration"
+        .span 249 9 249 59
+        ret collect_effects_from_block(statement.body)
+    .endif
+    .if statement.variant == "PipelineDeclaration"
+        .span 252 9 252 59
+        ret collect_effects_from_block(statement.body)
+    .endif
+    .if statement.variant == "ToolDeclaration"
+        .span 255 9 255 59
+        ret collect_effects_from_block(statement.body)
+    .endif
+    .if statement.variant == "TestDeclaration"
+        .span 258 9 258 59
+        ret collect_effects_from_block(statement.body)
+    .endif
+    .if statement.variant == "StructDeclaration"
+        .span 261 9 261 54
+        eval let mut required -> EffectRequirement[] = []
+        .span 262 9 262 44
+        eval let mut method_index -> number = 0
+        .loop
+            .if method_index >= statement.methods.length
+                break
+            .endif
+            .span 267 13 267 119
+            eval required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body))
+            .span 268 13 268 31
+            eval method_index += 1
+        .endloop
+        .span 270 9 270 25
+        ret required
+    .endif
+    .if statement.variant == "ModelDeclaration"
+        .span 273 9 273 54
+        eval let mut required -> EffectRequirement[] = []
+        .span 274 9 274 46
+        eval let mut property_index -> number = 0
+        .loop
+            .if property_index >= statement.properties.length
+                break
+            .endif
+            .span 279 13 279 130
+            eval required = merge_requirements(required, collect_effects_from_expression(statement.properties[property_index].value))
+            .span 280 13 280 33
+            eval property_index += 1
+        .endloop
+        .span 282 9 282 25
+        ret required
+    .endif
+    .if statement.variant == "Unknown"
+        .span 285 9 285 62
+        ret collect_effects_from_tokens(statement.tokens)
+    .endif
+    .span 287 5 287 15
+    ret []
+.endfn
+
+.fn collect_effects_from_else_branch(branch -> ElseBranch) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 290 37 290 57
+    .param branch -> ElseBranch
+    .span 291 5 291 50
+    eval let mut required -> EffectRequirement[] = []
+    .if branch.body != null
+        .span 293 9 293 90
+        eval required = merge_requirements(required, collect_effects_from_block(branch.body))
+    .endif
+    .if branch.statement != null
+        .span 296 9 296 99
+        eval required = merge_requirements(required, collect_effects_from_statement(branch.statement))
+    .endif
+    .span 298 5 298 21
+    ret required
+.endfn
+
+.fn collect_effects_from_match_case(case -> MatchCase) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 301 36 301 53
+    .param case -> MatchCase
+    .span 302 5 302 70
+    eval let mut required = collect_effects_from_expression(case.pattern)
+    .if case.guard != null
+        .span 304 9 304 94
+        eval required = merge_requirements(required, collect_effects_from_expression(case.guard))
+    .endif
+    .span 306 5 306 84
+    eval required = merge_requirements(required, collect_effects_from_block(case.body))
+    .span 307 5 307 21
+    ret required
+.endfn
+
+.fn collect_effects_from_expression(expression -> Expression?) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 310 36 310 61
+    .param expression -> Expression?
+    .if expression == null
+        .span 312 9 312 19
+        ret []
+    .endif
+    .if expression.variant == "Call"
+        .span 315 9 315 79
+        eval let mut required = collect_effects_from_expression(expression.callee)
+        .span 316 9 316 46
+        eval let mut argument_index -> number = 0
+        .loop
+            .if argument_index >= expression.arguments.length
+                break
+            .endif
+            .span 321 13 321 124
+            eval required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index]))
+            .span 322 13 322 33
+            eval argument_index += 1
+        .endloop
+        .span 324 9 324 25
+        ret required
+    .endif
+    .if expression.variant == "Member"
+        .span 327 9 327 67
+        ret collect_effects_from_expression(expression.object)
+    .endif
+    .if expression.variant == "Unary"
+        .span 330 9 330 68
+        ret collect_effects_from_expression(expression.operand)
+    .endif
+    .if expression.variant == "Binary"
+        .span 333 9 333 77
+        eval let mut required = collect_effects_from_expression(expression.left)
+        .span 334 9 334 100
+        eval required = merge_requirements(required, collect_effects_from_expression(expression.right))
+        .span 335 9 335 25
+        ret required
+    .endif
+    .if expression.variant == "Array"
+        .span 338 9 338 54
+        eval let mut required -> EffectRequirement[] = []
+        .span 339 9 339 45
+        eval let mut element_index -> number = 0
+        .loop
+            .if element_index >= expression.elements.length
+                break
+            .endif
+            .span 344 13 344 122
+            eval required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index]))
+            .span 345 13 345 32
+            eval element_index += 1
+        .endloop
+        .span 347 9 347 25
+        ret required
+    .endif
+    .if expression.variant == "Object"
+        .span 350 9 350 54
+        eval let mut required -> EffectRequirement[] = []
+        .span 351 9 351 43
+        eval let mut field_index -> number = 0
+        .loop
+            .if field_index >= expression.fields.length
+                break
+            .endif
+            .span 356 13 356 124
+            eval required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value))
+            .span 357 13 357 30
+            eval field_index += 1
+        .endloop
+        .span 359 9 359 25
+        ret required
+    .endif
+    .if expression.variant == "Struct"
+        .span 362 9 362 54
+        eval let mut required -> EffectRequirement[] = []
+        .span 363 9 363 43
+        eval let mut field_index -> number = 0
+        .loop
+            .if field_index >= expression.fields.length
+                break
+            .endif
+            .span 368 13 368 124
+            eval required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value))
+            .span 369 13 369 30
+            eval field_index += 1
+        .endloop
+        .span 371 9 371 25
+        ret required
+    .endif
+    .if expression.variant == "Lambda"
+        .span 374 9 374 60
+        ret collect_effects_from_block(expression.body)
+    .endif
+    .if expression.variant == "Index"
+        .span 377 9 377 81
+        eval let mut required = collect_effects_from_expression(expression.sequence)
+        .span 378 9 378 100
+        eval required = merge_requirements(required, collect_effects_from_expression(expression.index))
+        .span 379 9 379 25
+        ret required
+    .endif
+    .if expression.variant == "Range"
+        .span 382 9 382 78
+        eval let mut required = collect_effects_from_expression(expression.start)
+        .span 383 9 383 98
+        eval required = merge_requirements(required, collect_effects_from_expression(expression.end))
+        .span 384 9 384 25
+        ret required
+    .endif
+    .if expression.variant == "Raw"
+        .span 387 9 387 19
+        ret []
+    .endif
+    .span 389 5 389 15
+    ret []
+.endfn
+
+.fn collect_effects_from_tokens(tokens -> Token[]) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 391 32 391 49
+    .param tokens -> Token[]
+    .span 392 5 392 50
+    eval let mut required -> EffectRequirement[] = []
+    .span 393 5 393 55
+    eval required = append_prompt_effect(required, tokens)
+    .span 394 5 394 102
+    eval required = append_identifier_dot_effect(required, tokens, "fs", "io", "filesystem helper usage")
+    .span 395 5 395 100
+    eval required = append_identifier_dot_effect(required, tokens, "print", "io", "print helper usage")
+    .span 396 5 396 104
+    eval required = append_identifier_dot_effect(required, tokens, "console", "io", "console helper usage")
+    .span 397 5 397 99
+    eval required = append_identifier_dot_effect(required, tokens, "http", "net", "http helper usage")
+    .span 398 5 398 109
+    eval required = append_identifier_dot_effect(required, tokens, "websocket", "net", "websocket helper usage")
+    .span 399 5 399 93
+    eval required = append_identifier_call_effect(required, tokens, "spawn", "io", "spawn call")
+    .span 400 5 400 94
+    eval required = append_identifier_call_effect(required, tokens, "serve", "net", "serve call")
+    .span 401 5 401 96
+    eval required = append_identifier_call_effect(required, tokens, "sleep", "clock", "sleep call")
+    .span 402 5 402 21
+    ret required
+.endfn
+
+.fn append_prompt_effect(requirements -> EffectRequirement[], tokens -> Token[]) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 405 25 405 60
+    .param requirements -> EffectRequirement[]
+    .span 405 62 405 79
+    .param tokens -> Token[]
+    .span 406 5 406 35
+    eval let mut result = requirements
+    .span 407 5 407 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 412 9 412 35
+        eval let token = tokens[index]
+        .if is_identifier_token(token, "prompt")
+            .span 414 13 414 68
+            eval let channel_index = next_non_trivia(tokens, index + 1)
+            .span 415 13 415 60
+            eval let mut description -> string = "prompt block"
+            .if channel_index != -1
+                .span 417 17 417 59
+                eval let channel_token = tokens[channel_index]
+                .if channel_token.kind.variant == "Identifier" || channel_token.kind.variant == "StringLiteral"
+                    .span 419 21 419 68
+                    eval description = "prompt " + channel_token.lexeme
+                    .span 420 21 420 82
+                    eval let brace_index = next_non_trivia(tokens, channel_index + 1)
+                    .if brace_index != -1 && is_symbol_token(tokens[brace_index], "{")
+                        .span 422 25 429 27
+                        eval result = append_requirement(
+                            result,
+                            EffectRequirement {
+                                effect: "model",
+                                origin: token,
+                                description: description,
+                            }
+                        )
+                        .span 430 25 430 36
+                        eval index += 1
+                        continue
+                    .endif
+                .endif
+            .endif
+            .span 435 13 442 15
+            eval result = append_requirement(
+                result,
+                EffectRequirement {
+                    effect: "model",
+                    origin: token,
+                    description: description,
+                }
+            )
+        .endif
+        .span 444 9 444 20
+        eval index += 1
+    .endloop
+    .span 446 5 446 19
+    ret result
+.endfn
+
+.fn append_identifier_dot_effect(requirements -> EffectRequirement[], tokens -> Token[], identifier -> string, effect -> string, description -> string) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 450 5 450 40
+    .param requirements -> EffectRequirement[]
+    .span 451 5 451 22
+    .param tokens -> Token[]
+    .span 452 5 452 25
+    .param identifier -> string
+    .span 453 5 453 21
+    .param effect -> string
+    .span 454 5 454 26
+    .param description -> string
+    .span 456 5 456 79
+    eval let matches = find_identifier_followed_by_symbol(tokens, identifier, ".")
+    .span 457 5 457 35
+    eval let mut result = requirements
+    .span 458 5 458 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= matches.length
+            break
+        .endif
+        .span 463 9 470 11
+        eval result = append_requirement(
+            result,
+            EffectRequirement {
+                effect: effect,
+                origin: matches[index],
+                description: description,
+            }
+        )
+        .span 471 9 471 20
+        eval index += 1
+    .endloop
+    .span 473 5 473 19
+    ret result
+.endfn
+
+.fn append_identifier_call_effect(requirements -> EffectRequirement[], tokens -> Token[], identifier -> string, effect -> string, description -> string) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 477 5 477 40
+    .param requirements -> EffectRequirement[]
+    .span 478 5 478 22
+    .param tokens -> Token[]
+    .span 479 5 479 25
+    .param identifier -> string
+    .span 480 5 480 21
+    .param effect -> string
+    .span 481 5 481 26
+    .param description -> string
+    .span 483 5 483 60
+    eval let matches = find_identifier_call(tokens, identifier)
+    .span 484 5 484 35
+    eval let mut result = requirements
+    .span 485 5 485 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= matches.length
+            break
+        .endif
+        .span 490 9 497 11
+        eval result = append_requirement(
+            result,
+            EffectRequirement {
+                effect: effect,
+                origin: matches[index],
+                description: description,
+            }
+        )
+        .span 498 9 498 20
+        eval index += 1
+    .endloop
+    .span 500 5 500 19
+    ret result
+.endfn
+
+.fn find_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> Token[]
+.meta return Token[]
+.meta effects none
+    .span 503 39 503 56
+    .param tokens -> Token[]
+    .span 503 58 503 72
+    .param name -> string
+    .span 503 74 503 90
+    .param symbol -> string
+    .span 504 5 504 37
+    eval let mut matches -> Token[] = []
+    .span 505 5 505 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .if is_identifier_token(tokens[index], name)
+            .span 511 13 511 65
+            eval let next_index = next_non_trivia(tokens, index + 1)
+            .if next_index != -1 && is_symbol_token(tokens[next_index], symbol)
+                .span 513 17 513 59
+                eval matches = matches.concat([tokens[index]])
+            .endif
+        .endif
+        .span 516 9 516 20
+        eval index += 1
+    .endloop
+    .span 518 5 518 20
+    ret matches
+.endfn
+
+.fn find_identifier_call(tokens -> Token[], name -> string) -> Token[]
+.meta return Token[]
+.meta effects none
+    .span 521 25 521 42
+    .param tokens -> Token[]
+    .span 521 44 521 58
+    .param name -> string
+    .span 522 5 522 37
+    eval let mut matches -> Token[] = []
+    .span 523 5 523 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .if is_identifier_token(tokens[index], name)
+            .span 529 13 529 60
+            eval let paren = next_non_trivia(tokens, index + 1)
+            .if paren != -1 && is_symbol_token(tokens[paren], "(")
+                .span 531 17 531 59
+                eval matches = matches.concat([tokens[index]])
+            .endif
+        .endif
+        .span 534 9 534 20
+        eval index += 1
+    .endloop
+    .span 536 5 536 20
+    ret matches
+.endfn
+
+.fn next_non_trivia(tokens -> Token[], start -> number) -> number
+.meta return number
+.meta effects none
+    .span 539 20 539 37
+    .param tokens -> Token[]
+    .span 539 39 539 54
+    .param start -> number
+    .span 540 5 540 27
+    eval let mut index = start
+    .loop
+        .if index >= tokens.length
+            break
+        .endif
+        .span 545 9 545 35
+        eval let token = tokens[index]
+        .if !is_trivia_token(token)
+            .span 547 13 547 26
+            ret index
+        .endif
+        .span 549 9 549 20
+        eval index += 1
+    .endloop
+    .span 551 5 551 15
+    ret -1
+.endfn
+
+.fn is_trivia_token(token -> Token) -> boolean
+.meta return boolean
+.meta effects none
+    .span 554 20 554 34
+    .param token -> Token
+    .span 555 5 555 82
+    ret token.kind.variant == "Whitespace" || token.kind.variant == "Comment"
+.endfn
+
+.fn is_identifier_token(token -> Token, expected -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 558 24 558 38
+    .param token -> Token
+    .span 558 40 558 58
+    .param expected -> string
+    .if token.kind.variant == "Identifier"
+        .span 560 9 560 38
+        eval let value = token.kind.value
+        .if value.length > 0
+            .span 562 13 562 38
+            ret value == expected
+        .endif
+    .endif
+    .span 565 5 565 37
+    ret token.lexeme == expected
+.endfn
+
+.fn is_symbol_token(token -> Token, expected -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 568 20 568 34
+    .param token -> Token
+    .span 568 36 568 54
+    .param expected -> string
+    .if token.kind.variant == "Symbol"
+        .span 570 9 570 38
+        eval let value = token.kind.value
+        .if value.length > 0
+            .span 572 13 572 38
+            ret value == expected
+        .endif
+    .endif
+    .span 575 5 575 37
+    ret token.lexeme == expected
+.endfn
+
+.fn append_violations(violations -> EffectViolation[], new_violations -> EffectViolation[]) -> EffectViolation[]
+.meta return EffectViolation[]
+.meta effects none
+    .span 578 22 578 53
+    .param violations -> EffectViolation[]
+    .span 578 55 578 90
+    .param new_violations -> EffectViolation[]
+    .span 579 5 579 33
+    eval let mut result = violations
+    .span 580 5 580 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= new_violations.length
+            break
+        .endif
+        .span 585 9 585 57
+        eval result = result.concat([new_violations[index]])
+        .span 586 9 586 20
+        eval index += 1
+    .endloop
+    .span 588 5 588 19
+    ret result
+.endfn
+
+.fn append_violation(collection -> EffectViolation[], item -> EffectViolation) -> EffectViolation[]
+.meta return EffectViolation[]
+.meta effects none
+    .span 591 21 591 52
+    .param collection -> EffectViolation[]
+    .span 591 54 591 77
+    .param item -> EffectViolation
+    .span 592 5 592 38
+    ret collection.concat([item])
+.endfn
+
+.fn append_unique_effect(effects -> string[], effect -> string) -> string[]
+.meta return string[]
+.meta effects none
+    .span 595 25 595 44
+    .param effects -> string[]
+    .span 595 46 595 62
+    .param effect -> string
+    .if contains_effect(effects, effect)
+        .span 597 9 597 24
+        ret effects
+    .endif
+    .span 599 5 599 37
+    ret effects.concat([effect])
+.endfn
+
+.fn contains_effect(effects -> string[], effect -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 602 20 602 39
+    .param effects -> string[]
+    .span 602 41 602 57
+    .param effect -> string
+    .span 603 5 603 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= effects.length
+            break
+        .endif
+        .if effects[index] == effect
+            .span 609 13 609 25
+            ret true
+        .endif
+        .span 611 9 611 20
+        eval index += 1
+    .endloop
+    .span 613 5 613 18
+    ret false
+.endfn
+
+.fn append_requirement(collection -> EffectRequirement[], item -> EffectRequirement) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 616 23 616 56
+    .param collection -> EffectRequirement[]
+    .span 616 58 616 83
+    .param item -> EffectRequirement
+    .span 617 5 617 38
+    ret collection.concat([item])
+.endfn
+
+.fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequirement[]) -> EffectRequirement[]
+.meta return EffectRequirement[]
+.meta effects none
+    .span 620 23 620 50
+    .param base -> EffectRequirement[]
+    .span 620 52 620 84
+    .param additions -> EffectRequirement[]
+    .span 621 5 621 27
+    eval let mut result = base
+    .span 622 5 622 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= additions.length
+            break
+        .endif
+        .span 627 9 627 52
+        eval result = result.concat([additions[index]])
+        .span 628 9 628 20
+        eval index += 1
+    .endloop
+    .span 630 5 630 19
+    ret result
+.endfn
+
+.fn contains_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 633 36 633 71
+    .param requirements -> EffectRequirement[]
+    .span 633 73 633 89
+    .param effect -> string
+    .span 634 5 634 33
+    eval let mut index -> number = 0
+    .loop
+        .if index >= requirements.length
+            break
+        .endif
+        .if requirements[index].effect == effect
+            .span 640 13 640 25
+            ret true
+        .endif
+        .span 642 9 642 20
+        eval index += 1
+    .endloop
+    .span 644 5 644 18
+    ret false
+.endfn

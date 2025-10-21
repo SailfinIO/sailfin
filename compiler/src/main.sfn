@@ -5,7 +5,7 @@ import { parse_program } from "./parser";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
-import { lower_to_llvm, lower_to_llvm_with_manifests, LoweredLLVMResult } from "./native_llvm_lowering";
+import { lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
 import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { typecheck_program } from "./typecheck";
 
@@ -137,8 +137,8 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
     };
 }
 
-// Version that accepts pre-loaded layout manifests for cross-module type resolution
-fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io] {
+// Extended lowering entry point that accepts layout manifests and native artifacts for imports
+fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
     
     // Parse the manifest contents into LayoutManifest structs
@@ -148,12 +148,17 @@ fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> 
         if manifest_index >= manifest_contents.length {
             break;
         }
-        let parsed = parse_layout_manifest(manifest_contents[manifest_index]);
-        manifests = manifests.concat([parsed]);
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([parsed]);
+        }
         manifest_index += 1;
     }
-    
-    let lowered = lower_to_llvm_with_manifests(native_result.module, manifests);
+
+    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts);
     let mut combined -> string[] = [];
     combined = combined.concat(native_result.diagnostics);
     combined = combined.concat(lowered.diagnostics);
@@ -176,6 +181,11 @@ fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> 
         capability_manifest: lowered.capability_manifest,
         string_constants: lowered.string_constants,
     };
+}
+
+// Backwards-compatible shim that only supplies layout manifests
+fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io] {
+    return compile_to_native_llvm_with_context(source, manifest_contents, []);
 }
 
 fn main() ![io] {
