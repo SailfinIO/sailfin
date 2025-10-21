@@ -16,6 +16,8 @@ source_filename = "sailfin"
 
 @vtable.Person.Meter.const = global %vtable.Person.Meter { double (i8*)* bitcast (double (i8*)* @Persontotal to double (i8*)*) }
 
+declare i8* @sailfin_runtime_get_field(i8*, i8*)
+
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
