@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.60 (2025-10-21)
+
+### Bug Fixes
+
+- Pointer coercion
+  ([`ece4195`](https://github.com/SailfinIO/sailfin/commit/ece41956ddb43329a192f56ab6a1d4520601109f))
+
+
 ## v0.1.1-alpha.59 (2025-10-21)
 
 ### Bug Fixes
