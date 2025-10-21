@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.64 (2025-10-21)
+
+### Bug Fixes
+
+- Collection returns
+  ([`9a00de8`](https://github.com/SailfinIO/sailfin/commit/9a00de860c0965fc06cff2bed8900bd5192c4ec8))
+
+- Combined lines
+  ([`34fdc20`](https://github.com/SailfinIO/sailfin/commit/34fdc20c2748b45fb654efec5cfd00911003dfd2))
+
+- Deeper lowering pass
+  ([`20ed226`](https://github.com/SailfinIO/sailfin/commit/20ed2269a9771c53ae5e0b3545ed3317733911ea))
+
+- Missing token import
+  ([`f9a313b`](https://github.com/SailfinIO/sailfin/commit/f9a313b7256b50f69b731e0d44131382a52d1ba0))
+
+- Runtime descriptors
+  ([`bafbe95`](https://github.com/SailfinIO/sailfin/commit/bafbe951b4481334a0e64671d1cfd58ce5afd7b1))
+
+- Runtime helper descriptor wiring
+  ([`8aa0425`](https://github.com/SailfinIO/sailfin/commit/8aa0425342958c7494c89ff0630f7e3622cd08f6))
+
+- Simplify emitter
+  ([`b93f76d`](https://github.com/SailfinIO/sailfin/commit/b93f76d395fb1616191c75855753286614088f59))
+
+- Sliced_text
+  ([`40c4dd2`](https://github.com/SailfinIO/sailfin/commit/40c4dd27e4a8c9ce5155ac3db9f1e323e1f02b20))
+
+- Stop mutating input
+  ([`cb48fc3`](https://github.com/SailfinIO/sailfin/commit/cb48fc3e3ae71c3f408ceaae6a91c4b2e4798082))
+
+- Strings
+  ([`6101299`](https://github.com/SailfinIO/sailfin/commit/61012999f6f5557d42f394d4a25644e7e3388abc))
+
+- Tests
+  ([`02c4f07`](https://github.com/SailfinIO/sailfin/commit/02c4f0754c4f731d267c3154a311e3a34d6737df))
+
+- Type-check helpers
+  ([`1a88f7e`](https://github.com/SailfinIO/sailfin/commit/1a88f7eaa365b1189401ab38844c7624b320e47d))
+
+
 ## v0.1.1-alpha.63 (2025-10-21)
 
 ### Bug Fixes
