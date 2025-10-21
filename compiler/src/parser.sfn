@@ -1711,10 +1711,8 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
                     bound = TypeAnnotation { text: bound_text };
                 }
                 let name_span = source_span_from_tokens(name_tokens);
-                parameters = append_type_parameter(
-                    parameters,
-                    TypeParameter { name: name_text, bound: bound, span: name_span },
-                );
+                let parameter = TypeParameter { name: name_text, bound: bound, span: name_span };
+                parameters = parameters.concat([parameter]);
             }
         }
         index += 1;
@@ -4122,6 +4120,7 @@ fn advance_to_symbol(parser -> Parser, symbol -> string) -> Parser {
         }
         current = next;
     }
+    return current;
 }
 
 fn skip_struct_member(parser -> Parser) -> Parser {
@@ -4147,6 +4146,7 @@ fn skip_struct_member(parser -> Parser) -> Parser {
             }
         }
     }
+    return current;
 }
 
 fn skip_enum_variant_entry(parser -> Parser) -> Parser {
@@ -4172,6 +4172,7 @@ fn skip_enum_variant_entry(parser -> Parser) -> Parser {
             }
         }
     }
+    return current;
 }
 
 fn strip_surrounding_quotes(text -> string) -> string {

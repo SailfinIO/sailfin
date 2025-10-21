@@ -2383,6 +2383,37 @@ fn append_function_call_entry(entries -> FunctionCallEntry[], entry -> FunctionC
     return entries.concat([entry]);
 }
 
+fn replace_function_effect_entry(entries -> FunctionEffectEntry[], position -> number, entry -> FunctionEffectEntry) -> FunctionEffectEntry[] {
+    let mut result -> FunctionEffectEntry[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        if index == position {
+            result = result.concat([entry]);
+        } else {
+            result = result.concat([entries[index]]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn find_function_effect_entry_index(entries -> FunctionEffectEntry[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        if entries[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
 fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_graph -> FunctionCallEntry[]) -> FunctionEffectEntry[] {
     let mut aggregated -> FunctionEffectEntry[] = [];
     let mut index -> number = 0;
@@ -2408,23 +2439,33 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
                 break;
             }
             let call_entry = call_graph[call_index];
-            let target_entry = find_function_effect_entry(aggregated, call_entry.name);
-            if target_entry != null {
-                let mut merged -> string[] = target_entry.effects;
+            let target_index = find_function_effect_entry_index(aggregated, call_entry.name);
+            if target_index >= 0 {
+                let target_entry = aggregated[target_index];
+                let mut merged -> string[] = copy_string_array(target_entry.effects);
                 let mut callee_index -> number = 0;
                 loop {
                     if callee_index >= call_entry.callees.length {
                         break;
                     }
                     let callee_name = call_entry.callees[callee_index];
-                    let callee_entry = find_function_effect_entry(aggregated, callee_name);
-                    if callee_entry != null {
-                        merged = merge_effect_lists(merged, callee_entry.effects);
+                    let callee_pos = find_function_effect_entry_index(aggregated, callee_name);
+                    if callee_pos >= 0 {
+                        let callee_entry = aggregated[callee_pos];
+                        let mut effect_index -> number = 0;
+                        loop {
+                            if effect_index >= callee_entry.effects.length {
+                                break;
+                            }
+                            merged = append_unique_effect(merged, callee_entry.effects[effect_index]);
+                            effect_index += 1;
+                        }
                     }
                     callee_index += 1;
                 }
                 if !string_arrays_equal(merged, target_entry.effects) {
-                    target_entry.effects = merged;
+                    let updated_entry = FunctionEffectEntry { name: target_entry.name, effects: merged };
+                    aggregated = replace_function_effect_entry(aggregated, target_index, updated_entry);
                     changed = true;
                 }
             }
@@ -2436,15 +2477,9 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
 }
 
 fn find_function_effect_entry(entries -> FunctionEffectEntry[], name -> string) -> FunctionEffectEntry? {
-    let mut index -> number = 0;
-    loop {
-        if index >= entries.length {
-            break;
-        }
-        if entries[index].name == name {
-            return entries[index];
-        }
-        index += 1;
+    let index = find_function_effect_entry_index(entries, name);
+    if index >= 0 {
+        return entries[index];
     }
     return null;
 }
@@ -7771,20 +7806,45 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
             let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
             return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
         }
-        if remainder[0] != "(" {
-            let issue = append_string(diagnostics, "llvm lowering: borrow expression missing `(`");
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
+        let mut mutable_flag -> boolean = false;
+        if starts_with(remainder, "mut") {
+            let after_mut = substring(remainder, 3, remainder.length);
+            mutable_flag = true;
+            remainder = trim_text(after_mut);
         }
-        let argument_parse = extract_borrow_argument(remainder);
-        let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
-        if !argument_parse.success {
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: messages };
+        if remainder.length > 0 && remainder[0] == "(" {
+            let argument_parse = extract_borrow_argument(remainder);
+            let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+            if !argument_parse.success {
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            let mut argument_text -> string = argument_parse.argument;
+            if starts_with(argument_text, "mut") {
+                let after_mut = substring(argument_text, 3, argument_text.length);
+                let trimmed_after_mut = trim_text(after_mut);
+                if trimmed_after_mut.length > 0 {
+                    mutable_flag = true;
+                    argument_text = trimmed_after_mut;
+                }
+            }
+            if argument_text.length == 0 {
+                messages = append_string(messages, "llvm lowering: borrow expression missing target");
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            if !is_valid_borrow_target(argument_text) {
+                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+            }
+            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
         }
-        if argument_parse.argument.length == 0 {
-            messages = append_string(messages, "llvm lowering: borrow expression missing target");
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: messages };
+
+        let simple_parse = extract_simple_borrow_target(remainder);
+        if !simple_parse.success {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
         }
-        return BorrowParseResult { recognized: true, success: true, target: argument_parse.argument, mutable: false, diagnostics: messages };
+        if !is_valid_borrow_target(simple_parse.argument) {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        }
+        return BorrowParseResult { recognized: true, success: true, target: simple_parse.argument, mutable: mutable_flag, diagnostics: diagnostics };
     }
 
     if !starts_with(trimmed, "&") {
@@ -7849,6 +7909,66 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
+}
+
+fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
+    let mut diagnostics -> string[] = [];
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if is_effect_delimiter(ch) {
+            break;
+        }
+        index += 1;
+    }
+    let target = trim_text(substring(trimmed, 0, index));
+    if target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let remainder = trim_text(substring(trimmed, index, trimmed.length));
+    if remainder.length > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        return BorrowArgumentParse { success: false, argument: target, diagnostics: diagnostics };
+    }
+    return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
+}
+
+fn is_valid_borrow_target(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "." {
+            index += 1;
+            continue;
+        }
+        if index == 0 {
+            if !is_identifier_start_char(ch) {
+                return false;
+            }
+        } else {
+            if !is_identifier_part_char(ch) {
+                return false;
+            }
+        }
+        index += 1;
+    }
+    return true;
 }
 
 fn parse_ternary_expression(text -> string) -> TernaryParseResult {

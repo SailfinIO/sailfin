@@ -1317,10 +1317,8 @@ def parse_type_parameter_clause(parser):
                 if len(bound_tokens) > 0  and  len(bound_text) > 0:
                     bound = TypeAnnotation(text=bound_text)
                 name_span = source_span_from_tokens(name_tokens)
-                parameters = append_type_parameter(
-parameters,
-TypeParameter(name=name_text, bound=bound, span=name_span),
-)
+                parameter = TypeParameter(name=name_text, bound=bound, span=name_span)
+                parameters = (parameters) + ([parameter])
         index += 1
     return TypeParameterParseResult(parser=current, parameters=parameters)
 
@@ -2886,6 +2884,7 @@ def advance_to_symbol(parser, symbol):
         if next.index == current.index:
             return current
         current = next
+    return current
 
 def skip_struct_member(parser):
     current = parser
@@ -2904,6 +2903,7 @@ def skip_struct_member(parser):
                 return current
             if sym == "}":
                 return current
+    return current
 
 def skip_enum_variant_entry(parser):
     current = parser
@@ -2922,6 +2922,7 @@ def skip_enum_variant_entry(parser):
                 return current
             if sym == "}":
                 return current
+    return current
 
 def strip_surrounding_quotes(text):
     if len(text) < 2:

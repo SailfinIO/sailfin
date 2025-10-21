@@ -404,6 +404,7 @@ def descriptor_strip_outer_parens(value):
         if not valid  or  depth != 0:
             return current
         current = descriptor_trim(substring(current, 1, len(current) - 1))
+    return current
 
 def split_descriptor(value, separator):
     trimmed = descriptor_trim(value)

@@ -1668,7 +1668,8 @@ loop.latch2:
   %t113 = load i8*, i8** %l0
   br label %loop.header0
 afterloop3:
-  ret i8* null
+  %t115 = load i8*, i8** %l0
+  ret i8* %t115
 }
 
 define { i8**, i64 }* @split_descriptor(i8* %value, i8* %separator) {

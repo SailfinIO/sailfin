@@ -12058,6 +12058,162 @@ entry:
   ret { %FunctionCallEntry*, i64 }* %t10
 }
 
+define { %FunctionEffectEntry*, i64 }* @replace_function_effect_entry({ %FunctionEffectEntry*, i64 }* %entries, double %position, %FunctionEffectEntry %entry) {
+entry:
+  %l0 = alloca { %FunctionEffectEntry*, i64 }*
+  %l1 = alloca double
+  %t0 = alloca [0 x %FunctionEffectEntry]
+  %t1 = getelementptr [0 x %FunctionEffectEntry], [0 x %FunctionEffectEntry]* %t0, i32 0, i32 0
+  %t2 = alloca { %FunctionEffectEntry*, i64 }
+  %t3 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t2, i32 0, i32 0
+  store %FunctionEffectEntry* %t1, %FunctionEffectEntry** %t3
+  %t4 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { %FunctionEffectEntry*, i64 }* %t2, { %FunctionEffectEntry*, i64 }** %l0
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t7 = load double, double* %l1
+  br label %loop.header0
+loop.header0:
+  %t57 = phi { %FunctionEffectEntry*, i64 }* [ %t6, %entry ], [ %t55, %loop.latch2 ]
+  %t58 = phi double [ %t7, %entry ], [ %t56, %loop.latch2 ]
+  store { %FunctionEffectEntry*, i64 }* %t57, { %FunctionEffectEntry*, i64 }** %l0
+  store double %t58, double* %l1
+  br label %loop.body1
+loop.body1:
+  %t8 = load double, double* %l1
+  %t9 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
+  %t10 = extractvalue { %FunctionEffectEntry*, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t15 = load double, double* %l1
+  %t16 = fcmp oeq double %t15, %position
+  %t17 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t18 = load double, double* %l1
+  br i1 %t16, label %then6, label %else7
+then6:
+  %t19 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t20 = call noalias i8* @malloc(i64 16)
+  %t21 = bitcast i8* %t20 to %FunctionEffectEntry*
+  store %FunctionEffectEntry %entry, %FunctionEffectEntry* %t21
+  %t22 = alloca [1 x i8*]
+  %t23 = getelementptr [1 x i8*], [1 x i8*]* %t22, i32 0, i32 0
+  %t24 = getelementptr i8*, i8** %t23, i64 0
+  store i8* %t20, i8** %t24
+  %t25 = alloca { i8**, i64 }
+  %t26 = getelementptr { i8**, i64 }, { i8**, i64 }* %t25, i32 0, i32 0
+  store i8** %t23, i8*** %t26
+  %t27 = getelementptr { i8**, i64 }, { i8**, i64 }* %t25, i32 0, i32 1
+  store i64 1, i64* %t27
+  %t28 = bitcast { %FunctionEffectEntry*, i64 }* %t19 to { i8**, i64 }*
+  %t29 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t28, { i8**, i64 }* %t25)
+  %t30 = bitcast { i8**, i64 }* %t29 to { %FunctionEffectEntry*, i64 }*
+  store { %FunctionEffectEntry*, i64 }* %t30, { %FunctionEffectEntry*, i64 }** %l0
+  br label %merge8
+else7:
+  %t31 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t32 = load double, double* %l1
+  %t33 = fptosi double %t32 to i64
+  %t34 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
+  %t35 = extractvalue { %FunctionEffectEntry*, i64 } %t34, 0
+  %t36 = extractvalue { %FunctionEffectEntry*, i64 } %t34, 1
+  %t37 = icmp uge i64 %t33, %t36
+  ; bounds check: %t37 (if true, out of bounds)
+  %t38 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t35, i64 %t33
+  %t39 = load %FunctionEffectEntry, %FunctionEffectEntry* %t38
+  %t40 = call noalias i8* @malloc(i64 16)
+  %t41 = bitcast i8* %t40 to %FunctionEffectEntry*
+  store %FunctionEffectEntry %t39, %FunctionEffectEntry* %t41
+  %t42 = alloca [1 x i8*]
+  %t43 = getelementptr [1 x i8*], [1 x i8*]* %t42, i32 0, i32 0
+  %t44 = getelementptr i8*, i8** %t43, i64 0
+  store i8* %t40, i8** %t44
+  %t45 = alloca { i8**, i64 }
+  %t46 = getelementptr { i8**, i64 }, { i8**, i64 }* %t45, i32 0, i32 0
+  store i8** %t43, i8*** %t46
+  %t47 = getelementptr { i8**, i64 }, { i8**, i64 }* %t45, i32 0, i32 1
+  store i64 1, i64* %t47
+  %t48 = bitcast { %FunctionEffectEntry*, i64 }* %t31 to { i8**, i64 }*
+  %t49 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t48, { i8**, i64 }* %t45)
+  %t50 = bitcast { i8**, i64 }* %t49 to { %FunctionEffectEntry*, i64 }*
+  store { %FunctionEffectEntry*, i64 }* %t50, { %FunctionEffectEntry*, i64 }** %l0
+  br label %merge8
+merge8:
+  %t51 = phi { %FunctionEffectEntry*, i64 }* [ %t30, %then6 ], [ %t50, %else7 ]
+  store { %FunctionEffectEntry*, i64 }* %t51, { %FunctionEffectEntry*, i64 }** %l0
+  %t52 = load double, double* %l1
+  %t53 = sitofp i64 1 to double
+  %t54 = fadd double %t52, %t53
+  store double %t54, double* %l1
+  br label %loop.latch2
+loop.latch2:
+  %t55 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t56 = load double, double* %l1
+  br label %loop.header0
+afterloop3:
+  %t59 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  ret { %FunctionEffectEntry*, i64 }* %t59
+}
+
+define double @find_function_effect_entry_index({ %FunctionEffectEntry*, i64 }* %entries, i8* %name) {
+entry:
+  %l0 = alloca double
+  %t0 = sitofp i64 0 to double
+  store double %t0, double* %l0
+  %t1 = load double, double* %l0
+  br label %loop.header0
+loop.header0:
+  %t24 = phi double [ %t1, %entry ], [ %t23, %loop.latch2 ]
+  store double %t24, double* %l0
+  br label %loop.body1
+loop.body1:
+  %t2 = load double, double* %l0
+  %t3 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
+  %t4 = extractvalue { %FunctionEffectEntry*, i64 } %t3, 1
+  %t5 = sitofp i64 %t4 to double
+  %t6 = fcmp oge double %t2, %t5
+  %t7 = load double, double* %l0
+  br i1 %t6, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t8 = load double, double* %l0
+  %t9 = fptosi double %t8 to i64
+  %t10 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
+  %t11 = extractvalue { %FunctionEffectEntry*, i64 } %t10, 0
+  %t12 = extractvalue { %FunctionEffectEntry*, i64 } %t10, 1
+  %t13 = icmp uge i64 %t9, %t12
+  ; bounds check: %t13 (if true, out of bounds)
+  %t14 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t11, i64 %t9
+  %t15 = load %FunctionEffectEntry, %FunctionEffectEntry* %t14
+  %t16 = extractvalue %FunctionEffectEntry %t15, 0
+  %t17 = icmp eq i8* %t16, %name
+  %t18 = load double, double* %l0
+  br i1 %t17, label %then6, label %merge7
+then6:
+  %t19 = load double, double* %l0
+  ret double %t19
+merge7:
+  %t20 = load double, double* %l0
+  %t21 = sitofp i64 1 to double
+  %t22 = fadd double %t20, %t21
+  store double %t22, double* %l0
+  br label %loop.latch2
+loop.latch2:
+  %t23 = load double, double* %l0
+  br label %loop.header0
+afterloop3:
+  %t25 = sitofp i64 -1 to double
+  ret double %t25
+}
+
 define { %FunctionEffectEntry*, i64 }* @propagate_function_effects({ %FunctionEffectEntry*, i64 }* %direct_effects, { %FunctionCallEntry*, i64 }* %call_graph) {
 entry:
   %l0 = alloca { %FunctionEffectEntry*, i64 }*
@@ -12065,11 +12221,15 @@ entry:
   %l2 = alloca i1
   %l3 = alloca double
   %l4 = alloca %FunctionCallEntry
-  %l5 = alloca %FunctionEffectEntry*
-  %l6 = alloca { i8**, i64 }*
-  %l7 = alloca double
-  %l8 = alloca i8*
-  %l9 = alloca %FunctionEffectEntry*
+  %l5 = alloca double
+  %l6 = alloca %FunctionEffectEntry
+  %l7 = alloca { i8**, i64 }*
+  %l8 = alloca double
+  %l9 = alloca i8*
+  %l10 = alloca double
+  %l11 = alloca %FunctionEffectEntry
+  %l12 = alloca double
+  %l13 = alloca %FunctionEffectEntry
   %t0 = alloca [0 x %FunctionEffectEntry]
   %t1 = getelementptr [0 x %FunctionEffectEntry], [0 x %FunctionEffectEntry]* %t0, i32 0, i32 0
   %t2 = alloca { %FunctionEffectEntry*, i64 }
@@ -12157,8 +12317,10 @@ afterloop3:
   %t57 = load i1, i1* %l2
   br label %loop.header6
 loop.header6:
-  %t188 = phi i1 [ %t57, %entry ], [ %t187, %loop.latch8 ]
-  store i1 %t188, i1* %l2
+  %t271 = phi i1 [ %t57, %entry ], [ %t269, %loop.latch8 ]
+  %t272 = phi { %FunctionEffectEntry*, i64 }* [ %t55, %entry ], [ %t270, %loop.latch8 ]
+  store i1 %t271, i1* %l2
+  store { %FunctionEffectEntry*, i64 }* %t272, { %FunctionEffectEntry*, i64 }** %l0
   br label %loop.body7
 loop.body7:
   %t58 = load i1, i1* %l2
@@ -12179,10 +12341,12 @@ merge11:
   %t67 = load double, double* %l3
   br label %loop.header12
 loop.header12:
-  %t185 = phi i1 [ %t66, %loop.body7 ], [ %t183, %loop.latch14 ]
-  %t186 = phi double [ %t67, %loop.body7 ], [ %t184, %loop.latch14 ]
-  store i1 %t185, i1* %l2
-  store double %t186, double* %l3
+  %t266 = phi { %FunctionEffectEntry*, i64 }* [ %t64, %loop.body7 ], [ %t263, %loop.latch14 ]
+  %t267 = phi i1 [ %t66, %loop.body7 ], [ %t264, %loop.latch14 ]
+  %t268 = phi double [ %t67, %loop.body7 ], [ %t265, %loop.latch14 ]
+  store { %FunctionEffectEntry*, i64 }* %t266, { %FunctionEffectEntry*, i64 }** %l0
+  store i1 %t267, i1* %l2
+  store double %t268, double* %l3
   br label %loop.body13
 loop.body13:
   %t68 = load double, double* %l3
@@ -12211,215 +12375,288 @@ merge17:
   %t85 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
   %t86 = load %FunctionCallEntry, %FunctionCallEntry* %l4
   %t87 = extractvalue %FunctionCallEntry %t86, 0
-  %t88 = call %FunctionEffectEntry* @find_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t85, i8* %t87)
-  store %FunctionEffectEntry* %t88, %FunctionEffectEntry** %l5
-  %t89 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t90 = icmp ne %FunctionEffectEntry* %t89, null
-  %t91 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t92 = load double, double* %l1
-  %t93 = load i1, i1* %l2
-  %t94 = load double, double* %l3
-  %t95 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t96 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  br i1 %t90, label %then18, label %merge19
+  %t88 = call double @find_function_effect_entry_index({ %FunctionEffectEntry*, i64 }* %t85, i8* %t87)
+  store double %t88, double* %l5
+  %t89 = load double, double* %l5
+  %t90 = sitofp i64 0 to double
+  %t91 = fcmp oge double %t89, %t90
+  %t92 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t93 = load double, double* %l1
+  %t94 = load i1, i1* %l2
+  %t95 = load double, double* %l3
+  %t96 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t97 = load double, double* %l5
+  br i1 %t91, label %then18, label %merge19
 then18:
-  %t97 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t98 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t97, i32 0, i32 1
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %t98
-  store { i8**, i64 }* %t99, { i8**, i64 }** %l6
-  %t100 = sitofp i64 0 to double
-  store double %t100, double* %l7
-  %t101 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t102 = load double, double* %l1
-  %t103 = load i1, i1* %l2
-  %t104 = load double, double* %l3
-  %t105 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t106 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t107 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t108 = load double, double* %l7
+  %t98 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t99 = load double, double* %l5
+  %t100 = fptosi double %t99 to i64
+  %t101 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t98
+  %t102 = extractvalue { %FunctionEffectEntry*, i64 } %t101, 0
+  %t103 = extractvalue { %FunctionEffectEntry*, i64 } %t101, 1
+  %t104 = icmp uge i64 %t100, %t103
+  ; bounds check: %t104 (if true, out of bounds)
+  %t105 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t102, i64 %t100
+  %t106 = load %FunctionEffectEntry, %FunctionEffectEntry* %t105
+  store %FunctionEffectEntry %t106, %FunctionEffectEntry* %l6
+  %t107 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t108 = extractvalue %FunctionEffectEntry %t107, 1
+  %t109 = call { i8**, i64 }* @copy_string_array({ i8**, i64 }* %t108)
+  store { i8**, i64 }* %t109, { i8**, i64 }** %l7
+  %t110 = sitofp i64 0 to double
+  store double %t110, double* %l8
+  %t111 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t112 = load double, double* %l1
+  %t113 = load i1, i1* %l2
+  %t114 = load double, double* %l3
+  %t115 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t116 = load double, double* %l5
+  %t117 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t119 = load double, double* %l8
   br label %loop.header20
 loop.header20:
-  %t160 = phi { i8**, i64 }* [ %t107, %then18 ], [ %t158, %loop.latch22 ]
-  %t161 = phi double [ %t108, %then18 ], [ %t159, %loop.latch22 ]
-  store { i8**, i64 }* %t160, { i8**, i64 }** %l6
-  store double %t161, double* %l7
+  %t231 = phi { i8**, i64 }* [ %t118, %then18 ], [ %t229, %loop.latch22 ]
+  %t232 = phi double [ %t119, %then18 ], [ %t230, %loop.latch22 ]
+  store { i8**, i64 }* %t231, { i8**, i64 }** %l7
+  store double %t232, double* %l8
   br label %loop.body21
 loop.body21:
-  %t109 = load double, double* %l7
-  %t110 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t111 = extractvalue %FunctionCallEntry %t110, 1
-  %t112 = load { i8**, i64 }, { i8**, i64 }* %t111
-  %t113 = extractvalue { i8**, i64 } %t112, 1
-  %t114 = sitofp i64 %t113 to double
-  %t115 = fcmp oge double %t109, %t114
-  %t116 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t117 = load double, double* %l1
-  %t118 = load i1, i1* %l2
-  %t119 = load double, double* %l3
-  %t120 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t121 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t122 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t123 = load double, double* %l7
-  br i1 %t115, label %then24, label %merge25
+  %t120 = load double, double* %l8
+  %t121 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t122 = extractvalue %FunctionCallEntry %t121, 1
+  %t123 = load { i8**, i64 }, { i8**, i64 }* %t122
+  %t124 = extractvalue { i8**, i64 } %t123, 1
+  %t125 = sitofp i64 %t124 to double
+  %t126 = fcmp oge double %t120, %t125
+  %t127 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t128 = load double, double* %l1
+  %t129 = load i1, i1* %l2
+  %t130 = load double, double* %l3
+  %t131 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t132 = load double, double* %l5
+  %t133 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t135 = load double, double* %l8
+  br i1 %t126, label %then24, label %merge25
 then24:
   br label %afterloop23
 merge25:
-  %t124 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t125 = extractvalue %FunctionCallEntry %t124, 1
-  %t126 = load double, double* %l7
-  %t127 = fptosi double %t126 to i64
-  %t128 = load { i8**, i64 }, { i8**, i64 }* %t125
-  %t129 = extractvalue { i8**, i64 } %t128, 0
-  %t130 = extractvalue { i8**, i64 } %t128, 1
-  %t131 = icmp uge i64 %t127, %t130
-  ; bounds check: %t131 (if true, out of bounds)
-  %t132 = getelementptr i8*, i8** %t129, i64 %t127
-  %t133 = load i8*, i8** %t132
-  store i8* %t133, i8** %l8
-  %t134 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t135 = load i8*, i8** %l8
-  %t136 = call %FunctionEffectEntry* @find_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t134, i8* %t135)
-  store %FunctionEffectEntry* %t136, %FunctionEffectEntry** %l9
-  %t137 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l9
-  %t138 = icmp ne %FunctionEffectEntry* %t137, null
-  %t139 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t140 = load double, double* %l1
-  %t141 = load i1, i1* %l2
-  %t142 = load double, double* %l3
-  %t143 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t144 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t145 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t146 = load double, double* %l7
-  %t147 = load i8*, i8** %l8
-  %t148 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l9
-  br i1 %t138, label %then26, label %merge27
+  %t136 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t137 = extractvalue %FunctionCallEntry %t136, 1
+  %t138 = load double, double* %l8
+  %t139 = fptosi double %t138 to i64
+  %t140 = load { i8**, i64 }, { i8**, i64 }* %t137
+  %t141 = extractvalue { i8**, i64 } %t140, 0
+  %t142 = extractvalue { i8**, i64 } %t140, 1
+  %t143 = icmp uge i64 %t139, %t142
+  ; bounds check: %t143 (if true, out of bounds)
+  %t144 = getelementptr i8*, i8** %t141, i64 %t139
+  %t145 = load i8*, i8** %t144
+  store i8* %t145, i8** %l9
+  %t146 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t147 = load i8*, i8** %l9
+  %t148 = call double @find_function_effect_entry_index({ %FunctionEffectEntry*, i64 }* %t146, i8* %t147)
+  store double %t148, double* %l10
+  %t149 = load double, double* %l10
+  %t150 = sitofp i64 0 to double
+  %t151 = fcmp oge double %t149, %t150
+  %t152 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t153 = load double, double* %l1
+  %t154 = load i1, i1* %l2
+  %t155 = load double, double* %l3
+  %t156 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t157 = load double, double* %l5
+  %t158 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t159 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t160 = load double, double* %l8
+  %t161 = load i8*, i8** %l9
+  %t162 = load double, double* %l10
+  br i1 %t151, label %then26, label %merge27
 then26:
-  %t149 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t150 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l9
-  %t151 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t150, i32 0, i32 1
-  %t152 = load { i8**, i64 }*, { i8**, i64 }** %t151
-  %t153 = call { i8**, i64 }* @merge_effect_lists({ i8**, i64 }* %t149, { i8**, i64 }* %t152)
-  store { i8**, i64 }* %t153, { i8**, i64 }** %l6
+  %t163 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t164 = load double, double* %l10
+  %t165 = fptosi double %t164 to i64
+  %t166 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t163
+  %t167 = extractvalue { %FunctionEffectEntry*, i64 } %t166, 0
+  %t168 = extractvalue { %FunctionEffectEntry*, i64 } %t166, 1
+  %t169 = icmp uge i64 %t165, %t168
+  ; bounds check: %t169 (if true, out of bounds)
+  %t170 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t167, i64 %t165
+  %t171 = load %FunctionEffectEntry, %FunctionEffectEntry* %t170
+  store %FunctionEffectEntry %t171, %FunctionEffectEntry* %l11
+  %t172 = sitofp i64 0 to double
+  store double %t172, double* %l12
+  %t173 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t174 = load double, double* %l1
+  %t175 = load i1, i1* %l2
+  %t176 = load double, double* %l3
+  %t177 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t178 = load double, double* %l5
+  %t179 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t180 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t181 = load double, double* %l8
+  %t182 = load i8*, i8** %l9
+  %t183 = load double, double* %l10
+  %t184 = load %FunctionEffectEntry, %FunctionEffectEntry* %l11
+  %t185 = load double, double* %l12
+  br label %loop.header28
+loop.header28:
+  %t223 = phi { i8**, i64 }* [ %t180, %then26 ], [ %t221, %loop.latch30 ]
+  %t224 = phi double [ %t185, %then26 ], [ %t222, %loop.latch30 ]
+  store { i8**, i64 }* %t223, { i8**, i64 }** %l7
+  store double %t224, double* %l12
+  br label %loop.body29
+loop.body29:
+  %t186 = load double, double* %l12
+  %t187 = load %FunctionEffectEntry, %FunctionEffectEntry* %l11
+  %t188 = extractvalue %FunctionEffectEntry %t187, 1
+  %t189 = load { i8**, i64 }, { i8**, i64 }* %t188
+  %t190 = extractvalue { i8**, i64 } %t189, 1
+  %t191 = sitofp i64 %t190 to double
+  %t192 = fcmp oge double %t186, %t191
+  %t193 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t194 = load double, double* %l1
+  %t195 = load i1, i1* %l2
+  %t196 = load double, double* %l3
+  %t197 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t198 = load double, double* %l5
+  %t199 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t200 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t201 = load double, double* %l8
+  %t202 = load i8*, i8** %l9
+  %t203 = load double, double* %l10
+  %t204 = load %FunctionEffectEntry, %FunctionEffectEntry* %l11
+  %t205 = load double, double* %l12
+  br i1 %t192, label %then32, label %merge33
+then32:
+  br label %afterloop31
+merge33:
+  %t206 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t207 = load %FunctionEffectEntry, %FunctionEffectEntry* %l11
+  %t208 = extractvalue %FunctionEffectEntry %t207, 1
+  %t209 = load double, double* %l12
+  %t210 = fptosi double %t209 to i64
+  %t211 = load { i8**, i64 }, { i8**, i64 }* %t208
+  %t212 = extractvalue { i8**, i64 } %t211, 0
+  %t213 = extractvalue { i8**, i64 } %t211, 1
+  %t214 = icmp uge i64 %t210, %t213
+  ; bounds check: %t214 (if true, out of bounds)
+  %t215 = getelementptr i8*, i8** %t212, i64 %t210
+  %t216 = load i8*, i8** %t215
+  %t217 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t206, i8* %t216)
+  store { i8**, i64 }* %t217, { i8**, i64 }** %l7
+  %t218 = load double, double* %l12
+  %t219 = sitofp i64 1 to double
+  %t220 = fadd double %t218, %t219
+  store double %t220, double* %l12
+  br label %loop.latch30
+loop.latch30:
+  %t221 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t222 = load double, double* %l12
+  br label %loop.header28
+afterloop31:
   br label %merge27
 merge27:
-  %t154 = phi { i8**, i64 }* [ %t153, %then26 ], [ %t145, %loop.body21 ]
-  store { i8**, i64 }* %t154, { i8**, i64 }** %l6
-  %t155 = load double, double* %l7
-  %t156 = sitofp i64 1 to double
-  %t157 = fadd double %t155, %t156
-  store double %t157, double* %l7
+  %t225 = phi { i8**, i64 }* [ %t217, %then26 ], [ %t159, %loop.body21 ]
+  store { i8**, i64 }* %t225, { i8**, i64 }** %l7
+  %t226 = load double, double* %l8
+  %t227 = sitofp i64 1 to double
+  %t228 = fadd double %t226, %t227
+  store double %t228, double* %l8
   br label %loop.latch22
 loop.latch22:
-  %t158 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t159 = load double, double* %l7
+  %t229 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t230 = load double, double* %l8
   br label %loop.header20
 afterloop23:
-  %t162 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t163 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t164 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t163, i32 0, i32 1
-  %t165 = load { i8**, i64 }*, { i8**, i64 }** %t164
-  %t166 = call i1 @string_arrays_equal({ i8**, i64 }* %t162, { i8**, i64 }* %t165)
-  %t167 = xor i1 %t166, 1
-  %t168 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  %t169 = load double, double* %l1
-  %t170 = load i1, i1* %l2
-  %t171 = load double, double* %l3
-  %t172 = load %FunctionCallEntry, %FunctionCallEntry* %l4
-  %t173 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
-  %t174 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t175 = load double, double* %l7
-  br i1 %t167, label %then28, label %merge29
-then28:
-  %t176 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t177 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l5
+  %t233 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t234 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t235 = extractvalue %FunctionEffectEntry %t234, 1
+  %t236 = call i1 @string_arrays_equal({ i8**, i64 }* %t233, { i8**, i64 }* %t235)
+  %t237 = xor i1 %t236, 1
+  %t238 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t239 = load double, double* %l1
+  %t240 = load i1, i1* %l2
+  %t241 = load double, double* %l3
+  %t242 = load %FunctionCallEntry, %FunctionCallEntry* %l4
+  %t243 = load double, double* %l5
+  %t244 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t245 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t246 = load double, double* %l8
+  br i1 %t237, label %then34, label %merge35
+then34:
+  %t247 = load %FunctionEffectEntry, %FunctionEffectEntry* %l6
+  %t248 = extractvalue %FunctionEffectEntry %t247, 0
+  %t249 = insertvalue %FunctionEffectEntry undef, i8* %t248, 0
+  %t250 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t251 = insertvalue %FunctionEffectEntry %t249, { i8**, i64 }* %t250, 1
+  store %FunctionEffectEntry %t251, %FunctionEffectEntry* %l13
+  %t252 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t253 = load double, double* %l5
+  %t254 = load %FunctionEffectEntry, %FunctionEffectEntry* %l13
+  %t255 = call { %FunctionEffectEntry*, i64 }* @replace_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t252, double %t253, %FunctionEffectEntry %t254)
+  store { %FunctionEffectEntry*, i64 }* %t255, { %FunctionEffectEntry*, i64 }** %l0
   store i1 1, i1* %l2
-  br label %merge29
-merge29:
-  %t178 = phi i1 [ 1, %then28 ], [ %t170, %then18 ]
-  store i1 %t178, i1* %l2
+  br label %merge35
+merge35:
+  %t256 = phi { %FunctionEffectEntry*, i64 }* [ %t255, %then34 ], [ %t238, %then18 ]
+  %t257 = phi i1 [ 1, %then34 ], [ %t240, %then18 ]
+  store { %FunctionEffectEntry*, i64 }* %t256, { %FunctionEffectEntry*, i64 }** %l0
+  store i1 %t257, i1* %l2
   br label %merge19
 merge19:
-  %t179 = phi i1 [ 1, %then18 ], [ %t93, %loop.body13 ]
-  store i1 %t179, i1* %l2
-  %t180 = load double, double* %l3
-  %t181 = sitofp i64 1 to double
-  %t182 = fadd double %t180, %t181
-  store double %t182, double* %l3
+  %t258 = phi { %FunctionEffectEntry*, i64 }* [ %t255, %then18 ], [ %t92, %loop.body13 ]
+  %t259 = phi i1 [ 1, %then18 ], [ %t94, %loop.body13 ]
+  store { %FunctionEffectEntry*, i64 }* %t258, { %FunctionEffectEntry*, i64 }** %l0
+  store i1 %t259, i1* %l2
+  %t260 = load double, double* %l3
+  %t261 = sitofp i64 1 to double
+  %t262 = fadd double %t260, %t261
+  store double %t262, double* %l3
   br label %loop.latch14
 loop.latch14:
-  %t183 = load i1, i1* %l2
-  %t184 = load double, double* %l3
+  %t263 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  %t264 = load i1, i1* %l2
+  %t265 = load double, double* %l3
   br label %loop.header12
 afterloop15:
   br label %loop.latch8
 loop.latch8:
-  %t187 = load i1, i1* %l2
+  %t269 = load i1, i1* %l2
+  %t270 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
   br label %loop.header6
 afterloop9:
-  %t189 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
-  ret { %FunctionEffectEntry*, i64 }* %t189
+  %t273 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l0
+  ret { %FunctionEffectEntry*, i64 }* %t273
 }
 
 define %FunctionEffectEntry* @find_function_effect_entry({ %FunctionEffectEntry*, i64 }* %entries, i8* %name) {
 entry:
   %l0 = alloca double
-  %t0 = sitofp i64 0 to double
+  %t0 = call double @find_function_effect_entry_index({ %FunctionEffectEntry*, i64 }* %entries, i8* %name)
   store double %t0, double* %l0
   %t1 = load double, double* %l0
-  br label %loop.header0
-loop.header0:
-  %t32 = phi double [ %t1, %entry ], [ %t31, %loop.latch2 ]
-  store double %t32, double* %l0
-  br label %loop.body1
-loop.body1:
-  %t2 = load double, double* %l0
-  %t3 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
-  %t4 = extractvalue { %FunctionEffectEntry*, i64 } %t3, 1
-  %t5 = sitofp i64 %t4 to double
-  %t6 = fcmp oge double %t2, %t5
-  %t7 = load double, double* %l0
-  br i1 %t6, label %then4, label %merge5
-then4:
-  br label %afterloop3
-merge5:
-  %t8 = load double, double* %l0
-  %t9 = fptosi double %t8 to i64
-  %t10 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
-  %t11 = extractvalue { %FunctionEffectEntry*, i64 } %t10, 0
-  %t12 = extractvalue { %FunctionEffectEntry*, i64 } %t10, 1
-  %t13 = icmp uge i64 %t9, %t12
-  ; bounds check: %t13 (if true, out of bounds)
-  %t14 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t11, i64 %t9
-  %t15 = load %FunctionEffectEntry, %FunctionEffectEntry* %t14
-  %t16 = extractvalue %FunctionEffectEntry %t15, 0
-  %t17 = icmp eq i8* %t16, %name
-  %t18 = load double, double* %l0
-  br i1 %t17, label %then6, label %merge7
-then6:
-  %t19 = load double, double* %l0
-  %t20 = fptosi double %t19 to i64
-  %t21 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
-  %t22 = extractvalue { %FunctionEffectEntry*, i64 } %t21, 0
-  %t23 = extractvalue { %FunctionEffectEntry*, i64 } %t21, 1
-  %t24 = icmp uge i64 %t20, %t23
-  ; bounds check: %t24 (if true, out of bounds)
-  %t25 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t22, i64 %t20
-  %t26 = load %FunctionEffectEntry, %FunctionEffectEntry* %t25
-  %t27 = alloca %FunctionEffectEntry
-  store %FunctionEffectEntry %t26, %FunctionEffectEntry* %t27
-  ret %FunctionEffectEntry* %t27
-merge7:
-  %t28 = load double, double* %l0
-  %t29 = sitofp i64 1 to double
-  %t30 = fadd double %t28, %t29
-  store double %t30, double* %l0
-  br label %loop.latch2
-loop.latch2:
-  %t31 = load double, double* %l0
-  br label %loop.header0
-afterloop3:
-  %t33 = bitcast i8* null to %FunctionEffectEntry*
-  ret %FunctionEffectEntry* %t33
+  %t2 = sitofp i64 0 to double
+  %t3 = fcmp oge double %t1, %t2
+  %t4 = load double, double* %l0
+  br i1 %t3, label %then0, label %merge1
+then0:
+  %t5 = load double, double* %l0
+  %t6 = fptosi double %t5 to i64
+  %t7 = load { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %entries
+  %t8 = extractvalue { %FunctionEffectEntry*, i64 } %t7, 0
+  %t9 = extractvalue { %FunctionEffectEntry*, i64 } %t7, 1
+  %t10 = icmp uge i64 %t6, %t9
+  ; bounds check: %t10 (if true, out of bounds)
+  %t11 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t8, i64 %t6
+  %t12 = load %FunctionEffectEntry, %FunctionEffectEntry* %t11
+  %t13 = alloca %FunctionEffectEntry
+  store %FunctionEffectEntry %t12, %FunctionEffectEntry* %t13
+  ret %FunctionEffectEntry* %t13
+merge1:
+  %t14 = bitcast i8* null to %FunctionEffectEntry*
+  ret %FunctionEffectEntry* %t14
 }
 
 define %CapabilityManifest @build_capability_manifest({ i8**, i64 }* %entry_points, { %FunctionEffectEntry*, i64 }* %function_effects) {
@@ -43536,13 +43773,18 @@ entry:
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca i8*
   %l3 = alloca { i8**, i64 }*
-  %l4 = alloca { i8**, i64 }*
-  %l5 = alloca %BorrowArgumentParse
-  %l6 = alloca { i8**, i64 }*
-  %l7 = alloca i8*
-  %l8 = alloca i1
+  %l4 = alloca i1
+  %l5 = alloca i8*
+  %l6 = alloca %BorrowArgumentParse
+  %l7 = alloca { i8**, i64 }*
+  %l8 = alloca i8*
   %l9 = alloca i8*
-  %l10 = alloca { i8**, i64 }*
+  %l10 = alloca i8*
+  %l11 = alloca %BorrowArgumentParse
+  %l12 = alloca i8*
+  %l13 = alloca i1
+  %l14 = alloca i8*
+  %l15 = alloca { i8**, i64 }*
   %t0 = call i8* @trim_text(i8* %text)
   store i8* %t0, i8** %l0
   %t1 = alloca [0 x i8*]
@@ -43603,191 +43845,353 @@ then4:
   %t43 = insertvalue %BorrowParseResult %t41, { i8**, i64 }* %t42, 4
   ret %BorrowParseResult %t43
 merge5:
+  store i1 0, i1* %l4
   %t44 = load i8*, i8** %l2
-  %t45 = getelementptr i8, i8* %t44, i64 0
-  %t46 = load i8, i8* %t45
-  %t47 = icmp ne i8 %t46, 40
-  %t48 = load i8*, i8** %l0
-  %t49 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t50 = load i8*, i8** %l2
-  br i1 %t47, label %then6, label %merge7
+  %s45 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.45, i32 0, i32 0
+  %t46 = call i1 @starts_with(i8* %t44, i8* %s45)
+  %t47 = load i8*, i8** %l0
+  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t49 = load i8*, i8** %l2
+  %t50 = load i1, i1* %l4
+  br i1 %t46, label %then6, label %merge7
 then6:
-  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s52 = getelementptr inbounds [45 x i8], [45 x i8]* @.str.52, i32 0, i32 0
-  %t53 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t51, i8* %s52)
-  store { i8**, i64 }* %t53, { i8**, i64 }** %l4
-  %t54 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t55 = insertvalue %BorrowParseResult %t54, i1 0, 1
-  %s56 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.56, i32 0, i32 0
-  %t57 = insertvalue %BorrowParseResult %t55, i8* %s56, 2
-  %t58 = insertvalue %BorrowParseResult %t57, i1 0, 3
-  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %t60 = insertvalue %BorrowParseResult %t58, { i8**, i64 }* %t59, 4
-  ret %BorrowParseResult %t60
+  %t51 = load i8*, i8** %l2
+  %t52 = load i8*, i8** %l2
+  %t53 = call i64 @sailfin_runtime_string_length(i8* %t52)
+  %t54 = call i8* @sailfin_runtime_substring(i8* %t51, i64 3, i64 %t53)
+  store i8* %t54, i8** %l5
+  store i1 1, i1* %l4
+  %t55 = load i8*, i8** %l5
+  %t56 = call i8* @trim_text(i8* %t55)
+  store i8* %t56, i8** %l2
+  br label %merge7
 merge7:
-  %t61 = load i8*, i8** %l2
-  %t62 = call %BorrowArgumentParse @extract_borrow_argument(i8* %t61)
-  store %BorrowArgumentParse %t62, %BorrowArgumentParse* %l5
-  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t64 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t65 = extractvalue %BorrowArgumentParse %t64, 2
-  %t66 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t63, { i8**, i64 }* %t65)
-  store { i8**, i64 }* %t66, { i8**, i64 }** %l6
-  %t67 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t68 = extractvalue %BorrowArgumentParse %t67, 0
-  %t69 = xor i1 %t68, 1
-  %t70 = load i8*, i8** %l0
-  %t71 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t72 = load i8*, i8** %l2
-  %t73 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t74 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  br i1 %t69, label %then8, label %merge9
+  %t57 = phi i1 [ 1, %then6 ], [ %t50, %then2 ]
+  %t58 = phi i8* [ %t56, %then6 ], [ %t49, %then2 ]
+  store i1 %t57, i1* %l4
+  store i8* %t58, i8** %l2
+  %t60 = load i8*, i8** %l2
+  %t61 = call i64 @sailfin_runtime_string_length(i8* %t60)
+  %t62 = icmp sgt i64 %t61, 0
+  br label %logical_and_entry_59
+
+logical_and_entry_59:
+  br i1 %t62, label %logical_and_right_59, label %logical_and_merge_59
+
+logical_and_right_59:
+  %t63 = load i8*, i8** %l2
+  %t64 = getelementptr i8, i8* %t63, i64 0
+  %t65 = load i8, i8* %t64
+  %t66 = icmp eq i8 %t65, 40
+  br label %logical_and_right_end_59
+
+logical_and_right_end_59:
+  br label %logical_and_merge_59
+
+logical_and_merge_59:
+  %t67 = phi i1 [ false, %logical_and_entry_59 ], [ %t66, %logical_and_right_end_59 ]
+  %t68 = load i8*, i8** %l0
+  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t70 = load i8*, i8** %l2
+  %t71 = load i1, i1* %l4
+  br i1 %t67, label %then8, label %merge9
 then8:
-  %t75 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t76 = insertvalue %BorrowParseResult %t75, i1 0, 1
-  %s77 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.77, i32 0, i32 0
-  %t78 = insertvalue %BorrowParseResult %t76, i8* %s77, 2
-  %t79 = insertvalue %BorrowParseResult %t78, i1 0, 3
-  %t80 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t81 = insertvalue %BorrowParseResult %t79, { i8**, i64 }* %t80, 4
-  ret %BorrowParseResult %t81
-merge9:
-  %t82 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t83 = extractvalue %BorrowArgumentParse %t82, 1
-  %t84 = call i64 @sailfin_runtime_string_length(i8* %t83)
-  %t85 = icmp eq i64 %t84, 0
-  %t86 = load i8*, i8** %l0
-  %t87 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t88 = load i8*, i8** %l2
-  %t89 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t90 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  br i1 %t85, label %then10, label %merge11
+  %t72 = load i8*, i8** %l2
+  %t73 = call %BorrowArgumentParse @extract_borrow_argument(i8* %t72)
+  store %BorrowArgumentParse %t73, %BorrowArgumentParse* %l6
+  %t74 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t75 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t76 = extractvalue %BorrowArgumentParse %t75, 2
+  %t77 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t74, { i8**, i64 }* %t76)
+  store { i8**, i64 }* %t77, { i8**, i64 }** %l7
+  %t78 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t79 = extractvalue %BorrowArgumentParse %t78, 0
+  %t80 = xor i1 %t79, 1
+  %t81 = load i8*, i8** %l0
+  %t82 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t83 = load i8*, i8** %l2
+  %t84 = load i1, i1* %l4
+  %t85 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t86 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  br i1 %t80, label %then10, label %merge11
 then10:
-  %t91 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %s92 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.92, i32 0, i32 0
-  %t93 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t91, i8* %s92)
-  store { i8**, i64 }* %t93, { i8**, i64 }** %l6
-  %t94 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t95 = insertvalue %BorrowParseResult %t94, i1 0, 1
-  %s96 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.96, i32 0, i32 0
-  %t97 = insertvalue %BorrowParseResult %t95, i8* %s96, 2
-  %t98 = insertvalue %BorrowParseResult %t97, i1 0, 3
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t100 = insertvalue %BorrowParseResult %t98, { i8**, i64 }* %t99, 4
-  ret %BorrowParseResult %t100
+  %t87 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t88 = insertvalue %BorrowParseResult %t87, i1 0, 1
+  %s89 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.89, i32 0, i32 0
+  %t90 = insertvalue %BorrowParseResult %t88, i8* %s89, 2
+  %t91 = load i1, i1* %l4
+  %t92 = insertvalue %BorrowParseResult %t90, i1 %t91, 3
+  %t93 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t94 = insertvalue %BorrowParseResult %t92, { i8**, i64 }* %t93, 4
+  ret %BorrowParseResult %t94
 merge11:
-  %t101 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t102 = insertvalue %BorrowParseResult %t101, i1 1, 1
-  %t103 = load %BorrowArgumentParse, %BorrowArgumentParse* %l5
-  %t104 = extractvalue %BorrowArgumentParse %t103, 1
-  %t105 = insertvalue %BorrowParseResult %t102, i8* %t104, 2
-  %t106 = insertvalue %BorrowParseResult %t105, i1 0, 3
-  %t107 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t108 = insertvalue %BorrowParseResult %t106, { i8**, i64 }* %t107, 4
-  ret %BorrowParseResult %t108
-merge3:
-  %t109 = load i8*, i8** %l0
-  %t110 = alloca [2 x i8], align 1
-  %t111 = getelementptr [2 x i8], [2 x i8]* %t110, i32 0, i32 0
-  store i8 38, i8* %t111
-  %t112 = getelementptr [2 x i8], [2 x i8]* %t110, i32 0, i32 1
-  store i8 0, i8* %t112
-  %t113 = getelementptr [2 x i8], [2 x i8]* %t110, i32 0, i32 0
-  %t114 = call i1 @starts_with(i8* %t109, i8* %t113)
-  %t115 = xor i1 %t114, 1
+  %t95 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t96 = extractvalue %BorrowArgumentParse %t95, 1
+  store i8* %t96, i8** %l8
+  %t97 = load i8*, i8** %l8
+  %s98 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.98, i32 0, i32 0
+  %t99 = call i1 @starts_with(i8* %t97, i8* %s98)
+  %t100 = load i8*, i8** %l0
+  %t101 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t102 = load i8*, i8** %l2
+  %t103 = load i1, i1* %l4
+  %t104 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t106 = load i8*, i8** %l8
+  br i1 %t99, label %then12, label %merge13
+then12:
+  %t107 = load i8*, i8** %l8
+  %t108 = load i8*, i8** %l8
+  %t109 = call i64 @sailfin_runtime_string_length(i8* %t108)
+  %t110 = call i8* @sailfin_runtime_substring(i8* %t107, i64 3, i64 %t109)
+  store i8* %t110, i8** %l9
+  %t111 = load i8*, i8** %l9
+  %t112 = call i8* @trim_text(i8* %t111)
+  store i8* %t112, i8** %l10
+  %t113 = load i8*, i8** %l10
+  %t114 = call i64 @sailfin_runtime_string_length(i8* %t113)
+  %t115 = icmp sgt i64 %t114, 0
   %t116 = load i8*, i8** %l0
   %t117 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  br i1 %t115, label %then12, label %merge13
-then12:
-  %t118 = insertvalue %BorrowParseResult undef, i1 0, 0
-  %t119 = insertvalue %BorrowParseResult %t118, i1 0, 1
-  %s120 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.120, i32 0, i32 0
-  %t121 = insertvalue %BorrowParseResult %t119, i8* %s120, 2
-  %t122 = insertvalue %BorrowParseResult %t121, i1 0, 3
-  %t123 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t124 = insertvalue %BorrowParseResult %t122, { i8**, i64 }* %t123, 4
-  ret %BorrowParseResult %t124
-merge13:
-  %t125 = load i8*, i8** %l0
-  %s126 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.126, i32 0, i32 0
-  %t127 = call i1 @starts_with(i8* %t125, i8* %s126)
-  %t128 = load i8*, i8** %l0
-  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  br i1 %t127, label %then14, label %merge15
+  %t118 = load i8*, i8** %l2
+  %t119 = load i1, i1* %l4
+  %t120 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t121 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t122 = load i8*, i8** %l8
+  %t123 = load i8*, i8** %l9
+  %t124 = load i8*, i8** %l10
+  br i1 %t115, label %then14, label %merge15
 then14:
-  %t130 = insertvalue %BorrowParseResult undef, i1 0, 0
-  %t131 = insertvalue %BorrowParseResult %t130, i1 0, 1
-  %s132 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.132, i32 0, i32 0
-  %t133 = insertvalue %BorrowParseResult %t131, i8* %s132, 2
-  %t134 = insertvalue %BorrowParseResult %t133, i1 0, 3
-  %t135 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t136 = insertvalue %BorrowParseResult %t134, { i8**, i64 }* %t135, 4
-  ret %BorrowParseResult %t136
+  store i1 1, i1* %l4
+  %t125 = load i8*, i8** %l10
+  store i8* %t125, i8** %l8
+  br label %merge15
 merge15:
-  %t137 = load i8*, i8** %l0
-  %t138 = load i8*, i8** %l0
-  %t139 = call i64 @sailfin_runtime_string_length(i8* %t138)
-  %t140 = call i8* @sailfin_runtime_substring(i8* %t137, i64 1, i64 %t139)
-  %t141 = call i8* @trim_text(i8* %t140)
-  store i8* %t141, i8** %l7
-  store i1 0, i1* %l8
-  %t142 = load i8*, i8** %l7
-  %s143 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.143, i32 0, i32 0
-  %t144 = call i1 @starts_with(i8* %t142, i8* %s143)
-  %t145 = load i8*, i8** %l0
-  %t146 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t147 = load i8*, i8** %l7
-  %t148 = load i1, i1* %l8
-  br i1 %t144, label %then16, label %merge17
+  %t126 = phi i1 [ 1, %then14 ], [ %t119, %then12 ]
+  %t127 = phi i8* [ %t125, %then14 ], [ %t122, %then12 ]
+  store i1 %t126, i1* %l4
+  store i8* %t127, i8** %l8
+  br label %merge13
+merge13:
+  %t128 = phi i1 [ 1, %then12 ], [ %t103, %then8 ]
+  %t129 = phi i8* [ %t125, %then12 ], [ %t106, %then8 ]
+  store i1 %t128, i1* %l4
+  store i8* %t129, i8** %l8
+  %t130 = load i8*, i8** %l8
+  %t131 = call i64 @sailfin_runtime_string_length(i8* %t130)
+  %t132 = icmp eq i64 %t131, 0
+  %t133 = load i8*, i8** %l0
+  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t135 = load i8*, i8** %l2
+  %t136 = load i1, i1* %l4
+  %t137 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t138 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t139 = load i8*, i8** %l8
+  br i1 %t132, label %then16, label %merge17
 then16:
-  store i1 1, i1* %l8
-  %t149 = load i8*, i8** %l7
-  %t150 = load i8*, i8** %l7
-  %t151 = call i64 @sailfin_runtime_string_length(i8* %t150)
-  %t152 = call i8* @sailfin_runtime_substring(i8* %t149, i64 3, i64 %t151)
-  store i8* %t152, i8** %l9
-  %t153 = load i8*, i8** %l9
-  %t154 = call i8* @trim_text(i8* %t153)
-  store i8* %t154, i8** %l7
-  br label %merge17
+  %t140 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %s141 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.141, i32 0, i32 0
+  %t142 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t140, i8* %s141)
+  store { i8**, i64 }* %t142, { i8**, i64 }** %l7
+  %t143 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t144 = insertvalue %BorrowParseResult %t143, i1 0, 1
+  %s145 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.145, i32 0, i32 0
+  %t146 = insertvalue %BorrowParseResult %t144, i8* %s145, 2
+  %t147 = load i1, i1* %l4
+  %t148 = insertvalue %BorrowParseResult %t146, i1 %t147, 3
+  %t149 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t150 = insertvalue %BorrowParseResult %t148, { i8**, i64 }* %t149, 4
+  ret %BorrowParseResult %t150
 merge17:
-  %t155 = phi i1 [ 1, %then16 ], [ %t148, %entry ]
-  %t156 = phi i8* [ %t154, %then16 ], [ %t147, %entry ]
-  store i1 %t155, i1* %l8
-  store i8* %t156, i8** %l7
-  %t157 = load i8*, i8** %l7
-  %t158 = call i64 @sailfin_runtime_string_length(i8* %t157)
-  %t159 = icmp eq i64 %t158, 0
-  %t160 = load i8*, i8** %l0
-  %t161 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t162 = load i8*, i8** %l7
-  %t163 = load i1, i1* %l8
-  br i1 %t159, label %then18, label %merge19
+  %t151 = load i8*, i8** %l8
+  %t152 = call i1 @is_valid_borrow_target(i8* %t151)
+  %t153 = xor i1 %t152, 1
+  %t154 = load i8*, i8** %l0
+  %t155 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t156 = load i8*, i8** %l2
+  %t157 = load i1, i1* %l4
+  %t158 = load %BorrowArgumentParse, %BorrowArgumentParse* %l6
+  %t159 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t160 = load i8*, i8** %l8
+  br i1 %t153, label %then18, label %merge19
 then18:
-  %t164 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s165 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.165, i32 0, i32 0
-  %t166 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t164, i8* %s165)
-  store { i8**, i64 }* %t166, { i8**, i64 }** %l10
-  %t167 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t168 = insertvalue %BorrowParseResult %t167, i1 0, 1
-  %s169 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.169, i32 0, i32 0
-  %t170 = insertvalue %BorrowParseResult %t168, i8* %s169, 2
-  %t171 = load i1, i1* %l8
-  %t172 = insertvalue %BorrowParseResult %t170, i1 %t171, 3
-  %t173 = load { i8**, i64 }*, { i8**, i64 }** %l10
-  %t174 = insertvalue %BorrowParseResult %t172, { i8**, i64 }* %t173, 4
-  ret %BorrowParseResult %t174
+  %t161 = insertvalue %BorrowParseResult undef, i1 0, 0
+  %t162 = insertvalue %BorrowParseResult %t161, i1 0, 1
+  %s163 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.163, i32 0, i32 0
+  %t164 = insertvalue %BorrowParseResult %t162, i8* %s163, 2
+  %t165 = load i1, i1* %l4
+  %t166 = insertvalue %BorrowParseResult %t164, i1 %t165, 3
+  %t167 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t168 = insertvalue %BorrowParseResult %t166, { i8**, i64 }* %t167, 4
+  ret %BorrowParseResult %t168
 merge19:
-  %t175 = insertvalue %BorrowParseResult undef, i1 1, 0
-  %t176 = insertvalue %BorrowParseResult %t175, i1 1, 1
-  %t177 = load i8*, i8** %l7
-  %t178 = call i8* @trim_text(i8* %t177)
-  %t179 = insertvalue %BorrowParseResult %t176, i8* %t178, 2
-  %t180 = load i1, i1* %l8
-  %t181 = insertvalue %BorrowParseResult %t179, i1 %t180, 3
-  %t182 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t183 = insertvalue %BorrowParseResult %t181, { i8**, i64 }* %t182, 4
-  ret %BorrowParseResult %t183
+  %t169 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t170 = insertvalue %BorrowParseResult %t169, i1 1, 1
+  %t171 = load i8*, i8** %l8
+  %t172 = insertvalue %BorrowParseResult %t170, i8* %t171, 2
+  %t173 = load i1, i1* %l4
+  %t174 = insertvalue %BorrowParseResult %t172, i1 %t173, 3
+  %t175 = load { i8**, i64 }*, { i8**, i64 }** %l7
+  %t176 = insertvalue %BorrowParseResult %t174, { i8**, i64 }* %t175, 4
+  ret %BorrowParseResult %t176
+merge9:
+  %t177 = load i8*, i8** %l2
+  %t178 = call %BorrowArgumentParse @extract_simple_borrow_target(i8* %t177)
+  store %BorrowArgumentParse %t178, %BorrowArgumentParse* %l11
+  %t179 = load %BorrowArgumentParse, %BorrowArgumentParse* %l11
+  %t180 = extractvalue %BorrowArgumentParse %t179, 0
+  %t181 = xor i1 %t180, 1
+  %t182 = load i8*, i8** %l0
+  %t183 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t184 = load i8*, i8** %l2
+  %t185 = load i1, i1* %l4
+  %t186 = load %BorrowArgumentParse, %BorrowArgumentParse* %l11
+  br i1 %t181, label %then20, label %merge21
+then20:
+  %t187 = insertvalue %BorrowParseResult undef, i1 0, 0
+  %t188 = insertvalue %BorrowParseResult %t187, i1 0, 1
+  %s189 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.189, i32 0, i32 0
+  %t190 = insertvalue %BorrowParseResult %t188, i8* %s189, 2
+  %t191 = load i1, i1* %l4
+  %t192 = insertvalue %BorrowParseResult %t190, i1 %t191, 3
+  %t193 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t194 = insertvalue %BorrowParseResult %t192, { i8**, i64 }* %t193, 4
+  ret %BorrowParseResult %t194
+merge21:
+  %t195 = load %BorrowArgumentParse, %BorrowArgumentParse* %l11
+  %t196 = extractvalue %BorrowArgumentParse %t195, 1
+  %t197 = call i1 @is_valid_borrow_target(i8* %t196)
+  %t198 = xor i1 %t197, 1
+  %t199 = load i8*, i8** %l0
+  %t200 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t201 = load i8*, i8** %l2
+  %t202 = load i1, i1* %l4
+  %t203 = load %BorrowArgumentParse, %BorrowArgumentParse* %l11
+  br i1 %t198, label %then22, label %merge23
+then22:
+  %t204 = insertvalue %BorrowParseResult undef, i1 0, 0
+  %t205 = insertvalue %BorrowParseResult %t204, i1 0, 1
+  %s206 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.206, i32 0, i32 0
+  %t207 = insertvalue %BorrowParseResult %t205, i8* %s206, 2
+  %t208 = load i1, i1* %l4
+  %t209 = insertvalue %BorrowParseResult %t207, i1 %t208, 3
+  %t210 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t211 = insertvalue %BorrowParseResult %t209, { i8**, i64 }* %t210, 4
+  ret %BorrowParseResult %t211
+merge23:
+  %t212 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t213 = insertvalue %BorrowParseResult %t212, i1 1, 1
+  %t214 = load %BorrowArgumentParse, %BorrowArgumentParse* %l11
+  %t215 = extractvalue %BorrowArgumentParse %t214, 1
+  %t216 = insertvalue %BorrowParseResult %t213, i8* %t215, 2
+  %t217 = load i1, i1* %l4
+  %t218 = insertvalue %BorrowParseResult %t216, i1 %t217, 3
+  %t219 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t220 = insertvalue %BorrowParseResult %t218, { i8**, i64 }* %t219, 4
+  ret %BorrowParseResult %t220
+merge3:
+  %t221 = load i8*, i8** %l0
+  %t222 = alloca [2 x i8], align 1
+  %t223 = getelementptr [2 x i8], [2 x i8]* %t222, i32 0, i32 0
+  store i8 38, i8* %t223
+  %t224 = getelementptr [2 x i8], [2 x i8]* %t222, i32 0, i32 1
+  store i8 0, i8* %t224
+  %t225 = getelementptr [2 x i8], [2 x i8]* %t222, i32 0, i32 0
+  %t226 = call i1 @starts_with(i8* %t221, i8* %t225)
+  %t227 = xor i1 %t226, 1
+  %t228 = load i8*, i8** %l0
+  %t229 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  br i1 %t227, label %then24, label %merge25
+then24:
+  %t230 = insertvalue %BorrowParseResult undef, i1 0, 0
+  %t231 = insertvalue %BorrowParseResult %t230, i1 0, 1
+  %s232 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.232, i32 0, i32 0
+  %t233 = insertvalue %BorrowParseResult %t231, i8* %s232, 2
+  %t234 = insertvalue %BorrowParseResult %t233, i1 0, 3
+  %t235 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t236 = insertvalue %BorrowParseResult %t234, { i8**, i64 }* %t235, 4
+  ret %BorrowParseResult %t236
+merge25:
+  %t237 = load i8*, i8** %l0
+  %s238 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.238, i32 0, i32 0
+  %t239 = call i1 @starts_with(i8* %t237, i8* %s238)
+  %t240 = load i8*, i8** %l0
+  %t241 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  br i1 %t239, label %then26, label %merge27
+then26:
+  %t242 = insertvalue %BorrowParseResult undef, i1 0, 0
+  %t243 = insertvalue %BorrowParseResult %t242, i1 0, 1
+  %s244 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.244, i32 0, i32 0
+  %t245 = insertvalue %BorrowParseResult %t243, i8* %s244, 2
+  %t246 = insertvalue %BorrowParseResult %t245, i1 0, 3
+  %t247 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t248 = insertvalue %BorrowParseResult %t246, { i8**, i64 }* %t247, 4
+  ret %BorrowParseResult %t248
+merge27:
+  %t249 = load i8*, i8** %l0
+  %t250 = load i8*, i8** %l0
+  %t251 = call i64 @sailfin_runtime_string_length(i8* %t250)
+  %t252 = call i8* @sailfin_runtime_substring(i8* %t249, i64 1, i64 %t251)
+  %t253 = call i8* @trim_text(i8* %t252)
+  store i8* %t253, i8** %l12
+  store i1 0, i1* %l13
+  %t254 = load i8*, i8** %l12
+  %s255 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.255, i32 0, i32 0
+  %t256 = call i1 @starts_with(i8* %t254, i8* %s255)
+  %t257 = load i8*, i8** %l0
+  %t258 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t259 = load i8*, i8** %l12
+  %t260 = load i1, i1* %l13
+  br i1 %t256, label %then28, label %merge29
+then28:
+  store i1 1, i1* %l13
+  %t261 = load i8*, i8** %l12
+  %t262 = load i8*, i8** %l12
+  %t263 = call i64 @sailfin_runtime_string_length(i8* %t262)
+  %t264 = call i8* @sailfin_runtime_substring(i8* %t261, i64 3, i64 %t263)
+  store i8* %t264, i8** %l14
+  %t265 = load i8*, i8** %l14
+  %t266 = call i8* @trim_text(i8* %t265)
+  store i8* %t266, i8** %l12
+  br label %merge29
+merge29:
+  %t267 = phi i1 [ 1, %then28 ], [ %t260, %entry ]
+  %t268 = phi i8* [ %t266, %then28 ], [ %t259, %entry ]
+  store i1 %t267, i1* %l13
+  store i8* %t268, i8** %l12
+  %t269 = load i8*, i8** %l12
+  %t270 = call i64 @sailfin_runtime_string_length(i8* %t269)
+  %t271 = icmp eq i64 %t270, 0
+  %t272 = load i8*, i8** %l0
+  %t273 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t274 = load i8*, i8** %l12
+  %t275 = load i1, i1* %l13
+  br i1 %t271, label %then30, label %merge31
+then30:
+  %t276 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s277 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.277, i32 0, i32 0
+  %t278 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t276, i8* %s277)
+  store { i8**, i64 }* %t278, { i8**, i64 }** %l15
+  %t279 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t280 = insertvalue %BorrowParseResult %t279, i1 0, 1
+  %s281 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.281, i32 0, i32 0
+  %t282 = insertvalue %BorrowParseResult %t280, i8* %s281, 2
+  %t283 = load i1, i1* %l13
+  %t284 = insertvalue %BorrowParseResult %t282, i1 %t283, 3
+  %t285 = load { i8**, i64 }*, { i8**, i64 }** %l15
+  %t286 = insertvalue %BorrowParseResult %t284, { i8**, i64 }* %t285, 4
+  ret %BorrowParseResult %t286
+merge31:
+  %t287 = insertvalue %BorrowParseResult undef, i1 1, 0
+  %t288 = insertvalue %BorrowParseResult %t287, i1 1, 1
+  %t289 = load i8*, i8** %l12
+  %t290 = call i8* @trim_text(i8* %t289)
+  %t291 = insertvalue %BorrowParseResult %t288, i8* %t290, 2
+  %t292 = load i1, i1* %l13
+  %t293 = insertvalue %BorrowParseResult %t291, i1 %t292, 3
+  %t294 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t295 = insertvalue %BorrowParseResult %t293, { i8**, i64 }* %t294, 4
+  ret %BorrowParseResult %t295
 }
 
 define %BorrowArgumentParse @extract_borrow_argument(i8* %text) {
@@ -44006,6 +44410,280 @@ merge17:
   %t142 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t143 = insertvalue %BorrowArgumentParse %t141, { i8**, i64 }* %t142, 2
   ret %BorrowArgumentParse %t143
+}
+
+define %BorrowArgumentParse @extract_simple_borrow_target(i8* %text) {
+entry:
+  %l0 = alloca { i8**, i64 }*
+  %l1 = alloca i8*
+  %l2 = alloca double
+  %l3 = alloca i8
+  %l4 = alloca i8*
+  %l5 = alloca i8*
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
+  %t5 = call i8* @trim_text(i8* %text)
+  store i8* %t5, i8** %l1
+  %t6 = load i8*, i8** %l1
+  %t7 = call i64 @sailfin_runtime_string_length(i8* %t6)
+  %t8 = icmp eq i64 %t7, 0
+  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t10 = load i8*, i8** %l1
+  br i1 %t8, label %then0, label %merge1
+then0:
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s12 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.12, i32 0, i32 0
+  %t13 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t11, i8* %s12)
+  store { i8**, i64 }* %t13, { i8**, i64 }** %l0
+  %t14 = insertvalue %BorrowArgumentParse undef, i1 0, 0
+  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.15, i32 0, i32 0
+  %t16 = insertvalue %BorrowArgumentParse %t14, i8* %s15, 1
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t18 = insertvalue %BorrowArgumentParse %t16, { i8**, i64 }* %t17, 2
+  ret %BorrowArgumentParse %t18
+merge1:
+  %t19 = sitofp i64 0 to double
+  store double %t19, double* %l2
+  %t20 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t21 = load i8*, i8** %l1
+  %t22 = load double, double* %l2
+  br label %loop.header2
+loop.header2:
+  %t50 = phi double [ %t22, %entry ], [ %t49, %loop.latch4 ]
+  store double %t50, double* %l2
+  br label %loop.body3
+loop.body3:
+  %t23 = load double, double* %l2
+  %t24 = load i8*, i8** %l1
+  %t25 = call i64 @sailfin_runtime_string_length(i8* %t24)
+  %t26 = sitofp i64 %t25 to double
+  %t27 = fcmp oge double %t23, %t26
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t29 = load i8*, i8** %l1
+  %t30 = load double, double* %l2
+  br i1 %t27, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t31 = load i8*, i8** %l1
+  %t32 = load double, double* %l2
+  %t33 = fptosi double %t32 to i64
+  %t34 = getelementptr i8, i8* %t31, i64 %t33
+  %t35 = load i8, i8* %t34
+  store i8 %t35, i8* %l3
+  %t36 = load i8, i8* %l3
+  %t37 = alloca [2 x i8], align 1
+  %t38 = getelementptr [2 x i8], [2 x i8]* %t37, i32 0, i32 0
+  store i8 %t36, i8* %t38
+  %t39 = getelementptr [2 x i8], [2 x i8]* %t37, i32 0, i32 1
+  store i8 0, i8* %t39
+  %t40 = getelementptr [2 x i8], [2 x i8]* %t37, i32 0, i32 0
+  %t41 = call i1 @is_effect_delimiter(i8* %t40)
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t43 = load i8*, i8** %l1
+  %t44 = load double, double* %l2
+  %t45 = load i8, i8* %l3
+  br i1 %t41, label %then8, label %merge9
+then8:
+  br label %afterloop5
+merge9:
+  %t46 = load double, double* %l2
+  %t47 = sitofp i64 1 to double
+  %t48 = fadd double %t46, %t47
+  store double %t48, double* %l2
+  br label %loop.latch4
+loop.latch4:
+  %t49 = load double, double* %l2
+  br label %loop.header2
+afterloop5:
+  %t51 = load i8*, i8** %l1
+  %t52 = load double, double* %l2
+  %t53 = fptosi double %t52 to i64
+  %t54 = call i8* @sailfin_runtime_substring(i8* %t51, i64 0, i64 %t53)
+  %t55 = call i8* @trim_text(i8* %t54)
+  store i8* %t55, i8** %l4
+  %t56 = load i8*, i8** %l4
+  %t57 = call i64 @sailfin_runtime_string_length(i8* %t56)
+  %t58 = icmp eq i64 %t57, 0
+  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t60 = load i8*, i8** %l1
+  %t61 = load double, double* %l2
+  %t62 = load i8*, i8** %l4
+  br i1 %t58, label %then10, label %merge11
+then10:
+  %t63 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s64 = getelementptr inbounds [48 x i8], [48 x i8]* @.str.64, i32 0, i32 0
+  %t65 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t63, i8* %s64)
+  store { i8**, i64 }* %t65, { i8**, i64 }** %l0
+  %t66 = insertvalue %BorrowArgumentParse undef, i1 0, 0
+  %s67 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.67, i32 0, i32 0
+  %t68 = insertvalue %BorrowArgumentParse %t66, i8* %s67, 1
+  %t69 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t70 = insertvalue %BorrowArgumentParse %t68, { i8**, i64 }* %t69, 2
+  ret %BorrowArgumentParse %t70
+merge11:
+  %t71 = load i8*, i8** %l1
+  %t72 = load double, double* %l2
+  %t73 = load i8*, i8** %l1
+  %t74 = call i64 @sailfin_runtime_string_length(i8* %t73)
+  %t75 = fptosi double %t72 to i64
+  %t76 = call i8* @sailfin_runtime_substring(i8* %t71, i64 %t75, i64 %t74)
+  %t77 = call i8* @trim_text(i8* %t76)
+  store i8* %t77, i8** %l5
+  %t78 = load i8*, i8** %l5
+  %t79 = call i64 @sailfin_runtime_string_length(i8* %t78)
+  %t80 = icmp sgt i64 %t79, 0
+  %t81 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t82 = load i8*, i8** %l1
+  %t83 = load double, double* %l2
+  %t84 = load i8*, i8** %l4
+  %t85 = load i8*, i8** %l5
+  br i1 %t80, label %then12, label %merge13
+then12:
+  %t86 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s87 = getelementptr inbounds [52 x i8], [52 x i8]* @.str.87, i32 0, i32 0
+  %t88 = load i8*, i8** %l5
+  %t89 = add i8* %s87, %t88
+  %t90 = load i8, i8* %t89
+  %t91 = add i8 %t90, 96
+  %t92 = alloca [2 x i8], align 1
+  %t93 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 0
+  store i8 %t91, i8* %t93
+  %t94 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 1
+  store i8 0, i8* %t94
+  %t95 = getelementptr [2 x i8], [2 x i8]* %t92, i32 0, i32 0
+  %t96 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t86, i8* %t95)
+  store { i8**, i64 }* %t96, { i8**, i64 }** %l0
+  %t97 = insertvalue %BorrowArgumentParse undef, i1 0, 0
+  %t98 = load i8*, i8** %l4
+  %t99 = insertvalue %BorrowArgumentParse %t97, i8* %t98, 1
+  %t100 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t101 = insertvalue %BorrowArgumentParse %t99, { i8**, i64 }* %t100, 2
+  ret %BorrowArgumentParse %t101
+merge13:
+  %t102 = insertvalue %BorrowArgumentParse undef, i1 1, 0
+  %t103 = load i8*, i8** %l4
+  %t104 = insertvalue %BorrowArgumentParse %t102, i8* %t103, 1
+  %t105 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t106 = insertvalue %BorrowArgumentParse %t104, { i8**, i64 }* %t105, 2
+  ret %BorrowArgumentParse %t106
+}
+
+define i1 @is_valid_borrow_target(i8* %text) {
+entry:
+  %l0 = alloca i8*
+  %l1 = alloca double
+  %l2 = alloca i8
+  %t0 = call i8* @trim_text(i8* %text)
+  store i8* %t0, i8** %l0
+  %t1 = load i8*, i8** %l0
+  %t2 = call i64 @sailfin_runtime_string_length(i8* %t1)
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = load i8*, i8** %l0
+  br i1 %t3, label %then0, label %merge1
+then0:
+  ret i1 0
+merge1:
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load i8*, i8** %l0
+  %t7 = load double, double* %l1
+  br label %loop.header2
+loop.header2:
+  %t58 = phi double [ %t7, %entry ], [ %t57, %loop.latch4 ]
+  store double %t58, double* %l1
+  br label %loop.body3
+loop.body3:
+  %t8 = load double, double* %l1
+  %t9 = load i8*, i8** %l0
+  %t10 = call i64 @sailfin_runtime_string_length(i8* %t9)
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load i8*, i8** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t15 = load i8*, i8** %l0
+  %t16 = load double, double* %l1
+  %t17 = fptosi double %t16 to i64
+  %t18 = getelementptr i8, i8* %t15, i64 %t17
+  %t19 = load i8, i8* %t18
+  store i8 %t19, i8* %l2
+  %t20 = load i8, i8* %l2
+  %t21 = icmp eq i8 %t20, 46
+  %t22 = load i8*, i8** %l0
+  %t23 = load double, double* %l1
+  %t24 = load i8, i8* %l2
+  br i1 %t21, label %then8, label %merge9
+then8:
+  %t25 = load double, double* %l1
+  %t26 = sitofp i64 1 to double
+  %t27 = fadd double %t25, %t26
+  store double %t27, double* %l1
+  br label %loop.latch4
+merge9:
+  %t28 = load double, double* %l1
+  %t29 = sitofp i64 0 to double
+  %t30 = fcmp oeq double %t28, %t29
+  %t31 = load i8*, i8** %l0
+  %t32 = load double, double* %l1
+  %t33 = load i8, i8* %l2
+  br i1 %t30, label %then10, label %else11
+then10:
+  %t34 = load i8, i8* %l2
+  %t35 = alloca [2 x i8], align 1
+  %t36 = getelementptr [2 x i8], [2 x i8]* %t35, i32 0, i32 0
+  store i8 %t34, i8* %t36
+  %t37 = getelementptr [2 x i8], [2 x i8]* %t35, i32 0, i32 1
+  store i8 0, i8* %t37
+  %t38 = getelementptr [2 x i8], [2 x i8]* %t35, i32 0, i32 0
+  %t39 = call i1 @is_identifier_start_char(i8* %t38)
+  %t40 = xor i1 %t39, 1
+  %t41 = load i8*, i8** %l0
+  %t42 = load double, double* %l1
+  %t43 = load i8, i8* %l2
+  br i1 %t40, label %then13, label %merge14
+then13:
+  ret i1 0
+merge14:
+  br label %merge12
+else11:
+  %t44 = load i8, i8* %l2
+  %t45 = alloca [2 x i8], align 1
+  %t46 = getelementptr [2 x i8], [2 x i8]* %t45, i32 0, i32 0
+  store i8 %t44, i8* %t46
+  %t47 = getelementptr [2 x i8], [2 x i8]* %t45, i32 0, i32 1
+  store i8 0, i8* %t47
+  %t48 = getelementptr [2 x i8], [2 x i8]* %t45, i32 0, i32 0
+  %t49 = call i1 @is_identifier_part_char(i8* %t48)
+  %t50 = xor i1 %t49, 1
+  %t51 = load i8*, i8** %l0
+  %t52 = load double, double* %l1
+  %t53 = load i8, i8* %l2
+  br i1 %t50, label %then15, label %merge16
+then15:
+  ret i1 0
+merge16:
+  br label %merge12
+merge12:
+  %t54 = load double, double* %l1
+  %t55 = sitofp i64 1 to double
+  %t56 = fadd double %t54, %t55
+  store double %t56, double* %l1
+  br label %loop.latch4
+loop.latch4:
+  %t57 = load double, double* %l1
+  br label %loop.header2
+afterloop5:
+  ret i1 1
 }
 
 define %TernaryParseResult @parse_ternary_expression(i8* %text) {

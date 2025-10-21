@@ -2076,6 +2076,29 @@ def filter_runtime_helper_targets(targets):
 def append_function_call_entry(entries, entry):
     return (entries) + ([entry])
 
+def replace_function_effect_entry(entries, position, entry):
+    result = []
+    index = 0
+    while True:
+        if index >= len(entries):
+            break
+        if index == position:
+            result = (result) + ([entry])
+        else:
+            result = (result) + ([entries[index]])
+        index += 1
+    return result
+
+def find_function_effect_entry_index(entries, name):
+    index = 0
+    while True:
+        if index >= len(entries):
+            break
+        if entries[index].name == name:
+            return index
+        index += 1
+    return -1
+
 def propagate_function_effects(direct_effects, call_graph):
     aggregated = []
     index = 0
@@ -2094,32 +2117,36 @@ def propagate_function_effects(direct_effects, call_graph):
             if call_index >= len(call_graph):
                 break
             call_entry = call_graph[call_index]
-            target_entry = find_function_effect_entry(aggregated, call_entry.name)
-            if target_entry != None:
-                merged = target_entry.effects
+            target_index = find_function_effect_entry_index(aggregated, call_entry.name)
+            if target_index >= 0:
+                target_entry = aggregated[target_index]
+                merged = copy_string_array(target_entry.effects)
                 callee_index = 0
                 while True:
                     if callee_index >= len(call_entry.callees):
                         break
                     callee_name = call_entry.callees[callee_index]
-                    callee_entry = find_function_effect_entry(aggregated, callee_name)
-                    if callee_entry != None:
-                        merged = merge_effect_lists(merged, callee_entry.effects)
+                    callee_pos = find_function_effect_entry_index(aggregated, callee_name)
+                    if callee_pos >= 0:
+                        callee_entry = aggregated[callee_pos]
+                        effect_index = 0
+                        while True:
+                            if effect_index >= len(callee_entry.effects):
+                                break
+                            merged = append_unique_effect(merged, callee_entry.effects[effect_index])
+                            effect_index += 1
                     callee_index += 1
                 if not string_arrays_equal(merged, target_entry.effects):
-                    target_entry.effects = merged
+                    updated_entry = FunctionEffectEntry(name=target_entry.name, effects=merged)
+                    aggregated = replace_function_effect_entry(aggregated, target_index, updated_entry)
                     changed = True
             call_index += 1
     return aggregated
 
 def find_function_effect_entry(entries, name):
-    index = 0
-    while True:
-        if index >= len(entries):
-            break
-        if entries[index].name == name:
-            return entries[index]
-        index += 1
+    index = find_function_effect_entry_index(entries, name)
+    if index >= 0:
+        return entries[index]
     return None
 
 def build_capability_manifest(entry_points, function_effects):
@@ -5261,17 +5288,35 @@ def parse_borrow_expression(text):
         if len(remainder) == 0:
             issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
             return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=issue)
-        if remainder[0] != "(":
-            issue = append_string(diagnostics, "llvm lowering: borrow expression missing `(`")
-            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=issue)
-        argument_parse = extract_borrow_argument(remainder)
-        messages = (diagnostics) + (argument_parse.diagnostics)
-        if not argument_parse.success:
-            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=messages)
-        if len(argument_parse.argument) == 0:
-            messages = append_string(messages, "llvm lowering: borrow expression missing target")
-            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=messages)
-        return BorrowParseResult(recognized=True, success=True, target=argument_parse.argument, mutable=False, diagnostics=messages)
+        mutable_flag = False
+        if starts_with(remainder, "mut"):
+            after_mut = substring(remainder, 3, len(remainder))
+            mutable_flag = True
+            remainder = trim_text(after_mut)
+        if len(remainder) > 0  and  remainder[0] == "(":
+            argument_parse = extract_borrow_argument(remainder)
+            messages = (diagnostics) + (argument_parse.diagnostics)
+            if not argument_parse.success:
+                return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
+            argument_text = argument_parse.argument
+            if starts_with(argument_text, "mut"):
+                after_mut = substring(argument_text, 3, len(argument_text))
+                trimmed_after_mut = trim_text(after_mut)
+                if len(trimmed_after_mut) > 0:
+                    mutable_flag = True
+                    argument_text = trimmed_after_mut
+            if len(argument_text) == 0:
+                messages = append_string(messages, "llvm lowering: borrow expression missing target")
+                return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
+            if not is_valid_borrow_target(argument_text):
+                return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+            return BorrowParseResult(recognized=True, success=True, target=argument_text, mutable=mutable_flag, diagnostics=messages)
+        simple_parse = extract_simple_borrow_target(remainder)
+        if not simple_parse.success:
+            return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+        if not is_valid_borrow_target(simple_parse.argument):
+            return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+        return BorrowParseResult(recognized=True, success=True, target=simple_parse.argument, mutable=mutable_flag, diagnostics=diagnostics)
     if not starts_with(trimmed, "&"):
         return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
     if starts_with(trimmed, "&&"):
@@ -5321,6 +5366,51 @@ def extract_borrow_argument(text):
         diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`")
         return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
     return BorrowArgumentParse(success=True, argument=trim_text(inner), diagnostics=diagnostics)
+
+def extract_simple_borrow_target(text):
+    diagnostics = []
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+        return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if is_effect_delimiter(ch):
+            break
+        index += 1
+    target = trim_text(substring(trimmed, 0, index))
+    if len(target) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target")
+        return BorrowArgumentParse(success=False, argument="", diagnostics=diagnostics)
+    remainder = trim_text(substring(trimmed, index, len(trimmed)))
+    if len(remainder) > 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`")
+        return BorrowArgumentParse(success=False, argument=target, diagnostics=diagnostics)
+    return BorrowArgumentParse(success=True, argument=target, diagnostics=diagnostics)
+
+def is_valid_borrow_target(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return False
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if ch == ".":
+            index += 1
+            continue
+        if index == 0:
+            if not is_identifier_start_char(ch):
+                return False
+        else:
+            if not is_identifier_part_char(ch):
+                return False
+        index += 1
+    return True
 
 def parse_ternary_expression(text):
     diagnostics = []

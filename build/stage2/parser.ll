@@ -10641,6 +10641,7 @@ entry:
   %l14 = alloca %TypeAnnotation*
   %l15 = alloca i8*
   %l16 = alloca %SourceSpan*
+  %l17 = alloca %TypeParameter
   %t0 = call %Parser @skip_trivia(%Parser %parser)
   store %Parser %t0, %Parser* %l0
   %t1 = load %Parser, %Parser* %l0
@@ -10987,10 +10988,10 @@ afterloop5:
   %t265 = load double, double* %l8
   br label %loop.header17
 loop.header17:
-  %t408 = phi { %TypeParameter*, i64 }* [ %t264, %entry ], [ %t406, %loop.latch19 ]
-  %t409 = phi double [ %t265, %entry ], [ %t407, %loop.latch19 ]
-  store { %TypeParameter*, i64 }* %t408, { %TypeParameter*, i64 }** %l7
-  store double %t409, double* %l8
+  %t420 = phi { %TypeParameter*, i64 }* [ %t264, %entry ], [ %t418, %loop.latch19 ]
+  %t421 = phi double [ %t265, %entry ], [ %t419, %loop.latch19 ]
+  store { %TypeParameter*, i64 }* %t420, { %TypeParameter*, i64 }** %l7
+  store double %t421, double* %l8
   br label %loop.body18
 loop.body18:
   %t266 = load double, double* %l8
@@ -11168,37 +11169,55 @@ merge30:
   %t392 = load { %Token*, i64 }*, { %Token*, i64 }** %l11
   %t393 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t392)
   store %SourceSpan* %t393, %SourceSpan** %l16
-  %t394 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
-  %t395 = load i8*, i8** %l13
-  %t396 = insertvalue %TypeParameter undef, i8* %t395, 0
-  %t397 = load %TypeAnnotation*, %TypeAnnotation** %l14
-  %t398 = insertvalue %TypeParameter %t396, %TypeAnnotation* %t397, 1
-  %t399 = load %SourceSpan*, %SourceSpan** %l16
-  %t400 = insertvalue %TypeParameter %t398, %SourceSpan* %t399, 2
+  %t394 = load i8*, i8** %l13
+  %t395 = insertvalue %TypeParameter undef, i8* %t394, 0
+  %t396 = load %TypeAnnotation*, %TypeAnnotation** %l14
+  %t397 = insertvalue %TypeParameter %t395, %TypeAnnotation* %t396, 1
+  %t398 = load %SourceSpan*, %SourceSpan** %l16
+  %t399 = insertvalue %TypeParameter %t397, %SourceSpan* %t398, 2
+  store %TypeParameter %t399, %TypeParameter* %l17
+  %t400 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
+  %t401 = load %TypeParameter, %TypeParameter* %l17
+  %t402 = call noalias i8* @malloc(i64 24)
+  %t403 = bitcast i8* %t402 to %TypeParameter*
+  store %TypeParameter %t401, %TypeParameter* %t403
+  %t404 = alloca [1 x i8*]
+  %t405 = getelementptr [1 x i8*], [1 x i8*]* %t404, i32 0, i32 0
+  %t406 = getelementptr i8*, i8** %t405, i64 0
+  store i8* %t402, i8** %t406
+  %t407 = alloca { i8**, i64 }
+  %t408 = getelementptr { i8**, i64 }, { i8**, i64 }* %t407, i32 0, i32 0
+  store i8** %t405, i8*** %t408
+  %t409 = getelementptr { i8**, i64 }, { i8**, i64 }* %t407, i32 0, i32 1
+  store i64 1, i64* %t409
+  %t410 = bitcast { %TypeParameter*, i64 }* %t400 to { i8**, i64 }*
+  %t411 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t410, { i8**, i64 }* %t407)
+  %t412 = bitcast { i8**, i64 }* %t411 to { %TypeParameter*, i64 }*
+  store { %TypeParameter*, i64 }* %t412, { %TypeParameter*, i64 }** %l7
   br label %merge28
 merge28:
-  %t401 = phi { %TypeParameter*, i64 }* [ null, %then27 ], [ %t354, %then23 ]
-  store { %TypeParameter*, i64 }* %t401, { %TypeParameter*, i64 }** %l7
+  %t413 = phi { %TypeParameter*, i64 }* [ %t412, %then27 ], [ %t354, %then23 ]
+  store { %TypeParameter*, i64 }* %t413, { %TypeParameter*, i64 }** %l7
   br label %merge24
 merge24:
-  %t402 = phi { %TypeParameter*, i64 }* [ null, %then23 ], [ %t299, %loop.body18 ]
-  store { %TypeParameter*, i64 }* %t402, { %TypeParameter*, i64 }** %l7
-  %t403 = load double, double* %l8
-  %t404 = sitofp i64 1 to double
-  %t405 = fadd double %t403, %t404
-  store double %t405, double* %l8
+  %t414 = phi { %TypeParameter*, i64 }* [ %t412, %then23 ], [ %t299, %loop.body18 ]
+  store { %TypeParameter*, i64 }* %t414, { %TypeParameter*, i64 }** %l7
+  %t415 = load double, double* %l8
+  %t416 = sitofp i64 1 to double
+  %t417 = fadd double %t415, %t416
+  store double %t417, double* %l8
   br label %loop.latch19
 loop.latch19:
-  %t406 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
-  %t407 = load double, double* %l8
+  %t418 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
+  %t419 = load double, double* %l8
   br label %loop.header17
 afterloop20:
-  %t410 = load %Parser, %Parser* %l0
-  %t411 = insertvalue %TypeParameterParseResult undef, %Parser %t410, 0
-  %t412 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
-  %t413 = bitcast { %TypeParameter*, i64 }* %t412 to { %TypeParameter**, i64 }*
-  %t414 = insertvalue %TypeParameterParseResult %t411, { %TypeParameter**, i64 }* %t413, 1
-  ret %TypeParameterParseResult %t414
+  %t422 = load %Parser, %Parser* %l0
+  %t423 = insertvalue %TypeParameterParseResult undef, %Parser %t422, 0
+  %t424 = load { %TypeParameter*, i64 }*, { %TypeParameter*, i64 }** %l7
+  %t425 = bitcast { %TypeParameter*, i64 }* %t424 to { %TypeParameter**, i64 }*
+  %t426 = insertvalue %TypeParameterParseResult %t423, { %TypeParameter**, i64 }* %t425, 1
+  ret %TypeParameterParseResult %t426
 }
 
 define %ImplementsParseResult @parse_implements_clause(%Parser %parser) {
@@ -29188,7 +29207,8 @@ loop.latch2:
   %t120 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
-  ret %Parser zeroinitializer
+  %t122 = load %Parser, %Parser* %l0
+  ret %Parser %t122
 }
 
 define %Parser @skip_struct_member(%Parser %parser) {
@@ -29370,7 +29390,8 @@ loop.latch2:
   %t134 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
-  ret %Parser zeroinitializer
+  %t136 = load %Parser, %Parser* %l0
+  ret %Parser %t136
 }
 
 define %Parser @skip_enum_variant_entry(%Parser %parser) {
@@ -29552,7 +29573,8 @@ loop.latch2:
   %t134 = load %Parser, %Parser* %l0
   br label %loop.header0
 afterloop3:
-  ret %Parser zeroinitializer
+  %t136 = load %Parser, %Parser* %l0
+  ret %Parser %t136
 }
 
 define i8* @strip_surrounding_quotes(i8* %text) {
