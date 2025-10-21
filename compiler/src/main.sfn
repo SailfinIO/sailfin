@@ -8,6 +8,7 @@ import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import { lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
 import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { substring } from "./string_utils";
+import { Token } from "./token";
 import { typecheck_program } from "./typecheck";
 
 struct CompiledModule {
@@ -77,8 +78,8 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
 }
 
 struct LLVMCompilationResult {
-    llvm: LoweredLLVMResult;
-    native_module: NativeModule;
+    llvm -> LoweredLLVMResult;
+    native_module -> NativeModule;
 }
 
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
@@ -324,7 +325,7 @@ fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], li
     }
     let mut parts -> string[] = [];
     parts = append_string(parts, entry.message);
-    let token = entry.primary;
+    let token -> Token? = entry.primary;
     let line_number = token.line;
     let column_number = token.column;
     let location = "  --> line " + number_to_string(line_number) + ", column " + number_to_string(column_number);

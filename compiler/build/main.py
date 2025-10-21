@@ -8,6 +8,7 @@ from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
 from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.string_utils import substring
+from compiler.build.token import Token
 from compiler.build.typecheck import typecheck_program
 
 print = runtime.console
