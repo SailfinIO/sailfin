@@ -2832,6 +2832,7 @@ def collect_if_structure(instructions, start_index, end, function_name):
             index += 1
             continue
         index += 1
+    return IfStructure(then_start=then_start, then_end=then_end, else_start=else_start, else_end=else_end, has_else=has_else, next_index=limit, diagnostics=diagnostics)
 
 def collect_loop_structure(instructions, start_index, end, function_name):
     diagnostics = []
@@ -2862,6 +2863,7 @@ def collect_loop_structure(instructions, start_index, end, function_name):
             index += 1
             continue
         index += 1
+    return LoopStructure(body_start=body_start, body_end=body_end, next_index=limit, diagnostics=diagnostics)
 
 def append_loop_context(values, value):
     return (values) + ([value])
@@ -3412,6 +3414,7 @@ def collect_match_structure(instructions, start_index, end, function_name):
             index += 1
             continue
         index += 1
+    return MatchStructure(cases=cases, end_index=limit, diagnostics=diagnostics)
 
 def append_match_case(cases, value):
     return (cases) + ([value])
@@ -4167,6 +4170,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_allocas = allocas
     current_locals = locals
     current_temp = temp_index
+    current_bindings = bindings
     ownership = None
     consumption = None
     initializer_span = instruction.value_span
@@ -4176,7 +4180,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     mutations = []
     if initializer_span == None:
         initializer_span = instruction.span
-    suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name, initializer_span)
+    suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span)
     diagnostics = (diagnostics) + (suspension_diagnostics)
     trimmed_annotation = trim_text(instruction.type_annotation)
     llvm_type = ""
@@ -4185,7 +4189,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         if len(llvm_type) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`")
     operand = None
-    ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, bindings)
+    ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)
     ownership = ownership_analysis.ownership
     consumption = ownership_analysis.consumption
@@ -4193,7 +4197,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name)
         diagnostics = (diagnostics) + (conflict_diagnostics)
         if ownership.variant == "Borrow":
-            base_scope = infer_borrow_base_scope(ownership.base, current_locals, bindings, function.name)
+            base_scope = infer_borrow_base_scope(ownership.base, current_locals, current_bindings, function.name)
             region_id = current_next_region
             current_next_region += 1
             ownership = OwnershipInfo(variant=ownership.variant, base=ownership.base, mutable=ownership.mutable, span=ownership.span, region_id=region_id)
@@ -4206,12 +4210,12 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
             current_locals = mark_local_consumed(current_locals, consumption.name)
         else:
             if consumption.kind == "parameter":
-                bindings = mark_parameter_consumed(bindings, consumption.name)
+                current_bindings = mark_parameter_consumed(current_bindings, consumption.name)
     string_constants = []
     if instruction.value == None  or  len(instruction.value) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`")
     else:
-        lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, llvm_type)
+        lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type)
         diagnostics = (diagnostics) + (lowered.diagnostics)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
@@ -4268,7 +4272,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
     mutation = LocalMutation(name=instruction.name, llvm_type=llvm_type, value_name=stored_value, span=initializer_span, originating_label=current_label)
     mutations = (mutations) + ([mutation])
-    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
+    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
 
 def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, current_label):
     suspension_span = None

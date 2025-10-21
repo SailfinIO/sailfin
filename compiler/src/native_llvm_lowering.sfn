@@ -3613,6 +3613,16 @@ fn collect_if_structure(
         }
         index += 1;
     }
+
+    return IfStructure {
+        then_start: then_start,
+        then_end: then_end,
+        else_start: else_start,
+        else_end: else_end,
+        has_else: has_else,
+        next_index: limit,
+        diagnostics: diagnostics,
+    };
 }
 
 fn collect_loop_structure(
@@ -3667,6 +3677,13 @@ fn collect_loop_structure(
         }
         index += 1;
     }
+
+    return LoopStructure {
+        body_start: body_start,
+        body_end: body_end,
+        next_index: limit,
+        diagnostics: diagnostics,
+    };
 }
 
 fn append_loop_context(values -> LoopContext[], value -> LoopContext) -> LoopContext[] {
@@ -4696,6 +4713,8 @@ fn collect_match_structure(
         }
         index += 1;
     }
+
+    return MatchStructure { cases: cases, end_index: limit, diagnostics: diagnostics };
 }
 
 fn append_match_case(cases -> MatchCaseStructure[], value -> MatchCaseStructure) -> MatchCaseStructure[] {
@@ -5963,6 +5982,7 @@ fn lower_let_instruction(
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
+    let mut current_bindings -> ParameterBinding[] = bindings;
     let mut ownership -> OwnershipInfo? = null;
     let mut consumption -> OwnershipConsumption? = null;
     let mut initializer_span -> NativeSourceSpan? = instruction.value_span;
@@ -5974,7 +5994,7 @@ fn lower_let_instruction(
         initializer_span = instruction.span;
     }
 
-    let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, bindings, function.name, initializer_span);
+    let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
     diagnostics = diagnostics.concat(suspension_diagnostics);
 
     let trimmed_annotation = trim_text(instruction.type_annotation);
@@ -5987,7 +6007,7 @@ fn lower_let_instruction(
     }
 
     let mut operand -> LLVMOperand? = null;
-    let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, bindings);
+    let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     ownership = ownership_analysis.ownership;
     consumption = ownership_analysis.consumption;
@@ -5995,7 +6015,7 @@ fn lower_let_instruction(
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
         diagnostics = diagnostics.concat(conflict_diagnostics);
         if ownership.variant == "Borrow" {
-            let base_scope = infer_borrow_base_scope(ownership.base, current_locals, bindings, function.name);
+            let base_scope = infer_borrow_base_scope(ownership.base, current_locals, current_bindings, function.name);
             let region_id = current_next_region;
             current_next_region += 1;
             ownership = OwnershipInfo {
@@ -6022,7 +6042,7 @@ fn lower_let_instruction(
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
         } else if consumption.kind == "parameter" {
-            bindings = mark_parameter_consumed(bindings, consumption.name);
+            current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
 
@@ -6030,7 +6050,7 @@ fn lower_let_instruction(
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
-        let lowered = lower_expression(instruction.value, bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
+    let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -6126,7 +6146,7 @@ fn lower_let_instruction(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
-        bindings: bindings,
+    bindings: current_bindings,
         temp_index: current_temp,
         diagnostics: diagnostics,
         next_local_id: next_local_id + 1,
