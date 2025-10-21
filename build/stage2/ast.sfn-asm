@@ -305,10 +305,10 @@
 .enum Statement
     .layout enum name=Statement size=64 align=8 tag_type=i32 tag_size=4 tag_align=4
     .layout variant ImportDeclaration tag=0 offset=8 size=16 align=8
-    .layout payload ImportDeclaration.specifiers type=ImportSpecifier[] offset=8 size=8 align=8
+    .layout payload ImportDeclaration.import_specifiers type=ImportSpecifier[] offset=8 size=8 align=8
     .layout payload ImportDeclaration.source type=string offset=16 size=8 align=8
     .layout variant ExportDeclaration tag=1 offset=8 size=16 align=8
-    .layout payload ExportDeclaration.specifiers type=ExportSpecifier[] offset=8 size=8 align=8
+    .layout payload ExportDeclaration.export_specifiers type=ExportSpecifier[] offset=8 size=8 align=8
     .layout payload ExportDeclaration.source type=string offset=16 size=8 align=8
     .layout variant VariableDeclaration tag=2 offset=8 size=48 align=8
     .layout payload VariableDeclaration.name type=string offset=8 size=8 align=8
@@ -405,8 +405,8 @@
     .layout variant Unknown tag=22 offset=8 size=16 align=8
     .layout payload Unknown.tokens type=Token[] offset=8 size=8 align=8
     .layout payload Unknown.text type=string offset=16 size=8 align=8
-    .variant ImportDeclaration { specifiers -> ImportSpecifier[]; source -> string }
-    .variant ExportDeclaration { specifiers -> ExportSpecifier[]; source -> string }
+    .variant ImportDeclaration { import_specifiers -> ImportSpecifier[]; source -> string }
+    .variant ExportDeclaration { export_specifiers -> ExportSpecifier[]; source -> string }
     .variant VariableDeclaration { name -> string; mutable -> boolean; type_annotation -> TypeAnnotation?; initializer -> Expression?; span -> SourceSpan?; initializer_span -> SourceSpan? }
     .variant ModelDeclaration { name -> string; name_span -> SourceSpan?; model_type -> TypeAnnotation; properties -> ModelProperty[]; effects -> string[]; decorators -> Decorator[] }
     .variant PipelineDeclaration { signature -> FunctionSignature; body -> Block; decorators -> Decorator[] }

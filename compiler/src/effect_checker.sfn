@@ -179,6 +179,20 @@ fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
     return required;
 }
 
+fn collect_effects_from_optional_block(block -> Block?) -> EffectRequirement[] {
+    if block == null {
+        return [];
+    }
+    return collect_effects_from_block(block);
+}
+
+fn collect_effects_from_optional_statement(statement -> Statement?) -> EffectRequirement[] {
+    if statement == null {
+        return [];
+    }
+    return collect_effects_from_statement(statement);
+}
+
 fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[] {
     if statement.variant == "PromptStatement" {
         let mut required = collect_effects_from_block(statement.body);
@@ -207,9 +221,7 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
     }
     if statement.variant == "ForStatement" {
         let mut required = collect_effects_from_block(statement.body);
-        if statement.clause.target != null {
-            required = merge_requirements(required, collect_effects_from_expression(statement.clause.target));
-        }
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.target));
         required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable));
         return required;
     }
@@ -231,9 +243,11 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
     if statement.variant == "IfStatement" {
         let mut required = collect_effects_from_expression(statement.condition);
         required = merge_requirements(required, collect_effects_from_block(statement.then_block));
-        if statement.else_branch != null {
-            required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch));
+        let else_branch = statement.else_branch;
+        if else_branch == null {
+            return required;
         }
+        required = merge_requirements(required, collect_effects_from_else_branch(else_branch));
         return required;
     }
     if statement.variant == "ReturnStatement" {
@@ -289,20 +303,14 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
 
 fn collect_effects_from_else_branch(branch -> ElseBranch) -> EffectRequirement[] {
     let mut required -> EffectRequirement[] = [];
-    if branch.body != null {
-        required = merge_requirements(required, collect_effects_from_block(branch.body));
-    }
-    if branch.statement != null {
-        required = merge_requirements(required, collect_effects_from_statement(branch.statement));
-    }
+    required = merge_requirements(required, collect_effects_from_optional_block(branch.body));
+    required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement));
     return required;
 }
 
 fn collect_effects_from_match_case(case -> MatchCase) -> EffectRequirement[] {
     let mut required = collect_effects_from_expression(case.pattern);
-    if case.guard != null {
-        required = merge_requirements(required, collect_effects_from_expression(case.guard));
-    }
+    required = merge_requirements(required, collect_effects_from_expression(case.guard));
     required = merge_requirements(required, collect_effects_from_block(case.body));
     return required;
 }

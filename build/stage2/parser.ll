@@ -218,7 +218,7 @@ entry:
   %l2 = alloca %DecoratorParseResult
   %l3 = alloca { %Decorator**, i64 }*
   %l4 = alloca %Token
-  %l5 = alloca double
+  %l5 = alloca %Parser
   store %Parser %initial_parser, %Parser* %l0
   %t0 = load %Parser, %Parser* %l0
   store %Parser %t0, %Parser* %l1
@@ -439,7 +439,7 @@ then24:
   ret %StatementParseResult %t158
 merge25:
   %t159 = load %Token, %Token* %l4
-  %s160 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.160, i32 0, i32 0
+  %s160 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.160, i32 0, i32 0
   %t161 = call i1 @identifier_matches(%Token %t159, i8* %s160)
   %t162 = load %Parser, %Parser* %l0
   %t163 = load %Parser, %Parser* %l1
@@ -448,208 +448,112 @@ merge25:
   %t166 = load %Token, %Token* %l4
   br i1 %t161, label %then26, label %merge27
 then26:
-  %t167 = load %Token, %Token* %l4
-  %s168 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.168, i32 0, i32 0
-  %t169 = call i1 @identifier_matches(%Token %t167, i8* %s168)
-  %t170 = load %Parser, %Parser* %l0
-  %t171 = load %Parser, %Parser* %l1
-  %t172 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t173 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t174 = load %Token, %Token* %l4
-  br i1 %t169, label %then28, label %merge29
+  %t167 = load %Parser, %Parser* %l0
+  %t168 = call %Parser @parser_advance_raw(%Parser %t167)
+  %t169 = call %Parser @skip_trivia(%Parser %t168)
+  store %Parser %t169, %Parser* %l5
+  %t170 = load %Parser, %Parser* %l5
+  %t171 = call %Token @parser_peek_raw(%Parser %t170)
+  %s172 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.172, i32 0, i32 0
+  %t173 = call i1 @identifier_matches(%Token %t171, i8* %s172)
+  %t174 = load %Parser, %Parser* %l0
+  %t175 = load %Parser, %Parser* %l1
+  %t176 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t177 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t178 = load %Token, %Token* %l4
+  %t179 = load %Parser, %Parser* %l5
+  br i1 %t173, label %then28, label %merge29
 then28:
-  br label %merge29
-merge29:
-  %t175 = load %Token, %Token* %l4
-  %s176 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.176, i32 0, i32 0
-  %t177 = call i1 @identifier_matches(%Token %t175, i8* %s176)
-  %t178 = load %Parser, %Parser* %l0
-  %t179 = load %Parser, %Parser* %l1
-  %t180 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t180 = load %Parser, %Parser* %l0
   %t181 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t182 = load %Token, %Token* %l4
-  br i1 %t177, label %then30, label %merge31
-then30:
-  %t183 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t184 = load { %Decorator**, i64 }, { %Decorator**, i64 }* %t183
-  %t185 = extractvalue { %Decorator**, i64 } %t184, 1
-  %t186 = icmp sgt i64 %t185, 0
+  %t182 = bitcast { %Decorator**, i64 }* %t181 to { %Decorator*, i64 }*
+  %t183 = call %StatementParseResult @parse_function(%Parser %t180, i1 1, { %Decorator*, i64 }* %t182)
+  ret %StatementParseResult %t183
+merge29:
+  br label %merge27
+merge27:
+  %t184 = load %Token, %Token* %l4
+  %s185 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.185, i32 0, i32 0
+  %t186 = call i1 @identifier_matches(%Token %t184, i8* %s185)
   %t187 = load %Parser, %Parser* %l0
   %t188 = load %Parser, %Parser* %l1
   %t189 = load %DecoratorParseResult, %DecoratorParseResult* %l2
   %t190 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
   %t191 = load %Token, %Token* %l4
-  br i1 %t186, label %then32, label %merge33
-then32:
-  %t192 = load %Parser, %Parser* %l1
-  %t193 = insertvalue %BlockStatementParseResult undef, %Parser %t192, 0
-  %t194 = bitcast i8* null to %Statement*
-  %t195 = insertvalue %BlockStatementParseResult %t193, %Statement* %t194, 1
-  %t196 = insertvalue %BlockStatementParseResult %t195, i1 0, 2
-  ret %StatementParseResult zeroinitializer
-merge33:
-  ret %StatementParseResult zeroinitializer
+  br i1 %t186, label %then30, label %merge31
+then30:
+  %t192 = load %Parser, %Parser* %l0
+  %t193 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t194 = bitcast { %Decorator**, i64 }* %t193 to { %Decorator*, i64 }*
+  %t195 = call %StatementParseResult @parse_struct(%Parser %t192, { %Decorator*, i64 }* %t194)
+  ret %StatementParseResult %t195
 merge31:
-  %t197 = load %Token, %Token* %l4
-  %s198 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.198, i32 0, i32 0
-  %t199 = call i1 @identifier_matches(%Token %t197, i8* %s198)
-  %t200 = load %Parser, %Parser* %l0
-  %t201 = load %Parser, %Parser* %l1
-  %t202 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t203 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t204 = load %Token, %Token* %l4
-  br i1 %t199, label %then34, label %merge35
-then34:
+  %t196 = load %Token, %Token* %l4
+  %s197 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.197, i32 0, i32 0
+  %t198 = call i1 @identifier_matches(%Token %t196, i8* %s197)
+  %t199 = load %Parser, %Parser* %l0
+  %t200 = load %Parser, %Parser* %l1
+  %t201 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t202 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t203 = load %Token, %Token* %l4
+  br i1 %t198, label %then32, label %merge33
+then32:
+  %t204 = load %Parser, %Parser* %l0
   %t205 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t206 = load { %Decorator**, i64 }, { %Decorator**, i64 }* %t205
-  %t207 = extractvalue { %Decorator**, i64 } %t206, 1
-  %t208 = icmp sgt i64 %t207, 0
-  %t209 = load %Parser, %Parser* %l0
-  %t210 = load %Parser, %Parser* %l1
-  %t211 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t212 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t213 = load %Token, %Token* %l4
-  br i1 %t208, label %then36, label %merge37
-then36:
-  %t214 = load %Parser, %Parser* %l1
-  %t215 = insertvalue %BlockStatementParseResult undef, %Parser %t214, 0
-  %t216 = bitcast i8* null to %Statement*
-  %t217 = insertvalue %BlockStatementParseResult %t215, %Statement* %t216, 1
-  %t218 = insertvalue %BlockStatementParseResult %t217, i1 0, 2
-  ret %StatementParseResult zeroinitializer
-merge37:
-  ret %StatementParseResult zeroinitializer
+  %t206 = bitcast { %Decorator**, i64 }* %t205 to { %Decorator*, i64 }*
+  %t207 = call %StatementParseResult @parse_type_alias(%Parser %t204, { %Decorator*, i64 }* %t206)
+  ret %StatementParseResult %t207
+merge33:
+  %t208 = load %Token, %Token* %l4
+  %s209 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.209, i32 0, i32 0
+  %t210 = call i1 @identifier_matches(%Token %t208, i8* %s209)
+  %t211 = load %Parser, %Parser* %l0
+  %t212 = load %Parser, %Parser* %l1
+  %t213 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t214 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t215 = load %Token, %Token* %l4
+  br i1 %t210, label %then34, label %merge35
+then34:
+  %t216 = load %Parser, %Parser* %l0
+  %t217 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t218 = bitcast { %Decorator**, i64 }* %t217 to { %Decorator*, i64 }*
+  %t219 = call %StatementParseResult @parse_interface(%Parser %t216, { %Decorator*, i64 }* %t218)
+  ret %StatementParseResult %t219
 merge35:
-  store double 0.0, double* %l5
-  %t219 = load double, double* %l5
-  %s220 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.220, i32 0, i32 0
-  %t221 = call i1 @identifier_matches(i8* null, i8* %s220)
-  %t222 = load %Parser, %Parser* %l0
-  %t223 = load %Parser, %Parser* %l1
-  %t224 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t225 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t226 = load %Token, %Token* %l4
-  %t227 = load double, double* %l5
-  br i1 %t221, label %then38, label %merge39
-then38:
+  %t220 = load %Token, %Token* %l4
+  %s221 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.221, i32 0, i32 0
+  %t222 = call i1 @identifier_matches(%Token %t220, i8* %s221)
+  %t223 = load %Parser, %Parser* %l0
+  %t224 = load %Parser, %Parser* %l1
+  %t225 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t226 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t227 = load %Token, %Token* %l4
+  br i1 %t222, label %then36, label %merge37
+then36:
   %t228 = load %Parser, %Parser* %l0
   %t229 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
   %t230 = bitcast { %Decorator**, i64 }* %t229 to { %Decorator*, i64 }*
-  %t231 = call %StatementParseResult @parse_function(%Parser %t228, i1 1, { %Decorator*, i64 }* %t230)
+  %t231 = call %StatementParseResult @parse_enum(%Parser %t228, { %Decorator*, i64 }* %t230)
   ret %StatementParseResult %t231
+merge37:
+  %t232 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t233 = load { %Decorator**, i64 }, { %Decorator**, i64 }* %t232
+  %t234 = extractvalue { %Decorator**, i64 } %t233, 1
+  %t235 = icmp sgt i64 %t234, 0
+  %t236 = load %Parser, %Parser* %l0
+  %t237 = load %Parser, %Parser* %l1
+  %t238 = load %DecoratorParseResult, %DecoratorParseResult* %l2
+  %t239 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
+  %t240 = load %Token, %Token* %l4
+  br i1 %t235, label %then38, label %merge39
+then38:
+  %t241 = load %Parser, %Parser* %l1
+  %t242 = call %StatementParseResult @parse_unknown(%Parser %t241)
+  ret %StatementParseResult %t242
 merge39:
-  br label %merge27
-merge27:
-  %t232 = load %Token, %Token* %l4
-  %s233 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.233, i32 0, i32 0
-  %t234 = call i1 @identifier_matches(%Token %t232, i8* %s233)
-  %t235 = load %Parser, %Parser* %l0
-  %t236 = load %Parser, %Parser* %l1
-  %t237 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t238 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t239 = load %Token, %Token* %l4
-  br i1 %t234, label %then40, label %merge41
-then40:
-  %t240 = load %Parser, %Parser* %l0
-  %t241 = call %StatementParseResult @parse_import(%Parser %t240)
-  ret %StatementParseResult %t241
-merge41:
-  %t242 = load %Token, %Token* %l4
-  %s243 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.243, i32 0, i32 0
-  %t244 = call i1 @identifier_matches(%Token %t242, i8* %s243)
-  %t245 = load %Parser, %Parser* %l0
-  %t246 = load %Parser, %Parser* %l1
-  %t247 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t248 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t249 = load %Token, %Token* %l4
-  br i1 %t244, label %then42, label %merge43
-then42:
-  %t250 = load %Parser, %Parser* %l0
-  %t251 = call %StatementParseResult @parse_export(%Parser %t250)
-  ret %StatementParseResult %t251
-merge43:
-  %t252 = load %Token, %Token* %l4
-  %s253 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.253, i32 0, i32 0
-  %t254 = call i1 @identifier_matches(%Token %t252, i8* %s253)
-  %t255 = load %Parser, %Parser* %l0
-  %t256 = load %Parser, %Parser* %l1
-  %t257 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t258 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t259 = load %Token, %Token* %l4
-  br i1 %t254, label %then44, label %merge45
-then44:
-  %t260 = load %Parser, %Parser* %l0
-  %t261 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t262 = bitcast { %Decorator**, i64 }* %t261 to { %Decorator*, i64 }*
-  %t263 = call %StatementParseResult @parse_struct(%Parser %t260, { %Decorator*, i64 }* %t262)
-  ret %StatementParseResult %t263
-merge45:
-  %t264 = load %Token, %Token* %l4
-  %s265 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.265, i32 0, i32 0
-  %t266 = call i1 @identifier_matches(%Token %t264, i8* %s265)
-  %t267 = load %Parser, %Parser* %l0
-  %t268 = load %Parser, %Parser* %l1
-  %t269 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t270 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t271 = load %Token, %Token* %l4
-  br i1 %t266, label %then46, label %merge47
-then46:
-  %t272 = load %Parser, %Parser* %l0
-  %t273 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t274 = bitcast { %Decorator**, i64 }* %t273 to { %Decorator*, i64 }*
-  %t275 = call %StatementParseResult @parse_type_alias(%Parser %t272, { %Decorator*, i64 }* %t274)
-  ret %StatementParseResult %t275
-merge47:
-  %t276 = load %Token, %Token* %l4
-  %s277 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.277, i32 0, i32 0
-  %t278 = call i1 @identifier_matches(%Token %t276, i8* %s277)
-  %t279 = load %Parser, %Parser* %l0
-  %t280 = load %Parser, %Parser* %l1
-  %t281 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t282 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t283 = load %Token, %Token* %l4
-  br i1 %t278, label %then48, label %merge49
-then48:
-  %t284 = load %Parser, %Parser* %l0
-  %t285 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t286 = bitcast { %Decorator**, i64 }* %t285 to { %Decorator*, i64 }*
-  %t287 = call %StatementParseResult @parse_interface(%Parser %t284, { %Decorator*, i64 }* %t286)
-  ret %StatementParseResult %t287
-merge49:
-  %t288 = load %Token, %Token* %l4
-  %s289 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.289, i32 0, i32 0
-  %t290 = call i1 @identifier_matches(%Token %t288, i8* %s289)
-  %t291 = load %Parser, %Parser* %l0
-  %t292 = load %Parser, %Parser* %l1
-  %t293 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t294 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t295 = load %Token, %Token* %l4
-  br i1 %t290, label %then50, label %merge51
-then50:
-  %t296 = load %Parser, %Parser* %l0
-  %t297 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t298 = bitcast { %Decorator**, i64 }* %t297 to { %Decorator*, i64 }*
-  %t299 = call %StatementParseResult @parse_enum(%Parser %t296, { %Decorator*, i64 }* %t298)
-  ret %StatementParseResult %t299
-merge51:
-  %t300 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t301 = load { %Decorator**, i64 }, { %Decorator**, i64 }* %t300
-  %t302 = extractvalue { %Decorator**, i64 } %t301, 1
-  %t303 = icmp sgt i64 %t302, 0
-  %t304 = load %Parser, %Parser* %l0
-  %t305 = load %Parser, %Parser* %l1
-  %t306 = load %DecoratorParseResult, %DecoratorParseResult* %l2
-  %t307 = load { %Decorator**, i64 }*, { %Decorator**, i64 }** %l3
-  %t308 = load %Token, %Token* %l4
-  br i1 %t303, label %then52, label %merge53
-then52:
-  %t309 = load %Parser, %Parser* %l1
-  %t310 = call %StatementParseResult @parse_unknown(%Parser %t309)
-  ret %StatementParseResult %t310
-merge53:
-  %t311 = load %Parser, %Parser* %l0
-  %t312 = call %StatementParseResult @parse_unknown(%Parser %t311)
-  ret %StatementParseResult %t312
+  %t243 = load %Parser, %Parser* %l0
+  %t244 = call %StatementParseResult @parse_unknown(%Parser %t243)
+  ret %StatementParseResult %t244
 }
 
 define %StatementParseResult @parse_import(%Parser %initial_parser) {
@@ -7298,35 +7202,36 @@ merge1:
   %t223 = getelementptr { %TypeParameter**, i64 }, { %TypeParameter**, i64 }* %t221, i32 0, i32 1
   store i64 0, i64* %t223
   %t224 = insertvalue %FunctionSignature %t218, { %TypeParameter**, i64 }* %t221, 5
-  %t225 = insertvalue %FunctionSignature %t224, %SourceSpan* null, 6
-  store %FunctionSignature %t225, %FunctionSignature* %l16
-  %t226 = alloca %Statement
-  %t227 = getelementptr inbounds %Statement, %Statement* %t226, i32 0, i32 0
-  store i32 5, i32* %t227
-  %t228 = load %FunctionSignature, %FunctionSignature* %l16
-  %t229 = getelementptr inbounds %Statement, %Statement* %t226, i32 0, i32 1
-  %t230 = bitcast [24 x i8]* %t229 to i8*
-  %t231 = bitcast i8* %t230 to %FunctionSignature*
-  store %FunctionSignature %t228, %FunctionSignature* %t231
-  %t232 = load %Block, %Block* %l15
-  %t233 = getelementptr inbounds %Statement, %Statement* %t226, i32 0, i32 1
-  %t234 = bitcast [24 x i8]* %t233 to i8*
-  %t235 = getelementptr inbounds i8, i8* %t234, i64 8
-  %t236 = bitcast i8* %t235 to %Block*
-  store %Block %t232, %Block* %t236
-  %t237 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
-  %t238 = getelementptr inbounds %Statement, %Statement* %t226, i32 0, i32 1
-  %t239 = bitcast [24 x i8]* %t238 to i8*
-  %t240 = getelementptr inbounds i8, i8* %t239, i64 16
-  %t241 = bitcast i8* %t240 to { %Decorator**, i64 }**
-  store { %Decorator**, i64 }* %t237, { %Decorator**, i64 }** %t241
-  %t242 = load %Statement, %Statement* %t226
-  store %Statement %t242, %Statement* %l17
-  %t243 = load %Parser, %Parser* %l0
-  %t244 = insertvalue %StatementParseResult undef, %Parser %t243, 0
-  %t245 = load %Statement, %Statement* %l17
-  %t246 = insertvalue %StatementParseResult %t244, %Statement %t245, 1
-  ret %StatementParseResult %t246
+  %t225 = load %SourceSpan*, %SourceSpan** %l3
+  %t226 = insertvalue %FunctionSignature %t224, %SourceSpan* %t225, 6
+  store %FunctionSignature %t226, %FunctionSignature* %l16
+  %t227 = alloca %Statement
+  %t228 = getelementptr inbounds %Statement, %Statement* %t227, i32 0, i32 0
+  store i32 5, i32* %t228
+  %t229 = load %FunctionSignature, %FunctionSignature* %l16
+  %t230 = getelementptr inbounds %Statement, %Statement* %t227, i32 0, i32 1
+  %t231 = bitcast [24 x i8]* %t230 to i8*
+  %t232 = bitcast i8* %t231 to %FunctionSignature*
+  store %FunctionSignature %t229, %FunctionSignature* %t232
+  %t233 = load %Block, %Block* %l15
+  %t234 = getelementptr inbounds %Statement, %Statement* %t227, i32 0, i32 1
+  %t235 = bitcast [24 x i8]* %t234 to i8*
+  %t236 = getelementptr inbounds i8, i8* %t235, i64 8
+  %t237 = bitcast i8* %t236 to %Block*
+  store %Block %t233, %Block* %t237
+  %t238 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
+  %t239 = getelementptr inbounds %Statement, %Statement* %t227, i32 0, i32 1
+  %t240 = bitcast [24 x i8]* %t239 to i8*
+  %t241 = getelementptr inbounds i8, i8* %t240, i64 16
+  %t242 = bitcast i8* %t241 to { %Decorator**, i64 }**
+  store { %Decorator**, i64 }* %t238, { %Decorator**, i64 }** %t242
+  %t243 = load %Statement, %Statement* %t227
+  store %Statement %t243, %Statement* %l17
+  %t244 = load %Parser, %Parser* %l0
+  %t245 = insertvalue %StatementParseResult undef, %Parser %t244, 0
+  %t246 = load %Statement, %Statement* %l17
+  %t247 = insertvalue %StatementParseResult %t245, %Statement %t246, 1
+  ret %StatementParseResult %t247
 }
 
 define %StatementParseResult @parse_test(%Parser %initial_parser, { %Decorator*, i64 }* %decorators) {

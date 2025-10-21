@@ -170,11 +170,11 @@ struct ExportSpecifier {
 
 enum Statement {
     ImportDeclaration {
-        specifiers -> ImportSpecifier[];
+        import_specifiers -> ImportSpecifier[];
         source -> string;
     },
     ExportDeclaration {
-        specifiers -> ExportSpecifier[];
+        export_specifiers -> ExportSpecifier[];
         source -> string;
     },
     VariableDeclaration {

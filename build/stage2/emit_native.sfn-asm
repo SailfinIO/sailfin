@@ -288,8 +288,8 @@
     .if statement.variant == "ImportDeclaration"
         .span 210 9 210 73
         eval let mut line -> string = ".import \"" + statement.source + "\""
-        .span 211 9 211 71
-        eval let rendered = render_native_specifiers(statement.specifiers)
+        .span 211 9 211 78
+        eval let rendered = render_native_specifiers(statement.import_specifiers)
         .if rendered.length > 0
             .span 213 13 213 51
             eval line = line + " { " + rendered + " }"
@@ -300,8 +300,8 @@
     .if statement.variant == "ExportDeclaration"
         .span 218 9 218 73
         eval let mut line -> string = ".export \"" + statement.source + "\""
-        .span 219 9 219 71
-        eval let rendered = render_export_specifiers(statement.specifiers)
+        .span 219 9 219 78
+        eval let rendered = render_export_specifiers(statement.export_specifiers)
         .if rendered.length > 0
             .span 221 13 221 51
             eval line = line + " { " + rendered + " }"
@@ -484,143 +484,169 @@
     ret state_emit_line(state, ".init-span " + format_span(span))
 .endfn
 
+.fn append_optional_type_annotation(line -> string, annotation -> TypeAnnotation?) -> string
+.meta return string
+.meta effects none
+    .span 336 36 336 50
+    .param line -> string
+    .span 336 52 336 81
+    .param annotation -> TypeAnnotation?
+    .if annotation == null
+        .span 338 9 338 21
+        ret line
+    .endif
+    .span 340 5 340 43
+    ret line + " : " + annotation.text
+.endfn
+
+.fn append_optional_initializer(line -> string, initializer -> Expression?) -> string
+.meta return string
+.meta effects none
+    .span 343 32 343 46
+    .param line -> string
+    .span 343 48 343 74
+    .param initializer -> Expression?
+    .if initializer == null
+        .span 345 9 345 21
+        ret line
+    .endif
+    .span 347 5 347 58
+    ret line + " = " + format_expression(initializer)
+.endfn
+
 .fn format_span(span -> SourceSpan) -> string
 .meta return string
 .meta effects none
-    .span 336 16 336 34
+    .span 350 16 350 34
     .param span -> SourceSpan
-    .span 337 5 343 45
+    .span 351 5 357 45
     ret number_to_string(span.start_line) + " " + number_to_string(span.start_column) + " " + number_to_string(span.end_line) + " " + number_to_string(span.end_column)
 .endfn
 
 .fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 346 18 346 38
+    .span 360 18 360 38
     .param state -> NativeState
-    .span 346 40 346 62
+    .span 360 40 360 62
     .param statement -> Statement
-    .span 347 5 347 67
+    .span 361 5 361 67
     eval let mut current = emit_span_if_present(state, statement.span)
-    .span 348 5 348 85
+    .span 362 5 362 85
     eval current = emit_initializer_span_if_present(current, statement.initializer_span)
-    .span 350 5 350 38
+    .span 364 5 364 38
     eval let mut line -> string = ".let "
     .if statement.mutable
-        .span 352 9 352 30
+        .span 366 9 366 30
         eval line = line + "mut "
     .endif
-    .span 354 5 354 34
+    .span 368 5 368 34
     eval line = line + statement.name
-    .if statement.type_annotation != null
-        .span 356 9 356 62
-        eval line = line + " : " + statement.type_annotation.text
-    .endif
-    .if statement.initializer != null
-        .span 359 9 359 72
-        eval line = line + " = " + format_expression(statement.initializer)
-    .endif
-    .span 361 5 361 43
+    .span 369 5 369 77
+    eval line = append_optional_type_annotation(line, statement.type_annotation)
+    .span 370 5 370 69
+    eval line = append_optional_initializer(line, statement.initializer)
+    .span 371 5 371 43
     ret state_emit_line(current, line)
 .endfn
 
 .fn emit_function(state -> NativeState, signature -> FunctionSignature, body -> Block, decorators -> Decorator[]) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 365 5 365 25
+    .span 375 5 375 25
     .param state -> NativeState
-    .span 366 5 366 35
+    .span 376 5 376 35
     .param signature -> FunctionSignature
-    .span 367 5 367 18
+    .span 377 5 377 18
     .param body -> Block
-    .span 368 5 368 30
+    .span 378 5 378 30
     .param decorators -> Decorator[]
-    .span 370 5 370 58
+    .span 380 5 380 58
     eval let mut current = emit_decorators(state, decorators)
-    .span 371 5 371 87
+    .span 381 5 381 87
     eval current = state_emit_line(current, ".fn " + format_function_signature(signature))
-    .span 372 5 372 59
+    .span 382 5 382 59
     eval current = emit_signature_metadata(current, signature)
-    .span 373 5 373 42
+    .span 383 5 383 42
     eval current = state_push_indent(current)
-    .span 374 5 374 70
+    .span 384 5 384 70
     eval current = emit_parameter_metadata(current, signature.parameters)
-    .span 375 5 375 41
+    .span 385 5 385 41
     eval current = emit_block(current, body)
-    .span 376 5 376 41
+    .span 386 5 386 41
     eval current = state_pop_indent(current)
-    .span 377 5 377 47
+    .span 387 5 387 47
     ret state_emit_line(current, ".endfn")
 .endfn
 
 .fn emit_pipeline(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 380 18 380 38
+    .span 390 18 390 38
     .param state -> NativeState
-    .span 380 40 380 62
+    .span 390 40 390 62
     .param statement -> Statement
-    .span 381 5 381 68
+    .span 391 5 391 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 382 5 382 103
+    .span 392 5 392 103
     eval current = state_emit_line(current, ".pipeline " + format_function_signature(statement.signature))
-    .span 383 5 383 69
+    .span 393 5 393 69
     eval current = emit_signature_metadata(current, statement.signature)
-    .span 384 5 384 42
+    .span 394 5 394 42
     eval current = state_push_indent(current)
-    .span 385 5 385 80
+    .span 395 5 395 80
     eval current = emit_parameter_metadata(current, statement.signature.parameters)
-    .span 386 5 386 51
+    .span 396 5 396 51
     eval current = emit_block(current, statement.body)
-    .span 387 5 387 41
+    .span 397 5 397 41
     eval current = state_pop_indent(current)
-    .span 388 5 388 53
+    .span 398 5 398 53
     ret state_emit_line(current, ".endpipeline")
 .endfn
 
 .fn emit_tool(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 391 14 391 34
+    .span 401 14 401 34
     .param state -> NativeState
-    .span 391 36 391 58
+    .span 401 36 401 58
     .param statement -> Statement
-    .span 392 5 392 68
+    .span 402 5 402 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 393 5 393 99
+    .span 403 5 403 99
     eval current = state_emit_line(current, ".tool " + format_function_signature(statement.signature))
-    .span 394 5 394 69
+    .span 404 5 404 69
     eval current = emit_signature_metadata(current, statement.signature)
-    .span 395 5 395 42
+    .span 405 5 405 42
     eval current = state_push_indent(current)
-    .span 396 5 396 80
+    .span 406 5 406 80
     eval current = emit_parameter_metadata(current, statement.signature.parameters)
-    .span 397 5 397 51
+    .span 407 5 407 51
     eval current = emit_block(current, statement.body)
-    .span 398 5 398 41
+    .span 408 5 408 41
     eval current = state_pop_indent(current)
-    .span 399 5 399 49
+    .span 409 5 409 49
     ret state_emit_line(current, ".endtool")
 .endfn
 
 .fn emit_test(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 402 14 402 34
+    .span 412 14 412 34
     .param state -> NativeState
-    .span 402 36 402 58
+    .span 412 36 412 58
     .param statement -> Statement
-    .span 403 5 403 68
+    .span 413 5 413 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 404 5 404 72
+    .span 414 5 414 72
     eval let mut header -> string = ".test " + quote_string(statement.name)
     .if statement.effects.length > 0
-        .span 406 9 406 86
+        .span 416 9 416 86
         eval header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
     .endif
-    .span 408 5 408 48
+    .span 418 5 418 48
     eval current = state_emit_line(current, header)
-    .span 409 5 420 7
+    .span 419 5 430 7
     eval current = emit_signature_metadata(
         current,
         FunctionSignature {
@@ -633,321 +659,298 @@
             name_span: null,
         }
     )
-    .span 421 5 421 42
+    .span 431 5 431 42
     eval current = state_push_indent(current)
-    .span 422 5 422 51
+    .span 432 5 432 51
     eval current = emit_block(current, statement.body)
-    .span 423 5 423 41
+    .span 433 5 433 41
     eval current = state_pop_indent(current)
-    .span 424 5 424 49
+    .span 434 5 434 49
     ret state_emit_line(current, ".endtest")
 .endfn
 
 .fn emit_model(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 427 15 427 35
+    .span 437 15 437 35
     .param state -> NativeState
-    .span 427 37 427 59
+    .span 437 37 437 59
     .param statement -> Statement
-    .span 428 5 428 68
+    .span 438 5 438 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 429 5 429 95
+    .span 439 5 439 95
     eval let mut header -> string = ".model " + statement.name + " : " + statement.model_type.text
     .if statement.effects.length > 0
-        .span 431 9 431 86
+        .span 441 9 441 86
         eval header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
     .endif
-    .span 433 5 433 48
+    .span 443 5 443 48
     eval current = state_emit_line(current, header)
-    .span 434 5 434 42
+    .span 444 5 444 42
     eval current = state_push_indent(current)
-    .span 435 5 435 33
+    .span 445 5 445 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.properties.length
             break
         .endif
-        .span 440 9 440 52
+        .span 450 9 450 52
         eval let property = statement.properties[index]
-        .span 441 9 441 93
+        .span 451 9 451 93
         eval let line = ".property " + property.name + " = " + format_expression(property.value)
-        .span 442 9 442 50
+        .span 452 9 452 50
         eval current = state_emit_line(current, line)
-        .span 443 9 443 20
+        .span 453 9 453 20
         eval index += 1
     .endloop
     .if statement.properties.length == 0
-        .span 446 9 446 52
+        .span 456 9 456 52
         eval current = state_emit_line(current, "noop")
     .endif
-    .span 448 5 448 41
+    .span 458 5 458 41
     eval current = state_pop_indent(current)
-    .span 449 5 449 50
+    .span 459 5 459 50
     ret state_emit_line(current, ".endmodel")
 .endfn
 
 .fn emit_type_alias(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 452 20 452 40
+    .span 462 20 462 40
     .param state -> NativeState
-    .span 452 42 452 64
+    .span 462 42 462 64
     .param statement -> Statement
-    .span 453 5 453 56
+    .span 463 5 463 56
     eval let mut line -> string = ".type " + statement.name
-    .span 454 5 454 69
+    .span 464 5 464 69
     eval line = line + format_type_parameters(statement.type_parameters)
-    .span 455 5 455 55
+    .span 465 5 465 55
     eval line = line + " = " + statement.aliased_type.text
     .if statement.decorators.length > 0
-        .span 457 9 457 72
+        .span 467 9 467 72
         eval let mut current = emit_decorators(state, statement.decorators)
-        .span 458 9 458 47
+        .span 468 9 468 47
         ret state_emit_line(current, line)
     .endif
-    .span 460 5 460 41
+    .span 470 5 470 41
     ret state_emit_line(state, line)
 .endfn
 
 .fn emit_interface(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 463 19 463 39
+    .span 473 19 473 39
     .param state -> NativeState
-    .span 463 41 463 63
+    .span 473 41 473 63
     .param statement -> Statement
-    .span 464 5 464 68
+    .span 474 5 474 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 465 5 465 63
+    .span 475 5 475 63
     eval let mut header -> string = ".interface " + statement.name
-    .span 466 5 466 73
+    .span 476 5 476 73
     eval header = header + format_type_parameters(statement.type_parameters)
-    .span 467 5 467 48
+    .span 477 5 477 48
     eval current = state_emit_line(current, header)
-    .span 468 5 468 42
+    .span 478 5 478 42
     eval current = state_push_indent(current)
-    .span 469 5 469 33
+    .span 479 5 479 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.members.length
             break
         .endif
-        .span 474 9 474 50
+        .span 484 9 484 50
         eval let signature = statement.members[index]
-        .span 475 9 475 92
+        .span 485 9 485 92
         eval current = state_emit_line(current, ".sig " + format_function_signature(signature))
-        .span 476 9 476 20
+        .span 486 9 486 20
         eval index += 1
     .endloop
     .if statement.members.length == 0
-        .span 479 9 479 52
+        .span 489 9 489 52
         eval current = state_emit_line(current, "noop")
     .endif
-    .span 481 5 481 41
+    .span 491 5 491 41
     eval current = state_pop_indent(current)
-    .span 482 5 482 54
+    .span 492 5 492 54
     ret state_emit_line(current, ".endinterface")
 .endfn
 
 .fn emit_enum(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 485 14 485 34
+    .span 495 14 495 34
     .param state -> NativeState
-    .span 485 36 485 58
+    .span 495 36 495 58
     .param statement -> Statement
-    .span 486 5 486 68
+    .span 496 5 496 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 487 5 487 58
+    .span 497 5 497 58
     eval let mut header -> string = ".enum " + statement.name
-    .span 488 5 488 73
+    .span 498 5 498 73
     eval header = header + format_type_parameters(statement.type_parameters)
-    .span 489 5 489 48
+    .span 499 5 499 48
     eval current = state_emit_line(current, header)
-    .span 490 5 490 42
+    .span 500 5 500 42
     eval current = state_push_indent(current)
-    .span 491 5 491 82
+    .span 501 5 501 82
     eval let enum_layout = compute_enum_layout_lines(state.layout_context, statement)
-    .span 492 5 492 61
+    .span 502 5 502 61
     eval current = emit_layout_lines(current, enum_layout.lines)
-    .span 493 5 493 73
+    .span 503 5 503 73
     eval current = state_merge_diagnostics(current, enum_layout.diagnostics)
-    .span 494 5 494 33
+    .span 504 5 504 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.variants.length
             break
         .endif
-        .span 499 9 499 106
+        .span 509 9 509 106
         eval current = state_emit_line(current, ".variant " + format_enum_variant(statement.variants[index]))
-        .span 500 9 500 20
+        .span 510 9 510 20
         eval index += 1
     .endloop
     .if statement.variants.length == 0
-        .span 503 9 503 52
+        .span 513 9 513 52
         eval current = state_emit_line(current, "noop")
     .endif
-    .span 505 5 505 41
+    .span 515 5 515 41
     eval current = state_pop_indent(current)
-    .span 506 5 506 49
+    .span 516 5 516 49
     ret state_emit_line(current, ".endenum")
 .endfn
 
 .fn emit_struct(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 509 16 509 36
+    .span 519 16 519 36
     .param state -> NativeState
-    .span 509 38 509 60
+    .span 519 38 519 60
     .param statement -> Statement
-    .span 510 5 510 68
+    .span 520 5 520 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 511 5 511 60
+    .span 521 5 521 60
     eval let mut header -> string = ".struct " + statement.name
-    .span 512 5 512 73
+    .span 522 5 522 73
     eval header = header + format_type_parameters(statement.type_parameters)
     .if statement.implements_types.length > 0
-        .span 514 9 514 94
+        .span 524 9 524 94
         eval header = header + " implements " + join_type_annotations(statement.implements_types)
     .endif
-    .span 516 5 516 48
+    .span 526 5 526 48
     eval current = state_emit_line(current, header)
-    .span 517 5 517 42
+    .span 527 5 527 42
     eval current = state_push_indent(current)
-    .span 518 5 518 109
+    .span 528 5 528 109
     eval let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields)
-    .span 519 5 519 63
+    .span 529 5 529 63
     eval current = emit_layout_lines(current, struct_layout.lines)
-    .span 520 5 520 75
+    .span 530 5 530 75
     eval current = state_merge_diagnostics(current, struct_layout.diagnostics)
-    .span 522 5 522 33
+    .span 532 5 532 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.fields.length
             break
         .endif
-        .span 527 9 527 95
+        .span 537 9 537 95
         eval current = state_emit_line(current, ".field " + format_field(statement.fields[index]))
-        .span 528 9 528 20
+        .span 538 9 538 20
         eval index += 1
     .endloop
-    .span 531 5 531 40
+    .span 541 5 541 40
     eval let mut method_index -> number = 0
     .loop
         .if method_index >= statement.methods.length
             break
         .endif
-        .span 536 9 536 73
+        .span 546 9 546 73
         eval current = emit_method(current, statement.methods[method_index])
-        .span 537 9 537 27
+        .span 547 9 547 27
         eval method_index += 1
     .endloop
     .if statement.fields.length == 0 && statement.methods.length == 0
-        .span 541 9 541 52
+        .span 551 9 551 52
         eval current = state_emit_line(current, "noop")
     .endif
-    .span 544 5 544 41
+    .span 554 5 554 41
     eval current = state_pop_indent(current)
-    .span 545 5 545 51
+    .span 555 5 555 51
     ret state_emit_line(current, ".endstruct")
 .endfn
 
 .fn emit_method(state -> NativeState, method -> MethodDeclaration) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 548 16 548 36
+    .span 558 16 558 36
     .param state -> NativeState
-    .span 548 38 548 65
+    .span 558 38 558 65
     .param method -> MethodDeclaration
-    .span 549 5 549 65
+    .span 559 5 559 65
     eval let mut current = emit_decorators(state, method.decorators)
-    .span 550 5 550 98
+    .span 560 5 560 98
     eval current = state_emit_line(current, ".method " + format_function_signature(method.signature))
-    .span 551 5 551 66
+    .span 561 5 561 66
     eval current = emit_signature_metadata(current, method.signature)
-    .span 552 5 552 42
+    .span 562 5 562 42
     eval current = state_push_indent(current)
-    .span 553 5 553 77
+    .span 563 5 563 77
     eval current = emit_parameter_metadata(current, method.signature.parameters)
-    .span 554 5 554 48
+    .span 564 5 564 48
     eval current = emit_block(current, method.body)
-    .span 555 5 555 41
+    .span 565 5 565 41
     eval current = state_pop_indent(current)
-    .span 556 5 556 51
+    .span 566 5 566 51
     ret state_emit_line(current, ".endmethod")
 .endfn
 
 .fn emit_prompt(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 559 16 559 36
+    .span 569 16 569 36
     .param state -> NativeState
-    .span 559 38 559 60
+    .span 569 38 569 60
     .param statement -> Statement
-    .span 560 5 560 68
+    .span 570 5 570 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 561 5 561 72
+    .span 571 5 571 72
     eval current = state_emit_line(current, ".prompt " + statement.channel)
-    .span 562 5 562 42
+    .span 572 5 572 42
     eval current = state_push_indent(current)
-    .span 563 5 563 51
+    .span 573 5 573 51
     eval current = emit_block(current, statement.body)
-    .span 564 5 564 41
+    .span 574 5 574 41
     eval current = state_pop_indent(current)
-    .span 565 5 565 51
+    .span 575 5 575 51
     ret state_emit_line(current, ".endprompt")
 .endfn
 
 .fn emit_with(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 568 14 568 34
+    .span 578 14 578 34
     .param state -> NativeState
-    .span 568 36 568 58
+    .span 578 36 578 58
     .param statement -> Statement
-    .span 569 5 569 68
+    .span 579 5 579 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 570 5 570 39
+    .span 580 5 580 39
     eval let mut line -> string = ".with "
-    .span 571 5 571 33
+    .span 581 5 581 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.clauses.length
             break
         .endif
         .if index > 0
-            .span 577 13 577 32
+            .span 587 13 587 32
             eval line = line + ", "
         .endif
-        .span 579 9 579 78
+        .span 589 9 589 78
         eval line = line + format_expression(statement.clauses[index].expression)
-        .span 580 9 580 20
+        .span 590 9 590 20
         eval index += 1
     .endloop
-    .span 582 5 582 46
-    eval current = state_emit_line(current, line)
-    .span 583 5 583 42
-    eval current = state_push_indent(current)
-    .span 584 5 584 51
-    eval current = emit_block(current, statement.body)
-    .span 585 5 585 41
-    eval current = state_pop_indent(current)
-    .span 586 5 586 49
-    ret state_emit_line(current, ".endwith")
-.endfn
-
-.fn emit_for(state -> NativeState, statement -> Statement) -> NativeState
-.meta return NativeState
-.meta effects none
-    .span 589 13 589 33
-    .param state -> NativeState
-    .span 589 35 589 57
-    .param statement -> Statement
-    .span 590 5 590 68
-    eval let mut current = emit_decorators(state, statement.decorators)
-    .span 591 5 591 125
-    eval let line = ".for " + format_expression(statement.clause.target) + " in " + format_expression(statement.clause.iterable)
     .span 592 5 592 46
     eval current = state_emit_line(current, line)
     .span 593 5 593 42
@@ -956,753 +959,786 @@
     eval current = emit_block(current, statement.body)
     .span 595 5 595 41
     eval current = state_pop_indent(current)
-    .span 596 5 596 48
+    .span 596 5 596 49
+    ret state_emit_line(current, ".endwith")
+.endfn
+
+.fn emit_for(state -> NativeState, statement -> Statement) -> NativeState
+.meta return NativeState
+.meta effects none
+    .span 599 13 599 33
+    .param state -> NativeState
+    .span 599 35 599 57
+    .param statement -> Statement
+    .span 600 5 600 68
+    eval let mut current = emit_decorators(state, statement.decorators)
+    .span 601 5 601 125
+    eval let line = ".for " + format_expression(statement.clause.target) + " in " + format_expression(statement.clause.iterable)
+    .span 602 5 602 46
+    eval current = state_emit_line(current, line)
+    .span 603 5 603 42
+    eval current = state_push_indent(current)
+    .span 604 5 604 51
+    eval current = emit_block(current, statement.body)
+    .span 605 5 605 41
+    eval current = state_pop_indent(current)
+    .span 606 5 606 48
     ret state_emit_line(current, ".endfor")
 .endfn
 
 .fn emit_loop(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 599 14 599 34
+    .span 609 14 609 34
     .param state -> NativeState
-    .span 599 36 599 58
+    .span 609 36 609 58
     .param statement -> Statement
-    .span 600 5 600 68
+    .span 610 5 610 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 601 5 601 49
+    .span 611 5 611 49
     eval current = state_emit_line(current, ".loop")
-    .span 602 5 602 42
+    .span 612 5 612 42
     eval current = state_push_indent(current)
-    .span 603 5 603 51
+    .span 613 5 613 51
     eval current = emit_block(current, statement.body)
-    .span 604 5 604 41
+    .span 614 5 614 41
     eval current = state_pop_indent(current)
-    .span 605 5 605 49
+    .span 615 5 615 49
     ret state_emit_line(current, ".endloop")
 .endfn
 
 .fn emit_match(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 608 15 608 35
+    .span 618 15 618 35
     .param state -> NativeState
-    .span 608 37 608 59
+    .span 618 37 618 59
     .param statement -> Statement
-    .span 609 5 609 68
+    .span 619 5 619 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 610 5 610 93
+    .span 620 5 620 93
     eval current = state_emit_line(current, ".match " + format_expression(statement.expression))
-    .span 611 5 611 42
+    .span 621 5 621 42
     eval current = state_push_indent(current)
-    .span 612 5 612 33
+    .span 622 5 622 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.cases.length
             break
         .endif
-        .span 617 9 617 68
+        .span 627 9 627 68
         eval current = emit_match_case(current, statement.cases[index])
-        .span 618 9 618 20
+        .span 628 9 628 20
         eval index += 1
     .endloop
     .if statement.cases.length == 0
-        .span 621 9 621 52
+        .span 631 9 631 52
         eval current = state_emit_line(current, "noop")
     .endif
-    .span 623 5 623 41
+    .span 633 5 633 41
     eval current = state_pop_indent(current)
-    .span 624 5 624 50
+    .span 634 5 634 50
     ret state_emit_line(current, ".endmatch")
 .endfn
 
 .fn emit_match_case(state -> NativeState, case -> MatchCase) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 627 20 627 40
+    .span 637 20 637 40
     .param state -> NativeState
-    .span 627 42 627 59
+    .span 637 42 637 59
     .param case -> MatchCase
-    .span 628 5 628 74
+    .span 638 5 638 74
     eval let inline_statement = select_inline_match_case_statement(case.body)
-    .if inline_statement != null
-        .span 630 9 630 70
-        ret emit_inline_match_case(state, case, inline_statement)
+    .if inline_statement == null
+        .span 640 9 640 74
+        eval let mut line -> string = ".case " + format_match_case_head(case)
+        .span 641 9 641 56
+        eval let mut current = state_emit_line(state, line)
+        .span 642 9 642 46
+        eval current = state_push_indent(current)
+        .span 643 9 643 50
+        eval current = emit_block(current, case.body)
+        .span 644 9 644 45
+        eval current = state_pop_indent(current)
+        .span 645 9 645 24
+        ret current
     .endif
-    .span 632 5 632 70
-    eval let mut line -> string = ".case " + format_match_case_head(case)
-    .span 633 5 633 52
-    eval let mut current = state_emit_line(state, line)
-    .span 634 5 634 42
-    eval current = state_push_indent(current)
-    .span 635 5 635 46
-    eval current = emit_block(current, case.body)
-    .span 636 5 636 41
-    eval current = state_pop_indent(current)
-    .span 637 5 637 20
-    ret current
+    .span 647 5 647 66
+    ret emit_inline_match_case(state, case, inline_statement)
 .endfn
 
 .fn select_inline_match_case_statement(block -> Block) -> Statement?
 .meta return Statement?
 .meta effects none
-    .span 640 39 640 53
+    .span 650 39 650 53
     .param block -> Block
     .if block.statements.length != 1
-        .span 642 9 642 21
+        .span 652 9 652 21
         ret null
     .endif
-    .span 644 5 644 41
+    .span 654 5 654 41
     eval let statement = block.statements[0]
     .if statement.variant == "ExpressionStatement"
-        .span 646 9 646 26
+        .span 656 9 656 26
         ret statement
     .endif
     .if statement.variant == "ReturnStatement"
-        .span 649 9 649 26
+        .span 659 9 659 26
         ret statement
     .endif
-    .span 651 5 651 17
+    .span 661 5 661 17
     ret null
 .endfn
 
 .fn emit_inline_match_case(state -> NativeState, case -> MatchCase, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 654 27 654 47
+    .span 664 27 664 47
     .param state -> NativeState
-    .span 654 49 654 66
+    .span 664 49 664 66
     .param case -> MatchCase
-    .span 654 68 654 90
+    .span 664 68 664 90
     .param statement -> Statement
-    .span 655 5 655 105
+    .span 665 5 665 105
     eval let mut line -> string = format_match_case_head(case) + " => " + format_inline_case_body(statement)
-    .span 656 5 656 47
+    .span 666 5 666 47
     ret state_emit_line(state, line + ",")
 .endfn
 
 .fn format_match_case_head(case -> MatchCase) -> string
 .meta return string
 .meta effects none
-    .span 659 27 659 44
+    .span 669 27 669 44
     .param case -> MatchCase
-    .span 660 5 660 62
+    .span 670 5 670 62
     eval let mut head -> string = format_expression(case.pattern)
-    .if case.guard != null
-        .span 662 9 662 62
-        eval head = head + " if " + format_expression(case.guard)
+    .span 671 5 671 28
+    eval let guard = case.guard
+    .if guard == null
+        .span 673 9 673 21
+        ret head
     .endif
-    .span 664 5 664 17
-    ret head
+    .span 675 5 675 53
+    ret head + " if " + format_expression(guard)
 .endfn
 
 .fn format_inline_case_body(statement -> Statement) -> string
 .meta return string
 .meta effects none
-    .span 667 28 667 50
+    .span 678 28 678 50
     .param statement -> Statement
     .if statement.variant == "ExpressionStatement"
-        .span 669 9 669 56
+        .span 680 9 680 56
         ret format_expression(statement.expression)
     .endif
     .if statement.variant == "ReturnStatement"
         .if statement.expression == null
-            .span 673 13 673 29
+            .span 684 13 684 29
             ret "return"
         .endif
-        .span 675 9 675 68
+        .span 686 9 686 68
         ret "return " + format_expression(statement.expression)
     .endif
-    .span 677 5 677 15
+    .span 688 5 688 15
     ret ""
 .endfn
 
 .fn emit_if(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 680 12 680 32
+    .span 691 12 691 32
     .param state -> NativeState
-    .span 680 34 680 56
+    .span 691 34 691 56
     .param statement -> Statement
-    .span 681 5 681 68
+    .span 692 5 692 68
     eval let mut current = emit_decorators(state, statement.decorators)
-    .span 682 5 682 89
+    .span 693 5 693 89
     eval current = state_emit_line(current, ".if " + format_expression(statement.condition))
-    .span 683 5 683 42
+    .span 694 5 694 42
     eval current = state_push_indent(current)
-    .span 684 5 684 57
+    .span 695 5 695 57
     eval current = emit_block(current, statement.then_block)
-    .span 685 5 685 41
+    .span 696 5 696 41
     eval current = state_pop_indent(current)
-    .if statement.else_branch != null
-        .span 687 9 687 68
-        eval current = emit_else_branch(current, statement.else_branch)
+    .span 697 5 697 45
+    eval let else_branch = statement.else_branch
+    .if else_branch == null
+        .span 699 9 699 51
+        ret state_emit_line(current, ".endif")
     .endif
-    .span 689 5 689 47
+    .span 701 5 701 54
+    eval current = emit_else_branch(current, else_branch)
+    .span 702 5 702 47
     ret state_emit_line(current, ".endif")
 .endfn
 
 .fn emit_else_branch(state -> NativeState, branch -> ElseBranch) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 692 21 692 41
+    .span 705 21 705 41
     .param state -> NativeState
-    .span 692 43 692 63
+    .span 705 43 705 63
     .param branch -> ElseBranch
-    .span 693 5 693 55
+    .span 706 5 706 55
     eval let mut current = state_emit_line(state, ".else")
-    .span 694 5 694 42
+    .span 707 5 707 42
     eval current = state_push_indent(current)
-    .if branch.body != null
-        .span 696 9 696 52
-        eval current = emit_block(current, branch.body)
-    .else
-        .if branch.statement != null
-            .span 698 9 698 61
-            eval current = emit_statement(current, branch.statement)
-        .else
-            .span 700 9 700 52
+    .span 708 5 708 28
+    eval let body = branch.body
+    .if body == null
+        .span 710 9 710 39
+        eval let nested = branch.statement
+        .if nested == null
+            .span 712 13 712 56
             eval current = state_emit_line(current, "noop")
+        .else
+            .span 714 13 714 55
+            eval current = emit_statement(current, nested)
         .endif
+    .else
+        .span 717 9 717 45
+        eval current = emit_block(current, body)
     .endif
-    .span 702 5 702 41
+    .span 719 5 719 41
     eval current = state_pop_indent(current)
-    .span 703 5 703 20
+    .span 720 5 720 20
     ret current
 .endfn
 
 .fn emit_return(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 706 16 706 36
+    .span 723 16 723 36
     .param state -> NativeState
-    .span 706 38 706 60
+    .span 723 38 723 60
     .param statement -> Statement
-    .span 707 5 707 67
+    .span 724 5 724 67
     eval let mut current = emit_span_if_present(state, statement.span)
     .if statement.expression == null
-        .span 709 9 709 48
+        .span 726 9 726 48
         ret state_emit_line(current, "ret")
     .endif
-    .span 711 5 711 87
+    .span 728 5 728 87
     ret state_emit_line(current, "ret " + format_expression(statement.expression))
 .endfn
 
 .fn emit_expression_statement(state -> NativeState, statement -> Statement) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 714 30 714 50
+    .span 731 30 731 50
     .param state -> NativeState
-    .span 714 52 714 74
+    .span 731 52 731 74
     .param statement -> Statement
-    .span 715 5 715 67
+    .span 732 5 732 67
     eval let mut current = emit_span_if_present(state, statement.span)
-    .span 716 5 716 88
+    .span 733 5 733 88
     ret state_emit_line(current, "eval " + format_expression(statement.expression))
 .endfn
 
 .fn emit_block(state -> NativeState, block -> Block) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 719 15 719 35
+    .span 736 15 736 35
     .param state -> NativeState
-    .span 719 37 719 51
+    .span 736 37 736 51
     .param block -> Block
     .if block.statements.length == 0
-        .span 721 9 721 47
+        .span 738 9 738 47
         ret state_emit_line(state, "noop")
     .endif
-    .span 723 5 723 29
+    .span 740 5 740 29
     eval let mut current = state
-    .span 724 5 724 33
+    .span 741 5 741 33
     eval let mut index -> number = 0
     .loop
         .if index >= block.statements.length
             break
         .endif
-        .span 729 9 729 68
+        .span 746 9 746 68
         eval current = emit_statement(current, block.statements[index])
-        .span 730 9 730 20
+        .span 747 9 747 20
         eval index += 1
     .endloop
-    .span 732 5 732 20
+    .span 749 5 749 20
     ret current
 .endfn
 
 .fn emit_decorators(state -> NativeState, decorators -> Decorator[]) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 735 20 735 40
+    .span 752 20 752 40
     .param state -> NativeState
-    .span 735 42 735 67
+    .span 752 42 752 67
     .param decorators -> Decorator[]
-    .span 736 5 736 29
+    .span 753 5 753 29
     eval let mut current = state
-    .span 737 5 737 33
+    .span 754 5 754 33
     eval let mut index -> number = 0
     .loop
         .if index >= decorators.length
             break
         .endif
-        .span 742 9 742 97
+        .span 759 9 759 97
         eval current = state_emit_line(current, ".decorator " + format_decorator(decorators[index]))
-        .span 743 9 743 20
+        .span 760 9 760 20
         eval index += 1
     .endloop
-    .span 745 5 745 20
+    .span 762 5 762 20
     ret current
 .endfn
 
 .fn emit_signature_metadata(state -> NativeState, signature -> FunctionSignature) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 748 28 748 48
+    .span 765 28 765 48
     .param state -> NativeState
-    .span 748 50 748 80
+    .span 765 50 765 80
     .param signature -> FunctionSignature
-    .span 749 5 749 29
+    .span 766 5 766 29
     eval let mut current = state
     .if signature.return_type != null
-        .span 751 9 751 90
+        .span 768 9 768 90
         eval current = state_emit_line(current, ".meta return " + signature.return_type.text)
     .else
-        .span 753 9 753 65
+        .span 770 9 770 65
         eval current = state_emit_line(current, ".meta return void")
     .endif
     .if signature.effects.length > 0
-        .span 756 9 756 109
+        .span 773 9 773 109
         eval current = state_emit_line(current, ".meta effects " + join_with_separator(signature.effects, ", "))
     .else
-        .span 758 9 758 66
+        .span 775 9 775 66
         eval current = state_emit_line(current, ".meta effects none")
     .endif
     .if signature.type_parameters.length > 0
-        .span 761 9 761 115
+        .span 778 9 778 115
         eval current = state_emit_line(current, ".meta generics " + format_type_parameters(signature.type_parameters))
     .endif
-    .span 763 5 763 20
+    .span 780 5 780 20
     ret current
 .endfn
 
 .fn emit_parameter_metadata(state -> NativeState, parameters -> Parameter[]) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 766 28 766 48
+    .span 783 28 783 48
     .param state -> NativeState
-    .span 766 50 766 75
+    .span 783 50 783 75
     .param parameters -> Parameter[]
-    .span 767 5 767 29
+    .span 784 5 784 29
     eval let mut current = state
-    .span 768 5 768 33
+    .span 785 5 785 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 773 9 773 43
+        .span 790 9 790 43
         eval let parameter = parameters[index]
-        .span 774 9 774 65
+        .span 791 9 791 65
         eval current = emit_span_if_present(current, parameter.span)
-        .span 775 9 775 44
+        .span 792 9 792 44
         eval let mut line -> string = ".param "
         .if parameter.mutable
-            .span 777 13 777 34
+            .span 794 13 794 34
             eval line = line + "mut "
         .endif
-        .span 779 9 779 38
+        .span 796 9 796 38
         eval line = line + parameter.name
         .if parameter.type_annotation != null
-            .span 781 13 781 67
+            .span 798 13 798 67
             eval line = line + " -> " + parameter.type_annotation.text
         .endif
         .if parameter.default_value != null
-            .span 784 13 784 78
+            .span 801 13 801 78
             eval line = line + " = " + format_expression(parameter.default_value)
         .endif
-        .span 786 9 786 50
+        .span 803 9 803 50
         eval current = state_emit_line(current, line)
-        .span 787 9 787 20
+        .span 804 9 804 20
         eval index += 1
     .endloop
-    .span 789 5 789 20
+    .span 806 5 806 20
     ret current
 .endfn
 
 .fn format_decorator(decorator -> Decorator) -> string
 .meta return string
 .meta effects none
-    .span 792 21 792 43
+    .span 809 21 809 43
     .param decorator -> Decorator
-    .span 793 5 793 51
+    .span 810 5 810 51
     eval let mut line -> string = "@" + decorator.name
     .if decorator.arguments.length == 0
-        .span 795 9 795 21
+        .span 812 9 812 21
         ret line
     .endif
-    .span 797 5 797 36
+    .span 814 5 814 36
     eval let mut parts -> string[] = []
-    .span 798 5 798 33
+    .span 815 5 815 33
     eval let mut index -> number = 0
     .loop
         .if index >= decorator.arguments.length
             break
         .endif
-        .span 803 9 803 51
+        .span 820 9 820 51
         eval let argument = decorator.arguments[index]
-        .span 804 9 804 60
+        .span 821 9 821 60
         eval let value = format_expression(argument.expression)
         .if argument.name != null
-            .span 806 13 806 71
+            .span 823 13 823 71
             eval parts = append_string(parts, argument.name + "=" + value)
         .else
-            .span 808 13 808 49
+            .span 825 13 825 49
             eval parts = append_string(parts, value)
         .endif
-        .span 810 9 810 20
+        .span 827 9 827 20
         eval index += 1
     .endloop
-    .span 812 5 812 64
+    .span 829 5 829 64
     ret line + "(" + join_with_separator(parts, ", ") + ")"
 .endfn
 
 .fn format_function_signature(signature -> FunctionSignature) -> string
 .meta return string
 .meta effects none
-    .span 815 30 815 60
+    .span 832 30 832 60
     .param signature -> FunctionSignature
-    .span 816 5 816 35
+    .span 833 5 833 35
     eval let mut prefix -> string = ""
     .if signature.is_async
-        .span 818 9 818 27
+        .span 835 9 835 27
         eval prefix = "async "
     .endif
-    .span 820 5 820 54
+    .span 837 5 837 54
     eval let mut line -> string = prefix + signature.name
-    .span 821 5 821 69
+    .span 838 5 838 69
     eval line = line + format_type_parameters(signature.type_parameters)
-    .span 822 5 822 71
+    .span 839 5 839 71
     eval line = line + "(" + format_parameters(signature.parameters) + ")"
     .if signature.return_type != null
-        .span 824 9 824 59
+        .span 841 9 841 59
         eval line = line + " -> " + signature.return_type.text
     .endif
     .if signature.effects.length > 0
-        .span 827 9 827 82
+        .span 844 9 844 82
         eval line = line + " ![" + join_with_separator(signature.effects, ", ") + "]"
     .endif
-    .span 829 5 829 17
+    .span 846 5 846 17
     ret line
 .endfn
 
 .fn format_parameters(parameters -> Parameter[]) -> string
 .meta return string
 .meta effects none
-    .span 832 22 832 47
+    .span 849 22 849 47
     .param parameters -> Parameter[]
     .if parameters.length == 0
-        .span 834 9 834 19
+        .span 851 9 851 19
         ret ""
     .endif
-    .span 836 5 836 36
+    .span 853 5 853 36
     eval let mut parts -> string[] = []
-    .span 837 5 837 33
+    .span 854 5 854 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 842 9 842 43
+        .span 859 9 859 43
         eval let parameter = parameters[index]
-        .span 843 9 843 38
+        .span 860 9 860 38
         eval let mut entry -> string = ""
         .if parameter.mutable
-            .span 845 13 845 45
+            .span 862 13 862 45
             eval entry = "mut " + parameter.name
         .else
-            .span 847 13 847 36
+            .span 864 13 864 36
             eval entry = parameter.name
         .endif
         .if parameter.type_annotation != null
-            .span 850 13 850 69
+            .span 867 13 867 69
             eval entry = entry + " -> " + parameter.type_annotation.text
         .endif
         .if parameter.default_value != null
-            .span 853 13 853 80
+            .span 870 13 870 80
             eval entry = entry + " = " + format_expression(parameter.default_value)
         .endif
-        .span 855 9 855 45
+        .span 872 9 872 45
         eval parts = append_string(parts, entry)
-        .span 856 9 856 20
+        .span 873 9 873 20
         eval index += 1
     .endloop
-    .span 858 5 858 45
+    .span 875 5 875 45
     ret join_with_separator(parts, ", ")
 .endfn
 
 .fn format_type_parameters(parameters -> TypeParameter[]) -> string
 .meta return string
 .meta effects none
-    .span 861 27 861 56
+    .span 878 27 878 56
     .param parameters -> TypeParameter[]
     .if parameters.length == 0
-        .span 863 9 863 19
+        .span 880 9 880 19
         ret ""
     .endif
-    .span 865 5 865 36
+    .span 882 5 882 36
     eval let mut parts -> string[] = []
-    .span 866 5 866 33
+    .span 883 5 883 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 871 9 871 43
+        .span 888 9 888 43
         eval let parameter = parameters[index]
-        .span 872 9 872 50
+        .span 889 9 889 50
         eval let mut entry -> string = parameter.name
         .if parameter.bound != null
-            .span 874 13 874 58
+            .span 891 13 891 58
             eval entry = entry + " : " + parameter.bound.text
         .endif
-        .span 876 9 876 45
+        .span 893 9 893 45
         eval parts = append_string(parts, entry)
-        .span 877 9 877 20
+        .span 894 9 894 20
         eval index += 1
     .endloop
-    .span 879 5 879 57
+    .span 896 5 896 57
     ret "<" + join_with_separator(parts, ", ") + ">"
 .endfn
 
 .fn format_field(field -> FieldDeclaration) -> string
 .meta return string
 .meta effects none
-    .span 882 17 882 42
+    .span 899 17 899 42
     .param field -> FieldDeclaration
-    .span 883 5 883 33
+    .span 900 5 900 33
     eval let mut line -> string = ""
     .if field.mutable
-        .span 885 9 885 30
+        .span 902 9 902 30
         eval line = line + "mut "
     .endif
-    .span 887 5 887 68
+    .span 904 5 904 68
     eval line = line + field.name + " -> " + field.type_annotation.text
-    .span 888 5 888 17
+    .span 905 5 905 17
     ret line
 .endfn
 
 .fn format_enum_variant(variant -> EnumVariant) -> string
 .meta return string
 .meta effects none
-    .span 891 24 891 46
+    .span 908 24 908 46
     .param variant -> EnumVariant
     .if variant.fields.length == 0
-        .span 893 9 893 29
+        .span 910 9 910 29
         ret variant.name
     .endif
-    .span 895 5 895 36
+    .span 912 5 912 36
     eval let mut parts -> string[] = []
-    .span 896 5 896 33
+    .span 913 5 913 33
     eval let mut index -> number = 0
     .loop
         .if index >= variant.fields.length
             break
         .endif
-        .span 901 9 901 75
+        .span 918 9 918 75
         eval parts = append_string(parts, format_field(variant.fields[index]))
-        .span 902 9 902 20
+        .span 919 9 919 20
         eval index += 1
     .endloop
-    .span 904 5 904 75
+    .span 921 5 921 75
     ret variant.name + " { " + join_with_separator(parts, "; ") + " }"
 .endfn
 
 .fn compute_struct_layout_lines(context -> LayoutContext, struct_name -> string, fields -> FieldDeclaration[]) -> LayoutEmitResult
 .meta return LayoutEmitResult
 .meta effects none
-    .span 907 32 907 56
+    .span 924 32 924 56
     .param context -> LayoutContext
-    .span 907 58 907 79
+    .span 924 58 924 79
     .param struct_name -> string
-    .span 907 81 907 109
+    .span 924 81 924 109
     .param fields -> FieldDeclaration[]
-    .span 908 5 908 48
+    .span 925 5 925 48
     eval let inputs = convert_struct_fields(fields)
-    .span 909 5 909 114
+    .span 926 5 926 114
     eval let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name))
-    .span 910 5 910 36
+    .span 927 5 927 36
     eval let mut lines -> string[] = []
-    .span 911 5 911 160
+    .span 928 5 928 160
     eval lines = append_string(lines, ".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align))
-    .span 912 5 912 33
+    .span 929 5 929 33
     eval let mut index -> number = 0
     .loop
         .if index >= layout.fields.length
             break
         .endif
-        .span 917 9 917 42
+        .span 934 9 934 42
         eval let field = layout.fields[index]
-        .span 918 9 918 64
+        .span 935 9 935 64
         eval let mut line -> string = ".layout field " + field.name
-        .span 919 9 919 56
+        .span 936 9 936 56
         eval line = line + " type=" + field.type_annotation
-        .span 920 9 920 67
+        .span 937 9 937 67
         eval line = line + " offset=" + number_to_string(field.offset)
-        .span 921 9 921 63
+        .span 938 9 938 63
         eval line = line + " size=" + number_to_string(field.size)
-        .span 922 9 922 65
+        .span 939 9 939 65
         eval line = line + " align=" + number_to_string(field.align)
-        .span 923 9 923 44
+        .span 940 9 940 44
         eval lines = append_string(lines, line)
-        .span 924 9 924 20
+        .span 941 9 941 20
         eval index += 1
     .endloop
-    .span 926 5 926 79
+    .span 943 5 943 79
     ret LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics }
 .endfn
 
 .fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -> LayoutEmitResult
 .meta return LayoutEmitResult
 .meta effects none
-    .span 929 30 929 54
+    .span 946 30 946 54
     .param context -> LayoutContext
-    .span 929 56 929 78
+    .span 946 56 946 78
     .param statement -> Statement
-    .span 930 5 930 67
+    .span 947 5 947 67
     eval let mut layout_variants -> LayoutEnumVariantDefinition[] = []
-    .span 931 5 931 33
+    .span 948 5 948 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.variants.length
             break
         .endif
-        .span 936 9 936 49
+        .span 953 9 953 49
         eval let variant = statement.variants[index]
-        .span 937 9 937 54
+        .span 954 9 954 54
         eval let inputs = convert_variant_fields(variant)
-        .span 938 9 938 150
+        .span 955 9 955 150
         eval layout_variants = append_layout_enum_variant_definition(layout_variants, LayoutEnumVariantDefinition { name: variant.name, fields: inputs })
-        .span 939 9 939 20
+        .span 956 9 956 20
         eval index += 1
     .endloop
-    .span 941 5 941 123
+    .span 958 5 958 123
     eval let layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name))
-    .span 942 5 942 36
+    .span 959 5 959 36
     eval let mut lines -> string[] = []
-    .span 943 5 943 158
+    .span 960 5 960 158
     eval let mut header -> string = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align)
-    .span 944 5 944 138
+    .span 961 5 961 138
     eval header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align)
-    .span 945 5 945 42
+    .span 962 5 962 42
     eval lines = append_string(lines, header)
-    .span 946 5 946 41
+    .span 963 5 963 41
     eval let mut variant_index -> number = 0
     .loop
         .if variant_index >= layout.variants.length
             break
         .endif
-        .span 951 9 951 57
+        .span 968 9 968 57
         eval let descriptor = layout.variants[variant_index]
-        .span 952 9 952 71
+        .span 969 9 969 71
         eval let mut line -> string = ".layout variant " + descriptor.name
-        .span 953 9 953 66
+        .span 970 9 970 66
         eval line = line + " tag=" + number_to_string(descriptor.tag)
-        .span 954 9 954 72
+        .span 971 9 971 72
         eval line = line + " offset=" + number_to_string(descriptor.offset)
-        .span 955 9 955 68
+        .span 972 9 972 68
         eval line = line + " size=" + number_to_string(descriptor.size)
-        .span 956 9 956 70
+        .span 973 9 973 70
         eval line = line + " align=" + number_to_string(descriptor.align)
-        .span 957 9 957 44
+        .span 974 9 974 44
         eval lines = append_string(lines, line)
-        .span 958 9 958 45
+        .span 975 9 975 45
         eval let mut payload_index -> number = 0
         .loop
             .if payload_index >= descriptor.fields.length
                 break
             .endif
-            .span 963 13 963 60
+            .span 980 13 980 60
             eval let payload = descriptor.fields[payload_index]
-            .span 964 13 964 104
+            .span 981 13 981 104
             eval let mut payload_line -> string = ".layout payload " + descriptor.name + "." + payload.name
-            .span 965 13 965 78
+            .span 982 13 982 78
             eval payload_line = payload_line + " type=" + payload.type_annotation
-            .span 966 13 966 89
+            .span 983 13 983 89
             eval payload_line = payload_line + " offset=" + number_to_string(payload.offset)
-            .span 967 13 967 85
+            .span 984 13 984 85
             eval payload_line = payload_line + " size=" + number_to_string(payload.size)
-            .span 968 13 968 87
+            .span 985 13 985 87
             eval payload_line = payload_line + " align=" + number_to_string(payload.align)
-            .span 969 13 969 56
+            .span 986 13 986 56
             eval lines = append_string(lines, payload_line)
-            .span 970 13 970 32
+            .span 987 13 987 32
             eval payload_index += 1
         .endloop
-        .span 972 9 972 28
+        .span 989 9 989 28
         eval variant_index += 1
     .endloop
-    .span 974 5 974 79
+    .span 991 5 991 79
     ret LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics }
 .endfn
 
 .fn infer_enum_aggregate_layout(context -> LayoutContext, enum_name -> string, variants -> LayoutEnumVariantDefinition[], visiting -> string[]) -> EnumAggregateLayout
 .meta return EnumAggregateLayout
 .meta effects none
-    .span 977 32 977 56
+    .span 994 32 994 56
     .param context -> LayoutContext
-    .span 977 58 977 77
+    .span 994 58 994 77
     .param enum_name -> string
-    .span 977 79 977 120
+    .span 994 79 994 120
     .param variants -> LayoutEnumVariantDefinition[]
-    .span 977 122 977 142
+    .span 994 122 994 142
     .param visiting -> string[]
-    .span 978 5 978 32
+    .span 995 5 995 32
     eval let tag_size -> number = 4
-    .span 979 5 979 33
+    .span 996 5 996 33
     eval let tag_align -> number = 4
-    .span 980 5 980 47
+    .span 997 5 997 47
     eval let mut union_align -> number = tag_align
-    .span 981 5 981 45
+    .span 998 5 998 45
     eval let mut union_size -> number = tag_size
-    .span 982 5 982 42
+    .span 999 5 999 42
     eval let mut diagnostics -> string[] = []
-    .span 983 5 983 63
+    .span 1000 5 1000 63
     eval let mut descriptors -> EnumVariantLayoutDescriptor[] = []
-    .span 984 5 984 33
+    .span 1001 5 1001 33
     eval let mut index -> number = 0
     .loop
         .if index >= variants.length
             break
         .endif
-        .span 989 9 989 39
+        .span 1006 9 1006 39
         eval let variant = variants[index]
-        .span 990 9 990 61
+        .span 1007 9 1007 61
         eval let container_name = enum_name + "." + variant.name
-        .span 991 9 991 108
+        .span 1008 9 1008 108
         eval let record = calculate_record_layout(context, variant.fields, "variant", container_name, visiting)
-        .span 992 9 992 62
+        .span 1009 9 1009 62
         eval diagnostics = diagnostics.concat(record.diagnostics)
-        .span 993 9 993 56
+        .span 1010 9 1010 56
         eval let mut variant_align -> number = record.align
         .if variant_align <= 0
-            .span 995 13 995 31
+            .span 1012 13 1012 31
             eval variant_align = 1
         .endif
-        .span 997 9 997 64
+        .span 1014 9 1014 64
         eval let payload_offset = align_to(tag_size, variant_align)
         .if variant_align > union_align
-            .span 999 13 999 41
+            .span 1016 13 1016 41
             eval union_align = variant_align
         .endif
-        .span 1001 9 1001 71
+        .span 1018 9 1018 71
         eval let mut absolute_fields -> StructFieldLayoutDescriptor[] = []
-        .span 1002 9 1002 43
+        .span 1019 9 1019 43
         eval let mut field_index -> number = 0
         .loop
             .if field_index >= record.fields.length
                 break
             .endif
-            .span 1007 13 1007 52
+            .span 1024 13 1024 52
             eval let field = record.fields[field_index]
-            .span 1008 13 1014 15
+            .span 1025 13 1031 15
             eval let absolute = StructFieldLayoutDescriptor {
                 name: field.name,
                 type_annotation: field.type_annotation,
@@ -1710,18 +1746,18 @@
                 size: field.size,
                 align: field.align,
             }
-            .span 1015 13 1015 85
+            .span 1032 13 1032 85
             eval absolute_fields = append_struct_field_layout(absolute_fields, absolute)
-            .span 1016 13 1016 30
+            .span 1033 13 1033 30
             eval field_index += 1
         .endloop
-        .span 1018 9 1018 57
+        .span 1035 9 1035 57
         eval let variant_size = payload_offset + record.size
         .if variant_size > union_size
-            .span 1020 13 1020 39
+            .span 1037 13 1037 39
             eval union_size = variant_size
         .endif
-        .span 1022 9 1029 12
+        .span 1039 9 1046 12
         eval descriptors = append_enum_variant_layout(descriptors, EnumVariantLayoutDescriptor {
             name: variant.name,
             tag: index,
@@ -1730,73 +1766,73 @@
             align: variant_align,
             fields: absolute_fields,
         })
-        .span 1030 9 1030 20
+        .span 1047 9 1047 20
         eval index += 1
     .endloop
     .if variants.length == 0
-        .span 1033 9 1033 33
+        .span 1050 9 1050 33
         eval union_align = tag_align
-        .span 1034 9 1034 31
+        .span 1051 9 1051 31
         eval union_size = tag_size
     .endif
-    .span 1036 5 1036 49
+    .span 1053 5 1053 49
     eval let mut final_align -> number = union_align
     .if final_align <= 0
-        .span 1038 9 1038 25
+        .span 1055 9 1055 25
         eval final_align = 1
     .endif
-    .span 1040 5 1040 49
+    .span 1057 5 1057 49
     eval let mut aligned_size -> number = union_size
     .if final_align > 1
-        .span 1042 9 1042 58
+        .span 1059 9 1059 58
         eval aligned_size = align_to(union_size, final_align)
     .endif
-    .span 1044 5 1051 7
+    .span 1061 5 1068 7
     ret EnumAggregateLayout { size: aligned_size, align: final_align, tag_size: tag_size, tag_align: tag_align, variants: descriptors, diagnostics: diagnostics }
 .endfn
 
 .fn calculate_record_layout(context -> LayoutContext, inputs -> LayoutFieldInput[], container_kind -> string, container_name -> string, visiting -> string[]) -> RecordLayoutResult
 .meta return RecordLayoutResult
 .meta effects none
-    .span 1054 28 1054 52
+    .span 1071 28 1071 52
     .param context -> LayoutContext
-    .span 1054 54 1054 82
+    .span 1071 54 1071 82
     .param inputs -> LayoutFieldInput[]
-    .span 1054 84 1054 108
+    .span 1071 84 1071 108
     .param container_kind -> string
-    .span 1054 110 1054 134
+    .span 1071 110 1071 134
     .param container_name -> string
-    .span 1054 136 1054 156
+    .span 1071 136 1071 156
     .param visiting -> string[]
-    .span 1055 5 1055 42
+    .span 1072 5 1072 42
     eval let mut diagnostics -> string[] = []
-    .span 1056 5 1056 58
+    .span 1073 5 1073 58
     eval let mut fields -> StructFieldLayoutDescriptor[] = []
-    .span 1057 5 1057 34
+    .span 1074 5 1074 34
     eval let mut offset -> number = 0
-    .span 1058 5 1058 37
+    .span 1075 5 1075 37
     eval let mut max_align -> number = 1
-    .span 1059 5 1059 33
+    .span 1076 5 1076 33
     eval let mut index -> number = 0
     .loop
         .if index >= inputs.length
             break
         .endif
-        .span 1064 9 1064 35
+        .span 1081 9 1081 35
         eval let input = inputs[index]
-        .span 1065 9 1065 128
+        .span 1082 9 1082 128
         eval let layout = analyze_type_layout(context, visiting, input.type_annotation, container_kind, container_name, input.name)
-        .span 1066 9 1066 62
+        .span 1083 9 1083 62
         eval diagnostics = diagnostics.concat(layout.diagnostics)
-        .span 1067 9 1067 54
+        .span 1084 9 1084 54
         eval let mut field_align -> number = layout.align
         .if field_align <= 0
-            .span 1069 13 1069 29
+            .span 1086 13 1086 29
             eval field_align = 1
         .endif
-        .span 1071 9 1071 48
+        .span 1088 9 1088 48
         eval offset = align_to(offset, field_align)
-        .span 1072 9 1078 11
+        .span 1089 9 1095 11
         eval let descriptor = StructFieldLayoutDescriptor {
             name: input.name,
             type_annotation: trim_text(input.type_annotation),
@@ -1804,873 +1840,869 @@
             size: layout.size,
             align: field_align,
         }
-        .span 1079 9 1079 65
+        .span 1096 9 1096 65
         eval fields = append_struct_field_layout(fields, descriptor)
-        .span 1080 9 1080 31
+        .span 1097 9 1097 31
         eval offset += layout.size
         .if field_align > max_align
-            .span 1082 13 1082 37
+            .span 1099 13 1099 37
             eval max_align = field_align
         .endif
-        .span 1084 9 1084 20
+        .span 1101 9 1101 20
         eval index += 1
     .endloop
-    .span 1086 5 1086 47
+    .span 1103 5 1103 47
     eval let mut final_align -> number = max_align
     .if inputs.length == 0
-        .span 1088 9 1088 25
+        .span 1105 9 1105 25
         eval final_align = 1
     .endif
     .if final_align <= 0
-        .span 1091 9 1091 25
+        .span 1108 9 1108 25
         eval final_align = 1
     .endif
-    .span 1093 5 1093 43
+    .span 1110 5 1110 43
     eval let mut total_size -> number = offset
     .if final_align > 1
-        .span 1095 9 1095 52
+        .span 1112 9 1112 52
         eval total_size = align_to(offset, final_align)
     .endif
-    .span 1097 5 1097 114
+    .span 1114 5 1114 114
     ret RecordLayoutResult { size: total_size, align: final_align, fields: fields, diagnostics: diagnostics }
 .endfn
 
 .fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_annotation -> string, container_kind -> string, container_name -> string, field_name -> string) -> TypeLayoutInfo
 .meta return TypeLayoutInfo
 .meta effects none
-    .span 1100 24 1100 48
+    .span 1117 24 1117 48
     .param context -> LayoutContext
-    .span 1100 50 1100 70
+    .span 1117 50 1117 70
     .param visiting -> string[]
-    .span 1100 72 1100 97
+    .span 1117 72 1117 97
     .param type_annotation -> string
-    .span 1100 99 1100 123
+    .span 1117 99 1117 123
     .param container_kind -> string
-    .span 1100 125 1100 149
+    .span 1117 125 1117 149
     .param container_name -> string
-    .span 1100 151 1100 171
+    .span 1117 151 1117 171
     .param field_name -> string
-    .span 1101 5 1101 46
+    .span 1118 5 1118 46
     eval let trimmed = trim_text(type_annotation)
-    .span 1102 5 1102 42
+    .span 1119 5 1119 42
     eval let mut diagnostics -> string[] = []
     .if trimmed.length == 0
-        .span 1104 9 1104 197
+        .span 1121 9 1121 197
         eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout")
-        .span 1105 9 1105 79
+        .span 1122 9 1122 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if trimmed == "number"
-        .span 1108 9 1108 79
+        .span 1125 9 1125 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if trimmed == "int" || trimmed == "i64"
-        .span 1111 9 1111 79
+        .span 1128 9 1128 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if trimmed == "i32"
-        .span 1114 9 1114 79
+        .span 1131 9 1131 79
         ret TypeLayoutInfo { size: 4, align: 4, diagnostics: diagnostics }
     .endif
     .if trimmed == "boolean" || trimmed == "bool" || trimmed == "i1"
-        .span 1117 9 1117 79
+        .span 1134 9 1134 79
         ret TypeLayoutInfo { size: 1, align: 1, diagnostics: diagnostics }
     .endif
     .if trimmed == "any"
-        .span 1120 9 1120 79
-        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
-    .endif
-    .span 1122 5 1122 59
-    eval let canonical = lookup_canonical_type_layout(trimmed)
-    .if canonical != null
-        .span 1124 9 1124 106
-        ret TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics }
-    .endif
-    .if is_array_type(trimmed)
-        .span 1127 9 1127 79
-        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
-    .endif
-    .if trimmed == "string"
-        .span 1130 9 1130 79
-        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
-    .endif
-    .if is_optional_annotation(trimmed)
-        .span 1133 9 1133 63
-        eval let inner = trim_text(strip_optional_suffix(trimmed))
-        .if inner.length == 0
-            .span 1135 13 1135 216
-            eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout")
-        .endif
         .span 1137 9 1137 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
-    .if contains_string(visiting, trimmed)
-        .span 1140 9 1140 79
+    .span 1139 5 1139 59
+    eval let canonical = lookup_canonical_type_layout(trimmed)
+    .if canonical != null
+        .span 1141 9 1141 106
+        ret TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics }
+    .endif
+    .if is_array_type(trimmed)
+        .span 1144 9 1144 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
-    .span 1142 5 1142 77
+    .if trimmed == "string"
+        .span 1147 9 1147 79
+        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
+    .endif
+    .if is_optional_annotation(trimmed)
+        .span 1150 9 1150 63
+        eval let inner = trim_text(strip_optional_suffix(trimmed))
+        .if inner.length == 0
+            .span 1152 13 1152 216
+            eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout")
+        .endif
+        .span 1154 9 1154 79
+        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
+    .endif
+    .if contains_string(visiting, trimmed)
+        .span 1157 9 1157 79
+        ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
+    .endif
+    .span 1159 5 1159 77
     eval let struct_definition = find_layout_struct_definition(context, trimmed)
     .if struct_definition != null
-        .span 1144 9 1144 64
+        .span 1161 9 1161 64
         eval let nested_visiting = append_string(visiting, trimmed)
-        .span 1145 9 1145 117
+        .span 1162 9 1162 117
         eval let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting)
-        .span 1146 9 1146 62
+        .span 1163 9 1163 62
         eval diagnostics = diagnostics.concat(record.diagnostics)
-        .span 1147 9 1147 100
+        .span 1164 9 1164 100
         ret TypeLayoutInfo { size: record.size, align: record.align, diagnostics: diagnostics }
     .endif
-    .span 1149 5 1149 73
+    .span 1166 5 1166 73
     eval let enum_definition = find_layout_enum_definition(context, trimmed)
     .if enum_definition != null
-        .span 1151 9 1151 64
+        .span 1168 9 1168 64
         eval let nested_visiting = append_string(visiting, trimmed)
-        .span 1152 9 1152 114
+        .span 1169 9 1169 114
         eval let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting)
-        .span 1153 9 1153 65
+        .span 1170 9 1170 65
         eval diagnostics = diagnostics.concat(aggregate.diagnostics)
-        .span 1154 9 1154 106
+        .span 1171 9 1171 106
         ret TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics }
     .endif
-    .span 1156 5 1156 209
+    .span 1173 5 1173 209
     eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout")
-    .span 1157 5 1157 75
+    .span 1174 5 1174 75
     ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
 .endfn
 
 .fn convert_struct_fields(fields -> FieldDeclaration[]) -> LayoutFieldInput[]
 .meta return LayoutFieldInput[]
 .meta effects none
-    .span 1160 26 1160 54
+    .span 1177 26 1177 54
     .param fields -> FieldDeclaration[]
-    .span 1161 5 1161 47
+    .span 1178 5 1178 47
     eval let mut inputs -> LayoutFieldInput[] = []
-    .span 1162 5 1162 33
+    .span 1179 5 1179 33
     eval let mut index -> number = 0
     .loop
         .if index >= fields.length
             break
         .endif
-        .span 1167 9 1167 35
+        .span 1184 9 1184 35
         eval let field = fields[index]
-        .span 1168 9 1168 42
-        eval let mut type_text -> string = ""
-        .if field.type_annotation != null
-            .span 1170 13 1170 52
-            eval type_text = field.type_annotation.text
-        .endif
-        .span 1172 9 1172 119
+        .span 1185 9 1185 52
+        eval let type_text = field.type_annotation.text
+        .span 1186 9 1186 119
         eval inputs = append_layout_field_input(inputs, LayoutFieldInput { name: field.name, type_annotation: type_text })
-        .span 1173 9 1173 20
+        .span 1187 9 1187 20
         eval index += 1
     .endloop
-    .span 1175 5 1175 19
+    .span 1189 5 1189 19
     ret inputs
 .endfn
 
 .fn convert_variant_fields(variant -> EnumVariant) -> LayoutFieldInput[]
 .meta return LayoutFieldInput[]
 .meta effects none
-    .span 1178 27 1178 49
+    .span 1192 27 1192 49
     .param variant -> EnumVariant
-    .span 1179 5 1179 50
+    .span 1193 5 1193 50
     ret convert_struct_fields(variant.fields)
 .endfn
 
 .fn append_struct_field_layout(values -> StructFieldLayoutDescriptor[], value -> StructFieldLayoutDescriptor) -> StructFieldLayoutDescriptor[]
 .meta return StructFieldLayoutDescriptor[]
 .meta effects none
-    .span 1182 31 1182 70
+    .span 1196 31 1196 70
     .param values -> StructFieldLayoutDescriptor[]
-    .span 1182 72 1182 108
+    .span 1196 72 1196 108
     .param value -> StructFieldLayoutDescriptor
-    .span 1183 5 1183 35
+    .span 1197 5 1197 35
     ret values.concat([value])
 .endfn
 
 .fn append_enum_variant_layout(values -> EnumVariantLayoutDescriptor[], value -> EnumVariantLayoutDescriptor) -> EnumVariantLayoutDescriptor[]
 .meta return EnumVariantLayoutDescriptor[]
 .meta effects none
-    .span 1186 31 1186 70
+    .span 1200 31 1200 70
     .param values -> EnumVariantLayoutDescriptor[]
-    .span 1186 72 1186 108
+    .span 1200 72 1200 108
     .param value -> EnumVariantLayoutDescriptor
-    .span 1187 5 1187 35
+    .span 1201 5 1201 35
     ret values.concat([value])
 .endfn
 
 .fn append_layout_field_input(values -> LayoutFieldInput[], value -> LayoutFieldInput) -> LayoutFieldInput[]
 .meta return LayoutFieldInput[]
 .meta effects none
-    .span 1190 30 1190 58
+    .span 1204 30 1204 58
     .param values -> LayoutFieldInput[]
-    .span 1190 60 1190 85
+    .span 1204 60 1204 85
     .param value -> LayoutFieldInput
-    .span 1191 5 1191 35
+    .span 1205 5 1205 35
     ret values.concat([value])
 .endfn
 
 .fn append_layout_struct_definition(values -> LayoutStructDefinition[], value -> LayoutStructDefinition) -> LayoutStructDefinition[]
 .meta return LayoutStructDefinition[]
 .meta effects none
-    .span 1194 36 1194 70
+    .span 1208 36 1208 70
     .param values -> LayoutStructDefinition[]
-    .span 1194 72 1194 103
+    .span 1208 72 1208 103
     .param value -> LayoutStructDefinition
-    .span 1195 5 1195 35
+    .span 1209 5 1209 35
     ret values.concat([value])
 .endfn
 
 .fn append_layout_enum_definition(values -> LayoutEnumDefinition[], value -> LayoutEnumDefinition) -> LayoutEnumDefinition[]
 .meta return LayoutEnumDefinition[]
 .meta effects none
-    .span 1198 34 1198 66
+    .span 1212 34 1212 66
     .param values -> LayoutEnumDefinition[]
-    .span 1198 68 1198 97
+    .span 1212 68 1212 97
     .param value -> LayoutEnumDefinition
-    .span 1199 5 1199 35
+    .span 1213 5 1213 35
     ret values.concat([value])
 .endfn
 
 .fn append_layout_enum_variant_definition(values -> LayoutEnumVariantDefinition[], value -> LayoutEnumVariantDefinition) -> LayoutEnumVariantDefinition[]
 .meta return LayoutEnumVariantDefinition[]
 .meta effects none
-    .span 1202 42 1202 81
+    .span 1216 42 1216 81
     .param values -> LayoutEnumVariantDefinition[]
-    .span 1202 83 1202 119
+    .span 1216 83 1216 119
     .param value -> LayoutEnumVariantDefinition
-    .span 1203 5 1203 35
+    .span 1217 5 1217 35
     ret values.concat([value])
 .endfn
 
 .fn append_canonical_type_layout(values -> CanonicalTypeLayout[], value -> CanonicalTypeLayout) -> CanonicalTypeLayout[]
 .meta return CanonicalTypeLayout[]
 .meta effects none
-    .span 1206 33 1206 64
+    .span 1220 33 1220 64
     .param values -> CanonicalTypeLayout[]
-    .span 1206 66 1206 94
+    .span 1220 66 1220 94
     .param value -> CanonicalTypeLayout
-    .span 1207 5 1207 35
+    .span 1221 5 1221 35
     ret values.concat([value])
 .endfn
 
 .fn find_layout_struct_definition(context -> LayoutContext, name -> string) -> LayoutStructDefinition?
 .meta return LayoutStructDefinition?
 .meta effects none
-    .span 1210 34 1210 58
+    .span 1224 34 1224 58
     .param context -> LayoutContext
-    .span 1210 60 1210 74
+    .span 1224 60 1224 74
     .param name -> string
-    .span 1211 5 1211 33
+    .span 1225 5 1225 33
     eval let mut index -> number = 0
     .loop
         .if index >= context.structs.length
             break
         .endif
-        .span 1216 9 1216 49
+        .span 1230 9 1230 49
         eval let definition = context.structs[index]
         .if definition.name == name
-            .span 1218 13 1218 31
+            .span 1232 13 1232 31
             ret definition
         .endif
-        .span 1220 9 1220 20
+        .span 1234 9 1234 20
         eval index += 1
     .endloop
-    .span 1222 5 1222 17
+    .span 1236 5 1236 17
     ret null
 .endfn
 
 .fn find_layout_enum_definition(context -> LayoutContext, name -> string) -> LayoutEnumDefinition?
 .meta return LayoutEnumDefinition?
 .meta effects none
-    .span 1225 32 1225 56
+    .span 1239 32 1239 56
     .param context -> LayoutContext
-    .span 1225 58 1225 72
+    .span 1239 58 1239 72
     .param name -> string
-    .span 1226 5 1226 33
+    .span 1240 5 1240 33
     eval let mut index -> number = 0
     .loop
         .if index >= context.enums.length
             break
         .endif
-        .span 1231 9 1231 47
+        .span 1245 9 1245 47
         eval let definition = context.enums[index]
         .if definition.name == name
-            .span 1233 13 1233 31
+            .span 1247 13 1247 31
             ret definition
         .endif
-        .span 1235 9 1235 20
+        .span 1249 9 1249 20
         eval index += 1
     .endloop
-    .span 1237 5 1237 17
+    .span 1251 5 1251 17
     ret null
 .endfn
 
 .fn canonical_type_layouts() -> CanonicalTypeLayout[]
 .meta return CanonicalTypeLayout[]
 .meta effects none
-    .span 1241 5 1241 51
+    .span 1255 5 1255 51
     eval let mut layouts -> CanonicalTypeLayout[] = []
-    .span 1242 5 1242 111
+    .span 1256 5 1256 111
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 8, align: 8 })
-    .span 1243 5 1243 115
+    .span 1257 5 1257 115
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 8, align: 8 })
-    .span 1244 5 1244 113
+    .span 1258 5 1258 113
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 })
-    .span 1245 5 1245 120
+    .span 1259 5 1259 120
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeAnnotation", size: 8, align: 8 })
-    .span 1246 5 1246 119
+    .span 1260 5 1260 119
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 8, align: 8 })
-    .span 1247 5 1247 111
+    .span 1261 5 1261 111
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Block", size: 8, align: 8 })
-    .span 1248 5 1248 116
+    .span 1262 5 1262 116
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "SourceSpan", size: 8, align: 8 })
-    .span 1249 5 1249 116
+    .span 1263 5 1263 116
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Expression", size: 8, align: 8 })
-    .span 1250 5 1250 115
+    .span 1264 5 1264 115
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Parameter", size: 8, align: 8 })
-    .span 1251 5 1251 116
+    .span 1265 5 1265 116
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "WithClause", size: 8, align: 8 })
-    .span 1252 5 1252 117
+    .span 1266 5 1266 117
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ObjectField", size: 8, align: 8 })
-    .span 1253 5 1253 116
+    .span 1267 5 1267 116
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ElseBranch", size: 8, align: 8 })
-    .span 1254 5 1254 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 8, align: 8 })
-    .span 1255 5 1255 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 8, align: 8 })
-    .span 1256 5 1256 119
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 8, align: 8 })
-    .span 1257 5 1257 122
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 8, align: 8 })
-    .span 1258 5 1258 123
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 8, align: 8 })
-    .span 1259 5 1259 117
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 8, align: 8 })
-    .span 1260 5 1260 123
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 8, align: 8 })
-    .span 1261 5 1261 125
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 8, align: 8 })
-    .span 1262 5 1262 121
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 8, align: 8 })
-    .span 1263 5 1263 121
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 8, align: 8 })
-    .span 1264 5 1264 122
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 8, align: 8 })
-    .span 1265 5 1265 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 8, align: 8 })
-    .span 1266 5 1266 123
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 8, align: 8 })
-    .span 1267 5 1267 120
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "NamedSpecifier", size: 8, align: 8 })
     .span 1268 5 1268 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 8, align: 8 })
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 8, align: 8 })
     .span 1269 5 1269 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumField", size: 8, align: 8 })
-    .span 1270 5 1270 127
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariantDefinition", size: 8, align: 8 })
-    .span 1271 5 1271 114
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumType", size: 8, align: 8 })
-    .span 1272 5 1272 118
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumInstance", size: 8, align: 8 })
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 8, align: 8 })
+    .span 1270 5 1270 119
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 8, align: 8 })
+    .span 1271 5 1271 122
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 8, align: 8 })
+    .span 1272 5 1272 123
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 8, align: 8 })
     .span 1273 5 1273 117
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 8, align: 8 })
+    .span 1274 5 1274 123
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 8, align: 8 })
+    .span 1275 5 1275 125
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 8, align: 8 })
+    .span 1276 5 1276 121
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 8, align: 8 })
+    .span 1277 5 1277 121
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 8, align: 8 })
+    .span 1278 5 1278 122
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 8, align: 8 })
+    .span 1279 5 1279 115
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 8, align: 8 })
+    .span 1280 5 1280 123
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 8, align: 8 })
+    .span 1281 5 1281 120
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "NamedSpecifier", size: 8, align: 8 })
+    .span 1282 5 1282 115
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 8, align: 8 })
+    .span 1283 5 1283 115
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumField", size: 8, align: 8 })
+    .span 1284 5 1284 127
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariantDefinition", size: 8, align: 8 })
+    .span 1285 5 1285 114
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumType", size: 8, align: 8 })
+    .span 1286 5 1286 118
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumInstance", size: 8, align: 8 })
+    .span 1287 5 1287 117
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "StructField", size: 8, align: 8 })
-    .span 1274 5 1274 120
+    .span 1288 5 1288 120
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeDescriptor", size: 8, align: 8 })
-    .span 1275 5 1275 20
+    .span 1289 5 1289 20
     ret layouts
 .endfn
 
 .fn lookup_canonical_type_layout(name -> string) -> CanonicalTypeLayout?
 .meta return CanonicalTypeLayout?
 .meta effects none
-    .span 1278 33 1278 47
+    .span 1292 33 1292 47
     .param name -> string
-    .span 1279 5 1279 44
+    .span 1293 5 1293 44
     eval let layouts = canonical_type_layouts()
-    .span 1280 5 1280 33
+    .span 1294 5 1294 33
     eval let mut index -> number = 0
     .loop
         .if index >= layouts.length
             break
         .endif
-        .span 1285 9 1285 37
+        .span 1299 9 1299 37
         eval let layout = layouts[index]
         .if layout.name == name
-            .span 1287 13 1287 27
+            .span 1301 13 1301 27
             ret layout
         .endif
-        .span 1289 9 1289 20
+        .span 1303 9 1303 20
         eval index += 1
     .endloop
-    .span 1291 5 1291 17
+    .span 1305 5 1305 17
     ret null
 .endfn
 
 .fn align_to(value -> number, alignment -> number) -> number
 .meta return number
 .meta effects none
-    .span 1294 13 1294 28
+    .span 1308 13 1308 28
     .param value -> number
-    .span 1294 30 1294 49
+    .span 1308 30 1308 49
     .param alignment -> number
     .if alignment <= 1
-        .span 1296 9 1296 22
+        .span 1310 9 1310 22
         ret value
     .endif
-    .span 1298 5 1298 41
+    .span 1312 5 1312 41
     eval let mut remainder -> number = value
     .loop
         .if remainder < alignment
             break
         .endif
-        .span 1303 9 1303 32
+        .span 1317 9 1317 32
         eval remainder -= alignment
     .endloop
     .if remainder == 0
-        .span 1306 9 1306 22
+        .span 1320 9 1320 22
         ret value
     .endif
-    .span 1308 5 1308 44
+    .span 1322 5 1322 44
     ret value + alignment - remainder
 .endfn
 
 .fn is_array_type(type_annotation -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1311 18 1311 43
+    .span 1325 18 1325 43
     .param type_annotation -> string
-    .span 1312 5 1312 45
+    .span 1326 5 1326 45
     ret ends_with(type_annotation, "[]")
 .endfn
 
 .fn is_optional_annotation(type_annotation -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1315 27 1315 52
+    .span 1329 27 1329 52
     .param type_annotation -> string
-    .span 1316 5 1316 44
+    .span 1330 5 1330 44
     ret ends_with(type_annotation, "?")
 .endfn
 
 .fn strip_optional_suffix(type_annotation -> string) -> string
 .meta return string
 .meta effects none
-    .span 1319 26 1319 51
+    .span 1333 26 1333 51
     .param type_annotation -> string
     .if type_annotation.length == 0
-        .span 1321 9 1321 32
+        .span 1335 9 1335 32
         ret type_annotation
     .endif
-    .span 1323 5 1323 70
+    .span 1337 5 1337 70
     ret substring(type_annotation, 0, type_annotation.length - 1)
 .endfn
 
 .fn ends_with(value -> string, suffix -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1326 14 1326 29
+    .span 1340 14 1340 29
     .param value -> string
-    .span 1326 31 1326 47
+    .span 1340 31 1340 47
     .param suffix -> string
     .if suffix.length == 0
-        .span 1328 9 1328 21
+        .span 1342 9 1342 21
         ret true
     .endif
     .if value.length < suffix.length
-        .span 1331 9 1331 22
+        .span 1345 9 1345 22
         ret false
     .endif
-    .span 1333 5 1333 46
+    .span 1347 5 1347 46
     eval let start = value.length - suffix.length
-    .span 1334 5 1334 33
+    .span 1348 5 1348 33
     eval let mut index -> number = 0
     .loop
         .if index >= suffix.length
             break
         .endif
         .if value[start + index] != suffix[index]
-            .span 1340 13 1340 26
+            .span 1354 13 1354 26
             ret false
         .endif
-        .span 1342 9 1342 20
+        .span 1356 9 1356 20
         eval index += 1
     .endloop
-    .span 1344 5 1344 17
+    .span 1358 5 1358 17
     ret true
 .endfn
 
 .fn number_to_string(value -> number) -> string
 .meta return string
 .meta effects none
-    .span 1347 21 1347 36
+    .span 1361 21 1361 36
     .param value -> number
     .if value == 0
-        .span 1349 9 1349 20
+        .span 1363 9 1363 20
         ret "0"
     .endif
-    .span 1351 5 1351 41
+    .span 1365 5 1365 41
     eval let mut remaining -> number = value
-    .span 1352 5 1352 35
+    .span 1366 5 1366 35
     eval let mut output -> string = ""
-    .span 1353 5 1353 31
+    .span 1367 5 1367 31
     eval let digits = "0123456789"
     .loop
         .if remaining <= 0
             break
         .endif
-        .span 1358 9 1358 44
+        .span 1372 9 1372 44
         eval let mut temp -> number = remaining
-        .span 1359 9 1359 40
+        .span 1373 9 1373 40
         eval let mut quotient -> number = 0
         .loop
             .if temp < 10
                 break
             .endif
-            .span 1364 13 1364 24
+            .span 1378 13 1378 24
             eval temp -= 10
-            .span 1365 13 1365 27
+            .span 1379 13 1379 27
             eval quotient += 1
         .endloop
-        .span 1367 9 1367 26
+        .span 1381 9 1381 26
         eval let digit = temp
-        .span 1368 9 1368 54
+        .span 1382 9 1382 54
         eval let ch = substring(digits, digit, digit + 1)
-        .span 1369 9 1369 30
+        .span 1383 9 1383 30
         eval output = ch + output
-        .span 1370 9 1370 30
+        .span 1384 9 1384 30
         eval remaining = quotient
     .endloop
-    .span 1372 5 1372 19
+    .span 1386 5 1386 19
     ret output
 .endfn
 
 .fn format_expression(expression -> Expression) -> string
 .meta return string
 .meta effects none
-    .span 1376 22 1376 46
+    .span 1390 22 1390 46
     .param expression -> Expression
     .if expression.variant == "Identifier"
-        .span 1378 9 1378 32
+        .span 1392 9 1392 32
         ret expression.name
     .endif
     .if expression.variant == "NumberLiteral"
-        .span 1381 9 1381 33
+        .span 1395 9 1395 33
         ret expression.value
     .endif
     .if expression.variant == "BooleanLiteral"
-        .span 1384 9 1384 33
+        .span 1398 9 1398 33
         ret expression.value
     .endif
     .if expression.variant == "NullLiteral"
-        .span 1387 9 1387 23
+        .span 1401 9 1401 23
         ret "null"
     .endif
     .if expression.variant == "StringLiteral"
-        .span 1390 9 1390 47
+        .span 1404 9 1404 47
         ret quote_string(expression.value)
     .endif
     .if expression.variant == "Unary"
-        .span 1393 9 1393 76
+        .span 1407 9 1407 76
         ret expression.operator + format_expression(expression.operand)
     .endif
     .if expression.variant == "Binary"
-        .span 1396 9 1396 55
+        .span 1410 9 1410 55
         eval let left = format_expression(expression.left)
-        .span 1397 9 1397 57
+        .span 1411 9 1411 57
         eval let right = format_expression(expression.right)
-        .span 1398 9 1398 63
+        .span 1412 9 1412 63
         ret left + " " + expression.operator + " " + right
     .endif
     .if expression.variant == "Member"
-        .span 1401 9 1401 79
+        .span 1415 9 1415 79
         ret format_expression(expression.object) + "." + expression.member
     .endif
     .if expression.variant == "Call"
-        .span 1404 9 1404 43
+        .span 1418 9 1418 43
         eval let mut rendered -> string[] = []
-        .span 1405 9 1405 37
+        .span 1419 9 1419 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.arguments.length
                 break
             .endif
-            .span 1410 13 1410 96
+            .span 1424 13 1424 96
             eval rendered = append_string(rendered, format_expression(expression.arguments[index]))
-            .span 1411 13 1411 24
+            .span 1425 13 1425 24
             eval index += 1
         .endloop
-        .span 1413 9 1413 56
+        .span 1427 9 1427 56
         eval let args = join_with_separator(rendered, ", ")
-        .span 1414 9 1414 72
+        .span 1428 9 1428 72
         ret format_expression(expression.callee) + "(" + args + ")"
     .endif
     .if expression.variant == "Index"
-        .span 1417 9 1417 105
+        .span 1431 9 1431 105
         ret format_expression(expression.sequence) + "[" + format_expression(expression.index) + "]"
     .endif
     .if expression.variant == "Array"
-        .span 1420 9 1420 61
+        .span 1434 9 1434 61
         ret format_array_expression(expression.elements)
     .endif
     .if expression.variant == "Object"
-        .span 1423 9 1423 43
+        .span 1437 9 1437 43
         eval let mut rendered -> string[] = []
-        .span 1424 9 1424 37
+        .span 1438 9 1438 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.fields.length
                 break
             .endif
-            .span 1429 13 1429 50
+            .span 1443 13 1443 50
             eval let field = expression.fields[index]
-            .span 1430 13 1430 100
+            .span 1444 13 1444 100
             eval rendered = append_string(rendered, field.name + ": " + format_expression(field.value))
-            .span 1431 13 1431 24
+            .span 1445 13 1445 24
             eval index += 1
         .endloop
-        .span 1433 9 1433 66
+        .span 1447 9 1447 66
         ret "{ " + join_with_separator(rendered, ", ") + " }"
     .endif
     .if expression.variant == "Struct"
-        .span 1436 9 1436 43
+        .span 1450 9 1450 43
         eval let mut rendered -> string[] = []
-        .span 1437 9 1437 37
+        .span 1451 9 1451 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.fields.length
                 break
             .endif
-            .span 1442 13 1442 50
+            .span 1456 13 1456 50
             eval let field = expression.fields[index]
-            .span 1443 13 1443 100
+            .span 1457 13 1457 100
             eval rendered = append_string(rendered, field.name + ": " + format_expression(field.value))
-            .span 1444 13 1444 24
+            .span 1458 13 1458 24
             eval index += 1
         .endloop
-        .span 1446 9 1446 72
+        .span 1460 9 1460 72
         eval let type_name = join_with_separator(expression.type_name, ".")
-        .span 1447 9 1447 79
+        .span 1461 9 1461 79
         ret type_name + " { " + join_with_separator(rendered, ", ") + " }"
     .endif
     .if expression.variant == "Range"
-        .span 1450 9 1450 95
+        .span 1464 9 1464 95
         ret format_expression(expression.start) + ".." + format_expression(expression.end)
     .endif
     .if expression.variant == "Lambda"
-        .span 1453 9 1453 27
+        .span 1467 9 1467 27
         ret "<lambda>"
     .endif
     .if expression.variant == "Raw"
-        .span 1456 9 1456 43
+        .span 1470 9 1470 43
         ret trim_text(expression.text)
     .endif
-    .span 1458 5 1458 43
+    .span 1472 5 1472 43
     ret "<" + expression.variant + ">"
 .endfn
 
 .fn format_array_expression(elements -> Expression[]) -> string
 .meta return string
 .meta effects none
-    .span 1461 28 1461 52
+    .span 1475 28 1475 52
     .param elements -> Expression[]
-    .span 1462 5 1462 57
+    .span 1476 5 1476 57
     eval let annotation = infer_array_element_type(elements)
-    .span 1463 5 1463 39
+    .span 1477 5 1477 39
     eval let mut rendered -> string[] = []
-    .span 1464 5 1464 33
+    .span 1478 5 1478 33
     eval let mut index -> number = 0
     .loop
         .if index >= elements.length
             break
         .endif
-        .span 1469 9 1469 80
+        .span 1483 9 1483 80
         eval rendered = append_string(rendered, format_expression(elements[index]))
-        .span 1470 9 1470 20
+        .span 1484 9 1484 20
         eval index += 1
     .endloop
     .if rendered.length == 0
         .if annotation.length == 0
-            .span 1474 13 1474 25
+            .span 1488 13 1488 25
             ret "[]"
         .endif
-        .span 1476 9 1476 48
+        .span 1490 9 1490 48
         ret "[#element:" + annotation + "]"
     .endif
-    .span 1478 5 1478 52
+    .span 1492 5 1492 52
     eval let body = join_with_separator(rendered, ", ")
     .if annotation.length == 0
-        .span 1480 9 1480 33
+        .span 1494 9 1494 33
         ret "[" + body + "]"
     .endif
-    .span 1482 5 1482 58
+    .span 1496 5 1496 58
     ret "[#element:" + annotation + ", " + body + "]"
 .endfn
 
 .fn infer_array_element_type(elements -> Expression[]) -> string
 .meta return string
 .meta effects none
-    .span 1485 29 1485 53
+    .span 1499 29 1499 53
     .param elements -> Expression[]
     .if elements.length == 0
-        .span 1487 9 1487 19
+        .span 1501 9 1501 19
         ret ""
     .endif
-    .span 1489 5 1489 38
+    .span 1503 5 1503 38
     eval let mut candidate -> string = ""
-    .span 1490 5 1490 33
+    .span 1504 5 1504 33
     eval let mut index -> number = 0
     .loop
         .if index >= elements.length
             break
         .endif
-        .span 1495 9 1495 67
+        .span 1509 9 1509 67
         eval let element_type = infer_expression_type(elements[index])
         .if element_type.length == 0
-            .span 1497 13 1497 23
+            .span 1511 13 1511 23
             ret ""
         .endif
         .if candidate.length == 0
-            .span 1500 13 1500 38
+            .span 1514 13 1514 38
             eval candidate = element_type
         .else
             .if candidate != element_type
-                .span 1502 13 1502 23
+                .span 1516 13 1516 23
                 ret ""
             .endif
         .endif
-        .span 1504 9 1504 20
+        .span 1518 9 1518 20
         eval index += 1
     .endloop
-    .span 1506 5 1506 22
+    .span 1520 5 1520 22
     ret candidate
 .endfn
 
 .fn infer_expression_type(expression -> Expression) -> string
 .meta return string
 .meta effects none
-    .span 1509 26 1509 50
+    .span 1523 26 1523 50
     .param expression -> Expression
     .if expression.variant == "NumberLiteral"
-        .span 1511 9 1511 25
+        .span 1525 9 1525 25
         ret "number"
     .endif
     .if expression.variant == "BooleanLiteral"
-        .span 1514 9 1514 26
+        .span 1528 9 1528 26
         ret "boolean"
     .endif
     .if expression.variant == "StringLiteral"
-        .span 1517 9 1517 25
+        .span 1531 9 1531 25
         ret "string"
     .endif
     .if expression.variant == "Struct"
         .if expression.type_name.length == 0
-            .span 1521 13 1521 23
+            .span 1535 13 1535 23
             ret ""
         .endif
         .if expression.type_name.length == 2
-            .span 1529 13 1529 44
+            .span 1543 13 1543 44
             ret expression.type_name[0]
         .endif
-        .span 1531 9 1531 63
+        .span 1545 9 1545 63
         ret join_with_separator(expression.type_name, ".")
     .endif
     .if expression.variant == "Member"
         .if expression.object.variant == "Identifier"
-            .span 1540 13 1540 43
+            .span 1554 13 1554 43
             ret expression.object.name
         .endif
         .if expression.object.variant == "Member"
-            .span 1544 13 1544 61
+            .span 1558 13 1558 61
             ret infer_expression_type(expression.object)
         .endif
-        .span 1546 9 1546 19
+        .span 1560 9 1560 19
         ret ""
     .endif
     .if expression.variant == "Array"
-        .span 1549 9 1549 68
+        .span 1563 9 1563 68
         eval let nested = infer_array_element_type(expression.elements)
         .if nested.length == 0
-            .span 1551 13 1551 23
+            .span 1565 13 1565 23
             ret ""
         .endif
-        .span 1553 9 1553 30
+        .span 1567 9 1567 30
         ret nested + "[]"
     .endif
-    .span 1555 5 1555 15
+    .span 1569 5 1569 15
     ret ""
 .endfn
 
 .fn quote_string(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1558 17 1558 32
+    .span 1572 17 1572 32
     .param value -> string
-    .span 1559 5 1559 37
+    .span 1573 5 1573 37
     eval let mut result -> string = "\""
-    .span 1560 5 1560 33
+    .span 1574 5 1574 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 1565 9 1565 60
+        .span 1579 9 1579 60
         eval result = result + escape_string_char(value[index])
-        .span 1566 9 1566 20
+        .span 1580 9 1580 20
         eval index += 1
     .endloop
-    .span 1568 5 1568 28
+    .span 1582 5 1582 28
     eval result = result + "\""
-    .span 1569 5 1569 19
+    .span 1583 5 1583 19
     ret result
 .endfn
 
 .fn escape_string_char(ch -> string) -> string
 .meta return string
 .meta effects none
-    .span 1572 23 1572 35
+    .span 1586 23 1586 35
     .param ch -> string
     .if ch == "\""
-        .span 1574 9 1574 23
+        .span 1588 9 1588 23
         ret "\\\""
     .endif
     .if ch == "\\"
-        .span 1577 9 1577 23
+        .span 1591 9 1591 23
         ret "\\\\"
     .endif
     .if ch == "\n"
-        .span 1580 9 1580 22
+        .span 1594 9 1594 22
         ret "\\n"
     .endif
     .if ch == "\r"
-        .span 1583 9 1583 22
+        .span 1597 9 1597 22
         ret "\\r"
     .endif
     .if ch == "\t"
-        .span 1586 9 1586 22
+        .span 1600 9 1600 22
         ret "\\t"
     .endif
-    .span 1588 5 1588 15
+    .span 1602 5 1602 15
     ret ch
 .endfn
 
 .fn trim_text(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1591 14 1591 29
+    .span 1605 14 1605 29
     .param value -> string
-    .span 1592 5 1592 33
+    .span 1606 5 1606 33
     eval let mut start -> number = 0
-    .span 1593 5 1593 42
+    .span 1607 5 1607 42
     eval let mut end -> number = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 1598 9 1598 31
+        .span 1612 9 1612 31
         eval let ch = value[start]
         .if is_trim_char(ch)
-            .span 1600 13 1600 24
+            .span 1614 13 1614 24
             eval start += 1
             continue
         .endif
@@ -2680,492 +2712,492 @@
         .if end <= start
             break
         .endif
-        .span 1609 9 1609 33
+        .span 1623 9 1623 33
         eval let ch = value[end - 1]
         .if is_trim_char(ch)
-            .span 1611 13 1611 22
+            .span 1625 13 1625 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if start == 0 && end == value.length
-        .span 1617 13 1617 26
+        .span 1631 13 1631 26
         ret value
     .endif
-    .span 1619 9 1619 45
+    .span 1633 9 1633 45
     ret substring(value, start, end)
 .endfn
 
 .fn is_trim_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1622 17 1622 29
+    .span 1636 17 1636 29
     .param ch -> string
-    .span 1623 5 1623 64
+    .span 1637 5 1637 64
     ret ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
 .endfn
 
 .fn collect_entry_points(program -> Program) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1626 25 1626 43
+    .span 1640 25 1640 43
     .param program -> Program
-    .span 1627 5 1627 38
+    .span 1641 5 1641 38
     eval let mut entries -> string[] = []
-    .span 1628 5 1628 33
+    .span 1642 5 1642 33
     eval let mut index -> number = 0
     .loop
         .if index >= program.statements.length
             break
         .endif
-        .span 1633 9 1633 51
+        .span 1647 9 1647 51
         eval let statement = program.statements[index]
         .if statement.variant == "FunctionDeclaration"
-            .span 1635 13 1635 72
+            .span 1649 13 1649 72
             eval entries = append_unique(entries, statement.signature.name)
         .endif
         .if statement.variant == "TestDeclaration"
-            .span 1638 13 1638 72
+            .span 1652 13 1652 72
             eval entries = append_unique(entries, "test:" + statement.name)
         .endif
-        .span 1640 9 1640 20
+        .span 1654 9 1654 20
         eval index += 1
     .endloop
-    .span 1642 5 1642 20
+    .span 1656 5 1656 20
     ret entries
 .endfn
 
 .fn count_exported_symbols(program -> Program) -> number
 .meta return number
 .meta effects none
-    .span 1645 27 1645 45
+    .span 1659 27 1659 45
     .param program -> Program
-    .span 1646 5 1646 33
+    .span 1660 5 1660 33
     eval let mut count -> number = 0
-    .span 1647 5 1647 33
+    .span 1661 5 1661 33
     eval let mut index -> number = 0
     .loop
         .if index >= program.statements.length
             break
         .endif
-        .span 1652 9 1652 46
+        .span 1666 9 1666 46
         eval let stmt = program.statements[index]
         .if stmt.variant == "FunctionDeclaration" || stmt.variant == "StructDeclaration" || stmt.variant == "EnumDeclaration" || stmt.variant == "PipelineDeclaration" || stmt.variant == "ToolDeclaration" || stmt.variant == "ModelDeclaration" || stmt.variant == "TestDeclaration" || stmt.variant == "TypeAliasDeclaration" || stmt.variant == "InterfaceDeclaration"
-            .span 1662 13 1662 24
+            .span 1676 13 1676 24
             eval count += 1
         .endif
-        .span 1664 9 1664 20
+        .span 1678 9 1678 20
         eval index += 1
     .endloop
-    .span 1666 5 1666 18
+    .span 1680 5 1680 18
     ret count
 .endfn
 
 .fn append_unique(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1669 18 1669 36
+    .span 1683 18 1683 36
     .param values -> string[]
-    .span 1669 38 1669 53
+    .span 1683 38 1683 53
     .param value -> string
     .if contains_string(values, value)
-        .span 1671 9 1671 23
+        .span 1685 9 1685 23
         ret values
     .endif
-    .span 1673 5 1673 41
+    .span 1687 5 1687 41
     ret append_string(values, value)
 .endfn
 
 .fn contains_string(values -> string[], target -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1676 20 1676 38
+    .span 1690 20 1690 38
     .param values -> string[]
-    .span 1676 40 1676 56
+    .span 1690 40 1690 56
     .param target -> string
-    .span 1677 5 1677 33
+    .span 1691 5 1691 33
     eval let mut index -> number = 0
     .loop
         .if index >= values.length
             break
         .endif
         .if values[index] == target
-            .span 1683 13 1683 25
+            .span 1697 13 1697 25
             ret true
         .endif
-        .span 1685 9 1685 20
+        .span 1699 9 1699 20
         eval index += 1
     .endloop
-    .span 1687 5 1687 18
+    .span 1701 5 1701 18
     ret false
 .endfn
 
 .fn state_new(context -> LayoutContext) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1690 14 1690 38
+    .span 1704 14 1704 38
     .param context -> LayoutContext
-    .span 1691 5 1691 93
+    .span 1705 5 1705 93
     ret NativeState { builder: builder_new(), diagnostics: [], layout_context: context }
 .endfn
 
 .fn state_emit_line(state -> NativeState, line -> string) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1694 20 1694 40
+    .span 1708 20 1708 40
     .param state -> NativeState
-    .span 1694 42 1694 56
+    .span 1708 42 1708 56
     .param line -> string
-    .span 1695 5 1699 7
+    .span 1709 5 1713 7
     ret NativeState { builder: builder_emit_line(state.builder, line), diagnostics: state.diagnostics, layout_context: state.layout_context }
 .endfn
 
 .fn state_emit_blank(state -> NativeState) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1702 21 1702 41
+    .span 1716 21 1716 41
     .param state -> NativeState
-    .span 1703 5 1707 7
+    .span 1717 5 1721 7
     ret NativeState { builder: builder_emit_blank(state.builder), diagnostics: state.diagnostics, layout_context: state.layout_context }
 .endfn
 
 .fn state_push_indent(state -> NativeState) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1710 22 1710 42
+    .span 1724 22 1724 42
     .param state -> NativeState
-    .span 1711 5 1715 7
+    .span 1725 5 1729 7
     ret NativeState { builder: builder_push_indent(state.builder), diagnostics: state.diagnostics, layout_context: state.layout_context }
 .endfn
 
 .fn state_pop_indent(state -> NativeState) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1718 21 1718 41
+    .span 1732 21 1732 41
     .param state -> NativeState
-    .span 1719 5 1723 7
+    .span 1733 5 1737 7
     ret NativeState { builder: builder_pop_indent(state.builder), diagnostics: state.diagnostics, layout_context: state.layout_context }
 .endfn
 
 .fn state_add_diagnostic(state -> NativeState, message -> string) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1726 25 1726 45
+    .span 1740 25 1740 45
     .param state -> NativeState
-    .span 1726 47 1726 64
+    .span 1740 47 1740 64
     .param message -> string
-    .span 1727 5 1727 65
+    .span 1741 5 1741 65
     eval let diagnostics = append_string(state.diagnostics, message)
-    .span 1728 5 1732 7
+    .span 1742 5 1746 7
     ret NativeState { builder: builder_emit_line(state.builder, "; " + message), diagnostics: diagnostics, layout_context: state.layout_context }
 .endfn
 
 .fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1735 28 1735 48
+    .span 1749 28 1749 48
     .param state -> NativeState
-    .span 1735 50 1735 69
+    .span 1749 50 1749 69
     .param entries -> string[]
     .if entries.length == 0
-        .span 1737 9 1737 22
+        .span 1751 9 1751 22
         ret state
     .endif
-    .span 1739 5 1739 54
+    .span 1753 5 1753 54
     eval let mut combined -> string[] = state.diagnostics
-    .span 1740 5 1740 33
+    .span 1754 5 1754 33
     eval let mut index -> number = 0
     .loop
         .if index >= entries.length
             break
         .endif
-        .span 1745 9 1745 60
+        .span 1759 9 1759 60
         eval combined = append_string(combined, entries[index])
-        .span 1746 9 1746 20
+        .span 1760 9 1760 20
         eval index += 1
     .endloop
-    .span 1748 5 1748 112
+    .span 1762 5 1762 112
     ret NativeState { builder: state.builder, diagnostics: combined, layout_context: state.layout_context }
 .endfn
 
 .fn generate_layout_manifest(program -> Program, context -> LayoutContext) -> NativeArtifact
 .meta return NativeArtifact
 .meta effects none
-    .span 1751 29 1751 47
+    .span 1765 29 1765 47
     .param program -> Program
-    .span 1751 49 1751 73
+    .span 1765 49 1765 73
     .param context -> LayoutContext
-    .span 1752 5 1752 37
+    .span 1766 5 1766 37
     eval let mut builder = builder_new()
-    .span 1753 5 1753 71
+    .span 1767 5 1767 71
     eval builder = builder_emit_line(builder, "; Sailfin Layout Manifest")
-    .span 1754 5 1754 65
+    .span 1768 5 1768 65
     eval builder = builder_emit_line(builder, ".manifest version=1")
-    .span 1755 5 1755 43
+    .span 1769 5 1769 43
     eval builder = builder_emit_blank(builder)
-    .span 1758 5 1758 33
+    .span 1772 5 1772 33
     eval let mut index -> number = 0
     .loop
         .if index >= program.statements.length
             break
         .endif
-        .span 1763 9 1763 51
+        .span 1777 9 1777 51
         eval let statement = program.statements[index]
         .if statement.variant == "StructDeclaration"
-            .span 1765 13 1765 97
+            .span 1779 13 1779 97
             eval let result = compute_struct_layout_lines(context, statement.name, statement.fields)
-            .span 1766 13 1766 46
+            .span 1780 13 1780 46
             eval let mut line_index -> number = 0
             .loop
                 .if line_index >= result.lines.length
                     break
                 .endif
-                .span 1771 17 1771 80
+                .span 1785 17 1785 80
                 eval builder = builder_emit_line(builder, result.lines[line_index])
-                .span 1772 17 1772 33
+                .span 1786 17 1786 33
                 eval line_index += 1
             .endloop
-            .span 1774 13 1774 51
+            .span 1788 13 1788 51
             eval builder = builder_emit_blank(builder)
         .endif
-        .span 1776 9 1776 20
+        .span 1790 9 1790 20
         eval index += 1
     .endloop
-    .span 1780 5 1780 15
+    .span 1794 5 1794 15
     eval index = 0
     .loop
         .if index >= program.statements.length
             break
         .endif
-        .span 1785 9 1785 51
+        .span 1799 9 1799 51
         eval let statement = program.statements[index]
         .if statement.variant == "EnumDeclaration"
-            .span 1787 13 1787 72
+            .span 1801 13 1801 72
             eval let result = compute_enum_layout_lines(context, statement)
-            .span 1788 13 1788 46
+            .span 1802 13 1802 46
             eval let mut line_index -> number = 0
             .loop
                 .if line_index >= result.lines.length
                     break
                 .endif
-                .span 1793 17 1793 80
+                .span 1807 17 1807 80
                 eval builder = builder_emit_line(builder, result.lines[line_index])
-                .span 1794 17 1794 33
+                .span 1808 17 1808 33
                 eval line_index += 1
             .endloop
-            .span 1796 13 1796 51
+            .span 1810 13 1810 51
             eval builder = builder_emit_blank(builder)
         .endif
-        .span 1798 9 1798 20
+        .span 1812 9 1812 20
         eval index += 1
     .endloop
-    .span 1801 5 1805 7
+    .span 1815 5 1819 7
     ret NativeArtifact { name: "module.layout-manifest", format: "sailfin-layout-manifest", contents: builder_to_string(builder) }
 .endfn
 
 .fn emit_layout_lines(state -> NativeState, lines -> string[]) -> NativeState
 .meta return NativeState
 .meta effects none
-    .span 1808 22 1808 42
+    .span 1822 22 1822 42
     .param state -> NativeState
-    .span 1808 44 1808 61
+    .span 1822 44 1822 61
     .param lines -> string[]
     .if lines.length == 0
-        .span 1810 9 1810 22
+        .span 1824 9 1824 22
         ret state
     .endif
-    .span 1812 5 1812 29
+    .span 1826 5 1826 29
     eval let mut current = state
-    .span 1813 5 1813 33
+    .span 1827 5 1827 33
     eval let mut index -> number = 0
     .loop
         .if index >= lines.length
             break
         .endif
-        .span 1818 9 1818 58
+        .span 1832 9 1832 58
         eval current = state_emit_line(current, lines[index])
-        .span 1819 9 1819 20
+        .span 1833 9 1833 20
         eval index += 1
     .endloop
-    .span 1821 5 1821 20
+    .span 1835 5 1835 20
     ret current
 .endfn
 
 .fn builder_new() -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1825 5 1825 49
+    .span 1839 5 1839 49
     ret TextBuilder { lines: [], indent: 0 }
 .endfn
 
 .fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1828 22 1828 44
+    .span 1842 22 1842 44
     .param builder -> TextBuilder
-    .span 1828 46 1828 60
+    .span 1842 46 1842 60
     .param line -> string
-    .span 1829 5 1829 35
+    .span 1843 5 1843 35
     eval let mut prefix -> string = ""
-    .span 1830 5 1830 33
+    .span 1844 5 1844 33
     eval let mut count -> number = 0
     .loop
         .if count >= builder.indent
             break
         .endif
-        .span 1835 9 1835 34
+        .span 1849 9 1849 34
         eval prefix = prefix + "    "
-        .span 1836 9 1836 20
+        .span 1850 9 1850 20
         eval count += 1
     .endloop
-    .span 1838 5 1838 47
+    .span 1852 5 1852 47
     eval let full_line = prefix + trim_right(line)
-    .span 1839 5 1839 57
+    .span 1853 5 1853 57
     eval let lines = append_string(builder.lines, full_line)
-    .span 1840 5 1840 65
+    .span 1854 5 1854 65
     ret TextBuilder { lines: lines, indent: builder.indent }
 .endfn
 
 .fn builder_emit_blank(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1843 23 1843 45
+    .span 1857 23 1857 45
     .param builder -> TextBuilder
-    .span 1844 5 1844 50
+    .span 1858 5 1858 50
     eval let lines = append_string(builder.lines, "")
-    .span 1845 5 1845 65
+    .span 1859 5 1859 65
     ret TextBuilder { lines: lines, indent: builder.indent }
 .endfn
 
 .fn builder_push_indent(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1848 24 1848 46
+    .span 1862 24 1862 46
     .param builder -> TextBuilder
-    .span 1849 5 1849 77
+    .span 1863 5 1863 77
     ret TextBuilder { lines: builder.lines, indent: builder.indent + 1 }
 .endfn
 
 .fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1852 23 1852 45
+    .span 1866 23 1866 45
     .param builder -> TextBuilder
-    .span 1853 5 1853 37
+    .span 1867 5 1867 37
     eval let mut indent = builder.indent
     .if indent > 0
-        .span 1855 9 1855 21
+        .span 1869 9 1869 21
         eval indent -= 1
     .endif
-    .span 1857 5 1857 65
+    .span 1871 5 1871 65
     ret TextBuilder { lines: builder.lines, indent: indent }
 .endfn
 
 .fn builder_to_string(builder -> TextBuilder) -> string
 .meta return string
 .meta effects none
-    .span 1860 22 1860 44
+    .span 1874 22 1874 44
     .param builder -> TextBuilder
-    .span 1861 5 1861 60
+    .span 1875 5 1875 60
     eval let content = join_with_separator(builder.lines, "\n")
     .if content.length == 0
-        .span 1863 9 1863 19
+        .span 1877 9 1877 19
         ret ""
     .endif
-    .span 1865 5 1865 27
+    .span 1879 5 1879 27
     ret content + "\n"
 .endfn
 
 .fn trim_right(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1868 15 1868 30
+    .span 1882 15 1882 30
     .param value -> string
-    .span 1869 5 1869 42
+    .span 1883 5 1883 42
     eval let mut end -> number = value.length
     .loop
         .if end <= 0
             break
         .endif
-        .span 1874 9 1874 33
+        .span 1888 9 1888 33
         eval let ch = value[end - 1]
         .if ch == " " || ch == "\t"
-            .span 1876 13 1876 22
+            .span 1890 13 1890 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if end == value.length
-        .span 1882 9 1882 22
+        .span 1896 9 1896 22
         ret value
     .endif
-    .span 1884 5 1884 37
+    .span 1898 5 1898 37
     ret substring(value, 0, end)
 .endfn
 
 .fn append_string(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1887 18 1887 36
+    .span 1901 18 1901 36
     .param values -> string[]
-    .span 1887 38 1887 53
+    .span 1901 38 1901 53
     .param value -> string
-    .span 1888 5 1888 35
+    .span 1902 5 1902 35
     ret values.concat([value])
 .endfn
 
 .fn join_with_separator(values -> string[], separator -> string) -> string
 .meta return string
 .meta effects none
-    .span 1891 24 1891 42
+    .span 1905 24 1905 42
     .param values -> string[]
-    .span 1891 44 1891 63
+    .span 1905 44 1905 63
     .param separator -> string
     .if values.length == 0
-        .span 1893 9 1893 19
+        .span 1907 9 1907 19
         ret ""
     .endif
-    .span 1895 5 1895 42
+    .span 1909 5 1909 42
     eval let mut result -> string = values[0]
-    .span 1896 5 1896 33
+    .span 1910 5 1910 33
     eval let mut index -> number = 1
     .loop
         .if index >= values.length
             break
         .endif
-        .span 1901 9 1901 53
+        .span 1915 9 1915 53
         eval result = result + separator + values[index]
-        .span 1902 9 1902 20
+        .span 1916 9 1916 20
         eval index += 1
     .endloop
-    .span 1904 5 1904 19
+    .span 1918 5 1918 19
     ret result
 .endfn
 
 .fn join_type_annotations(values -> TypeAnnotation[]) -> string
 .meta return string
 .meta effects none
-    .span 1907 26 1907 52
+    .span 1921 26 1921 52
     .param values -> TypeAnnotation[]
     .if values.length == 0
-        .span 1909 9 1909 19
+        .span 1923 9 1923 19
         ret ""
     .endif
-    .span 1911 5 1911 36
+    .span 1925 5 1925 36
     eval let mut parts -> string[] = []
-    .span 1912 5 1912 33
+    .span 1926 5 1926 33
     eval let mut index -> number = 0
     .loop
         .if index >= values.length
             break
         .endif
-        .span 1917 9 1917 58
+        .span 1931 9 1931 58
         eval parts = append_string(parts, values[index].text)
-        .span 1918 9 1918 20
+        .span 1932 9 1932 20
         eval index += 1
     .endloop
-    .span 1920 5 1920 45
+    .span 1934 5 1934 45
     ret join_with_separator(parts, ", ")
 .endfn

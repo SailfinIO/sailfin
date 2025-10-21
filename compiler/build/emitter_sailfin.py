@@ -50,9 +50,9 @@ builder,
 
 def emit_statement(builder, statement):
     if statement.variant == "ImportDeclaration":
-        return emit_import(builder, statement.specifiers, statement.source)
+        return emit_import(builder, statement.import_specifiers, statement.source)
     if statement.variant == "ExportDeclaration":
-        return emit_export(builder, statement.specifiers, statement.source)
+        return emit_export(builder, statement.export_specifiers, statement.source)
     if statement.variant == "VariableDeclaration":
         return emit_variable(builder, statement)
     if statement.variant == "FunctionDeclaration":
@@ -317,24 +317,28 @@ def emit_if(builder, statement):
     line = "if " + format_expression(statement.condition)
     current = builder_emit_line(current, line)
     current = emit_block(current, statement.then_block)
-    if statement.else_branch != None:
-        current = emit_else_branch(current, statement.else_branch)
-    return current
+    else_branch = statement.else_branch
+    if else_branch == None:
+        return current
+    return emit_else_branch(current, else_branch)
 
 def emit_else_branch(builder, branch):
-    if branch.body != None:
+    body = branch.body
+    if body == None:
+        nested = branch.statement
+        if nested == None:
+            return builder
+        if nested.variant == "IfStatement":
+            current = builder_emit_line(builder, "else if " + format_expression(nested.condition))
+            after = emit_block(current, nested.then_block)
+            nested_else = nested.else_branch
+            if nested_else == None:
+                return after
+            return emit_else_branch(after, nested_else)
         current = builder_emit_line(builder, "else")
-        return emit_block(current, branch.body)
-    if branch.statement != None:
-        if branch.statement.variant == "IfStatement":
-            current = builder_emit_line(builder, "else if " + format_expression(branch.statement.condition))
-            after = emit_block(current, branch.statement.then_block)
-            if branch.statement.else_branch != None:
-                return emit_else_branch(after, branch.statement.else_branch)
-            return after
-        current = builder_emit_line(builder, "else")
-        return emit_block_statement(current, branch.statement)
-    return builder
+        return emit_block_statement(current, nested)
+    current = builder_emit_line(builder, "else")
+    return emit_block(current, body)
 
 def emit_for(builder, statement):
     current = emit_decorators(builder, statement.decorators)
@@ -359,9 +363,11 @@ def emit_match(builder, statement):
 
 def emit_match_case(builder, case):
     line = "case " + format_expression(case.pattern)
-    if case.guard != None:
-        line = line + " if " + format_expression(case.guard)
-    line = line + " => {"
+    guard = case.guard
+    if guard == None:
+        line = line + " => {"
+    else:
+        line = line + " if " + format_expression(guard) + " => {"
     current = builder_emit_line(builder, line)
     current = builder_push_indent(current)
     current = emit_block_body(current, case.body)
@@ -535,9 +541,7 @@ def format_expression(expression):
     if expression.variant == "NumberLiteral":
         return expression.value
     if expression.variant == "BooleanLiteral":
-        if expression.value:
-            return "true"
-        return "false"
+        return expression.value
     if expression.variant == "NullLiteral":
         return "null"
     if expression.variant == "StringLiteral":
@@ -617,8 +621,7 @@ def format_expression(expression):
 def format_lambda_expression(expression):
     params = format_lambda_parameters(expression.parameters)
     header = "fn " + params
-    if expression.return_type != None:
-        header = header + " -> " + expression.return_type.text
+    header = header + format_type_annotation(expression.return_type)
     body = format_lambda_body(expression.body)
     return header + " " + body
 
@@ -630,8 +633,7 @@ def format_lambda_parameters(parameters):
             break
         param = parameters[index]
         entry = param.name
-        if param.type_annotation != None:
-            entry = entry + " -> " + param.type_annotation.text
+        entry = entry + format_type_annotation(param.type_annotation)
         rendered = append_string(rendered, entry)
         index += 1
     args = join_with_separator(rendered, ", ")
@@ -663,10 +665,8 @@ def format_lambda_statement(statement):
         if statement.mutable:
             line = line + "mut "
         line = line + statement.name
-        if statement.type_annotation != None:
-            line = line + " -> " + statement.type_annotation.text
-        if statement.initializer != None:
-            line = line + " = " + format_expression(statement.initializer)
+        line = line + format_type_annotation(statement.type_annotation)
+        line = line + format_initializer(statement.initializer)
         return line + ";"
     if statement.variant == "Unknown":
         return "// original: " + collapse_whitespace(statement.text)

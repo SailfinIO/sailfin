@@ -222,13 +222,13 @@ def emit_native(program):
 def emit_statement(state, statement):
     if statement.variant == "ImportDeclaration":
         line = ".import \"" + statement.source + "\""
-        rendered = render_native_specifiers(statement.specifiers)
+        rendered = render_native_specifiers(statement.import_specifiers)
         if len(rendered) > 0:
             line = line + " { " + rendered + " }"
         return state_emit_line(state, line)
     if statement.variant == "ExportDeclaration":
         line = ".export \"" + statement.source + "\""
-        rendered = render_export_specifiers(statement.specifiers)
+        rendered = render_export_specifiers(statement.export_specifiers)
         if len(rendered) > 0:
             line = line + " { " + rendered + " }"
         return state_emit_line(state, line)
@@ -310,6 +310,16 @@ def emit_initializer_span_if_present(state, span):
         return state
     return state_emit_line(state, ".init-span " + format_span(span))
 
+def append_optional_type_annotation(line, annotation):
+    if annotation == None:
+        return line
+    return line + " : " + annotation.text
+
+def append_optional_initializer(line, initializer):
+    if initializer == None:
+        return line
+    return line + " = " + format_expression(initializer)
+
 def format_span(span):
     return number_to_string(span.start_line) + " " + number_to_string(span.start_column) + " " + number_to_string(span.end_line) + " " + number_to_string(span.end_column)
 
@@ -320,10 +330,8 @@ def emit_variable(state, statement):
     if statement.mutable:
         line = line + "mut "
     line = line + statement.name
-    if statement.type_annotation != None:
-        line = line + " : " + statement.type_annotation.text
-    if statement.initializer != None:
-        line = line + " = " + format_expression(statement.initializer)
+    line = append_optional_type_annotation(line, statement.type_annotation)
+    line = append_optional_initializer(line, statement.initializer)
     return state_emit_line(current, line)
 
 def emit_function(state, signature, body, decorators):
@@ -535,14 +543,14 @@ def emit_match(state, statement):
 
 def emit_match_case(state, case):
     inline_statement = select_inline_match_case_statement(case.body)
-    if inline_statement != None:
-        return emit_inline_match_case(state, case, inline_statement)
-    line = ".case " + format_match_case_head(case)
-    current = state_emit_line(state, line)
-    current = state_push_indent(current)
-    current = emit_block(current, case.body)
-    current = state_pop_indent(current)
-    return current
+    if inline_statement == None:
+        line = ".case " + format_match_case_head(case)
+        current = state_emit_line(state, line)
+        current = state_push_indent(current)
+        current = emit_block(current, case.body)
+        current = state_pop_indent(current)
+        return current
+    return emit_inline_match_case(state, case, inline_statement)
 
 def select_inline_match_case_statement(block):
     if len(block.statements) != 1:
@@ -560,9 +568,10 @@ def emit_inline_match_case(state, case, statement):
 
 def format_match_case_head(case):
     head = format_expression(case.pattern)
-    if case.guard != None:
-        head = head + " if " + format_expression(case.guard)
-    return head
+    guard = case.guard
+    if guard == None:
+        return head
+    return head + " if " + format_expression(guard)
 
 def format_inline_case_body(statement):
     if statement.variant == "ExpressionStatement":
@@ -579,20 +588,24 @@ def emit_if(state, statement):
     current = state_push_indent(current)
     current = emit_block(current, statement.then_block)
     current = state_pop_indent(current)
-    if statement.else_branch != None:
-        current = emit_else_branch(current, statement.else_branch)
+    else_branch = statement.else_branch
+    if else_branch == None:
+        return state_emit_line(current, ".endif")
+    current = emit_else_branch(current, else_branch)
     return state_emit_line(current, ".endif")
 
 def emit_else_branch(state, branch):
     current = state_emit_line(state, ".else")
     current = state_push_indent(current)
-    if branch.body != None:
-        current = emit_block(current, branch.body)
-    else:
-        if branch.statement != None:
-            current = emit_statement(current, branch.statement)
-        else:
+    body = branch.body
+    if body == None:
+        nested = branch.statement
+        if nested == None:
             current = state_emit_line(current, "noop")
+        else:
+            current = emit_statement(current, nested)
+    else:
+        current = emit_block(current, body)
     current = state_pop_indent(current)
     return current
 
@@ -940,9 +953,7 @@ def convert_struct_fields(fields):
         if index >= len(fields):
             break
         field = fields[index]
-        type_text = ""
-        if field.type_annotation != None:
-            type_text = field.type_annotation.text
+        type_text = field.type_annotation.text
         inputs = append_layout_field_input(inputs, LayoutFieldInput(name=field.name, type_annotation=type_text))
         index += 1
     return inputs

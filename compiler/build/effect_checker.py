@@ -143,6 +143,16 @@ def collect_effects_from_block(block):
         index += 1
     return required
 
+def collect_effects_from_optional_block(block):
+    if block == None:
+        return []
+    return collect_effects_from_block(block)
+
+def collect_effects_from_optional_statement(statement):
+    if statement == None:
+        return []
+    return collect_effects_from_statement(statement)
+
 def collect_effects_from_statement(statement):
     if statement.variant == "PromptStatement":
         required = collect_effects_from_block(statement.body)
@@ -163,8 +173,7 @@ EffectRequirement(effect="model", origin=statement.keyword_token, description="p
         return required
     if statement.variant == "ForStatement":
         required = collect_effects_from_block(statement.body)
-        if statement.clause.target != None:
-            required = merge_requirements(required, collect_effects_from_expression(statement.clause.target))
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.target))
         required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable))
         return required
     if statement.variant == "LoopStatement":
@@ -181,8 +190,10 @@ EffectRequirement(effect="model", origin=statement.keyword_token, description="p
     if statement.variant == "IfStatement":
         required = collect_effects_from_expression(statement.condition)
         required = merge_requirements(required, collect_effects_from_block(statement.then_block))
-        if statement.else_branch != None:
-            required = merge_requirements(required, collect_effects_from_else_branch(statement.else_branch))
+        else_branch = statement.else_branch
+        if else_branch == None:
+            return required
+        required = merge_requirements(required, collect_effects_from_else_branch(else_branch))
         return required
     if statement.variant == "ReturnStatement":
         return collect_effects_from_expression(statement.expression)
@@ -222,16 +233,13 @@ EffectRequirement(effect="model", origin=statement.keyword_token, description="p
 
 def collect_effects_from_else_branch(branch):
     required = []
-    if branch.body != None:
-        required = merge_requirements(required, collect_effects_from_block(branch.body))
-    if branch.statement != None:
-        required = merge_requirements(required, collect_effects_from_statement(branch.statement))
+    required = merge_requirements(required, collect_effects_from_optional_block(branch.body))
+    required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement))
     return required
 
 def collect_effects_from_match_case(case):
     required = collect_effects_from_expression(case.pattern)
-    if case.guard != None:
-        required = merge_requirements(required, collect_effects_from_expression(case.guard))
+    required = merge_requirements(required, collect_effects_from_expression(case.guard))
     required = merge_requirements(required, collect_effects_from_block(case.body))
     return required
 

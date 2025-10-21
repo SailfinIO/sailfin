@@ -208,7 +208,7 @@ fn emit_native(program -> Program) -> EmitNativeResult {
 fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "ImportDeclaration" {
         let mut line -> string = ".import \"" + statement.source + "\"";
-        let rendered = render_native_specifiers(statement.specifiers);
+        let rendered = render_native_specifiers(statement.import_specifiers);
         if rendered.length > 0 {
             line = line + " { " + rendered + " }";
         }
@@ -216,7 +216,7 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     }
     if statement.variant == "ExportDeclaration" {
         let mut line -> string = ".export \"" + statement.source + "\"";
-        let rendered = render_export_specifiers(statement.specifiers);
+        let rendered = render_export_specifiers(statement.export_specifiers);
         if rendered.length > 0 {
             line = line + " { " + rendered + " }";
         }
@@ -333,6 +333,20 @@ fn emit_initializer_span_if_present(state -> NativeState, span -> SourceSpan?) -
     return state_emit_line(state, ".init-span " + format_span(span));
 }
 
+fn append_optional_type_annotation(line -> string, annotation -> TypeAnnotation?) -> string {
+    if annotation == null {
+        return line;
+    }
+    return line + " : " + annotation.text;
+}
+
+fn append_optional_initializer(line -> string, initializer -> Expression?) -> string {
+    if initializer == null {
+        return line;
+    }
+    return line + " = " + format_expression(initializer);
+}
+
 fn format_span(span -> SourceSpan) -> string {
     return number_to_string(span.start_line)
         + " "
@@ -352,12 +366,8 @@ fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {
         line = line + "mut ";
     }
     line = line + statement.name;
-    if statement.type_annotation != null {
-        line = line + " : " + statement.type_annotation.text;
-    }
-    if statement.initializer != null {
-        line = line + " = " + format_expression(statement.initializer);
-    }
+    line = append_optional_type_annotation(line, statement.type_annotation);
+    line = append_optional_initializer(line, statement.initializer);
     return state_emit_line(current, line);
 }
 
@@ -626,15 +636,15 @@ fn emit_match(state -> NativeState, statement -> Statement) -> NativeState {
 
 fn emit_match_case(state -> NativeState, case -> MatchCase) -> NativeState {
     let inline_statement = select_inline_match_case_statement(case.body);
-    if inline_statement != null {
-        return emit_inline_match_case(state, case, inline_statement);
+    if inline_statement == null {
+        let mut line -> string = ".case " + format_match_case_head(case);
+        let mut current = state_emit_line(state, line);
+        current = state_push_indent(current);
+        current = emit_block(current, case.body);
+        current = state_pop_indent(current);
+        return current;
     }
-    let mut line -> string = ".case " + format_match_case_head(case);
-    let mut current = state_emit_line(state, line);
-    current = state_push_indent(current);
-    current = emit_block(current, case.body);
-    current = state_pop_indent(current);
-    return current;
+    return emit_inline_match_case(state, case, inline_statement);
 }
 
 fn select_inline_match_case_statement(block -> Block) -> Statement? {
@@ -658,10 +668,11 @@ fn emit_inline_match_case(state -> NativeState, case -> MatchCase, statement -> 
 
 fn format_match_case_head(case -> MatchCase) -> string {
     let mut head -> string = format_expression(case.pattern);
-    if case.guard != null {
-        head = head + " if " + format_expression(case.guard);
+    let guard = case.guard;
+    if guard == null {
+        return head;
     }
-    return head;
+    return head + " if " + format_expression(guard);
 }
 
 fn format_inline_case_body(statement -> Statement) -> string {
@@ -683,21 +694,27 @@ fn emit_if(state -> NativeState, statement -> Statement) -> NativeState {
     current = state_push_indent(current);
     current = emit_block(current, statement.then_block);
     current = state_pop_indent(current);
-    if statement.else_branch != null {
-        current = emit_else_branch(current, statement.else_branch);
+    let else_branch = statement.else_branch;
+    if else_branch == null {
+        return state_emit_line(current, ".endif");
     }
+    current = emit_else_branch(current, else_branch);
     return state_emit_line(current, ".endif");
 }
 
 fn emit_else_branch(state -> NativeState, branch -> ElseBranch) -> NativeState {
     let mut current = state_emit_line(state, ".else");
     current = state_push_indent(current);
-    if branch.body != null {
-        current = emit_block(current, branch.body);
-    } else if branch.statement != null {
-        current = emit_statement(current, branch.statement);
+    let body = branch.body;
+    if body == null {
+        let nested = branch.statement;
+        if nested == null {
+            current = state_emit_line(current, "noop");
+        } else {
+            current = emit_statement(current, nested);
+        }
     } else {
-        current = state_emit_line(current, "noop");
+        current = emit_block(current, body);
     }
     current = state_pop_indent(current);
     return current;
@@ -1165,10 +1182,7 @@ fn convert_struct_fields(fields -> FieldDeclaration[]) -> LayoutFieldInput[] {
             break;
         }
         let field = fields[index];
-        let mut type_text -> string = "";
-        if field.type_annotation != null {
-            type_text = field.type_annotation.text;
-        }
+        let type_text = field.type_annotation.text;
         inputs = append_layout_field_input(inputs, LayoutFieldInput { name: field.name, type_annotation: type_text });
         index += 1;
     }

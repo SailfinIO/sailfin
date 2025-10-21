@@ -360,24 +360,10 @@ def parse_statement(initial_parser):
         return parse_test(parser, decorators)
     if identifier_matches(token, "fn"):
         return parse_function(parser, False, decorators)
-    if identifier_matches(token, "loop"):
-        if identifier_matches(token, "async"):
-            pass
-        if identifier_matches(token, "break"):
-            if len(decorators) > 0:
-                return BlockStatementParseResult(parser=original, statement=None, success=False)
-            return parse_break_statement(after_decorators)
-        if identifier_matches(token, "continue"):
-            if len(decorators) > 0:
-                return BlockStatementParseResult(parser=original, statement=None, success=False)
-            return parse_continue_statement(after_decorators)
-        after = parser_peek_raw(lookahead)
-        if identifier_matches(after, "fn"):
+    if identifier_matches(token, "async"):
+        lookahead = skip_trivia(parser_advance_raw(parser))
+        if identifier_matches(parser_peek_raw(lookahead), "fn"):
             return parse_function(parser, True, decorators)
-    if identifier_matches(token, "import"):
-        return parse_import(parser)
-    if identifier_matches(token, "export"):
-        return parse_export(parser)
     if identifier_matches(token, "struct"):
         return parse_struct(parser, decorators)
     if identifier_matches(token, "type"):
@@ -407,7 +393,7 @@ def parse_import(initial_parser):
     parser = skip_trivia(parser)
     if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'ImportDeclaration', [runtime.enum_field('specifiers', import_specifiers), runtime.enum_field('source', source)])
+    statement = runtime.enum_instantiate(Statement, 'ImportDeclaration', [runtime.enum_field('import_specifiers', import_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
 
 def parse_export(initial_parser):
@@ -427,7 +413,7 @@ def parse_export(initial_parser):
     parser = skip_trivia(parser)
     if parser_peek_raw(parser).kind.variant == "Symbol"  and  parser_peek_raw(parser).kind.value == ";":
         parser = parser_advance_raw(parser)
-    statement = runtime.enum_instantiate(Statement, 'ExportDeclaration', [runtime.enum_field('specifiers', export_specifiers), runtime.enum_field('source', source)])
+    statement = runtime.enum_instantiate(Statement, 'ExportDeclaration', [runtime.enum_field('export_specifiers', export_specifiers), runtime.enum_field('source', source)])
     return StatementParseResult(parser=parser, statement=statement)
 
 def parse_variable(initial_parser):
@@ -981,7 +967,7 @@ def parse_tool(initial_parser, decorators):
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
-    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[])
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=[], name_span=name_span)
     statement = runtime.enum_instantiate(Statement, 'ToolDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('body', body), runtime.enum_field('decorators', decorators)])
     return StatementParseResult(parser=parser, statement=statement)
 

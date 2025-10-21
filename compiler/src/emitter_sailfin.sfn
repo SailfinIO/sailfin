@@ -63,10 +63,10 @@ fn emit_program(program -> Program) -> string {
 
 fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if statement.variant == "ImportDeclaration" {
-        return emit_import(builder, statement.specifiers, statement.source);
+        return emit_import(builder, statement.import_specifiers, statement.source);
     }
     if statement.variant == "ExportDeclaration" {
-        return emit_export(builder, statement.specifiers, statement.source);
+        return emit_export(builder, statement.export_specifiers, statement.source);
     }
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
@@ -420,30 +420,34 @@ fn emit_if(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let line = "if " + format_expression(statement.condition);
     current = builder_emit_line(current, line);
     current = emit_block(current, statement.then_block);
-    if statement.else_branch != null {
-        current = emit_else_branch(current, statement.else_branch);
+    let else_branch = statement.else_branch;
+    if else_branch == null {
+        return current;
     }
-    return current;
+    return emit_else_branch(current, else_branch);
 }
 
 fn emit_else_branch(builder -> TextBuilder, branch -> ElseBranch) -> TextBuilder {
-    if branch.body != null {
-        let current = builder_emit_line(builder, "else");
-        return emit_block(current, branch.body);
-    }
-    if branch.statement != null {
-        if branch.statement.variant == "IfStatement" {
-            let current = builder_emit_line(builder, "else if " + format_expression(branch.statement.condition));
-            let after = emit_block(current, branch.statement.then_block);
-            if branch.statement.else_branch != null {
-                return emit_else_branch(after, branch.statement.else_branch);
+    let body = branch.body;
+    if body == null {
+        let nested = branch.statement;
+        if nested == null {
+            return builder;
+        }
+        if nested.variant == "IfStatement" {
+            let current = builder_emit_line(builder, "else if " + format_expression(nested.condition));
+            let after = emit_block(current, nested.then_block);
+            let nested_else = nested.else_branch;
+            if nested_else == null {
+                return after;
             }
-            return after;
+            return emit_else_branch(after, nested_else);
         }
         let current = builder_emit_line(builder, "else");
-        return emit_block_statement(current, branch.statement);
+        return emit_block_statement(current, nested);
     }
-    return builder;
+    let current = builder_emit_line(builder, "else");
+    return emit_block(current, body);
 }
 
 fn emit_for(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
@@ -473,10 +477,12 @@ fn emit_match(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
 
 fn emit_match_case(builder -> TextBuilder, case -> MatchCase) -> TextBuilder {
     let mut line -> string = "case " + format_expression(case.pattern);
-    if case.guard != null {
-        line = line + " if " + format_expression(case.guard);
+    let guard = case.guard;
+    if guard == null {
+        line = line + " => {";
+    } else {
+        line = line + " if " + format_expression(guard) + " => {";
     }
-    line = line + " => {";
     let mut current = builder_emit_line(builder, line);
     current = builder_push_indent(current);
     current = emit_block_body(current, case.body);
@@ -704,10 +710,7 @@ fn format_expression(expression -> Expression) -> string {
         return expression.value;
     }
     if expression.variant == "BooleanLiteral" {
-        if expression.value {
-            return "true";
-        }
-        return "false";
+        return expression.value;
     }
     if expression.variant == "NullLiteral" {
         return "null";
@@ -811,9 +814,7 @@ fn format_expression(expression -> Expression) -> string {
 fn format_lambda_expression(expression -> Expression) -> string {
     let params = format_lambda_parameters(expression.parameters);
     let mut header -> string = "fn " + params;
-    if expression.return_type != null {
-        header = header + " -> " + expression.return_type.text;
-    }
+    header = header + format_type_annotation(expression.return_type);
 
     let body = format_lambda_body(expression.body);
     return header + " " + body;
@@ -828,9 +829,7 @@ fn format_lambda_parameters(parameters -> Parameter[]) -> string {
         }
         let param = parameters[index];
         let mut entry -> string = param.name;
-        if param.type_annotation != null {
-            entry = entry + " -> " + param.type_annotation.text;
-        }
+        entry = entry + format_type_annotation(param.type_annotation);
         rendered = append_string(rendered, entry);
         index += 1;
     }
@@ -873,12 +872,8 @@ fn format_lambda_statement(statement -> Statement) -> string {
             line = line + "mut ";
         }
         line = line + statement.name;
-        if statement.type_annotation != null {
-            line = line + " -> " + statement.type_annotation.text;
-        }
-        if statement.initializer != null {
-            line = line + " = " + format_expression(statement.initializer);
-        }
+        line = line + format_type_annotation(statement.type_annotation);
+        line = line + format_initializer(statement.initializer);
         return line + ";";
     }
     if statement.variant == "Unknown" {

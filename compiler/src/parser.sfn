@@ -293,31 +293,11 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
     if identifier_matches(token, "fn") {
         return parse_function(parser, false, decorators);
     }
-    if identifier_matches(token, "loop") {
     if identifier_matches(token, "async") {
-    }
-    if identifier_matches(token, "break") {
-        if decorators.length > 0 {
-            return BlockStatementParseResult { parser: original, statement: null, success: false };
-        }
-        return parse_break_statement(after_decorators);
-    }
-    if identifier_matches(token, "continue") {
-        if decorators.length > 0 {
-            return BlockStatementParseResult { parser: original, statement: null, success: false };
-        }
-        return parse_continue_statement(after_decorators);
-    }
-        let after = parser_peek_raw(lookahead);
-        if identifier_matches(after, "fn") {
+        let lookahead = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(lookahead), "fn") {
             return parse_function(parser, true, decorators);
         }
-    }
-    if identifier_matches(token, "import") {
-        return parse_import(parser);
-    }
-    if identifier_matches(token, "export") {
-        return parse_export(parser);
     }
     if identifier_matches(token, "struct") {
         return parse_struct(parser, decorators);
@@ -362,7 +342,7 @@ fn parse_import(initial_parser -> Parser) -> StatementParseResult {
     }
 
     let statement = Statement.ImportDeclaration {
-        specifiers: import_specifiers,
+        import_specifiers: import_specifiers,
         source: source,
     };
     return StatementParseResult { parser: parser, statement: statement };
@@ -391,7 +371,7 @@ fn parse_export(initial_parser -> Parser) -> StatementParseResult {
     }
 
     let statement = Statement.ExportDeclaration {
-        specifiers: export_specifiers,
+        export_specifiers: export_specifiers,
         source: source,
     };
     return StatementParseResult { parser: parser, statement: statement };
@@ -1222,6 +1202,7 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
+        name_span: name_span,
     };
 
     let statement = Statement.ToolDeclaration {
