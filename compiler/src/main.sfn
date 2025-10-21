@@ -7,6 +7,7 @@ import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import { lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
 import { LayoutManifest, parse_layout_manifest } from "./native_ir";
+import { substring } from "./string_utils";
 import { typecheck_program } from "./typecheck";
 
 struct CompiledModule {
@@ -357,12 +358,13 @@ fn split_source_lines(source -> string) -> string[] {
         if index >= source.length {
             break;
         }
-        let ch = source[index];
+        let ch = substring(source, index, index + 1);
         if ch == "\r" {
             lines = append_string(lines, current);
             current = "";
             if index + 1 < source.length {
-                if source[index + 1] == "\n" {
+                let next = substring(source, index + 1, index + 2);
+                if next == "\n" {
                     index += 2;
                     continue;
                 }
@@ -401,7 +403,7 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
             break;
         }
         if index <= line_text.length {
-            let current = line_text[index - 1];
+            let current = substring(line_text, index - 1, index);
             if current == "\t" {
                 pointer = pointer + "\t";
             } else {
@@ -462,7 +464,7 @@ fn number_to_string(value -> number) -> string {
     let mut negative -> boolean = false;
     if working < 0 {
         negative = true;
-        working = -working;
+        working = 0 - working;
     }
     let digits = "0123456789";
     let mut remaining -> number = working;
@@ -480,7 +482,7 @@ fn number_to_string(value -> number) -> string {
             temp -= 10;
             quotient += 1;
         }
-        let ch = slice_string(digits, temp, temp + 1);
+        let ch = substring(digits, temp, temp + 1);
         output = ch + output;
         remaining = quotient;
     }
@@ -613,8 +615,8 @@ fn strip_needs_python_fallback_literals(source -> string) -> string {
     }
     let mut tail_end -> number = tail_index + tail_marker.length;
     tail_end = advance_to_line_end(source, tail_end);
-    let prefix = slice_string(source, 0, start);
-    let suffix = slice_string(source, tail_end, source.length);
+    let prefix = substring(source, 0, start);
+    let suffix = substring(source, tail_end, source.length);
     return prefix + suffix;
 }
 
@@ -625,7 +627,7 @@ fn strip_python_string_literals(value -> string) -> string {
         if index >= value.length {
             break;
         }
-        let ch = value[index];
+        let ch = substring(value, index, index + 1);
         if ch == "'" {
             let quote_length = python_quote_length(value, index, "'");
             let quotes = repeat_character("'", quote_length);
@@ -650,8 +652,8 @@ fn strip_python_string_literals(value -> string) -> string {
 
 fn python_quote_length(value -> string, start -> number, delimiter -> string) -> number {
     if start + 2 < value.length {
-        if value[start + 1] == delimiter {
-            if value[start + 2] == delimiter {
+        if substring(value, start + 1, start + 2) == delimiter {
+            if substring(value, start + 2, start + 3) == delimiter {
                 return 3;
             }
         }
@@ -667,7 +669,7 @@ fn skip_python_string_literal(value -> string, position -> number, delimiter -> 
             if index >= value.length {
                 return index;
             }
-            let current = value[index];
+            let current = substring(value, index, index + 1);
             index += 1;
             if escaped {
                 escaped = false;
@@ -693,7 +695,8 @@ fn skip_python_string_literal(value -> string, position -> number, delimiter -> 
             if offset >= quote_length {
                 break;
             }
-            if value[search_index + offset] != delimiter {
+            let current = substring(value, search_index + offset, search_index + offset + 1);
+            if current != delimiter {
                 matches = false;
                 break;
             }
@@ -704,6 +707,7 @@ fn skip_python_string_literal(value -> string, position -> number, delimiter -> 
         }
         search_index += 1;
     }
+    return value.length;
 }
 
 fn repeat_character(ch -> string, count -> number) -> string {
@@ -792,38 +796,11 @@ fn advance_to_line_end(value -> string, position -> number) -> number {
         if index >= value.length {
             break;
         }
-        let ch = value[index];
+        let ch = substring(value, index, index + 1);
         index += 1;
         if ch == "\n" {
             break;
         }
     }
     return index;
-}
-
-fn slice_string(value -> string, start -> number, end -> number) -> string {
-    let mut start_index -> number = start;
-    if start_index < 0 {
-        start_index = 0;
-    }
-    let mut end_index -> number = end;
-    if end_index < start_index {
-        end_index = start_index;
-    }
-    if start_index >= value.length {
-        return "";
-    }
-    if end_index > value.length {
-        end_index = value.length;
-    }
-    let mut index -> number = start_index;
-    let mut result -> string = "";
-    loop {
-        if index >= end_index {
-            break;
-        }
-        result = result + value[index];
-        index += 1;
-    }
-    return result;
 }

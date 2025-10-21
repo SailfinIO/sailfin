@@ -7,6 +7,7 @@ from compiler.build.emit_native import emit_native, EmitNativeResult, NativeModu
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
 from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
+from compiler.build.string_utils import substring
 from compiler.build.typecheck import typecheck_program
 
 print = runtime.console
@@ -275,12 +276,13 @@ def split_source_lines(source):
     while True:
         if index >= len(source):
             break
-        ch = source[index]
+        ch = substring(source, index, index + 1)
         if ch == "\r":
             lines = append_string(lines, current)
             current = ""
             if index + 1 < len(source):
-                if source[index + 1] == "\n":
+                next = substring(source, index + 1, index + 2)
+                if next == "\n":
                     index += 2
                     continue
             index += 1
@@ -309,7 +311,7 @@ def build_pointer_line(column, lexeme, line_text):
         if index >= start_column:
             break
         if index <= len(line_text):
-            current = line_text[index - 1]
+            current = substring(line_text, index - 1, index)
             if current == "\t":
                 pointer = pointer + "\t"
             else:
@@ -355,7 +357,7 @@ def number_to_string(value):
     negative = False
     if working < 0:
         negative = True
-        working = -working
+        working = 0 - working
     digits = "0123456789"
     remaining = working
     output = ""
@@ -369,7 +371,7 @@ def number_to_string(value):
                 break
             temp -= 10
             quotient += 1
-        ch = slice_string(digits, temp, temp + 1)
+        ch = substring(digits, temp, temp + 1)
         output = ch + output
         remaining = quotient
     if negative:
@@ -462,8 +464,8 @@ def strip_needs_python_fallback_literals(source):
         return source
     tail_end = tail_index + len(tail_marker)
     tail_end = advance_to_line_end(source, tail_end)
-    prefix = slice_string(source, 0, start)
-    suffix = slice_string(source, tail_end, len(source))
+    prefix = substring(source, 0, start)
+    suffix = substring(source, tail_end, len(source))
     return prefix + suffix
 
 def strip_python_string_literals(value):
@@ -472,7 +474,7 @@ def strip_python_string_literals(value):
     while True:
         if index >= len(value):
             break
-        ch = value[index]
+        ch = substring(value, index, index + 1)
         if ch == "'":
             quote_length = python_quote_length(value, index, "'")
             quotes = repeat_character("'", quote_length)
@@ -493,8 +495,8 @@ def strip_python_string_literals(value):
 
 def python_quote_length(value, start, delimiter):
     if start + 2 < len(value):
-        if value[start + 1] == delimiter:
-            if value[start + 2] == delimiter:
+        if substring(value, start + 1, start + 2) == delimiter:
+            if substring(value, start + 2, start + 3) == delimiter:
                 return 3
     return 1
 
@@ -505,7 +507,7 @@ def skip_python_string_literal(value, position, delimiter, quote_length):
         while True:
             if index >= len(value):
                 return index
-            current = value[index]
+            current = substring(value, index, index + 1)
             index += 1
             if escaped:
                 escaped = False
@@ -524,13 +526,15 @@ def skip_python_string_literal(value, position, delimiter, quote_length):
         while True:
             if offset >= quote_length:
                 break
-            if value[search_index + offset] != delimiter:
+            current = substring(value, search_index + offset, search_index + offset + 1)
+            if current != delimiter:
                 matches = False
                 break
             offset += 1
         if matches:
             return search_index + quote_length
         search_index += 1
+    return len(value)
 
 def repeat_character(ch, count):
     if count <= 0:
@@ -595,28 +599,8 @@ def advance_to_line_end(value, position):
     while True:
         if index >= len(value):
             break
-        ch = value[index]
+        ch = substring(value, index, index + 1)
         index += 1
         if ch == "\n":
             break
     return index
-
-def slice_string(value, start, end):
-    start_index = start
-    if start_index < 0:
-        start_index = 0
-    end_index = end
-    if end_index < start_index:
-        end_index = start_index
-    if start_index >= len(value):
-        return ""
-    if end_index > len(value):
-        end_index = len(value)
-    index = start_index
-    result = ""
-    while True:
-        if index >= end_index:
-            break
-        result = result + value[index]
-        index += 1
-    return result

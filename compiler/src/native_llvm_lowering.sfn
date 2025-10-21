@@ -2014,24 +2014,6 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
                     }
                 }
             }
-        } else {
-            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered_self.diagnostics);
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
-            current_lines = lowered_self.lines;
-            current_temp = lowered_self.temp_index;
-            if lowered_self.operand != null {
-                let base_operand = lowered_self.operand;
-                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
-                if array_element_type.length > 0 && method_parse.field == "concat" {
-                    method_operand = base_operand;
-                    trimmed_target = "concat";
-                    injected_argument_count = 1;
-                }
-            } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
-            }
         }
     }
 

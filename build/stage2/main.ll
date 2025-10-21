@@ -192,6 +192,7 @@ declare void @sailfin_runtime_print_error(i8*)
 declare void @sailfin_runtime_print_warn(i8*)
 ; intrinsic sailfin_adapter_fs_read_file requires capabilities: ![io]
 declare i8* @sailfin_adapter_fs_read_file(i8*)
+declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
@@ -209,11 +210,9 @@ declare noalias i8* @malloc(i64)
 @.str.137 = private unnamed_addr constant [4 x i8] c" | \00"
 @.str.5 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.20 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.13 = private unnamed_addr constant [11 x i8] c"0123456789\00"
-@.str.15 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.16 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.8 = private unnamed_addr constant [13 x i8] c"return False\00"
 @.str.4 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.30 = private unnamed_addr constant [1 x i8] c"\00"
 
 ; fn compile_to_sailfin effects: ![io]
 define i8* @compile_to_sailfin(i8* %source) {
@@ -1684,7 +1683,8 @@ entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca i8*
   %l2 = alloca double
-  %l3 = alloca i8
+  %l3 = alloca i8*
+  %l4 = alloca i8*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -1702,12 +1702,12 @@ entry:
   %t9 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t86 = phi { i8**, i64 }* [ %t7, %entry ], [ %t83, %loop.latch2 ]
-  %t87 = phi i8* [ %t8, %entry ], [ %t84, %loop.latch2 ]
-  %t88 = phi double [ %t9, %entry ], [ %t85, %loop.latch2 ]
-  store { i8**, i64 }* %t86, { i8**, i64 }** %l0
-  store i8* %t87, i8** %l1
-  store double %t88, double* %l2
+  %t92 = phi { i8**, i64 }* [ %t7, %entry ], [ %t89, %loop.latch2 ]
+  %t93 = phi i8* [ %t8, %entry ], [ %t90, %loop.latch2 ]
+  %t94 = phi double [ %t9, %entry ], [ %t91, %loop.latch2 ]
+  store { i8**, i64 }* %t92, { i8**, i64 }** %l0
+  store i8* %t93, i8** %l1
+  store double %t94, double* %l2
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l2
@@ -1722,113 +1722,118 @@ then4:
   br label %afterloop3
 merge5:
   %t17 = load double, double* %l2
-  %t18 = fptosi double %t17 to i64
-  %t19 = getelementptr i8, i8* %source, i64 %t18
-  %t20 = load i8, i8* %t19
-  store i8 %t20, i8* %l3
-  %t21 = load i8, i8* %l3
-  %t22 = icmp eq i8 %t21, 13
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t24 = load i8*, i8** %l1
-  %t25 = load double, double* %l2
-  %t26 = load i8, i8* %l3
-  br i1 %t22, label %then6, label %merge7
-then6:
+  %t18 = load double, double* %l2
+  %t19 = sitofp i64 1 to double
+  %t20 = fadd double %t18, %t19
+  %t21 = fptosi double %t17 to i64
+  %t22 = fptosi double %t20 to i64
+  %t23 = call i8* @sailfin_runtime_substring(i8* %source, i64 %t21, i64 %t22)
+  store i8* %t23, i8** %l3
+  %t24 = load i8*, i8** %l3
+  %t25 = load i8, i8* %t24
+  %t26 = icmp eq i8 %t25, 13
   %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t28 = load i8*, i8** %l1
-  %t29 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t27, i8* %t28)
-  store { i8**, i64 }* %t29, { i8**, i64 }** %l0
-  %s30 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.30, i32 0, i32 0
-  store i8* %s30, i8** %l1
-  %t31 = load double, double* %l2
-  %t32 = sitofp i64 1 to double
-  %t33 = fadd double %t31, %t32
-  %t34 = call i64 @sailfin_runtime_string_length(i8* %source)
-  %t35 = sitofp i64 %t34 to double
-  %t36 = fcmp olt double %t33, %t35
-  %t37 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t38 = load i8*, i8** %l1
-  %t39 = load double, double* %l2
-  %t40 = load i8, i8* %l3
-  br i1 %t36, label %then8, label %merge9
+  %t29 = load double, double* %l2
+  %t30 = load i8*, i8** %l3
+  br i1 %t26, label %then6, label %merge7
+then6:
+  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t32 = load i8*, i8** %l1
+  %t33 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t31, i8* %t32)
+  store { i8**, i64 }* %t33, { i8**, i64 }** %l0
+  %s34 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.34, i32 0, i32 0
+  store i8* %s34, i8** %l1
+  %t35 = load double, double* %l2
+  %t36 = sitofp i64 1 to double
+  %t37 = fadd double %t35, %t36
+  %t38 = call i64 @sailfin_runtime_string_length(i8* %source)
+  %t39 = sitofp i64 %t38 to double
+  %t40 = fcmp olt double %t37, %t39
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t42 = load i8*, i8** %l1
+  %t43 = load double, double* %l2
+  %t44 = load i8*, i8** %l3
+  br i1 %t40, label %then8, label %merge9
 then8:
-  %t41 = load double, double* %l2
-  %t42 = sitofp i64 1 to double
-  %t43 = fadd double %t41, %t42
-  %t44 = fptosi double %t43 to i64
-  %t45 = getelementptr i8, i8* %source, i64 %t44
-  %t46 = load i8, i8* %t45
-  %t47 = icmp eq i8 %t46, 10
-  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t49 = load i8*, i8** %l1
-  %t50 = load double, double* %l2
-  %t51 = load i8, i8* %l3
-  br i1 %t47, label %then10, label %merge11
+  %t45 = load double, double* %l2
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  %t48 = load double, double* %l2
+  %t49 = sitofp i64 2 to double
+  %t50 = fadd double %t48, %t49
+  %t51 = fptosi double %t47 to i64
+  %t52 = fptosi double %t50 to i64
+  %t53 = call i8* @sailfin_runtime_substring(i8* %source, i64 %t51, i64 %t52)
+  store i8* %t53, i8** %l4
+  %t54 = load i8*, i8** %l4
+  %t55 = load i8, i8* %t54
+  %t56 = icmp eq i8 %t55, 10
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t58 = load i8*, i8** %l1
+  %t59 = load double, double* %l2
+  %t60 = load i8*, i8** %l3
+  %t61 = load i8*, i8** %l4
+  br i1 %t56, label %then10, label %merge11
 then10:
-  %t52 = load double, double* %l2
-  %t53 = sitofp i64 2 to double
-  %t54 = fadd double %t52, %t53
-  store double %t54, double* %l2
+  %t62 = load double, double* %l2
+  %t63 = sitofp i64 2 to double
+  %t64 = fadd double %t62, %t63
+  store double %t64, double* %l2
   br label %loop.latch2
 merge11:
   br label %merge9
 merge9:
-  %t55 = phi double [ %t54, %then8 ], [ %t39, %then6 ]
-  store double %t55, double* %l2
-  %t56 = load double, double* %l2
-  %t57 = sitofp i64 1 to double
-  %t58 = fadd double %t56, %t57
-  store double %t58, double* %l2
+  %t65 = phi double [ %t64, %then8 ], [ %t43, %then6 ]
+  store double %t65, double* %l2
+  %t66 = load double, double* %l2
+  %t67 = sitofp i64 1 to double
+  %t68 = fadd double %t66, %t67
+  store double %t68, double* %l2
   br label %loop.latch2
 merge7:
-  %t59 = load i8, i8* %l3
-  %t60 = icmp eq i8 %t59, 10
-  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t62 = load i8*, i8** %l1
-  %t63 = load double, double* %l2
-  %t64 = load i8, i8* %l3
-  br i1 %t60, label %then12, label %merge13
+  %t69 = load i8*, i8** %l3
+  %t70 = load i8, i8* %t69
+  %t71 = icmp eq i8 %t70, 10
+  %t72 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t73 = load i8*, i8** %l1
+  %t74 = load double, double* %l2
+  %t75 = load i8*, i8** %l3
+  br i1 %t71, label %then12, label %merge13
 then12:
-  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t66 = load i8*, i8** %l1
-  %t67 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t65, i8* %t66)
-  store { i8**, i64 }* %t67, { i8**, i64 }** %l0
-  %s68 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.68, i32 0, i32 0
-  store i8* %s68, i8** %l1
-  %t69 = load double, double* %l2
-  %t70 = sitofp i64 1 to double
-  %t71 = fadd double %t69, %t70
-  store double %t71, double* %l2
-  br label %loop.latch2
-merge13:
-  %t72 = load i8*, i8** %l1
-  %t73 = load i8, i8* %l3
-  %t74 = load i8, i8* %t72
-  %t75 = add i8 %t74, %t73
-  %t76 = alloca [2 x i8], align 1
-  %t77 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 0
-  store i8 %t75, i8* %t77
-  %t78 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 1
-  store i8 0, i8* %t78
-  %t79 = getelementptr [2 x i8], [2 x i8]* %t76, i32 0, i32 0
-  store i8* %t79, i8** %l1
+  %t76 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t77 = load i8*, i8** %l1
+  %t78 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t76, i8* %t77)
+  store { i8**, i64 }* %t78, { i8**, i64 }** %l0
+  %s79 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.79, i32 0, i32 0
+  store i8* %s79, i8** %l1
   %t80 = load double, double* %l2
   %t81 = sitofp i64 1 to double
   %t82 = fadd double %t80, %t81
   store double %t82, double* %l2
   br label %loop.latch2
+merge13:
+  %t83 = load i8*, i8** %l1
+  %t84 = load i8*, i8** %l3
+  %t85 = add i8* %t83, %t84
+  store i8* %t85, i8** %l1
+  %t86 = load double, double* %l2
+  %t87 = sitofp i64 1 to double
+  %t88 = fadd double %t86, %t87
+  store double %t88, double* %l2
+  br label %loop.latch2
 loop.latch2:
-  %t83 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t84 = load i8*, i8** %l1
-  %t85 = load double, double* %l2
-  br label %loop.header0
-afterloop3:
   %t89 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t90 = load i8*, i8** %l1
-  %t91 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t89, i8* %t90)
-  store { i8**, i64 }* %t91, { i8**, i64 }** %l0
-  %t92 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t92
+  %t91 = load double, double* %l2
+  br label %loop.header0
+afterloop3:
+  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t96 = load i8*, i8** %l1
+  %t97 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t95, i8* %t96)
+  store { i8**, i64 }* %t97, { i8**, i64 }** %l0
+  %t98 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t98
 }
 
 define i8* @build_pointer_line(double %column, i8* %lexeme, i8* %line_text) {
@@ -1836,7 +1841,7 @@ entry:
   %l0 = alloca double
   %l1 = alloca i8*
   %l2 = alloca double
-  %l3 = alloca i8
+  %l3 = alloca i8*
   %l4 = alloca double
   %l5 = alloca double
   %l6 = alloca double
@@ -1888,10 +1893,10 @@ merge5:
   %t24 = load double, double* %l2
   br label %loop.header6
 loop.header6:
-  %t78 = phi i8* [ %t23, %entry ], [ %t76, %loop.latch8 ]
-  %t79 = phi double [ %t24, %entry ], [ %t77, %loop.latch8 ]
-  store i8* %t78, i8** %l1
-  store double %t79, double* %l2
+  %t80 = phi i8* [ %t23, %entry ], [ %t78, %loop.latch8 ]
+  %t81 = phi double [ %t24, %entry ], [ %t79, %loop.latch8 ]
+  store i8* %t80, i8** %l1
+  store double %t81, double* %l2
   br label %loop.body7
 loop.body7:
   %t25 = load double, double* %l2
@@ -1916,178 +1921,180 @@ then12:
   %t38 = load double, double* %l2
   %t39 = sitofp i64 1 to double
   %t40 = fsub double %t38, %t39
-  %t41 = fptosi double %t40 to i64
-  %t42 = getelementptr i8, i8* %line_text, i64 %t41
-  %t43 = load i8, i8* %t42
-  store i8 %t43, i8* %l3
-  %t44 = load i8, i8* %l3
-  %t45 = icmp eq i8 %t44, 9
-  %t46 = load double, double* %l0
-  %t47 = load i8*, i8** %l1
-  %t48 = load double, double* %l2
-  %t49 = load i8, i8* %l3
-  br i1 %t45, label %then15, label %else16
+  %t41 = load double, double* %l2
+  %t42 = fptosi double %t40 to i64
+  %t43 = fptosi double %t41 to i64
+  %t44 = call i8* @sailfin_runtime_substring(i8* %line_text, i64 %t42, i64 %t43)
+  store i8* %t44, i8** %l3
+  %t45 = load i8*, i8** %l3
+  %t46 = load i8, i8* %t45
+  %t47 = icmp eq i8 %t46, 9
+  %t48 = load double, double* %l0
+  %t49 = load i8*, i8** %l1
+  %t50 = load double, double* %l2
+  %t51 = load i8*, i8** %l3
+  br i1 %t47, label %then15, label %else16
 then15:
-  %t50 = load i8*, i8** %l1
-  %t51 = load i8, i8* %t50
-  %t52 = add i8 %t51, 9
-  %t53 = alloca [2 x i8], align 1
-  %t54 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  store i8 %t52, i8* %t54
-  %t55 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 1
-  store i8 0, i8* %t55
-  %t56 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  store i8* %t56, i8** %l1
+  %t52 = load i8*, i8** %l1
+  %t53 = load i8, i8* %t52
+  %t54 = add i8 %t53, 9
+  %t55 = alloca [2 x i8], align 1
+  %t56 = getelementptr [2 x i8], [2 x i8]* %t55, i32 0, i32 0
+  store i8 %t54, i8* %t56
+  %t57 = getelementptr [2 x i8], [2 x i8]* %t55, i32 0, i32 1
+  store i8 0, i8* %t57
+  %t58 = getelementptr [2 x i8], [2 x i8]* %t55, i32 0, i32 0
+  store i8* %t58, i8** %l1
   br label %merge17
 else16:
-  %t57 = load i8*, i8** %l1
-  %t58 = load i8, i8* %t57
-  %t59 = add i8 %t58, 32
-  %t60 = alloca [2 x i8], align 1
-  %t61 = getelementptr [2 x i8], [2 x i8]* %t60, i32 0, i32 0
-  store i8 %t59, i8* %t61
-  %t62 = getelementptr [2 x i8], [2 x i8]* %t60, i32 0, i32 1
-  store i8 0, i8* %t62
-  %t63 = getelementptr [2 x i8], [2 x i8]* %t60, i32 0, i32 0
-  store i8* %t63, i8** %l1
+  %t59 = load i8*, i8** %l1
+  %t60 = load i8, i8* %t59
+  %t61 = add i8 %t60, 32
+  %t62 = alloca [2 x i8], align 1
+  %t63 = getelementptr [2 x i8], [2 x i8]* %t62, i32 0, i32 0
+  store i8 %t61, i8* %t63
+  %t64 = getelementptr [2 x i8], [2 x i8]* %t62, i32 0, i32 1
+  store i8 0, i8* %t64
+  %t65 = getelementptr [2 x i8], [2 x i8]* %t62, i32 0, i32 0
+  store i8* %t65, i8** %l1
   br label %merge17
 merge17:
-  %t64 = phi i8* [ %t56, %then15 ], [ %t63, %else16 ]
-  store i8* %t64, i8** %l1
+  %t66 = phi i8* [ %t58, %then15 ], [ %t65, %else16 ]
+  store i8* %t66, i8** %l1
   br label %merge14
 else13:
-  %t65 = load i8*, i8** %l1
-  %t66 = load i8, i8* %t65
-  %t67 = add i8 %t66, 32
-  %t68 = alloca [2 x i8], align 1
-  %t69 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 0
-  store i8 %t67, i8* %t69
-  %t70 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 1
-  store i8 0, i8* %t70
-  %t71 = getelementptr [2 x i8], [2 x i8]* %t68, i32 0, i32 0
-  store i8* %t71, i8** %l1
+  %t67 = load i8*, i8** %l1
+  %t68 = load i8, i8* %t67
+  %t69 = add i8 %t68, 32
+  %t70 = alloca [2 x i8], align 1
+  %t71 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 0
+  store i8 %t69, i8* %t71
+  %t72 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 1
+  store i8 0, i8* %t72
+  %t73 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 0
+  store i8* %t73, i8** %l1
   br label %merge14
 merge14:
-  %t72 = phi i8* [ %t56, %then12 ], [ %t71, %else13 ]
-  store i8* %t72, i8** %l1
-  %t73 = load double, double* %l2
-  %t74 = sitofp i64 1 to double
-  %t75 = fadd double %t73, %t74
-  store double %t75, double* %l2
+  %t74 = phi i8* [ %t58, %then12 ], [ %t73, %else13 ]
+  store i8* %t74, i8** %l1
+  %t75 = load double, double* %l2
+  %t76 = sitofp i64 1 to double
+  %t77 = fadd double %t75, %t76
+  store double %t77, double* %l2
   br label %loop.latch8
 loop.latch8:
-  %t76 = load i8*, i8** %l1
-  %t77 = load double, double* %l2
+  %t78 = load i8*, i8** %l1
+  %t79 = load double, double* %l2
   br label %loop.header6
 afterloop9:
-  %t80 = call i64 @sailfin_runtime_string_length(i8* %lexeme)
-  %t81 = sitofp i64 %t80 to double
-  store double %t81, double* %l4
-  %t82 = load double, double* %l4
-  %t83 = sitofp i64 0 to double
-  %t84 = fcmp ole double %t82, %t83
-  %t85 = load double, double* %l0
-  %t86 = load i8*, i8** %l1
-  %t87 = load double, double* %l2
-  %t88 = load double, double* %l4
-  br i1 %t84, label %then18, label %merge19
+  %t82 = call i64 @sailfin_runtime_string_length(i8* %lexeme)
+  %t83 = sitofp i64 %t82 to double
+  store double %t83, double* %l4
+  %t84 = load double, double* %l4
+  %t85 = sitofp i64 0 to double
+  %t86 = fcmp ole double %t84, %t85
+  %t87 = load double, double* %l0
+  %t88 = load i8*, i8** %l1
+  %t89 = load double, double* %l2
+  %t90 = load double, double* %l4
+  br i1 %t86, label %then18, label %merge19
 then18:
-  %t89 = sitofp i64 1 to double
-  store double %t89, double* %l4
+  %t91 = sitofp i64 1 to double
+  store double %t91, double* %l4
   br label %merge19
 merge19:
-  %t90 = phi double [ %t89, %then18 ], [ %t88, %entry ]
-  store double %t90, double* %l4
-  %t91 = call i64 @sailfin_runtime_string_length(i8* %line_text)
-  %t92 = load double, double* %l0
-  %t93 = sitofp i64 1 to double
-  %t94 = fsub double %t92, %t93
-  %t95 = sitofp i64 %t91 to double
-  %t96 = fsub double %t95, %t94
-  store double %t96, double* %l5
-  %t97 = load double, double* %l5
-  %t98 = sitofp i64 0 to double
-  %t99 = fcmp ole double %t97, %t98
-  %t100 = load double, double* %l0
-  %t101 = load i8*, i8** %l1
-  %t102 = load double, double* %l2
-  %t103 = load double, double* %l4
-  %t104 = load double, double* %l5
-  br i1 %t99, label %then20, label %merge21
+  %t92 = phi double [ %t91, %then18 ], [ %t90, %entry ]
+  store double %t92, double* %l4
+  %t93 = call i64 @sailfin_runtime_string_length(i8* %line_text)
+  %t94 = load double, double* %l0
+  %t95 = sitofp i64 1 to double
+  %t96 = fsub double %t94, %t95
+  %t97 = sitofp i64 %t93 to double
+  %t98 = fsub double %t97, %t96
+  store double %t98, double* %l5
+  %t99 = load double, double* %l5
+  %t100 = sitofp i64 0 to double
+  %t101 = fcmp ole double %t99, %t100
+  %t102 = load double, double* %l0
+  %t103 = load i8*, i8** %l1
+  %t104 = load double, double* %l2
+  %t105 = load double, double* %l4
+  %t106 = load double, double* %l5
+  br i1 %t101, label %then20, label %merge21
 then20:
-  %t105 = sitofp i64 1 to double
-  store double %t105, double* %l5
+  %t107 = sitofp i64 1 to double
+  store double %t107, double* %l5
   br label %merge21
 merge21:
-  %t106 = phi double [ %t105, %then20 ], [ %t104, %entry ]
-  store double %t106, double* %l5
-  %t107 = load double, double* %l4
-  %t108 = load double, double* %l5
-  %t109 = fcmp ogt double %t107, %t108
-  %t110 = load double, double* %l0
-  %t111 = load i8*, i8** %l1
-  %t112 = load double, double* %l2
-  %t113 = load double, double* %l4
-  %t114 = load double, double* %l5
-  br i1 %t109, label %then22, label %merge23
+  %t108 = phi double [ %t107, %then20 ], [ %t106, %entry ]
+  store double %t108, double* %l5
+  %t109 = load double, double* %l4
+  %t110 = load double, double* %l5
+  %t111 = fcmp ogt double %t109, %t110
+  %t112 = load double, double* %l0
+  %t113 = load i8*, i8** %l1
+  %t114 = load double, double* %l2
+  %t115 = load double, double* %l4
+  %t116 = load double, double* %l5
+  br i1 %t111, label %then22, label %merge23
 then22:
-  %t115 = load double, double* %l5
-  store double %t115, double* %l4
+  %t117 = load double, double* %l5
+  store double %t117, double* %l4
   br label %merge23
 merge23:
-  %t116 = phi double [ %t115, %then22 ], [ %t113, %entry ]
-  store double %t116, double* %l4
-  %t117 = sitofp i64 0 to double
-  store double %t117, double* %l6
-  %t118 = load double, double* %l0
-  %t119 = load i8*, i8** %l1
-  %t120 = load double, double* %l2
-  %t121 = load double, double* %l4
-  %t122 = load double, double* %l5
-  %t123 = load double, double* %l6
+  %t118 = phi double [ %t117, %then22 ], [ %t115, %entry ]
+  store double %t118, double* %l4
+  %t119 = sitofp i64 0 to double
+  store double %t119, double* %l6
+  %t120 = load double, double* %l0
+  %t121 = load i8*, i8** %l1
+  %t122 = load double, double* %l2
+  %t123 = load double, double* %l4
+  %t124 = load double, double* %l5
+  %t125 = load double, double* %l6
   br label %loop.header24
 loop.header24:
-  %t145 = phi i8* [ %t119, %entry ], [ %t143, %loop.latch26 ]
-  %t146 = phi double [ %t123, %entry ], [ %t144, %loop.latch26 ]
-  store i8* %t145, i8** %l1
-  store double %t146, double* %l6
+  %t147 = phi i8* [ %t121, %entry ], [ %t145, %loop.latch26 ]
+  %t148 = phi double [ %t125, %entry ], [ %t146, %loop.latch26 ]
+  store i8* %t147, i8** %l1
+  store double %t148, double* %l6
   br label %loop.body25
 loop.body25:
-  %t124 = load double, double* %l6
-  %t125 = load double, double* %l4
-  %t126 = fcmp oge double %t124, %t125
-  %t127 = load double, double* %l0
-  %t128 = load i8*, i8** %l1
-  %t129 = load double, double* %l2
-  %t130 = load double, double* %l4
-  %t131 = load double, double* %l5
-  %t132 = load double, double* %l6
-  br i1 %t126, label %then28, label %merge29
+  %t126 = load double, double* %l6
+  %t127 = load double, double* %l4
+  %t128 = fcmp oge double %t126, %t127
+  %t129 = load double, double* %l0
+  %t130 = load i8*, i8** %l1
+  %t131 = load double, double* %l2
+  %t132 = load double, double* %l4
+  %t133 = load double, double* %l5
+  %t134 = load double, double* %l6
+  br i1 %t128, label %then28, label %merge29
 then28:
   br label %afterloop27
 merge29:
-  %t133 = load i8*, i8** %l1
-  %t134 = load i8, i8* %t133
-  %t135 = add i8 %t134, 94
-  %t136 = alloca [2 x i8], align 1
-  %t137 = getelementptr [2 x i8], [2 x i8]* %t136, i32 0, i32 0
-  store i8 %t135, i8* %t137
-  %t138 = getelementptr [2 x i8], [2 x i8]* %t136, i32 0, i32 1
-  store i8 0, i8* %t138
-  %t139 = getelementptr [2 x i8], [2 x i8]* %t136, i32 0, i32 0
-  store i8* %t139, i8** %l1
-  %t140 = load double, double* %l6
-  %t141 = sitofp i64 1 to double
-  %t142 = fadd double %t140, %t141
-  store double %t142, double* %l6
+  %t135 = load i8*, i8** %l1
+  %t136 = load i8, i8* %t135
+  %t137 = add i8 %t136, 94
+  %t138 = alloca [2 x i8], align 1
+  %t139 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 0
+  store i8 %t137, i8* %t139
+  %t140 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 1
+  store i8 0, i8* %t140
+  %t141 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 0
+  store i8* %t141, i8** %l1
+  %t142 = load double, double* %l6
+  %t143 = sitofp i64 1 to double
+  %t144 = fadd double %t142, %t143
+  store double %t144, double* %l6
   br label %loop.latch26
 loop.latch26:
-  %t143 = load i8*, i8** %l1
-  %t144 = load double, double* %l6
+  %t145 = load i8*, i8** %l1
+  %t146 = load double, double* %l6
   br label %loop.header24
 afterloop27:
-  %t147 = load i8*, i8** %l1
-  ret i8* %t147
+  %t149 = load i8*, i8** %l1
+  ret i8* %t149
 }
 
 define i8* @join_lines({ i8**, i64 }* %lines) {
@@ -2215,133 +2222,139 @@ merge1:
   br i1 %t8, label %then2, label %merge3
 then2:
   store i1 1, i1* %l1
+  %t11 = load double, double* %l0
+  %t12 = sitofp i64 0 to double
+  %t13 = fsub double %t12, %t11
+  store double %t13, double* %l0
   br label %merge3
 merge3:
-  %t11 = phi i1 [ 1, %then2 ], [ %t10, %entry ]
-  %t12 = phi double [ 0.0, %then2 ], [ %t9, %entry ]
-  store i1 %t11, i1* %l1
-  store double %t12, double* %l0
-  %s13 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.13, i32 0, i32 0
-  store i8* %s13, i8** %l2
-  %t14 = load double, double* %l0
-  store double %t14, double* %l3
-  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.15, i32 0, i32 0
-  store i8* %s15, i8** %l4
-  %t16 = load double, double* %l0
-  %t17 = load i1, i1* %l1
-  %t18 = load i8*, i8** %l2
-  %t19 = load double, double* %l3
-  %t20 = load i8*, i8** %l4
+  %t14 = phi i1 [ 1, %then2 ], [ %t10, %entry ]
+  %t15 = phi double [ %t13, %then2 ], [ %t9, %entry ]
+  store i1 %t14, i1* %l1
+  store double %t15, double* %l0
+  %s16 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.16, i32 0, i32 0
+  store i8* %s16, i8** %l2
+  %t17 = load double, double* %l0
+  store double %t17, double* %l3
+  %s18 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.18, i32 0, i32 0
+  store i8* %s18, i8** %l4
+  %t19 = load double, double* %l0
+  %t20 = load i1, i1* %l1
+  %t21 = load i8*, i8** %l2
+  %t22 = load double, double* %l3
+  %t23 = load i8*, i8** %l4
   br label %loop.header4
 loop.header4:
-  %t70 = phi i8* [ %t20, %entry ], [ %t68, %loop.latch6 ]
-  %t71 = phi double [ %t19, %entry ], [ %t69, %loop.latch6 ]
-  store i8* %t70, i8** %l4
-  store double %t71, double* %l3
+  %t75 = phi i8* [ %t23, %entry ], [ %t73, %loop.latch6 ]
+  %t76 = phi double [ %t22, %entry ], [ %t74, %loop.latch6 ]
+  store i8* %t75, i8** %l4
+  store double %t76, double* %l3
   br label %loop.body5
 loop.body5:
-  %t21 = load double, double* %l3
-  %t22 = sitofp i64 0 to double
-  %t23 = fcmp ole double %t21, %t22
-  %t24 = load double, double* %l0
-  %t25 = load i1, i1* %l1
-  %t26 = load i8*, i8** %l2
-  %t27 = load double, double* %l3
-  %t28 = load i8*, i8** %l4
-  br i1 %t23, label %then8, label %merge9
+  %t24 = load double, double* %l3
+  %t25 = sitofp i64 0 to double
+  %t26 = fcmp ole double %t24, %t25
+  %t27 = load double, double* %l0
+  %t28 = load i1, i1* %l1
+  %t29 = load i8*, i8** %l2
+  %t30 = load double, double* %l3
+  %t31 = load i8*, i8** %l4
+  br i1 %t26, label %then8, label %merge9
 then8:
   br label %afterloop7
 merge9:
-  %t29 = load double, double* %l3
-  store double %t29, double* %l5
-  %t30 = sitofp i64 0 to double
-  store double %t30, double* %l6
-  %t31 = load double, double* %l0
-  %t32 = load i1, i1* %l1
-  %t33 = load i8*, i8** %l2
-  %t34 = load double, double* %l3
-  %t35 = load i8*, i8** %l4
-  %t36 = load double, double* %l5
-  %t37 = load double, double* %l6
+  %t32 = load double, double* %l3
+  store double %t32, double* %l5
+  %t33 = sitofp i64 0 to double
+  store double %t33, double* %l6
+  %t34 = load double, double* %l0
+  %t35 = load i1, i1* %l1
+  %t36 = load i8*, i8** %l2
+  %t37 = load double, double* %l3
+  %t38 = load i8*, i8** %l4
+  %t39 = load double, double* %l5
+  %t40 = load double, double* %l6
   br label %loop.header10
 loop.header10:
-  %t56 = phi double [ %t36, %loop.body5 ], [ %t54, %loop.latch12 ]
-  %t57 = phi double [ %t37, %loop.body5 ], [ %t55, %loop.latch12 ]
-  store double %t56, double* %l5
-  store double %t57, double* %l6
+  %t59 = phi double [ %t39, %loop.body5 ], [ %t57, %loop.latch12 ]
+  %t60 = phi double [ %t40, %loop.body5 ], [ %t58, %loop.latch12 ]
+  store double %t59, double* %l5
+  store double %t60, double* %l6
   br label %loop.body11
 loop.body11:
-  %t38 = load double, double* %l5
-  %t39 = sitofp i64 10 to double
-  %t40 = fcmp olt double %t38, %t39
-  %t41 = load double, double* %l0
-  %t42 = load i1, i1* %l1
-  %t43 = load i8*, i8** %l2
-  %t44 = load double, double* %l3
-  %t45 = load i8*, i8** %l4
-  %t46 = load double, double* %l5
-  %t47 = load double, double* %l6
-  br i1 %t40, label %then14, label %merge15
+  %t41 = load double, double* %l5
+  %t42 = sitofp i64 10 to double
+  %t43 = fcmp olt double %t41, %t42
+  %t44 = load double, double* %l0
+  %t45 = load i1, i1* %l1
+  %t46 = load i8*, i8** %l2
+  %t47 = load double, double* %l3
+  %t48 = load i8*, i8** %l4
+  %t49 = load double, double* %l5
+  %t50 = load double, double* %l6
+  br i1 %t43, label %then14, label %merge15
 then14:
   br label %afterloop13
 merge15:
-  %t48 = load double, double* %l5
-  %t49 = sitofp i64 10 to double
-  %t50 = fsub double %t48, %t49
-  store double %t50, double* %l5
-  %t51 = load double, double* %l6
-  %t52 = sitofp i64 1 to double
-  %t53 = fadd double %t51, %t52
-  store double %t53, double* %l6
+  %t51 = load double, double* %l5
+  %t52 = sitofp i64 10 to double
+  %t53 = fsub double %t51, %t52
+  store double %t53, double* %l5
+  %t54 = load double, double* %l6
+  %t55 = sitofp i64 1 to double
+  %t56 = fadd double %t54, %t55
+  store double %t56, double* %l6
   br label %loop.latch12
 loop.latch12:
-  %t54 = load double, double* %l5
-  %t55 = load double, double* %l6
+  %t57 = load double, double* %l5
+  %t58 = load double, double* %l6
   br label %loop.header10
 afterloop13:
-  %t58 = load i8*, i8** %l2
-  %t59 = load double, double* %l5
-  %t60 = load double, double* %l5
-  %t61 = sitofp i64 1 to double
-  %t62 = fadd double %t60, %t61
-  %t63 = call i8* @slice_string(i8* %t58, double %t59, double %t62)
-  store i8* %t63, i8** %l7
-  %t64 = load i8*, i8** %l7
-  %t65 = load i8*, i8** %l4
-  %t66 = add i8* %t64, %t65
-  store i8* %t66, i8** %l4
-  %t67 = load double, double* %l6
-  store double %t67, double* %l3
+  %t61 = load i8*, i8** %l2
+  %t62 = load double, double* %l5
+  %t63 = load double, double* %l5
+  %t64 = sitofp i64 1 to double
+  %t65 = fadd double %t63, %t64
+  %t66 = fptosi double %t62 to i64
+  %t67 = fptosi double %t65 to i64
+  %t68 = call i8* @sailfin_runtime_substring(i8* %t61, i64 %t66, i64 %t67)
+  store i8* %t68, i8** %l7
+  %t69 = load i8*, i8** %l7
+  %t70 = load i8*, i8** %l4
+  %t71 = add i8* %t69, %t70
+  store i8* %t71, i8** %l4
+  %t72 = load double, double* %l6
+  store double %t72, double* %l3
   br label %loop.latch6
 loop.latch6:
-  %t68 = load i8*, i8** %l4
-  %t69 = load double, double* %l3
+  %t73 = load i8*, i8** %l4
+  %t74 = load double, double* %l3
   br label %loop.header4
 afterloop7:
-  %t72 = load i1, i1* %l1
-  %t73 = load double, double* %l0
-  %t74 = load i1, i1* %l1
-  %t75 = load i8*, i8** %l2
-  %t76 = load double, double* %l3
-  %t77 = load i8*, i8** %l4
-  br i1 %t72, label %then16, label %merge17
+  %t77 = load i1, i1* %l1
+  %t78 = load double, double* %l0
+  %t79 = load i1, i1* %l1
+  %t80 = load i8*, i8** %l2
+  %t81 = load double, double* %l3
+  %t82 = load i8*, i8** %l4
+  br i1 %t77, label %then16, label %merge17
 then16:
-  %t78 = load i8*, i8** %l4
-  %t79 = load i8, i8* %t78
-  %t80 = add i8 45, %t79
-  %t81 = alloca [2 x i8], align 1
-  %t82 = getelementptr [2 x i8], [2 x i8]* %t81, i32 0, i32 0
-  store i8 %t80, i8* %t82
-  %t83 = getelementptr [2 x i8], [2 x i8]* %t81, i32 0, i32 1
-  store i8 0, i8* %t83
-  %t84 = getelementptr [2 x i8], [2 x i8]* %t81, i32 0, i32 0
-  store i8* %t84, i8** %l4
+  %t83 = load i8*, i8** %l4
+  %t84 = load i8, i8* %t83
+  %t85 = add i8 45, %t84
+  %t86 = alloca [2 x i8], align 1
+  %t87 = getelementptr [2 x i8], [2 x i8]* %t86, i32 0, i32 0
+  store i8 %t85, i8* %t87
+  %t88 = getelementptr [2 x i8], [2 x i8]* %t86, i32 0, i32 1
+  store i8 0, i8* %t88
+  %t89 = getelementptr [2 x i8], [2 x i8]* %t86, i32 0, i32 0
+  store i8* %t89, i8** %l4
   br label %merge17
 merge17:
-  %t85 = phi i8* [ %t84, %then16 ], [ %t77, %entry ]
-  store i8* %t85, i8** %l4
-  %t86 = load i8*, i8** %l4
-  ret i8* %t86
+  %t90 = phi i8* [ %t89, %then16 ], [ %t82, %entry ]
+  store i8* %t90, i8** %l4
+  %t91 = load i8*, i8** %l4
+  ret i8* %t91
 }
 
 define %NativeModule @empty_native_module() {
@@ -2765,13 +2778,13 @@ merge3:
   %t25 = call double @advance_to_line_end(i8* %source, double %t24)
   store double %t25, double* %l4
   %t26 = load double, double* %l1
-  %t27 = sitofp i64 0 to double
-  %t28 = call i8* @slice_string(i8* %source, double %t27, double %t26)
+  %t27 = fptosi double %t26 to i64
+  %t28 = call i8* @sailfin_runtime_substring(i8* %source, i64 0, i64 %t27)
   store i8* %t28, i8** %l5
   %t29 = load double, double* %l4
   %t30 = call i64 @sailfin_runtime_string_length(i8* %source)
-  %t31 = sitofp i64 %t30 to double
-  %t32 = call i8* @slice_string(i8* %source, double %t29, double %t31)
+  %t31 = fptosi double %t29 to i64
+  %t32 = call i8* @sailfin_runtime_substring(i8* %source, i64 %t31, i64 %t30)
   store i8* %t32, i8** %l6
   %t33 = load i8*, i8** %l5
   %t34 = load i8*, i8** %l6
@@ -2783,7 +2796,7 @@ define i8* @strip_python_string_literals(i8* %value) {
 entry:
   %l0 = alloca double
   %l1 = alloca i8*
-  %l2 = alloca i8
+  %l2 = alloca i8*
   %l3 = alloca double
   %l4 = alloca i8*
   %l5 = alloca double
@@ -2813,114 +2826,112 @@ then4:
   br label %afterloop3
 merge5:
   %t10 = load double, double* %l0
-  %t11 = fptosi double %t10 to i64
-  %t12 = getelementptr i8, i8* %value, i64 %t11
-  %t13 = load i8, i8* %t12
-  store i8 %t13, i8* %l2
-  %t14 = load i8, i8* %l2
-  %t15 = icmp eq i8 %t14, 39
-  %t16 = load double, double* %l0
-  %t17 = load i8*, i8** %l1
-  %t18 = load i8, i8* %l2
-  br i1 %t15, label %then6, label %merge7
+  %t11 = load double, double* %l0
+  %t12 = sitofp i64 1 to double
+  %t13 = fadd double %t11, %t12
+  %t14 = fptosi double %t10 to i64
+  %t15 = fptosi double %t13 to i64
+  %t16 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t14, i64 %t15)
+  store i8* %t16, i8** %l2
+  %t17 = load i8*, i8** %l2
+  %t18 = load i8, i8* %t17
+  %t19 = icmp eq i8 %t18, 39
+  %t20 = load double, double* %l0
+  %t21 = load i8*, i8** %l1
+  %t22 = load i8*, i8** %l2
+  br i1 %t19, label %then6, label %merge7
 then6:
-  %t19 = load double, double* %l0
-  %t20 = alloca [2 x i8], align 1
-  %t21 = getelementptr [2 x i8], [2 x i8]* %t20, i32 0, i32 0
-  store i8 39, i8* %t21
-  %t22 = getelementptr [2 x i8], [2 x i8]* %t20, i32 0, i32 1
-  store i8 0, i8* %t22
-  %t23 = getelementptr [2 x i8], [2 x i8]* %t20, i32 0, i32 0
-  %t24 = call double @python_quote_length(i8* %value, double %t19, i8* %t23)
-  store double %t24, double* %l3
-  %t25 = load double, double* %l3
-  %t26 = alloca [2 x i8], align 1
-  %t27 = getelementptr [2 x i8], [2 x i8]* %t26, i32 0, i32 0
-  store i8 39, i8* %t27
-  %t28 = getelementptr [2 x i8], [2 x i8]* %t26, i32 0, i32 1
-  store i8 0, i8* %t28
-  %t29 = getelementptr [2 x i8], [2 x i8]* %t26, i32 0, i32 0
-  %t30 = call i8* @repeat_character(i8* %t29, double %t25)
-  store i8* %t30, i8** %l4
-  %t31 = load i8*, i8** %l1
-  %t32 = load i8*, i8** %l4
-  %t33 = add i8* %t31, %t32
-  store i8* %t33, i8** %l1
-  %t34 = load double, double* %l0
-  %t35 = load double, double* %l3
-  %t36 = fadd double %t34, %t35
-  %t37 = load double, double* %l3
-  %t38 = alloca [2 x i8], align 1
-  %t39 = getelementptr [2 x i8], [2 x i8]* %t38, i32 0, i32 0
-  store i8 39, i8* %t39
-  %t40 = getelementptr [2 x i8], [2 x i8]* %t38, i32 0, i32 1
-  store i8 0, i8* %t40
-  %t41 = getelementptr [2 x i8], [2 x i8]* %t38, i32 0, i32 0
-  %t42 = call double @skip_python_string_literal(i8* %value, double %t36, i8* %t41, double %t37)
-  store double %t42, double* %l0
-  %t43 = load i8*, i8** %l1
-  %t44 = load i8*, i8** %l4
-  %t45 = add i8* %t43, %t44
-  store i8* %t45, i8** %l1
+  %t23 = load double, double* %l0
+  %t24 = alloca [2 x i8], align 1
+  %t25 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 0
+  store i8 39, i8* %t25
+  %t26 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 1
+  store i8 0, i8* %t26
+  %t27 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 0
+  %t28 = call double @python_quote_length(i8* %value, double %t23, i8* %t27)
+  store double %t28, double* %l3
+  %t29 = load double, double* %l3
+  %t30 = alloca [2 x i8], align 1
+  %t31 = getelementptr [2 x i8], [2 x i8]* %t30, i32 0, i32 0
+  store i8 39, i8* %t31
+  %t32 = getelementptr [2 x i8], [2 x i8]* %t30, i32 0, i32 1
+  store i8 0, i8* %t32
+  %t33 = getelementptr [2 x i8], [2 x i8]* %t30, i32 0, i32 0
+  %t34 = call i8* @repeat_character(i8* %t33, double %t29)
+  store i8* %t34, i8** %l4
+  %t35 = load i8*, i8** %l1
+  %t36 = load i8*, i8** %l4
+  %t37 = add i8* %t35, %t36
+  store i8* %t37, i8** %l1
+  %t38 = load double, double* %l0
+  %t39 = load double, double* %l3
+  %t40 = fadd double %t38, %t39
+  %t41 = load double, double* %l3
+  %t42 = alloca [2 x i8], align 1
+  %t43 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  store i8 39, i8* %t43
+  %t44 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 1
+  store i8 0, i8* %t44
+  %t45 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  %t46 = call double @skip_python_string_literal(i8* %value, double %t40, i8* %t45, double %t41)
+  store double %t46, double* %l0
+  %t47 = load i8*, i8** %l1
+  %t48 = load i8*, i8** %l4
+  %t49 = add i8* %t47, %t48
+  store i8* %t49, i8** %l1
   br label %loop.latch2
 merge7:
-  %t46 = load i8, i8* %l2
-  %t47 = icmp eq i8 %t46, 34
-  %t48 = load double, double* %l0
-  %t49 = load i8*, i8** %l1
-  %t50 = load i8, i8* %l2
-  br i1 %t47, label %then8, label %merge9
+  %t50 = load i8*, i8** %l2
+  %t51 = load i8, i8* %t50
+  %t52 = icmp eq i8 %t51, 34
+  %t53 = load double, double* %l0
+  %t54 = load i8*, i8** %l1
+  %t55 = load i8*, i8** %l2
+  br i1 %t52, label %then8, label %merge9
 then8:
-  %t51 = load double, double* %l0
-  %t52 = alloca [2 x i8], align 1
-  %t53 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 0
-  store i8 34, i8* %t53
-  %t54 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 1
-  store i8 0, i8* %t54
-  %t55 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 0
-  %t56 = call double @python_quote_length(i8* %value, double %t51, i8* %t55)
-  store double %t56, double* %l5
-  %t57 = load double, double* %l5
-  %t58 = alloca [2 x i8], align 1
-  %t59 = getelementptr [2 x i8], [2 x i8]* %t58, i32 0, i32 0
-  store i8 34, i8* %t59
-  %t60 = getelementptr [2 x i8], [2 x i8]* %t58, i32 0, i32 1
-  store i8 0, i8* %t60
-  %t61 = getelementptr [2 x i8], [2 x i8]* %t58, i32 0, i32 0
-  %t62 = call i8* @repeat_character(i8* %t61, double %t57)
-  store i8* %t62, i8** %l6
-  %t63 = load i8*, i8** %l1
-  %t64 = load i8*, i8** %l6
-  %t65 = add i8* %t63, %t64
-  store i8* %t65, i8** %l1
-  %t66 = load double, double* %l0
-  %t67 = load double, double* %l5
-  %t68 = fadd double %t66, %t67
-  %t69 = load double, double* %l5
-  %t70 = alloca [2 x i8], align 1
-  %t71 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 0
-  store i8 34, i8* %t71
-  %t72 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 1
-  store i8 0, i8* %t72
-  %t73 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 0
-  %t74 = call double @skip_python_string_literal(i8* %value, double %t68, i8* %t73, double %t69)
-  store double %t74, double* %l0
-  %t75 = load i8*, i8** %l1
-  %t76 = load i8*, i8** %l6
-  %t77 = add i8* %t75, %t76
-  store i8* %t77, i8** %l1
+  %t56 = load double, double* %l0
+  %t57 = alloca [2 x i8], align 1
+  %t58 = getelementptr [2 x i8], [2 x i8]* %t57, i32 0, i32 0
+  store i8 34, i8* %t58
+  %t59 = getelementptr [2 x i8], [2 x i8]* %t57, i32 0, i32 1
+  store i8 0, i8* %t59
+  %t60 = getelementptr [2 x i8], [2 x i8]* %t57, i32 0, i32 0
+  %t61 = call double @python_quote_length(i8* %value, double %t56, i8* %t60)
+  store double %t61, double* %l5
+  %t62 = load double, double* %l5
+  %t63 = alloca [2 x i8], align 1
+  %t64 = getelementptr [2 x i8], [2 x i8]* %t63, i32 0, i32 0
+  store i8 34, i8* %t64
+  %t65 = getelementptr [2 x i8], [2 x i8]* %t63, i32 0, i32 1
+  store i8 0, i8* %t65
+  %t66 = getelementptr [2 x i8], [2 x i8]* %t63, i32 0, i32 0
+  %t67 = call i8* @repeat_character(i8* %t66, double %t62)
+  store i8* %t67, i8** %l6
+  %t68 = load i8*, i8** %l1
+  %t69 = load i8*, i8** %l6
+  %t70 = add i8* %t68, %t69
+  store i8* %t70, i8** %l1
+  %t71 = load double, double* %l0
+  %t72 = load double, double* %l5
+  %t73 = fadd double %t71, %t72
+  %t74 = load double, double* %l5
+  %t75 = alloca [2 x i8], align 1
+  %t76 = getelementptr [2 x i8], [2 x i8]* %t75, i32 0, i32 0
+  store i8 34, i8* %t76
+  %t77 = getelementptr [2 x i8], [2 x i8]* %t75, i32 0, i32 1
+  store i8 0, i8* %t77
+  %t78 = getelementptr [2 x i8], [2 x i8]* %t75, i32 0, i32 0
+  %t79 = call double @skip_python_string_literal(i8* %value, double %t73, i8* %t78, double %t74)
+  store double %t79, double* %l0
+  %t80 = load i8*, i8** %l1
+  %t81 = load i8*, i8** %l6
+  %t82 = add i8* %t80, %t81
+  store i8* %t82, i8** %l1
   br label %loop.latch2
 merge9:
-  %t78 = load i8*, i8** %l1
-  %t79 = load i8, i8* %l2
-  %t80 = load i8, i8* %t78
-  %t81 = add i8 %t80, %t79
-  %t82 = alloca [2 x i8], align 1
-  %t83 = getelementptr [2 x i8], [2 x i8]* %t82, i32 0, i32 0
-  store i8 %t81, i8* %t83
-  %t84 = getelementptr [2 x i8], [2 x i8]* %t82, i32 0, i32 1
-  store i8 0, i8* %t84
-  %t85 = getelementptr [2 x i8], [2 x i8]* %t82, i32 0, i32 0
+  %t83 = load i8*, i8** %l1
+  %t84 = load i8*, i8** %l2
+  %t85 = add i8* %t83, %t84
   store i8* %t85, i8** %l1
   %t86 = load double, double* %l0
   %t87 = sitofp i64 1 to double
@@ -2947,41 +2958,44 @@ entry:
 then0:
   %t5 = sitofp i64 1 to double
   %t6 = fadd double %start, %t5
-  %t7 = fptosi double %t6 to i64
-  %t8 = getelementptr i8, i8* %value, i64 %t7
-  %t9 = load i8, i8* %t8
-  %t10 = load i8, i8* %delimiter
-  %t11 = icmp eq i8 %t9, %t10
-  br i1 %t11, label %then2, label %merge3
+  %t7 = sitofp i64 2 to double
+  %t8 = fadd double %start, %t7
+  %t9 = fptosi double %t6 to i64
+  %t10 = fptosi double %t8 to i64
+  %t11 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t9, i64 %t10)
+  %t12 = icmp eq i8* %t11, %delimiter
+  br i1 %t12, label %then2, label %merge3
 then2:
-  %t12 = sitofp i64 2 to double
-  %t13 = fadd double %start, %t12
-  %t14 = fptosi double %t13 to i64
-  %t15 = getelementptr i8, i8* %value, i64 %t14
-  %t16 = load i8, i8* %t15
-  %t17 = load i8, i8* %delimiter
-  %t18 = icmp eq i8 %t16, %t17
-  br i1 %t18, label %then4, label %merge5
+  %t13 = sitofp i64 2 to double
+  %t14 = fadd double %start, %t13
+  %t15 = sitofp i64 3 to double
+  %t16 = fadd double %start, %t15
+  %t17 = fptosi double %t14 to i64
+  %t18 = fptosi double %t16 to i64
+  %t19 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t17, i64 %t18)
+  %t20 = icmp eq i8* %t19, %delimiter
+  br i1 %t20, label %then4, label %merge5
 then4:
-  %t19 = sitofp i64 3 to double
-  ret double %t19
+  %t21 = sitofp i64 3 to double
+  ret double %t21
 merge5:
   br label %merge3
 merge3:
   br label %merge1
 merge1:
-  %t20 = sitofp i64 1 to double
-  ret double %t20
+  %t22 = sitofp i64 1 to double
+  ret double %t22
 }
 
 define double @skip_python_string_literal(i8* %value, double %position, i8* %delimiter, double %quote_length) {
 entry:
   %l0 = alloca double
   %l1 = alloca i1
-  %l2 = alloca i8
+  %l2 = alloca i8*
   %l3 = alloca double
   %l4 = alloca i1
   %l5 = alloca double
+  %l6 = alloca i8*
   %t0 = sitofp i64 1 to double
   %t1 = fcmp oeq double %quote_length, %t0
   br i1 %t1, label %then0, label %merge1
@@ -2992,10 +3006,10 @@ then0:
   %t3 = load i1, i1* %l1
   br label %loop.header2
 loop.header2:
-  %t36 = phi double [ %t2, %then0 ], [ %t34, %loop.latch4 ]
-  %t37 = phi i1 [ %t3, %then0 ], [ %t35, %loop.latch4 ]
-  store double %t36, double* %l0
-  store i1 %t37, i1* %l1
+  %t39 = phi double [ %t2, %then0 ], [ %t37, %loop.latch4 ]
+  %t40 = phi i1 [ %t3, %then0 ], [ %t38, %loop.latch4 ]
+  store double %t39, double* %l0
+  store i1 %t40, i1* %l1
   br label %loop.body3
 loop.body3:
   %t4 = load double, double* %l0
@@ -3010,141 +3024,153 @@ then6:
   ret double %t10
 merge7:
   %t11 = load double, double* %l0
-  %t12 = fptosi double %t11 to i64
-  %t13 = getelementptr i8, i8* %value, i64 %t12
-  %t14 = load i8, i8* %t13
-  store i8 %t14, i8* %l2
-  %t15 = load double, double* %l0
-  %t16 = sitofp i64 1 to double
-  %t17 = fadd double %t15, %t16
-  store double %t17, double* %l0
-  %t18 = load i1, i1* %l1
-  %t19 = load double, double* %l0
-  %t20 = load i1, i1* %l1
-  %t21 = load i8, i8* %l2
-  br i1 %t18, label %then8, label %merge9
+  %t12 = load double, double* %l0
+  %t13 = sitofp i64 1 to double
+  %t14 = fadd double %t12, %t13
+  %t15 = fptosi double %t11 to i64
+  %t16 = fptosi double %t14 to i64
+  %t17 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t15, i64 %t16)
+  store i8* %t17, i8** %l2
+  %t18 = load double, double* %l0
+  %t19 = sitofp i64 1 to double
+  %t20 = fadd double %t18, %t19
+  store double %t20, double* %l0
+  %t21 = load i1, i1* %l1
+  %t22 = load double, double* %l0
+  %t23 = load i1, i1* %l1
+  %t24 = load i8*, i8** %l2
+  br i1 %t21, label %then8, label %merge9
 then8:
   store i1 0, i1* %l1
   br label %loop.latch4
 merge9:
-  %t22 = load i8, i8* %l2
-  %t23 = icmp eq i8 %t22, 92
-  %t24 = load double, double* %l0
-  %t25 = load i1, i1* %l1
-  %t26 = load i8, i8* %l2
-  br i1 %t23, label %then10, label %merge11
+  %t25 = load i8*, i8** %l2
+  %t26 = load i8, i8* %t25
+  %t27 = icmp eq i8 %t26, 92
+  %t28 = load double, double* %l0
+  %t29 = load i1, i1* %l1
+  %t30 = load i8*, i8** %l2
+  br i1 %t27, label %then10, label %merge11
 then10:
   store i1 1, i1* %l1
   br label %loop.latch4
 merge11:
-  %t27 = load i8, i8* %l2
-  %t28 = load i8, i8* %delimiter
-  %t29 = icmp eq i8 %t27, %t28
-  %t30 = load double, double* %l0
-  %t31 = load i1, i1* %l1
-  %t32 = load i8, i8* %l2
-  br i1 %t29, label %then12, label %merge13
-then12:
+  %t31 = load i8*, i8** %l2
+  %t32 = icmp eq i8* %t31, %delimiter
   %t33 = load double, double* %l0
-  ret double %t33
+  %t34 = load i1, i1* %l1
+  %t35 = load i8*, i8** %l2
+  br i1 %t32, label %then12, label %merge13
+then12:
+  %t36 = load double, double* %l0
+  ret double %t36
 merge13:
   br label %loop.latch4
 loop.latch4:
-  %t34 = load double, double* %l0
-  %t35 = load i1, i1* %l1
+  %t37 = load double, double* %l0
+  %t38 = load i1, i1* %l1
   br label %loop.header2
 afterloop5:
   br label %merge1
 merge1:
   store double %position, double* %l3
-  %t38 = load double, double* %l3
+  %t41 = load double, double* %l3
   br label %loop.header14
 loop.header14:
-  %t84 = phi double [ %t38, %entry ], [ %t83, %loop.latch16 ]
-  store double %t84, double* %l3
+  %t93 = phi double [ %t41, %entry ], [ %t92, %loop.latch16 ]
+  store double %t93, double* %l3
   br label %loop.body15
 loop.body15:
-  %t39 = load double, double* %l3
-  %t40 = fadd double %t39, %quote_length
-  %t41 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t42 = sitofp i64 %t41 to double
-  %t43 = fcmp ogt double %t40, %t42
-  %t44 = load double, double* %l3
-  br i1 %t43, label %then18, label %merge19
+  %t42 = load double, double* %l3
+  %t43 = fadd double %t42, %quote_length
+  %t44 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t45 = sitofp i64 %t44 to double
+  %t46 = fcmp ogt double %t43, %t45
+  %t47 = load double, double* %l3
+  br i1 %t46, label %then18, label %merge19
 then18:
-  %t45 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t46 = sitofp i64 %t45 to double
-  ret double %t46
+  %t48 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t49 = sitofp i64 %t48 to double
+  ret double %t49
 merge19:
   store i1 1, i1* %l4
-  %t47 = sitofp i64 0 to double
-  store double %t47, double* %l5
-  %t48 = load double, double* %l3
-  %t49 = load i1, i1* %l4
-  %t50 = load double, double* %l5
+  %t50 = sitofp i64 0 to double
+  store double %t50, double* %l5
+  %t51 = load double, double* %l3
+  %t52 = load i1, i1* %l4
+  %t53 = load double, double* %l5
   br label %loop.header20
 loop.header20:
-  %t72 = phi i1 [ %t49, %loop.body15 ], [ %t70, %loop.latch22 ]
-  %t73 = phi double [ %t50, %loop.body15 ], [ %t71, %loop.latch22 ]
-  store i1 %t72, i1* %l4
-  store double %t73, double* %l5
+  %t81 = phi i1 [ %t52, %loop.body15 ], [ %t79, %loop.latch22 ]
+  %t82 = phi double [ %t53, %loop.body15 ], [ %t80, %loop.latch22 ]
+  store i1 %t81, i1* %l4
+  store double %t82, double* %l5
   br label %loop.body21
 loop.body21:
-  %t51 = load double, double* %l5
-  %t52 = fcmp oge double %t51, %quote_length
-  %t53 = load double, double* %l3
-  %t54 = load i1, i1* %l4
-  %t55 = load double, double* %l5
-  br i1 %t52, label %then24, label %merge25
+  %t54 = load double, double* %l5
+  %t55 = fcmp oge double %t54, %quote_length
+  %t56 = load double, double* %l3
+  %t57 = load i1, i1* %l4
+  %t58 = load double, double* %l5
+  br i1 %t55, label %then24, label %merge25
 then24:
   br label %afterloop23
 merge25:
-  %t56 = load double, double* %l3
-  %t57 = load double, double* %l5
-  %t58 = fadd double %t56, %t57
-  %t59 = fptosi double %t58 to i64
-  %t60 = getelementptr i8, i8* %value, i64 %t59
-  %t61 = load i8, i8* %t60
-  %t62 = load i8, i8* %delimiter
-  %t63 = icmp ne i8 %t61, %t62
-  %t64 = load double, double* %l3
-  %t65 = load i1, i1* %l4
-  %t66 = load double, double* %l5
-  br i1 %t63, label %then26, label %merge27
+  %t59 = load double, double* %l3
+  %t60 = load double, double* %l5
+  %t61 = fadd double %t59, %t60
+  %t62 = load double, double* %l3
+  %t63 = load double, double* %l5
+  %t64 = fadd double %t62, %t63
+  %t65 = sitofp i64 1 to double
+  %t66 = fadd double %t64, %t65
+  %t67 = fptosi double %t61 to i64
+  %t68 = fptosi double %t66 to i64
+  %t69 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t67, i64 %t68)
+  store i8* %t69, i8** %l6
+  %t70 = load i8*, i8** %l6
+  %t71 = icmp ne i8* %t70, %delimiter
+  %t72 = load double, double* %l3
+  %t73 = load i1, i1* %l4
+  %t74 = load double, double* %l5
+  %t75 = load i8*, i8** %l6
+  br i1 %t71, label %then26, label %merge27
 then26:
   store i1 0, i1* %l4
   br label %afterloop23
 merge27:
-  %t67 = load double, double* %l5
-  %t68 = sitofp i64 1 to double
-  %t69 = fadd double %t67, %t68
-  store double %t69, double* %l5
+  %t76 = load double, double* %l5
+  %t77 = sitofp i64 1 to double
+  %t78 = fadd double %t76, %t77
+  store double %t78, double* %l5
   br label %loop.latch22
 loop.latch22:
-  %t70 = load i1, i1* %l4
-  %t71 = load double, double* %l5
+  %t79 = load i1, i1* %l4
+  %t80 = load double, double* %l5
   br label %loop.header20
 afterloop23:
-  %t74 = load i1, i1* %l4
-  %t75 = load double, double* %l3
-  %t76 = load i1, i1* %l4
-  %t77 = load double, double* %l5
-  br i1 %t74, label %then28, label %merge29
+  %t83 = load i1, i1* %l4
+  %t84 = load double, double* %l3
+  %t85 = load i1, i1* %l4
+  %t86 = load double, double* %l5
+  br i1 %t83, label %then28, label %merge29
 then28:
-  %t78 = load double, double* %l3
-  %t79 = fadd double %t78, %quote_length
-  ret double %t79
+  %t87 = load double, double* %l3
+  %t88 = fadd double %t87, %quote_length
+  ret double %t88
 merge29:
-  %t80 = load double, double* %l3
-  %t81 = sitofp i64 1 to double
-  %t82 = fadd double %t80, %t81
-  store double %t82, double* %l3
+  %t89 = load double, double* %l3
+  %t90 = sitofp i64 1 to double
+  %t91 = fadd double %t89, %t90
+  store double %t91, double* %l3
   br label %loop.latch16
 loop.latch16:
-  %t83 = load double, double* %l3
+  %t92 = load double, double* %l3
   br label %loop.header14
 afterloop17:
-  ret double 0.0
+  %t94 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t95 = sitofp i64 %t94 to double
+  ret double %t95
 }
 
 define i8* @repeat_character(i8* %ch, double %count) {
@@ -3433,13 +3459,13 @@ afterloop7:
 define double @advance_to_line_end(i8* %value, double %position) {
 entry:
   %l0 = alloca double
-  %l1 = alloca i8
+  %l1 = alloca i8*
   store double %position, double* %l0
   %t0 = load double, double* %l0
   br label %loop.header0
 loop.header0:
-  %t18 = phi double [ %t0, %entry ], [ %t17, %loop.latch2 ]
-  store double %t18, double* %l0
+  %t22 = phi double [ %t0, %entry ], [ %t21, %loop.latch2 ]
+  store double %t22, double* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load double, double* %l0
@@ -3452,143 +3478,33 @@ then4:
   br label %afterloop3
 merge5:
   %t6 = load double, double* %l0
-  %t7 = fptosi double %t6 to i64
-  %t8 = getelementptr i8, i8* %value, i64 %t7
-  %t9 = load i8, i8* %t8
-  store i8 %t9, i8* %l1
-  %t10 = load double, double* %l0
-  %t11 = sitofp i64 1 to double
-  %t12 = fadd double %t10, %t11
-  store double %t12, double* %l0
-  %t13 = load i8, i8* %l1
-  %t14 = icmp eq i8 %t13, 10
-  %t15 = load double, double* %l0
-  %t16 = load i8, i8* %l1
-  br i1 %t14, label %then6, label %merge7
+  %t7 = load double, double* %l0
+  %t8 = sitofp i64 1 to double
+  %t9 = fadd double %t7, %t8
+  %t10 = fptosi double %t6 to i64
+  %t11 = fptosi double %t9 to i64
+  %t12 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t10, i64 %t11)
+  store i8* %t12, i8** %l1
+  %t13 = load double, double* %l0
+  %t14 = sitofp i64 1 to double
+  %t15 = fadd double %t13, %t14
+  store double %t15, double* %l0
+  %t16 = load i8*, i8** %l1
+  %t17 = load i8, i8* %t16
+  %t18 = icmp eq i8 %t17, 10
+  %t19 = load double, double* %l0
+  %t20 = load i8*, i8** %l1
+  br i1 %t18, label %then6, label %merge7
 then6:
   br label %afterloop3
 merge7:
   br label %loop.latch2
 loop.latch2:
-  %t17 = load double, double* %l0
+  %t21 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t19 = load double, double* %l0
-  ret double %t19
-}
-
-define i8* @slice_string(i8* %value, double %start, double %end) {
-entry:
-  %l0 = alloca double
-  %l1 = alloca double
-  %l2 = alloca double
-  %l3 = alloca i8*
-  store double %start, double* %l0
-  %t0 = load double, double* %l0
-  %t1 = sitofp i64 0 to double
-  %t2 = fcmp olt double %t0, %t1
-  %t3 = load double, double* %l0
-  br i1 %t2, label %then0, label %merge1
-then0:
-  %t4 = sitofp i64 0 to double
-  store double %t4, double* %l0
-  br label %merge1
-merge1:
-  %t5 = phi double [ %t4, %then0 ], [ %t3, %entry ]
-  store double %t5, double* %l0
-  store double %end, double* %l1
-  %t6 = load double, double* %l1
-  %t7 = load double, double* %l0
-  %t8 = fcmp olt double %t6, %t7
-  %t9 = load double, double* %l0
-  %t10 = load double, double* %l1
-  br i1 %t8, label %then2, label %merge3
-then2:
-  %t11 = load double, double* %l0
-  store double %t11, double* %l1
-  br label %merge3
-merge3:
-  %t12 = phi double [ %t11, %then2 ], [ %t10, %entry ]
-  store double %t12, double* %l1
-  %t13 = load double, double* %l0
-  %t14 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t15 = sitofp i64 %t14 to double
-  %t16 = fcmp oge double %t13, %t15
-  %t17 = load double, double* %l0
-  %t18 = load double, double* %l1
-  br i1 %t16, label %then4, label %merge5
-then4:
-  %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.19, i32 0, i32 0
-  ret i8* %s19
-merge5:
-  %t20 = load double, double* %l1
-  %t21 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t22 = sitofp i64 %t21 to double
-  %t23 = fcmp ogt double %t20, %t22
-  %t24 = load double, double* %l0
-  %t25 = load double, double* %l1
-  br i1 %t23, label %then6, label %merge7
-then6:
-  %t26 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t27 = sitofp i64 %t26 to double
-  store double %t27, double* %l1
-  br label %merge7
-merge7:
-  %t28 = phi double [ %t27, %then6 ], [ %t25, %entry ]
-  store double %t28, double* %l1
-  %t29 = load double, double* %l0
-  store double %t29, double* %l2
-  %s30 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.30, i32 0, i32 0
-  store i8* %s30, i8** %l3
-  %t31 = load double, double* %l0
-  %t32 = load double, double* %l1
-  %t33 = load double, double* %l2
-  %t34 = load i8*, i8** %l3
-  br label %loop.header8
-loop.header8:
-  %t58 = phi i8* [ %t34, %entry ], [ %t56, %loop.latch10 ]
-  %t59 = phi double [ %t33, %entry ], [ %t57, %loop.latch10 ]
-  store i8* %t58, i8** %l3
-  store double %t59, double* %l2
-  br label %loop.body9
-loop.body9:
-  %t35 = load double, double* %l2
-  %t36 = load double, double* %l1
-  %t37 = fcmp oge double %t35, %t36
-  %t38 = load double, double* %l0
-  %t39 = load double, double* %l1
-  %t40 = load double, double* %l2
-  %t41 = load i8*, i8** %l3
-  br i1 %t37, label %then12, label %merge13
-then12:
-  br label %afterloop11
-merge13:
-  %t42 = load i8*, i8** %l3
-  %t43 = load double, double* %l2
-  %t44 = fptosi double %t43 to i64
-  %t45 = getelementptr i8, i8* %value, i64 %t44
-  %t46 = load i8, i8* %t45
-  %t47 = load i8, i8* %t42
-  %t48 = add i8 %t47, %t46
-  %t49 = alloca [2 x i8], align 1
-  %t50 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
-  store i8 %t48, i8* %t50
-  %t51 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 1
-  store i8 0, i8* %t51
-  %t52 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
-  store i8* %t52, i8** %l3
-  %t53 = load double, double* %l2
-  %t54 = sitofp i64 1 to double
-  %t55 = fadd double %t53, %t54
-  store double %t55, double* %l2
-  br label %loop.latch10
-loop.latch10:
-  %t56 = load i8*, i8** %l3
-  %t57 = load double, double* %l2
-  br label %loop.header8
-afterloop11:
-  %t60 = load i8*, i8** %l3
-  ret i8* %t60
+  %t23 = load double, double* %l0
+  ret double %t23
 }
 
 define double @add(double %a, double %b) {

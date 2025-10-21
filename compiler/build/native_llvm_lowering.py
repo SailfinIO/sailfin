@@ -1807,22 +1807,6 @@ def resolve_struct_info_for_literal(context, type_name):
                 if len(tail_base) > 0:
                     if not string_array_contains(candidates, tail_base):
                         candidates = append_string(candidates, tail_base)
-        else:
-            lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
-            diagnostics = (diagnostics) + (lowered_self.diagnostics)
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
-            current_lines = lowered_self.lines
-            current_temp = lowered_self.temp_index
-            if lowered_self.operand != None:
-                base_operand = lowered_self.operand
-                array_element_type = array_pointer_element_type(base_operand.llvm_type)
-                if len(array_element_type) > 0  and  method_parse.field == "concat":
-                    method_operand = base_operand
-                    trimmed_target = "concat"
-                    injected_argument_count = 1
-            else:
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
-                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     index = 0
     while True:
         if index >= len(candidates):
