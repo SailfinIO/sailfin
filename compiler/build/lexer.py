@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
-from compiler.build.string_utils import substring, find_char, char_code
+from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -64,13 +64,16 @@ def lex(source):
                 start_column = state.column
                 state.index += 2
                 state.column += 2
-                newline_index = find_char(state.source, "\n", state.index)
-                carriage_index = find_char(state.source, "\r", state.index)
                 comment_end = len(state.source)
-                if newline_index != -1:
-                    comment_end = newline_index
-                if carriage_index != -1  and  carriage_index < comment_end:
-                    comment_end = carriage_index
+                scan_index = state.index
+                while True:
+                    if scan_index >= len(state.source):
+                        break
+                    scan_character = state.source[scan_index]
+                    if scan_character == "\n"  or  scan_character == "\r":
+                        comment_end = scan_index
+                        break
+                    scan_index += 1
                 lexeme = slice(state.source, start_index, comment_end)
                 consumed_columns = comment_end - state.index
                 state.index = comment_end

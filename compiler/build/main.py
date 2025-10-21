@@ -602,18 +602,20 @@ def advance_to_line_end(value, position):
     return index
 
 def slice_string(value, start, end):
-    if start < 0:
-        start = 0
-    if end < start:
-        end = start
-    if start >= len(value):
+    start_index = start
+    if start_index < 0:
+        start_index = 0
+    end_index = end
+    if end_index < start_index:
+        end_index = start_index
+    if start_index >= len(value):
         return ""
-    if end > len(value):
-        end = len(value)
-    index = start
+    if end_index > len(value):
+        end_index = len(value)
+    index = start_index
     result = ""
     while True:
-        if index >= end:
+        if index >= end_index:
             break
         result = result + value[index]
         index += 1
