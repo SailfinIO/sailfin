@@ -2237,200 +2237,222 @@ merge11:
 
 define { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }* %functions, %NativeFunction %value) {
 entry:
-  %t0 = alloca [1 x %NativeFunction]
-  %t1 = getelementptr [1 x %NativeFunction], [1 x %NativeFunction]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeFunction, %NativeFunction* %t1, i64 0
-  store %NativeFunction %value, %NativeFunction* %t2
-  %t3 = alloca { %NativeFunction*, i64 }
-  %t4 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t3, i32 0, i32 0
-  store %NativeFunction* %t1, %NativeFunction** %t4
-  %t5 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeFunction*, i64 }* %functions to { i8**, i64 }*
-  %t7 = bitcast { %NativeFunction*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeFunction*, i64 }*
-  ret { %NativeFunction*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 40)
+  %t1 = bitcast i8* %t0 to %NativeFunction*
+  store %NativeFunction %value, %NativeFunction* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeFunction*, i64 }* %functions to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeFunction*, i64 }*
+  ret { %NativeFunction*, i64 }* %t10
 }
 
 define { %NativeBinding*, i64 }* @append_binding({ %NativeBinding*, i64 }* %bindings, %NativeBinding %value) {
 entry:
-  %t0 = alloca [1 x %NativeBinding]
-  %t1 = getelementptr [1 x %NativeBinding], [1 x %NativeBinding]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeBinding, %NativeBinding* %t1, i64 0
-  store %NativeBinding %value, %NativeBinding* %t2
-  %t3 = alloca { %NativeBinding*, i64 }
-  %t4 = getelementptr { %NativeBinding*, i64 }, { %NativeBinding*, i64 }* %t3, i32 0, i32 0
-  store %NativeBinding* %t1, %NativeBinding** %t4
-  %t5 = getelementptr { %NativeBinding*, i64 }, { %NativeBinding*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeBinding*, i64 }* %bindings to { i8**, i64 }*
-  %t7 = bitcast { %NativeBinding*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeBinding*, i64 }*
-  ret { %NativeBinding*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to %NativeBinding*
+  store %NativeBinding %value, %NativeBinding* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeBinding*, i64 }* %bindings to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeBinding*, i64 }*
+  ret { %NativeBinding*, i64 }* %t10
 }
 
 define { %NativeImport*, i64 }* @append_import({ %NativeImport*, i64 }* %imports, %NativeImport %value) {
 entry:
-  %t0 = alloca [1 x %NativeImport]
-  %t1 = getelementptr [1 x %NativeImport], [1 x %NativeImport]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeImport, %NativeImport* %t1, i64 0
-  store %NativeImport %value, %NativeImport* %t2
-  %t3 = alloca { %NativeImport*, i64 }
-  %t4 = getelementptr { %NativeImport*, i64 }, { %NativeImport*, i64 }* %t3, i32 0, i32 0
-  store %NativeImport* %t1, %NativeImport** %t4
-  %t5 = getelementptr { %NativeImport*, i64 }, { %NativeImport*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeImport*, i64 }* %imports to { i8**, i64 }*
-  %t7 = bitcast { %NativeImport*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeImport*, i64 }*
-  ret { %NativeImport*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %NativeImport*
+  store %NativeImport %value, %NativeImport* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeImport*, i64 }* %imports to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeImport*, i64 }*
+  ret { %NativeImport*, i64 }* %t10
 }
 
 define { %NativeStruct*, i64 }* @append_struct({ %NativeStruct*, i64 }* %structs, %NativeStruct %value) {
 entry:
-  %t0 = alloca [1 x %NativeStruct]
-  %t1 = getelementptr [1 x %NativeStruct], [1 x %NativeStruct]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeStruct, %NativeStruct* %t1, i64 0
-  store %NativeStruct %value, %NativeStruct* %t2
-  %t3 = alloca { %NativeStruct*, i64 }
-  %t4 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t3, i32 0, i32 0
-  store %NativeStruct* %t1, %NativeStruct** %t4
-  %t5 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeStruct*, i64 }* %structs to { i8**, i64 }*
-  %t7 = bitcast { %NativeStruct*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeStruct*, i64 }*
-  ret { %NativeStruct*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 40)
+  %t1 = bitcast i8* %t0 to %NativeStruct*
+  store %NativeStruct %value, %NativeStruct* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeStruct*, i64 }* %structs to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeStruct*, i64 }*
+  ret { %NativeStruct*, i64 }* %t10
 }
 
 define { %NativeInterface*, i64 }* @append_interface({ %NativeInterface*, i64 }* %interfaces, %NativeInterface %value) {
 entry:
-  %t0 = alloca [1 x %NativeInterface]
-  %t1 = getelementptr [1 x %NativeInterface], [1 x %NativeInterface]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeInterface, %NativeInterface* %t1, i64 0
-  store %NativeInterface %value, %NativeInterface* %t2
-  %t3 = alloca { %NativeInterface*, i64 }
-  %t4 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t3, i32 0, i32 0
-  store %NativeInterface* %t1, %NativeInterface** %t4
-  %t5 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeInterface*, i64 }* %interfaces to { i8**, i64 }*
-  %t7 = bitcast { %NativeInterface*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeInterface*, i64 }*
-  ret { %NativeInterface*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %NativeInterface*
+  store %NativeInterface %value, %NativeInterface* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeInterface*, i64 }* %interfaces to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeInterface*, i64 }*
+  ret { %NativeInterface*, i64 }* %t10
 }
 
 define { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }* %enums, %NativeEnum %value) {
 entry:
-  %t0 = alloca [1 x %NativeEnum]
-  %t1 = getelementptr [1 x %NativeEnum], [1 x %NativeEnum]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeEnum, %NativeEnum* %t1, i64 0
-  store %NativeEnum %value, %NativeEnum* %t2
-  %t3 = alloca { %NativeEnum*, i64 }
-  %t4 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t3, i32 0, i32 0
-  store %NativeEnum* %t1, %NativeEnum** %t4
-  %t5 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeEnum*, i64 }* %enums to { i8**, i64 }*
-  %t7 = bitcast { %NativeEnum*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeEnum*, i64 }*
-  ret { %NativeEnum*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %NativeEnum*
+  store %NativeEnum %value, %NativeEnum* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeEnum*, i64 }* %enums to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeEnum*, i64 }*
+  ret { %NativeEnum*, i64 }* %t10
 }
 
 define { %NativeEnumVariant*, i64 }* @append_enum_variant({ %NativeEnumVariant*, i64 }* %variants, %NativeEnumVariant %value) {
 entry:
-  %t0 = alloca [1 x %NativeEnumVariant]
-  %t1 = getelementptr [1 x %NativeEnumVariant], [1 x %NativeEnumVariant]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeEnumVariant, %NativeEnumVariant* %t1, i64 0
-  store %NativeEnumVariant %value, %NativeEnumVariant* %t2
-  %t3 = alloca { %NativeEnumVariant*, i64 }
-  %t4 = getelementptr { %NativeEnumVariant*, i64 }, { %NativeEnumVariant*, i64 }* %t3, i32 0, i32 0
-  store %NativeEnumVariant* %t1, %NativeEnumVariant** %t4
-  %t5 = getelementptr { %NativeEnumVariant*, i64 }, { %NativeEnumVariant*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeEnumVariant*, i64 }* %variants to { i8**, i64 }*
-  %t7 = bitcast { %NativeEnumVariant*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeEnumVariant*, i64 }*
-  ret { %NativeEnumVariant*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 16)
+  %t1 = bitcast i8* %t0 to %NativeEnumVariant*
+  store %NativeEnumVariant %value, %NativeEnumVariant* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeEnumVariant*, i64 }* %variants to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeEnumVariant*, i64 }*
+  ret { %NativeEnumVariant*, i64 }* %t10
 }
 
 define { %NativeEnumVariantField*, i64 }* @append_enum_variant_field({ %NativeEnumVariantField*, i64 }* %fields, %NativeEnumVariantField %value) {
 entry:
-  %t0 = alloca [1 x %NativeEnumVariantField]
-  %t1 = getelementptr [1 x %NativeEnumVariantField], [1 x %NativeEnumVariantField]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeEnumVariantField, %NativeEnumVariantField* %t1, i64 0
-  store %NativeEnumVariantField %value, %NativeEnumVariantField* %t2
-  %t3 = alloca { %NativeEnumVariantField*, i64 }
-  %t4 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t3, i32 0, i32 0
-  store %NativeEnumVariantField* %t1, %NativeEnumVariantField** %t4
-  %t5 = getelementptr { %NativeEnumVariantField*, i64 }, { %NativeEnumVariantField*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeEnumVariantField*, i64 }* %fields to { i8**, i64 }*
-  %t7 = bitcast { %NativeEnumVariantField*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeEnumVariantField*, i64 }*
-  ret { %NativeEnumVariantField*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %NativeEnumVariantField*
+  store %NativeEnumVariantField %value, %NativeEnumVariantField* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeEnumVariantField*, i64 }* %fields to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeEnumVariantField*, i64 }*
+  ret { %NativeEnumVariantField*, i64 }* %t10
 }
 
 define { %NativeStructField*, i64 }* @append_struct_field({ %NativeStructField*, i64 }* %fields, %NativeStructField %field) {
 entry:
-  %t0 = alloca [1 x %NativeStructField]
-  %t1 = getelementptr [1 x %NativeStructField], [1 x %NativeStructField]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeStructField, %NativeStructField* %t1, i64 0
-  store %NativeStructField %field, %NativeStructField* %t2
-  %t3 = alloca { %NativeStructField*, i64 }
-  %t4 = getelementptr { %NativeStructField*, i64 }, { %NativeStructField*, i64 }* %t3, i32 0, i32 0
-  store %NativeStructField* %t1, %NativeStructField** %t4
-  %t5 = getelementptr { %NativeStructField*, i64 }, { %NativeStructField*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeStructField*, i64 }* %fields to { i8**, i64 }*
-  %t7 = bitcast { %NativeStructField*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeStructField*, i64 }*
-  ret { %NativeStructField*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %NativeStructField*
+  store %NativeStructField %field, %NativeStructField* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeStructField*, i64 }* %fields to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeStructField*, i64 }*
+  ret { %NativeStructField*, i64 }* %t10
 }
 
 define { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }* %fields, %NativeStructLayoutField %field) {
 entry:
-  %t0 = alloca [1 x %NativeStructLayoutField]
-  %t1 = getelementptr [1 x %NativeStructLayoutField], [1 x %NativeStructLayoutField]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeStructLayoutField, %NativeStructLayoutField* %t1, i64 0
-  store %NativeStructLayoutField %field, %NativeStructLayoutField* %t2
-  %t3 = alloca { %NativeStructLayoutField*, i64 }
-  %t4 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t3, i32 0, i32 0
-  store %NativeStructLayoutField* %t1, %NativeStructLayoutField** %t4
-  %t5 = getelementptr { %NativeStructLayoutField*, i64 }, { %NativeStructLayoutField*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeStructLayoutField*, i64 }* %fields to { i8**, i64 }*
-  %t7 = bitcast { %NativeStructLayoutField*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeStructLayoutField*, i64 }*
-  ret { %NativeStructLayoutField*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 40)
+  %t1 = bitcast i8* %t0 to %NativeStructLayoutField*
+  store %NativeStructLayoutField %field, %NativeStructLayoutField* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeStructLayoutField*, i64 }* %fields to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeStructLayoutField*, i64 }*
+  ret { %NativeStructLayoutField*, i64 }* %t10
 }
 
 define { %NativeEnumVariantLayout*, i64 }* @append_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %variants, %NativeEnumVariantLayout %value) {
 entry:
-  %t0 = alloca [1 x %NativeEnumVariantLayout]
-  %t1 = getelementptr [1 x %NativeEnumVariantLayout], [1 x %NativeEnumVariantLayout]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeEnumVariantLayout, %NativeEnumVariantLayout* %t1, i64 0
-  store %NativeEnumVariantLayout %value, %NativeEnumVariantLayout* %t2
-  %t3 = alloca { %NativeEnumVariantLayout*, i64 }
-  %t4 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t3, i32 0, i32 0
-  store %NativeEnumVariantLayout* %t1, %NativeEnumVariantLayout** %t4
-  %t5 = getelementptr { %NativeEnumVariantLayout*, i64 }, { %NativeEnumVariantLayout*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeEnumVariantLayout*, i64 }* %variants to { i8**, i64 }*
-  %t7 = bitcast { %NativeEnumVariantLayout*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeEnumVariantLayout*, i64 }*
-  ret { %NativeEnumVariantLayout*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 48)
+  %t1 = bitcast i8* %t0 to %NativeEnumVariantLayout*
+  store %NativeEnumVariantLayout %value, %NativeEnumVariantLayout* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeEnumVariantLayout*, i64 }* %variants to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeEnumVariantLayout*, i64 }*
+  ret { %NativeEnumVariantLayout*, i64 }* %t10
 }
 
 define double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }* %variants, i8* %name) {
@@ -2621,31 +2643,33 @@ define %NativeFunction @append_instruction(%NativeFunction %function, %NativeIns
 entry:
   %l0 = alloca { i8**, i64 }*
   %t0 = extractvalue %NativeFunction %function, 4
-  %t1 = alloca [1 x %NativeInstruction]
-  %t2 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t1, i32 0, i32 0
-  %t3 = getelementptr %NativeInstruction, %NativeInstruction* %t2, i64 0
-  store %NativeInstruction %instruction, %NativeInstruction* %t3
-  %t4 = alloca { %NativeInstruction*, i64 }
-  %t5 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t4, i32 0, i32 0
-  store %NativeInstruction* %t2, %NativeInstruction** %t5
-  %t6 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t4, i32 0, i32 1
-  store i64 1, i64* %t6
-  %t7 = bitcast { %NativeInstruction**, i64 }* %t0 to { i8**, i64 }*
-  %t8 = bitcast { %NativeInstruction*, i64 }* %t4 to { i8**, i64 }*
-  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t7, { i8**, i64 }* %t8)
-  store { i8**, i64 }* %t9, { i8**, i64 }** %l0
-  %t10 = extractvalue %NativeFunction %function, 0
-  %t11 = insertvalue %NativeFunction undef, i8* %t10, 0
-  %t12 = extractvalue %NativeFunction %function, 1
-  %t13 = insertvalue %NativeFunction %t11, { %NativeParameter**, i64 }* %t12, 1
-  %t14 = extractvalue %NativeFunction %function, 2
-  %t15 = insertvalue %NativeFunction %t13, i8* %t14, 2
-  %t16 = extractvalue %NativeFunction %function, 3
-  %t17 = insertvalue %NativeFunction %t15, { i8**, i64 }* %t16, 3
-  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t19 = bitcast { i8**, i64 }* %t18 to { %NativeInstruction**, i64 }*
-  %t20 = insertvalue %NativeFunction %t17, { %NativeInstruction**, i64 }* %t19, 4
-  ret %NativeFunction %t20
+  %t1 = call noalias i8* @malloc(i64 56)
+  %t2 = bitcast i8* %t1 to %NativeInstruction*
+  store %NativeInstruction %instruction, %NativeInstruction* %t2
+  %t3 = alloca [1 x i8*]
+  %t4 = getelementptr [1 x i8*], [1 x i8*]* %t3, i32 0, i32 0
+  %t5 = getelementptr i8*, i8** %t4, i64 0
+  store i8* %t1, i8** %t5
+  %t6 = alloca { i8**, i64 }
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 0
+  store i8** %t4, i8*** %t7
+  %t8 = getelementptr { i8**, i64 }, { i8**, i64 }* %t6, i32 0, i32 1
+  store i64 1, i64* %t8
+  %t9 = bitcast { %NativeInstruction**, i64 }* %t0 to { i8**, i64 }*
+  %t10 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t9, { i8**, i64 }* %t6)
+  store { i8**, i64 }* %t10, { i8**, i64 }** %l0
+  %t11 = extractvalue %NativeFunction %function, 0
+  %t12 = insertvalue %NativeFunction undef, i8* %t11, 0
+  %t13 = extractvalue %NativeFunction %function, 1
+  %t14 = insertvalue %NativeFunction %t12, { %NativeParameter**, i64 }* %t13, 1
+  %t15 = extractvalue %NativeFunction %function, 2
+  %t16 = insertvalue %NativeFunction %t14, i8* %t15, 2
+  %t17 = extractvalue %NativeFunction %function, 3
+  %t18 = insertvalue %NativeFunction %t16, { i8**, i64 }* %t17, 3
+  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t20 = bitcast { i8**, i64 }* %t19 to { %NativeInstruction**, i64 }*
+  %t21 = insertvalue %NativeFunction %t18, { %NativeInstruction**, i64 }* %t20, 4
+  ret %NativeFunction %t21
 }
 
 define %NativeBinding @binding_from_instruction(%NativeInstruction %instruction) {
@@ -4184,71 +4208,77 @@ merge1:
   %t57 = bitcast i8* %t56 to i8**
   store i8* %t53, i8** %t57
   %t58 = load %NativeInstruction, %NativeInstruction* %t45
-  %t59 = alloca [1 x %NativeInstruction]
-  %t60 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t59, i32 0, i32 0
-  %t61 = getelementptr %NativeInstruction, %NativeInstruction* %t60, i64 0
-  store %NativeInstruction %t58, %NativeInstruction* %t61
-  %t62 = alloca { %NativeInstruction*, i64 }
-  %t63 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t62, i32 0, i32 0
-  store %NativeInstruction* %t60, %NativeInstruction** %t63
-  %t64 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t62, i32 0, i32 1
-  store i64 1, i64* %t64
-  %t65 = bitcast { %NativeInstruction*, i64 }* %t44 to { i8**, i64 }*
-  %t66 = bitcast { %NativeInstruction*, i64 }* %t62 to { i8**, i64 }*
-  %t67 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t65, { i8**, i64 }* %t66)
-  %t68 = bitcast { i8**, i64 }* %t67 to { %NativeInstruction*, i64 }*
-  store { %NativeInstruction*, i64 }* %t68, { %NativeInstruction*, i64 }** %l5
-  %t69 = load i8*, i8** %l3
-  %t70 = call i64 @sailfin_runtime_string_length(i8* %t69)
-  %t71 = icmp eq i64 %t70, 0
-  %t72 = load i8*, i8** %l0
-  %t73 = load double, double* %l1
-  %t74 = load i8*, i8** %l2
-  %t75 = load i8*, i8** %l3
-  %t76 = load %CaseComponents, %CaseComponents* %l4
-  %t77 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
-  br i1 %t71, label %then2, label %merge3
-then2:
+  %t59 = call noalias i8* @malloc(i64 56)
+  %t60 = bitcast i8* %t59 to %NativeInstruction*
+  store %NativeInstruction %t58, %NativeInstruction* %t60
+  %t61 = alloca [1 x i8*]
+  %t62 = getelementptr [1 x i8*], [1 x i8*]* %t61, i32 0, i32 0
+  %t63 = getelementptr i8*, i8** %t62, i64 0
+  store i8* %t59, i8** %t63
+  %t64 = alloca { i8**, i64 }
+  %t65 = getelementptr { i8**, i64 }, { i8**, i64 }* %t64, i32 0, i32 0
+  store i8** %t62, i8*** %t65
+  %t66 = getelementptr { i8**, i64 }, { i8**, i64 }* %t64, i32 0, i32 1
+  store i64 1, i64* %t66
+  %t67 = bitcast { %NativeInstruction*, i64 }* %t44 to { i8**, i64 }*
+  %t68 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t67, { i8**, i64 }* %t64)
+  %t69 = bitcast { i8**, i64 }* %t68 to { %NativeInstruction*, i64 }*
+  store { %NativeInstruction*, i64 }* %t69, { %NativeInstruction*, i64 }** %l5
+  %t70 = load i8*, i8** %l3
+  %t71 = call i64 @sailfin_runtime_string_length(i8* %t70)
+  %t72 = icmp eq i64 %t71, 0
+  %t73 = load i8*, i8** %l0
+  %t74 = load double, double* %l1
+  %t75 = load i8*, i8** %l2
+  %t76 = load i8*, i8** %l3
+  %t77 = load %CaseComponents, %CaseComponents* %l4
   %t78 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
-  %t79 = insertvalue %NativeInstruction undef, i32 15, 0
-  %t80 = alloca [1 x %NativeInstruction]
-  %t81 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t80, i32 0, i32 0
-  %t82 = getelementptr %NativeInstruction, %NativeInstruction* %t81, i64 0
-  store %NativeInstruction %t79, %NativeInstruction* %t82
-  %t83 = alloca { %NativeInstruction*, i64 }
-  %t84 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t83, i32 0, i32 0
-  store %NativeInstruction* %t81, %NativeInstruction** %t84
-  %t85 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t83, i32 0, i32 1
-  store i64 1, i64* %t85
-  %t86 = bitcast { %NativeInstruction*, i64 }* %t78 to { i8**, i64 }*
-  %t87 = bitcast { %NativeInstruction*, i64 }* %t83 to { i8**, i64 }*
-  %t88 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t86, { i8**, i64 }* %t87)
-  %t89 = bitcast { i8**, i64 }* %t88 to { %NativeInstruction*, i64 }*
-  store { %NativeInstruction*, i64 }* %t89, { %NativeInstruction*, i64 }** %l5
-  %t90 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
-  ret { %NativeInstruction*, i64 }* %t90
+  br i1 %t72, label %then2, label %merge3
+then2:
+  %t79 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
+  %t80 = insertvalue %NativeInstruction undef, i32 15, 0
+  %t81 = call noalias i8* @malloc(i64 56)
+  %t82 = bitcast i8* %t81 to %NativeInstruction*
+  store %NativeInstruction %t80, %NativeInstruction* %t82
+  %t83 = alloca [1 x i8*]
+  %t84 = getelementptr [1 x i8*], [1 x i8*]* %t83, i32 0, i32 0
+  %t85 = getelementptr i8*, i8** %t84, i64 0
+  store i8* %t81, i8** %t85
+  %t86 = alloca { i8**, i64 }
+  %t87 = getelementptr { i8**, i64 }, { i8**, i64 }* %t86, i32 0, i32 0
+  store i8** %t84, i8*** %t87
+  %t88 = getelementptr { i8**, i64 }, { i8**, i64 }* %t86, i32 0, i32 1
+  store i64 1, i64* %t88
+  %t89 = bitcast { %NativeInstruction*, i64 }* %t79 to { i8**, i64 }*
+  %t90 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t89, { i8**, i64 }* %t86)
+  %t91 = bitcast { i8**, i64 }* %t90 to { %NativeInstruction*, i64 }*
+  store { %NativeInstruction*, i64 }* %t91, { %NativeInstruction*, i64 }** %l5
+  %t92 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
+  ret { %NativeInstruction*, i64 }* %t92
 merge3:
-  %t91 = load i8*, i8** %l3
-  %t92 = call %NativeInstruction @parse_inline_case_body_instruction(i8* %t91)
-  store %NativeInstruction %t92, %NativeInstruction* %l6
-  %t93 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
-  %t94 = load %NativeInstruction, %NativeInstruction* %l6
-  %t95 = alloca [1 x %NativeInstruction]
-  %t96 = getelementptr [1 x %NativeInstruction], [1 x %NativeInstruction]* %t95, i32 0, i32 0
-  %t97 = getelementptr %NativeInstruction, %NativeInstruction* %t96, i64 0
-  store %NativeInstruction %t94, %NativeInstruction* %t97
-  %t98 = alloca { %NativeInstruction*, i64 }
-  %t99 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t98, i32 0, i32 0
-  store %NativeInstruction* %t96, %NativeInstruction** %t99
-  %t100 = getelementptr { %NativeInstruction*, i64 }, { %NativeInstruction*, i64 }* %t98, i32 0, i32 1
-  store i64 1, i64* %t100
-  %t101 = bitcast { %NativeInstruction*, i64 }* %t93 to { i8**, i64 }*
-  %t102 = bitcast { %NativeInstruction*, i64 }* %t98 to { i8**, i64 }*
-  %t103 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t101, { i8**, i64 }* %t102)
-  %t104 = bitcast { i8**, i64 }* %t103 to { %NativeInstruction*, i64 }*
-  store { %NativeInstruction*, i64 }* %t104, { %NativeInstruction*, i64 }** %l5
-  %t105 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
-  ret { %NativeInstruction*, i64 }* %t105
+  %t93 = load i8*, i8** %l3
+  %t94 = call %NativeInstruction @parse_inline_case_body_instruction(i8* %t93)
+  store %NativeInstruction %t94, %NativeInstruction* %l6
+  %t95 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
+  %t96 = load %NativeInstruction, %NativeInstruction* %l6
+  %t97 = call noalias i8* @malloc(i64 56)
+  %t98 = bitcast i8* %t97 to %NativeInstruction*
+  store %NativeInstruction %t96, %NativeInstruction* %t98
+  %t99 = alloca [1 x i8*]
+  %t100 = getelementptr [1 x i8*], [1 x i8*]* %t99, i32 0, i32 0
+  %t101 = getelementptr i8*, i8** %t100, i64 0
+  store i8* %t97, i8** %t101
+  %t102 = alloca { i8**, i64 }
+  %t103 = getelementptr { i8**, i64 }, { i8**, i64 }* %t102, i32 0, i32 0
+  store i8** %t100, i8*** %t103
+  %t104 = getelementptr { i8**, i64 }, { i8**, i64 }* %t102, i32 0, i32 1
+  store i64 1, i64* %t104
+  %t105 = bitcast { %NativeInstruction*, i64 }* %t95 to { i8**, i64 }*
+  %t106 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t105, { i8**, i64 }* %t102)
+  %t107 = bitcast { i8**, i64 }* %t106 to { %NativeInstruction*, i64 }*
+  store { %NativeInstruction*, i64 }* %t107, { %NativeInstruction*, i64 }** %l5
+  %t108 = load { %NativeInstruction*, i64 }*, { %NativeInstruction*, i64 }** %l5
+  ret { %NativeInstruction*, i64 }* %t108
 }
 
 define %NativeInstruction @parse_inline_case_body_instruction(i8* %body) {
@@ -4577,10 +4607,10 @@ merge1:
   %t21 = load double, double* %l3
   br label %loop.header2
 loop.header2:
-  %t69 = phi { %NativeImportSpecifier*, i64 }* [ %t20, %entry ], [ %t67, %loop.latch4 ]
-  %t70 = phi double [ %t21, %entry ], [ %t68, %loop.latch4 ]
-  store { %NativeImportSpecifier*, i64 }* %t69, { %NativeImportSpecifier*, i64 }** %l2
-  store double %t70, double* %l3
+  %t70 = phi { %NativeImportSpecifier*, i64 }* [ %t20, %entry ], [ %t68, %loop.latch4 ]
+  %t71 = phi double [ %t21, %entry ], [ %t69, %loop.latch4 ]
+  store { %NativeImportSpecifier*, i64 }* %t70, { %NativeImportSpecifier*, i64 }** %l2
+  store double %t71, double* %l3
   br label %loop.body3
 loop.body3:
   %t22 = load double, double* %l3
@@ -4622,36 +4652,38 @@ merge7:
 then8:
   %t51 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
   %t52 = load %NativeImportSpecifier, %NativeImportSpecifier* %l4
-  %t53 = alloca [1 x %NativeImportSpecifier]
-  %t54 = getelementptr [1 x %NativeImportSpecifier], [1 x %NativeImportSpecifier]* %t53, i32 0, i32 0
-  %t55 = getelementptr %NativeImportSpecifier, %NativeImportSpecifier* %t54, i64 0
-  store %NativeImportSpecifier %t52, %NativeImportSpecifier* %t55
-  %t56 = alloca { %NativeImportSpecifier*, i64 }
-  %t57 = getelementptr { %NativeImportSpecifier*, i64 }, { %NativeImportSpecifier*, i64 }* %t56, i32 0, i32 0
-  store %NativeImportSpecifier* %t54, %NativeImportSpecifier** %t57
-  %t58 = getelementptr { %NativeImportSpecifier*, i64 }, { %NativeImportSpecifier*, i64 }* %t56, i32 0, i32 1
-  store i64 1, i64* %t58
-  %t59 = bitcast { %NativeImportSpecifier*, i64 }* %t51 to { i8**, i64 }*
-  %t60 = bitcast { %NativeImportSpecifier*, i64 }* %t56 to { i8**, i64 }*
-  %t61 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t59, { i8**, i64 }* %t60)
-  %t62 = bitcast { i8**, i64 }* %t61 to { %NativeImportSpecifier*, i64 }*
-  store { %NativeImportSpecifier*, i64 }* %t62, { %NativeImportSpecifier*, i64 }** %l2
+  %t53 = call noalias i8* @malloc(i64 16)
+  %t54 = bitcast i8* %t53 to %NativeImportSpecifier*
+  store %NativeImportSpecifier %t52, %NativeImportSpecifier* %t54
+  %t55 = alloca [1 x i8*]
+  %t56 = getelementptr [1 x i8*], [1 x i8*]* %t55, i32 0, i32 0
+  %t57 = getelementptr i8*, i8** %t56, i64 0
+  store i8* %t53, i8** %t57
+  %t58 = alloca { i8**, i64 }
+  %t59 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 0
+  store i8** %t56, i8*** %t59
+  %t60 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 1
+  store i64 1, i64* %t60
+  %t61 = bitcast { %NativeImportSpecifier*, i64 }* %t51 to { i8**, i64 }*
+  %t62 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t61, { i8**, i64 }* %t58)
+  %t63 = bitcast { i8**, i64 }* %t62 to { %NativeImportSpecifier*, i64 }*
+  store { %NativeImportSpecifier*, i64 }* %t63, { %NativeImportSpecifier*, i64 }** %l2
   br label %merge9
 merge9:
-  %t63 = phi { %NativeImportSpecifier*, i64 }* [ %t62, %then8 ], [ %t48, %loop.body3 ]
-  store { %NativeImportSpecifier*, i64 }* %t63, { %NativeImportSpecifier*, i64 }** %l2
-  %t64 = load double, double* %l3
-  %t65 = sitofp i64 1 to double
-  %t66 = fadd double %t64, %t65
-  store double %t66, double* %l3
+  %t64 = phi { %NativeImportSpecifier*, i64 }* [ %t63, %then8 ], [ %t48, %loop.body3 ]
+  store { %NativeImportSpecifier*, i64 }* %t64, { %NativeImportSpecifier*, i64 }** %l2
+  %t65 = load double, double* %l3
+  %t66 = sitofp i64 1 to double
+  %t67 = fadd double %t65, %t66
+  store double %t67, double* %l3
   br label %loop.latch4
 loop.latch4:
-  %t67 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
-  %t68 = load double, double* %l3
+  %t68 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
+  %t69 = load double, double* %l3
   br label %loop.header2
 afterloop5:
-  %t71 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
-  ret { %NativeImportSpecifier*, i64 }* %t71
+  %t72 = load { %NativeImportSpecifier*, i64 }*, { %NativeImportSpecifier*, i64 }** %l2
+  ret { %NativeImportSpecifier*, i64 }* %t72
 }
 
 define %NativeImportSpecifier @parse_single_specifier(i8* %entry) {
@@ -6442,12 +6474,12 @@ merge1:
   %t58 = load double, double* %l6
   br label %loop.header2
 loop.header2:
-  %t208 = phi { i8**, i64 }* [ %t52, %entry ], [ %t205, %loop.latch4 ]
-  %t209 = phi double [ %t58, %entry ], [ %t206, %loop.latch4 ]
-  %t210 = phi { %NativeInterfaceSignature*, i64 }* [ %t57, %entry ], [ %t207, %loop.latch4 ]
-  store { i8**, i64 }* %t208, { i8**, i64 }** %l0
-  store double %t209, double* %l6
-  store { %NativeInterfaceSignature*, i64 }* %t210, { %NativeInterfaceSignature*, i64 }** %l5
+  %t209 = phi { i8**, i64 }* [ %t52, %entry ], [ %t206, %loop.latch4 ]
+  %t210 = phi double [ %t58, %entry ], [ %t207, %loop.latch4 ]
+  %t211 = phi { %NativeInterfaceSignature*, i64 }* [ %t57, %entry ], [ %t208, %loop.latch4 ]
+  store { i8**, i64 }* %t209, { i8**, i64 }** %l0
+  store double %t210, double* %l6
+  store { %NativeInterfaceSignature*, i64 }* %t211, { %NativeInterfaceSignature*, i64 }** %l5
   br label %loop.body3
 loop.body3:
   %t59 = load double, double* %l6
@@ -6616,63 +6648,65 @@ then16:
   %t180 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
   %t181 = load %InterfaceSignatureParse, %InterfaceSignatureParse* %l8
   %t182 = extractvalue %InterfaceSignatureParse %t181, 1
-  %t183 = alloca [1 x %NativeInterfaceSignature]
-  %t184 = getelementptr [1 x %NativeInterfaceSignature], [1 x %NativeInterfaceSignature]* %t183, i32 0, i32 0
-  %t185 = getelementptr %NativeInterfaceSignature, %NativeInterfaceSignature* %t184, i64 0
-  store %NativeInterfaceSignature %t182, %NativeInterfaceSignature* %t185
-  %t186 = alloca { %NativeInterfaceSignature*, i64 }
-  %t187 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t186, i32 0, i32 0
-  store %NativeInterfaceSignature* %t184, %NativeInterfaceSignature** %t187
-  %t188 = getelementptr { %NativeInterfaceSignature*, i64 }, { %NativeInterfaceSignature*, i64 }* %t186, i32 0, i32 1
-  store i64 1, i64* %t188
-  %t189 = bitcast { %NativeInterfaceSignature*, i64 }* %t180 to { i8**, i64 }*
-  %t190 = bitcast { %NativeInterfaceSignature*, i64 }* %t186 to { i8**, i64 }*
-  %t191 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t189, { i8**, i64 }* %t190)
-  %t192 = bitcast { i8**, i64 }* %t191 to { %NativeInterfaceSignature*, i64 }*
-  store { %NativeInterfaceSignature*, i64 }* %t192, { %NativeInterfaceSignature*, i64 }** %l5
+  %t183 = call noalias i8* @malloc(i64 48)
+  %t184 = bitcast i8* %t183 to %NativeInterfaceSignature*
+  store %NativeInterfaceSignature %t182, %NativeInterfaceSignature* %t184
+  %t185 = alloca [1 x i8*]
+  %t186 = getelementptr [1 x i8*], [1 x i8*]* %t185, i32 0, i32 0
+  %t187 = getelementptr i8*, i8** %t186, i64 0
+  store i8* %t183, i8** %t187
+  %t188 = alloca { i8**, i64 }
+  %t189 = getelementptr { i8**, i64 }, { i8**, i64 }* %t188, i32 0, i32 0
+  store i8** %t186, i8*** %t189
+  %t190 = getelementptr { i8**, i64 }, { i8**, i64 }* %t188, i32 0, i32 1
+  store i64 1, i64* %t190
+  %t191 = bitcast { %NativeInterfaceSignature*, i64 }* %t180 to { i8**, i64 }*
+  %t192 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t191, { i8**, i64 }* %t188)
+  %t193 = bitcast { i8**, i64 }* %t192 to { %NativeInterfaceSignature*, i64 }*
+  store { %NativeInterfaceSignature*, i64 }* %t193, { %NativeInterfaceSignature*, i64 }** %l5
   br label %merge17
 merge17:
-  %t193 = phi { %NativeInterfaceSignature*, i64 }* [ %t192, %then16 ], [ %t176, %then14 ]
-  store { %NativeInterfaceSignature*, i64 }* %t193, { %NativeInterfaceSignature*, i64 }** %l5
-  %t194 = load double, double* %l6
-  %t195 = sitofp i64 1 to double
-  %t196 = fadd double %t194, %t195
-  store double %t196, double* %l6
+  %t194 = phi { %NativeInterfaceSignature*, i64 }* [ %t193, %then16 ], [ %t176, %then14 ]
+  store { %NativeInterfaceSignature*, i64 }* %t194, { %NativeInterfaceSignature*, i64 }** %l5
+  %t195 = load double, double* %l6
+  %t196 = sitofp i64 1 to double
+  %t197 = fadd double %t195, %t196
+  store double %t197, double* %l6
   br label %loop.latch4
 merge15:
-  %t197 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s198 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.198, i32 0, i32 0
-  %t199 = load i8*, i8** %l7
-  %t200 = add i8* %s198, %t199
-  %t201 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t197, i8* %t200)
-  store { i8**, i64 }* %t201, { i8**, i64 }** %l0
-  %t202 = load double, double* %l6
-  %t203 = sitofp i64 1 to double
-  %t204 = fadd double %t202, %t203
-  store double %t204, double* %l6
+  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s199 = getelementptr inbounds [34 x i8], [34 x i8]* @.str.199, i32 0, i32 0
+  %t200 = load i8*, i8** %l7
+  %t201 = add i8* %s199, %t200
+  %t202 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t198, i8* %t201)
+  store { i8**, i64 }* %t202, { i8**, i64 }** %l0
+  %t203 = load double, double* %l6
+  %t204 = sitofp i64 1 to double
+  %t205 = fadd double %t203, %t204
+  store double %t205, double* %l6
   br label %loop.latch4
 loop.latch4:
-  %t205 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t206 = load double, double* %l6
-  %t207 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t206 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t207 = load double, double* %l6
+  %t208 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
   br label %loop.header2
 afterloop5:
-  %t211 = load i8*, i8** %l4
-  %t212 = insertvalue %NativeInterface undef, i8* %t211, 0
-  %t213 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
-  %t214 = extractvalue %InterfaceHeaderParse %t213, 1
-  %t215 = insertvalue %NativeInterface %t212, { i8**, i64 }* %t214, 1
-  %t216 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
-  %t217 = bitcast { %NativeInterfaceSignature*, i64 }* %t216 to { %NativeInterfaceSignature**, i64 }*
-  %t218 = insertvalue %NativeInterface %t215, { %NativeInterfaceSignature**, i64 }* %t217, 2
-  %t219 = alloca %NativeInterface
-  store %NativeInterface %t218, %NativeInterface* %t219
-  %t220 = insertvalue %InterfaceParseResult undef, %NativeInterface* %t219, 0
-  %t221 = load double, double* %l6
-  %t222 = insertvalue %InterfaceParseResult %t220, double %t221, 1
-  %t223 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t224 = insertvalue %InterfaceParseResult %t222, { i8**, i64 }* %t223, 2
-  ret %InterfaceParseResult %t224
+  %t212 = load i8*, i8** %l4
+  %t213 = insertvalue %NativeInterface undef, i8* %t212, 0
+  %t214 = load %InterfaceHeaderParse, %InterfaceHeaderParse* %l3
+  %t215 = extractvalue %InterfaceHeaderParse %t214, 1
+  %t216 = insertvalue %NativeInterface %t213, { i8**, i64 }* %t215, 1
+  %t217 = load { %NativeInterfaceSignature*, i64 }*, { %NativeInterfaceSignature*, i64 }** %l5
+  %t218 = bitcast { %NativeInterfaceSignature*, i64 }* %t217 to { %NativeInterfaceSignature**, i64 }*
+  %t219 = insertvalue %NativeInterface %t216, { %NativeInterfaceSignature**, i64 }* %t218, 2
+  %t220 = alloca %NativeInterface
+  store %NativeInterface %t219, %NativeInterface* %t220
+  %t221 = insertvalue %InterfaceParseResult undef, %NativeInterface* %t220, 0
+  %t222 = load double, double* %l6
+  %t223 = insertvalue %InterfaceParseResult %t221, double %t222, 1
+  %t224 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t225 = insertvalue %InterfaceParseResult %t223, { i8**, i64 }* %t224, 2
+  ret %InterfaceParseResult %t225
 }
 
 define %StructHeaderParse @parse_struct_header(i8* %text) {
@@ -18834,20 +18868,22 @@ merge12:
 
 define { %NativeParameter*, i64 }* @append_parameter_array({ %NativeParameter*, i64 }* %values, %NativeParameter %parameter) {
 entry:
-  %t0 = alloca [1 x %NativeParameter]
-  %t1 = getelementptr [1 x %NativeParameter], [1 x %NativeParameter]* %t0, i32 0, i32 0
-  %t2 = getelementptr %NativeParameter, %NativeParameter* %t1, i64 0
-  store %NativeParameter %parameter, %NativeParameter* %t2
-  %t3 = alloca { %NativeParameter*, i64 }
-  %t4 = getelementptr { %NativeParameter*, i64 }, { %NativeParameter*, i64 }* %t3, i32 0, i32 0
-  store %NativeParameter* %t1, %NativeParameter** %t4
-  %t5 = getelementptr { %NativeParameter*, i64 }, { %NativeParameter*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %NativeParameter*, i64 }* %values to { i8**, i64 }*
-  %t7 = bitcast { %NativeParameter*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %NativeParameter*, i64 }*
-  ret { %NativeParameter*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 40)
+  %t1 = bitcast i8* %t0 to %NativeParameter*
+  store %NativeParameter %parameter, %NativeParameter* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %NativeParameter*, i64 }* %values to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %NativeParameter*, i64 }*
+  ret { %NativeParameter*, i64 }* %t10
 }
 
 define double @add(double %a, double %b) {

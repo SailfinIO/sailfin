@@ -1860,10 +1860,10 @@ entry:
   %t16 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
   br label %loop.header0
 loop.header0:
-  %t298 = phi %Parser [ %t15, %entry ], [ %t296, %loop.latch2 ]
-  %t299 = phi { %NamedSpecifier*, i64 }* [ %t16, %entry ], [ %t297, %loop.latch2 ]
-  store %Parser %t298, %Parser* %l0
-  store { %NamedSpecifier*, i64 }* %t299, { %NamedSpecifier*, i64 }** %l1
+  %t299 = phi %Parser [ %t15, %entry ], [ %t297, %loop.latch2 ]
+  %t300 = phi { %NamedSpecifier*, i64 }* [ %t16, %entry ], [ %t298, %loop.latch2 ]
+  store %Parser %t299, %Parser* %l0
+  store { %NamedSpecifier*, i64 }* %t300, { %NamedSpecifier*, i64 }** %l1
   br label %loop.body1
 loop.body1:
   %t17 = load %Parser, %Parser* %l0
@@ -2103,228 +2103,230 @@ merge9:
   %t202 = insertvalue %NamedSpecifier undef, i8* %t201, 0
   %t203 = load i8*, i8** %l4
   %t204 = insertvalue %NamedSpecifier %t202, i8* %t203, 1
-  %t205 = alloca [1 x %NamedSpecifier]
-  %t206 = getelementptr [1 x %NamedSpecifier], [1 x %NamedSpecifier]* %t205, i32 0, i32 0
-  %t207 = getelementptr %NamedSpecifier, %NamedSpecifier* %t206, i64 0
-  store %NamedSpecifier %t204, %NamedSpecifier* %t207
-  %t208 = alloca { %NamedSpecifier*, i64 }
-  %t209 = getelementptr { %NamedSpecifier*, i64 }, { %NamedSpecifier*, i64 }* %t208, i32 0, i32 0
-  store %NamedSpecifier* %t206, %NamedSpecifier** %t209
-  %t210 = getelementptr { %NamedSpecifier*, i64 }, { %NamedSpecifier*, i64 }* %t208, i32 0, i32 1
-  store i64 1, i64* %t210
-  %t211 = bitcast { %NamedSpecifier*, i64 }* %t200 to { i8**, i64 }*
-  %t212 = bitcast { %NamedSpecifier*, i64 }* %t208 to { i8**, i64 }*
-  %t213 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t211, { i8**, i64 }* %t212)
-  %t214 = bitcast { i8**, i64 }* %t213 to { %NamedSpecifier*, i64 }*
-  store { %NamedSpecifier*, i64 }* %t214, { %NamedSpecifier*, i64 }** %l1
-  %t215 = load %Parser, %Parser* %l0
-  %t216 = call %Token @parser_peek_raw(%Parser %t215)
-  store %Token %t216, %Token* %l7
-  %t218 = load %Token, %Token* %l7
-  %t219 = extractvalue %Token %t218, 0
-  %t220 = extractvalue %TokenKind %t219, 0
-  %t221 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
-  %t222 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
-  %t223 = icmp eq i32 %t220, 0
-  %t224 = select i1 %t223, i8* %t222, i8* %t221
-  %t225 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
-  %t226 = icmp eq i32 %t220, 1
-  %t227 = select i1 %t226, i8* %t225, i8* %t224
-  %t228 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
-  %t229 = icmp eq i32 %t220, 2
-  %t230 = select i1 %t229, i8* %t228, i8* %t227
-  %t231 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
-  %t232 = icmp eq i32 %t220, 3
-  %t233 = select i1 %t232, i8* %t231, i8* %t230
-  %t234 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
-  %t235 = icmp eq i32 %t220, 4
-  %t236 = select i1 %t235, i8* %t234, i8* %t233
-  %t237 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
-  %t238 = icmp eq i32 %t220, 5
-  %t239 = select i1 %t238, i8* %t237, i8* %t236
-  %t240 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
-  %t241 = icmp eq i32 %t220, 6
-  %t242 = select i1 %t241, i8* %t240, i8* %t239
-  %t243 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
-  %t244 = icmp eq i32 %t220, 7
-  %t245 = select i1 %t244, i8* %t243, i8* %t242
-  %s246 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.246, i32 0, i32 0
-  %t247 = icmp eq i8* %t245, %s246
-  br label %logical_and_entry_217
+  %t205 = call noalias i8* @malloc(i64 16)
+  %t206 = bitcast i8* %t205 to %NamedSpecifier*
+  store %NamedSpecifier %t204, %NamedSpecifier* %t206
+  %t207 = alloca [1 x i8*]
+  %t208 = getelementptr [1 x i8*], [1 x i8*]* %t207, i32 0, i32 0
+  %t209 = getelementptr i8*, i8** %t208, i64 0
+  store i8* %t205, i8** %t209
+  %t210 = alloca { i8**, i64 }
+  %t211 = getelementptr { i8**, i64 }, { i8**, i64 }* %t210, i32 0, i32 0
+  store i8** %t208, i8*** %t211
+  %t212 = getelementptr { i8**, i64 }, { i8**, i64 }* %t210, i32 0, i32 1
+  store i64 1, i64* %t212
+  %t213 = bitcast { %NamedSpecifier*, i64 }* %t200 to { i8**, i64 }*
+  %t214 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t213, { i8**, i64 }* %t210)
+  %t215 = bitcast { i8**, i64 }* %t214 to { %NamedSpecifier*, i64 }*
+  store { %NamedSpecifier*, i64 }* %t215, { %NamedSpecifier*, i64 }** %l1
+  %t216 = load %Parser, %Parser* %l0
+  %t217 = call %Token @parser_peek_raw(%Parser %t216)
+  store %Token %t217, %Token* %l7
+  %t219 = load %Token, %Token* %l7
+  %t220 = extractvalue %Token %t219, 0
+  %t221 = extractvalue %TokenKind %t220, 0
+  %t222 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
+  %t223 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
+  %t224 = icmp eq i32 %t221, 0
+  %t225 = select i1 %t224, i8* %t223, i8* %t222
+  %t226 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
+  %t227 = icmp eq i32 %t221, 1
+  %t228 = select i1 %t227, i8* %t226, i8* %t225
+  %t229 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
+  %t230 = icmp eq i32 %t221, 2
+  %t231 = select i1 %t230, i8* %t229, i8* %t228
+  %t232 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
+  %t233 = icmp eq i32 %t221, 3
+  %t234 = select i1 %t233, i8* %t232, i8* %t231
+  %t235 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
+  %t236 = icmp eq i32 %t221, 4
+  %t237 = select i1 %t236, i8* %t235, i8* %t234
+  %t238 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
+  %t239 = icmp eq i32 %t221, 5
+  %t240 = select i1 %t239, i8* %t238, i8* %t237
+  %t241 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
+  %t242 = icmp eq i32 %t221, 6
+  %t243 = select i1 %t242, i8* %t241, i8* %t240
+  %t244 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
+  %t245 = icmp eq i32 %t221, 7
+  %t246 = select i1 %t245, i8* %t244, i8* %t243
+  %s247 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.247, i32 0, i32 0
+  %t248 = icmp eq i8* %t246, %s247
+  br label %logical_and_entry_218
 
-logical_and_entry_217:
-  br i1 %t247, label %logical_and_right_217, label %logical_and_merge_217
+logical_and_entry_218:
+  br i1 %t248, label %logical_and_right_218, label %logical_and_merge_218
 
-logical_and_right_217:
-  %t248 = load %Token, %Token* %l7
-  %t249 = extractvalue %Token %t248, 0
-  %t250 = extractvalue %TokenKind %t249, 0
-  %t251 = alloca %TokenKind
-  store %TokenKind %t249, %TokenKind* %t251
-  %t252 = getelementptr inbounds %TokenKind, %TokenKind* %t251, i32 0, i32 1
-  %t253 = bitcast [8 x i8]* %t252 to i8*
-  %t254 = bitcast i8* %t253 to i8**
-  %t255 = load i8*, i8** %t254
-  %t256 = icmp eq i32 %t250, 0
-  %t257 = select i1 %t256, i8* %t255, i8* null
-  %t258 = getelementptr inbounds %TokenKind, %TokenKind* %t251, i32 0, i32 1
-  %t259 = bitcast [8 x i8]* %t258 to i8*
-  %t260 = bitcast i8* %t259 to i8**
-  %t261 = load i8*, i8** %t260
-  %t262 = icmp eq i32 %t250, 1
-  %t263 = select i1 %t262, i8* %t261, i8* %t257
-  %t264 = getelementptr inbounds %TokenKind, %TokenKind* %t251, i32 0, i32 1
-  %t265 = bitcast [8 x i8]* %t264 to i8*
-  %t266 = bitcast i8* %t265 to i8**
-  %t267 = load i8*, i8** %t266
-  %t268 = icmp eq i32 %t250, 2
-  %t269 = select i1 %t268, i8* %t267, i8* %t263
-  %t270 = getelementptr inbounds %TokenKind, %TokenKind* %t251, i32 0, i32 1
-  %t271 = bitcast [8 x i8]* %t270 to i8*
-  %t272 = bitcast i8* %t271 to i8**
-  %t273 = load i8*, i8** %t272
-  %t274 = icmp eq i32 %t250, 3
-  %t275 = select i1 %t274, i8* %t273, i8* %t269
-  %t276 = getelementptr inbounds %TokenKind, %TokenKind* %t251, i32 0, i32 1
-  %t277 = bitcast [8 x i8]* %t276 to i8*
-  %t278 = bitcast i8* %t277 to i8**
-  %t279 = load i8*, i8** %t278
-  %t280 = icmp eq i32 %t250, 4
-  %t281 = select i1 %t280, i8* %t279, i8* %t275
-  %t282 = load i8, i8* %t281
-  %t283 = icmp eq i8 %t282, 44
-  br label %logical_and_right_end_217
+logical_and_right_218:
+  %t249 = load %Token, %Token* %l7
+  %t250 = extractvalue %Token %t249, 0
+  %t251 = extractvalue %TokenKind %t250, 0
+  %t252 = alloca %TokenKind
+  store %TokenKind %t250, %TokenKind* %t252
+  %t253 = getelementptr inbounds %TokenKind, %TokenKind* %t252, i32 0, i32 1
+  %t254 = bitcast [8 x i8]* %t253 to i8*
+  %t255 = bitcast i8* %t254 to i8**
+  %t256 = load i8*, i8** %t255
+  %t257 = icmp eq i32 %t251, 0
+  %t258 = select i1 %t257, i8* %t256, i8* null
+  %t259 = getelementptr inbounds %TokenKind, %TokenKind* %t252, i32 0, i32 1
+  %t260 = bitcast [8 x i8]* %t259 to i8*
+  %t261 = bitcast i8* %t260 to i8**
+  %t262 = load i8*, i8** %t261
+  %t263 = icmp eq i32 %t251, 1
+  %t264 = select i1 %t263, i8* %t262, i8* %t258
+  %t265 = getelementptr inbounds %TokenKind, %TokenKind* %t252, i32 0, i32 1
+  %t266 = bitcast [8 x i8]* %t265 to i8*
+  %t267 = bitcast i8* %t266 to i8**
+  %t268 = load i8*, i8** %t267
+  %t269 = icmp eq i32 %t251, 2
+  %t270 = select i1 %t269, i8* %t268, i8* %t264
+  %t271 = getelementptr inbounds %TokenKind, %TokenKind* %t252, i32 0, i32 1
+  %t272 = bitcast [8 x i8]* %t271 to i8*
+  %t273 = bitcast i8* %t272 to i8**
+  %t274 = load i8*, i8** %t273
+  %t275 = icmp eq i32 %t251, 3
+  %t276 = select i1 %t275, i8* %t274, i8* %t270
+  %t277 = getelementptr inbounds %TokenKind, %TokenKind* %t252, i32 0, i32 1
+  %t278 = bitcast [8 x i8]* %t277 to i8*
+  %t279 = bitcast i8* %t278 to i8**
+  %t280 = load i8*, i8** %t279
+  %t281 = icmp eq i32 %t251, 4
+  %t282 = select i1 %t281, i8* %t280, i8* %t276
+  %t283 = load i8, i8* %t282
+  %t284 = icmp eq i8 %t283, 44
+  br label %logical_and_right_end_218
 
-logical_and_right_end_217:
-  br label %logical_and_merge_217
+logical_and_right_end_218:
+  br label %logical_and_merge_218
 
-logical_and_merge_217:
-  %t284 = phi i1 [ false, %logical_and_entry_217 ], [ %t283, %logical_and_right_end_217 ]
-  %t285 = load %Parser, %Parser* %l0
-  %t286 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
-  %t287 = load %Token, %Token* %l2
-  %t288 = load i8*, i8** %l3
-  %t289 = load i8*, i8** %l4
-  %t290 = load %Token, %Token* %l5
-  %t291 = load %Token, %Token* %l7
-  br i1 %t284, label %then12, label %merge13
+logical_and_merge_218:
+  %t285 = phi i1 [ false, %logical_and_entry_218 ], [ %t284, %logical_and_right_end_218 ]
+  %t286 = load %Parser, %Parser* %l0
+  %t287 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
+  %t288 = load %Token, %Token* %l2
+  %t289 = load i8*, i8** %l3
+  %t290 = load i8*, i8** %l4
+  %t291 = load %Token, %Token* %l5
+  %t292 = load %Token, %Token* %l7
+  br i1 %t285, label %then12, label %merge13
 then12:
-  %t292 = load %Parser, %Parser* %l0
-  %t293 = call %Parser @parser_advance_raw(%Parser %t292)
-  store %Parser %t293, %Parser* %l0
-  %t294 = load %Parser, %Parser* %l0
-  %t295 = call %Parser @skip_trivia(%Parser %t294)
-  store %Parser %t295, %Parser* %l0
+  %t293 = load %Parser, %Parser* %l0
+  %t294 = call %Parser @parser_advance_raw(%Parser %t293)
+  store %Parser %t294, %Parser* %l0
+  %t295 = load %Parser, %Parser* %l0
+  %t296 = call %Parser @skip_trivia(%Parser %t295)
+  store %Parser %t296, %Parser* %l0
   br label %loop.latch2
 merge13:
   br label %loop.latch2
 loop.latch2:
-  %t296 = load %Parser, %Parser* %l0
-  %t297 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
+  %t297 = load %Parser, %Parser* %l0
+  %t298 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
   br label %loop.header0
 afterloop3:
-  %t300 = load %Parser, %Parser* %l0
-  %t301 = call %Parser @skip_trivia(%Parser %t300)
-  store %Parser %t301, %Parser* %l0
-  %t303 = load %Parser, %Parser* %l0
-  %t304 = call %Token @parser_peek_raw(%Parser %t303)
-  %t305 = extractvalue %Token %t304, 0
-  %t306 = extractvalue %TokenKind %t305, 0
-  %t307 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
-  %t308 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
-  %t309 = icmp eq i32 %t306, 0
-  %t310 = select i1 %t309, i8* %t308, i8* %t307
-  %t311 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
-  %t312 = icmp eq i32 %t306, 1
-  %t313 = select i1 %t312, i8* %t311, i8* %t310
-  %t314 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
-  %t315 = icmp eq i32 %t306, 2
-  %t316 = select i1 %t315, i8* %t314, i8* %t313
-  %t317 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
-  %t318 = icmp eq i32 %t306, 3
-  %t319 = select i1 %t318, i8* %t317, i8* %t316
-  %t320 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
-  %t321 = icmp eq i32 %t306, 4
-  %t322 = select i1 %t321, i8* %t320, i8* %t319
-  %t323 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
-  %t324 = icmp eq i32 %t306, 5
-  %t325 = select i1 %t324, i8* %t323, i8* %t322
-  %t326 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
-  %t327 = icmp eq i32 %t306, 6
-  %t328 = select i1 %t327, i8* %t326, i8* %t325
-  %t329 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
-  %t330 = icmp eq i32 %t306, 7
-  %t331 = select i1 %t330, i8* %t329, i8* %t328
-  %s332 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.332, i32 0, i32 0
-  %t333 = icmp eq i8* %t331, %s332
-  br label %logical_and_entry_302
+  %t301 = load %Parser, %Parser* %l0
+  %t302 = call %Parser @skip_trivia(%Parser %t301)
+  store %Parser %t302, %Parser* %l0
+  %t304 = load %Parser, %Parser* %l0
+  %t305 = call %Token @parser_peek_raw(%Parser %t304)
+  %t306 = extractvalue %Token %t305, 0
+  %t307 = extractvalue %TokenKind %t306, 0
+  %t308 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
+  %t309 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
+  %t310 = icmp eq i32 %t307, 0
+  %t311 = select i1 %t310, i8* %t309, i8* %t308
+  %t312 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
+  %t313 = icmp eq i32 %t307, 1
+  %t314 = select i1 %t313, i8* %t312, i8* %t311
+  %t315 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
+  %t316 = icmp eq i32 %t307, 2
+  %t317 = select i1 %t316, i8* %t315, i8* %t314
+  %t318 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
+  %t319 = icmp eq i32 %t307, 3
+  %t320 = select i1 %t319, i8* %t318, i8* %t317
+  %t321 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
+  %t322 = icmp eq i32 %t307, 4
+  %t323 = select i1 %t322, i8* %t321, i8* %t320
+  %t324 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
+  %t325 = icmp eq i32 %t307, 5
+  %t326 = select i1 %t325, i8* %t324, i8* %t323
+  %t327 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
+  %t328 = icmp eq i32 %t307, 6
+  %t329 = select i1 %t328, i8* %t327, i8* %t326
+  %t330 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
+  %t331 = icmp eq i32 %t307, 7
+  %t332 = select i1 %t331, i8* %t330, i8* %t329
+  %s333 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.333, i32 0, i32 0
+  %t334 = icmp eq i8* %t332, %s333
+  br label %logical_and_entry_303
 
-logical_and_entry_302:
-  br i1 %t333, label %logical_and_right_302, label %logical_and_merge_302
+logical_and_entry_303:
+  br i1 %t334, label %logical_and_right_303, label %logical_and_merge_303
 
-logical_and_right_302:
-  %t334 = load %Parser, %Parser* %l0
-  %t335 = call %Token @parser_peek_raw(%Parser %t334)
-  %t336 = extractvalue %Token %t335, 0
-  %t337 = extractvalue %TokenKind %t336, 0
-  %t338 = alloca %TokenKind
-  store %TokenKind %t336, %TokenKind* %t338
-  %t339 = getelementptr inbounds %TokenKind, %TokenKind* %t338, i32 0, i32 1
-  %t340 = bitcast [8 x i8]* %t339 to i8*
-  %t341 = bitcast i8* %t340 to i8**
-  %t342 = load i8*, i8** %t341
-  %t343 = icmp eq i32 %t337, 0
-  %t344 = select i1 %t343, i8* %t342, i8* null
-  %t345 = getelementptr inbounds %TokenKind, %TokenKind* %t338, i32 0, i32 1
-  %t346 = bitcast [8 x i8]* %t345 to i8*
-  %t347 = bitcast i8* %t346 to i8**
-  %t348 = load i8*, i8** %t347
-  %t349 = icmp eq i32 %t337, 1
-  %t350 = select i1 %t349, i8* %t348, i8* %t344
-  %t351 = getelementptr inbounds %TokenKind, %TokenKind* %t338, i32 0, i32 1
-  %t352 = bitcast [8 x i8]* %t351 to i8*
-  %t353 = bitcast i8* %t352 to i8**
-  %t354 = load i8*, i8** %t353
-  %t355 = icmp eq i32 %t337, 2
-  %t356 = select i1 %t355, i8* %t354, i8* %t350
-  %t357 = getelementptr inbounds %TokenKind, %TokenKind* %t338, i32 0, i32 1
-  %t358 = bitcast [8 x i8]* %t357 to i8*
-  %t359 = bitcast i8* %t358 to i8**
-  %t360 = load i8*, i8** %t359
-  %t361 = icmp eq i32 %t337, 3
-  %t362 = select i1 %t361, i8* %t360, i8* %t356
-  %t363 = getelementptr inbounds %TokenKind, %TokenKind* %t338, i32 0, i32 1
-  %t364 = bitcast [8 x i8]* %t363 to i8*
-  %t365 = bitcast i8* %t364 to i8**
-  %t366 = load i8*, i8** %t365
-  %t367 = icmp eq i32 %t337, 4
-  %t368 = select i1 %t367, i8* %t366, i8* %t362
-  %t369 = load i8, i8* %t368
-  %t370 = icmp eq i8 %t369, 125
-  br label %logical_and_right_end_302
+logical_and_right_303:
+  %t335 = load %Parser, %Parser* %l0
+  %t336 = call %Token @parser_peek_raw(%Parser %t335)
+  %t337 = extractvalue %Token %t336, 0
+  %t338 = extractvalue %TokenKind %t337, 0
+  %t339 = alloca %TokenKind
+  store %TokenKind %t337, %TokenKind* %t339
+  %t340 = getelementptr inbounds %TokenKind, %TokenKind* %t339, i32 0, i32 1
+  %t341 = bitcast [8 x i8]* %t340 to i8*
+  %t342 = bitcast i8* %t341 to i8**
+  %t343 = load i8*, i8** %t342
+  %t344 = icmp eq i32 %t338, 0
+  %t345 = select i1 %t344, i8* %t343, i8* null
+  %t346 = getelementptr inbounds %TokenKind, %TokenKind* %t339, i32 0, i32 1
+  %t347 = bitcast [8 x i8]* %t346 to i8*
+  %t348 = bitcast i8* %t347 to i8**
+  %t349 = load i8*, i8** %t348
+  %t350 = icmp eq i32 %t338, 1
+  %t351 = select i1 %t350, i8* %t349, i8* %t345
+  %t352 = getelementptr inbounds %TokenKind, %TokenKind* %t339, i32 0, i32 1
+  %t353 = bitcast [8 x i8]* %t352 to i8*
+  %t354 = bitcast i8* %t353 to i8**
+  %t355 = load i8*, i8** %t354
+  %t356 = icmp eq i32 %t338, 2
+  %t357 = select i1 %t356, i8* %t355, i8* %t351
+  %t358 = getelementptr inbounds %TokenKind, %TokenKind* %t339, i32 0, i32 1
+  %t359 = bitcast [8 x i8]* %t358 to i8*
+  %t360 = bitcast i8* %t359 to i8**
+  %t361 = load i8*, i8** %t360
+  %t362 = icmp eq i32 %t338, 3
+  %t363 = select i1 %t362, i8* %t361, i8* %t357
+  %t364 = getelementptr inbounds %TokenKind, %TokenKind* %t339, i32 0, i32 1
+  %t365 = bitcast [8 x i8]* %t364 to i8*
+  %t366 = bitcast i8* %t365 to i8**
+  %t367 = load i8*, i8** %t366
+  %t368 = icmp eq i32 %t338, 4
+  %t369 = select i1 %t368, i8* %t367, i8* %t363
+  %t370 = load i8, i8* %t369
+  %t371 = icmp eq i8 %t370, 125
+  br label %logical_and_right_end_303
 
-logical_and_right_end_302:
-  br label %logical_and_merge_302
+logical_and_right_end_303:
+  br label %logical_and_merge_303
 
-logical_and_merge_302:
-  %t371 = phi i1 [ false, %logical_and_entry_302 ], [ %t370, %logical_and_right_end_302 ]
-  %t372 = load %Parser, %Parser* %l0
-  %t373 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
-  br i1 %t371, label %then14, label %merge15
+logical_and_merge_303:
+  %t372 = phi i1 [ false, %logical_and_entry_303 ], [ %t371, %logical_and_right_end_303 ]
+  %t373 = load %Parser, %Parser* %l0
+  %t374 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
+  br i1 %t372, label %then14, label %merge15
 then14:
-  %t374 = load %Parser, %Parser* %l0
-  %t375 = call %Parser @parser_advance_raw(%Parser %t374)
-  store %Parser %t375, %Parser* %l0
+  %t375 = load %Parser, %Parser* %l0
+  %t376 = call %Parser @parser_advance_raw(%Parser %t375)
+  store %Parser %t376, %Parser* %l0
   br label %merge15
 merge15:
-  %t376 = phi %Parser [ %t375, %then14 ], [ %t372, %entry ]
-  store %Parser %t376, %Parser* %l0
-  %t377 = load %Parser, %Parser* %l0
-  %t378 = insertvalue %SpecifierListParseResult undef, %Parser %t377, 0
-  %t379 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
-  %t380 = bitcast { %NamedSpecifier*, i64 }* %t379 to { %NamedSpecifier**, i64 }*
-  %t381 = insertvalue %SpecifierListParseResult %t378, { %NamedSpecifier**, i64 }* %t380, 1
-  ret %SpecifierListParseResult %t381
+  %t377 = phi %Parser [ %t376, %then14 ], [ %t373, %entry ]
+  store %Parser %t377, %Parser* %l0
+  %t378 = load %Parser, %Parser* %l0
+  %t379 = insertvalue %SpecifierListParseResult undef, %Parser %t378, 0
+  %t380 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
+  %t381 = bitcast { %NamedSpecifier*, i64 }* %t380 to { %NamedSpecifier**, i64 }*
+  %t382 = insertvalue %SpecifierListParseResult %t379, { %NamedSpecifier**, i64 }* %t381, 1
+  ret %SpecifierListParseResult %t382
 }
 
 define { %ImportSpecifier*, i64 }* @build_import_specifiers({ %NamedSpecifier*, i64 }* %values) {
@@ -2346,10 +2348,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi { %ImportSpecifier*, i64 }* [ %t6, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t7, %entry ], [ %t44, %loop.latch2 ]
-  store { %ImportSpecifier*, i64 }* %t45, { %ImportSpecifier*, i64 }** %l0
-  store double %t46, double* %l1
+  %t46 = phi { %ImportSpecifier*, i64 }* [ %t6, %entry ], [ %t44, %loop.latch2 ]
+  %t47 = phi double [ %t7, %entry ], [ %t45, %loop.latch2 ]
+  store { %ImportSpecifier*, i64 }* %t46, { %ImportSpecifier*, i64 }** %l0
+  store double %t47, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -2380,32 +2382,34 @@ merge5:
   %t27 = load %NamedSpecifier, %NamedSpecifier* %l2
   %t28 = extractvalue %NamedSpecifier %t27, 1
   %t29 = insertvalue %ImportSpecifier %t26, i8* %t28, 1
-  %t30 = alloca [1 x %ImportSpecifier]
-  %t31 = getelementptr [1 x %ImportSpecifier], [1 x %ImportSpecifier]* %t30, i32 0, i32 0
-  %t32 = getelementptr %ImportSpecifier, %ImportSpecifier* %t31, i64 0
-  store %ImportSpecifier %t29, %ImportSpecifier* %t32
-  %t33 = alloca { %ImportSpecifier*, i64 }
-  %t34 = getelementptr { %ImportSpecifier*, i64 }, { %ImportSpecifier*, i64 }* %t33, i32 0, i32 0
-  store %ImportSpecifier* %t31, %ImportSpecifier** %t34
-  %t35 = getelementptr { %ImportSpecifier*, i64 }, { %ImportSpecifier*, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = bitcast { %ImportSpecifier*, i64 }* %t23 to { i8**, i64 }*
-  %t37 = bitcast { %ImportSpecifier*, i64 }* %t33 to { i8**, i64 }*
-  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t36, { i8**, i64 }* %t37)
-  %t39 = bitcast { i8**, i64 }* %t38 to { %ImportSpecifier*, i64 }*
-  store { %ImportSpecifier*, i64 }* %t39, { %ImportSpecifier*, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t30 = call noalias i8* @malloc(i64 16)
+  %t31 = bitcast i8* %t30 to %ImportSpecifier*
+  store %ImportSpecifier %t29, %ImportSpecifier* %t31
+  %t32 = alloca [1 x i8*]
+  %t33 = getelementptr [1 x i8*], [1 x i8*]* %t32, i32 0, i32 0
+  %t34 = getelementptr i8*, i8** %t33, i64 0
+  store i8* %t30, i8** %t34
+  %t35 = alloca { i8**, i64 }
+  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 0
+  store i8** %t33, i8*** %t36
+  %t37 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 1
+  store i64 1, i64* %t37
+  %t38 = bitcast { %ImportSpecifier*, i64 }* %t23 to { i8**, i64 }*
+  %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t38, { i8**, i64 }* %t35)
+  %t40 = bitcast { i8**, i64 }* %t39 to { %ImportSpecifier*, i64 }*
+  store { %ImportSpecifier*, i64 }* %t40, { %ImportSpecifier*, i64 }** %l0
+  %t41 = load double, double* %l1
+  %t42 = sitofp i64 1 to double
+  %t43 = fadd double %t41, %t42
+  store double %t43, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load { %ImportSpecifier*, i64 }*, { %ImportSpecifier*, i64 }** %l0
-  %t44 = load double, double* %l1
+  %t44 = load { %ImportSpecifier*, i64 }*, { %ImportSpecifier*, i64 }** %l0
+  %t45 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load { %ImportSpecifier*, i64 }*, { %ImportSpecifier*, i64 }** %l0
-  ret { %ImportSpecifier*, i64 }* %t47
+  %t48 = load { %ImportSpecifier*, i64 }*, { %ImportSpecifier*, i64 }** %l0
+  ret { %ImportSpecifier*, i64 }* %t48
 }
 
 define { %ExportSpecifier*, i64 }* @build_export_specifiers({ %NamedSpecifier*, i64 }* %values) {
@@ -2427,10 +2431,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t45 = phi { %ExportSpecifier*, i64 }* [ %t6, %entry ], [ %t43, %loop.latch2 ]
-  %t46 = phi double [ %t7, %entry ], [ %t44, %loop.latch2 ]
-  store { %ExportSpecifier*, i64 }* %t45, { %ExportSpecifier*, i64 }** %l0
-  store double %t46, double* %l1
+  %t46 = phi { %ExportSpecifier*, i64 }* [ %t6, %entry ], [ %t44, %loop.latch2 ]
+  %t47 = phi double [ %t7, %entry ], [ %t45, %loop.latch2 ]
+  store { %ExportSpecifier*, i64 }* %t46, { %ExportSpecifier*, i64 }** %l0
+  store double %t47, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -2461,32 +2465,34 @@ merge5:
   %t27 = load %NamedSpecifier, %NamedSpecifier* %l2
   %t28 = extractvalue %NamedSpecifier %t27, 1
   %t29 = insertvalue %ExportSpecifier %t26, i8* %t28, 1
-  %t30 = alloca [1 x %ExportSpecifier]
-  %t31 = getelementptr [1 x %ExportSpecifier], [1 x %ExportSpecifier]* %t30, i32 0, i32 0
-  %t32 = getelementptr %ExportSpecifier, %ExportSpecifier* %t31, i64 0
-  store %ExportSpecifier %t29, %ExportSpecifier* %t32
-  %t33 = alloca { %ExportSpecifier*, i64 }
-  %t34 = getelementptr { %ExportSpecifier*, i64 }, { %ExportSpecifier*, i64 }* %t33, i32 0, i32 0
-  store %ExportSpecifier* %t31, %ExportSpecifier** %t34
-  %t35 = getelementptr { %ExportSpecifier*, i64 }, { %ExportSpecifier*, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = bitcast { %ExportSpecifier*, i64 }* %t23 to { i8**, i64 }*
-  %t37 = bitcast { %ExportSpecifier*, i64 }* %t33 to { i8**, i64 }*
-  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t36, { i8**, i64 }* %t37)
-  %t39 = bitcast { i8**, i64 }* %t38 to { %ExportSpecifier*, i64 }*
-  store { %ExportSpecifier*, i64 }* %t39, { %ExportSpecifier*, i64 }** %l0
-  %t40 = load double, double* %l1
-  %t41 = sitofp i64 1 to double
-  %t42 = fadd double %t40, %t41
-  store double %t42, double* %l1
+  %t30 = call noalias i8* @malloc(i64 16)
+  %t31 = bitcast i8* %t30 to %ExportSpecifier*
+  store %ExportSpecifier %t29, %ExportSpecifier* %t31
+  %t32 = alloca [1 x i8*]
+  %t33 = getelementptr [1 x i8*], [1 x i8*]* %t32, i32 0, i32 0
+  %t34 = getelementptr i8*, i8** %t33, i64 0
+  store i8* %t30, i8** %t34
+  %t35 = alloca { i8**, i64 }
+  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 0
+  store i8** %t33, i8*** %t36
+  %t37 = getelementptr { i8**, i64 }, { i8**, i64 }* %t35, i32 0, i32 1
+  store i64 1, i64* %t37
+  %t38 = bitcast { %ExportSpecifier*, i64 }* %t23 to { i8**, i64 }*
+  %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t38, { i8**, i64 }* %t35)
+  %t40 = bitcast { i8**, i64 }* %t39 to { %ExportSpecifier*, i64 }*
+  store { %ExportSpecifier*, i64 }* %t40, { %ExportSpecifier*, i64 }** %l0
+  %t41 = load double, double* %l1
+  %t42 = sitofp i64 1 to double
+  %t43 = fadd double %t41, %t42
+  store double %t43, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t43 = load { %ExportSpecifier*, i64 }*, { %ExportSpecifier*, i64 }** %l0
-  %t44 = load double, double* %l1
+  %t44 = load { %ExportSpecifier*, i64 }*, { %ExportSpecifier*, i64 }** %l0
+  %t45 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t47 = load { %ExportSpecifier*, i64 }*, { %ExportSpecifier*, i64 }** %l0
-  ret { %ExportSpecifier*, i64 }* %t47
+  %t48 = load { %ExportSpecifier*, i64 }*, { %ExportSpecifier*, i64 }** %l0
+  ret { %ExportSpecifier*, i64 }* %t48
 }
 
 define %StatementParseResult @parse_struct(%Parser %initial_parser, { %Decorator*, i64 }* %decorators) {
@@ -13815,280 +13821,279 @@ then6:
   br i1 %t94, label %then8, label %else9
 then8:
   %t104 = load %Parser, %Parser* %l1
-  %t105 = alloca [0 x double]
-  %t106 = getelementptr [0 x double], [0 x double]* %t105, i32 0, i32 0
-  %t107 = alloca { double*, i64 }
-  %t108 = getelementptr { double*, i64 }, { double*, i64 }* %t107, i32 0, i32 0
-  store double* %t106, double** %t108
-  %t109 = getelementptr { double*, i64 }, { double*, i64 }* %t107, i32 0, i32 1
+  %t105 = alloca [0 x %Decorator]
+  %t106 = getelementptr [0 x %Decorator], [0 x %Decorator]* %t105, i32 0, i32 0
+  %t107 = alloca { %Decorator*, i64 }
+  %t108 = getelementptr { %Decorator*, i64 }, { %Decorator*, i64 }* %t107, i32 0, i32 0
+  store %Decorator* %t106, %Decorator** %t108
+  %t109 = getelementptr { %Decorator*, i64 }, { %Decorator*, i64 }* %t107, i32 0, i32 1
   store i64 0, i64* %t109
-  %t110 = bitcast { double*, i64 }* %t107 to { %Decorator*, i64 }*
-  %t111 = call %BlockStatementParseResult @parse_if_statement(%Parser %t104, { %Decorator*, i64 }* %t110)
-  store %BlockStatementParseResult %t111, %BlockStatementParseResult* %l9
-  %t112 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  %t113 = extractvalue %BlockStatementParseResult %t112, 2
-  %t114 = xor i1 %t113, 1
-  %t115 = load %Parser, %Parser* %l0
-  %t116 = load %Parser, %Parser* %l1
-  %t117 = load %CaptureResult, %CaptureResult* %l2
-  %t118 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
-  %t119 = load %Expression, %Expression* %l4
-  %t120 = load %BlockParseResult, %BlockParseResult* %l5
-  %t121 = load %Block, %Block* %l6
-  %t122 = load %ElseBranch*, %ElseBranch** %l7
-  %t123 = load %Token, %Token* %l8
-  %t124 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  br i1 %t114, label %then11, label %merge12
+  %t110 = call %BlockStatementParseResult @parse_if_statement(%Parser %t104, { %Decorator*, i64 }* %t107)
+  store %BlockStatementParseResult %t110, %BlockStatementParseResult* %l9
+  %t111 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  %t112 = extractvalue %BlockStatementParseResult %t111, 2
+  %t113 = xor i1 %t112, 1
+  %t114 = load %Parser, %Parser* %l0
+  %t115 = load %Parser, %Parser* %l1
+  %t116 = load %CaptureResult, %CaptureResult* %l2
+  %t117 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
+  %t118 = load %Expression, %Expression* %l4
+  %t119 = load %BlockParseResult, %BlockParseResult* %l5
+  %t120 = load %Block, %Block* %l6
+  %t121 = load %ElseBranch*, %ElseBranch** %l7
+  %t122 = load %Token, %Token* %l8
+  %t123 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  br i1 %t113, label %then11, label %merge12
 then11:
-  %t125 = load %Parser, %Parser* %l0
-  %t126 = insertvalue %BlockStatementParseResult undef, %Parser %t125, 0
-  %t127 = bitcast i8* null to %Statement*
-  %t128 = insertvalue %BlockStatementParseResult %t126, %Statement* %t127, 1
-  %t129 = insertvalue %BlockStatementParseResult %t128, i1 0, 2
-  ret %BlockStatementParseResult %t129
+  %t124 = load %Parser, %Parser* %l0
+  %t125 = insertvalue %BlockStatementParseResult undef, %Parser %t124, 0
+  %t126 = bitcast i8* null to %Statement*
+  %t127 = insertvalue %BlockStatementParseResult %t125, %Statement* %t126, 1
+  %t128 = insertvalue %BlockStatementParseResult %t127, i1 0, 2
+  ret %BlockStatementParseResult %t128
 merge12:
-  %t130 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  %t131 = extractvalue %BlockStatementParseResult %t130, 1
-  %t132 = bitcast i8* null to %Statement*
-  %t133 = icmp eq %Statement* %t131, %t132
-  %t134 = load %Parser, %Parser* %l0
-  %t135 = load %Parser, %Parser* %l1
-  %t136 = load %CaptureResult, %CaptureResult* %l2
-  %t137 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
-  %t138 = load %Expression, %Expression* %l4
-  %t139 = load %BlockParseResult, %BlockParseResult* %l5
-  %t140 = load %Block, %Block* %l6
-  %t141 = load %ElseBranch*, %ElseBranch** %l7
-  %t142 = load %Token, %Token* %l8
-  %t143 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  br i1 %t133, label %then13, label %merge14
+  %t129 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  %t130 = extractvalue %BlockStatementParseResult %t129, 1
+  %t131 = bitcast i8* null to %Statement*
+  %t132 = icmp eq %Statement* %t130, %t131
+  %t133 = load %Parser, %Parser* %l0
+  %t134 = load %Parser, %Parser* %l1
+  %t135 = load %CaptureResult, %CaptureResult* %l2
+  %t136 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
+  %t137 = load %Expression, %Expression* %l4
+  %t138 = load %BlockParseResult, %BlockParseResult* %l5
+  %t139 = load %Block, %Block* %l6
+  %t140 = load %ElseBranch*, %ElseBranch** %l7
+  %t141 = load %Token, %Token* %l8
+  %t142 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  br i1 %t132, label %then13, label %merge14
 then13:
-  %t144 = load %Parser, %Parser* %l0
-  %t145 = insertvalue %BlockStatementParseResult undef, %Parser %t144, 0
-  %t146 = bitcast i8* null to %Statement*
-  %t147 = insertvalue %BlockStatementParseResult %t145, %Statement* %t146, 1
-  %t148 = insertvalue %BlockStatementParseResult %t147, i1 0, 2
-  ret %BlockStatementParseResult %t148
+  %t143 = load %Parser, %Parser* %l0
+  %t144 = insertvalue %BlockStatementParseResult undef, %Parser %t143, 0
+  %t145 = bitcast i8* null to %Statement*
+  %t146 = insertvalue %BlockStatementParseResult %t144, %Statement* %t145, 1
+  %t147 = insertvalue %BlockStatementParseResult %t146, i1 0, 2
+  ret %BlockStatementParseResult %t147
 merge14:
-  %t149 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  %t150 = extractvalue %BlockStatementParseResult %t149, 0
-  store %Parser %t150, %Parser* %l1
-  %t151 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
-  %t152 = extractvalue %BlockStatementParseResult %t151, 1
-  %t153 = insertvalue %ElseBranch undef, %Statement* %t152, 0
-  %t154 = bitcast i8* null to %Block*
-  %t155 = insertvalue %ElseBranch %t153, %Block* %t154, 1
-  %t156 = alloca %ElseBranch
-  store %ElseBranch %t155, %ElseBranch* %t156
-  store %ElseBranch* %t156, %ElseBranch** %l7
+  %t148 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  %t149 = extractvalue %BlockStatementParseResult %t148, 0
+  store %Parser %t149, %Parser* %l1
+  %t150 = load %BlockStatementParseResult, %BlockStatementParseResult* %l9
+  %t151 = extractvalue %BlockStatementParseResult %t150, 1
+  %t152 = insertvalue %ElseBranch undef, %Statement* %t151, 0
+  %t153 = bitcast i8* null to %Block*
+  %t154 = insertvalue %ElseBranch %t152, %Block* %t153, 1
+  %t155 = alloca %ElseBranch
+  store %ElseBranch %t154, %ElseBranch* %t155
+  store %ElseBranch* %t155, %ElseBranch** %l7
   br label %merge10
 else9:
-  %t157 = load %Parser, %Parser* %l1
-  %t158 = call %BlockParseResult @parse_block(%Parser %t157)
-  store %BlockParseResult %t158, %BlockParseResult* %l10
-  %t159 = load %BlockParseResult, %BlockParseResult* %l10
-  %t160 = extractvalue %BlockParseResult %t159, 1
-  %t161 = extractvalue %Block %t160, 0
-  %t162 = load { %Token**, i64 }, { %Token**, i64 }* %t161
-  %t163 = extractvalue { %Token**, i64 } %t162, 1
-  %t164 = icmp eq i64 %t163, 0
-  %t165 = load %Parser, %Parser* %l0
-  %t166 = load %Parser, %Parser* %l1
-  %t167 = load %CaptureResult, %CaptureResult* %l2
-  %t168 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
-  %t169 = load %Expression, %Expression* %l4
-  %t170 = load %BlockParseResult, %BlockParseResult* %l5
-  %t171 = load %Block, %Block* %l6
-  %t172 = load %ElseBranch*, %ElseBranch** %l7
-  %t173 = load %Token, %Token* %l8
-  %t174 = load %BlockParseResult, %BlockParseResult* %l10
-  br i1 %t164, label %then15, label %merge16
+  %t156 = load %Parser, %Parser* %l1
+  %t157 = call %BlockParseResult @parse_block(%Parser %t156)
+  store %BlockParseResult %t157, %BlockParseResult* %l10
+  %t158 = load %BlockParseResult, %BlockParseResult* %l10
+  %t159 = extractvalue %BlockParseResult %t158, 1
+  %t160 = extractvalue %Block %t159, 0
+  %t161 = load { %Token**, i64 }, { %Token**, i64 }* %t160
+  %t162 = extractvalue { %Token**, i64 } %t161, 1
+  %t163 = icmp eq i64 %t162, 0
+  %t164 = load %Parser, %Parser* %l0
+  %t165 = load %Parser, %Parser* %l1
+  %t166 = load %CaptureResult, %CaptureResult* %l2
+  %t167 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
+  %t168 = load %Expression, %Expression* %l4
+  %t169 = load %BlockParseResult, %BlockParseResult* %l5
+  %t170 = load %Block, %Block* %l6
+  %t171 = load %ElseBranch*, %ElseBranch** %l7
+  %t172 = load %Token, %Token* %l8
+  %t173 = load %BlockParseResult, %BlockParseResult* %l10
+  br i1 %t163, label %then15, label %merge16
 then15:
-  %t175 = load %Parser, %Parser* %l0
-  %t176 = insertvalue %BlockStatementParseResult undef, %Parser %t175, 0
-  %t177 = bitcast i8* null to %Statement*
-  %t178 = insertvalue %BlockStatementParseResult %t176, %Statement* %t177, 1
-  %t179 = insertvalue %BlockStatementParseResult %t178, i1 0, 2
-  ret %BlockStatementParseResult %t179
+  %t174 = load %Parser, %Parser* %l0
+  %t175 = insertvalue %BlockStatementParseResult undef, %Parser %t174, 0
+  %t176 = bitcast i8* null to %Statement*
+  %t177 = insertvalue %BlockStatementParseResult %t175, %Statement* %t176, 1
+  %t178 = insertvalue %BlockStatementParseResult %t177, i1 0, 2
+  ret %BlockStatementParseResult %t178
 merge16:
-  %t180 = load %BlockParseResult, %BlockParseResult* %l10
-  %t181 = extractvalue %BlockParseResult %t180, 0
-  store %Parser %t181, %Parser* %l1
-  %t182 = bitcast i8* null to %Statement*
-  %t183 = insertvalue %ElseBranch undef, %Statement* %t182, 0
-  %t184 = load %BlockParseResult, %BlockParseResult* %l10
-  %t185 = extractvalue %BlockParseResult %t184, 1
-  %t186 = alloca %Block
-  store %Block %t185, %Block* %t186
-  %t187 = insertvalue %ElseBranch %t183, %Block* %t186, 1
-  %t188 = alloca %ElseBranch
-  store %ElseBranch %t187, %ElseBranch* %t188
-  store %ElseBranch* %t188, %ElseBranch** %l7
+  %t179 = load %BlockParseResult, %BlockParseResult* %l10
+  %t180 = extractvalue %BlockParseResult %t179, 0
+  store %Parser %t180, %Parser* %l1
+  %t181 = bitcast i8* null to %Statement*
+  %t182 = insertvalue %ElseBranch undef, %Statement* %t181, 0
+  %t183 = load %BlockParseResult, %BlockParseResult* %l10
+  %t184 = extractvalue %BlockParseResult %t183, 1
+  %t185 = alloca %Block
+  store %Block %t184, %Block* %t185
+  %t186 = insertvalue %ElseBranch %t182, %Block* %t185, 1
+  %t187 = alloca %ElseBranch
+  store %ElseBranch %t186, %ElseBranch* %t187
+  store %ElseBranch* %t187, %ElseBranch** %l7
   br label %merge10
 merge10:
-  %t189 = phi %Parser [ %t150, %then8 ], [ %t181, %else9 ]
-  %t190 = phi %ElseBranch* [ %t156, %then8 ], [ %t188, %else9 ]
-  store %Parser %t189, %Parser* %l1
-  store %ElseBranch* %t190, %ElseBranch** %l7
-  %t191 = load %Parser, %Parser* %l1
-  %t192 = call %Parser @skip_trivia(%Parser %t191)
-  store %Parser %t192, %Parser* %l1
-  %t193 = load %Parser, %Parser* %l1
-  %t194 = call %Token @parser_peek_raw(%Parser %t193)
-  store %Token %t194, %Token* %l11
-  %t196 = load %Token, %Token* %l11
-  %t197 = extractvalue %Token %t196, 0
-  %t198 = extractvalue %TokenKind %t197, 0
-  %t199 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
-  %t200 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
-  %t201 = icmp eq i32 %t198, 0
-  %t202 = select i1 %t201, i8* %t200, i8* %t199
-  %t203 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
-  %t204 = icmp eq i32 %t198, 1
-  %t205 = select i1 %t204, i8* %t203, i8* %t202
-  %t206 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
-  %t207 = icmp eq i32 %t198, 2
-  %t208 = select i1 %t207, i8* %t206, i8* %t205
-  %t209 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
-  %t210 = icmp eq i32 %t198, 3
-  %t211 = select i1 %t210, i8* %t209, i8* %t208
-  %t212 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
-  %t213 = icmp eq i32 %t198, 4
-  %t214 = select i1 %t213, i8* %t212, i8* %t211
-  %t215 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
-  %t216 = icmp eq i32 %t198, 5
-  %t217 = select i1 %t216, i8* %t215, i8* %t214
-  %t218 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
-  %t219 = icmp eq i32 %t198, 6
-  %t220 = select i1 %t219, i8* %t218, i8* %t217
-  %t221 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
-  %t222 = icmp eq i32 %t198, 7
-  %t223 = select i1 %t222, i8* %t221, i8* %t220
-  %s224 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.224, i32 0, i32 0
-  %t225 = icmp eq i8* %t223, %s224
-  br label %logical_and_entry_195
+  %t188 = phi %Parser [ %t149, %then8 ], [ %t180, %else9 ]
+  %t189 = phi %ElseBranch* [ %t155, %then8 ], [ %t187, %else9 ]
+  store %Parser %t188, %Parser* %l1
+  store %ElseBranch* %t189, %ElseBranch** %l7
+  %t190 = load %Parser, %Parser* %l1
+  %t191 = call %Parser @skip_trivia(%Parser %t190)
+  store %Parser %t191, %Parser* %l1
+  %t192 = load %Parser, %Parser* %l1
+  %t193 = call %Token @parser_peek_raw(%Parser %t192)
+  store %Token %t193, %Token* %l11
+  %t195 = load %Token, %Token* %l11
+  %t196 = extractvalue %Token %t195, 0
+  %t197 = extractvalue %TokenKind %t196, 0
+  %t198 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.TokenKind.variant.default, i32 0, i32 0
+  %t199 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Identifier.variant, i32 0, i32 0
+  %t200 = icmp eq i32 %t197, 0
+  %t201 = select i1 %t200, i8* %t199, i8* %t198
+  %t202 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.NumberLiteral.variant, i32 0, i32 0
+  %t203 = icmp eq i32 %t197, 1
+  %t204 = select i1 %t203, i8* %t202, i8* %t201
+  %t205 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.TokenKind.StringLiteral.variant, i32 0, i32 0
+  %t206 = icmp eq i32 %t197, 2
+  %t207 = select i1 %t206, i8* %t205, i8* %t204
+  %t208 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.TokenKind.BooleanLiteral.variant, i32 0, i32 0
+  %t209 = icmp eq i32 %t197, 3
+  %t210 = select i1 %t209, i8* %t208, i8* %t207
+  %t211 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.TokenKind.Symbol.variant, i32 0, i32 0
+  %t212 = icmp eq i32 %t197, 4
+  %t213 = select i1 %t212, i8* %t211, i8* %t210
+  %t214 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.TokenKind.Whitespace.variant, i32 0, i32 0
+  %t215 = icmp eq i32 %t197, 5
+  %t216 = select i1 %t215, i8* %t214, i8* %t213
+  %t217 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.TokenKind.Comment.variant, i32 0, i32 0
+  %t218 = icmp eq i32 %t197, 6
+  %t219 = select i1 %t218, i8* %t217, i8* %t216
+  %t220 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
+  %t221 = icmp eq i32 %t197, 7
+  %t222 = select i1 %t221, i8* %t220, i8* %t219
+  %s223 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.223, i32 0, i32 0
+  %t224 = icmp eq i8* %t222, %s223
+  br label %logical_and_entry_194
 
-logical_and_entry_195:
-  br i1 %t225, label %logical_and_right_195, label %logical_and_merge_195
+logical_and_entry_194:
+  br i1 %t224, label %logical_and_right_194, label %logical_and_merge_194
 
-logical_and_right_195:
-  %t226 = load %Token, %Token* %l11
-  %t227 = extractvalue %Token %t226, 0
-  %t228 = extractvalue %TokenKind %t227, 0
-  %t229 = alloca %TokenKind
-  store %TokenKind %t227, %TokenKind* %t229
-  %t230 = getelementptr inbounds %TokenKind, %TokenKind* %t229, i32 0, i32 1
-  %t231 = bitcast [8 x i8]* %t230 to i8*
-  %t232 = bitcast i8* %t231 to i8**
-  %t233 = load i8*, i8** %t232
-  %t234 = icmp eq i32 %t228, 0
-  %t235 = select i1 %t234, i8* %t233, i8* null
-  %t236 = getelementptr inbounds %TokenKind, %TokenKind* %t229, i32 0, i32 1
-  %t237 = bitcast [8 x i8]* %t236 to i8*
-  %t238 = bitcast i8* %t237 to i8**
-  %t239 = load i8*, i8** %t238
-  %t240 = icmp eq i32 %t228, 1
-  %t241 = select i1 %t240, i8* %t239, i8* %t235
-  %t242 = getelementptr inbounds %TokenKind, %TokenKind* %t229, i32 0, i32 1
-  %t243 = bitcast [8 x i8]* %t242 to i8*
-  %t244 = bitcast i8* %t243 to i8**
-  %t245 = load i8*, i8** %t244
-  %t246 = icmp eq i32 %t228, 2
-  %t247 = select i1 %t246, i8* %t245, i8* %t241
-  %t248 = getelementptr inbounds %TokenKind, %TokenKind* %t229, i32 0, i32 1
-  %t249 = bitcast [8 x i8]* %t248 to i8*
-  %t250 = bitcast i8* %t249 to i8**
-  %t251 = load i8*, i8** %t250
-  %t252 = icmp eq i32 %t228, 3
-  %t253 = select i1 %t252, i8* %t251, i8* %t247
-  %t254 = getelementptr inbounds %TokenKind, %TokenKind* %t229, i32 0, i32 1
-  %t255 = bitcast [8 x i8]* %t254 to i8*
-  %t256 = bitcast i8* %t255 to i8**
-  %t257 = load i8*, i8** %t256
-  %t258 = icmp eq i32 %t228, 4
-  %t259 = select i1 %t258, i8* %t257, i8* %t253
-  %t260 = load i8, i8* %t259
-  %t261 = icmp eq i8 %t260, 59
-  br label %logical_and_right_end_195
+logical_and_right_194:
+  %t225 = load %Token, %Token* %l11
+  %t226 = extractvalue %Token %t225, 0
+  %t227 = extractvalue %TokenKind %t226, 0
+  %t228 = alloca %TokenKind
+  store %TokenKind %t226, %TokenKind* %t228
+  %t229 = getelementptr inbounds %TokenKind, %TokenKind* %t228, i32 0, i32 1
+  %t230 = bitcast [8 x i8]* %t229 to i8*
+  %t231 = bitcast i8* %t230 to i8**
+  %t232 = load i8*, i8** %t231
+  %t233 = icmp eq i32 %t227, 0
+  %t234 = select i1 %t233, i8* %t232, i8* null
+  %t235 = getelementptr inbounds %TokenKind, %TokenKind* %t228, i32 0, i32 1
+  %t236 = bitcast [8 x i8]* %t235 to i8*
+  %t237 = bitcast i8* %t236 to i8**
+  %t238 = load i8*, i8** %t237
+  %t239 = icmp eq i32 %t227, 1
+  %t240 = select i1 %t239, i8* %t238, i8* %t234
+  %t241 = getelementptr inbounds %TokenKind, %TokenKind* %t228, i32 0, i32 1
+  %t242 = bitcast [8 x i8]* %t241 to i8*
+  %t243 = bitcast i8* %t242 to i8**
+  %t244 = load i8*, i8** %t243
+  %t245 = icmp eq i32 %t227, 2
+  %t246 = select i1 %t245, i8* %t244, i8* %t240
+  %t247 = getelementptr inbounds %TokenKind, %TokenKind* %t228, i32 0, i32 1
+  %t248 = bitcast [8 x i8]* %t247 to i8*
+  %t249 = bitcast i8* %t248 to i8**
+  %t250 = load i8*, i8** %t249
+  %t251 = icmp eq i32 %t227, 3
+  %t252 = select i1 %t251, i8* %t250, i8* %t246
+  %t253 = getelementptr inbounds %TokenKind, %TokenKind* %t228, i32 0, i32 1
+  %t254 = bitcast [8 x i8]* %t253 to i8*
+  %t255 = bitcast i8* %t254 to i8**
+  %t256 = load i8*, i8** %t255
+  %t257 = icmp eq i32 %t227, 4
+  %t258 = select i1 %t257, i8* %t256, i8* %t252
+  %t259 = load i8, i8* %t258
+  %t260 = icmp eq i8 %t259, 59
+  br label %logical_and_right_end_194
 
-logical_and_right_end_195:
-  br label %logical_and_merge_195
+logical_and_right_end_194:
+  br label %logical_and_merge_194
 
-logical_and_merge_195:
-  %t262 = phi i1 [ false, %logical_and_entry_195 ], [ %t261, %logical_and_right_end_195 ]
-  %t263 = load %Parser, %Parser* %l0
-  %t264 = load %Parser, %Parser* %l1
-  %t265 = load %CaptureResult, %CaptureResult* %l2
-  %t266 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
-  %t267 = load %Expression, %Expression* %l4
-  %t268 = load %BlockParseResult, %BlockParseResult* %l5
-  %t269 = load %Block, %Block* %l6
-  %t270 = load %ElseBranch*, %ElseBranch** %l7
-  %t271 = load %Token, %Token* %l8
-  %t272 = load %Token, %Token* %l11
-  br i1 %t262, label %then17, label %merge18
+logical_and_merge_194:
+  %t261 = phi i1 [ false, %logical_and_entry_194 ], [ %t260, %logical_and_right_end_194 ]
+  %t262 = load %Parser, %Parser* %l0
+  %t263 = load %Parser, %Parser* %l1
+  %t264 = load %CaptureResult, %CaptureResult* %l2
+  %t265 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
+  %t266 = load %Expression, %Expression* %l4
+  %t267 = load %BlockParseResult, %BlockParseResult* %l5
+  %t268 = load %Block, %Block* %l6
+  %t269 = load %ElseBranch*, %ElseBranch** %l7
+  %t270 = load %Token, %Token* %l8
+  %t271 = load %Token, %Token* %l11
+  br i1 %t261, label %then17, label %merge18
 then17:
-  %t273 = load %Parser, %Parser* %l1
-  %t274 = call %Parser @parser_advance_raw(%Parser %t273)
-  store %Parser %t274, %Parser* %l1
+  %t272 = load %Parser, %Parser* %l1
+  %t273 = call %Parser @parser_advance_raw(%Parser %t272)
+  store %Parser %t273, %Parser* %l1
   br label %merge18
 merge18:
-  %t275 = phi %Parser [ %t274, %then17 ], [ %t264, %then6 ]
-  store %Parser %t275, %Parser* %l1
+  %t274 = phi %Parser [ %t273, %then17 ], [ %t263, %then6 ]
+  store %Parser %t274, %Parser* %l1
   br label %merge7
 merge7:
-  %t276 = phi %Parser [ %t87, %then6 ], [ %t78, %entry ]
-  %t277 = phi %Parser [ %t89, %then6 ], [ %t78, %entry ]
-  %t278 = phi %Parser [ %t150, %then6 ], [ %t78, %entry ]
-  %t279 = phi %ElseBranch* [ %t156, %then6 ], [ %t84, %entry ]
-  %t280 = phi %Parser [ %t181, %then6 ], [ %t78, %entry ]
-  %t281 = phi %ElseBranch* [ %t188, %then6 ], [ %t84, %entry ]
-  %t282 = phi %Parser [ %t192, %then6 ], [ %t78, %entry ]
-  %t283 = phi %Parser [ %t274, %then6 ], [ %t78, %entry ]
+  %t275 = phi %Parser [ %t87, %then6 ], [ %t78, %entry ]
+  %t276 = phi %Parser [ %t89, %then6 ], [ %t78, %entry ]
+  %t277 = phi %Parser [ %t149, %then6 ], [ %t78, %entry ]
+  %t278 = phi %ElseBranch* [ %t155, %then6 ], [ %t84, %entry ]
+  %t279 = phi %Parser [ %t180, %then6 ], [ %t78, %entry ]
+  %t280 = phi %ElseBranch* [ %t187, %then6 ], [ %t84, %entry ]
+  %t281 = phi %Parser [ %t191, %then6 ], [ %t78, %entry ]
+  %t282 = phi %Parser [ %t273, %then6 ], [ %t78, %entry ]
+  store %Parser %t275, %Parser* %l1
   store %Parser %t276, %Parser* %l1
   store %Parser %t277, %Parser* %l1
-  store %Parser %t278, %Parser* %l1
-  store %ElseBranch* %t279, %ElseBranch** %l7
-  store %Parser %t280, %Parser* %l1
-  store %ElseBranch* %t281, %ElseBranch** %l7
+  store %ElseBranch* %t278, %ElseBranch** %l7
+  store %Parser %t279, %Parser* %l1
+  store %ElseBranch* %t280, %ElseBranch** %l7
+  store %Parser %t281, %Parser* %l1
   store %Parser %t282, %Parser* %l1
-  store %Parser %t283, %Parser* %l1
-  %t284 = alloca %Statement
-  %t285 = getelementptr inbounds %Statement, %Statement* %t284, i32 0, i32 0
-  store i32 19, i32* %t285
-  %t286 = load %Expression, %Expression* %l4
-  %t287 = getelementptr inbounds %Statement, %Statement* %t284, i32 0, i32 1
-  %t288 = bitcast [32 x i8]* %t287 to i8*
-  %t289 = bitcast i8* %t288 to %Expression*
-  store %Expression %t286, %Expression* %t289
-  %t290 = load %Block, %Block* %l6
-  %t291 = getelementptr inbounds %Statement, %Statement* %t284, i32 0, i32 1
-  %t292 = bitcast [32 x i8]* %t291 to i8*
-  %t293 = getelementptr inbounds i8, i8* %t292, i64 8
-  %t294 = bitcast i8* %t293 to %Block*
-  store %Block %t290, %Block* %t294
-  %t295 = load %ElseBranch*, %ElseBranch** %l7
-  %t296 = getelementptr inbounds %Statement, %Statement* %t284, i32 0, i32 1
-  %t297 = bitcast [32 x i8]* %t296 to i8*
-  %t298 = getelementptr inbounds i8, i8* %t297, i64 16
-  %t299 = bitcast i8* %t298 to %ElseBranch**
-  store %ElseBranch* %t295, %ElseBranch** %t299
-  %t300 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
-  %t301 = getelementptr inbounds %Statement, %Statement* %t284, i32 0, i32 1
-  %t302 = bitcast [32 x i8]* %t301 to i8*
-  %t303 = getelementptr inbounds i8, i8* %t302, i64 24
-  %t304 = bitcast i8* %t303 to { %Decorator**, i64 }**
-  store { %Decorator**, i64 }* %t300, { %Decorator**, i64 }** %t304
-  %t305 = load %Statement, %Statement* %t284
-  store %Statement %t305, %Statement* %l12
-  %t306 = load %Parser, %Parser* %l1
-  %t307 = insertvalue %BlockStatementParseResult undef, %Parser %t306, 0
-  %t308 = load %Statement, %Statement* %l12
-  %t309 = alloca %Statement
-  store %Statement %t308, %Statement* %t309
-  %t310 = insertvalue %BlockStatementParseResult %t307, %Statement* %t309, 1
-  %t311 = insertvalue %BlockStatementParseResult %t310, i1 1, 2
-  ret %BlockStatementParseResult %t311
+  %t283 = alloca %Statement
+  %t284 = getelementptr inbounds %Statement, %Statement* %t283, i32 0, i32 0
+  store i32 19, i32* %t284
+  %t285 = load %Expression, %Expression* %l4
+  %t286 = getelementptr inbounds %Statement, %Statement* %t283, i32 0, i32 1
+  %t287 = bitcast [32 x i8]* %t286 to i8*
+  %t288 = bitcast i8* %t287 to %Expression*
+  store %Expression %t285, %Expression* %t288
+  %t289 = load %Block, %Block* %l6
+  %t290 = getelementptr inbounds %Statement, %Statement* %t283, i32 0, i32 1
+  %t291 = bitcast [32 x i8]* %t290 to i8*
+  %t292 = getelementptr inbounds i8, i8* %t291, i64 8
+  %t293 = bitcast i8* %t292 to %Block*
+  store %Block %t289, %Block* %t293
+  %t294 = load %ElseBranch*, %ElseBranch** %l7
+  %t295 = getelementptr inbounds %Statement, %Statement* %t283, i32 0, i32 1
+  %t296 = bitcast [32 x i8]* %t295 to i8*
+  %t297 = getelementptr inbounds i8, i8* %t296, i64 16
+  %t298 = bitcast i8* %t297 to %ElseBranch**
+  store %ElseBranch* %t294, %ElseBranch** %t298
+  %t299 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
+  %t300 = getelementptr inbounds %Statement, %Statement* %t283, i32 0, i32 1
+  %t301 = bitcast [32 x i8]* %t300 to i8*
+  %t302 = getelementptr inbounds i8, i8* %t301, i64 24
+  %t303 = bitcast i8* %t302 to { %Decorator**, i64 }**
+  store { %Decorator**, i64 }* %t299, { %Decorator**, i64 }** %t303
+  %t304 = load %Statement, %Statement* %t283
+  store %Statement %t304, %Statement* %l12
+  %t305 = load %Parser, %Parser* %l1
+  %t306 = insertvalue %BlockStatementParseResult undef, %Parser %t305, 0
+  %t307 = load %Statement, %Statement* %l12
+  %t308 = alloca %Statement
+  store %Statement %t307, %Statement* %t308
+  %t309 = insertvalue %BlockStatementParseResult %t306, %Statement* %t308, 1
+  %t310 = insertvalue %BlockStatementParseResult %t309, i1 1, 2
+  ret %BlockStatementParseResult %t310
 }
 
 define %BlockStatementParseResult @parse_match_statement(%Parser %parser, { %Decorator*, i64 }* %decorators) {
@@ -31429,20 +31434,22 @@ afterloop3:
 
 define { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %statements, %Statement %statement) {
 entry:
-  %t0 = alloca [1 x %Statement]
-  %t1 = getelementptr [1 x %Statement], [1 x %Statement]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Statement, %Statement* %t1, i64 0
-  store %Statement %statement, %Statement* %t2
-  %t3 = alloca { %Statement*, i64 }
-  %t4 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t3, i32 0, i32 0
-  store %Statement* %t1, %Statement** %t4
-  %t5 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Statement*, i64 }* %statements to { i8**, i64 }*
-  %t7 = bitcast { %Statement*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Statement*, i64 }*
-  ret { %Statement*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 64)
+  %t1 = bitcast i8* %t0 to %Statement*
+  store %Statement %statement, %Statement* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Statement*, i64 }* %statements to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Statement*, i64 }*
+  ret { %Statement*, i64 }* %t10
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {
@@ -31462,287 +31469,317 @@ entry:
 
 define { %Parameter*, i64 }* @append_parameter({ %Parameter*, i64 }* %parameters, %Parameter %parameter) {
 entry:
-  %t0 = alloca [1 x %Parameter]
-  %t1 = getelementptr [1 x %Parameter], [1 x %Parameter]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Parameter, %Parameter* %t1, i64 0
-  store %Parameter %parameter, %Parameter* %t2
-  %t3 = alloca { %Parameter*, i64 }
-  %t4 = getelementptr { %Parameter*, i64 }, { %Parameter*, i64 }* %t3, i32 0, i32 0
-  store %Parameter* %t1, %Parameter** %t4
-  %t5 = getelementptr { %Parameter*, i64 }, { %Parameter*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Parameter*, i64 }* %parameters to { i8**, i64 }*
-  %t7 = bitcast { %Parameter*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Parameter*, i64 }*
-  ret { %Parameter*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 40)
+  %t1 = bitcast i8* %t0 to %Parameter*
+  store %Parameter %parameter, %Parameter* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Parameter*, i64 }* %parameters to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Parameter*, i64 }*
+  ret { %Parameter*, i64 }* %t10
 }
 
 define { %ModelProperty*, i64 }* @append_model_property({ %ModelProperty*, i64 }* %properties, %ModelProperty %property) {
 entry:
-  %t0 = alloca [1 x %ModelProperty]
-  %t1 = getelementptr [1 x %ModelProperty], [1 x %ModelProperty]* %t0, i32 0, i32 0
-  %t2 = getelementptr %ModelProperty, %ModelProperty* %t1, i64 0
-  store %ModelProperty %property, %ModelProperty* %t2
-  %t3 = alloca { %ModelProperty*, i64 }
-  %t4 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t3, i32 0, i32 0
-  store %ModelProperty* %t1, %ModelProperty** %t4
-  %t5 = getelementptr { %ModelProperty*, i64 }, { %ModelProperty*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %ModelProperty*, i64 }* %properties to { i8**, i64 }*
-  %t7 = bitcast { %ModelProperty*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %ModelProperty*, i64 }*
-  ret { %ModelProperty*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %ModelProperty*
+  store %ModelProperty %property, %ModelProperty* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %ModelProperty*, i64 }* %properties to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %ModelProperty*, i64 }*
+  ret { %ModelProperty*, i64 }* %t10
 }
 
 define { %FieldDeclaration*, i64 }* @append_field({ %FieldDeclaration*, i64 }* %fields, %FieldDeclaration %field) {
 entry:
-  %t0 = alloca [1 x %FieldDeclaration]
-  %t1 = getelementptr [1 x %FieldDeclaration], [1 x %FieldDeclaration]* %t0, i32 0, i32 0
-  %t2 = getelementptr %FieldDeclaration, %FieldDeclaration* %t1, i64 0
-  store %FieldDeclaration %field, %FieldDeclaration* %t2
-  %t3 = alloca { %FieldDeclaration*, i64 }
-  %t4 = getelementptr { %FieldDeclaration*, i64 }, { %FieldDeclaration*, i64 }* %t3, i32 0, i32 0
-  store %FieldDeclaration* %t1, %FieldDeclaration** %t4
-  %t5 = getelementptr { %FieldDeclaration*, i64 }, { %FieldDeclaration*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %FieldDeclaration*, i64 }* %fields to { i8**, i64 }*
-  %t7 = bitcast { %FieldDeclaration*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %FieldDeclaration*, i64 }*
-  ret { %FieldDeclaration*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to %FieldDeclaration*
+  store %FieldDeclaration %field, %FieldDeclaration* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %FieldDeclaration*, i64 }* %fields to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %FieldDeclaration*, i64 }*
+  ret { %FieldDeclaration*, i64 }* %t10
 }
 
 define { %MethodDeclaration*, i64 }* @append_method({ %MethodDeclaration*, i64 }* %methods, %MethodDeclaration %method) {
 entry:
-  %t0 = alloca [1 x %MethodDeclaration]
-  %t1 = getelementptr [1 x %MethodDeclaration], [1 x %MethodDeclaration]* %t0, i32 0, i32 0
-  %t2 = getelementptr %MethodDeclaration, %MethodDeclaration* %t1, i64 0
-  store %MethodDeclaration %method, %MethodDeclaration* %t2
-  %t3 = alloca { %MethodDeclaration*, i64 }
-  %t4 = getelementptr { %MethodDeclaration*, i64 }, { %MethodDeclaration*, i64 }* %t3, i32 0, i32 0
-  store %MethodDeclaration* %t1, %MethodDeclaration** %t4
-  %t5 = getelementptr { %MethodDeclaration*, i64 }, { %MethodDeclaration*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %MethodDeclaration*, i64 }* %methods to { i8**, i64 }*
-  %t7 = bitcast { %MethodDeclaration*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %MethodDeclaration*, i64 }*
-  ret { %MethodDeclaration*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %MethodDeclaration*
+  store %MethodDeclaration %method, %MethodDeclaration* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %MethodDeclaration*, i64 }* %methods to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %MethodDeclaration*, i64 }*
+  ret { %MethodDeclaration*, i64 }* %t10
 }
 
 define { %FunctionSignature*, i64 }* @append_signature({ %FunctionSignature*, i64 }* %signatures, %FunctionSignature %signature) {
 entry:
-  %t0 = alloca [1 x %FunctionSignature]
-  %t1 = getelementptr [1 x %FunctionSignature], [1 x %FunctionSignature]* %t0, i32 0, i32 0
-  %t2 = getelementptr %FunctionSignature, %FunctionSignature* %t1, i64 0
-  store %FunctionSignature %signature, %FunctionSignature* %t2
-  %t3 = alloca { %FunctionSignature*, i64 }
-  %t4 = getelementptr { %FunctionSignature*, i64 }, { %FunctionSignature*, i64 }* %t3, i32 0, i32 0
-  store %FunctionSignature* %t1, %FunctionSignature** %t4
-  %t5 = getelementptr { %FunctionSignature*, i64 }, { %FunctionSignature*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %FunctionSignature*, i64 }* %signatures to { i8**, i64 }*
-  %t7 = bitcast { %FunctionSignature*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %FunctionSignature*, i64 }*
-  ret { %FunctionSignature*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 56)
+  %t1 = bitcast i8* %t0 to %FunctionSignature*
+  store %FunctionSignature %signature, %FunctionSignature* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %FunctionSignature*, i64 }* %signatures to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %FunctionSignature*, i64 }*
+  ret { %FunctionSignature*, i64 }* %t10
 }
 
 define { %EnumVariant*, i64 }* @append_enum_variant({ %EnumVariant*, i64 }* %variants, %EnumVariant %variant) {
 entry:
-  %t0 = alloca [1 x %EnumVariant]
-  %t1 = getelementptr [1 x %EnumVariant], [1 x %EnumVariant]* %t0, i32 0, i32 0
-  %t2 = getelementptr %EnumVariant, %EnumVariant* %t1, i64 0
-  store %EnumVariant %variant, %EnumVariant* %t2
-  %t3 = alloca { %EnumVariant*, i64 }
-  %t4 = getelementptr { %EnumVariant*, i64 }, { %EnumVariant*, i64 }* %t3, i32 0, i32 0
-  store %EnumVariant* %t1, %EnumVariant** %t4
-  %t5 = getelementptr { %EnumVariant*, i64 }, { %EnumVariant*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %EnumVariant*, i64 }* %variants to { i8**, i64 }*
-  %t7 = bitcast { %EnumVariant*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %EnumVariant*, i64 }*
-  ret { %EnumVariant*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %EnumVariant*
+  store %EnumVariant %variant, %EnumVariant* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %EnumVariant*, i64 }* %variants to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %EnumVariant*, i64 }*
+  ret { %EnumVariant*, i64 }* %t10
 }
 
 define { %TypeAnnotation*, i64 }* @append_type_annotation({ %TypeAnnotation*, i64 }* %types, %TypeAnnotation %item) {
 entry:
-  %t0 = alloca [1 x %TypeAnnotation]
-  %t1 = getelementptr [1 x %TypeAnnotation], [1 x %TypeAnnotation]* %t0, i32 0, i32 0
-  %t2 = getelementptr %TypeAnnotation, %TypeAnnotation* %t1, i64 0
-  store %TypeAnnotation %item, %TypeAnnotation* %t2
-  %t3 = alloca { %TypeAnnotation*, i64 }
-  %t4 = getelementptr { %TypeAnnotation*, i64 }, { %TypeAnnotation*, i64 }* %t3, i32 0, i32 0
-  store %TypeAnnotation* %t1, %TypeAnnotation** %t4
-  %t5 = getelementptr { %TypeAnnotation*, i64 }, { %TypeAnnotation*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %TypeAnnotation*, i64 }* %types to { i8**, i64 }*
-  %t7 = bitcast { %TypeAnnotation*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %TypeAnnotation*, i64 }*
-  ret { %TypeAnnotation*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 8)
+  %t1 = bitcast i8* %t0 to %TypeAnnotation*
+  store %TypeAnnotation %item, %TypeAnnotation* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %TypeAnnotation*, i64 }* %types to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %TypeAnnotation*, i64 }*
+  ret { %TypeAnnotation*, i64 }* %t10
 }
 
 define { %TypeParameter*, i64 }* @append_type_parameter({ %TypeParameter*, i64 }* %parameters, %TypeParameter %parameter) {
 entry:
-  %t0 = alloca [1 x %TypeParameter]
-  %t1 = getelementptr [1 x %TypeParameter], [1 x %TypeParameter]* %t0, i32 0, i32 0
-  %t2 = getelementptr %TypeParameter, %TypeParameter* %t1, i64 0
-  store %TypeParameter %parameter, %TypeParameter* %t2
-  %t3 = alloca { %TypeParameter*, i64 }
-  %t4 = getelementptr { %TypeParameter*, i64 }, { %TypeParameter*, i64 }* %t3, i32 0, i32 0
-  store %TypeParameter* %t1, %TypeParameter** %t4
-  %t5 = getelementptr { %TypeParameter*, i64 }, { %TypeParameter*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %TypeParameter*, i64 }* %parameters to { i8**, i64 }*
-  %t7 = bitcast { %TypeParameter*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %TypeParameter*, i64 }*
-  ret { %TypeParameter*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %TypeParameter*
+  store %TypeParameter %parameter, %TypeParameter* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %TypeParameter*, i64 }* %parameters to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %TypeParameter*, i64 }*
+  ret { %TypeParameter*, i64 }* %t10
 }
 
 define { %Decorator*, i64 }* @append_decorator({ %Decorator*, i64 }* %decorators, %Decorator %decorator) {
 entry:
-  %t0 = alloca [1 x %Decorator]
-  %t1 = getelementptr [1 x %Decorator], [1 x %Decorator]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Decorator, %Decorator* %t1, i64 0
-  store %Decorator %decorator, %Decorator* %t2
-  %t3 = alloca { %Decorator*, i64 }
-  %t4 = getelementptr { %Decorator*, i64 }, { %Decorator*, i64 }* %t3, i32 0, i32 0
-  store %Decorator* %t1, %Decorator** %t4
-  %t5 = getelementptr { %Decorator*, i64 }, { %Decorator*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Decorator*, i64 }* %decorators to { i8**, i64 }*
-  %t7 = bitcast { %Decorator*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Decorator*, i64 }*
-  ret { %Decorator*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 16)
+  %t1 = bitcast i8* %t0 to %Decorator*
+  store %Decorator %decorator, %Decorator* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Decorator*, i64 }* %decorators to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Decorator*, i64 }*
+  ret { %Decorator*, i64 }* %t10
 }
 
 define { %DecoratorArgument*, i64 }* @append_decorator_argument({ %DecoratorArgument*, i64 }* %arguments, %DecoratorArgument %argument) {
 entry:
-  %t0 = alloca [1 x %DecoratorArgument]
-  %t1 = getelementptr [1 x %DecoratorArgument], [1 x %DecoratorArgument]* %t0, i32 0, i32 0
-  %t2 = getelementptr %DecoratorArgument, %DecoratorArgument* %t1, i64 0
-  store %DecoratorArgument %argument, %DecoratorArgument* %t2
-  %t3 = alloca { %DecoratorArgument*, i64 }
-  %t4 = getelementptr { %DecoratorArgument*, i64 }, { %DecoratorArgument*, i64 }* %t3, i32 0, i32 0
-  store %DecoratorArgument* %t1, %DecoratorArgument** %t4
-  %t5 = getelementptr { %DecoratorArgument*, i64 }, { %DecoratorArgument*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %DecoratorArgument*, i64 }* %arguments to { i8**, i64 }*
-  %t7 = bitcast { %DecoratorArgument*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %DecoratorArgument*, i64 }*
-  ret { %DecoratorArgument*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 16)
+  %t1 = bitcast i8* %t0 to %DecoratorArgument*
+  store %DecoratorArgument %argument, %DecoratorArgument* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %DecoratorArgument*, i64 }* %arguments to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %DecoratorArgument*, i64 }*
+  ret { %DecoratorArgument*, i64 }* %t10
 }
 
 define { %WithClause*, i64 }* @append_with_clause({ %WithClause*, i64 }* %clauses, %WithClause %clause) {
 entry:
-  %t0 = alloca [1 x %WithClause]
-  %t1 = getelementptr [1 x %WithClause], [1 x %WithClause]* %t0, i32 0, i32 0
-  %t2 = getelementptr %WithClause, %WithClause* %t1, i64 0
-  store %WithClause %clause, %WithClause* %t2
-  %t3 = alloca { %WithClause*, i64 }
-  %t4 = getelementptr { %WithClause*, i64 }, { %WithClause*, i64 }* %t3, i32 0, i32 0
-  store %WithClause* %t1, %WithClause** %t4
-  %t5 = getelementptr { %WithClause*, i64 }, { %WithClause*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %WithClause*, i64 }* %clauses to { i8**, i64 }*
-  %t7 = bitcast { %WithClause*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %WithClause*, i64 }*
-  ret { %WithClause*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 8)
+  %t1 = bitcast i8* %t0 to %WithClause*
+  store %WithClause %clause, %WithClause* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %WithClause*, i64 }* %clauses to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %WithClause*, i64 }*
+  ret { %WithClause*, i64 }* %t10
 }
 
 define { %MatchCase*, i64 }* @append_match_case({ %MatchCase*, i64 }* %cases, %MatchCase %case) {
 entry:
-  %t0 = alloca [1 x %MatchCase]
-  %t1 = getelementptr [1 x %MatchCase], [1 x %MatchCase]* %t0, i32 0, i32 0
-  %t2 = getelementptr %MatchCase, %MatchCase* %t1, i64 0
-  store %MatchCase %case, %MatchCase* %t2
-  %t3 = alloca { %MatchCase*, i64 }
-  %t4 = getelementptr { %MatchCase*, i64 }, { %MatchCase*, i64 }* %t3, i32 0, i32 0
-  store %MatchCase* %t1, %MatchCase** %t4
-  %t5 = getelementptr { %MatchCase*, i64 }, { %MatchCase*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %MatchCase*, i64 }* %cases to { i8**, i64 }*
-  %t7 = bitcast { %MatchCase*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %MatchCase*, i64 }*
-  ret { %MatchCase*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %MatchCase*
+  store %MatchCase %case, %MatchCase* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %MatchCase*, i64 }* %cases to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %MatchCase*, i64 }*
+  ret { %MatchCase*, i64 }* %t10
 }
 
 define { %Expression*, i64 }* @append_expression({ %Expression*, i64 }* %expressions, %Expression %expression) {
 entry:
-  %t0 = alloca [1 x %Expression]
-  %t1 = getelementptr [1 x %Expression], [1 x %Expression]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Expression, %Expression* %t1, i64 0
-  store %Expression %expression, %Expression* %t2
-  %t3 = alloca { %Expression*, i64 }
-  %t4 = getelementptr { %Expression*, i64 }, { %Expression*, i64 }* %t3, i32 0, i32 0
-  store %Expression* %t1, %Expression** %t4
-  %t5 = getelementptr { %Expression*, i64 }, { %Expression*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Expression*, i64 }* %expressions to { i8**, i64 }*
-  %t7 = bitcast { %Expression*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Expression*, i64 }*
-  ret { %Expression*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to %Expression*
+  store %Expression %expression, %Expression* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Expression*, i64 }* %expressions to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Expression*, i64 }*
+  ret { %Expression*, i64 }* %t10
 }
 
 define { %ObjectField*, i64 }* @append_object_field({ %ObjectField*, i64 }* %fields, %ObjectField %field) {
 entry:
-  %t0 = alloca [1 x %ObjectField]
-  %t1 = getelementptr [1 x %ObjectField], [1 x %ObjectField]* %t0, i32 0, i32 0
-  %t2 = getelementptr %ObjectField, %ObjectField* %t1, i64 0
-  store %ObjectField %field, %ObjectField* %t2
-  %t3 = alloca { %ObjectField*, i64 }
-  %t4 = getelementptr { %ObjectField*, i64 }, { %ObjectField*, i64 }* %t3, i32 0, i32 0
-  store %ObjectField* %t1, %ObjectField** %t4
-  %t5 = getelementptr { %ObjectField*, i64 }, { %ObjectField*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %ObjectField*, i64 }* %fields to { i8**, i64 }*
-  %t7 = bitcast { %ObjectField*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %ObjectField*, i64 }*
-  ret { %ObjectField*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 16)
+  %t1 = bitcast i8* %t0 to %ObjectField*
+  store %ObjectField %field, %ObjectField* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %ObjectField*, i64 }* %fields to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %ObjectField*, i64 }*
+  ret { %ObjectField*, i64 }* %t10
 }
 
 define { %Token*, i64 }* @append_token({ %Token*, i64 }* %tokens, %Token %token) {
 entry:
-  %t0 = alloca [1 x %Token]
-  %t1 = getelementptr [1 x %Token], [1 x %Token]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Token, %Token* %t1, i64 0
-  store %Token %token, %Token* %t2
-  %t3 = alloca { %Token*, i64 }
-  %t4 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t3, i32 0, i32 0
-  store %Token* %t1, %Token** %t4
-  %t5 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
-  %t7 = bitcast { %Token*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Token*, i64 }*
-  ret { %Token*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to %Token*
+  store %Token %token, %Token* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Token*, i64 }*
+  ret { %Token*, i64 }* %t10
 }
 
 define { i8**, i64 }* @append_token_array({ i8**, i64 }* %collection, { %Token*, i64 }* %tokens) {
 entry:
-  %t0 = alloca [1 x { %Token*, i64 }*]
-  %t1 = getelementptr [1 x { %Token*, i64 }*], [1 x { %Token*, i64 }*]* %t0, i32 0, i32 0
-  %t2 = getelementptr { %Token*, i64 }*, { %Token*, i64 }** %t1, i64 0
-  store { %Token*, i64 }* %tokens, { %Token*, i64 }** %t2
-  %t3 = alloca { { %Token*, i64 }**, i64 }
-  %t4 = getelementptr { { %Token*, i64 }**, i64 }, { { %Token*, i64 }**, i64 }* %t3, i32 0, i32 0
-  store { %Token*, i64 }** %t1, { %Token*, i64 }*** %t4
-  %t5 = getelementptr { { %Token*, i64 }**, i64 }, { { %Token*, i64 }**, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { { %Token*, i64 }**, i64 }* %t3 to { i8**, i64 }*
-  %t7 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %collection, { i8**, i64 }* %t6)
+  %t0 = bitcast { %Token*, i64 }* %tokens to i8*
+  %t1 = alloca [1 x i8*]
+  %t2 = getelementptr [1 x i8*], [1 x i8*]* %t1, i32 0, i32 0
+  %t3 = getelementptr i8*, i8** %t2, i64 0
+  store i8* %t0, i8** %t3
+  %t4 = alloca { i8**, i64 }
+  %t5 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 0
+  store i8** %t2, i8*** %t5
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t4, i32 0, i32 1
+  store i64 1, i64* %t6
+  %t7 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %collection, { i8**, i64 }* %t4)
   ret { i8**, i64 }* %t7
 }
 

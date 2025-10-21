@@ -303,25 +303,27 @@ entry:
   store %EnumVariantDefinition %t1, %EnumVariantDefinition* %l0
   %t2 = extractvalue %EnumType %enum_type, 1
   %t3 = load %EnumVariantDefinition, %EnumVariantDefinition* %l0
-  %t4 = alloca [1 x %EnumVariantDefinition]
-  %t5 = getelementptr [1 x %EnumVariantDefinition], [1 x %EnumVariantDefinition]* %t4, i32 0, i32 0
-  %t6 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %t5, i64 0
-  store %EnumVariantDefinition %t3, %EnumVariantDefinition* %t6
-  %t7 = alloca { %EnumVariantDefinition*, i64 }
-  %t8 = getelementptr { %EnumVariantDefinition*, i64 }, { %EnumVariantDefinition*, i64 }* %t7, i32 0, i32 0
-  store %EnumVariantDefinition* %t5, %EnumVariantDefinition** %t8
-  %t9 = getelementptr { %EnumVariantDefinition*, i64 }, { %EnumVariantDefinition*, i64 }* %t7, i32 0, i32 1
-  store i64 1, i64* %t9
-  %t10 = bitcast { %EnumVariantDefinition**, i64 }* %t2 to { i8**, i64 }*
-  %t11 = bitcast { %EnumVariantDefinition*, i64 }* %t7 to { i8**, i64 }*
-  %t12 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t10, { i8**, i64 }* %t11)
-  store { i8**, i64 }* %t12, { i8**, i64 }** %l1
-  %t13 = extractvalue %EnumType %enum_type, 0
-  %t14 = insertvalue %EnumType undef, i8* %t13, 0
-  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t16 = bitcast { i8**, i64 }* %t15 to { %EnumVariantDefinition**, i64 }*
-  %t17 = insertvalue %EnumType %t14, { %EnumVariantDefinition**, i64 }* %t16, 1
-  ret %EnumType %t17
+  %t4 = call noalias i8* @malloc(i64 16)
+  %t5 = bitcast i8* %t4 to %EnumVariantDefinition*
+  store %EnumVariantDefinition %t3, %EnumVariantDefinition* %t5
+  %t6 = alloca [1 x i8*]
+  %t7 = getelementptr [1 x i8*], [1 x i8*]* %t6, i32 0, i32 0
+  %t8 = getelementptr i8*, i8** %t7, i64 0
+  store i8* %t4, i8** %t8
+  %t9 = alloca { i8**, i64 }
+  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %t9, i32 0, i32 0
+  store i8** %t7, i8*** %t10
+  %t11 = getelementptr { i8**, i64 }, { i8**, i64 }* %t9, i32 0, i32 1
+  store i64 1, i64* %t11
+  %t12 = bitcast { %EnumVariantDefinition**, i64 }* %t2 to { i8**, i64 }*
+  %t13 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t12, { i8**, i64 }* %t9)
+  store { i8**, i64 }* %t13, { i8**, i64 }** %l1
+  %t14 = extractvalue %EnumType %enum_type, 0
+  %t15 = insertvalue %EnumType undef, i8* %t14, 0
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t17 = bitcast { i8**, i64 }* %t16 to { %EnumVariantDefinition**, i64 }*
+  %t18 = insertvalue %EnumType %t15, { %EnumVariantDefinition**, i64 }* %t17, 1
+  ret %EnumType %t18
 }
 
 define %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %fields, i8* %name) {
@@ -480,10 +482,10 @@ merge3:
   %t21 = load i64, i64* %l2
   br label %loop.header4
 loop.header4:
-  %t72 = phi { %EnumField*, i64 }* [ %t20, %entry ], [ %t70, %loop.latch6 ]
-  %t73 = phi i64 [ %t21, %entry ], [ %t71, %loop.latch6 ]
-  store { %EnumField*, i64 }* %t72, { %EnumField*, i64 }** %l1
-  store i64 %t73, i64* %l2
+  %t73 = phi { %EnumField*, i64 }* [ %t20, %entry ], [ %t71, %loop.latch6 ]
+  %t74 = phi i64 [ %t21, %entry ], [ %t72, %loop.latch6 ]
+  store { %EnumField*, i64 }* %t73, { %EnumField*, i64 }** %l1
+  store i64 %t74, i64* %l2
   br label %loop.body5
 loop.body5:
   %t22 = load i64, i64* %l2
@@ -536,31 +538,33 @@ merge11:
   %t55 = insertvalue %EnumField undef, i8* %t54, 0
   %t56 = load i8*, i8** %l5
   %t57 = insertvalue %EnumField %t55, i8* %t56, 1
-  %t58 = alloca [1 x %EnumField]
-  %t59 = getelementptr [1 x %EnumField], [1 x %EnumField]* %t58, i32 0, i32 0
-  %t60 = getelementptr %EnumField, %EnumField* %t59, i64 0
-  store %EnumField %t57, %EnumField* %t60
-  %t61 = alloca { %EnumField*, i64 }
-  %t62 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t61, i32 0, i32 0
-  store %EnumField* %t59, %EnumField** %t62
-  %t63 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t61, i32 0, i32 1
-  store i64 1, i64* %t63
-  %t64 = bitcast { %EnumField*, i64 }* %t53 to { i8**, i64 }*
-  %t65 = bitcast { %EnumField*, i64 }* %t61 to { i8**, i64 }*
-  %t66 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t64, { i8**, i64 }* %t65)
-  %t67 = bitcast { i8**, i64 }* %t66 to { %EnumField*, i64 }*
-  store { %EnumField*, i64 }* %t67, { %EnumField*, i64 }** %l1
-  %t68 = load i64, i64* %l2
-  %t69 = add i64 %t68, 1
-  store i64 %t69, i64* %l2
+  %t58 = call noalias i8* @malloc(i64 16)
+  %t59 = bitcast i8* %t58 to %EnumField*
+  store %EnumField %t57, %EnumField* %t59
+  %t60 = alloca [1 x i8*]
+  %t61 = getelementptr [1 x i8*], [1 x i8*]* %t60, i32 0, i32 0
+  %t62 = getelementptr i8*, i8** %t61, i64 0
+  store i8* %t58, i8** %t62
+  %t63 = alloca { i8**, i64 }
+  %t64 = getelementptr { i8**, i64 }, { i8**, i64 }* %t63, i32 0, i32 0
+  store i8** %t61, i8*** %t64
+  %t65 = getelementptr { i8**, i64 }, { i8**, i64 }* %t63, i32 0, i32 1
+  store i64 1, i64* %t65
+  %t66 = bitcast { %EnumField*, i64 }* %t53 to { i8**, i64 }*
+  %t67 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t66, { i8**, i64 }* %t63)
+  %t68 = bitcast { i8**, i64 }* %t67 to { %EnumField*, i64 }*
+  store { %EnumField*, i64 }* %t68, { %EnumField*, i64 }** %l1
+  %t69 = load i64, i64* %l2
+  %t70 = add i64 %t69, 1
+  store i64 %t70, i64* %l2
   br label %loop.latch6
 loop.latch6:
-  %t70 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t71 = load i64, i64* %l2
+  %t71 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t72 = load i64, i64* %l2
   br label %loop.header4
 afterloop7:
-  %t74 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  ret { %EnumField*, i64 }* %t74
+  %t75 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  ret { %EnumField*, i64 }* %t75
 }
 
 define %EnumInstance @enum_instantiate(%EnumType %enum_type, i8* %variant_name, { %EnumField*, i64 }* %provided) {
@@ -771,16 +775,15 @@ entry:
 define %TypeDescriptor @type_descriptor_primitive(i8* %name) {
 entry:
   %s0 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.0, i32 0, i32 0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %TypeDescriptor]
+  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
+  %t3 = alloca { %TypeDescriptor*, i64 }
+  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
+  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
+  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = bitcast { double*, i64 }* %t3 to { %TypeDescriptor*, i64 }*
-  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t6)
-  ret %TypeDescriptor %t7
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t3)
+  ret %TypeDescriptor %t6
 }
 
 define %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %descriptors) {
@@ -816,46 +819,43 @@ entry:
 define %TypeDescriptor @type_descriptor_function() {
 entry:
   %s0 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.0, i32 0, i32 0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %TypeDescriptor]
+  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
+  %t3 = alloca { %TypeDescriptor*, i64 }
+  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
+  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
+  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = bitcast { double*, i64 }* %t3 to { %TypeDescriptor*, i64 }*
-  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t6)
-  ret %TypeDescriptor %t7
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t3)
+  ret %TypeDescriptor %t6
 }
 
 define %TypeDescriptor @type_descriptor_named(i8* %name) {
 entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %TypeDescriptor]
+  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
+  %t3 = alloca { %TypeDescriptor*, i64 }
+  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
+  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
+  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = bitcast { double*, i64 }* %t3 to { %TypeDescriptor*, i64 }*
-  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t6)
-  ret %TypeDescriptor %t7
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t3)
+  ret %TypeDescriptor %t6
 }
 
 define %TypeDescriptor @type_descriptor_unknown() {
 entry:
   %s0 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.0, i32 0, i32 0
-  %t1 = alloca [0 x double]
-  %t2 = getelementptr [0 x double], [0 x double]* %t1, i32 0, i32 0
-  %t3 = alloca { double*, i64 }
-  %t4 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 0
-  store double* %t2, double** %t4
-  %t5 = getelementptr { double*, i64 }, { double*, i64 }* %t3, i32 0, i32 1
+  %t1 = alloca [0 x %TypeDescriptor]
+  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
+  %t3 = alloca { %TypeDescriptor*, i64 }
+  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
+  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
+  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
   store i64 0, i64* %t5
-  %t6 = bitcast { double*, i64 }* %t3 to { %TypeDescriptor*, i64 }*
-  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t6)
-  ret %TypeDescriptor %t7
+  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t3)
+  ret %TypeDescriptor %t6
 }
 
 define i8* @descriptor_trim(i8* %value) {
@@ -2192,10 +2192,10 @@ entry:
   %t6 = load i64, i64* %l1
   br label %loop.header0
 loop.header0:
-  %t44 = phi { %TypeDescriptor*, i64 }* [ %t5, %entry ], [ %t42, %loop.latch2 ]
-  %t45 = phi i64 [ %t6, %entry ], [ %t43, %loop.latch2 ]
-  store { %TypeDescriptor*, i64 }* %t44, { %TypeDescriptor*, i64 }** %l0
-  store i64 %t45, i64* %l1
+  %t45 = phi { %TypeDescriptor*, i64 }* [ %t5, %entry ], [ %t43, %loop.latch2 ]
+  %t46 = phi i64 [ %t6, %entry ], [ %t44, %loop.latch2 ]
+  store { %TypeDescriptor*, i64 }* %t45, { %TypeDescriptor*, i64 }** %l0
+  store i64 %t46, i64* %l1
   br label %loop.body1
 loop.body1:
   %t7 = load i64, i64* %l1
@@ -2228,35 +2228,37 @@ then6:
   %t26 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
   %t27 = load i8*, i8** %l2
   %t28 = call %TypeDescriptor @parse_type_descriptor(i8* %t27)
-  %t29 = alloca [1 x %TypeDescriptor]
-  %t30 = getelementptr [1 x %TypeDescriptor], [1 x %TypeDescriptor]* %t29, i32 0, i32 0
-  %t31 = getelementptr %TypeDescriptor, %TypeDescriptor* %t30, i64 0
-  store %TypeDescriptor %t28, %TypeDescriptor* %t31
-  %t32 = alloca { %TypeDescriptor*, i64 }
-  %t33 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t32, i32 0, i32 0
-  store %TypeDescriptor* %t30, %TypeDescriptor** %t33
-  %t34 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t32, i32 0, i32 1
-  store i64 1, i64* %t34
-  %t35 = bitcast { %TypeDescriptor*, i64 }* %t26 to { i8**, i64 }*
-  %t36 = bitcast { %TypeDescriptor*, i64 }* %t32 to { i8**, i64 }*
-  %t37 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t35, { i8**, i64 }* %t36)
-  %t38 = bitcast { i8**, i64 }* %t37 to { %TypeDescriptor*, i64 }*
-  store { %TypeDescriptor*, i64 }* %t38, { %TypeDescriptor*, i64 }** %l0
+  %t29 = call noalias i8* @malloc(i64 24)
+  %t30 = bitcast i8* %t29 to %TypeDescriptor*
+  store %TypeDescriptor %t28, %TypeDescriptor* %t30
+  %t31 = alloca [1 x i8*]
+  %t32 = getelementptr [1 x i8*], [1 x i8*]* %t31, i32 0, i32 0
+  %t33 = getelementptr i8*, i8** %t32, i64 0
+  store i8* %t29, i8** %t33
+  %t34 = alloca { i8**, i64 }
+  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 0
+  store i8** %t32, i8*** %t35
+  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 1
+  store i64 1, i64* %t36
+  %t37 = bitcast { %TypeDescriptor*, i64 }* %t26 to { i8**, i64 }*
+  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t37, { i8**, i64 }* %t34)
+  %t39 = bitcast { i8**, i64 }* %t38 to { %TypeDescriptor*, i64 }*
+  store { %TypeDescriptor*, i64 }* %t39, { %TypeDescriptor*, i64 }** %l0
   br label %merge7
 merge7:
-  %t39 = phi { %TypeDescriptor*, i64 }* [ %t38, %then6 ], [ %t23, %loop.body1 ]
-  store { %TypeDescriptor*, i64 }* %t39, { %TypeDescriptor*, i64 }** %l0
-  %t40 = load i64, i64* %l1
-  %t41 = add i64 %t40, 1
-  store i64 %t41, i64* %l1
+  %t40 = phi { %TypeDescriptor*, i64 }* [ %t39, %then6 ], [ %t23, %loop.body1 ]
+  store { %TypeDescriptor*, i64 }* %t40, { %TypeDescriptor*, i64 }** %l0
+  %t41 = load i64, i64* %l1
+  %t42 = add i64 %t41, 1
+  store i64 %t42, i64* %l1
   br label %loop.latch2
 loop.latch2:
-  %t42 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t43 = load i64, i64* %l1
+  %t43 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t44 = load i64, i64* %l1
   br label %loop.header0
 afterloop3:
-  %t46 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  ret { %TypeDescriptor*, i64 }* %t46
+  %t47 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  ret { %TypeDescriptor*, i64 }* %t47
 }
 
 define %TypeDescriptor @parse_type_descriptor(i8* %text) {

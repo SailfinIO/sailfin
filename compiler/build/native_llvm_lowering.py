@@ -5680,38 +5680,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
-    index = 0
-    while True:
-        if index >= len(arguments):
-            break
-        argument_text = trim_text(arguments[index])
-        if len(argument_text) == 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`")
-        lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, "")
-        diagnostics = (diagnostics) + (lowered.diagnostics)
-        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
-        current_lines = lowered.lines
-        current_temp = lowered.temp_index
-        if lowered.operand != None:
-            operands = append_llvm_operand(operands, lowered.operand)
-        else:
-            diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
-        index += 1
-    if method_operand != None:
-        operand_value = method_operand
-        combined_operands = []
-        combined_operands = append_llvm_operand(combined_operands, operand_value)
-        operand_index = 0
-        while True:
-            if operand_index >= len(operands):
-                break
-            combined_operands = append_llvm_operand(combined_operands, operands[operand_index])
-            operand_index += 1
-        operands = combined_operands
-    expected_operand_count = len(arguments) + injected_argument_count
-    if len(operands) != expected_operand_count:
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    function_entry = None
     llvm_return = "double"
     expected_params = []
     is_trait_dispatch = False
@@ -5753,6 +5722,42 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 expected_params = descriptor.parameter_types
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
+    index = 0
+    while True:
+        if index >= len(arguments):
+            break
+        argument_text = trim_text(arguments[index])
+        if len(argument_text) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`")
+        argument_expected_type = ""
+        parameter_index = index + injected_argument_count
+        if len(expected_params) > parameter_index:
+            argument_expected_type = expected_params[parameter_index]
+        lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type)
+        diagnostics = (diagnostics) + (lowered.diagnostics)
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+        current_lines = lowered.lines
+        current_temp = lowered.temp_index
+        if lowered.operand != None:
+            operands = append_llvm_operand(operands, lowered.operand)
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
+        index += 1
+    if method_operand != None:
+        operand_value = method_operand
+        combined_operands = []
+        combined_operands = append_llvm_operand(combined_operands, operand_value)
+        operand_index = 0
+        while True:
+            if operand_index >= len(operands):
+                break
+            combined_operands = append_llvm_operand(combined_operands, operands[operand_index])
+            operand_index += 1
+        operands = combined_operands
+    expected_operand_count = len(arguments) + injected_argument_count
+    if len(operands) != expected_operand_count:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     if function_entry != None  and  injected_argument_count == 1:
         if len(operands) > 0  and  len(expected_params) > 0:
             expected_self_type = expected_params[0]
@@ -5966,7 +5971,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
     current_temp = temp_index
     collected = string_constants
     messages = diagnostics
-    tag_operand = None
+    tag_operand = LLVMOperand(llvm_type=enum_info.tag_type, value="")
     if pointer_available:
         tag_ptr = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0")
@@ -5984,7 +5989,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         sanitized_enum = sanitize_symbol(enum_info.name)
         default_constant_name = "@.enum." + sanitized_enum + ".variant.default"
         existing_default = find_string_constant_by_name(collected, default_constant_name)
-        default_constant = None
+        default_constant = StringConstant(name=default_constant_name, content="", byte_count=0)
         if existing_default != None:
             default_constant = existing_default
         else:
@@ -6002,7 +6007,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             sanitized_variant = sanitize_symbol(variant_info.name)
             constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant"
             existing_variant = find_string_constant_by_name(collected, constant_name)
-            variant_constant = None
+            variant_constant = StringConstant(name=constant_name, content="", byte_count=0)
             if existing_variant != None:
                 variant_constant = existing_variant
             else:
@@ -6158,8 +6163,6 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         match_index += 1
     operand = LLVMOperand(llvm_type=field_type, value=current_value_text)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=messages, string_constants=collected)
-    messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` not yet supported")
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
 
 def emit_string_constant_pointer(constant, temp_index, lines):
     current_lines = lines

@@ -8222,6 +8222,61 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
+    let mut function_entry -> NativeFunction? = null;
+    let mut llvm_return -> string = "double";
+    let mut expected_params -> string[] = [];
+    let mut is_trait_dispatch -> boolean = false;
+
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        is_trait_dispatch = true;
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+            let interface_info = find_interface_info_by_name(context, interface_name);
+            if interface_info != null {
+                let mut sig_idx -> number = 0;
+                loop {
+                    if sig_idx >= interface_info.signatures.length {
+                        break;
+                    }
+                    let sig = interface_info.signatures[sig_idx];
+                    if sig.name == method_name {
+                        llvm_return = map_return_type(context, sig.return_type);
+                        if llvm_return.length == 0 {
+                            llvm_return = "double";
+                        }
+                        expected_params = ["i8*"];
+                        break;
+                    }
+                    sig_idx += 1;
+                }
+            }
+        }
+    }
+
+    function_entry = find_function_by_name(functions, trimmed_target);
+    if helper_descriptor == null {
+        helper_descriptor = find_runtime_helper(trimmed_target);
+    }
+    if !is_trait_dispatch {
+        if function_entry != null {
+            llvm_return = map_return_type(context, function_entry.return_type);
+            if llvm_return.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                llvm_return = "double";
+            }
+            expected_params = collect_parameter_types(context, function_entry.parameters);
+        } else if helper_descriptor != null {
+            let descriptor = helper_descriptor;
+            llvm_return = descriptor.return_type;
+            expected_params = descriptor.parameter_types;
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+        }
+    }
+
     let mut index -> number = 0;
     loop {
         if index >= arguments.length {
@@ -8231,7 +8286,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if argument_text.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
         }
-        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, "");
+        let mut argument_expected_type -> string = "";
+        let parameter_index = index + injected_argument_count;
+        if expected_params.length > parameter_index {
+            argument_expected_type = expected_params[parameter_index];
+        }
+        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type);
         diagnostics = diagnostics.concat(lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
@@ -8263,64 +8323,6 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if operands.length != expected_operand_count {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
-    }
-
-    let mut llvm_return -> string = "double";
-    let mut expected_params -> string[] = [];
-    let mut is_trait_dispatch -> boolean = false;
-    
-    // Check if this is a trait dispatch before looking up function/helper
-    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
-        is_trait_dispatch = true;
-        // Extract interface name and method name
-        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
-        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
-        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
-            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
-            let interface_info = find_interface_info_by_name(context, interface_name);
-            if interface_info != null {
-                // Find the method signature to get return type
-                let mut sig_idx -> number = 0;
-                loop {
-                    if sig_idx >= interface_info.signatures.length {
-                        break;
-                    }
-                    let sig = interface_info.signatures[sig_idx];
-                    if sig.name == method_name {
-                        llvm_return = map_return_type(context, sig.return_type);
-                        if llvm_return.length == 0 {
-                            llvm_return = "double";
-                        }
-                        // First param is i8* (data pointer from trait object)
-                        expected_params = ["i8*"];
-                        break;
-                    }
-                    sig_idx += 1;
-                }
-            }
-        }
-    }
-    
-    let function_entry = find_function_by_name(functions, trimmed_target);
-    if helper_descriptor == null {
-        helper_descriptor = find_runtime_helper(trimmed_target);
-    }
-    if !is_trait_dispatch {
-        if function_entry != null {
-            llvm_return = map_return_type(context, function_entry.return_type);
-            if llvm_return.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-                llvm_return = "double";
-            }
-            expected_params = collect_parameter_types(context, function_entry.parameters);
-        } else if helper_descriptor != null {
-            let descriptor = helper_descriptor;
-            llvm_return = descriptor.return_type;
-            expected_params = descriptor.parameter_types;
-        } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
-        }
     }
 
     if function_entry != null && injected_argument_count == 1 {
@@ -8636,7 +8638,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     let mut collected -> StringConstant[] = string_constants;
     let mut messages -> string[] = diagnostics;
 
-    let mut tag_operand -> LLVMOperand;
+    let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
     if pointer_available {
         let tag_ptr = format_temp_name(current_temp);
         current_lines = append_string(current_lines, "  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
@@ -8656,7 +8658,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
         let existing_default = find_string_constant_by_name(collected, default_constant_name);
-        let mut default_constant -> StringConstant;
+    let mut default_constant -> StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
         if existing_default != null {
             default_constant = existing_default;
         } else {
@@ -8678,7 +8680,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant";
             let existing_variant = find_string_constant_by_name(collected, constant_name);
-            let mut variant_constant -> StringConstant;
+            let mut variant_constant -> StringConstant = StringConstant { name: constant_name, content: "", byte_count: 0 };
             if existing_variant != null {
                 variant_constant = existing_variant;
             } else {
@@ -8892,9 +8894,6 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
 
     let operand = LLVMOperand { llvm_type: field_type, value: current_value_text };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: messages, string_constants: collected };
-
-    messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` not yet supported");
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: messages, string_constants: collected };
 }
 
 fn emit_string_constant_pointer(constant -> StringConstant, temp_index -> number, lines -> string[]) -> StringPointerResult {

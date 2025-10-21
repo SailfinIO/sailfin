@@ -11797,20 +11797,22 @@ afterloop122:
 
 define { %MatchContext*, i64 }* @append_match_context({ %MatchContext*, i64 }* %values, %MatchContext %value) {
 entry:
-  %t0 = alloca [1 x %MatchContext]
-  %t1 = getelementptr [1 x %MatchContext], [1 x %MatchContext]* %t0, i32 0, i32 0
-  %t2 = getelementptr %MatchContext, %MatchContext* %t1, i64 0
-  store %MatchContext %value, %MatchContext* %t2
-  %t3 = alloca { %MatchContext*, i64 }
-  %t4 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t3, i32 0, i32 0
-  store %MatchContext* %t1, %MatchContext** %t4
-  %t5 = getelementptr { %MatchContext*, i64 }, { %MatchContext*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %MatchContext*, i64 }* %values to { i8**, i64 }*
-  %t7 = bitcast { %MatchContext*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %MatchContext*, i64 }*
-  ret { %MatchContext*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %MatchContext*
+  store %MatchContext %value, %MatchContext* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %MatchContext*, i64 }* %values to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %MatchContext*, i64 }*
+  ret { %MatchContext*, i64 }* %t10
 }
 
 define { %MatchContext*, i64 }* @replace_match_context({ %MatchContext*, i64 }* %values, double %index, %MatchContext %replacement) {

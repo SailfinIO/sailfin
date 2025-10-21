@@ -1837,20 +1837,22 @@ entry:
 
 define { %Token*, i64 }* @append({ %Token*, i64 }* %tokens, %Token %token) {
 entry:
-  %t0 = alloca [1 x %Token]
-  %t1 = getelementptr [1 x %Token], [1 x %Token]* %t0, i32 0, i32 0
-  %t2 = getelementptr %Token, %Token* %t1, i64 0
-  store %Token %token, %Token* %t2
-  %t3 = alloca { %Token*, i64 }
-  %t4 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t3, i32 0, i32 0
-  store %Token* %t1, %Token** %t4
-  %t5 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
-  %t7 = bitcast { %Token*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %Token*, i64 }*
-  ret { %Token*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to %Token*
+  store %Token %token, %Token* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %Token*, i64 }*
+  ret { %Token*, i64 }* %t10
 }
 
 define i8* @peek_next_char(%LexerState %state) {

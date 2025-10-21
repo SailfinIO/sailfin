@@ -1471,38 +1471,42 @@ logical_and_merge_0:
 
 define { %DecoratorInfo*, i64 }* @append_decorator_info({ %DecoratorInfo*, i64 }* %collection, %DecoratorInfo %item) {
 entry:
-  %t0 = alloca [1 x %DecoratorInfo]
-  %t1 = getelementptr [1 x %DecoratorInfo], [1 x %DecoratorInfo]* %t0, i32 0, i32 0
-  %t2 = getelementptr %DecoratorInfo, %DecoratorInfo* %t1, i64 0
-  store %DecoratorInfo %item, %DecoratorInfo* %t2
-  %t3 = alloca { %DecoratorInfo*, i64 }
-  %t4 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t3, i32 0, i32 0
-  store %DecoratorInfo* %t1, %DecoratorInfo** %t4
-  %t5 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %DecoratorInfo*, i64 }* %collection to { i8**, i64 }*
-  %t7 = bitcast { %DecoratorInfo*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %DecoratorInfo*, i64 }*
-  ret { %DecoratorInfo*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 16)
+  %t1 = bitcast i8* %t0 to %DecoratorInfo*
+  store %DecoratorInfo %item, %DecoratorInfo* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %DecoratorInfo*, i64 }* %collection to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %DecoratorInfo*, i64 }*
+  ret { %DecoratorInfo*, i64 }* %t10
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %collection, %DecoratorArgumentInfo %item) {
 entry:
-  %t0 = alloca [1 x %DecoratorArgumentInfo]
-  %t1 = getelementptr [1 x %DecoratorArgumentInfo], [1 x %DecoratorArgumentInfo]* %t0, i32 0, i32 0
-  %t2 = getelementptr %DecoratorArgumentInfo, %DecoratorArgumentInfo* %t1, i64 0
-  store %DecoratorArgumentInfo %item, %DecoratorArgumentInfo* %t2
-  %t3 = alloca { %DecoratorArgumentInfo*, i64 }
-  %t4 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t3, i32 0, i32 0
-  store %DecoratorArgumentInfo* %t1, %DecoratorArgumentInfo** %t4
-  %t5 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t3, i32 0, i32 1
-  store i64 1, i64* %t5
-  %t6 = bitcast { %DecoratorArgumentInfo*, i64 }* %collection to { i8**, i64 }*
-  %t7 = bitcast { %DecoratorArgumentInfo*, i64 }* %t3 to { i8**, i64 }*
-  %t8 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  %t9 = bitcast { i8**, i64 }* %t8 to { %DecoratorArgumentInfo*, i64 }*
-  ret { %DecoratorArgumentInfo*, i64 }* %t9
+  %t0 = call noalias i8* @malloc(i64 24)
+  %t1 = bitcast i8* %t0 to %DecoratorArgumentInfo*
+  store %DecoratorArgumentInfo %item, %DecoratorArgumentInfo* %t1
+  %t2 = alloca [1 x i8*]
+  %t3 = getelementptr [1 x i8*], [1 x i8*]* %t2, i32 0, i32 0
+  %t4 = getelementptr i8*, i8** %t3, i64 0
+  store i8* %t0, i8** %t4
+  %t5 = alloca { i8**, i64 }
+  %t6 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 0
+  store i8** %t3, i8*** %t6
+  %t7 = getelementptr { i8**, i64 }, { i8**, i64 }* %t5, i32 0, i32 1
+  store i64 1, i64* %t7
+  %t8 = bitcast { %DecoratorArgumentInfo*, i64 }* %collection to { i8**, i64 }*
+  %t9 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t5)
+  %t10 = bitcast { i8**, i64 }* %t9 to { %DecoratorArgumentInfo*, i64 }*
+  ret { %DecoratorArgumentInfo*, i64 }* %t10
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %collection, i8* %item) {
