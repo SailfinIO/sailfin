@@ -6060,19 +6060,52 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         else:
             messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
-    field_type = selected_fields[0].llvm_type
-    consistent = True
+    first_type = selected_fields[0].llvm_type
+    base_type = first_type
+    first_pointer_depth = 0
+    while True:
+        if not ends_with_pointer_suffix(base_type):
+            break
+        base_type = strip_pointer_suffix(base_type)
+        first_pointer_depth += 1
+    min_pointer_depth = first_pointer_depth
+    max_pointer_depth = first_pointer_depth
+    consistent_base = True
+    pointer_depth_mismatch = False
     type_index = 1
     while True:
         if type_index >= len(selected_fields):
             break
-        if selected_fields[type_index].llvm_type != field_type:
-            consistent = False
+        candidate_type = selected_fields[type_index].llvm_type
+        candidate_base = candidate_type
+        candidate_depth = 0
+        while True:
+            if not ends_with_pointer_suffix(candidate_base):
+                break
+            candidate_base = strip_pointer_suffix(candidate_base)
+            candidate_depth += 1
+        if candidate_base != base_type:
+            consistent_base = False
             break
+        if candidate_depth != first_pointer_depth:
+            pointer_depth_mismatch = True
+        if candidate_depth < min_pointer_depth:
+            min_pointer_depth = candidate_depth
+        if candidate_depth > max_pointer_depth:
+            max_pointer_depth = candidate_depth
         type_index += 1
-    if not consistent:
+    if not consistent_base:
         messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
+    field_type = selected_fields[0].llvm_type
+    pointer_coercion = False
+    if pointer_depth_mismatch:
+        if max_pointer_depth - min_pointer_depth == 1  and  len(base_type) > 0  and  base_type[0] == "%":
+            pointer_coercion = True
+            field_type = base_type + "*"
+        else:
+            messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
     enum_pointer_value = base_operand.value
     if not pointer_available:
         alloca_temp = format_temp_name(current_temp)
@@ -6101,12 +6134,20 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
             current_temp += 1
             field_ptr_temp = offset_ptr_temp
+        storage_type = field_info.llvm_type
         typed_ptr_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + field_type + "*")
+        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + storage_type + "*")
         current_temp += 1
-        value_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_type + ", " + field_type + "* " + typed_ptr_temp)
-        current_temp += 1
+        value_temp = typed_ptr_temp
+        if pointer_coercion:
+            if ends_with_pointer_suffix(storage_type):
+                value_temp = format_temp_name(current_temp)
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp)
+                current_temp += 1
+        else:
+            value_temp = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp)
+            current_temp += 1
         compare_temp = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag))
         current_temp += 1
