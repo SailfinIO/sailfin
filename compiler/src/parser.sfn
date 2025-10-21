@@ -260,6 +260,12 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
         }
         return parse_import(parser);
     }
+    if identifier_matches(token, "export") {
+        if decorators.length > 0 {
+            return parse_unknown(original);
+        }
+        return parse_export(parser);
+    }
     if identifier_matches(token, "let") {
         if decorators.length > 0 {
             return parse_unknown(original);

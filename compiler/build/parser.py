@@ -338,6 +338,10 @@ def parse_statement(initial_parser):
         if len(decorators) > 0:
             return parse_unknown(original)
         return parse_import(parser)
+    if identifier_matches(token, "export"):
+        if len(decorators) > 0:
+            return parse_unknown(original)
+        return parse_export(parser)
     if identifier_matches(token, "let"):
         if len(decorators) > 0:
             return parse_unknown(original)
