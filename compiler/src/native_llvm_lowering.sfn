@@ -3038,8 +3038,19 @@ fn append_function_effect_entry(values -> FunctionEffectEntry[], entry -> Functi
 }
 
 fn merge_effect_lists(base -> string[], extras -> string[]) -> string[] {
-    let mut result -> string[] = base;
+    let mut result -> string[] = [];
+
+    // Copy existing effects first so we preserve order before appending extras.
     let mut index -> number = 0;
+    loop {
+        if index >= base.length {
+            break;
+        }
+        result = append_unique_effect(result, base[index]);
+        index += 1;
+    }
+
+    index = 0;
     loop {
         if index >= extras.length {
             break;
@@ -3047,6 +3058,7 @@ fn merge_effect_lists(base -> string[], extras -> string[]) -> string[] {
         result = append_unique_effect(result, extras[index]);
         index += 1;
     }
+
     return result;
 }
 

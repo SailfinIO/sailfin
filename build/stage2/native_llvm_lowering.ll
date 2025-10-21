@@ -14993,54 +14993,106 @@ define { i8**, i64 }* @merge_effect_lists({ i8**, i64 }* %base, { i8**, i64 }* %
 entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
-  store { i8**, i64 }* %base, { i8**, i64 }** %l0
-  %t0 = sitofp i64 0 to double
-  store double %t0, double* %l1
-  %t1 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t2 = load double, double* %l1
+  %t0 = alloca [0 x i8*]
+  %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
+  %t2 = alloca { i8**, i64 }
+  %t3 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 0
+  store i8** %t1, i8*** %t3
+  %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
+  store i64 0, i64* %t4
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
+  %t5 = sitofp i64 0 to double
+  store double %t5, double* %l1
+  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t25 = phi { i8**, i64 }* [ %t1, %entry ], [ %t23, %loop.latch2 ]
-  %t26 = phi double [ %t2, %entry ], [ %t24, %loop.latch2 ]
-  store { i8**, i64 }* %t25, { i8**, i64 }** %l0
-  store double %t26, double* %l1
+  %t30 = phi { i8**, i64 }* [ %t6, %entry ], [ %t28, %loop.latch2 ]
+  %t31 = phi double [ %t7, %entry ], [ %t29, %loop.latch2 ]
+  store { i8**, i64 }* %t30, { i8**, i64 }** %l0
+  store double %t31, double* %l1
   br label %loop.body1
 loop.body1:
-  %t3 = load double, double* %l1
-  %t4 = load { i8**, i64 }, { i8**, i64 }* %extras
-  %t5 = extractvalue { i8**, i64 } %t4, 1
-  %t6 = sitofp i64 %t5 to double
-  %t7 = fcmp oge double %t3, %t6
-  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t9 = load double, double* %l1
-  br i1 %t7, label %then4, label %merge5
+  %t8 = load double, double* %l1
+  %t9 = load { i8**, i64 }, { i8**, i64 }* %base
+  %t10 = extractvalue { i8**, i64 } %t9, 1
+  %t11 = sitofp i64 %t10 to double
+  %t12 = fcmp oge double %t8, %t11
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t14 = load double, double* %l1
+  br i1 %t12, label %then4, label %merge5
 then4:
   br label %afterloop3
 merge5:
-  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t11 = load double, double* %l1
-  %t12 = fptosi double %t11 to i64
-  %t13 = load { i8**, i64 }, { i8**, i64 }* %extras
-  %t14 = extractvalue { i8**, i64 } %t13, 0
-  %t15 = extractvalue { i8**, i64 } %t13, 1
-  %t16 = icmp uge i64 %t12, %t15
-  ; bounds check: %t16 (if true, out of bounds)
-  %t17 = getelementptr i8*, i8** %t14, i64 %t12
-  %t18 = load i8*, i8** %t17
-  %t19 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t10, i8* %t18)
-  store { i8**, i64 }* %t19, { i8**, i64 }** %l0
-  %t20 = load double, double* %l1
-  %t21 = sitofp i64 1 to double
-  %t22 = fadd double %t20, %t21
-  store double %t22, double* %l1
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t16 = load double, double* %l1
+  %t17 = fptosi double %t16 to i64
+  %t18 = load { i8**, i64 }, { i8**, i64 }* %base
+  %t19 = extractvalue { i8**, i64 } %t18, 0
+  %t20 = extractvalue { i8**, i64 } %t18, 1
+  %t21 = icmp uge i64 %t17, %t20
+  ; bounds check: %t21 (if true, out of bounds)
+  %t22 = getelementptr i8*, i8** %t19, i64 %t17
+  %t23 = load i8*, i8** %t22
+  %t24 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t15, i8* %t23)
+  store { i8**, i64 }* %t24, { i8**, i64 }** %l0
+  %t25 = load double, double* %l1
+  %t26 = sitofp i64 1 to double
+  %t27 = fadd double %t25, %t26
+  store double %t27, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t24 = load double, double* %l1
+  %t28 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t29 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t27
+  %t32 = sitofp i64 0 to double
+  store double %t32, double* %l1
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t34 = load double, double* %l1
+  br label %loop.header6
+loop.header6:
+  %t57 = phi { i8**, i64 }* [ %t33, %entry ], [ %t55, %loop.latch8 ]
+  %t58 = phi double [ %t34, %entry ], [ %t56, %loop.latch8 ]
+  store { i8**, i64 }* %t57, { i8**, i64 }** %l0
+  store double %t58, double* %l1
+  br label %loop.body7
+loop.body7:
+  %t35 = load double, double* %l1
+  %t36 = load { i8**, i64 }, { i8**, i64 }* %extras
+  %t37 = extractvalue { i8**, i64 } %t36, 1
+  %t38 = sitofp i64 %t37 to double
+  %t39 = fcmp oge double %t35, %t38
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t41 = load double, double* %l1
+  br i1 %t39, label %then10, label %merge11
+then10:
+  br label %afterloop9
+merge11:
+  %t42 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t43 = load double, double* %l1
+  %t44 = fptosi double %t43 to i64
+  %t45 = load { i8**, i64 }, { i8**, i64 }* %extras
+  %t46 = extractvalue { i8**, i64 } %t45, 0
+  %t47 = extractvalue { i8**, i64 } %t45, 1
+  %t48 = icmp uge i64 %t44, %t47
+  ; bounds check: %t48 (if true, out of bounds)
+  %t49 = getelementptr i8*, i8** %t46, i64 %t44
+  %t50 = load i8*, i8** %t49
+  %t51 = call { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %t42, i8* %t50)
+  store { i8**, i64 }* %t51, { i8**, i64 }** %l0
+  %t52 = load double, double* %l1
+  %t53 = sitofp i64 1 to double
+  %t54 = fadd double %t52, %t53
+  store double %t54, double* %l1
+  br label %loop.latch8
+loop.latch8:
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t56 = load double, double* %l1
+  br label %loop.header6
+afterloop9:
+  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t59
 }
 
 define { i8**, i64 }* @append_unique_effect({ i8**, i64 }* %effects, i8* %effect) {
