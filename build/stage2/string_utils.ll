@@ -43,10 +43,8 @@ then4:
 merge5:
   %t10 = sitofp i64 1 to double
   %t11 = fadd double %index, %t10
-  %t12 = fptosi double %index to i64
-  %t13 = fptosi double %t11 to i64
-  %t14 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t12, i64 %t13)
-  ret i8* %t14
+  %t12 = call i8* @sailfin_runtime_substring(i8* %value, double %index, double %t11)
+  ret i8* %t12
 }
 
 define i1 @is_symbol_char(i8* %ch) {

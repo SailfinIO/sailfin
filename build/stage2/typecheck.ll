@@ -7549,15 +7549,15 @@ afterfor3:
 
 define { %Diagnostic*, i64 }* @build_effect_diagnostics(%Program %program) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca { %EffectViolation*, i64 }*
   %l1 = alloca { %Diagnostic*, i64 }*
   %l2 = alloca double
-  %l3 = alloca double
+  %l3 = alloca %EffectViolation
   %l4 = alloca double
-  %l5 = alloca double
-  %l6 = alloca double
-  %t0 = call double @validate_effects(%Program %program)
-  store double %t0, double* %l0
+  %l5 = alloca i8*
+  %l6 = alloca %EffectRequirement*
+  %t0 = call { %EffectViolation*, i64 }* @validate_effects(%Program %program)
+  store { %EffectViolation*, i64 }* %t0, { %EffectViolation*, i64 }** %l0
   %t1 = alloca [0 x %Diagnostic]
   %t2 = getelementptr [0 x %Diagnostic], [0 x %Diagnostic]* %t1, i32 0, i32 0
   %t3 = alloca { %Diagnostic*, i64 }
@@ -7568,93 +7568,140 @@ entry:
   store { %Diagnostic*, i64 }* %t3, { %Diagnostic*, i64 }** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
-  %t7 = load double, double* %l0
+  %t7 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
   %t8 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t9 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t59 = phi { %Diagnostic*, i64 }* [ %t8, %entry ], [ %t57, %loop.latch2 ]
-  %t60 = phi double [ %t9, %entry ], [ %t58, %loop.latch2 ]
-  store { %Diagnostic*, i64 }* %t59, { %Diagnostic*, i64 }** %l1
-  store double %t60, double* %l2
+  %t96 = phi { %Diagnostic*, i64 }* [ %t8, %entry ], [ %t94, %loop.latch2 ]
+  %t97 = phi double [ %t9, %entry ], [ %t95, %loop.latch2 ]
+  store { %Diagnostic*, i64 }* %t96, { %Diagnostic*, i64 }** %l1
+  store double %t97, double* %l2
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l2
-  %t11 = load double, double* %l0
-  %t12 = load double, double* %l0
-  %t13 = load double, double* %l2
-  %t14 = fptosi double %t13 to i64
-  store double 0.0, double* %l3
-  %t15 = sitofp i64 0 to double
-  store double %t15, double* %l4
-  %t16 = load double, double* %l0
+  %t11 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t12 = load { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t11
+  %t13 = extractvalue { %EffectViolation*, i64 } %t12, 1
+  %t14 = sitofp i64 %t13 to double
+  %t15 = fcmp oge double %t10, %t14
+  %t16 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
   %t17 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t18 = load double, double* %l2
-  %t19 = load double, double* %l3
-  %t20 = load double, double* %l4
-  br label %loop.header4
-loop.header4:
-  %t52 = phi { %Diagnostic*, i64 }* [ %t17, %loop.body1 ], [ %t50, %loop.latch6 ]
-  %t53 = phi double [ %t20, %loop.body1 ], [ %t51, %loop.latch6 ]
-  store { %Diagnostic*, i64 }* %t52, { %Diagnostic*, i64 }** %l1
-  store double %t53, double* %l4
-  br label %loop.body5
-loop.body5:
-  %t21 = load double, double* %l4
-  %t22 = load double, double* %l3
-  %t23 = load double, double* %l3
-  store double 0.0, double* %l5
-  %t24 = load double, double* %l3
-  %t25 = load double, double* %l5
-  store double 0.0, double* %l6
-  %t26 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %s27 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.27, i32 0, i32 0
-  %t28 = insertvalue %Diagnostic undef, i8* %s27, 0
-  %t29 = load double, double* %l3
-  %t30 = load double, double* %l5
-  %t31 = load double, double* %l6
-  %t32 = insertvalue %Diagnostic %t28, i8* null, 1
-  %t33 = load double, double* %l6
-  %t34 = call %Token* @requirement_primary_token(i8* null)
-  %t35 = insertvalue %Diagnostic %t32, %Token* %t34, 2
-  %t36 = call noalias i8* @malloc(i64 24)
-  %t37 = bitcast i8* %t36 to %Diagnostic*
-  store %Diagnostic %t35, %Diagnostic* %t37
-  %t38 = alloca [1 x i8*]
-  %t39 = getelementptr [1 x i8*], [1 x i8*]* %t38, i32 0, i32 0
-  %t40 = getelementptr i8*, i8** %t39, i64 0
-  store i8* %t36, i8** %t40
-  %t41 = alloca { i8**, i64 }
-  %t42 = getelementptr { i8**, i64 }, { i8**, i64 }* %t41, i32 0, i32 0
-  store i8** %t39, i8*** %t42
-  %t43 = getelementptr { i8**, i64 }, { i8**, i64 }* %t41, i32 0, i32 1
-  store i64 1, i64* %t43
-  %t44 = bitcast { %Diagnostic*, i64 }* %t26 to { i8**, i64 }*
-  %t45 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t44, { i8**, i64 }* %t41)
-  %t46 = bitcast { i8**, i64 }* %t45 to { %Diagnostic*, i64 }*
-  store { %Diagnostic*, i64 }* %t46, { %Diagnostic*, i64 }** %l1
-  %t47 = load double, double* %l4
-  %t48 = sitofp i64 1 to double
-  %t49 = fadd double %t47, %t48
-  store double %t49, double* %l4
-  br label %loop.latch6
-loop.latch6:
-  %t50 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %t51 = load double, double* %l4
-  br label %loop.header4
-afterloop7:
-  %t54 = load double, double* %l2
-  %t55 = sitofp i64 1 to double
-  %t56 = fadd double %t54, %t55
-  store double %t56, double* %l2
+  br i1 %t15, label %then4, label %merge5
+then4:
+  br label %afterloop3
+merge5:
+  %t19 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t20 = load double, double* %l2
+  %t21 = fptosi double %t20 to i64
+  %t22 = load { %EffectViolation*, i64 }, { %EffectViolation*, i64 }* %t19
+  %t23 = extractvalue { %EffectViolation*, i64 } %t22, 0
+  %t24 = extractvalue { %EffectViolation*, i64 } %t22, 1
+  %t25 = icmp uge i64 %t21, %t24
+  ; bounds check: %t25 (if true, out of bounds)
+  %t26 = getelementptr %EffectViolation, %EffectViolation* %t23, i64 %t21
+  %t27 = load %EffectViolation, %EffectViolation* %t26
+  store %EffectViolation %t27, %EffectViolation* %l3
+  %t28 = sitofp i64 0 to double
+  store double %t28, double* %l4
+  %t29 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t30 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t31 = load double, double* %l2
+  %t32 = load %EffectViolation, %EffectViolation* %l3
+  %t33 = load double, double* %l4
+  br label %loop.header6
+loop.header6:
+  %t89 = phi { %Diagnostic*, i64 }* [ %t30, %loop.body1 ], [ %t87, %loop.latch8 ]
+  %t90 = phi double [ %t33, %loop.body1 ], [ %t88, %loop.latch8 ]
+  store { %Diagnostic*, i64 }* %t89, { %Diagnostic*, i64 }** %l1
+  store double %t90, double* %l4
+  br label %loop.body7
+loop.body7:
+  %t34 = load double, double* %l4
+  %t35 = load %EffectViolation, %EffectViolation* %l3
+  %t36 = extractvalue %EffectViolation %t35, 1
+  %t37 = load { i8**, i64 }, { i8**, i64 }* %t36
+  %t38 = extractvalue { i8**, i64 } %t37, 1
+  %t39 = sitofp i64 %t38 to double
+  %t40 = fcmp oge double %t34, %t39
+  %t41 = load { %EffectViolation*, i64 }*, { %EffectViolation*, i64 }** %l0
+  %t42 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t43 = load double, double* %l2
+  %t44 = load %EffectViolation, %EffectViolation* %l3
+  %t45 = load double, double* %l4
+  br i1 %t40, label %then10, label %merge11
+then10:
+  br label %afterloop9
+merge11:
+  %t46 = load %EffectViolation, %EffectViolation* %l3
+  %t47 = extractvalue %EffectViolation %t46, 1
+  %t48 = load double, double* %l4
+  %t49 = fptosi double %t48 to i64
+  %t50 = load { i8**, i64 }, { i8**, i64 }* %t47
+  %t51 = extractvalue { i8**, i64 } %t50, 0
+  %t52 = extractvalue { i8**, i64 } %t50, 1
+  %t53 = icmp uge i64 %t49, %t52
+  ; bounds check: %t53 (if true, out of bounds)
+  %t54 = getelementptr i8*, i8** %t51, i64 %t49
+  %t55 = load i8*, i8** %t54
+  store i8* %t55, i8** %l5
+  %t56 = load %EffectViolation, %EffectViolation* %l3
+  %t57 = extractvalue %EffectViolation %t56, 2
+  %t58 = load i8*, i8** %l5
+  %t59 = bitcast { %EffectRequirement**, i64 }* %t57 to { %EffectRequirement*, i64 }*
+  %t60 = call %EffectRequirement* @select_requirement_for_effect({ %EffectRequirement*, i64 }* %t59, i8* %t58)
+  store %EffectRequirement* %t60, %EffectRequirement** %l6
+  %t61 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %s62 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.62, i32 0, i32 0
+  %t63 = insertvalue %Diagnostic undef, i8* %s62, 0
+  %t64 = load %EffectViolation, %EffectViolation* %l3
+  %t65 = extractvalue %EffectViolation %t64, 0
+  %t66 = load i8*, i8** %l5
+  %t67 = load %EffectRequirement*, %EffectRequirement** %l6
+  %t68 = call i8* @format_effect_message(i8* %t65, i8* %t66, %EffectRequirement* %t67)
+  %t69 = insertvalue %Diagnostic %t63, i8* %t68, 1
+  %t70 = load %EffectRequirement*, %EffectRequirement** %l6
+  %t71 = call %Token* @requirement_primary_token(%EffectRequirement* %t70)
+  %t72 = insertvalue %Diagnostic %t69, %Token* %t71, 2
+  %t73 = call noalias i8* @malloc(i64 24)
+  %t74 = bitcast i8* %t73 to %Diagnostic*
+  store %Diagnostic %t72, %Diagnostic* %t74
+  %t75 = alloca [1 x i8*]
+  %t76 = getelementptr [1 x i8*], [1 x i8*]* %t75, i32 0, i32 0
+  %t77 = getelementptr i8*, i8** %t76, i64 0
+  store i8* %t73, i8** %t77
+  %t78 = alloca { i8**, i64 }
+  %t79 = getelementptr { i8**, i64 }, { i8**, i64 }* %t78, i32 0, i32 0
+  store i8** %t76, i8*** %t79
+  %t80 = getelementptr { i8**, i64 }, { i8**, i64 }* %t78, i32 0, i32 1
+  store i64 1, i64* %t80
+  %t81 = bitcast { %Diagnostic*, i64 }* %t61 to { i8**, i64 }*
+  %t82 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t81, { i8**, i64 }* %t78)
+  %t83 = bitcast { i8**, i64 }* %t82 to { %Diagnostic*, i64 }*
+  store { %Diagnostic*, i64 }* %t83, { %Diagnostic*, i64 }** %l1
+  %t84 = load double, double* %l4
+  %t85 = sitofp i64 1 to double
+  %t86 = fadd double %t84, %t85
+  store double %t86, double* %l4
+  br label %loop.latch8
+loop.latch8:
+  %t87 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t88 = load double, double* %l4
+  br label %loop.header6
+afterloop9:
+  %t91 = load double, double* %l2
+  %t92 = sitofp i64 1 to double
+  %t93 = fadd double %t91, %t92
+  store double %t93, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t57 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %t58 = load double, double* %l2
+  %t94 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  %t95 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t61 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  ret { %Diagnostic*, i64 }* %t61
+  %t98 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
+  ret { %Diagnostic*, i64 }* %t98
 }
 
 define %EffectRequirement* @select_requirement_for_effect({ %EffectRequirement*, i64 }* %requirements, i8* %effect) {

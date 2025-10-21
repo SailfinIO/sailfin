@@ -137,13 +137,13 @@ declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.384 = private unnamed_addr constant [23 x i8] c"; ModuleID = 'sailfin'\00"
-@.str.387 = private unnamed_addr constant [28 x i8] c"source_filename = \22sailfin\22\00"
-@.str.390 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.736 = private unnamed_addr constant [33 x i8] c"declare noalias i8* @malloc(i64)\00"
-@.str.739 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.742 = private unnamed_addr constant [32 x i8] c"@runtime = external global i8**\00"
-@.str.745 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.501 = private unnamed_addr constant [23 x i8] c"; ModuleID = 'sailfin'\00"
+@.str.504 = private unnamed_addr constant [28 x i8] c"source_filename = \22sailfin\22\00"
+@.str.507 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.853 = private unnamed_addr constant [33 x i8] c"declare noalias i8* @malloc(i64)\00"
+@.str.856 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.859 = private unnamed_addr constant [32 x i8] c"@runtime = external global i8**\00"
+@.str.862 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.200 = private unnamed_addr constant [53 x i8] c"; -- Trait Metadata --------------------------------\00"
 @.str.230 = private unnamed_addr constant [50 x i8] c"; -----------------------------------------------\00"
 @.str.183 = private unnamed_addr constant [4 x i8] c"i8*\00"
@@ -229,6 +229,7 @@ declare noalias i8* @malloc(i64)
 @.str.378 = private unnamed_addr constant [6 x i8] c"sleep\00"
 @.str.380 = private unnamed_addr constant [22 x i8] c"sailfin_runtime_sleep\00"
 @.str.382 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.384 = private unnamed_addr constant [7 x i8] c"double\00"
 @.str.392 = private unnamed_addr constant [3 x i8] c"io\00"
 @.str.402 = private unnamed_addr constant [13 x i8] c"fs_read_file\00"
 @.str.404 = private unnamed_addr constant [29 x i8] c"sailfin_adapter_fs_read_file\00"
@@ -253,9 +254,7 @@ declare noalias i8* @malloc(i64)
 @.str.490 = private unnamed_addr constant [4 x i8] c"net\00"
 @.str.500 = private unnamed_addr constant [10 x i8] c"http_post\00"
 @.str.502 = private unnamed_addr constant [26 x i8] c"sailfin_adapter_http_post\00"
-@.str.504 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.506 = private unnamed_addr constant [4 x i8] c"i8*\00"
-@.str.507 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.516 = private unnamed_addr constant [4 x i8] c"net\00"
 @.str.526 = private unnamed_addr constant [25 x i8] c"model_invoke_with_prompt\00"
 @.str.528 = private unnamed_addr constant [41 x i8] c"sailfin_adapter_model_invoke_with_prompt\00"
@@ -306,6 +305,7 @@ declare noalias i8* @malloc(i64)
 @.str.730 = private unnamed_addr constant [14 x i8] c"string.length\00"
 @.str.732 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_string_length\00"
 @.str.734 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.736 = private unnamed_addr constant [4 x i8] c"i8*\00"
 @.str.752 = private unnamed_addr constant [10 x i8] c"char_code\00"
 @.str.754 = private unnamed_addr constant [10 x i8] c"char_code\00"
 @.str.756 = private unnamed_addr constant [7 x i8] c"double\00"
@@ -457,6 +457,7 @@ declare noalias i8* @malloc(i64)
 @.str.376 = private unnamed_addr constant [3 x i8] c"  \00"
 @.str.379 = private unnamed_addr constant [8 x i8] c" = phi \00"
 @.str.383 = private unnamed_addr constant [4 x i8] c" [ \00"
+@.str.390 = private unnamed_addr constant [4 x i8] c", %\00"
 @.str.394 = private unnamed_addr constant [7 x i8] c" ], [ \00"
 @.str.401 = private unnamed_addr constant [4 x i8] c", %\00"
 @.str.405 = private unnamed_addr constant [3 x i8] c" ]\00"
@@ -866,45 +867,45 @@ entry:
 define %LoweredLLVMResult @lower_to_llvm_with_context(%NativeModule %native_module, { %LayoutManifest*, i64 }* %imported_manifests, { i8**, i64 }* %imported_native_texts) {
 entry:
   %l0 = alloca { i8**, i64 }*
-  %l1 = alloca double
-  %l2 = alloca double
-  %l3 = alloca double
+  %l1 = alloca %NativeArtifact*
+  %l2 = alloca %ParseNativeResult
+  %l3 = alloca %NativeArtifact*
   %l4 = alloca %LayoutManifest*
-  %l5 = alloca double
-  %l6 = alloca double
-  %l7 = alloca double
-  %l8 = alloca { %NativeStruct*, i64 }*
-  %l9 = alloca { %NativeEnum*, i64 }*
-  %l10 = alloca { %NativeInterface*, i64 }*
-  %l11 = alloca { %NativeFunction*, i64 }*
+  %l5 = alloca %LayoutManifest
+  %l6 = alloca %LayoutManifestApplication
+  %l7 = alloca { %NativeStruct**, i64 }*
+  %l8 = alloca { %NativeEnum**, i64 }*
+  %l9 = alloca { %NativeStruct*, i64 }*
+  %l10 = alloca { %NativeEnum*, i64 }*
+  %l11 = alloca { %NativeInterface*, i64 }*
   %l12 = alloca { %NativeFunction*, i64 }*
-  %l13 = alloca i64
-  %l14 = alloca double
-  %l15 = alloca i8*
-  %l16 = alloca %LayoutManifest*
-  %l17 = alloca %LayoutManifest
-  %l18 = alloca %LayoutManifest*
-  %l19 = alloca double
-  %l20 = alloca double
-  %l21 = alloca double
-  %l22 = alloca double
-  %l23 = alloca %LayoutManifest
-  %l24 = alloca double
-  %l25 = alloca double
-  %l26 = alloca double
-  %l27 = alloca %TraitMetadata
-  %l28 = alloca %TypeContextBuild
-  %l29 = alloca %TypeContext
-  %l30 = alloca { %NativeFunction*, i64 }*
-  %l31 = alloca double
+  %l13 = alloca { %NativeFunction*, i64 }*
+  %l14 = alloca i64
+  %l15 = alloca double
+  %l16 = alloca i8*
+  %l17 = alloca %LayoutManifest*
+  %l18 = alloca %LayoutManifest
+  %l19 = alloca %LayoutManifest*
+  %l20 = alloca %ParseNativeResult
+  %l21 = alloca %LayoutManifestApplication
+  %l22 = alloca { %NativeFunction*, i64 }*
+  %l23 = alloca double
+  %l24 = alloca %LayoutManifest
+  %l25 = alloca { i8**, i64 }*
+  %l26 = alloca { i8**, i64 }*
+  %l27 = alloca { i8**, i64 }*
+  %l28 = alloca %TraitMetadata
+  %l29 = alloca %TypeContextBuild
+  %l30 = alloca %TypeContext
+  %l31 = alloca { %NativeFunction*, i64 }*
   %l32 = alloca { %NativeFunction*, i64 }*
-  %l33 = alloca { i8**, i64 }*
-  %l34 = alloca { %FunctionEffectEntry*, i64 }*
-  %l35 = alloca { %FunctionCallEntry*, i64 }*
-  %l36 = alloca { %FunctionEffectEntry*, i64 }*
+  %l33 = alloca { %NativeFunction*, i64 }*
+  %l34 = alloca { i8**, i64 }*
+  %l35 = alloca { %FunctionEffectEntry*, i64 }*
+  %l36 = alloca { %FunctionCallEntry*, i64 }*
   %l37 = alloca { %FunctionEffectEntry*, i64 }*
-  %l38 = alloca { %LifetimeRegionMetadata*, i64 }*
-  %l39 = alloca { i8**, i64 }*
+  %l38 = alloca { %FunctionEffectEntry*, i64 }*
+  %l39 = alloca { %LifetimeRegionMetadata*, i64 }*
   %l40 = alloca { i8**, i64 }*
   %l41 = alloca { i8**, i64 }*
   %l42 = alloca { i8**, i64 }*
@@ -914,18 +915,19 @@ entry:
   %l46 = alloca { i8**, i64 }*
   %l47 = alloca { i8**, i64 }*
   %l48 = alloca { i8**, i64 }*
-  %l49 = alloca double
-  %l50 = alloca i1
-  %l51 = alloca { %StringConstant*, i64 }*
-  %l52 = alloca double
-  %l53 = alloca double
-  %l54 = alloca { i8**, i64 }*
-  %l55 = alloca %LoweredLLVMFunction
-  %l56 = alloca { i8**, i64 }*
+  %l49 = alloca { i8**, i64 }*
+  %l50 = alloca double
+  %l51 = alloca i1
+  %l52 = alloca { %StringConstant*, i64 }*
+  %l53 = alloca %NativeFunction
+  %l54 = alloca %FunctionEffectEntry*
+  %l55 = alloca { i8**, i64 }*
+  %l56 = alloca %LoweredLLVMFunction
   %l57 = alloca { i8**, i64 }*
-  %l58 = alloca i8*
-  %l59 = alloca %CapabilityManifest
-  %l60 = alloca i8*
+  %l58 = alloca { i8**, i64 }*
+  %l59 = alloca i8*
+  %l60 = alloca %CapabilityManifest
+  %l61 = alloca i8*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -935,1472 +937,1860 @@ entry:
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t5 = extractvalue %NativeModule %native_module, 0
-  %t6 = call double @select_text_artifact({ %NativeArtifact**, i64 }* %t5)
-  store double %t6, double* %l1
-  %t7 = load double, double* %l1
-  %t8 = load double, double* %l1
-  store double 0.0, double* %l2
-  %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t10 = load double, double* %l2
-  %t11 = extractvalue %NativeModule %native_module, 0
-  %t12 = call double @select_layout_manifest_artifact({ %NativeArtifact**, i64 }* %t11)
-  store double %t12, double* %l3
-  %t13 = bitcast i8* null to %LayoutManifest*
-  store %LayoutManifest* %t13, %LayoutManifest** %l4
-  %t14 = load double, double* %l3
-  %t15 = load double, double* %l2
-  %t16 = load double, double* %l2
-  %t17 = load %LayoutManifest*, %LayoutManifest** %l4
-  store double 0.0, double* %l5
+  %t6 = bitcast { %NativeArtifact**, i64 }* %t5 to { %NativeArtifact*, i64 }*
+  %t7 = call %NativeArtifact* @select_text_artifact({ %NativeArtifact*, i64 }* %t6)
+  store %NativeArtifact* %t7, %NativeArtifact** %l1
+  %t8 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t9 = bitcast i8* null to %NativeArtifact*
+  %t10 = icmp eq %NativeArtifact* %t8, %t9
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t12 = load %NativeArtifact*, %NativeArtifact** %l1
+  br i1 %t10, label %then0, label %merge1
+then0:
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s14 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.14, i32 0, i32 0
+  %t15 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t13, i8* %s14)
+  store { i8**, i64 }* %t15, { i8**, i64 }** %l0
+  %s16 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.16, i32 0, i32 0
+  %t17 = insertvalue %LoweredLLVMResult undef, i8* %s16, 0
   %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t19 = load double, double* %l5
-  %t20 = load double, double* %l5
-  store double 0.0, double* %l6
-  %t21 = load double, double* %l5
-  store double 0.0, double* %l7
-  %t22 = alloca [0 x %NativeStruct]
-  %t23 = getelementptr [0 x %NativeStruct], [0 x %NativeStruct]* %t22, i32 0, i32 0
-  %t24 = alloca { %NativeStruct*, i64 }
-  %t25 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t24, i32 0, i32 0
-  store %NativeStruct* %t23, %NativeStruct** %t25
-  %t26 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t24, i32 0, i32 1
+  %t19 = insertvalue %LoweredLLVMResult %t17, { i8**, i64 }* %t18, 1
+  %t20 = call %TraitMetadata @empty_trait_metadata()
+  %t21 = insertvalue %LoweredLLVMResult %t19, %TraitMetadata %t20, 2
+  %t22 = alloca [0 x %FunctionEffectEntry*]
+  %t23 = getelementptr [0 x %FunctionEffectEntry*], [0 x %FunctionEffectEntry*]* %t22, i32 0, i32 0
+  %t24 = alloca { %FunctionEffectEntry**, i64 }
+  %t25 = getelementptr { %FunctionEffectEntry**, i64 }, { %FunctionEffectEntry**, i64 }* %t24, i32 0, i32 0
+  store %FunctionEffectEntry** %t23, %FunctionEffectEntry*** %t25
+  %t26 = getelementptr { %FunctionEffectEntry**, i64 }, { %FunctionEffectEntry**, i64 }* %t24, i32 0, i32 1
   store i64 0, i64* %t26
-  store { %NativeStruct*, i64 }* %t24, { %NativeStruct*, i64 }** %l8
-  %t27 = alloca [0 x %NativeEnum]
-  %t28 = getelementptr [0 x %NativeEnum], [0 x %NativeEnum]* %t27, i32 0, i32 0
-  %t29 = alloca { %NativeEnum*, i64 }
-  %t30 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t29, i32 0, i32 0
-  store %NativeEnum* %t28, %NativeEnum** %t30
-  %t31 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t29, i32 0, i32 1
-  store i64 0, i64* %t31
-  store { %NativeEnum*, i64 }* %t29, { %NativeEnum*, i64 }** %l9
-  %t32 = alloca [0 x %NativeInterface]
-  %t33 = getelementptr [0 x %NativeInterface], [0 x %NativeInterface]* %t32, i32 0, i32 0
-  %t34 = alloca { %NativeInterface*, i64 }
-  %t35 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t34, i32 0, i32 0
-  store %NativeInterface* %t33, %NativeInterface** %t35
-  %t36 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t34, i32 0, i32 1
-  store i64 0, i64* %t36
-  store { %NativeInterface*, i64 }* %t34, { %NativeInterface*, i64 }** %l10
-  %t37 = alloca [0 x %NativeFunction]
-  %t38 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t37, i32 0, i32 0
-  %t39 = alloca { %NativeFunction*, i64 }
-  %t40 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t39, i32 0, i32 0
-  store %NativeFunction* %t38, %NativeFunction** %t40
-  %t41 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t39, i32 0, i32 1
-  store i64 0, i64* %t41
-  store { %NativeFunction*, i64 }* %t39, { %NativeFunction*, i64 }** %l11
-  %t42 = alloca [0 x %NativeFunction]
-  %t43 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t42, i32 0, i32 0
-  %t44 = alloca { %NativeFunction*, i64 }
-  %t45 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t44, i32 0, i32 0
-  store %NativeFunction* %t43, %NativeFunction** %t45
-  %t46 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t44, i32 0, i32 1
-  store i64 0, i64* %t46
-  store { %NativeFunction*, i64 }* %t44, { %NativeFunction*, i64 }** %l12
-  %t47 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
-  %t48 = extractvalue { %LayoutManifest*, i64 } %t47, 1
-  store i64 %t48, i64* %l13
-  %t49 = sitofp i64 0 to double
-  store double %t49, double* %l14
-  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t51 = load double, double* %l1
-  %t52 = load double, double* %l2
-  %t53 = load double, double* %l3
-  %t54 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t55 = load double, double* %l5
-  %t56 = load double, double* %l6
-  %t57 = load double, double* %l7
-  %t58 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t59 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t60 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t61 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t62 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t63 = load i64, i64* %l13
-  %t64 = load double, double* %l14
-  br label %loop.header0
-loop.header0:
-  %t224 = phi { i8**, i64 }* [ %t50, %entry ], [ %t217, %loop.latch2 ]
-  %t225 = phi { %NativeStruct*, i64 }* [ %t58, %entry ], [ %t218, %loop.latch2 ]
-  %t226 = phi { %NativeEnum*, i64 }* [ %t59, %entry ], [ %t219, %loop.latch2 ]
-  %t227 = phi double [ %t64, %entry ], [ %t220, %loop.latch2 ]
-  %t228 = phi { %NativeInterface*, i64 }* [ %t60, %entry ], [ %t221, %loop.latch2 ]
-  %t229 = phi { %NativeFunction*, i64 }* [ %t61, %entry ], [ %t222, %loop.latch2 ]
-  %t230 = phi { %NativeFunction*, i64 }* [ %t62, %entry ], [ %t223, %loop.latch2 ]
-  store { i8**, i64 }* %t224, { i8**, i64 }** %l0
-  store { %NativeStruct*, i64 }* %t225, { %NativeStruct*, i64 }** %l8
-  store { %NativeEnum*, i64 }* %t226, { %NativeEnum*, i64 }** %l9
-  store double %t227, double* %l14
-  store { %NativeInterface*, i64 }* %t228, { %NativeInterface*, i64 }** %l10
-  store { %NativeFunction*, i64 }* %t229, { %NativeFunction*, i64 }** %l11
-  store { %NativeFunction*, i64 }* %t230, { %NativeFunction*, i64 }** %l12
-  br label %loop.body1
-loop.body1:
-  %t65 = load double, double* %l14
-  %t66 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
-  %t67 = extractvalue { i8**, i64 } %t66, 1
-  %t68 = sitofp i64 %t67 to double
-  %t69 = fcmp oge double %t65, %t68
-  %t70 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t71 = load double, double* %l1
-  %t72 = load double, double* %l2
-  %t73 = load double, double* %l3
-  %t74 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t75 = load double, double* %l5
-  %t76 = load double, double* %l6
-  %t77 = load double, double* %l7
-  %t78 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t79 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t80 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t81 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t82 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t83 = load i64, i64* %l13
-  %t84 = load double, double* %l14
-  br i1 %t69, label %then4, label %merge5
-then4:
-  br label %afterloop3
-merge5:
-  %t85 = load double, double* %l14
-  %t86 = fptosi double %t85 to i64
-  %t87 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
-  %t88 = extractvalue { i8**, i64 } %t87, 0
-  %t89 = extractvalue { i8**, i64 } %t87, 1
-  %t90 = icmp uge i64 %t86, %t89
-  ; bounds check: %t90 (if true, out of bounds)
-  %t91 = getelementptr i8*, i8** %t88, i64 %t86
-  %t92 = load i8*, i8** %t91
-  store i8* %t92, i8** %l15
-  %t93 = bitcast i8* null to %LayoutManifest*
-  store %LayoutManifest* %t93, %LayoutManifest** %l16
-  %t94 = load double, double* %l14
-  %t95 = load i64, i64* %l13
-  %t96 = sitofp i64 %t95 to double
-  %t97 = fcmp olt double %t94, %t96
-  %t98 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t99 = load double, double* %l1
-  %t100 = load double, double* %l2
-  %t101 = load double, double* %l3
-  %t102 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t103 = load double, double* %l5
-  %t104 = load double, double* %l6
-  %t105 = load double, double* %l7
-  %t106 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t107 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t108 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t109 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t110 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t111 = load i64, i64* %l13
-  %t112 = load double, double* %l14
-  %t113 = load i8*, i8** %l15
-  %t114 = load %LayoutManifest*, %LayoutManifest** %l16
-  br i1 %t97, label %then6, label %merge7
-then6:
-  %t115 = load double, double* %l14
-  %t116 = fptosi double %t115 to i64
-  %t117 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
-  %t118 = extractvalue { %LayoutManifest*, i64 } %t117, 0
-  %t119 = extractvalue { %LayoutManifest*, i64 } %t117, 1
-  %t120 = icmp uge i64 %t116, %t119
-  ; bounds check: %t120 (if true, out of bounds)
-  %t121 = getelementptr %LayoutManifest, %LayoutManifest* %t118, i64 %t116
-  %t122 = load %LayoutManifest, %LayoutManifest* %t121
-  store %LayoutManifest %t122, %LayoutManifest* %l17
-  %t123 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t124 = load %LayoutManifest, %LayoutManifest* %l17
-  %t125 = extractvalue %LayoutManifest %t124, 2
-  %t126 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t123, { i8**, i64 }* %t125)
-  store { i8**, i64 }* %t126, { i8**, i64 }** %l0
-  %t127 = load %LayoutManifest, %LayoutManifest* %l17
-  %t128 = alloca %LayoutManifest
-  store %LayoutManifest %t127, %LayoutManifest* %t128
-  store %LayoutManifest* %t128, %LayoutManifest** %l16
-  br label %merge7
-merge7:
-  %t129 = phi { i8**, i64 }* [ %t126, %then6 ], [ %t98, %loop.body1 ]
-  %t130 = phi %LayoutManifest* [ %t128, %then6 ], [ %t114, %loop.body1 ]
-  store { i8**, i64 }* %t129, { i8**, i64 }** %l0
-  store %LayoutManifest* %t130, %LayoutManifest** %l16
-  %t131 = load i8*, i8** %l15
-  %t132 = call i64 @sailfin_runtime_string_length(i8* %t131)
-  %t133 = icmp eq i64 %t132, 0
-  %t134 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t135 = load double, double* %l1
-  %t136 = load double, double* %l2
-  %t137 = load double, double* %l3
-  %t138 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t139 = load double, double* %l5
-  %t140 = load double, double* %l6
-  %t141 = load double, double* %l7
-  %t142 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t143 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t144 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t145 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t146 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t147 = load i64, i64* %l13
-  %t148 = load double, double* %l14
-  %t149 = load i8*, i8** %l15
-  %t150 = load %LayoutManifest*, %LayoutManifest** %l16
-  br i1 %t133, label %then8, label %merge9
+  %t27 = insertvalue %LoweredLLVMResult %t21, { %FunctionEffectEntry**, i64 }* %t24, 3
+  %t28 = alloca [0 x %LifetimeRegionMetadata*]
+  %t29 = getelementptr [0 x %LifetimeRegionMetadata*], [0 x %LifetimeRegionMetadata*]* %t28, i32 0, i32 0
+  %t30 = alloca { %LifetimeRegionMetadata**, i64 }
+  %t31 = getelementptr { %LifetimeRegionMetadata**, i64 }, { %LifetimeRegionMetadata**, i64 }* %t30, i32 0, i32 0
+  store %LifetimeRegionMetadata** %t29, %LifetimeRegionMetadata*** %t31
+  %t32 = getelementptr { %LifetimeRegionMetadata**, i64 }, { %LifetimeRegionMetadata**, i64 }* %t30, i32 0, i32 1
+  store i64 0, i64* %t32
+  %t33 = insertvalue %LoweredLLVMResult %t27, { %LifetimeRegionMetadata**, i64 }* %t30, 4
+  %t34 = call %CapabilityManifest @empty_capability_manifest()
+  %t35 = insertvalue %LoweredLLVMResult %t33, %CapabilityManifest %t34, 5
+  %t36 = alloca [0 x %StringConstant*]
+  %t37 = getelementptr [0 x %StringConstant*], [0 x %StringConstant*]* %t36, i32 0, i32 0
+  %t38 = alloca { %StringConstant**, i64 }
+  %t39 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t38, i32 0, i32 0
+  store %StringConstant** %t37, %StringConstant*** %t39
+  %t40 = getelementptr { %StringConstant**, i64 }, { %StringConstant**, i64 }* %t38, i32 0, i32 1
+  store i64 0, i64* %t40
+  %t41 = insertvalue %LoweredLLVMResult %t35, { %StringConstant**, i64 }* %t38, 6
+  ret %LoweredLLVMResult %t41
+merge1:
+  %t42 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t43 = getelementptr %NativeArtifact, %NativeArtifact* %t42, i32 0, i32 2
+  %t44 = load i8*, i8** %t43
+  %t45 = call %ParseNativeResult @parse_native_artifact(i8* %t44)
+  store %ParseNativeResult %t45, %ParseNativeResult* %l2
+  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t47 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t48 = extractvalue %ParseNativeResult %t47, 6
+  %t49 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t46, { i8**, i64 }* %t48)
+  store { i8**, i64 }* %t49, { i8**, i64 }** %l0
+  %t50 = extractvalue %NativeModule %native_module, 0
+  %t51 = bitcast { %NativeArtifact**, i64 }* %t50 to { %NativeArtifact*, i64 }*
+  %t52 = call %NativeArtifact* @select_layout_manifest_artifact({ %NativeArtifact*, i64 }* %t51)
+  store %NativeArtifact* %t52, %NativeArtifact** %l3
+  %t53 = bitcast i8* null to %LayoutManifest*
+  store %LayoutManifest* %t53, %LayoutManifest** %l4
+  %t54 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t55 = bitcast i8* null to %NativeArtifact*
+  %t56 = icmp ne %NativeArtifact* %t54, %t55
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t58 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t59 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t60 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t61 = load %LayoutManifest*, %LayoutManifest** %l4
+  br i1 %t56, label %then2, label %merge3
+then2:
+  %t62 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t63 = getelementptr %NativeArtifact, %NativeArtifact* %t62, i32 0, i32 2
+  %t64 = load i8*, i8** %t63
+  %t65 = call %LayoutManifest @parse_layout_manifest(i8* %t64)
+  store %LayoutManifest %t65, %LayoutManifest* %l5
+  %t66 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t67 = load %LayoutManifest, %LayoutManifest* %l5
+  %t68 = extractvalue %LayoutManifest %t67, 2
+  %t69 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t66, { i8**, i64 }* %t68)
+  store { i8**, i64 }* %t69, { i8**, i64 }** %l0
+  %t70 = load %LayoutManifest, %LayoutManifest* %l5
+  %t71 = alloca %LayoutManifest
+  store %LayoutManifest %t70, %LayoutManifest* %t71
+  store %LayoutManifest* %t71, %LayoutManifest** %l4
+  br label %merge3
+merge3:
+  %t72 = phi { i8**, i64 }* [ %t69, %then2 ], [ %t57, %entry ]
+  %t73 = phi %LayoutManifest* [ %t71, %then2 ], [ %t61, %entry ]
+  store { i8**, i64 }* %t72, { i8**, i64 }** %l0
+  store %LayoutManifest* %t73, %LayoutManifest** %l4
+  %t74 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t75 = extractvalue %ParseNativeResult %t74, 2
+  %t76 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t77 = extractvalue %ParseNativeResult %t76, 4
+  %t78 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t79 = bitcast { %NativeStruct**, i64 }* %t75 to { %NativeStruct*, i64 }*
+  %t80 = bitcast { %NativeEnum**, i64 }* %t77 to { %NativeEnum*, i64 }*
+  %t81 = call %LayoutManifestApplication @apply_layout_manifest_to_module({ %NativeStruct*, i64 }* %t79, { %NativeEnum*, i64 }* %t80, %LayoutManifest* %t78)
+  store %LayoutManifestApplication %t81, %LayoutManifestApplication* %l6
+  %t82 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t83 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t84 = extractvalue %LayoutManifestApplication %t83, 2
+  %t85 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t82, { i8**, i64 }* %t84)
+  store { i8**, i64 }* %t85, { i8**, i64 }** %l0
+  %t86 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t87 = extractvalue %LayoutManifestApplication %t86, 0
+  store { %NativeStruct**, i64 }* %t87, { %NativeStruct**, i64 }** %l7
+  %t88 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t89 = extractvalue %LayoutManifestApplication %t88, 1
+  store { %NativeEnum**, i64 }* %t89, { %NativeEnum**, i64 }** %l8
+  %t90 = alloca [0 x %NativeStruct]
+  %t91 = getelementptr [0 x %NativeStruct], [0 x %NativeStruct]* %t90, i32 0, i32 0
+  %t92 = alloca { %NativeStruct*, i64 }
+  %t93 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t92, i32 0, i32 0
+  store %NativeStruct* %t91, %NativeStruct** %t93
+  %t94 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t92, i32 0, i32 1
+  store i64 0, i64* %t94
+  store { %NativeStruct*, i64 }* %t92, { %NativeStruct*, i64 }** %l9
+  %t95 = alloca [0 x %NativeEnum]
+  %t96 = getelementptr [0 x %NativeEnum], [0 x %NativeEnum]* %t95, i32 0, i32 0
+  %t97 = alloca { %NativeEnum*, i64 }
+  %t98 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t97, i32 0, i32 0
+  store %NativeEnum* %t96, %NativeEnum** %t98
+  %t99 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t97, i32 0, i32 1
+  store i64 0, i64* %t99
+  store { %NativeEnum*, i64 }* %t97, { %NativeEnum*, i64 }** %l10
+  %t100 = alloca [0 x %NativeInterface]
+  %t101 = getelementptr [0 x %NativeInterface], [0 x %NativeInterface]* %t100, i32 0, i32 0
+  %t102 = alloca { %NativeInterface*, i64 }
+  %t103 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t102, i32 0, i32 0
+  store %NativeInterface* %t101, %NativeInterface** %t103
+  %t104 = getelementptr { %NativeInterface*, i64 }, { %NativeInterface*, i64 }* %t102, i32 0, i32 1
+  store i64 0, i64* %t104
+  store { %NativeInterface*, i64 }* %t102, { %NativeInterface*, i64 }** %l11
+  %t105 = alloca [0 x %NativeFunction]
+  %t106 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t105, i32 0, i32 0
+  %t107 = alloca { %NativeFunction*, i64 }
+  %t108 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t107, i32 0, i32 0
+  store %NativeFunction* %t106, %NativeFunction** %t108
+  %t109 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t107, i32 0, i32 1
+  store i64 0, i64* %t109
+  store { %NativeFunction*, i64 }* %t107, { %NativeFunction*, i64 }** %l12
+  %t110 = alloca [0 x %NativeFunction]
+  %t111 = getelementptr [0 x %NativeFunction], [0 x %NativeFunction]* %t110, i32 0, i32 0
+  %t112 = alloca { %NativeFunction*, i64 }
+  %t113 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t112, i32 0, i32 0
+  store %NativeFunction* %t111, %NativeFunction** %t113
+  %t114 = getelementptr { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t112, i32 0, i32 1
+  store i64 0, i64* %t114
+  store { %NativeFunction*, i64 }* %t112, { %NativeFunction*, i64 }** %l13
+  %t115 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
+  %t116 = extractvalue { %LayoutManifest*, i64 } %t115, 1
+  store i64 %t116, i64* %l14
+  %t117 = sitofp i64 0 to double
+  store double %t117, double* %l15
+  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t119 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t120 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t121 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t122 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t123 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t124 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t125 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t126 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t127 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t128 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t129 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t130 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t131 = load i64, i64* %l14
+  %t132 = load double, double* %l15
+  br label %loop.header4
+loop.header4:
+  %t323 = phi { i8**, i64 }* [ %t118, %entry ], [ %t316, %loop.latch6 ]
+  %t324 = phi { %NativeStruct*, i64 }* [ %t126, %entry ], [ %t317, %loop.latch6 ]
+  %t325 = phi { %NativeEnum*, i64 }* [ %t127, %entry ], [ %t318, %loop.latch6 ]
+  %t326 = phi double [ %t132, %entry ], [ %t319, %loop.latch6 ]
+  %t327 = phi { %NativeInterface*, i64 }* [ %t128, %entry ], [ %t320, %loop.latch6 ]
+  %t328 = phi { %NativeFunction*, i64 }* [ %t129, %entry ], [ %t321, %loop.latch6 ]
+  %t329 = phi { %NativeFunction*, i64 }* [ %t130, %entry ], [ %t322, %loop.latch6 ]
+  store { i8**, i64 }* %t323, { i8**, i64 }** %l0
+  store { %NativeStruct*, i64 }* %t324, { %NativeStruct*, i64 }** %l9
+  store { %NativeEnum*, i64 }* %t325, { %NativeEnum*, i64 }** %l10
+  store double %t326, double* %l15
+  store { %NativeInterface*, i64 }* %t327, { %NativeInterface*, i64 }** %l11
+  store { %NativeFunction*, i64 }* %t328, { %NativeFunction*, i64 }** %l12
+  store { %NativeFunction*, i64 }* %t329, { %NativeFunction*, i64 }** %l13
+  br label %loop.body5
+loop.body5:
+  %t133 = load double, double* %l15
+  %t134 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
+  %t135 = extractvalue { i8**, i64 } %t134, 1
+  %t136 = sitofp i64 %t135 to double
+  %t137 = fcmp oge double %t133, %t136
+  %t138 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t139 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t140 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t141 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t142 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t143 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t144 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t145 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t146 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t147 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t148 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t149 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t150 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t151 = load i64, i64* %l14
+  %t152 = load double, double* %l15
+  br i1 %t137, label %then8, label %merge9
 then8:
-  %t151 = load %LayoutManifest*, %LayoutManifest** %l16
-  %t152 = bitcast i8* null to %LayoutManifest*
-  %t153 = icmp ne %LayoutManifest* %t151, %t152
-  %t154 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t155 = load double, double* %l1
-  %t156 = load double, double* %l2
-  %t157 = load double, double* %l3
-  %t158 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t159 = load double, double* %l5
-  %t160 = load double, double* %l6
-  %t161 = load double, double* %l7
-  %t162 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t163 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t164 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t165 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t166 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t167 = load i64, i64* %l13
-  %t168 = load double, double* %l14
-  %t169 = load i8*, i8** %l15
-  %t170 = load %LayoutManifest*, %LayoutManifest** %l16
-  br i1 %t153, label %then10, label %merge11
+  br label %afterloop7
+merge9:
+  %t153 = load double, double* %l15
+  %t154 = fptosi double %t153 to i64
+  %t155 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
+  %t156 = extractvalue { i8**, i64 } %t155, 0
+  %t157 = extractvalue { i8**, i64 } %t155, 1
+  %t158 = icmp uge i64 %t154, %t157
+  ; bounds check: %t158 (if true, out of bounds)
+  %t159 = getelementptr i8*, i8** %t156, i64 %t154
+  %t160 = load i8*, i8** %t159
+  store i8* %t160, i8** %l16
+  %t161 = bitcast i8* null to %LayoutManifest*
+  store %LayoutManifest* %t161, %LayoutManifest** %l17
+  %t162 = load double, double* %l15
+  %t163 = load i64, i64* %l14
+  %t164 = sitofp i64 %t163 to double
+  %t165 = fcmp olt double %t162, %t164
+  %t166 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t167 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t168 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t169 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t170 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t171 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t172 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t173 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t174 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t175 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t176 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t177 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t178 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t179 = load i64, i64* %l14
+  %t180 = load double, double* %l15
+  %t181 = load i8*, i8** %l16
+  %t182 = load %LayoutManifest*, %LayoutManifest** %l17
+  br i1 %t165, label %then10, label %merge11
 then10:
-  %t171 = load %LayoutManifest*, %LayoutManifest** %l16
-  store %LayoutManifest* %t171, %LayoutManifest** %l18
-  %t172 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t173 = load %LayoutManifest*, %LayoutManifest** %l18
-  %t174 = getelementptr %LayoutManifest, %LayoutManifest* %t173, i32 0, i32 0
-  %t175 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %t174
-  %t176 = bitcast { %NativeStruct*, i64 }* %t172 to { i8**, i64 }*
-  %t177 = bitcast { %NativeStruct**, i64 }* %t175 to { i8**, i64 }*
-  %t178 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t176, { i8**, i64 }* %t177)
-  %t179 = bitcast { i8**, i64 }* %t178 to { %NativeStruct*, i64 }*
-  store { %NativeStruct*, i64 }* %t179, { %NativeStruct*, i64 }** %l8
-  %t180 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t181 = load %LayoutManifest*, %LayoutManifest** %l18
-  %t182 = getelementptr %LayoutManifest, %LayoutManifest* %t181, i32 0, i32 1
-  %t183 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %t182
-  %t184 = bitcast { %NativeEnum*, i64 }* %t180 to { i8**, i64 }*
-  %t185 = bitcast { %NativeEnum**, i64 }* %t183 to { i8**, i64 }*
-  %t186 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t184, { i8**, i64 }* %t185)
-  %t187 = bitcast { i8**, i64 }* %t186 to { %NativeEnum*, i64 }*
-  store { %NativeEnum*, i64 }* %t187, { %NativeEnum*, i64 }** %l9
+  %t183 = load double, double* %l15
+  %t184 = fptosi double %t183 to i64
+  %t185 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
+  %t186 = extractvalue { %LayoutManifest*, i64 } %t185, 0
+  %t187 = extractvalue { %LayoutManifest*, i64 } %t185, 1
+  %t188 = icmp uge i64 %t184, %t187
+  ; bounds check: %t188 (if true, out of bounds)
+  %t189 = getelementptr %LayoutManifest, %LayoutManifest* %t186, i64 %t184
+  %t190 = load %LayoutManifest, %LayoutManifest* %t189
+  store %LayoutManifest %t190, %LayoutManifest* %l18
+  %t191 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t192 = load %LayoutManifest, %LayoutManifest* %l18
+  %t193 = extractvalue %LayoutManifest %t192, 2
+  %t194 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t191, { i8**, i64 }* %t193)
+  store { i8**, i64 }* %t194, { i8**, i64 }** %l0
+  %t195 = load %LayoutManifest, %LayoutManifest* %l18
+  %t196 = alloca %LayoutManifest
+  store %LayoutManifest %t195, %LayoutManifest* %t196
+  store %LayoutManifest* %t196, %LayoutManifest** %l17
   br label %merge11
 merge11:
-  %t188 = phi { %NativeStruct*, i64 }* [ %t179, %then10 ], [ %t162, %then8 ]
-  %t189 = phi { %NativeEnum*, i64 }* [ %t187, %then10 ], [ %t163, %then8 ]
-  store { %NativeStruct*, i64 }* %t188, { %NativeStruct*, i64 }** %l8
-  store { %NativeEnum*, i64 }* %t189, { %NativeEnum*, i64 }** %l9
-  %t190 = load double, double* %l14
-  %t191 = sitofp i64 1 to double
-  %t192 = fadd double %t190, %t191
-  store double %t192, double* %l14
-  br label %loop.latch2
-merge9:
-  %t193 = load i8*, i8** %l15
-  %t194 = call double @parse_native_artifact(i8* %t193)
-  store double %t194, double* %l19
-  %t195 = load double, double* %l19
-  %t196 = load double, double* %l19
-  %t197 = load %LayoutManifest*, %LayoutManifest** %l16
-  store double 0.0, double* %l20
-  %t198 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t199 = load double, double* %l20
-  %t200 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t201 = load double, double* %l20
-  %t202 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t203 = load double, double* %l20
-  %t204 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t205 = load double, double* %l19
-  %t206 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t207 = load double, double* %l19
-  %t208 = load double, double* %l20
-  store double 0.0, double* %l21
-  %t209 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t210 = load double, double* %l21
-  %t211 = bitcast { %NativeFunction*, i64 }* %t209 to { i8**, i64 }*
-  %t212 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t211, i8* null)
-  %t213 = bitcast { i8**, i64 }* %t212 to { %NativeFunction*, i64 }*
-  store { %NativeFunction*, i64 }* %t213, { %NativeFunction*, i64 }** %l12
-  %t214 = load double, double* %l14
-  %t215 = sitofp i64 1 to double
-  %t216 = fadd double %t214, %t215
-  store double %t216, double* %l14
-  br label %loop.latch2
-loop.latch2:
-  %t217 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t218 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t219 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t220 = load double, double* %l14
-  %t221 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t222 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t223 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  br label %loop.header0
-afterloop3:
-  %t231 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
-  %t232 = extractvalue { i8**, i64 } %t231, 1
-  %t233 = load i64, i64* %l13
-  %t234 = icmp slt i64 %t232, %t233
-  %t235 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t236 = load double, double* %l1
-  %t237 = load double, double* %l2
-  %t238 = load double, double* %l3
-  %t239 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t240 = load double, double* %l5
-  %t241 = load double, double* %l6
-  %t242 = load double, double* %l7
-  %t243 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t244 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t245 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t246 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t247 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t248 = load i64, i64* %l13
-  %t249 = load double, double* %l14
-  br i1 %t234, label %then12, label %merge13
+  %t197 = phi { i8**, i64 }* [ %t194, %then10 ], [ %t166, %loop.body5 ]
+  %t198 = phi %LayoutManifest* [ %t196, %then10 ], [ %t182, %loop.body5 ]
+  store { i8**, i64 }* %t197, { i8**, i64 }** %l0
+  store %LayoutManifest* %t198, %LayoutManifest** %l17
+  %t199 = load i8*, i8** %l16
+  %t200 = call i64 @sailfin_runtime_string_length(i8* %t199)
+  %t201 = icmp eq i64 %t200, 0
+  %t202 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t203 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t204 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t205 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t206 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t207 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t208 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t209 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t210 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t211 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t212 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t213 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t214 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t215 = load i64, i64* %l14
+  %t216 = load double, double* %l15
+  %t217 = load i8*, i8** %l16
+  %t218 = load %LayoutManifest*, %LayoutManifest** %l17
+  br i1 %t201, label %then12, label %merge13
 then12:
-  %t250 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
-  %t251 = extractvalue { i8**, i64 } %t250, 1
-  %t252 = sitofp i64 %t251 to double
-  store double %t252, double* %l22
-  %t253 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t254 = load double, double* %l1
-  %t255 = load double, double* %l2
-  %t256 = load double, double* %l3
-  %t257 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t258 = load double, double* %l5
-  %t259 = load double, double* %l6
-  %t260 = load double, double* %l7
-  %t261 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t262 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t263 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t264 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t265 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t266 = load i64, i64* %l13
-  %t267 = load double, double* %l14
-  %t268 = load double, double* %l22
-  br label %loop.header14
-loop.header14:
-  %t322 = phi { i8**, i64 }* [ %t253, %then12 ], [ %t318, %loop.latch16 ]
-  %t323 = phi { %NativeStruct*, i64 }* [ %t261, %then12 ], [ %t319, %loop.latch16 ]
-  %t324 = phi { %NativeEnum*, i64 }* [ %t262, %then12 ], [ %t320, %loop.latch16 ]
-  %t325 = phi double [ %t268, %then12 ], [ %t321, %loop.latch16 ]
-  store { i8**, i64 }* %t322, { i8**, i64 }** %l0
-  store { %NativeStruct*, i64 }* %t323, { %NativeStruct*, i64 }** %l8
-  store { %NativeEnum*, i64 }* %t324, { %NativeEnum*, i64 }** %l9
-  store double %t325, double* %l22
-  br label %loop.body15
-loop.body15:
-  %t269 = load double, double* %l22
-  %t270 = load i64, i64* %l13
-  %t271 = sitofp i64 %t270 to double
-  %t272 = fcmp oge double %t269, %t271
-  %t273 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t274 = load double, double* %l1
-  %t275 = load double, double* %l2
-  %t276 = load double, double* %l3
-  %t277 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t278 = load double, double* %l5
-  %t279 = load double, double* %l6
-  %t280 = load double, double* %l7
-  %t281 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t282 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t283 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t284 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t285 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t286 = load i64, i64* %l13
-  %t287 = load double, double* %l14
-  %t288 = load double, double* %l22
-  br i1 %t272, label %then18, label %merge19
-then18:
-  br label %afterloop17
-merge19:
-  %t289 = load double, double* %l22
-  %t290 = fptosi double %t289 to i64
-  %t291 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
-  %t292 = extractvalue { %LayoutManifest*, i64 } %t291, 0
-  %t293 = extractvalue { %LayoutManifest*, i64 } %t291, 1
-  %t294 = icmp uge i64 %t290, %t293
-  ; bounds check: %t294 (if true, out of bounds)
-  %t295 = getelementptr %LayoutManifest, %LayoutManifest* %t292, i64 %t290
-  %t296 = load %LayoutManifest, %LayoutManifest* %t295
-  store %LayoutManifest %t296, %LayoutManifest* %l23
-  %t297 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t298 = load %LayoutManifest, %LayoutManifest* %l23
-  %t299 = extractvalue %LayoutManifest %t298, 2
-  %t300 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t297, { i8**, i64 }* %t299)
-  store { i8**, i64 }* %t300, { i8**, i64 }** %l0
-  %t301 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t302 = load %LayoutManifest, %LayoutManifest* %l23
-  %t303 = extractvalue %LayoutManifest %t302, 0
-  %t304 = bitcast { %NativeStruct*, i64 }* %t301 to { i8**, i64 }*
-  %t305 = bitcast { %NativeStruct**, i64 }* %t303 to { i8**, i64 }*
-  %t306 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t304, { i8**, i64 }* %t305)
-  %t307 = bitcast { i8**, i64 }* %t306 to { %NativeStruct*, i64 }*
-  store { %NativeStruct*, i64 }* %t307, { %NativeStruct*, i64 }** %l8
-  %t308 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t309 = load %LayoutManifest, %LayoutManifest* %l23
-  %t310 = extractvalue %LayoutManifest %t309, 1
-  %t311 = bitcast { %NativeEnum*, i64 }* %t308 to { i8**, i64 }*
-  %t312 = bitcast { %NativeEnum**, i64 }* %t310 to { i8**, i64 }*
-  %t313 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t311, { i8**, i64 }* %t312)
-  %t314 = bitcast { i8**, i64 }* %t313 to { %NativeEnum*, i64 }*
-  store { %NativeEnum*, i64 }* %t314, { %NativeEnum*, i64 }** %l9
-  %t315 = load double, double* %l22
-  %t316 = sitofp i64 1 to double
-  %t317 = fadd double %t315, %t316
-  store double %t317, double* %l22
-  br label %loop.latch16
-loop.latch16:
-  %t318 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t319 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t320 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t321 = load double, double* %l22
-  br label %loop.header14
-afterloop17:
-  br label %merge13
+  %t219 = load %LayoutManifest*, %LayoutManifest** %l17
+  %t220 = bitcast i8* null to %LayoutManifest*
+  %t221 = icmp ne %LayoutManifest* %t219, %t220
+  %t222 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t223 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t224 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t225 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t226 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t227 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t228 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t229 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t230 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t231 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t232 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t233 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t234 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t235 = load i64, i64* %l14
+  %t236 = load double, double* %l15
+  %t237 = load i8*, i8** %l16
+  %t238 = load %LayoutManifest*, %LayoutManifest** %l17
+  br i1 %t221, label %then14, label %merge15
+then14:
+  %t239 = load %LayoutManifest*, %LayoutManifest** %l17
+  store %LayoutManifest* %t239, %LayoutManifest** %l19
+  %t240 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t241 = load %LayoutManifest*, %LayoutManifest** %l19
+  %t242 = getelementptr %LayoutManifest, %LayoutManifest* %t241, i32 0, i32 0
+  %t243 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %t242
+  %t244 = bitcast { %NativeStruct*, i64 }* %t240 to { i8**, i64 }*
+  %t245 = bitcast { %NativeStruct**, i64 }* %t243 to { i8**, i64 }*
+  %t246 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t244, { i8**, i64 }* %t245)
+  %t247 = bitcast { i8**, i64 }* %t246 to { %NativeStruct*, i64 }*
+  store { %NativeStruct*, i64 }* %t247, { %NativeStruct*, i64 }** %l9
+  %t248 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t249 = load %LayoutManifest*, %LayoutManifest** %l19
+  %t250 = getelementptr %LayoutManifest, %LayoutManifest* %t249, i32 0, i32 1
+  %t251 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %t250
+  %t252 = bitcast { %NativeEnum*, i64 }* %t248 to { i8**, i64 }*
+  %t253 = bitcast { %NativeEnum**, i64 }* %t251 to { i8**, i64 }*
+  %t254 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t252, { i8**, i64 }* %t253)
+  %t255 = bitcast { i8**, i64 }* %t254 to { %NativeEnum*, i64 }*
+  store { %NativeEnum*, i64 }* %t255, { %NativeEnum*, i64 }** %l10
+  br label %merge15
+merge15:
+  %t256 = phi { %NativeStruct*, i64 }* [ %t247, %then14 ], [ %t230, %then12 ]
+  %t257 = phi { %NativeEnum*, i64 }* [ %t255, %then14 ], [ %t231, %then12 ]
+  store { %NativeStruct*, i64 }* %t256, { %NativeStruct*, i64 }** %l9
+  store { %NativeEnum*, i64 }* %t257, { %NativeEnum*, i64 }** %l10
+  %t258 = load double, double* %l15
+  %t259 = sitofp i64 1 to double
+  %t260 = fadd double %t258, %t259
+  store double %t260, double* %l15
+  br label %loop.latch6
 merge13:
-  %t326 = phi { i8**, i64 }* [ %t300, %then12 ], [ %t235, %entry ]
-  %t327 = phi { %NativeStruct*, i64 }* [ %t307, %then12 ], [ %t243, %entry ]
-  %t328 = phi { %NativeEnum*, i64 }* [ %t314, %then12 ], [ %t244, %entry ]
-  store { i8**, i64 }* %t326, { i8**, i64 }** %l0
-  store { %NativeStruct*, i64 }* %t327, { %NativeStruct*, i64 }** %l8
-  store { %NativeEnum*, i64 }* %t328, { %NativeEnum*, i64 }** %l9
-  %t329 = load double, double* %l6
-  %t330 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t331 = call double @module_structsconcat({ %NativeStruct*, i64 }* %t330)
-  store double %t331, double* %l24
-  %t332 = load double, double* %l7
-  %t333 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t334 = call double @module_enumsconcat({ %NativeEnum*, i64 }* %t333)
-  store double %t334, double* %l25
-  %t335 = load double, double* %l2
-  store double 0.0, double* %l26
-  %t336 = load double, double* %l26
-  %t337 = load double, double* %l24
-  %t338 = call %TraitMetadata @build_trait_metadata(i8* null, i8* null)
-  store %TraitMetadata %t338, %TraitMetadata* %l27
-  %t339 = load double, double* %l24
-  %t340 = load double, double* %l25
-  %t341 = load double, double* %l26
-  %t342 = call %TypeContextBuild @build_type_context(i8* null, i8* null, i8* null)
-  store %TypeContextBuild %t342, %TypeContextBuild* %l28
-  %t343 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t344 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t345 = extractvalue %TypeContextBuild %t344, 1
-  %t346 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t343, { i8**, i64 }* %t345)
-  store { i8**, i64 }* %t346, { i8**, i64 }** %l0
-  %t347 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t348 = extractvalue %TypeContextBuild %t347, 0
-  store %TypeContext %t348, %TypeContext* %l29
-  %t349 = load double, double* %l6
-  %t350 = call { %NativeFunction*, i64 }* @flatten_struct_methods(i8* null)
-  store { %NativeFunction*, i64 }* %t350, { %NativeFunction*, i64 }** %l30
-  %t351 = load double, double* %l2
-  %t352 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  store double 0.0, double* %l31
-  %t353 = load double, double* %l31
-  %t354 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t355 = call { %NativeFunction*, i64 }* @concat_native_functions(i8* null, { %NativeFunction*, i64 }* %t354)
-  store { %NativeFunction*, i64 }* %t355, { %NativeFunction*, i64 }** %l32
-  %t356 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t357 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t358 = call { %NativeFunction*, i64 }* @concat_native_functions({ %NativeFunction*, i64 }* %t356, { %NativeFunction*, i64 }* %t357)
-  store { %NativeFunction*, i64 }* %t358, { %NativeFunction*, i64 }** %l32
-  %t359 = load double, double* %l31
-  %t360 = call { i8**, i64 }* @collect_runtime_helper_targets(i8* null)
-  store { i8**, i64 }* %t360, { i8**, i64 }** %l33
-  %t361 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t362 = call { %FunctionEffectEntry*, i64 }* @collect_direct_function_effects({ %NativeFunction*, i64 }* %t361)
-  store { %FunctionEffectEntry*, i64 }* %t362, { %FunctionEffectEntry*, i64 }** %l34
-  %t363 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t364 = call { %FunctionCallEntry*, i64 }* @collect_function_call_graph({ %NativeFunction*, i64 }* %t363)
-  store { %FunctionCallEntry*, i64 }* %t364, { %FunctionCallEntry*, i64 }** %l35
-  %t365 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t366 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t367 = call { %FunctionEffectEntry*, i64 }* @propagate_function_effects({ %FunctionEffectEntry*, i64 }* %t365, { %FunctionCallEntry*, i64 }* %t366)
-  store { %FunctionEffectEntry*, i64 }* %t367, { %FunctionEffectEntry*, i64 }** %l36
-  %t368 = alloca [0 x %FunctionEffectEntry]
-  %t369 = getelementptr [0 x %FunctionEffectEntry], [0 x %FunctionEffectEntry]* %t368, i32 0, i32 0
-  %t370 = alloca { %FunctionEffectEntry*, i64 }
-  %t371 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t370, i32 0, i32 0
-  store %FunctionEffectEntry* %t369, %FunctionEffectEntry** %t371
-  %t372 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t370, i32 0, i32 1
-  store i64 0, i64* %t372
-  store { %FunctionEffectEntry*, i64 }* %t370, { %FunctionEffectEntry*, i64 }** %l37
-  %t373 = alloca [0 x %LifetimeRegionMetadata]
-  %t374 = getelementptr [0 x %LifetimeRegionMetadata], [0 x %LifetimeRegionMetadata]* %t373, i32 0, i32 0
-  %t375 = alloca { %LifetimeRegionMetadata*, i64 }
-  %t376 = getelementptr { %LifetimeRegionMetadata*, i64 }, { %LifetimeRegionMetadata*, i64 }* %t375, i32 0, i32 0
-  store %LifetimeRegionMetadata* %t374, %LifetimeRegionMetadata** %t376
-  %t377 = getelementptr { %LifetimeRegionMetadata*, i64 }, { %LifetimeRegionMetadata*, i64 }* %t375, i32 0, i32 1
-  store i64 0, i64* %t377
-  store { %LifetimeRegionMetadata*, i64 }* %t375, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t378 = alloca [0 x i8*]
-  %t379 = getelementptr [0 x i8*], [0 x i8*]* %t378, i32 0, i32 0
-  %t380 = alloca { i8**, i64 }
-  %t381 = getelementptr { i8**, i64 }, { i8**, i64 }* %t380, i32 0, i32 0
-  store i8** %t379, i8*** %t381
-  %t382 = getelementptr { i8**, i64 }, { i8**, i64 }* %t380, i32 0, i32 1
-  store i64 0, i64* %t382
-  store { i8**, i64 }* %t380, { i8**, i64 }** %l39
-  %t383 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s384 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.384, i32 0, i32 0
-  %t385 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t383, i8* %s384)
-  store { i8**, i64 }* %t385, { i8**, i64 }** %l39
-  %t386 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s387 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.387, i32 0, i32 0
-  %t388 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t386, i8* %s387)
-  store { i8**, i64 }* %t388, { i8**, i64 }** %l39
-  %t389 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s390 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.390, i32 0, i32 0
-  %t391 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t389, i8* %s390)
-  store { i8**, i64 }* %t391, { i8**, i64 }** %l39
-  %t392 = load %TraitMetadata, %TraitMetadata* %l27
-  %t393 = call { i8**, i64 }* @render_trait_metadata_comments(%TraitMetadata %t392)
-  store { i8**, i64 }* %t393, { i8**, i64 }** %l40
-  %t394 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t395 = load { i8**, i64 }, { i8**, i64 }* %t394
-  %t396 = extractvalue { i8**, i64 } %t395, 1
-  %t397 = icmp sgt i64 %t396, 0
-  %t398 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t399 = load double, double* %l1
-  %t400 = load double, double* %l2
-  %t401 = load double, double* %l3
-  %t402 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t403 = load double, double* %l5
-  %t404 = load double, double* %l6
-  %t405 = load double, double* %l7
-  %t406 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t407 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t408 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t409 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t410 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t411 = load i64, i64* %l13
-  %t412 = load double, double* %l14
-  %t413 = load double, double* %l24
-  %t414 = load double, double* %l25
-  %t415 = load double, double* %l26
-  %t416 = load %TraitMetadata, %TraitMetadata* %l27
-  %t417 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t418 = load %TypeContext, %TypeContext* %l29
-  %t419 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t420 = load double, double* %l31
-  %t421 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t422 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t423 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t424 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t425 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t426 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t427 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t428 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t429 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  br i1 %t397, label %then20, label %merge21
-then20:
-  %t430 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t431 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t432 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t430, { i8**, i64 }* %t431)
-  store { i8**, i64 }* %t432, { i8**, i64 }** %l39
-  %t433 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s434 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.434, i32 0, i32 0
-  %t435 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t433, i8* %s434)
-  store { i8**, i64 }* %t435, { i8**, i64 }** %l39
-  br label %merge21
-merge21:
-  %t436 = phi { i8**, i64 }* [ %t432, %then20 ], [ %t428, %entry ]
-  %t437 = phi { i8**, i64 }* [ %t435, %then20 ], [ %t428, %entry ]
-  store { i8**, i64 }* %t436, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t437, { i8**, i64 }** %l39
-  %t438 = load %TypeContext, %TypeContext* %l29
-  %t439 = call { i8**, i64 }* @render_struct_type_definitions(%TypeContext %t438)
-  store { i8**, i64 }* %t439, { i8**, i64 }** %l41
-  %t440 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t441 = load { i8**, i64 }, { i8**, i64 }* %t440
-  %t442 = extractvalue { i8**, i64 } %t441, 1
-  %t443 = icmp sgt i64 %t442, 0
-  %t444 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t445 = load double, double* %l1
-  %t446 = load double, double* %l2
-  %t447 = load double, double* %l3
-  %t448 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t449 = load double, double* %l5
-  %t450 = load double, double* %l6
-  %t451 = load double, double* %l7
-  %t452 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t453 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t454 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t455 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t456 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t457 = load i64, i64* %l13
-  %t458 = load double, double* %l14
-  %t459 = load double, double* %l24
-  %t460 = load double, double* %l25
-  %t461 = load double, double* %l26
-  %t462 = load %TraitMetadata, %TraitMetadata* %l27
-  %t463 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t464 = load %TypeContext, %TypeContext* %l29
-  %t465 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t466 = load double, double* %l31
-  %t467 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t468 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t469 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t470 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t471 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t472 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t473 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t474 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t475 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t476 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  br i1 %t443, label %then22, label %merge23
+  %t261 = load i8*, i8** %l16
+  %t262 = call %ParseNativeResult @parse_native_artifact(i8* %t261)
+  store %ParseNativeResult %t262, %ParseNativeResult* %l20
+  %t263 = load %ParseNativeResult, %ParseNativeResult* %l20
+  %t264 = extractvalue %ParseNativeResult %t263, 2
+  %t265 = load %ParseNativeResult, %ParseNativeResult* %l20
+  %t266 = extractvalue %ParseNativeResult %t265, 4
+  %t267 = load %LayoutManifest*, %LayoutManifest** %l17
+  %t268 = bitcast { %NativeStruct**, i64 }* %t264 to { %NativeStruct*, i64 }*
+  %t269 = bitcast { %NativeEnum**, i64 }* %t266 to { %NativeEnum*, i64 }*
+  %t270 = call %LayoutManifestApplication @apply_layout_manifest_to_module({ %NativeStruct*, i64 }* %t268, { %NativeEnum*, i64 }* %t269, %LayoutManifest* %t267)
+  store %LayoutManifestApplication %t270, %LayoutManifestApplication* %l21
+  %t271 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t272 = load %LayoutManifestApplication, %LayoutManifestApplication* %l21
+  %t273 = extractvalue %LayoutManifestApplication %t272, 2
+  %t274 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t271, { i8**, i64 }* %t273)
+  store { i8**, i64 }* %t274, { i8**, i64 }** %l0
+  %t275 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t276 = load %LayoutManifestApplication, %LayoutManifestApplication* %l21
+  %t277 = extractvalue %LayoutManifestApplication %t276, 0
+  %t278 = bitcast { %NativeStruct*, i64 }* %t275 to { i8**, i64 }*
+  %t279 = bitcast { %NativeStruct**, i64 }* %t277 to { i8**, i64 }*
+  %t280 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t278, { i8**, i64 }* %t279)
+  %t281 = bitcast { i8**, i64 }* %t280 to { %NativeStruct*, i64 }*
+  store { %NativeStruct*, i64 }* %t281, { %NativeStruct*, i64 }** %l9
+  %t282 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t283 = load %LayoutManifestApplication, %LayoutManifestApplication* %l21
+  %t284 = extractvalue %LayoutManifestApplication %t283, 1
+  %t285 = bitcast { %NativeEnum*, i64 }* %t282 to { i8**, i64 }*
+  %t286 = bitcast { %NativeEnum**, i64 }* %t284 to { i8**, i64 }*
+  %t287 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t285, { i8**, i64 }* %t286)
+  %t288 = bitcast { i8**, i64 }* %t287 to { %NativeEnum*, i64 }*
+  store { %NativeEnum*, i64 }* %t288, { %NativeEnum*, i64 }** %l10
+  %t289 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t290 = load %ParseNativeResult, %ParseNativeResult* %l20
+  %t291 = extractvalue %ParseNativeResult %t290, 3
+  %t292 = bitcast { %NativeInterface*, i64 }* %t289 to { i8**, i64 }*
+  %t293 = bitcast { %NativeInterface**, i64 }* %t291 to { i8**, i64 }*
+  %t294 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t292, { i8**, i64 }* %t293)
+  %t295 = bitcast { i8**, i64 }* %t294 to { %NativeInterface*, i64 }*
+  store { %NativeInterface*, i64 }* %t295, { %NativeInterface*, i64 }** %l11
+  %t296 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t297 = load %ParseNativeResult, %ParseNativeResult* %l20
+  %t298 = extractvalue %ParseNativeResult %t297, 0
+  %t299 = bitcast { %NativeFunction*, i64 }* %t296 to { i8**, i64 }*
+  %t300 = bitcast { %NativeFunction**, i64 }* %t298 to { i8**, i64 }*
+  %t301 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t299, { i8**, i64 }* %t300)
+  %t302 = bitcast { i8**, i64 }* %t301 to { %NativeFunction*, i64 }*
+  store { %NativeFunction*, i64 }* %t302, { %NativeFunction*, i64 }** %l12
+  %t303 = load %LayoutManifestApplication, %LayoutManifestApplication* %l21
+  %t304 = extractvalue %LayoutManifestApplication %t303, 0
+  %t305 = bitcast { %NativeStruct**, i64 }* %t304 to { %NativeStruct*, i64 }*
+  %t306 = call { %NativeFunction*, i64 }* @flatten_struct_methods({ %NativeStruct*, i64 }* %t305)
+  store { %NativeFunction*, i64 }* %t306, { %NativeFunction*, i64 }** %l22
+  %t307 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t308 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l22
+  %t309 = bitcast { %NativeFunction*, i64 }* %t307 to { i8**, i64 }*
+  %t310 = bitcast { %NativeFunction*, i64 }* %t308 to { i8**, i64 }*
+  %t311 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t309, { i8**, i64 }* %t310)
+  %t312 = bitcast { i8**, i64 }* %t311 to { %NativeFunction*, i64 }*
+  store { %NativeFunction*, i64 }* %t312, { %NativeFunction*, i64 }** %l13
+  %t313 = load double, double* %l15
+  %t314 = sitofp i64 1 to double
+  %t315 = fadd double %t313, %t314
+  store double %t315, double* %l15
+  br label %loop.latch6
+loop.latch6:
+  %t316 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t317 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t318 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t319 = load double, double* %l15
+  %t320 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t321 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t322 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  br label %loop.header4
+afterloop7:
+  %t330 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
+  %t331 = extractvalue { i8**, i64 } %t330, 1
+  %t332 = load i64, i64* %l14
+  %t333 = icmp slt i64 %t331, %t332
+  %t334 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t335 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t336 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t337 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t338 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t339 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t340 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t341 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t342 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t343 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t344 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t345 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t346 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t347 = load i64, i64* %l14
+  %t348 = load double, double* %l15
+  br i1 %t333, label %then16, label %merge17
+then16:
+  %t349 = load { i8**, i64 }, { i8**, i64 }* %imported_native_texts
+  %t350 = extractvalue { i8**, i64 } %t349, 1
+  %t351 = sitofp i64 %t350 to double
+  store double %t351, double* %l23
+  %t352 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t353 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t354 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t355 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t356 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t357 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t358 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t359 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t360 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t361 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t362 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t363 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t364 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t365 = load i64, i64* %l14
+  %t366 = load double, double* %l15
+  %t367 = load double, double* %l23
+  br label %loop.header18
+loop.header18:
+  %t421 = phi { i8**, i64 }* [ %t352, %then16 ], [ %t417, %loop.latch20 ]
+  %t422 = phi { %NativeStruct*, i64 }* [ %t360, %then16 ], [ %t418, %loop.latch20 ]
+  %t423 = phi { %NativeEnum*, i64 }* [ %t361, %then16 ], [ %t419, %loop.latch20 ]
+  %t424 = phi double [ %t367, %then16 ], [ %t420, %loop.latch20 ]
+  store { i8**, i64 }* %t421, { i8**, i64 }** %l0
+  store { %NativeStruct*, i64 }* %t422, { %NativeStruct*, i64 }** %l9
+  store { %NativeEnum*, i64 }* %t423, { %NativeEnum*, i64 }** %l10
+  store double %t424, double* %l23
+  br label %loop.body19
+loop.body19:
+  %t368 = load double, double* %l23
+  %t369 = load i64, i64* %l14
+  %t370 = sitofp i64 %t369 to double
+  %t371 = fcmp oge double %t368, %t370
+  %t372 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t373 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t374 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t375 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t376 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t377 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t378 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t379 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t380 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t381 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t382 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t383 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t384 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t385 = load i64, i64* %l14
+  %t386 = load double, double* %l15
+  %t387 = load double, double* %l23
+  br i1 %t371, label %then22, label %merge23
 then22:
-  %t477 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t478 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t479 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t477, { i8**, i64 }* %t478)
-  store { i8**, i64 }* %t479, { i8**, i64 }** %l39
-  %t480 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s481 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.481, i32 0, i32 0
-  %t482 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t480, i8* %s481)
-  store { i8**, i64 }* %t482, { i8**, i64 }** %l39
-  br label %merge23
+  br label %afterloop21
 merge23:
-  %t483 = phi { i8**, i64 }* [ %t479, %then22 ], [ %t474, %entry ]
-  %t484 = phi { i8**, i64 }* [ %t482, %then22 ], [ %t474, %entry ]
-  store { i8**, i64 }* %t483, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t484, { i8**, i64 }** %l39
-  %t485 = load %TypeContext, %TypeContext* %l29
-  %t486 = call { i8**, i64 }* @render_enum_type_definitions(%TypeContext %t485)
-  store { i8**, i64 }* %t486, { i8**, i64 }** %l42
-  %t487 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t488 = load { i8**, i64 }, { i8**, i64 }* %t487
-  %t489 = extractvalue { i8**, i64 } %t488, 1
-  %t490 = icmp sgt i64 %t489, 0
-  %t491 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t492 = load double, double* %l1
-  %t493 = load double, double* %l2
-  %t494 = load double, double* %l3
-  %t495 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t496 = load double, double* %l5
-  %t497 = load double, double* %l6
-  %t498 = load double, double* %l7
-  %t499 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t500 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t501 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t502 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t503 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t504 = load i64, i64* %l13
-  %t505 = load double, double* %l14
-  %t506 = load double, double* %l24
-  %t507 = load double, double* %l25
-  %t508 = load double, double* %l26
-  %t509 = load %TraitMetadata, %TraitMetadata* %l27
-  %t510 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t511 = load %TypeContext, %TypeContext* %l29
-  %t512 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t513 = load double, double* %l31
-  %t514 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t515 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t516 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t517 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t518 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t519 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t520 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t521 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t522 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t523 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t524 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  br i1 %t490, label %then24, label %merge25
+  %t388 = load double, double* %l23
+  %t389 = fptosi double %t388 to i64
+  %t390 = load { %LayoutManifest*, i64 }, { %LayoutManifest*, i64 }* %imported_manifests
+  %t391 = extractvalue { %LayoutManifest*, i64 } %t390, 0
+  %t392 = extractvalue { %LayoutManifest*, i64 } %t390, 1
+  %t393 = icmp uge i64 %t389, %t392
+  ; bounds check: %t393 (if true, out of bounds)
+  %t394 = getelementptr %LayoutManifest, %LayoutManifest* %t391, i64 %t389
+  %t395 = load %LayoutManifest, %LayoutManifest* %t394
+  store %LayoutManifest %t395, %LayoutManifest* %l24
+  %t396 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t397 = load %LayoutManifest, %LayoutManifest* %l24
+  %t398 = extractvalue %LayoutManifest %t397, 2
+  %t399 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t396, { i8**, i64 }* %t398)
+  store { i8**, i64 }* %t399, { i8**, i64 }** %l0
+  %t400 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t401 = load %LayoutManifest, %LayoutManifest* %l24
+  %t402 = extractvalue %LayoutManifest %t401, 0
+  %t403 = bitcast { %NativeStruct*, i64 }* %t400 to { i8**, i64 }*
+  %t404 = bitcast { %NativeStruct**, i64 }* %t402 to { i8**, i64 }*
+  %t405 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t403, { i8**, i64 }* %t404)
+  %t406 = bitcast { i8**, i64 }* %t405 to { %NativeStruct*, i64 }*
+  store { %NativeStruct*, i64 }* %t406, { %NativeStruct*, i64 }** %l9
+  %t407 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t408 = load %LayoutManifest, %LayoutManifest* %l24
+  %t409 = extractvalue %LayoutManifest %t408, 1
+  %t410 = bitcast { %NativeEnum*, i64 }* %t407 to { i8**, i64 }*
+  %t411 = bitcast { %NativeEnum**, i64 }* %t409 to { i8**, i64 }*
+  %t412 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t410, { i8**, i64 }* %t411)
+  %t413 = bitcast { i8**, i64 }* %t412 to { %NativeEnum*, i64 }*
+  store { %NativeEnum*, i64 }* %t413, { %NativeEnum*, i64 }** %l10
+  %t414 = load double, double* %l23
+  %t415 = sitofp i64 1 to double
+  %t416 = fadd double %t414, %t415
+  store double %t416, double* %l23
+  br label %loop.latch20
+loop.latch20:
+  %t417 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t418 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t419 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t420 = load double, double* %l23
+  br label %loop.header18
+afterloop21:
+  br label %merge17
+merge17:
+  %t425 = phi { i8**, i64 }* [ %t399, %then16 ], [ %t334, %entry ]
+  %t426 = phi { %NativeStruct*, i64 }* [ %t406, %then16 ], [ %t342, %entry ]
+  %t427 = phi { %NativeEnum*, i64 }* [ %t413, %then16 ], [ %t343, %entry ]
+  store { i8**, i64 }* %t425, { i8**, i64 }** %l0
+  store { %NativeStruct*, i64 }* %t426, { %NativeStruct*, i64 }** %l9
+  store { %NativeEnum*, i64 }* %t427, { %NativeEnum*, i64 }** %l10
+  %t428 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t429 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t430 = bitcast { %NativeStruct**, i64 }* %t428 to { i8**, i64 }*
+  %t431 = bitcast { %NativeStruct*, i64 }* %t429 to { i8**, i64 }*
+  %t432 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t430, { i8**, i64 }* %t431)
+  store { i8**, i64 }* %t432, { i8**, i64 }** %l25
+  %t433 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t434 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t435 = bitcast { %NativeEnum**, i64 }* %t433 to { i8**, i64 }*
+  %t436 = bitcast { %NativeEnum*, i64 }* %t434 to { i8**, i64 }*
+  %t437 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t435, { i8**, i64 }* %t436)
+  store { i8**, i64 }* %t437, { i8**, i64 }** %l26
+  %t438 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t439 = extractvalue %ParseNativeResult %t438, 3
+  %t440 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t441 = bitcast { %NativeInterface**, i64 }* %t439 to { i8**, i64 }*
+  %t442 = bitcast { %NativeInterface*, i64 }* %t440 to { i8**, i64 }*
+  %t443 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t441, { i8**, i64 }* %t442)
+  store { i8**, i64 }* %t443, { i8**, i64 }** %l27
+  %t444 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t445 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t446 = bitcast { i8**, i64 }* %t444 to { %NativeInterface*, i64 }*
+  %t447 = bitcast { i8**, i64 }* %t445 to { %NativeStruct*, i64 }*
+  %t448 = call %TraitMetadata @build_trait_metadata({ %NativeInterface*, i64 }* %t446, { %NativeStruct*, i64 }* %t447)
+  store %TraitMetadata %t448, %TraitMetadata* %l28
+  %t449 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t450 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t451 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t452 = bitcast { i8**, i64 }* %t449 to { %NativeStruct*, i64 }*
+  %t453 = bitcast { i8**, i64 }* %t450 to { %NativeEnum*, i64 }*
+  %t454 = bitcast { i8**, i64 }* %t451 to { %NativeInterface*, i64 }*
+  %t455 = call %TypeContextBuild @build_type_context({ %NativeStruct*, i64 }* %t452, { %NativeEnum*, i64 }* %t453, { %NativeInterface*, i64 }* %t454)
+  store %TypeContextBuild %t455, %TypeContextBuild* %l29
+  %t456 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t457 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t458 = extractvalue %TypeContextBuild %t457, 1
+  %t459 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t456, { i8**, i64 }* %t458)
+  store { i8**, i64 }* %t459, { i8**, i64 }** %l0
+  %t460 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t461 = extractvalue %TypeContextBuild %t460, 0
+  store %TypeContext %t461, %TypeContext* %l30
+  %t462 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t463 = bitcast { %NativeStruct**, i64 }* %t462 to { %NativeStruct*, i64 }*
+  %t464 = call { %NativeFunction*, i64 }* @flatten_struct_methods({ %NativeStruct*, i64 }* %t463)
+  store { %NativeFunction*, i64 }* %t464, { %NativeFunction*, i64 }** %l31
+  %t465 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t466 = extractvalue %ParseNativeResult %t465, 0
+  %t467 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t468 = bitcast { %NativeFunction**, i64 }* %t466 to { %NativeFunction*, i64 }*
+  %t469 = call { %NativeFunction*, i64 }* @concat_native_functions({ %NativeFunction*, i64 }* %t468, { %NativeFunction*, i64 }* %t467)
+  store { %NativeFunction*, i64 }* %t469, { %NativeFunction*, i64 }** %l32
+  %t470 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t471 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t472 = call { %NativeFunction*, i64 }* @concat_native_functions({ %NativeFunction*, i64 }* %t470, { %NativeFunction*, i64 }* %t471)
+  store { %NativeFunction*, i64 }* %t472, { %NativeFunction*, i64 }** %l33
+  %t473 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t474 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t475 = call { %NativeFunction*, i64 }* @concat_native_functions({ %NativeFunction*, i64 }* %t473, { %NativeFunction*, i64 }* %t474)
+  store { %NativeFunction*, i64 }* %t475, { %NativeFunction*, i64 }** %l33
+  %t476 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t477 = call { i8**, i64 }* @collect_runtime_helper_targets({ %NativeFunction*, i64 }* %t476)
+  store { i8**, i64 }* %t477, { i8**, i64 }** %l34
+  %t478 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t479 = call { %FunctionEffectEntry*, i64 }* @collect_direct_function_effects({ %NativeFunction*, i64 }* %t478)
+  store { %FunctionEffectEntry*, i64 }* %t479, { %FunctionEffectEntry*, i64 }** %l35
+  %t480 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t481 = call { %FunctionCallEntry*, i64 }* @collect_function_call_graph({ %NativeFunction*, i64 }* %t480)
+  store { %FunctionCallEntry*, i64 }* %t481, { %FunctionCallEntry*, i64 }** %l36
+  %t482 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t483 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t484 = call { %FunctionEffectEntry*, i64 }* @propagate_function_effects({ %FunctionEffectEntry*, i64 }* %t482, { %FunctionCallEntry*, i64 }* %t483)
+  store { %FunctionEffectEntry*, i64 }* %t484, { %FunctionEffectEntry*, i64 }** %l37
+  %t485 = alloca [0 x %FunctionEffectEntry]
+  %t486 = getelementptr [0 x %FunctionEffectEntry], [0 x %FunctionEffectEntry]* %t485, i32 0, i32 0
+  %t487 = alloca { %FunctionEffectEntry*, i64 }
+  %t488 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t487, i32 0, i32 0
+  store %FunctionEffectEntry* %t486, %FunctionEffectEntry** %t488
+  %t489 = getelementptr { %FunctionEffectEntry*, i64 }, { %FunctionEffectEntry*, i64 }* %t487, i32 0, i32 1
+  store i64 0, i64* %t489
+  store { %FunctionEffectEntry*, i64 }* %t487, { %FunctionEffectEntry*, i64 }** %l38
+  %t490 = alloca [0 x %LifetimeRegionMetadata]
+  %t491 = getelementptr [0 x %LifetimeRegionMetadata], [0 x %LifetimeRegionMetadata]* %t490, i32 0, i32 0
+  %t492 = alloca { %LifetimeRegionMetadata*, i64 }
+  %t493 = getelementptr { %LifetimeRegionMetadata*, i64 }, { %LifetimeRegionMetadata*, i64 }* %t492, i32 0, i32 0
+  store %LifetimeRegionMetadata* %t491, %LifetimeRegionMetadata** %t493
+  %t494 = getelementptr { %LifetimeRegionMetadata*, i64 }, { %LifetimeRegionMetadata*, i64 }* %t492, i32 0, i32 1
+  store i64 0, i64* %t494
+  store { %LifetimeRegionMetadata*, i64 }* %t492, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t495 = alloca [0 x i8*]
+  %t496 = getelementptr [0 x i8*], [0 x i8*]* %t495, i32 0, i32 0
+  %t497 = alloca { i8**, i64 }
+  %t498 = getelementptr { i8**, i64 }, { i8**, i64 }* %t497, i32 0, i32 0
+  store i8** %t496, i8*** %t498
+  %t499 = getelementptr { i8**, i64 }, { i8**, i64 }* %t497, i32 0, i32 1
+  store i64 0, i64* %t499
+  store { i8**, i64 }* %t497, { i8**, i64 }** %l40
+  %t500 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s501 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.501, i32 0, i32 0
+  %t502 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t500, i8* %s501)
+  store { i8**, i64 }* %t502, { i8**, i64 }** %l40
+  %t503 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s504 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.504, i32 0, i32 0
+  %t505 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t503, i8* %s504)
+  store { i8**, i64 }* %t505, { i8**, i64 }** %l40
+  %t506 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s507 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.507, i32 0, i32 0
+  %t508 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t506, i8* %s507)
+  store { i8**, i64 }* %t508, { i8**, i64 }** %l40
+  %t509 = load %TraitMetadata, %TraitMetadata* %l28
+  %t510 = call { i8**, i64 }* @render_trait_metadata_comments(%TraitMetadata %t509)
+  store { i8**, i64 }* %t510, { i8**, i64 }** %l41
+  %t511 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t512 = load { i8**, i64 }, { i8**, i64 }* %t511
+  %t513 = extractvalue { i8**, i64 } %t512, 1
+  %t514 = icmp sgt i64 %t513, 0
+  %t515 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t516 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t517 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t518 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t519 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t520 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t521 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t522 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t523 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t524 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t525 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t526 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t527 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t528 = load i64, i64* %l14
+  %t529 = load double, double* %l15
+  %t530 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t531 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t532 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t533 = load %TraitMetadata, %TraitMetadata* %l28
+  %t534 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t535 = load %TypeContext, %TypeContext* %l30
+  %t536 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t537 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t538 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t539 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t540 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t541 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t542 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t543 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t544 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t545 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t546 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  br i1 %t514, label %then24, label %merge25
 then24:
-  %t525 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t526 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t527 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t525, { i8**, i64 }* %t526)
-  store { i8**, i64 }* %t527, { i8**, i64 }** %l39
-  %t528 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s529 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.529, i32 0, i32 0
-  %t530 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t528, i8* %s529)
-  store { i8**, i64 }* %t530, { i8**, i64 }** %l39
+  %t547 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t548 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t549 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t547, { i8**, i64 }* %t548)
+  store { i8**, i64 }* %t549, { i8**, i64 }** %l40
+  %t550 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s551 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.551, i32 0, i32 0
+  %t552 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t550, i8* %s551)
+  store { i8**, i64 }* %t552, { i8**, i64 }** %l40
   br label %merge25
 merge25:
-  %t531 = phi { i8**, i64 }* [ %t527, %then24 ], [ %t521, %entry ]
-  %t532 = phi { i8**, i64 }* [ %t530, %then24 ], [ %t521, %entry ]
-  store { i8**, i64 }* %t531, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t532, { i8**, i64 }** %l39
-  %t533 = load %TypeContext, %TypeContext* %l29
-  %t534 = call { i8**, i64 }* @render_interface_type_definitions(%TypeContext %t533)
-  store { i8**, i64 }* %t534, { i8**, i64 }** %l43
-  %t535 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t536 = load { i8**, i64 }, { i8**, i64 }* %t535
-  %t537 = extractvalue { i8**, i64 } %t536, 1
-  %t538 = icmp sgt i64 %t537, 0
-  %t539 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t540 = load double, double* %l1
-  %t541 = load double, double* %l2
-  %t542 = load double, double* %l3
-  %t543 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t544 = load double, double* %l5
-  %t545 = load double, double* %l6
-  %t546 = load double, double* %l7
-  %t547 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t548 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t549 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t550 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t551 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t552 = load i64, i64* %l13
-  %t553 = load double, double* %l14
-  %t554 = load double, double* %l24
-  %t555 = load double, double* %l25
-  %t556 = load double, double* %l26
-  %t557 = load %TraitMetadata, %TraitMetadata* %l27
-  %t558 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t559 = load %TypeContext, %TypeContext* %l29
-  %t560 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t561 = load double, double* %l31
-  %t562 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t563 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t564 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t565 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t566 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t567 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t568 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t569 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t570 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t571 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t572 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t573 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  br i1 %t538, label %then26, label %merge27
+  %t553 = phi { i8**, i64 }* [ %t549, %then24 ], [ %t545, %entry ]
+  %t554 = phi { i8**, i64 }* [ %t552, %then24 ], [ %t545, %entry ]
+  store { i8**, i64 }* %t553, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t554, { i8**, i64 }** %l40
+  %t555 = load %TypeContext, %TypeContext* %l30
+  %t556 = call { i8**, i64 }* @render_struct_type_definitions(%TypeContext %t555)
+  store { i8**, i64 }* %t556, { i8**, i64 }** %l42
+  %t557 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t558 = load { i8**, i64 }, { i8**, i64 }* %t557
+  %t559 = extractvalue { i8**, i64 } %t558, 1
+  %t560 = icmp sgt i64 %t559, 0
+  %t561 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t562 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t563 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t564 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t565 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t566 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t567 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t568 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t569 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t570 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t571 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t572 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t573 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t574 = load i64, i64* %l14
+  %t575 = load double, double* %l15
+  %t576 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t577 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t578 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t579 = load %TraitMetadata, %TraitMetadata* %l28
+  %t580 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t581 = load %TypeContext, %TypeContext* %l30
+  %t582 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t583 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t584 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t585 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t586 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t587 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t588 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t589 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t590 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t591 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t592 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t593 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  br i1 %t560, label %then26, label %merge27
 then26:
-  %t574 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t575 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t576 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t574, { i8**, i64 }* %t575)
-  store { i8**, i64 }* %t576, { i8**, i64 }** %l39
-  %t577 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s578 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.578, i32 0, i32 0
-  %t579 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t577, i8* %s578)
-  store { i8**, i64 }* %t579, { i8**, i64 }** %l39
+  %t594 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t595 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t596 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t594, { i8**, i64 }* %t595)
+  store { i8**, i64 }* %t596, { i8**, i64 }** %l40
+  %t597 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s598 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.598, i32 0, i32 0
+  %t599 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t597, i8* %s598)
+  store { i8**, i64 }* %t599, { i8**, i64 }** %l40
   br label %merge27
 merge27:
-  %t580 = phi { i8**, i64 }* [ %t576, %then26 ], [ %t569, %entry ]
-  %t581 = phi { i8**, i64 }* [ %t579, %then26 ], [ %t569, %entry ]
-  store { i8**, i64 }* %t580, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t581, { i8**, i64 }** %l39
-  %t582 = load %TypeContext, %TypeContext* %l29
-  %t583 = call { i8**, i64 }* @render_vtable_type_definitions(%TypeContext %t582)
-  store { i8**, i64 }* %t583, { i8**, i64 }** %l44
-  %t584 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t585 = load { i8**, i64 }, { i8**, i64 }* %t584
-  %t586 = extractvalue { i8**, i64 } %t585, 1
-  %t587 = icmp sgt i64 %t586, 0
-  %t588 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t589 = load double, double* %l1
-  %t590 = load double, double* %l2
-  %t591 = load double, double* %l3
-  %t592 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t593 = load double, double* %l5
-  %t594 = load double, double* %l6
-  %t595 = load double, double* %l7
-  %t596 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t597 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t598 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t599 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t600 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t601 = load i64, i64* %l13
-  %t602 = load double, double* %l14
-  %t603 = load double, double* %l24
-  %t604 = load double, double* %l25
-  %t605 = load double, double* %l26
-  %t606 = load %TraitMetadata, %TraitMetadata* %l27
-  %t607 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t608 = load %TypeContext, %TypeContext* %l29
-  %t609 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t610 = load double, double* %l31
-  %t611 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t612 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t613 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t614 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t615 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t616 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t617 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t618 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t619 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t620 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t621 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t622 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t623 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  br i1 %t587, label %then28, label %merge29
+  %t600 = phi { i8**, i64 }* [ %t596, %then26 ], [ %t591, %entry ]
+  %t601 = phi { i8**, i64 }* [ %t599, %then26 ], [ %t591, %entry ]
+  store { i8**, i64 }* %t600, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t601, { i8**, i64 }** %l40
+  %t602 = load %TypeContext, %TypeContext* %l30
+  %t603 = call { i8**, i64 }* @render_enum_type_definitions(%TypeContext %t602)
+  store { i8**, i64 }* %t603, { i8**, i64 }** %l43
+  %t604 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t605 = load { i8**, i64 }, { i8**, i64 }* %t604
+  %t606 = extractvalue { i8**, i64 } %t605, 1
+  %t607 = icmp sgt i64 %t606, 0
+  %t608 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t609 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t610 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t611 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t612 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t613 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t614 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t615 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t616 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t617 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t618 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t619 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t620 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t621 = load i64, i64* %l14
+  %t622 = load double, double* %l15
+  %t623 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t624 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t625 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t626 = load %TraitMetadata, %TraitMetadata* %l28
+  %t627 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t628 = load %TypeContext, %TypeContext* %l30
+  %t629 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t630 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t631 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t632 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t633 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t634 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t635 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t636 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t637 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t638 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t639 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t640 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t641 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  br i1 %t607, label %then28, label %merge29
 then28:
-  %t624 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t625 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t626 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t624, { i8**, i64 }* %t625)
-  store { i8**, i64 }* %t626, { i8**, i64 }** %l39
-  %t627 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s628 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.628, i32 0, i32 0
-  %t629 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t627, i8* %s628)
-  store { i8**, i64 }* %t629, { i8**, i64 }** %l39
+  %t642 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t643 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t644 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t642, { i8**, i64 }* %t643)
+  store { i8**, i64 }* %t644, { i8**, i64 }** %l40
+  %t645 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s646 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.646, i32 0, i32 0
+  %t647 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t645, i8* %s646)
+  store { i8**, i64 }* %t647, { i8**, i64 }** %l40
   br label %merge29
 merge29:
-  %t630 = phi { i8**, i64 }* [ %t626, %then28 ], [ %t618, %entry ]
-  %t631 = phi { i8**, i64 }* [ %t629, %then28 ], [ %t618, %entry ]
-  store { i8**, i64 }* %t630, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t631, { i8**, i64 }** %l39
-  %t632 = load %TypeContext, %TypeContext* %l29
-  %t633 = call { i8**, i64 }* @render_vtable_constants(%TypeContext %t632)
-  store { i8**, i64 }* %t633, { i8**, i64 }** %l45
-  %t634 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t635 = load { i8**, i64 }, { i8**, i64 }* %t634
-  %t636 = extractvalue { i8**, i64 } %t635, 1
-  %t637 = icmp sgt i64 %t636, 0
-  %t638 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t639 = load double, double* %l1
-  %t640 = load double, double* %l2
-  %t641 = load double, double* %l3
-  %t642 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t643 = load double, double* %l5
-  %t644 = load double, double* %l6
-  %t645 = load double, double* %l7
-  %t646 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t647 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t648 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t649 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t650 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t651 = load i64, i64* %l13
-  %t652 = load double, double* %l14
-  %t653 = load double, double* %l24
-  %t654 = load double, double* %l25
-  %t655 = load double, double* %l26
-  %t656 = load %TraitMetadata, %TraitMetadata* %l27
-  %t657 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t658 = load %TypeContext, %TypeContext* %l29
-  %t659 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t660 = load double, double* %l31
-  %t661 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t662 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t663 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t664 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t665 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t666 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t667 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t668 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t669 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t670 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t671 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t672 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t673 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t674 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  br i1 %t637, label %then30, label %merge31
+  %t648 = phi { i8**, i64 }* [ %t644, %then28 ], [ %t638, %entry ]
+  %t649 = phi { i8**, i64 }* [ %t647, %then28 ], [ %t638, %entry ]
+  store { i8**, i64 }* %t648, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t649, { i8**, i64 }** %l40
+  %t650 = load %TypeContext, %TypeContext* %l30
+  %t651 = call { i8**, i64 }* @render_interface_type_definitions(%TypeContext %t650)
+  store { i8**, i64 }* %t651, { i8**, i64 }** %l44
+  %t652 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t653 = load { i8**, i64 }, { i8**, i64 }* %t652
+  %t654 = extractvalue { i8**, i64 } %t653, 1
+  %t655 = icmp sgt i64 %t654, 0
+  %t656 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t657 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t658 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t659 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t660 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t661 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t662 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t663 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t664 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t665 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t666 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t667 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t668 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t669 = load i64, i64* %l14
+  %t670 = load double, double* %l15
+  %t671 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t672 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t673 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t674 = load %TraitMetadata, %TraitMetadata* %l28
+  %t675 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t676 = load %TypeContext, %TypeContext* %l30
+  %t677 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t678 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t679 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t680 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t681 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t682 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t683 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t684 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t685 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t686 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t687 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t688 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t689 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t690 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  br i1 %t655, label %then30, label %merge31
 then30:
-  %t675 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t676 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t677 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t675, { i8**, i64 }* %t676)
-  store { i8**, i64 }* %t677, { i8**, i64 }** %l39
-  %t678 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s679 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.679, i32 0, i32 0
-  %t680 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t678, i8* %s679)
-  store { i8**, i64 }* %t680, { i8**, i64 }** %l39
+  %t691 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t692 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t693 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t691, { i8**, i64 }* %t692)
+  store { i8**, i64 }* %t693, { i8**, i64 }** %l40
+  %t694 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s695 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.695, i32 0, i32 0
+  %t696 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t694, i8* %s695)
+  store { i8**, i64 }* %t696, { i8**, i64 }** %l40
   br label %merge31
 merge31:
-  %t681 = phi { i8**, i64 }* [ %t677, %then30 ], [ %t668, %entry ]
-  %t682 = phi { i8**, i64 }* [ %t680, %then30 ], [ %t668, %entry ]
-  store { i8**, i64 }* %t681, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t682, { i8**, i64 }** %l39
-  %t683 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t684 = call { i8**, i64 }* @render_runtime_helper_declarations({ i8**, i64 }* %t683)
-  store { i8**, i64 }* %t684, { i8**, i64 }** %l46
-  %t685 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t686 = load { i8**, i64 }, { i8**, i64 }* %t685
-  %t687 = extractvalue { i8**, i64 } %t686, 1
-  %t688 = icmp sgt i64 %t687, 0
-  %t689 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t690 = load double, double* %l1
-  %t691 = load double, double* %l2
-  %t692 = load double, double* %l3
-  %t693 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t694 = load double, double* %l5
-  %t695 = load double, double* %l6
-  %t696 = load double, double* %l7
-  %t697 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t698 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t699 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t700 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t701 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t702 = load i64, i64* %l13
-  %t703 = load double, double* %l14
-  %t704 = load double, double* %l24
-  %t705 = load double, double* %l25
-  %t706 = load double, double* %l26
-  %t707 = load %TraitMetadata, %TraitMetadata* %l27
-  %t708 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t709 = load %TypeContext, %TypeContext* %l29
-  %t710 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t711 = load double, double* %l31
-  %t712 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t713 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t714 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t715 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t716 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t717 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t718 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t719 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t720 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t721 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t722 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t723 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t724 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t725 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t726 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  br i1 %t688, label %then32, label %merge33
+  %t697 = phi { i8**, i64 }* [ %t693, %then30 ], [ %t686, %entry ]
+  %t698 = phi { i8**, i64 }* [ %t696, %then30 ], [ %t686, %entry ]
+  store { i8**, i64 }* %t697, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t698, { i8**, i64 }** %l40
+  %t699 = load %TypeContext, %TypeContext* %l30
+  %t700 = call { i8**, i64 }* @render_vtable_type_definitions(%TypeContext %t699)
+  store { i8**, i64 }* %t700, { i8**, i64 }** %l45
+  %t701 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t702 = load { i8**, i64 }, { i8**, i64 }* %t701
+  %t703 = extractvalue { i8**, i64 } %t702, 1
+  %t704 = icmp sgt i64 %t703, 0
+  %t705 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t706 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t707 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t708 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t709 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t710 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t711 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t712 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t713 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t714 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t715 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t716 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t717 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t718 = load i64, i64* %l14
+  %t719 = load double, double* %l15
+  %t720 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t721 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t722 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t723 = load %TraitMetadata, %TraitMetadata* %l28
+  %t724 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t725 = load %TypeContext, %TypeContext* %l30
+  %t726 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t727 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t728 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t729 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t730 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t731 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t732 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t733 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t734 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t735 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t736 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t737 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t738 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t739 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t740 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  br i1 %t704, label %then32, label %merge33
 then32:
-  %t727 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t728 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t729 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t727, { i8**, i64 }* %t728)
-  store { i8**, i64 }* %t729, { i8**, i64 }** %l39
-  %t730 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s731 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.731, i32 0, i32 0
-  %t732 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t730, i8* %s731)
-  store { i8**, i64 }* %t732, { i8**, i64 }** %l39
-  br label %merge33
-merge33:
-  %t733 = phi { i8**, i64 }* [ %t729, %then32 ], [ %t719, %entry ]
-  %t734 = phi { i8**, i64 }* [ %t732, %then32 ], [ %t719, %entry ]
-  store { i8**, i64 }* %t733, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t734, { i8**, i64 }** %l39
-  %t735 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s736 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.736, i32 0, i32 0
-  %t737 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t735, i8* %s736)
-  store { i8**, i64 }* %t737, { i8**, i64 }** %l39
-  %t738 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s739 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.739, i32 0, i32 0
-  %t740 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t738, i8* %s739)
-  store { i8**, i64 }* %t740, { i8**, i64 }** %l39
-  %t741 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %s742 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.742, i32 0, i32 0
-  %t743 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t741, i8* %s742)
-  store { i8**, i64 }* %t743, { i8**, i64 }** %l39
-  %t744 = load { i8**, i64 }*, { i8**, i64 }** %l39
+  %t741 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t742 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t743 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t741, { i8**, i64 }* %t742)
+  store { i8**, i64 }* %t743, { i8**, i64 }** %l40
+  %t744 = load { i8**, i64 }*, { i8**, i64 }** %l40
   %s745 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.745, i32 0, i32 0
   %t746 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t744, i8* %s745)
-  store { i8**, i64 }* %t746, { i8**, i64 }** %l39
-  %t747 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  store { i8**, i64 }* %t747, { i8**, i64 }** %l47
-  %t748 = alloca [0 x i8*]
-  %t749 = getelementptr [0 x i8*], [0 x i8*]* %t748, i32 0, i32 0
-  %t750 = alloca { i8**, i64 }
-  %t751 = getelementptr { i8**, i64 }, { i8**, i64 }* %t750, i32 0, i32 0
-  store i8** %t749, i8*** %t751
-  %t752 = getelementptr { i8**, i64 }, { i8**, i64 }* %t750, i32 0, i32 1
-  store i64 0, i64* %t752
-  store { i8**, i64 }* %t750, { i8**, i64 }** %l48
-  %t753 = sitofp i64 0 to double
-  store double %t753, double* %l49
-  store i1 0, i1* %l50
-  %t754 = alloca [0 x %StringConstant]
-  %t755 = getelementptr [0 x %StringConstant], [0 x %StringConstant]* %t754, i32 0, i32 0
-  %t756 = alloca { %StringConstant*, i64 }
-  %t757 = getelementptr { %StringConstant*, i64 }, { %StringConstant*, i64 }* %t756, i32 0, i32 0
-  store %StringConstant* %t755, %StringConstant** %t757
-  %t758 = getelementptr { %StringConstant*, i64 }, { %StringConstant*, i64 }* %t756, i32 0, i32 1
-  store i64 0, i64* %t758
-  store { %StringConstant*, i64 }* %t756, { %StringConstant*, i64 }** %l51
-  %t759 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t760 = load double, double* %l1
-  %t761 = load double, double* %l2
-  %t762 = load double, double* %l3
-  %t763 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t764 = load double, double* %l5
-  %t765 = load double, double* %l6
-  %t766 = load double, double* %l7
-  %t767 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t768 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t769 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t770 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t771 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t772 = load i64, i64* %l13
-  %t773 = load double, double* %l14
-  %t774 = load double, double* %l24
-  %t775 = load double, double* %l25
-  %t776 = load double, double* %l26
-  %t777 = load %TraitMetadata, %TraitMetadata* %l27
-  %t778 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t779 = load %TypeContext, %TypeContext* %l29
-  %t780 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t781 = load double, double* %l31
-  %t782 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t783 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t784 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t785 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t786 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t787 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t788 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t789 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t790 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t791 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t792 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t793 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t794 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t795 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t796 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t797 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t798 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t799 = load double, double* %l49
-  %t800 = load i1, i1* %l50
-  %t801 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  br label %loop.header34
-loop.header34:
-  %t913 = phi { %FunctionEffectEntry*, i64 }* [ %t787, %entry ], [ %t907, %loop.latch36 ]
-  %t914 = phi { i8**, i64 }* [ %t759, %entry ], [ %t908, %loop.latch36 ]
-  %t915 = phi { %LifetimeRegionMetadata*, i64 }* [ %t788, %entry ], [ %t909, %loop.latch36 ]
-  %t916 = phi { %StringConstant*, i64 }* [ %t801, %entry ], [ %t910, %loop.latch36 ]
-  %t917 = phi { i8**, i64 }* [ %t798, %entry ], [ %t911, %loop.latch36 ]
-  %t918 = phi double [ %t799, %entry ], [ %t912, %loop.latch36 ]
-  store { %FunctionEffectEntry*, i64 }* %t913, { %FunctionEffectEntry*, i64 }** %l37
-  store { i8**, i64 }* %t914, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t915, { %LifetimeRegionMetadata*, i64 }** %l38
-  store { %StringConstant*, i64 }* %t916, { %StringConstant*, i64 }** %l51
-  store { i8**, i64 }* %t917, { i8**, i64 }** %l48
-  store double %t918, double* %l49
-  br label %loop.body35
-loop.body35:
-  %t802 = load double, double* %l49
-  %t803 = load double, double* %l31
-  %t804 = load double, double* %l31
-  %t805 = load double, double* %l49
-  %t806 = fptosi double %t805 to i64
-  store double 0.0, double* %l52
-  %t807 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t808 = load double, double* %l52
-  store double 0.0, double* %l53
-  %t809 = alloca [0 x i8*]
-  %t810 = getelementptr [0 x i8*], [0 x i8*]* %t809, i32 0, i32 0
-  %t811 = alloca { i8**, i64 }
-  %t812 = getelementptr { i8**, i64 }, { i8**, i64 }* %t811, i32 0, i32 0
-  store i8** %t810, i8*** %t812
-  %t813 = getelementptr { i8**, i64 }, { i8**, i64 }* %t811, i32 0, i32 1
-  store i64 0, i64* %t813
-  store { i8**, i64 }* %t811, { i8**, i64 }** %l54
-  %t814 = load double, double* %l53
-  %t815 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t816 = load double, double* %l52
-  %t817 = insertvalue %FunctionEffectEntry undef, i8* null, 0
-  %t818 = load { i8**, i64 }*, { i8**, i64 }** %l54
-  %t819 = insertvalue %FunctionEffectEntry %t817, { i8**, i64 }* %t818, 1
-  %t820 = call { %FunctionEffectEntry*, i64 }* @append_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t815, %FunctionEffectEntry %t819)
-  store { %FunctionEffectEntry*, i64 }* %t820, { %FunctionEffectEntry*, i64 }** %l37
-  %t821 = load double, double* %l52
-  %t822 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t823 = load { i8**, i64 }*, { i8**, i64 }** %l54
-  %t824 = load %TypeContext, %TypeContext* %l29
-  %t825 = call %LoweredLLVMFunction @emit_function(i8* null, { %NativeFunction*, i64 }* %t822, { i8**, i64 }* %t823, %TypeContext %t824)
-  store %LoweredLLVMFunction %t825, %LoweredLLVMFunction* %l55
-  %t826 = load double, double* %l52
-  %t827 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t828 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  %t829 = extractvalue %LoweredLLVMFunction %t828, 1
-  %t830 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t827, { i8**, i64 }* %t829)
-  store { i8**, i64 }* %t830, { i8**, i64 }** %l0
-  %t831 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t832 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  %t833 = extractvalue %LoweredLLVMFunction %t832, 2
-  %t834 = bitcast { %LifetimeRegionMetadata*, i64 }* %t831 to { i8**, i64 }*
-  %t835 = bitcast { %LifetimeRegionMetadata**, i64 }* %t833 to { i8**, i64 }*
-  %t836 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t834, { i8**, i64 }* %t835)
-  %t837 = bitcast { i8**, i64 }* %t836 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t837, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t838 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t839 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  %t840 = extractvalue %LoweredLLVMFunction %t839, 3
-  %t841 = bitcast { %StringConstant**, i64 }* %t840 to { %StringConstant*, i64 }*
-  %t842 = call { %StringConstant*, i64 }* @merge_string_constants({ %StringConstant*, i64 }* %t838, { %StringConstant*, i64 }* %t841)
-  store { %StringConstant*, i64 }* %t842, { %StringConstant*, i64 }** %l51
-  %t843 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  %t844 = extractvalue %LoweredLLVMFunction %t843, 0
-  %t845 = load { i8**, i64 }, { i8**, i64 }* %t844
-  %t846 = extractvalue { i8**, i64 } %t845, 1
-  %t847 = icmp sgt i64 %t846, 0
-  %t848 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t849 = load double, double* %l1
-  %t850 = load double, double* %l2
-  %t851 = load double, double* %l3
-  %t852 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t853 = load double, double* %l5
-  %t854 = load double, double* %l6
-  %t855 = load double, double* %l7
-  %t856 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t857 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t858 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t859 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t860 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t861 = load i64, i64* %l13
-  %t862 = load double, double* %l14
-  %t863 = load double, double* %l24
-  %t864 = load double, double* %l25
-  %t865 = load double, double* %l26
-  %t866 = load %TraitMetadata, %TraitMetadata* %l27
-  %t867 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t868 = load %TypeContext, %TypeContext* %l29
-  %t869 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t870 = load double, double* %l31
-  %t871 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t872 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t873 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t874 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t875 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t876 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t877 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t878 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t879 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t880 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t881 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t882 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t883 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t884 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t885 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t886 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t887 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t888 = load double, double* %l49
-  %t889 = load i1, i1* %l50
-  %t890 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t891 = load double, double* %l52
-  %t892 = load double, double* %l53
-  %t893 = load { i8**, i64 }*, { i8**, i64 }** %l54
-  %t894 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  br i1 %t847, label %then38, label %merge39
-then38:
-  %t895 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t896 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l55
-  %t897 = extractvalue %LoweredLLVMFunction %t896, 0
-  %t898 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t895, { i8**, i64 }* %t897)
-  store { i8**, i64 }* %t898, { i8**, i64 }** %l48
-  %t899 = load double, double* %l49
-  %t900 = sitofp i64 1 to double
-  %t901 = fadd double %t899, %t900
-  %t902 = load double, double* %l31
-  br label %merge39
-merge39:
-  %t903 = phi { i8**, i64 }* [ %t898, %then38 ], [ %t887, %loop.body35 ]
-  store { i8**, i64 }* %t903, { i8**, i64 }** %l48
-  %t904 = load double, double* %l49
-  %t905 = sitofp i64 1 to double
-  %t906 = fadd double %t904, %t905
-  store double %t906, double* %l49
-  br label %loop.latch36
-loop.latch36:
-  %t907 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t908 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t909 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t910 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t911 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t912 = load double, double* %l49
-  br label %loop.header34
-afterloop37:
-  %t919 = load i1, i1* %l50
-  %t920 = xor i1 %t919, 1
-  %t921 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t922 = load double, double* %l1
-  %t923 = load double, double* %l2
-  %t924 = load double, double* %l3
-  %t925 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t926 = load double, double* %l5
-  %t927 = load double, double* %l6
-  %t928 = load double, double* %l7
-  %t929 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t930 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t931 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t932 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t933 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t934 = load i64, i64* %l13
-  %t935 = load double, double* %l14
-  %t936 = load double, double* %l24
-  %t937 = load double, double* %l25
-  %t938 = load double, double* %l26
-  %t939 = load %TraitMetadata, %TraitMetadata* %l27
-  %t940 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t941 = load %TypeContext, %TypeContext* %l29
-  %t942 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t943 = load double, double* %l31
-  %t944 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t945 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t946 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t947 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t948 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t949 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t950 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t951 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t952 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t953 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t954 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t955 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t956 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t957 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t958 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t959 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t960 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t961 = load double, double* %l49
-  %t962 = load i1, i1* %l50
-  %t963 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  br i1 %t920, label %then40, label %merge41
-then40:
-  %t964 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t965 = load { i8**, i64 }, { i8**, i64 }* %t964
-  %t966 = extractvalue { i8**, i64 } %t965, 1
-  %t967 = icmp sgt i64 %t966, 0
-  %t968 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t969 = load double, double* %l1
-  %t970 = load double, double* %l2
-  %t971 = load double, double* %l3
-  %t972 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t973 = load double, double* %l5
-  %t974 = load double, double* %l6
-  %t975 = load double, double* %l7
-  %t976 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t977 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t978 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t979 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t980 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t981 = load i64, i64* %l13
-  %t982 = load double, double* %l14
-  %t983 = load double, double* %l24
-  %t984 = load double, double* %l25
-  %t985 = load double, double* %l26
-  %t986 = load %TraitMetadata, %TraitMetadata* %l27
-  %t987 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t988 = load %TypeContext, %TypeContext* %l29
-  %t989 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t990 = load double, double* %l31
-  %t991 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t992 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t993 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t994 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t995 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t996 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t997 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t998 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t999 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t1000 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t1001 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t1002 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t1003 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t1004 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t1005 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t1006 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t1007 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t1008 = load double, double* %l49
-  %t1009 = load i1, i1* %l50
-  %t1010 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  br i1 %t967, label %then42, label %merge43
+  store { i8**, i64 }* %t746, { i8**, i64 }** %l40
+  br label %merge33
+merge33:
+  %t747 = phi { i8**, i64 }* [ %t743, %then32 ], [ %t735, %entry ]
+  %t748 = phi { i8**, i64 }* [ %t746, %then32 ], [ %t735, %entry ]
+  store { i8**, i64 }* %t747, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t748, { i8**, i64 }** %l40
+  %t749 = load %TypeContext, %TypeContext* %l30
+  %t750 = call { i8**, i64 }* @render_vtable_constants(%TypeContext %t749)
+  store { i8**, i64 }* %t750, { i8**, i64 }** %l46
+  %t751 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t752 = load { i8**, i64 }, { i8**, i64 }* %t751
+  %t753 = extractvalue { i8**, i64 } %t752, 1
+  %t754 = icmp sgt i64 %t753, 0
+  %t755 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t756 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t757 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t758 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t759 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t760 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t761 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t762 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t763 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t764 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t765 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t766 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t767 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t768 = load i64, i64* %l14
+  %t769 = load double, double* %l15
+  %t770 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t771 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t772 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t773 = load %TraitMetadata, %TraitMetadata* %l28
+  %t774 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t775 = load %TypeContext, %TypeContext* %l30
+  %t776 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t777 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t778 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t779 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t780 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t781 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t782 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t783 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t784 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t785 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t786 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t787 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t788 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t789 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t790 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t791 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  br i1 %t754, label %then34, label %merge35
+then34:
+  %t792 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t793 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t794 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t792, { i8**, i64 }* %t793)
+  store { i8**, i64 }* %t794, { i8**, i64 }** %l40
+  %t795 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s796 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.796, i32 0, i32 0
+  %t797 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t795, i8* %s796)
+  store { i8**, i64 }* %t797, { i8**, i64 }** %l40
+  br label %merge35
+merge35:
+  %t798 = phi { i8**, i64 }* [ %t794, %then34 ], [ %t785, %entry ]
+  %t799 = phi { i8**, i64 }* [ %t797, %then34 ], [ %t785, %entry ]
+  store { i8**, i64 }* %t798, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t799, { i8**, i64 }** %l40
+  %t800 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t801 = call { i8**, i64 }* @render_runtime_helper_declarations({ i8**, i64 }* %t800)
+  store { i8**, i64 }* %t801, { i8**, i64 }** %l47
+  %t802 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t803 = load { i8**, i64 }, { i8**, i64 }* %t802
+  %t804 = extractvalue { i8**, i64 } %t803, 1
+  %t805 = icmp sgt i64 %t804, 0
+  %t806 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t807 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t808 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t809 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t810 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t811 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t812 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t813 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t814 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t815 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t816 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t817 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t818 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t819 = load i64, i64* %l14
+  %t820 = load double, double* %l15
+  %t821 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t822 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t823 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t824 = load %TraitMetadata, %TraitMetadata* %l28
+  %t825 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t826 = load %TypeContext, %TypeContext* %l30
+  %t827 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t828 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t829 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t830 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t831 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t832 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t833 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t834 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t835 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t836 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t837 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t838 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t839 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t840 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t841 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t842 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t843 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  br i1 %t805, label %then36, label %merge37
+then36:
+  %t844 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t845 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t846 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t844, { i8**, i64 }* %t845)
+  store { i8**, i64 }* %t846, { i8**, i64 }** %l40
+  %t847 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s848 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.848, i32 0, i32 0
+  %t849 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t847, i8* %s848)
+  store { i8**, i64 }* %t849, { i8**, i64 }** %l40
+  br label %merge37
+merge37:
+  %t850 = phi { i8**, i64 }* [ %t846, %then36 ], [ %t836, %entry ]
+  %t851 = phi { i8**, i64 }* [ %t849, %then36 ], [ %t836, %entry ]
+  store { i8**, i64 }* %t850, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t851, { i8**, i64 }** %l40
+  %t852 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s853 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.853, i32 0, i32 0
+  %t854 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t852, i8* %s853)
+  store { i8**, i64 }* %t854, { i8**, i64 }** %l40
+  %t855 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s856 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.856, i32 0, i32 0
+  %t857 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t855, i8* %s856)
+  store { i8**, i64 }* %t857, { i8**, i64 }** %l40
+  %t858 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s859 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.859, i32 0, i32 0
+  %t860 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t858, i8* %s859)
+  store { i8**, i64 }* %t860, { i8**, i64 }** %l40
+  %t861 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %s862 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.862, i32 0, i32 0
+  %t863 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t861, i8* %s862)
+  store { i8**, i64 }* %t863, { i8**, i64 }** %l40
+  %t864 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  store { i8**, i64 }* %t864, { i8**, i64 }** %l48
+  %t865 = alloca [0 x i8*]
+  %t866 = getelementptr [0 x i8*], [0 x i8*]* %t865, i32 0, i32 0
+  %t867 = alloca { i8**, i64 }
+  %t868 = getelementptr { i8**, i64 }, { i8**, i64 }* %t867, i32 0, i32 0
+  store i8** %t866, i8*** %t868
+  %t869 = getelementptr { i8**, i64 }, { i8**, i64 }* %t867, i32 0, i32 1
+  store i64 0, i64* %t869
+  store { i8**, i64 }* %t867, { i8**, i64 }** %l49
+  %t870 = sitofp i64 0 to double
+  store double %t870, double* %l50
+  store i1 0, i1* %l51
+  %t871 = alloca [0 x %StringConstant]
+  %t872 = getelementptr [0 x %StringConstant], [0 x %StringConstant]* %t871, i32 0, i32 0
+  %t873 = alloca { %StringConstant*, i64 }
+  %t874 = getelementptr { %StringConstant*, i64 }, { %StringConstant*, i64 }* %t873, i32 0, i32 0
+  store %StringConstant* %t872, %StringConstant** %t874
+  %t875 = getelementptr { %StringConstant*, i64 }, { %StringConstant*, i64 }* %t873, i32 0, i32 1
+  store i64 0, i64* %t875
+  store { %StringConstant*, i64 }* %t873, { %StringConstant*, i64 }** %l52
+  %t876 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t877 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t878 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t879 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t880 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t881 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t882 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t883 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t884 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t885 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t886 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t887 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t888 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t889 = load i64, i64* %l14
+  %t890 = load double, double* %l15
+  %t891 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t892 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t893 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t894 = load %TraitMetadata, %TraitMetadata* %l28
+  %t895 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t896 = load %TypeContext, %TypeContext* %l30
+  %t897 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t898 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t899 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t900 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t901 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t902 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t903 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t904 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t905 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t906 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t907 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t908 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t909 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t910 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t911 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t912 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t913 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t914 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t915 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t916 = load double, double* %l50
+  %t917 = load i1, i1* %l51
+  %t918 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  br label %loop.header38
+loop.header38:
+  %t1247 = phi { %FunctionEffectEntry*, i64 }* [ %t904, %entry ], [ %t1240, %loop.latch40 ]
+  %t1248 = phi i1 [ %t917, %entry ], [ %t1241, %loop.latch40 ]
+  %t1249 = phi { i8**, i64 }* [ %t876, %entry ], [ %t1242, %loop.latch40 ]
+  %t1250 = phi { %LifetimeRegionMetadata*, i64 }* [ %t905, %entry ], [ %t1243, %loop.latch40 ]
+  %t1251 = phi { %StringConstant*, i64 }* [ %t918, %entry ], [ %t1244, %loop.latch40 ]
+  %t1252 = phi { i8**, i64 }* [ %t915, %entry ], [ %t1245, %loop.latch40 ]
+  %t1253 = phi double [ %t916, %entry ], [ %t1246, %loop.latch40 ]
+  store { %FunctionEffectEntry*, i64 }* %t1247, { %FunctionEffectEntry*, i64 }** %l38
+  store i1 %t1248, i1* %l51
+  store { i8**, i64 }* %t1249, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t1250, { %LifetimeRegionMetadata*, i64 }** %l39
+  store { %StringConstant*, i64 }* %t1251, { %StringConstant*, i64 }** %l52
+  store { i8**, i64 }* %t1252, { i8**, i64 }** %l49
+  store double %t1253, double* %l50
+  br label %loop.body39
+loop.body39:
+  %t919 = load double, double* %l50
+  %t920 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t921 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t920
+  %t922 = extractvalue { %NativeFunction*, i64 } %t921, 1
+  %t923 = sitofp i64 %t922 to double
+  %t924 = fcmp oge double %t919, %t923
+  %t925 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t926 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t927 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t928 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t929 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t930 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t931 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t932 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t933 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t934 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t935 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t936 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t937 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t938 = load i64, i64* %l14
+  %t939 = load double, double* %l15
+  %t940 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t941 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t942 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t943 = load %TraitMetadata, %TraitMetadata* %l28
+  %t944 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t945 = load %TypeContext, %TypeContext* %l30
+  %t946 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t947 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t948 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t949 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t950 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t951 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t952 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t953 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t954 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t955 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t956 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t957 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t958 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t959 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t960 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t961 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t962 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t963 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t964 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t965 = load double, double* %l50
+  %t966 = load i1, i1* %l51
+  %t967 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  br i1 %t924, label %then42, label %merge43
 then42:
-  %t1011 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %s1012 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1012, i32 0, i32 0
-  %t1013 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1011, i8* %s1012)
-  store { i8**, i64 }* %t1013, { i8**, i64 }** %l48
-  br label %merge43
+  br label %afterloop41
 merge43:
-  %t1014 = phi { i8**, i64 }* [ %t1013, %then42 ], [ %t1007, %then40 ]
-  store { i8**, i64 }* %t1014, { i8**, i64 }** %l48
-  %t1015 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %s1016 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.1016, i32 0, i32 0
-  %s1017 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1017, i32 0, i32 0
-  %s1018 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.1018, i32 0, i32 0
-  %s1019 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.1019, i32 0, i32 0
-  %t1020 = load i8, i8* %s1016
-  %t1021 = load i8, i8* %s1017
-  %t1022 = load i8, i8* %s1018
-  %t1023 = load i8, i8* %s1019
-  %t1024 = alloca [5 x i8]
-  %t1025 = getelementptr [5 x i8], [5 x i8]* %t1024, i32 0, i32 0
-  %t1026 = getelementptr i8, i8* %t1025, i64 0
-  store i8 %t1020, i8* %t1026
-  %t1027 = getelementptr i8, i8* %t1025, i64 1
-  store i8 %t1021, i8* %t1027
-  %t1028 = getelementptr i8, i8* %t1025, i64 2
-  store i8 %t1022, i8* %t1028
-  %t1029 = getelementptr i8, i8* %t1025, i64 3
-  store i8 %t1023, i8* %t1029
-  %t1030 = getelementptr i8, i8* %t1025, i64 4
-  store i8 125, i8* %t1030
-  %t1031 = alloca { i8*, i64 }
-  %t1032 = getelementptr { i8*, i64 }, { i8*, i64 }* %t1031, i32 0, i32 0
-  store i8* %t1025, i8** %t1032
-  %t1033 = getelementptr { i8*, i64 }, { i8*, i64 }* %t1031, i32 0, i32 1
-  store i64 5, i64* %t1033
-  %t1034 = bitcast { i8*, i64 }* %t1031 to { i8**, i64 }*
-  %t1035 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1015, { i8**, i64 }* %t1034)
-  store { i8**, i64 }* %t1035, { i8**, i64 }** %l48
-  br label %merge41
-merge41:
-  %t1036 = phi { i8**, i64 }* [ %t1013, %then40 ], [ %t960, %entry ]
-  %t1037 = phi { i8**, i64 }* [ %t1035, %then40 ], [ %t960, %entry ]
-  store { i8**, i64 }* %t1036, { i8**, i64 }** %l48
-  store { i8**, i64 }* %t1037, { i8**, i64 }** %l48
-  %t1038 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t1039 = call { i8**, i64 }* @render_string_constants({ %StringConstant*, i64 }* %t1038)
-  store { i8**, i64 }* %t1039, { i8**, i64 }** %l56
-  %t1040 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  store { i8**, i64 }* %t1040, { i8**, i64 }** %l57
-  %t1041 = load { i8**, i64 }*, { i8**, i64 }** %l56
-  %t1042 = load { i8**, i64 }, { i8**, i64 }* %t1041
-  %t1043 = extractvalue { i8**, i64 } %t1042, 1
-  %t1044 = icmp sgt i64 %t1043, 0
-  %t1045 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1046 = load double, double* %l1
-  %t1047 = load double, double* %l2
-  %t1048 = load double, double* %l3
-  %t1049 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t1050 = load double, double* %l5
-  %t1051 = load double, double* %l6
-  %t1052 = load double, double* %l7
-  %t1053 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t1054 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t1055 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t1056 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t1057 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t1058 = load i64, i64* %l13
-  %t1059 = load double, double* %l14
-  %t1060 = load double, double* %l24
-  %t1061 = load double, double* %l25
-  %t1062 = load double, double* %l26
-  %t1063 = load %TraitMetadata, %TraitMetadata* %l27
-  %t1064 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t1065 = load %TypeContext, %TypeContext* %l29
-  %t1066 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t1067 = load double, double* %l31
-  %t1068 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t1069 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t1070 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t1071 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t1072 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t1073 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t1074 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t1075 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t1076 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t1077 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t1078 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t1079 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t1080 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t1081 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t1082 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t1083 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t1084 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t1085 = load double, double* %l49
-  %t1086 = load i1, i1* %l50
-  %t1087 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t1088 = load { i8**, i64 }*, { i8**, i64 }** %l56
-  %t1089 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  br i1 %t1044, label %then44, label %merge45
+  %t968 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t969 = load double, double* %l50
+  %t970 = fptosi double %t969 to i64
+  %t971 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t968
+  %t972 = extractvalue { %NativeFunction*, i64 } %t971, 0
+  %t973 = extractvalue { %NativeFunction*, i64 } %t971, 1
+  %t974 = icmp uge i64 %t970, %t973
+  ; bounds check: %t974 (if true, out of bounds)
+  %t975 = getelementptr %NativeFunction, %NativeFunction* %t972, i64 %t970
+  %t976 = load %NativeFunction, %NativeFunction* %t975
+  store %NativeFunction %t976, %NativeFunction* %l53
+  %t977 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t978 = load %NativeFunction, %NativeFunction* %l53
+  %t979 = extractvalue %NativeFunction %t978, 0
+  %t980 = call %FunctionEffectEntry* @find_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t977, i8* %t979)
+  store %FunctionEffectEntry* %t980, %FunctionEffectEntry** %l54
+  %t981 = alloca [0 x i8*]
+  %t982 = getelementptr [0 x i8*], [0 x i8*]* %t981, i32 0, i32 0
+  %t983 = alloca { i8**, i64 }
+  %t984 = getelementptr { i8**, i64 }, { i8**, i64 }* %t983, i32 0, i32 0
+  store i8** %t982, i8*** %t984
+  %t985 = getelementptr { i8**, i64 }, { i8**, i64 }* %t983, i32 0, i32 1
+  store i64 0, i64* %t985
+  store { i8**, i64 }* %t983, { i8**, i64 }** %l55
+  %t986 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t987 = bitcast i8* null to %FunctionEffectEntry*
+  %t988 = icmp ne %FunctionEffectEntry* %t986, %t987
+  %t989 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t990 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t991 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t992 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t993 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t994 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t995 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t996 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t997 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t998 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t999 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1000 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1001 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1002 = load i64, i64* %l14
+  %t1003 = load double, double* %l15
+  %t1004 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1005 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1006 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1007 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1008 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1009 = load %TypeContext, %TypeContext* %l30
+  %t1010 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1011 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1012 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1013 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1014 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1015 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1016 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1017 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1018 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1019 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1020 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1021 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1022 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1023 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1024 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1025 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1026 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1027 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1028 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1029 = load double, double* %l50
+  %t1030 = load i1, i1* %l51
+  %t1031 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1032 = load %NativeFunction, %NativeFunction* %l53
+  %t1033 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t1034 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  br i1 %t988, label %then44, label %merge45
 then44:
-  %t1090 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  %t1091 = load { i8**, i64 }*, { i8**, i64 }** %l56
-  %t1092 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1090, { i8**, i64 }* %t1091)
-  store { i8**, i64 }* %t1092, { i8**, i64 }** %l57
-  %t1093 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  %s1094 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1094, i32 0, i32 0
-  %t1095 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1093, i8* %s1094)
-  store { i8**, i64 }* %t1095, { i8**, i64 }** %l57
+  %t1035 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t1036 = getelementptr %FunctionEffectEntry, %FunctionEffectEntry* %t1035, i32 0, i32 1
+  %t1037 = load { i8**, i64 }*, { i8**, i64 }** %t1036
+  store { i8**, i64 }* %t1037, { i8**, i64 }** %l55
   br label %merge45
 merge45:
-  %t1096 = phi { i8**, i64 }* [ %t1092, %then44 ], [ %t1089, %entry ]
-  %t1097 = phi { i8**, i64 }* [ %t1095, %then44 ], [ %t1089, %entry ]
-  store { i8**, i64 }* %t1096, { i8**, i64 }** %l57
-  store { i8**, i64 }* %t1097, { i8**, i64 }** %l57
-  %t1098 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  %t1099 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t1100 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1098, { i8**, i64 }* %t1099)
-  store { i8**, i64 }* %t1100, { i8**, i64 }** %l57
-  %t1101 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  %t1102 = alloca [2 x i8], align 1
-  %t1103 = getelementptr [2 x i8], [2 x i8]* %t1102, i32 0, i32 0
-  store i8 10, i8* %t1103
-  %t1104 = getelementptr [2 x i8], [2 x i8]* %t1102, i32 0, i32 1
-  store i8 0, i8* %t1104
-  %t1105 = getelementptr [2 x i8], [2 x i8]* %t1102, i32 0, i32 0
-  %t1106 = call i8* @join_with_separator({ i8**, i64 }* %t1101, i8* %t1105)
-  store i8* %t1106, i8** %l58
-  %t1107 = extractvalue %NativeModule %native_module, 1
-  %t1108 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t1109 = call %CapabilityManifest @build_capability_manifest({ i8**, i64 }* %t1107, { %FunctionEffectEntry*, i64 }* %t1108)
-  store %CapabilityManifest %t1109, %CapabilityManifest* %l59
-  %t1110 = load i8*, i8** %l58
-  store i8* %t1110, i8** %l60
-  %t1111 = load i8*, i8** %l60
-  %t1112 = call i64 @sailfin_runtime_string_length(i8* %t1111)
-  %t1113 = icmp sgt i64 %t1112, 0
-  %t1114 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1115 = load double, double* %l1
-  %t1116 = load double, double* %l2
-  %t1117 = load double, double* %l3
-  %t1118 = load %LayoutManifest*, %LayoutManifest** %l4
-  %t1119 = load double, double* %l5
-  %t1120 = load double, double* %l6
-  %t1121 = load double, double* %l7
-  %t1122 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l8
-  %t1123 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l9
-  %t1124 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l10
-  %t1125 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l11
-  %t1126 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
-  %t1127 = load i64, i64* %l13
-  %t1128 = load double, double* %l14
-  %t1129 = load double, double* %l24
-  %t1130 = load double, double* %l25
-  %t1131 = load double, double* %l26
-  %t1132 = load %TraitMetadata, %TraitMetadata* %l27
-  %t1133 = load %TypeContextBuild, %TypeContextBuild* %l28
-  %t1134 = load %TypeContext, %TypeContext* %l29
-  %t1135 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l30
-  %t1136 = load double, double* %l31
-  %t1137 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
-  %t1138 = load { i8**, i64 }*, { i8**, i64 }** %l33
-  %t1139 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l34
-  %t1140 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l35
-  %t1141 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l36
-  %t1142 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t1143 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t1144 = load { i8**, i64 }*, { i8**, i64 }** %l39
-  %t1145 = load { i8**, i64 }*, { i8**, i64 }** %l40
-  %t1146 = load { i8**, i64 }*, { i8**, i64 }** %l41
-  %t1147 = load { i8**, i64 }*, { i8**, i64 }** %l42
-  %t1148 = load { i8**, i64 }*, { i8**, i64 }** %l43
-  %t1149 = load { i8**, i64 }*, { i8**, i64 }** %l44
-  %t1150 = load { i8**, i64 }*, { i8**, i64 }** %l45
-  %t1151 = load { i8**, i64 }*, { i8**, i64 }** %l46
-  %t1152 = load { i8**, i64 }*, { i8**, i64 }** %l47
-  %t1153 = load { i8**, i64 }*, { i8**, i64 }** %l48
-  %t1154 = load double, double* %l49
-  %t1155 = load i1, i1* %l50
-  %t1156 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t1157 = load { i8**, i64 }*, { i8**, i64 }** %l56
-  %t1158 = load { i8**, i64 }*, { i8**, i64 }** %l57
-  %t1159 = load i8*, i8** %l58
-  %t1160 = load %CapabilityManifest, %CapabilityManifest* %l59
-  %t1161 = load i8*, i8** %l60
-  br i1 %t1113, label %then46, label %merge47
+  %t1038 = phi { i8**, i64 }* [ %t1037, %then44 ], [ %t1034, %loop.body39 ]
+  store { i8**, i64 }* %t1038, { i8**, i64 }** %l55
+  %t1039 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1040 = load %NativeFunction, %NativeFunction* %l53
+  %t1041 = extractvalue %NativeFunction %t1040, 0
+  %t1042 = insertvalue %FunctionEffectEntry undef, i8* %t1041, 0
+  %t1043 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  %t1044 = insertvalue %FunctionEffectEntry %t1042, { i8**, i64 }* %t1043, 1
+  %t1045 = call { %FunctionEffectEntry*, i64 }* @append_function_effect_entry({ %FunctionEffectEntry*, i64 }* %t1039, %FunctionEffectEntry %t1044)
+  store { %FunctionEffectEntry*, i64 }* %t1045, { %FunctionEffectEntry*, i64 }** %l38
+  %t1046 = load %NativeFunction, %NativeFunction* %l53
+  %t1047 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1048 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  %t1049 = load %TypeContext, %TypeContext* %l30
+  %t1050 = call %LoweredLLVMFunction @emit_function(%NativeFunction %t1046, { %NativeFunction*, i64 }* %t1047, { i8**, i64 }* %t1048, %TypeContext %t1049)
+  store %LoweredLLVMFunction %t1050, %LoweredLLVMFunction* %l56
+  %t1051 = load %NativeFunction, %NativeFunction* %l53
+  %t1052 = extractvalue %NativeFunction %t1051, 0
+  %t1053 = call i8* @sanitize_symbol(i8* %t1052)
+  %s1054 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1054, i32 0, i32 0
+  %t1055 = icmp eq i8* %t1053, %s1054
+  %t1056 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1057 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1058 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1059 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1060 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1061 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1062 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1063 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1064 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1065 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1066 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1067 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1068 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1069 = load i64, i64* %l14
+  %t1070 = load double, double* %l15
+  %t1071 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1072 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1073 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1074 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1075 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1076 = load %TypeContext, %TypeContext* %l30
+  %t1077 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1078 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1079 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1080 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1081 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1082 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1083 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1084 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1085 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1086 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1087 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1088 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1089 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1090 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1091 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1092 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1093 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1094 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1095 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1096 = load double, double* %l50
+  %t1097 = load i1, i1* %l51
+  %t1098 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1099 = load %NativeFunction, %NativeFunction* %l53
+  %t1100 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t1101 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  %t1102 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  br i1 %t1055, label %then46, label %merge47
 then46:
-  %t1162 = load i8*, i8** %l60
-  %t1163 = load i8, i8* %t1162
-  %t1164 = add i8 %t1163, 10
-  %t1165 = alloca [2 x i8], align 1
-  %t1166 = getelementptr [2 x i8], [2 x i8]* %t1165, i32 0, i32 0
-  store i8 %t1164, i8* %t1166
-  %t1167 = getelementptr [2 x i8], [2 x i8]* %t1165, i32 0, i32 1
-  store i8 0, i8* %t1167
-  %t1168 = getelementptr [2 x i8], [2 x i8]* %t1165, i32 0, i32 0
-  store i8* %t1168, i8** %l60
+  store i1 1, i1* %l51
   br label %merge47
 merge47:
-  %t1169 = phi i8* [ %t1168, %then46 ], [ %t1161, %entry ]
-  store i8* %t1169, i8** %l60
-  %t1170 = load i8*, i8** %l60
-  %t1171 = insertvalue %LoweredLLVMResult undef, i8* %t1170, 0
-  %t1172 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1173 = insertvalue %LoweredLLVMResult %t1171, { i8**, i64 }* %t1172, 1
-  %t1174 = load %TraitMetadata, %TraitMetadata* %l27
-  %t1175 = insertvalue %LoweredLLVMResult %t1173, %TraitMetadata %t1174, 2
-  %t1176 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
-  %t1177 = bitcast { %FunctionEffectEntry*, i64 }* %t1176 to { %FunctionEffectEntry**, i64 }*
-  %t1178 = insertvalue %LoweredLLVMResult %t1175, { %FunctionEffectEntry**, i64 }* %t1177, 3
-  %t1179 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l38
-  %t1180 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1179 to { %LifetimeRegionMetadata**, i64 }*
-  %t1181 = insertvalue %LoweredLLVMResult %t1178, { %LifetimeRegionMetadata**, i64 }* %t1180, 4
-  %t1182 = load %CapabilityManifest, %CapabilityManifest* %l59
-  %t1183 = insertvalue %LoweredLLVMResult %t1181, %CapabilityManifest %t1182, 5
-  %t1184 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l51
-  %t1185 = bitcast { %StringConstant*, i64 }* %t1184 to { %StringConstant**, i64 }*
-  %t1186 = insertvalue %LoweredLLVMResult %t1183, { %StringConstant**, i64 }* %t1185, 6
-  ret %LoweredLLVMResult %t1186
+  %t1103 = phi i1 [ 1, %then46 ], [ %t1097, %loop.body39 ]
+  store i1 %t1103, i1* %l51
+  %t1104 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1105 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  %t1106 = extractvalue %LoweredLLVMFunction %t1105, 1
+  %t1107 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1104, { i8**, i64 }* %t1106)
+  store { i8**, i64 }* %t1107, { i8**, i64 }** %l0
+  %t1108 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1109 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  %t1110 = extractvalue %LoweredLLVMFunction %t1109, 2
+  %t1111 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1108 to { i8**, i64 }*
+  %t1112 = bitcast { %LifetimeRegionMetadata**, i64 }* %t1110 to { i8**, i64 }*
+  %t1113 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1111, { i8**, i64 }* %t1112)
+  %t1114 = bitcast { i8**, i64 }* %t1113 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t1114, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1115 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1116 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  %t1117 = extractvalue %LoweredLLVMFunction %t1116, 3
+  %t1118 = bitcast { %StringConstant**, i64 }* %t1117 to { %StringConstant*, i64 }*
+  %t1119 = call { %StringConstant*, i64 }* @merge_string_constants({ %StringConstant*, i64 }* %t1115, { %StringConstant*, i64 }* %t1118)
+  store { %StringConstant*, i64 }* %t1119, { %StringConstant*, i64 }** %l52
+  %t1120 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  %t1121 = extractvalue %LoweredLLVMFunction %t1120, 0
+  %t1122 = load { i8**, i64 }, { i8**, i64 }* %t1121
+  %t1123 = extractvalue { i8**, i64 } %t1122, 1
+  %t1124 = icmp sgt i64 %t1123, 0
+  %t1125 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1126 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1127 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1128 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1129 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1130 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1131 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1132 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1133 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1134 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1135 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1136 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1137 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1138 = load i64, i64* %l14
+  %t1139 = load double, double* %l15
+  %t1140 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1141 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1142 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1143 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1144 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1145 = load %TypeContext, %TypeContext* %l30
+  %t1146 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1147 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1148 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1149 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1150 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1151 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1152 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1153 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1154 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1155 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1156 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1157 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1158 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1159 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1160 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1161 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1162 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1163 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1164 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1165 = load double, double* %l50
+  %t1166 = load i1, i1* %l51
+  %t1167 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1168 = load %NativeFunction, %NativeFunction* %l53
+  %t1169 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t1170 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  %t1171 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  br i1 %t1124, label %then48, label %merge49
+then48:
+  %t1172 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1173 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  %t1174 = extractvalue %LoweredLLVMFunction %t1173, 0
+  %t1175 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1172, { i8**, i64 }* %t1174)
+  store { i8**, i64 }* %t1175, { i8**, i64 }** %l49
+  %t1176 = load double, double* %l50
+  %t1177 = sitofp i64 1 to double
+  %t1178 = fadd double %t1176, %t1177
+  %t1179 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1180 = load { %NativeFunction*, i64 }, { %NativeFunction*, i64 }* %t1179
+  %t1181 = extractvalue { %NativeFunction*, i64 } %t1180, 1
+  %t1182 = sitofp i64 %t1181 to double
+  %t1183 = fcmp olt double %t1178, %t1182
+  %t1184 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1185 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1186 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1187 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1188 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1189 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1190 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1191 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1192 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1193 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1194 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1195 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1196 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1197 = load i64, i64* %l14
+  %t1198 = load double, double* %l15
+  %t1199 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1200 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1201 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1202 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1203 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1204 = load %TypeContext, %TypeContext* %l30
+  %t1205 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1206 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1207 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1208 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1209 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1210 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1211 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1212 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1213 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1214 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1215 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1216 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1217 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1218 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1219 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1220 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1221 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1222 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1223 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1224 = load double, double* %l50
+  %t1225 = load i1, i1* %l51
+  %t1226 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1227 = load %NativeFunction, %NativeFunction* %l53
+  %t1228 = load %FunctionEffectEntry*, %FunctionEffectEntry** %l54
+  %t1229 = load { i8**, i64 }*, { i8**, i64 }** %l55
+  %t1230 = load %LoweredLLVMFunction, %LoweredLLVMFunction* %l56
+  br i1 %t1183, label %then50, label %merge51
+then50:
+  %t1231 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %s1232 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1232, i32 0, i32 0
+  %t1233 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1231, i8* %s1232)
+  store { i8**, i64 }* %t1233, { i8**, i64 }** %l49
+  br label %merge51
+merge51:
+  %t1234 = phi { i8**, i64 }* [ %t1233, %then50 ], [ %t1223, %then48 ]
+  store { i8**, i64 }* %t1234, { i8**, i64 }** %l49
+  br label %merge49
+merge49:
+  %t1235 = phi { i8**, i64 }* [ %t1175, %then48 ], [ %t1164, %loop.body39 ]
+  %t1236 = phi { i8**, i64 }* [ %t1233, %then48 ], [ %t1164, %loop.body39 ]
+  store { i8**, i64 }* %t1235, { i8**, i64 }** %l49
+  store { i8**, i64 }* %t1236, { i8**, i64 }** %l49
+  %t1237 = load double, double* %l50
+  %t1238 = sitofp i64 1 to double
+  %t1239 = fadd double %t1237, %t1238
+  store double %t1239, double* %l50
+  br label %loop.latch40
+loop.latch40:
+  %t1240 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1241 = load i1, i1* %l51
+  %t1242 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1243 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1244 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1245 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1246 = load double, double* %l50
+  br label %loop.header38
+afterloop41:
+  %t1254 = load i1, i1* %l51
+  %t1255 = xor i1 %t1254, 1
+  %t1256 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1257 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1258 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1259 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1260 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1261 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1262 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1263 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1264 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1265 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1266 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1267 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1268 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1269 = load i64, i64* %l14
+  %t1270 = load double, double* %l15
+  %t1271 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1272 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1273 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1274 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1275 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1276 = load %TypeContext, %TypeContext* %l30
+  %t1277 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1278 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1279 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1280 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1281 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1282 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1283 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1284 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1285 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1286 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1287 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1288 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1289 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1290 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1291 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1292 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1293 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1294 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1295 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1296 = load double, double* %l50
+  %t1297 = load i1, i1* %l51
+  %t1298 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  br i1 %t1255, label %then52, label %merge53
+then52:
+  %t1299 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1300 = load { i8**, i64 }, { i8**, i64 }* %t1299
+  %t1301 = extractvalue { i8**, i64 } %t1300, 1
+  %t1302 = icmp sgt i64 %t1301, 0
+  %t1303 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1304 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1305 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1306 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1307 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1308 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1309 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1310 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1311 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1312 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1313 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1314 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1315 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1316 = load i64, i64* %l14
+  %t1317 = load double, double* %l15
+  %t1318 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1319 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1320 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1321 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1322 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1323 = load %TypeContext, %TypeContext* %l30
+  %t1324 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1325 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1326 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1327 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1328 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1329 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1330 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1331 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1332 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1333 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1334 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1335 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1336 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1337 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1338 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1339 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1340 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1341 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1342 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1343 = load double, double* %l50
+  %t1344 = load i1, i1* %l51
+  %t1345 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  br i1 %t1302, label %then54, label %merge55
+then54:
+  %t1346 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %s1347 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1347, i32 0, i32 0
+  %t1348 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1346, i8* %s1347)
+  store { i8**, i64 }* %t1348, { i8**, i64 }** %l49
+  br label %merge55
+merge55:
+  %t1349 = phi { i8**, i64 }* [ %t1348, %then54 ], [ %t1342, %then52 ]
+  store { i8**, i64 }* %t1349, { i8**, i64 }** %l49
+  %t1350 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %s1351 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.1351, i32 0, i32 0
+  %s1352 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1352, i32 0, i32 0
+  %s1353 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.1353, i32 0, i32 0
+  %s1354 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.1354, i32 0, i32 0
+  %t1355 = load i8, i8* %s1351
+  %t1356 = load i8, i8* %s1352
+  %t1357 = load i8, i8* %s1353
+  %t1358 = load i8, i8* %s1354
+  %t1359 = alloca [5 x i8]
+  %t1360 = getelementptr [5 x i8], [5 x i8]* %t1359, i32 0, i32 0
+  %t1361 = getelementptr i8, i8* %t1360, i64 0
+  store i8 %t1355, i8* %t1361
+  %t1362 = getelementptr i8, i8* %t1360, i64 1
+  store i8 %t1356, i8* %t1362
+  %t1363 = getelementptr i8, i8* %t1360, i64 2
+  store i8 %t1357, i8* %t1363
+  %t1364 = getelementptr i8, i8* %t1360, i64 3
+  store i8 %t1358, i8* %t1364
+  %t1365 = getelementptr i8, i8* %t1360, i64 4
+  store i8 125, i8* %t1365
+  %t1366 = alloca { i8*, i64 }
+  %t1367 = getelementptr { i8*, i64 }, { i8*, i64 }* %t1366, i32 0, i32 0
+  store i8* %t1360, i8** %t1367
+  %t1368 = getelementptr { i8*, i64 }, { i8*, i64 }* %t1366, i32 0, i32 1
+  store i64 5, i64* %t1368
+  %t1369 = bitcast { i8*, i64 }* %t1366 to { i8**, i64 }*
+  %t1370 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1350, { i8**, i64 }* %t1369)
+  store { i8**, i64 }* %t1370, { i8**, i64 }** %l49
+  br label %merge53
+merge53:
+  %t1371 = phi { i8**, i64 }* [ %t1348, %then52 ], [ %t1295, %entry ]
+  %t1372 = phi { i8**, i64 }* [ %t1370, %then52 ], [ %t1295, %entry ]
+  store { i8**, i64 }* %t1371, { i8**, i64 }** %l49
+  store { i8**, i64 }* %t1372, { i8**, i64 }** %l49
+  %t1373 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1374 = call { i8**, i64 }* @render_string_constants({ %StringConstant*, i64 }* %t1373)
+  store { i8**, i64 }* %t1374, { i8**, i64 }** %l57
+  %t1375 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  store { i8**, i64 }* %t1375, { i8**, i64 }** %l58
+  %t1376 = load { i8**, i64 }*, { i8**, i64 }** %l57
+  %t1377 = load { i8**, i64 }, { i8**, i64 }* %t1376
+  %t1378 = extractvalue { i8**, i64 } %t1377, 1
+  %t1379 = icmp sgt i64 %t1378, 0
+  %t1380 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1381 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1382 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1383 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1384 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1385 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1386 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1387 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1388 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1389 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1390 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1391 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1392 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1393 = load i64, i64* %l14
+  %t1394 = load double, double* %l15
+  %t1395 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1396 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1397 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1398 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1399 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1400 = load %TypeContext, %TypeContext* %l30
+  %t1401 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1402 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1403 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1404 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1405 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1406 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1407 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1408 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1409 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1410 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1411 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1412 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1413 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1414 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1415 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1416 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1417 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1418 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1419 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1420 = load double, double* %l50
+  %t1421 = load i1, i1* %l51
+  %t1422 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1423 = load { i8**, i64 }*, { i8**, i64 }** %l57
+  %t1424 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  br i1 %t1379, label %then56, label %merge57
+then56:
+  %t1425 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  %t1426 = load { i8**, i64 }*, { i8**, i64 }** %l57
+  %t1427 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1425, { i8**, i64 }* %t1426)
+  store { i8**, i64 }* %t1427, { i8**, i64 }** %l58
+  %t1428 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  %s1429 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1429, i32 0, i32 0
+  %t1430 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1428, i8* %s1429)
+  store { i8**, i64 }* %t1430, { i8**, i64 }** %l58
+  br label %merge57
+merge57:
+  %t1431 = phi { i8**, i64 }* [ %t1427, %then56 ], [ %t1424, %entry ]
+  %t1432 = phi { i8**, i64 }* [ %t1430, %then56 ], [ %t1424, %entry ]
+  store { i8**, i64 }* %t1431, { i8**, i64 }** %l58
+  store { i8**, i64 }* %t1432, { i8**, i64 }** %l58
+  %t1433 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  %t1434 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1435 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1433, { i8**, i64 }* %t1434)
+  store { i8**, i64 }* %t1435, { i8**, i64 }** %l58
+  %t1436 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  %t1437 = alloca [2 x i8], align 1
+  %t1438 = getelementptr [2 x i8], [2 x i8]* %t1437, i32 0, i32 0
+  store i8 10, i8* %t1438
+  %t1439 = getelementptr [2 x i8], [2 x i8]* %t1437, i32 0, i32 1
+  store i8 0, i8* %t1439
+  %t1440 = getelementptr [2 x i8], [2 x i8]* %t1437, i32 0, i32 0
+  %t1441 = call i8* @join_with_separator({ i8**, i64 }* %t1436, i8* %t1440)
+  store i8* %t1441, i8** %l59
+  %t1442 = extractvalue %NativeModule %native_module, 1
+  %t1443 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1444 = call %CapabilityManifest @build_capability_manifest({ i8**, i64 }* %t1442, { %FunctionEffectEntry*, i64 }* %t1443)
+  store %CapabilityManifest %t1444, %CapabilityManifest* %l60
+  %t1445 = load i8*, i8** %l59
+  store i8* %t1445, i8** %l61
+  %t1446 = load i8*, i8** %l61
+  %t1447 = call i64 @sailfin_runtime_string_length(i8* %t1446)
+  %t1448 = icmp sgt i64 %t1447, 0
+  %t1449 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1450 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t1451 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t1452 = load %NativeArtifact*, %NativeArtifact** %l3
+  %t1453 = load %LayoutManifest*, %LayoutManifest** %l4
+  %t1454 = load %LayoutManifestApplication, %LayoutManifestApplication* %l6
+  %t1455 = load { %NativeStruct**, i64 }*, { %NativeStruct**, i64 }** %l7
+  %t1456 = load { %NativeEnum**, i64 }*, { %NativeEnum**, i64 }** %l8
+  %t1457 = load { %NativeStruct*, i64 }*, { %NativeStruct*, i64 }** %l9
+  %t1458 = load { %NativeEnum*, i64 }*, { %NativeEnum*, i64 }** %l10
+  %t1459 = load { %NativeInterface*, i64 }*, { %NativeInterface*, i64 }** %l11
+  %t1460 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l12
+  %t1461 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l13
+  %t1462 = load i64, i64* %l14
+  %t1463 = load double, double* %l15
+  %t1464 = load { i8**, i64 }*, { i8**, i64 }** %l25
+  %t1465 = load { i8**, i64 }*, { i8**, i64 }** %l26
+  %t1466 = load { i8**, i64 }*, { i8**, i64 }** %l27
+  %t1467 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1468 = load %TypeContextBuild, %TypeContextBuild* %l29
+  %t1469 = load %TypeContext, %TypeContext* %l30
+  %t1470 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l31
+  %t1471 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l32
+  %t1472 = load { %NativeFunction*, i64 }*, { %NativeFunction*, i64 }** %l33
+  %t1473 = load { i8**, i64 }*, { i8**, i64 }** %l34
+  %t1474 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l35
+  %t1475 = load { %FunctionCallEntry*, i64 }*, { %FunctionCallEntry*, i64 }** %l36
+  %t1476 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l37
+  %t1477 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1478 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1479 = load { i8**, i64 }*, { i8**, i64 }** %l40
+  %t1480 = load { i8**, i64 }*, { i8**, i64 }** %l41
+  %t1481 = load { i8**, i64 }*, { i8**, i64 }** %l42
+  %t1482 = load { i8**, i64 }*, { i8**, i64 }** %l43
+  %t1483 = load { i8**, i64 }*, { i8**, i64 }** %l44
+  %t1484 = load { i8**, i64 }*, { i8**, i64 }** %l45
+  %t1485 = load { i8**, i64 }*, { i8**, i64 }** %l46
+  %t1486 = load { i8**, i64 }*, { i8**, i64 }** %l47
+  %t1487 = load { i8**, i64 }*, { i8**, i64 }** %l48
+  %t1488 = load { i8**, i64 }*, { i8**, i64 }** %l49
+  %t1489 = load double, double* %l50
+  %t1490 = load i1, i1* %l51
+  %t1491 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1492 = load { i8**, i64 }*, { i8**, i64 }** %l57
+  %t1493 = load { i8**, i64 }*, { i8**, i64 }** %l58
+  %t1494 = load i8*, i8** %l59
+  %t1495 = load %CapabilityManifest, %CapabilityManifest* %l60
+  %t1496 = load i8*, i8** %l61
+  br i1 %t1448, label %then58, label %merge59
+then58:
+  %t1497 = load i8*, i8** %l61
+  %t1498 = load i8, i8* %t1497
+  %t1499 = add i8 %t1498, 10
+  %t1500 = alloca [2 x i8], align 1
+  %t1501 = getelementptr [2 x i8], [2 x i8]* %t1500, i32 0, i32 0
+  store i8 %t1499, i8* %t1501
+  %t1502 = getelementptr [2 x i8], [2 x i8]* %t1500, i32 0, i32 1
+  store i8 0, i8* %t1502
+  %t1503 = getelementptr [2 x i8], [2 x i8]* %t1500, i32 0, i32 0
+  store i8* %t1503, i8** %l61
+  br label %merge59
+merge59:
+  %t1504 = phi i8* [ %t1503, %then58 ], [ %t1496, %entry ]
+  store i8* %t1504, i8** %l61
+  %t1505 = load i8*, i8** %l61
+  %t1506 = insertvalue %LoweredLLVMResult undef, i8* %t1505, 0
+  %t1507 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1508 = insertvalue %LoweredLLVMResult %t1506, { i8**, i64 }* %t1507, 1
+  %t1509 = load %TraitMetadata, %TraitMetadata* %l28
+  %t1510 = insertvalue %LoweredLLVMResult %t1508, %TraitMetadata %t1509, 2
+  %t1511 = load { %FunctionEffectEntry*, i64 }*, { %FunctionEffectEntry*, i64 }** %l38
+  %t1512 = bitcast { %FunctionEffectEntry*, i64 }* %t1511 to { %FunctionEffectEntry**, i64 }*
+  %t1513 = insertvalue %LoweredLLVMResult %t1510, { %FunctionEffectEntry**, i64 }* %t1512, 3
+  %t1514 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l39
+  %t1515 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1514 to { %LifetimeRegionMetadata**, i64 }*
+  %t1516 = insertvalue %LoweredLLVMResult %t1513, { %LifetimeRegionMetadata**, i64 }* %t1515, 4
+  %t1517 = load %CapabilityManifest, %CapabilityManifest* %l60
+  %t1518 = insertvalue %LoweredLLVMResult %t1516, %CapabilityManifest %t1517, 5
+  %t1519 = load { %StringConstant*, i64 }*, { %StringConstant*, i64 }** %l52
+  %t1520 = bitcast { %StringConstant*, i64 }* %t1519 to { %StringConstant**, i64 }*
+  %t1521 = insertvalue %LoweredLLVMResult %t1518, { %StringConstant**, i64 }* %t1520, 6
+  ret %LoweredLLVMResult %t1521
 }
 
 define %TraitMetadata @empty_trait_metadata() {

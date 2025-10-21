@@ -1589,8 +1589,8 @@ afterloop3:
   %t1079 = extractvalue %LexerState %t1078, 2
   %t1080 = load %LexerState, %LexerState* %l0
   %t1081 = extractvalue %LexerState %t1080, 3
-  %t1082 = call double @eof_token(double %t1079, double %t1081)
-  %t1083 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t1077, i8* null)
+  %t1082 = call %Token @eof_token(double %t1079, double %t1081)
+  %t1083 = call { %Token*, i64 }* @append({ %Token*, i64 }* %t1077, %Token %t1082)
   store { %Token*, i64 }* %t1083, { %Token*, i64 }** %l1
   %t1084 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   ret { %Token*, i64 }* %t1084

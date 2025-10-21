@@ -15,48 +15,87 @@ declare noalias i8* @malloc(i64)
 ; fn run_self_host_check effects: ![io]
 define %SelfHostCheckResult @run_self_host_check({ i8**, i64 }* %sources) {
 entry:
-  %l0 = alloca double
-  %l1 = alloca double
+  %l0 = alloca %ProjectCompilation
+  %l1 = alloca { %ModuleDiagnostics*, i64 }*
   %l2 = alloca { i8**, i64 }*
   %l3 = alloca i1
-  %t0 = call double @compile_project({ i8**, i64 }* %sources)
-  store double %t0, double* %l0
-  %t1 = load double, double* %l0
-  store double 0.0, double* %l1
-  %t2 = load double, double* %l0
-  %t3 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, i8* null)
-  store { i8**, i64 }* %t3, { i8**, i64 }** %l2
+  %t0 = call %ProjectCompilation @compile_project({ i8**, i64 }* %sources)
+  store %ProjectCompilation %t0, %ProjectCompilation* %l0
+  %t1 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t2 = extractvalue %ProjectCompilation %t1, 1
+  %t3 = bitcast { %ModuleDiagnostics**, i64 }* %t2 to { %ModuleDiagnostics*, i64 }*
+  %t4 = call { %ModuleDiagnostics*, i64 }* @collect_fatal_diagnostics({ %ModuleDiagnostics*, i64 }* %t3)
+  store { %ModuleDiagnostics*, i64 }* %t4, { %ModuleDiagnostics*, i64 }** %l1
+  %t5 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t6 = call { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, %ProjectCompilation %t5)
+  store { i8**, i64 }* %t6, { i8**, i64 }** %l2
   store i1 1, i1* %l3
-  %t4 = load double, double* %l1
-  %t5 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t6 = load { i8**, i64 }, { i8**, i64 }* %t5
-  %t7 = extractvalue { i8**, i64 } %t6, 1
-  %t8 = icmp sgt i64 %t7, 0
-  %t9 = load double, double* %l0
-  %t10 = load double, double* %l1
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t12 = load i1, i1* %l3
-  br i1 %t8, label %then0, label %merge1
+  %t7 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t8 = load { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t7
+  %t9 = extractvalue { %ModuleDiagnostics*, i64 } %t8, 1
+  %t10 = icmp sgt i64 %t9, 0
+  %t11 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t12 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t14 = load i1, i1* %l3
+  br i1 %t10, label %then0, label %merge1
 then0:
   store i1 0, i1* %l3
   br label %merge1
 merge1:
-  %t13 = phi i1 [ 0, %then0 ], [ %t12, %entry ]
-  store i1 %t13, i1* %l3
-  %t14 = load double, double* %l0
-  %t15 = load i1, i1* %l3
-  %t16 = insertvalue %SelfHostCheckResult undef, i1 %t15, 0
-  %t17 = load double, double* %l0
-  %t18 = insertvalue %SelfHostCheckResult %t16, double 0.0, 1
-  %t19 = load { i8**, i64 }, { i8**, i64 }* %sources
-  %t20 = extractvalue { i8**, i64 } %t19, 1
-  %t21 = sitofp i64 %t20 to double
-  %t22 = insertvalue %SelfHostCheckResult %t18, double %t21, 2
-  %t23 = load double, double* %l1
-  %t24 = insertvalue %SelfHostCheckResult %t22, { %ModuleDiagnostics**, i64 }* null, 3
-  %t25 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t26 = insertvalue %SelfHostCheckResult %t24, { i8**, i64 }* %t25, 4
-  ret %SelfHostCheckResult %t26
+  %t15 = phi i1 [ 0, %then0 ], [ %t14, %entry ]
+  store i1 %t15, i1* %l3
+  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t17 = load { i8**, i64 }, { i8**, i64 }* %t16
+  %t18 = extractvalue { i8**, i64 } %t17, 1
+  %t19 = icmp sgt i64 %t18, 0
+  %t20 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t21 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t23 = load i1, i1* %l3
+  br i1 %t19, label %then2, label %merge3
+then2:
+  store i1 0, i1* %l3
+  br label %merge3
+merge3:
+  %t24 = phi i1 [ 0, %then2 ], [ %t23, %entry ]
+  store i1 %t24, i1* %l3
+  %t25 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t26 = extractvalue %ProjectCompilation %t25, 0
+  %t27 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t26
+  %t28 = extractvalue { %CompiledModule**, i64 } %t27, 1
+  %t29 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t30 = extractvalue { i8**, i64 } %t29, 1
+  %t31 = icmp ne i64 %t28, %t30
+  %t32 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t33 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t35 = load i1, i1* %l3
+  br i1 %t31, label %then4, label %merge5
+then4:
+  store i1 0, i1* %l3
+  br label %merge5
+merge5:
+  %t36 = phi i1 [ 0, %then4 ], [ %t35, %entry ]
+  store i1 %t36, i1* %l3
+  %t37 = load i1, i1* %l3
+  %t38 = insertvalue %SelfHostCheckResult undef, i1 %t37, 0
+  %t39 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t40 = extractvalue %ProjectCompilation %t39, 0
+  %t41 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t40
+  %t42 = extractvalue { %CompiledModule**, i64 } %t41, 1
+  %t43 = sitofp i64 %t42 to double
+  %t44 = insertvalue %SelfHostCheckResult %t38, double %t43, 1
+  %t45 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t46 = extractvalue { i8**, i64 } %t45, 1
+  %t47 = sitofp i64 %t46 to double
+  %t48 = insertvalue %SelfHostCheckResult %t44, double %t47, 2
+  %t49 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t50 = bitcast { %ModuleDiagnostics*, i64 }* %t49 to { %ModuleDiagnostics**, i64 }*
+  %t51 = insertvalue %SelfHostCheckResult %t48, { %ModuleDiagnostics**, i64 }* %t50, 3
+  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t53 = insertvalue %SelfHostCheckResult %t51, { i8**, i64 }* %t52, 4
+  ret %SelfHostCheckResult %t53
 }
 
 define { %ModuleDiagnostics*, i64 }* @collect_fatal_diagnostics({ %ModuleDiagnostics*, i64 }* %entries) {

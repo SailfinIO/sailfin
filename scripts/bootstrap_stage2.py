@@ -436,9 +436,9 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
             result = None
             native_module = None
 
-            if has_context and import_contexts and any(ctx[0] for ctx in import_contexts):
+            if has_context and import_contexts and (any(ctx[0] for ctx in import_contexts) or any(ctx[1] for ctx in import_contexts)):
                 manifests_payload = [ctx[0] for ctx in import_contexts]
-                native_payload = [""] * len(import_contexts)
+                native_payload = [ctx[1] for ctx in import_contexts]
                 result = stage1_main.compile_to_native_llvm_with_context(
                     source, manifests_payload, native_payload)
             elif has_manifest:
