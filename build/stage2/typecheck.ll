@@ -42,6 +42,8 @@ declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.153 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.5 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.7 = private unnamed_addr constant [1 x i8] c"\00"

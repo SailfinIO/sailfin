@@ -51,6 +51,8 @@ declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.4 = private unnamed_addr constant [27 x i8] c"; Sailfin Native Prototype\00"
 @.str.7 = private unnamed_addr constant [13 x i8] c".module main\00"
 @.str.64 = private unnamed_addr constant [15 x i8] c"module.sfn-asm\00"

@@ -662,6 +662,11 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
 
     lines = append_string(lines, "declare noalias i8* @malloc(i64)");
     lines = append_string(lines, "");
+    
+    // Declare the runtime global (provided by the Python bootstrap runtime)
+    // This is a pointer to the Python runtime object (i8** because we need to load from it)
+    lines = append_string(lines, "@runtime = external global i8**");
+    lines = append_string(lines, "");
 
     let mut preamble_lines -> string[] = lines;
     let mut function_lines -> string[] = [];
@@ -7306,6 +7311,18 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     let literal_candidate = trim_text(stripped);
+    
+    // Handle runtime global as an opaque pointer (it's a Python object in the bootstrap runtime)
+    if literal_candidate == "runtime" {
+        // Load @runtime (an external global i8* pointer to the Python runtime object)
+        // The actual runtime is provided by the bootstrap Python runtime
+        /// In the future the runtime will be native code instead of Python
+        let runtime_temp = format_temp_name(temp_index);
+        let mut current_lines = lines;
+        current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime");
+        let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
+        return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: [] };
+    }
 
     if is_string_literal(literal_candidate) {
         // Check if this is a single-character literal that should be treated as i8

@@ -64,6 +64,8 @@ declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.0 = private unnamed_addr constant [7 x i8] c".case \00"
 @.str.3 = private unnamed_addr constant [3 x i8] c"=>\00"
 @.str.8 = private unnamed_addr constant [5 x i8] c" if \00"

@@ -76,6 +76,8 @@ declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.7 = private unnamed_addr constant [15 x i8] c"import asyncio\00"
 @.str.10 = private unnamed_addr constant [47 x i8] c"from runtime import runtime_support as runtime\00"
 @.str.1 = private unnamed_addr constant [24 x i8] c"print = runtime.console\00"

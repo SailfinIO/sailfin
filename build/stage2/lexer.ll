@@ -11,6 +11,8 @@ declare double @char_code(i8*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.1 = private unnamed_addr constant [3 x i8] c"->\00"
 @.str.4 = private unnamed_addr constant [3 x i8] c"=>\00"
 @.str.7 = private unnamed_addr constant [3 x i8] c"==\00"

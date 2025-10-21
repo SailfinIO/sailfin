@@ -18,6 +18,8 @@ source_filename = "sailfin"
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 define { %Person*, i64 }* @make_people() {
 entry:
   %t0 = sitofp i64 36 to double

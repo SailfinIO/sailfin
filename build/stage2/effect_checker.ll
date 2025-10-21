@@ -38,6 +38,8 @@ source_filename = "sailfin"
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.8 = private unnamed_addr constant [3 x i8] c"fs\00"
 @.str.9 = private unnamed_addr constant [3 x i8] c"io\00"
 @.str.10 = private unnamed_addr constant [24 x i8] c"filesystem helper usage\00"

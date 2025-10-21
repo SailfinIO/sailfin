@@ -850,6 +850,8 @@ def lower_to_llvm_with_manifests(native_module, imported_manifests):
         lines = append_string(lines, "")
     lines = append_string(lines, "declare noalias i8* @malloc(i64)")
     lines = append_string(lines, "")
+    lines = append_string(lines, "@runtime = external global i8**")
+    lines = append_string(lines, "")
     preamble_lines = lines
     function_lines = []
     index = 0
@@ -5054,6 +5056,12 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         diagnostics = (diagnostics) + (load_result.diagnostics)
         return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics, string_constants=[])
     literal_candidate = trim_text(stripped)
+    if literal_candidate == "runtime":
+        runtime_temp = format_temp_name(temp_index)
+        current_lines = lines
+        current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime")
+        operand = LLVMOperand(llvm_type="i8*", value=runtime_temp)
+        return ExpressionResult(lines=current_lines, temp_index=temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=[])
     if is_string_literal(literal_candidate):
         if is_character_literal(literal_candidate):
             char_value = get_character_literal_value(literal_candidate)

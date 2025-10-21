@@ -10,6 +10,8 @@ source_filename = "sailfin"
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 ; fn run_self_host_check effects: ![io]
 define %SelfHostCheckResult @run_self_host_check({ i8**, i64 }* %sources) {
 entry:

@@ -7,6 +7,8 @@ source_filename = "sailfin"
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.2 = private unnamed_addr constant [1 x i8] c"\00"
 
 define %Token @eof_token(double %line, double %column) {

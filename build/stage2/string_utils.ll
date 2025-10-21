@@ -13,6 +13,8 @@ declare double @char_code(i8*)
 
 declare noalias i8* @malloc(i64)
 
+@runtime = external global i8**
+
 @.str.6 = private unnamed_addr constant [1 x i8] c"\00"
 
 define i8* @char_at(i8* %value, double %index) {
