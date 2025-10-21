@@ -139,63 +139,62 @@ entry:
   %t7 = call %NativeArtifact* @select_text_artifact({ %NativeArtifact*, i64 }* %t6)
   store %NativeArtifact* %t7, %NativeArtifact** %l1
   %t8 = load %NativeArtifact*, %NativeArtifact** %l1
-  %t9 = bitcast i8* null to %NativeArtifact*
-  %t10 = icmp eq %NativeArtifact* %t8, %t9
-  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t12 = load %NativeArtifact*, %NativeArtifact** %l1
-  br i1 %t10, label %then0, label %merge1
+  %t9 = icmp eq %NativeArtifact* %t8, null
+  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t11 = load %NativeArtifact*, %NativeArtifact** %l1
+  br i1 %t9, label %then0, label %merge1
 then0:
-  %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s14 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.14, i32 0, i32 0
-  %t15 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t13, i8* %s14)
-  store { i8**, i64 }* %t15, { i8**, i64 }** %l0
-  %s16 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.16, i32 0, i32 0
-  %t17 = insertvalue %LoweredPythonResult undef, i8* %s16, 0
-  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t19 = insertvalue %LoweredPythonResult %t17, { i8**, i64 }* %t18, 1
-  ret %LoweredPythonResult %t19
+  %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s13 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.13, i32 0, i32 0
+  %t14 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t12, i8* %s13)
+  store { i8**, i64 }* %t14, { i8**, i64 }** %l0
+  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.15, i32 0, i32 0
+  %t16 = insertvalue %LoweredPythonResult undef, i8* %s15, 0
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t18 = insertvalue %LoweredPythonResult %t16, { i8**, i64 }* %t17, 1
+  ret %LoweredPythonResult %t18
 merge1:
-  %t20 = load %NativeArtifact*, %NativeArtifact** %l1
-  %t21 = getelementptr %NativeArtifact, %NativeArtifact* %t20, i32 0, i32 2
-  %t22 = load i8*, i8** %t21
-  %t23 = call %ParseNativeResult @parse_native_artifact(i8* %t22)
-  store %ParseNativeResult %t23, %ParseNativeResult* %l2
-  %t24 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t25 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t26 = extractvalue %ParseNativeResult %t25, 6
-  %t27 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t24, { i8**, i64 }* %t26)
-  store { i8**, i64 }* %t27, { i8**, i64 }** %l0
-  %t28 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t29 = extractvalue %ParseNativeResult %t28, 0
-  %t30 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t31 = extractvalue %ParseNativeResult %t30, 1
-  %t32 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t33 = extractvalue %ParseNativeResult %t32, 2
-  %t34 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t35 = extractvalue %ParseNativeResult %t34, 4
-  %t36 = load %ParseNativeResult, %ParseNativeResult* %l2
-  %t37 = extractvalue %ParseNativeResult %t36, 5
-  %t38 = bitcast { %NativeFunction**, i64 }* %t29 to { %NativeFunction*, i64 }*
-  %t39 = bitcast { %NativeImport**, i64 }* %t31 to { %NativeImport*, i64 }*
-  %t40 = bitcast { %NativeStruct**, i64 }* %t33 to { %NativeStruct*, i64 }*
-  %t41 = bitcast { %NativeEnum**, i64 }* %t35 to { %NativeEnum*, i64 }*
-  %t42 = bitcast { %NativeBinding**, i64 }* %t37 to { %NativeBinding*, i64 }*
-  %t43 = call %PythonModuleEmission @emit_python_module({ %NativeFunction*, i64 }* %t38, { %NativeImport*, i64 }* %t39, { %NativeStruct*, i64 }* %t40, { %NativeEnum*, i64 }* %t41, { %NativeBinding*, i64 }* %t42)
-  store %PythonModuleEmission %t43, %PythonModuleEmission* %l3
-  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t45 = load %PythonModuleEmission, %PythonModuleEmission* %l3
-  %t46 = extractvalue %PythonModuleEmission %t45, 1
-  %t47 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t44, { i8**, i64 }* %t46)
-  store { i8**, i64 }* %t47, { i8**, i64 }** %l0
-  %t48 = load %PythonModuleEmission, %PythonModuleEmission* %l3
-  %t49 = extractvalue %PythonModuleEmission %t48, 0
-  %t50 = call i8* @builder_to_string(%PythonBuilder %t49)
-  store i8* %t50, i8** %l4
-  %t51 = load i8*, i8** %l4
-  %t52 = insertvalue %LoweredPythonResult undef, i8* %t51, 0
-  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t54 = insertvalue %LoweredPythonResult %t52, { i8**, i64 }* %t53, 1
-  ret %LoweredPythonResult %t54
+  %t19 = load %NativeArtifact*, %NativeArtifact** %l1
+  %t20 = getelementptr %NativeArtifact, %NativeArtifact* %t19, i32 0, i32 2
+  %t21 = load i8*, i8** %t20
+  %t22 = call %ParseNativeResult @parse_native_artifact(i8* %t21)
+  store %ParseNativeResult %t22, %ParseNativeResult* %l2
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t24 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t25 = extractvalue %ParseNativeResult %t24, 6
+  %t26 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t23, { i8**, i64 }* %t25)
+  store { i8**, i64 }* %t26, { i8**, i64 }** %l0
+  %t27 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t28 = extractvalue %ParseNativeResult %t27, 0
+  %t29 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t30 = extractvalue %ParseNativeResult %t29, 1
+  %t31 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t32 = extractvalue %ParseNativeResult %t31, 2
+  %t33 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t34 = extractvalue %ParseNativeResult %t33, 4
+  %t35 = load %ParseNativeResult, %ParseNativeResult* %l2
+  %t36 = extractvalue %ParseNativeResult %t35, 5
+  %t37 = bitcast { %NativeFunction**, i64 }* %t28 to { %NativeFunction*, i64 }*
+  %t38 = bitcast { %NativeImport**, i64 }* %t30 to { %NativeImport*, i64 }*
+  %t39 = bitcast { %NativeStruct**, i64 }* %t32 to { %NativeStruct*, i64 }*
+  %t40 = bitcast { %NativeEnum**, i64 }* %t34 to { %NativeEnum*, i64 }*
+  %t41 = bitcast { %NativeBinding**, i64 }* %t36 to { %NativeBinding*, i64 }*
+  %t42 = call %PythonModuleEmission @emit_python_module({ %NativeFunction*, i64 }* %t37, { %NativeImport*, i64 }* %t38, { %NativeStruct*, i64 }* %t39, { %NativeEnum*, i64 }* %t40, { %NativeBinding*, i64 }* %t41)
+  store %PythonModuleEmission %t42, %PythonModuleEmission* %l3
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t44 = load %PythonModuleEmission, %PythonModuleEmission* %l3
+  %t45 = extractvalue %PythonModuleEmission %t44, 1
+  %t46 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t43, { i8**, i64 }* %t45)
+  store { i8**, i64 }* %t46, { i8**, i64 }** %l0
+  %t47 = load %PythonModuleEmission, %PythonModuleEmission* %l3
+  %t48 = extractvalue %PythonModuleEmission %t47, 0
+  %t49 = call i8* @builder_to_string(%PythonBuilder %t48)
+  store i8* %t49, i8** %l4
+  %t50 = load i8*, i8** %l4
+  %t51 = insertvalue %LoweredPythonResult undef, i8* %t50, 0
+  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t53 = insertvalue %LoweredPythonResult %t51, { i8**, i64 }* %t52, 1
+  ret %LoweredPythonResult %t53
 }
 
 define %PythonModuleEmission @emit_python_module({ %NativeFunction*, i64 }* %functions, { %NativeImport*, i64 }* %imports, { %NativeStruct*, i64 }* %structs, { %NativeEnum*, i64 }* %enums, { %NativeBinding*, i64 }* %bindings) {

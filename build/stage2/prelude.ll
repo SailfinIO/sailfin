@@ -443,128 +443,126 @@ entry:
   %l3 = alloca i8*
   %l4 = alloca %EnumField*
   %l5 = alloca i8*
-  %t0 = bitcast i8* null to %EnumVariantDefinition*
-  %t1 = icmp eq %EnumVariantDefinition* %definition, %t0
-  br i1 %t1, label %then0, label %merge1
+  %t0 = icmp eq %EnumVariantDefinition* %definition, null
+  br i1 %t0, label %then0, label %merge1
 then0:
   ret { %EnumField*, i64 }* %provided
 merge1:
-  %t2 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %definition, i32 0, i32 1
-  %t3 = load { i8**, i64 }*, { i8**, i64 }** %t2
-  store { i8**, i64 }* %t3, { i8**, i64 }** %l0
-  %t4 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t5 = load { i8**, i64 }, { i8**, i64 }* %t4
-  %t6 = extractvalue { i8**, i64 } %t5, 1
-  %t7 = icmp eq i64 %t6, 0
-  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  br i1 %t7, label %then2, label %merge3
+  %t1 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %definition, i32 0, i32 1
+  %t2 = load { i8**, i64 }*, { i8**, i64 }** %t1
+  store { i8**, i64 }* %t2, { i8**, i64 }** %l0
+  %t3 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t4 = load { i8**, i64 }, { i8**, i64 }* %t3
+  %t5 = extractvalue { i8**, i64 } %t4, 1
+  %t6 = icmp eq i64 %t5, 0
+  %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  br i1 %t6, label %then2, label %merge3
 then2:
-  %t9 = alloca [0 x %EnumField]
-  %t10 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t9, i32 0, i32 0
-  %t11 = alloca { %EnumField*, i64 }
-  %t12 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t11, i32 0, i32 0
-  store %EnumField* %t10, %EnumField** %t12
-  %t13 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t11, i32 0, i32 1
-  store i64 0, i64* %t13
-  ret { %EnumField*, i64 }* %t11
+  %t8 = alloca [0 x %EnumField]
+  %t9 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t8, i32 0, i32 0
+  %t10 = alloca { %EnumField*, i64 }
+  %t11 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t10, i32 0, i32 0
+  store %EnumField* %t9, %EnumField** %t11
+  %t12 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  ret { %EnumField*, i64 }* %t10
 merge3:
-  %t14 = alloca [0 x %EnumField]
-  %t15 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t14, i32 0, i32 0
-  %t16 = alloca { %EnumField*, i64 }
-  %t17 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t16, i32 0, i32 0
-  store %EnumField* %t15, %EnumField** %t17
-  %t18 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t16, i32 0, i32 1
-  store i64 0, i64* %t18
-  store { %EnumField*, i64 }* %t16, { %EnumField*, i64 }** %l1
+  %t13 = alloca [0 x %EnumField]
+  %t14 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t13, i32 0, i32 0
+  %t15 = alloca { %EnumField*, i64 }
+  %t16 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t15, i32 0, i32 0
+  store %EnumField* %t14, %EnumField** %t16
+  %t17 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t15, i32 0, i32 1
+  store i64 0, i64* %t17
+  store { %EnumField*, i64 }* %t15, { %EnumField*, i64 }** %l1
   store i64 0, i64* %l2
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t20 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t21 = load i64, i64* %l2
+  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t19 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t20 = load i64, i64* %l2
   br label %loop.header4
 loop.header4:
-  %t73 = phi { %EnumField*, i64 }* [ %t20, %entry ], [ %t71, %loop.latch6 ]
-  %t74 = phi i64 [ %t21, %entry ], [ %t72, %loop.latch6 ]
-  store { %EnumField*, i64 }* %t73, { %EnumField*, i64 }** %l1
-  store i64 %t74, i64* %l2
+  %t71 = phi { %EnumField*, i64 }* [ %t19, %entry ], [ %t69, %loop.latch6 ]
+  %t72 = phi i64 [ %t20, %entry ], [ %t70, %loop.latch6 ]
+  store { %EnumField*, i64 }* %t71, { %EnumField*, i64 }** %l1
+  store i64 %t72, i64* %l2
   br label %loop.body5
 loop.body5:
-  %t22 = load i64, i64* %l2
-  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t24 = load { i8**, i64 }, { i8**, i64 }* %t23
-  %t25 = extractvalue { i8**, i64 } %t24, 1
-  %t26 = icmp sge i64 %t22, %t25
-  %t27 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t28 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t29 = load i64, i64* %l2
-  br i1 %t26, label %then8, label %merge9
+  %t21 = load i64, i64* %l2
+  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t23 = load { i8**, i64 }, { i8**, i64 }* %t22
+  %t24 = extractvalue { i8**, i64 } %t23, 1
+  %t25 = icmp sge i64 %t21, %t24
+  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t27 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t28 = load i64, i64* %l2
+  br i1 %t25, label %then8, label %merge9
 then8:
   br label %afterloop7
 merge9:
-  %t30 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t31 = load i64, i64* %l2
-  %t32 = load { i8**, i64 }, { i8**, i64 }* %t30
-  %t33 = extractvalue { i8**, i64 } %t32, 0
-  %t34 = extractvalue { i8**, i64 } %t32, 1
-  %t35 = icmp uge i64 %t31, %t34
-  ; bounds check: %t35 (if true, out of bounds)
-  %t36 = getelementptr i8*, i8** %t33, i64 %t31
-  %t37 = load i8*, i8** %t36
-  store i8* %t37, i8** %l3
-  %t38 = load i8*, i8** %l3
-  %t39 = call %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* %t38)
-  store %EnumField* %t39, %EnumField** %l4
+  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t30 = load i64, i64* %l2
+  %t31 = load { i8**, i64 }, { i8**, i64 }* %t29
+  %t32 = extractvalue { i8**, i64 } %t31, 0
+  %t33 = extractvalue { i8**, i64 } %t31, 1
+  %t34 = icmp uge i64 %t30, %t33
+  ; bounds check: %t34 (if true, out of bounds)
+  %t35 = getelementptr i8*, i8** %t32, i64 %t30
+  %t36 = load i8*, i8** %t35
+  store i8* %t36, i8** %l3
+  %t37 = load i8*, i8** %l3
+  %t38 = call %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* %t37)
+  store %EnumField* %t38, %EnumField** %l4
   store i8* null, i8** %l5
-  %t40 = load %EnumField*, %EnumField** %l4
-  %t41 = bitcast i8* null to %EnumField*
-  %t42 = icmp ne %EnumField* %t40, %t41
-  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t44 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t45 = load i64, i64* %l2
-  %t46 = load i8*, i8** %l3
-  %t47 = load %EnumField*, %EnumField** %l4
-  %t48 = load i8*, i8** %l5
-  br i1 %t42, label %then10, label %merge11
+  %t39 = load %EnumField*, %EnumField** %l4
+  %t40 = icmp ne %EnumField* %t39, null
+  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t42 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t43 = load i64, i64* %l2
+  %t44 = load i8*, i8** %l3
+  %t45 = load %EnumField*, %EnumField** %l4
+  %t46 = load i8*, i8** %l5
+  br i1 %t40, label %then10, label %merge11
 then10:
-  %t49 = load %EnumField*, %EnumField** %l4
-  %t50 = getelementptr %EnumField, %EnumField* %t49, i32 0, i32 1
-  %t51 = load i8*, i8** %t50
-  store i8* %t51, i8** %l5
+  %t47 = load %EnumField*, %EnumField** %l4
+  %t48 = getelementptr %EnumField, %EnumField* %t47, i32 0, i32 1
+  %t49 = load i8*, i8** %t48
+  store i8* %t49, i8** %l5
   br label %merge11
 merge11:
-  %t52 = phi i8* [ %t51, %then10 ], [ %t48, %loop.body5 ]
-  store i8* %t52, i8** %l5
-  %t53 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t54 = load i8*, i8** %l3
-  %t55 = insertvalue %EnumField undef, i8* %t54, 0
-  %t56 = load i8*, i8** %l5
-  %t57 = insertvalue %EnumField %t55, i8* %t56, 1
-  %t58 = call noalias i8* @malloc(i64 16)
-  %t59 = bitcast i8* %t58 to %EnumField*
-  store %EnumField %t57, %EnumField* %t59
-  %t60 = alloca [1 x i8*]
-  %t61 = getelementptr [1 x i8*], [1 x i8*]* %t60, i32 0, i32 0
-  %t62 = getelementptr i8*, i8** %t61, i64 0
-  store i8* %t58, i8** %t62
-  %t63 = alloca { i8**, i64 }
-  %t64 = getelementptr { i8**, i64 }, { i8**, i64 }* %t63, i32 0, i32 0
-  store i8** %t61, i8*** %t64
-  %t65 = getelementptr { i8**, i64 }, { i8**, i64 }* %t63, i32 0, i32 1
-  store i64 1, i64* %t65
-  %t66 = bitcast { %EnumField*, i64 }* %t53 to { i8**, i64 }*
-  %t67 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t66, { i8**, i64 }* %t63)
-  %t68 = bitcast { i8**, i64 }* %t67 to { %EnumField*, i64 }*
-  store { %EnumField*, i64 }* %t68, { %EnumField*, i64 }** %l1
-  %t69 = load i64, i64* %l2
-  %t70 = add i64 %t69, 1
-  store i64 %t70, i64* %l2
+  %t50 = phi i8* [ %t49, %then10 ], [ %t46, %loop.body5 ]
+  store i8* %t50, i8** %l5
+  %t51 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t52 = load i8*, i8** %l3
+  %t53 = insertvalue %EnumField undef, i8* %t52, 0
+  %t54 = load i8*, i8** %l5
+  %t55 = insertvalue %EnumField %t53, i8* %t54, 1
+  %t56 = call noalias i8* @malloc(i64 16)
+  %t57 = bitcast i8* %t56 to %EnumField*
+  store %EnumField %t55, %EnumField* %t57
+  %t58 = alloca [1 x i8*]
+  %t59 = getelementptr [1 x i8*], [1 x i8*]* %t58, i32 0, i32 0
+  %t60 = getelementptr i8*, i8** %t59, i64 0
+  store i8* %t56, i8** %t60
+  %t61 = alloca { i8**, i64 }
+  %t62 = getelementptr { i8**, i64 }, { i8**, i64 }* %t61, i32 0, i32 0
+  store i8** %t59, i8*** %t62
+  %t63 = getelementptr { i8**, i64 }, { i8**, i64 }* %t61, i32 0, i32 1
+  store i64 1, i64* %t63
+  %t64 = bitcast { %EnumField*, i64 }* %t51 to { i8**, i64 }*
+  %t65 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t64, { i8**, i64 }* %t61)
+  %t66 = bitcast { i8**, i64 }* %t65 to { %EnumField*, i64 }*
+  store { %EnumField*, i64 }* %t66, { %EnumField*, i64 }** %l1
+  %t67 = load i64, i64* %l2
+  %t68 = add i64 %t67, 1
+  store i64 %t68, i64* %l2
   br label %loop.latch6
 loop.latch6:
-  %t71 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t72 = load i64, i64* %l2
+  %t69 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t70 = load i64, i64* %l2
   br label %loop.header4
 afterloop7:
-  %t75 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  ret { %EnumField*, i64 }* %t75
+  %t73 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  ret { %EnumField*, i64 }* %t73
 }
 
 define %EnumInstance @enum_instantiate(%EnumType %enum_type, i8* %variant_name, { %EnumField*, i64 }* %provided) {

@@ -2075,7 +2075,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="net_request", symbol="sailfin_intrinsic_net_request", return_type="i8*", parameter_types=["i8*", "i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.get", symbol="sailfin_intrinsic_http_get", return_type="i8*", parameter_types=["i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.post", symbol="sailfin_intrinsic_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_read_file", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_file", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
@@ -7213,6 +7213,28 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
         coerced = LLVMOperand(llvm_type=target_type, value=temp_name)
         return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if operand.value == "null"  and  ends_with_pointer_suffix(target_type):
+        coerced = LLVMOperand(llvm_type=target_type, value="null")
+        return CoercionResult(lines=current_lines, temp_index=temp_index, operand=coerced, diagnostics=diagnostics)
+    if operand.value == "null"  and  not ends_with_pointer_suffix(target_type):
+        literal = default_return_literal(target_type)
+        coerced = LLVMOperand(llvm_type=target_type, value=literal)
+        return CoercionResult(lines=current_lines, temp_index=temp_index, operand=coerced, diagnostics=diagnostics)
+    if not ends_with_pointer_suffix(target_type)  and  ends_with_pointer_suffix(operand.llvm_type):
+        pointer_type = operand.llvm_type
+        pointer_value = operand.value
+        base_type = strip_pointer_suffix(pointer_type)
+        if base_type != target_type:
+            desired_pointer_type = target_type + "*"
+            bitcast_temp = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type)
+            pointer_type = desired_pointer_type
+            pointer_value = bitcast_temp
+            temp_index += 1
+        load_temp = format_temp_name(temp_index)
+        current_lines = append_string(current_lines, "  " + load_temp + " = load " + target_type + ", " + pointer_type + " " + pointer_value)
+        coerced = LLVMOperand(llvm_type=target_type, value=load_temp)
+        return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
     return CoercionResult(lines=current_lines, temp_index=temp_index, operand=None, diagnostics=diagnostics)
 
@@ -7241,6 +7263,10 @@ def harmonise_operands(left, right, temp_index, lines):
     current_temp = temp_index
     left_operand = left
     right_operand = right
+    if left_operand.value == "null"  and  ends_with_pointer_suffix(right_operand.llvm_type):
+        left_operand = LLVMOperand(llvm_type=right_operand.llvm_type, value="null")
+    if right_operand.value == "null"  and  ends_with_pointer_suffix(left_operand.llvm_type):
+        right_operand = LLVMOperand(llvm_type=left_operand.llvm_type, value="null")
     if left_operand.llvm_type == right_operand.llvm_type:
         return BinaryAlignmentResult(lines=current_lines, temp_index=current_temp, left=left_operand, right=right_operand, diagnostics=diagnostics, result_type=left_operand.llvm_type)
     target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type)
