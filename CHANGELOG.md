@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.61 (2025-10-21)
+
+### Bug Fixes
+
+- Combined manifests
+  ([`1d49570`](https://github.com/SailfinIO/sailfin/commit/1d495703ce63f1980d07eafd4457f5e10b6d7d0f))
+
+
 ## v0.1.1-alpha.60 (2025-10-21)
 
 ### Bug Fixes
