@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.62 (2025-10-21)
+
+### Bug Fixes
+
+- Native text context
+  ([`f8e022b`](https://github.com/SailfinIO/sailfin/commit/f8e022bb1dd5fe9822a86d319d2005920514bd6b))
+
+
 ## v0.1.1-alpha.61 (2025-10-21)
 
 ### Bug Fixes
