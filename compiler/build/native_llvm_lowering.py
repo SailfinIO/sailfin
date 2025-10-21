@@ -2263,7 +2263,13 @@ def append_function_effect_entry(values, entry):
     return (values) + ([entry])
 
 def merge_effect_lists(base, extras):
-    result = base
+    result = []
+    index = 0
+    while True:
+        if index >= len(base):
+            break
+        result = append_unique_effect(result, base[index])
+        index += 1
     index = 0
     while True:
         if index >= len(extras):
