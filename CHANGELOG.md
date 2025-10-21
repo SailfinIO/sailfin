@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.59 (2025-10-21)
+
+### Bug Fixes
+
+- Operator scanner
+  ([`a777158`](https://github.com/SailfinIO/sailfin/commit/a777158421675438ec1613b0a46e4d973b8c45d3))
+
+
 ## v0.1.1-alpha.58 (2025-10-21)
 
 ### Bug Fixes
