@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.58 (2025-10-21)
+
+### Bug Fixes
+
+- Metadata runtime
+  ([`edae93a`](https://github.com/SailfinIO/sailfin/commit/edae93ac0b1a9ccd4dde3f343c51de1ece7c0d68))
+
+
 ## v0.1.1-alpha.57 (2025-10-20)
 
 ### Bug Fixes
