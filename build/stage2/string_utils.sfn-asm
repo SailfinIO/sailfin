@@ -115,6 +115,4 @@
     ret result
 .endfn
 
-; native backend: unsupported statement `Unknown`
-
-; native backend: unsupported statement `Unknown`
+.export "" { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol }
