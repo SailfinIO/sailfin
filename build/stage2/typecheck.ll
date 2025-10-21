@@ -38,7 +38,6 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
-declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
@@ -61,6 +60,8 @@ entry:
   %l1 = alloca { %Statement*, i64 }*
   %l2 = alloca { %Diagnostic*, i64 }*
   %l3 = alloca { %Diagnostic*, i64 }*
+  %l4 = alloca { i8**, i64 }*
+  %l5 = alloca { i8**, i64 }*
   %t0 = call %SymbolCollectionResult @collect_top_level_symbols(%Program %program)
   store %SymbolCollectionResult %t0, %SymbolCollectionResult* %l0
   %t1 = call { %Statement*, i64 }* @collect_interface_definitions(%Program %program)
@@ -72,11 +73,23 @@ entry:
   store { %Diagnostic*, i64 }* %t4, { %Diagnostic*, i64 }** %l3
   %t5 = load %SymbolCollectionResult, %SymbolCollectionResult* %l0
   %t6 = extractvalue %SymbolCollectionResult %t5, 1
-  %t7 = insertvalue %TypecheckResult undef, { %Diagnostic**, i64 }* null, 0
-  %t8 = load %SymbolCollectionResult, %SymbolCollectionResult* %l0
-  %t9 = extractvalue %SymbolCollectionResult %t8, 0
-  %t10 = insertvalue %TypecheckResult %t7, { %SymbolEntry**, i64 }* %t9, 1
-  ret %TypecheckResult %t10
+  %t7 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l2
+  %t8 = bitcast { %Diagnostic**, i64 }* %t6 to { i8**, i64 }*
+  %t9 = bitcast { %Diagnostic*, i64 }* %t7 to { i8**, i64 }*
+  %t10 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t8, { i8**, i64 }* %t9)
+  store { i8**, i64 }* %t10, { i8**, i64 }** %l4
+  %t11 = load { i8**, i64 }*, { i8**, i64 }** %l4
+  %t12 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l3
+  %t13 = bitcast { %Diagnostic*, i64 }* %t12 to { i8**, i64 }*
+  %t14 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t11, { i8**, i64 }* %t13)
+  store { i8**, i64 }* %t14, { i8**, i64 }** %l5
+  %t15 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t16 = bitcast { i8**, i64 }* %t15 to { %Diagnostic**, i64 }*
+  %t17 = insertvalue %TypecheckResult undef, { %Diagnostic**, i64 }* %t16, 0
+  %t18 = load %SymbolCollectionResult, %SymbolCollectionResult* %l0
+  %t19 = extractvalue %SymbolCollectionResult %t18, 0
+  %t20 = insertvalue %TypecheckResult %t17, { %SymbolEntry**, i64 }* %t19, 1
+  ret %TypecheckResult %t20
 }
 
 define { %Statement*, i64 }* @collect_interface_definitions(%Program %program) {

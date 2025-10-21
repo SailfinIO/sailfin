@@ -3860,7 +3860,8 @@ def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_la
                 store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
         index += 1
-    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    lines_with_phi = (lines) + (phi_lines)
+    combined_lines = (lines_with_phi) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
 
 def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloaded_values, then_label, else_label, then_terminated, else_terminated, lines, temp_index):
@@ -3921,7 +3922,8 @@ def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloade
                 store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
         name_idx += 1
-    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    lines_with_phi = (lines) + (phi_lines)
+    combined_lines = (lines_with_phi) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
 
 def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, lines, temp_index):
@@ -3984,7 +3986,8 @@ def emit_phi_merges_for_match(arm_mutations_list, locals, preloaded_values, line
                 store_lines = append_string(store_lines, entry.store_line)
                 current_temp += 1
         name_idx += 1
-    combined_lines = (lines) + ((phi_lines)) + (store_lines)
+    lines_with_phi = (lines) + (phi_lines)
+    combined_lines = (lines_with_phi) + (store_lines)
     return PhiMergeResult(lines=combined_lines, temp_index=current_temp)
 
 def lower_if_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):

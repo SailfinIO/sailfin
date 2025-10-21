@@ -136,7 +136,6 @@ declare i8* @sailfin_adapter_fs_read_file(i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
-declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
@@ -29479,7 +29478,8 @@ entry:
   %l6 = alloca i8*
   %l7 = alloca { i8**, i64 }*
   %l8 = alloca %PhiStoreEntry
-  %l9 = alloca double
+  %l9 = alloca { i8**, i64 }*
+  %l10 = alloca { i8**, i64 }*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -29662,12 +29662,18 @@ loop.latch2:
   %t114 = load double, double* %l3
   br label %loop.header0
 afterloop3:
-  store double 0.0, double* %l9
-  %t119 = load double, double* %l9
-  %t120 = insertvalue %PhiMergeResult undef, { i8**, i64 }* null, 0
-  %t121 = load double, double* %l2
-  %t122 = insertvalue %PhiMergeResult %t120, double %t121, 1
-  ret %PhiMergeResult %t122
+  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t120 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %lines, { i8**, i64 }* %t119)
+  store { i8**, i64 }* %t120, { i8**, i64 }** %l9
+  %t121 = load { i8**, i64 }*, { i8**, i64 }** %l9
+  %t122 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t123 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t121, { i8**, i64 }* %t122)
+  store { i8**, i64 }* %t123, { i8**, i64 }** %l10
+  %t124 = load { i8**, i64 }*, { i8**, i64 }** %l10
+  %t125 = insertvalue %PhiMergeResult undef, { i8**, i64 }* %t124, 0
+  %t126 = load double, double* %l2
+  %t127 = insertvalue %PhiMergeResult %t125, double %t126, 1
+  ret %PhiMergeResult %t127
 }
 
 define %PhiMergeResult @emit_phi_merges_for_if_else({ %LocalMutation*, i64 }* %then_mutations, { %LocalMutation*, i64 }* %else_mutations, { %LocalBinding*, i64 }* %locals, { i8**, i64 }* %preloaded_values, i8* %then_label, i8* %else_label, i1 %then_terminated, i1 %else_terminated, { i8**, i64 }* %lines, double %temp_index) {
@@ -29691,7 +29697,8 @@ entry:
   %l16 = alloca i8*
   %l17 = alloca { i8**, i64 }*
   %l18 = alloca %PhiStoreEntry
-  %l19 = alloca double
+  %l19 = alloca { i8**, i64 }*
+  %l20 = alloca { i8**, i64 }*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -30291,12 +30298,18 @@ loop.latch18:
   %t428 = load double, double* %l10
   br label %loop.header16
 afterloop19:
-  store double 0.0, double* %l19
-  %t433 = load double, double* %l19
-  %t434 = insertvalue %PhiMergeResult undef, { i8**, i64 }* null, 0
-  %t435 = load double, double* %l2
-  %t436 = insertvalue %PhiMergeResult %t434, double %t435, 1
-  ret %PhiMergeResult %t436
+  %t433 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t434 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %lines, { i8**, i64 }* %t433)
+  store { i8**, i64 }* %t434, { i8**, i64 }** %l19
+  %t435 = load { i8**, i64 }*, { i8**, i64 }** %l19
+  %t436 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t437 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t435, { i8**, i64 }* %t436)
+  store { i8**, i64 }* %t437, { i8**, i64 }** %l20
+  %t438 = load { i8**, i64 }*, { i8**, i64 }** %l20
+  %t439 = insertvalue %PhiMergeResult undef, { i8**, i64 }* %t438, 0
+  %t440 = load double, double* %l2
+  %t441 = insertvalue %PhiMergeResult %t439, double %t440, 1
+  ret %PhiMergeResult %t441
 }
 
 define %PhiMergeResult @emit_phi_merges_for_match({ %MatchArmMutations*, i64 }* %arm_mutations_list, { %LocalBinding*, i64 }* %locals, { i8**, i64 }* %preloaded_values, { i8**, i64 }* %lines, double %temp_index) {
@@ -30322,7 +30335,8 @@ entry:
   %l18 = alloca %MatchArmMutations
   %l19 = alloca %LocalMutation*
   %l20 = alloca %PhiStoreEntry
-  %l21 = alloca double
+  %l21 = alloca { i8**, i64 }*
+  %l22 = alloca { i8**, i64 }*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -30910,12 +30924,18 @@ loop.latch24:
   %t414 = load double, double* %l11
   br label %loop.header22
 afterloop25:
-  store double 0.0, double* %l21
-  %t419 = load double, double* %l21
-  %t420 = insertvalue %PhiMergeResult undef, { i8**, i64 }* null, 0
-  %t421 = load double, double* %l2
-  %t422 = insertvalue %PhiMergeResult %t420, double %t421, 1
-  ret %PhiMergeResult %t422
+  %t419 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t420 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %lines, { i8**, i64 }* %t419)
+  store { i8**, i64 }* %t420, { i8**, i64 }** %l21
+  %t421 = load { i8**, i64 }*, { i8**, i64 }** %l21
+  %t422 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t423 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t421, { i8**, i64 }* %t422)
+  store { i8**, i64 }* %t423, { i8**, i64 }** %l22
+  %t424 = load { i8**, i64 }*, { i8**, i64 }** %l22
+  %t425 = insertvalue %PhiMergeResult undef, { i8**, i64 }* %t424, 0
+  %t426 = load double, double* %l2
+  %t427 = insertvalue %PhiMergeResult %t425, double %t426, 1
+  ret %PhiMergeResult %t427
 }
 
 define %BlockLoweringResult @lower_if_instruction(%NativeFunction %function, double %start_index, i8* %llvm_return, { %ParameterBinding*, i64 }* %bindings, { %LocalBinding*, i64 }* %locals, { i8**, i64 }* %allocas, { i8**, i64 }* %lines, double %temp_index, double %block_counter, double %next_local_id, double %next_region_id, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %loop_stack, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label) {

@@ -68,7 +68,9 @@ def typecheck_program(program):
     interfaces = collect_interface_definitions(program)
     scoped_diagnostics = check_program_scopes(program, interfaces)
     effect_diagnostics = build_effect_diagnostics(program)
-    return TypecheckResult(diagnostics=(top_level.diagnostics) + ((scoped_diagnostics)) + (effect_diagnostics), symbols=top_level.symbols)
+    diagnostics_with_scopes = (top_level.diagnostics) + (scoped_diagnostics)
+    all_diagnostics = (diagnostics_with_scopes) + (effect_diagnostics)
+    return TypecheckResult(diagnostics=all_diagnostics, symbols=top_level.symbols)
 
 def collect_interface_definitions(program):
     interfaces = []

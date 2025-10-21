@@ -40,8 +40,11 @@ fn typecheck_program(program -> Program) -> TypecheckResult {
     let scoped_diagnostics = check_program_scopes(program, interfaces);
     let effect_diagnostics = build_effect_diagnostics(program);
 
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
+    let all_diagnostics = diagnostics_with_scopes.concat(effect_diagnostics);
+
     return TypecheckResult {
-        diagnostics: top_level.diagnostics.concat(scoped_diagnostics).concat(effect_diagnostics),
+        diagnostics: all_diagnostics,
         symbols: top_level.symbols,
     };
 }
