@@ -97,39 +97,63 @@
 .init-span 31 28 31 45
 .let runtime_char_code_fn = runtime.char_code
 
+.span 32 1 32 44
+.init-span 32 27 32 43
+.let runtime_parallel_fn = runtime.parallel
+
+.span 33 1 33 46
+.init-span 33 28 33 45
+.let runtime_array_map_fn = runtime.array_map
+
+.span 34 1 34 52
+.init-span 34 31 34 51
+.let runtime_array_filter_fn = runtime.array_filter
+
+.span 35 1 35 52
+.init-span 35 31 35 51
+.let runtime_array_reduce_fn = runtime.array_reduce
+
+.span 36 1 36 56
+.init-span 36 33 36 55
+.let runtime_grapheme_count_fn = runtime.grapheme_count
+
+.span 37 1 37 50
+.init-span 37 30 37 49
+.let runtime_grapheme_at_fn = runtime.grapheme_at
+
 .fn capability_grant(effects -> string[]) -> any
 .meta return any
 .meta effects none
-    .span 33 21 33 40
+    .span 39 21 39 40
     .param effects -> string[]
-    .span 34 5 34 53
+    .span 40 5 40 53
     ret runtime_create_capability_grant(effects)
 .endfn
 
 .fn fs_bridge(grant -> any) -> any
 .meta return any
 .meta effects none
-    .span 37 14 37 26
+    .span 43 14 43 26
     .param grant -> any
-    .span 38 5 38 52
+    .span 44 5 44 52
     ret runtime_create_filesystem_bridge(grant)
 .endfn
 
 .fn http_bridge(grant -> any) -> any
 .meta return any
 .meta effects none
-    .span 41 16 41 28
+    .span 47 16 47 28
     .param grant -> any
-    .span 42 5 42 46
+    .span 48 5 48 46
     ret runtime_create_http_bridge(grant)
 .endfn
 
 .fn model_bridge(grant -> any) -> any
 .meta return any
 .meta effects none
-    .span 45 17 45 29
+    .span 51 17 51 29
     .param grant -> any
-    .span 46 5 46 47
+    .span 52 5 52 47
     ret runtime_create_model_bridge(grant)
 .endfn
 
@@ -188,486 +212,456 @@
 .fn sleep(milliseconds -> number) ![clock]
 .meta return void
 .meta effects clock
-    .span 81 10 81 32
+    .span 87 10 87 32
     .param milliseconds -> number
-    .span 82 5 82 36
+    .span 88 5 88 36
     eval runtime_sleep_fn(milliseconds)
 .endfn
 
-.fn channel<T>(capacity -> number = 0) ![io]
-.meta return void
+.fn channel<T>(capacity -> number = 0) -> any ![io]
+.meta return any
 .meta effects io
 .meta generics <T>
-    .span 85 15 85 37
+    .span 91 15 91 37
     .param capacity -> number = 0
-    .span 86 5 86 41
+    .span 92 5 92 41
     ret runtime_channel_fn(capacity)
 .endfn
 
 .fn parallel(tasks -> any[]) -> any[] ![io]
 .meta return any[]
 .meta effects io
-    .span 89 13 89 27
+    .span 95 13 95 27
     .param tasks -> any[]
-    .span 90 5 90 26
-    eval let mut results = []
-    .for task in tasks
-        .span 92 9 92 28
-        eval let value = task()
-        .span 93 9 93 43
-        eval results = results.concat([value])
-    .endfor
-    .span 95 5 95 20
-    ret results
+    .span 96 5 96 39
+    ret runtime_parallel_fn(tasks)
 .endfn
 
 .fn spawn(task -> any, name -> string = "") -> void ![io]
 .meta return void
 .meta effects io
-    .span 98 10 98 21
+    .span 99 10 99 21
     .param task -> any
-    .span 98 23 98 42
+    .span 99 23 99 42
     .param name -> string = ""
-    .span 99 5 99 34
+    .span 100 5 100 34
     eval runtime_spawn_fn(task, name)
 .endfn
 
 .fn logExecution(callable -> any) -> any
 .meta return any
 .meta effects none
-    .span 102 17 102 32
+    .span 103 17 103 32
     .param callable -> any
-    .span 103 5 103 47
+    .span 104 5 104 47
     ret runtime_log_execution_fn(callable)
 .endfn
 
 .fn array_map(items -> any[], mapper -> any) -> any[]
 .meta return any[]
 .meta effects none
-    .span 106 14 106 28
+    .span 107 14 107 28
     .param items -> any[]
-    .span 106 30 106 43
+    .span 107 30 107 43
     .param mapper -> any
-    .span 107 5 107 25
-    eval let mut result = []
-    .for item in items
-        .span 109 9 109 35
-        eval let mapped = mapper(item)
-        .span 110 9 110 42
-        eval result = result.concat([mapped])
-    .endfor
-    .span 112 5 112 19
-    ret result
+    .span 108 5 108 48
+    ret runtime_array_map_fn(items, mapper)
 .endfn
 
 .fn array_filter(items -> any[], predicate -> any) -> any[]
 .meta return any[]
 .meta effects none
-    .span 115 17 115 31
+    .span 111 17 111 31
     .param items -> any[]
-    .span 115 33 115 49
+    .span 111 33 111 49
     .param predicate -> any
-    .span 116 5 116 25
-    eval let mut result = []
-    .for item in items
-        .if predicate(item)
-            .span 119 13 119 44
-            eval result = result.concat([item])
-        .endif
-    .endfor
-    .span 122 5 122 19
-    ret result
+    .span 112 5 112 54
+    ret runtime_array_filter_fn(items, predicate)
 .endfn
 
 .fn array_reduce(items -> any[], initial -> any, reducer -> any) -> any
 .meta return any
 .meta effects none
-    .span 125 17 125 31
+    .span 115 17 115 31
     .param items -> any[]
-    .span 125 33 125 47
+    .span 115 33 115 47
     .param initial -> any
-    .span 125 49 125 63
+    .span 115 49 115 63
     .param reducer -> any
-    .span 126 5 126 35
-    eval let mut accumulator = initial
-    .for item in items
-        .span 128 9 128 50
-        eval accumulator = reducer(accumulator, item)
-    .endfor
-    .span 130 5 130 24
-    ret accumulator
+    .span 116 5 116 61
+    ret runtime_array_reduce_fn(items, initial, reducer)
 .endfn
 
 .fn char_at(value -> string, index -> number) -> string
 .meta return string
 .meta effects none
-    .span 133 12 133 27
+    .span 119 12 119 27
     .param value -> string
-    .span 133 29 133 44
+    .span 119 29 119 44
     .param index -> number
     .if value.length == 0
-        .span 135 9 135 19
+        .span 121 9 121 19
         ret ""
     .endif
     .if index < 0
-        .span 138 9 138 19
+        .span 124 9 124 19
         ret ""
     .endif
     .if index >= value.length
-        .span 141 9 141 19
+        .span 127 9 127 19
         ret ""
     .endif
-    .span 143 5 143 25
+    .span 129 5 129 25
     ret value[index]
 .endfn
 
 .fn enum_type(name -> string) -> EnumType
 .meta return EnumType
 .meta effects none
-    .span 146 14 146 28
+    .span 132 14 132 28
     .param name -> string
-    .span 147 5 147 50
+    .span 133 5 133 50
     ret EnumType { name: name, variants: [] }
 .endfn
 
 .fn enum_field(name -> string, value -> any) -> EnumField
 .meta return EnumField
 .meta effects none
-    .span 150 15 150 29
+    .span 136 15 136 29
     .param name -> string
-    .span 150 31 150 43
+    .span 136 31 136 43
     .param value -> any
-    .span 151 5 151 51
+    .span 137 5 137 51
     ret EnumField { name: name, value: value }
 .endfn
 
 .fn enum_define_variant(enum_type -> EnumType, variant_name -> string, field_names -> string[]) -> EnumType
 .meta return EnumType
 .meta effects none
-    .span 154 24 154 45
+    .span 140 24 140 45
     .param enum_type -> EnumType
-    .span 154 47 154 69
+    .span 140 47 140 69
     .param variant_name -> string
-    .span 154 71 154 94
+    .span 140 71 140 94
     .param field_names -> string[]
-    .span 155 5 155 90
+    .span 141 5 141 90
     eval let variant = EnumVariantDefinition { name: variant_name, field_names: field_names }
-    .span 156 5 156 56
+    .span 142 5 142 56
     eval let updated = enum_type.variants.concat([variant])
-    .span 157 5 157 65
+    .span 143 5 143 65
     ret EnumType { name: enum_type.name, variants: updated }
 .endfn
 
 .fn enum_lookup_field(fields -> EnumField[], name -> string) -> EnumField?
 .meta return EnumField?
 .meta effects none
-    .span 160 22 160 43
+    .span 146 22 146 43
     .param fields -> EnumField[]
-    .span 160 45 160 59
+    .span 146 45 146 59
     .param name -> string
-    .span 161 5 161 23
+    .span 147 5 147 23
     eval let mut index = 0
     .loop
         .if index >= fields.length
             break
         .endif
-        .span 166 9 166 35
+        .span 152 9 152 35
         eval let field = fields[index]
         .if field.name == name
-            .span 168 13 168 26
+            .span 154 13 154 26
             ret field
         .endif
-        .span 170 9 170 27
+        .span 156 9 156 27
         eval index = index + 1
     .endloop
-    .span 172 5 172 17
+    .span 158 5 158 17
     ret null
 .endfn
 
 .fn enum_find_variant(enum_type -> EnumType, variant_name -> string) -> EnumVariantDefinition?
 .meta return EnumVariantDefinition?
 .meta effects none
-    .span 175 22 175 43
+    .span 161 22 161 43
     .param enum_type -> EnumType
-    .span 175 45 175 67
+    .span 161 45 161 67
     .param variant_name -> string
-    .span 176 5 176 23
+    .span 162 5 162 23
     eval let mut index = 0
     .loop
         .if index >= enum_type.variants.length
             break
         .endif
-        .span 181 9 181 49
+        .span 167 9 167 49
         eval let variant = enum_type.variants[index]
         .if variant.name == variant_name
-            .span 183 13 183 28
+            .span 169 13 169 28
             ret variant
         .endif
-        .span 185 9 185 27
+        .span 171 9 171 27
         eval index = index + 1
     .endloop
-    .span 187 5 187 17
+    .span 173 5 173 17
     ret null
 .endfn
 
 .fn enum_normalize_fields(definition -> EnumVariantDefinition?, provided -> EnumField[]) -> EnumField[]
 .meta return EnumField[]
 .meta effects none
-    .span 190 26 190 62
+    .span 176 26 176 62
     .param definition -> EnumVariantDefinition?
-    .span 190 64 190 87
+    .span 176 64 176 87
     .param provided -> EnumField[]
     .if definition == null
-        .span 192 9 192 25
+        .span 178 9 178 25
         ret provided
     .endif
-    .span 194 5 194 43
+    .span 180 5 180 43
     eval let expected = definition.field_names
     .if expected.length == 0
-        .span 196 9 196 19
+        .span 182 9 182 19
         ret []
     .endif
-    .span 198 5 198 44
+    .span 184 5 184 44
     eval let mut normalized -> EnumField[] = []
-    .span 199 5 199 23
+    .span 185 5 185 23
     eval let mut index = 0
     .loop
         .if index >= expected.length
             break
         .endif
-        .span 204 9 204 42
+        .span 190 9 190 42
         eval let field_name = expected[index]
-        .span 205 9 205 65
+        .span 191 9 191 65
         eval let candidate = enum_lookup_field(provided, field_name)
-        .span 206 9 206 26
+        .span 192 9 192 26
         eval let value = null
         .if candidate != null
-            .span 208 13 208 37
+            .span 194 13 194 37
             eval value = candidate.value
         .endif
-        .span 210 9 210 88
+        .span 196 9 196 88
         eval normalized = normalized.concat([EnumField { name: field_name, value: value }])
-        .span 211 9 211 27
+        .span 197 9 197 27
         eval index = index + 1
     .endloop
-    .span 213 5 213 23
+    .span 199 5 199 23
     ret normalized
 .endfn
 
 .fn enum_instantiate(enum_type -> EnumType, variant_name -> string, provided -> EnumField[]) -> EnumInstance
 .meta return EnumInstance
 .meta effects none
-    .span 216 21 216 42
+    .span 202 21 202 42
     .param enum_type -> EnumType
-    .span 216 44 216 66
+    .span 202 44 202 66
     .param variant_name -> string
-    .span 216 68 216 91
+    .span 202 68 202 91
     .param provided -> EnumField[]
-    .span 217 5 217 65
+    .span 203 5 203 65
     eval let definition = enum_find_variant(enum_type, variant_name)
-    .span 218 5 218 62
+    .span 204 5 204 62
     eval let fields = enum_normalize_fields(definition, provided)
-    .span 219 5 219 84
+    .span 205 5 205 84
     ret EnumInstance { type: enum_type, variant: variant_name, fields: fields }
 .endfn
 
 .fn enum_get_field(instance -> EnumInstance, name -> string) -> any
 .meta return any
 .meta effects none
-    .span 222 19 222 43
+    .span 208 19 208 43
     .param instance -> EnumInstance
-    .span 222 45 222 59
+    .span 208 45 208 59
     .param name -> string
-    .span 223 5 223 23
+    .span 209 5 209 23
     eval let mut index = 0
     .loop
         .if index >= instance.fields.length
             break
         .endif
-        .span 228 5 228 40
+        .span 214 5 214 40
         eval let field = instance.fields[index]
         .if field.name == name
-            .span 230 9 230 28
+            .span 216 9 216 28
             ret field.value
         .endif
-        .span 232 5 232 23
+        .span 218 5 218 23
         eval index = index + 1
     .endloop
-    .span 234 5 234 17
+    .span 220 5 220 17
     ret null
 .endfn
 
 .fn struct_field(name -> string, value -> any) -> StructField
 .meta return StructField
 .meta effects none
-    .span 237 17 237 31
+    .span 223 17 223 31
     .param name -> string
-    .span 237 33 237 45
+    .span 223 33 223 45
     .param value -> any
-    .span 238 5 238 53
+    .span 224 5 224 53
     ret StructField { name: name, value: value }
 .endfn
 
 .fn struct_repr(name -> string, fields -> StructField[]) -> string
 .meta return string
 .meta effects none
-    .span 241 16 241 30
+    .span 227 16 227 30
     .param name -> string
-    .span 241 32 241 55
+    .span 227 32 227 55
     .param fields -> StructField[]
-    .span 242 5 242 33
+    .span 228 5 228 33
     eval let mut result = name + "("
-    .span 243 5 243 23
+    .span 229 5 229 23
     eval let mut index = 0
     .loop
         .if index >= fields.length
             break
         .endif
         .if index > 0
-            .span 249 13 249 36
+            .span 235 13 235 36
             eval result = result + ", "
         .endif
-        .span 251 9 251 35
+        .span 237 9 237 35
         eval let field = fields[index]
-        .span 252 9 252 55
+        .span 238 9 238 55
         eval let value_text = to_debug_string(field.value)
-        .span 253 9 253 57
+        .span 239 9 239 57
         eval result = result + field.name + "=" + value_text
-        .span 254 9 254 27
+        .span 240 9 240 27
         eval index = index + 1
     .endloop
-    .span 256 5 256 27
+    .span 242 5 242 27
     eval result = result + ")"
-    .span 257 5 257 19
+    .span 243 5 243 19
     ret result
 .endfn
 
 .fn to_debug_string(value -> any) -> string
 .meta return string
 .meta effects none
-    .span 260 20 260 32
+    .span 246 20 246 32
     .param value -> any
-    .span 261 5 261 46
+    .span 247 5 247 46
     ret runtime_to_debug_string_fn(value)
 .endfn
 
 .fn format_interpolated(parts -> string[], values -> any[]) -> string
 .meta return string
 .meta effects none
-    .span 264 24 264 41
+    .span 250 24 250 41
     .param parts -> string[]
-    .span 264 43 264 58
+    .span 250 43 250 58
     .param values -> any[]
-    .span 265 5 265 25
+    .span 251 5 251 25
     eval let mut result = ""
-    .span 266 5 266 23
+    .span 252 5 252 23
     eval let mut index = 0
     .loop
         .if index >= parts.length
             break
         .endif
-        .span 271 9 271 40
+        .span 257 9 257 40
         eval result = result + parts[index]
         .if index < values.length
-            .span 273 13 273 62
+            .span 259 13 259 62
             eval result = result + to_debug_string(values[index])
         .endif
-        .span 275 9 275 27
+        .span 261 9 261 27
         eval index = index + 1
     .endloop
-    .span 277 5 277 19
+    .span 263 5 263 19
     ret result
 .endfn
 
 .fn type_descriptor(kind -> string, name -> string?, items -> TypeDescriptor[]) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 280 20 280 34
+    .span 266 20 266 34
     .param kind -> string
-    .span 280 36 280 51
+    .span 266 36 266 51
     .param name -> string?
-    .span 280 53 280 78
+    .span 266 53 266 78
     .param items -> TypeDescriptor[]
-    .span 281 5 281 68
+    .span 267 5 267 68
     ret TypeDescriptor { kind: kind, name: name, items: items }
 .endfn
 
 .fn type_descriptor_primitive(name -> string) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 284 30 284 44
+    .span 270 30 270 44
     .param name -> string
-    .span 285 5 285 51
+    .span 271 5 271 51
     ret type_descriptor("primitive", name, [])
 .endfn
 
 .fn type_descriptor_union(descriptors -> TypeDescriptor[]) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 288 26 288 57
+    .span 274 26 274 57
     .param descriptors -> TypeDescriptor[]
-    .span 289 5 289 56
+    .span 275 5 275 56
     ret type_descriptor("union", null, descriptors)
 .endfn
 
 .fn type_descriptor_intersection(descriptors -> TypeDescriptor[]) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 292 33 292 64
+    .span 278 33 278 64
     .param descriptors -> TypeDescriptor[]
-    .span 293 5 293 63
+    .span 279 5 279 63
     ret type_descriptor("intersection", null, descriptors)
 .endfn
 
 .fn type_descriptor_array(inner -> TypeDescriptor) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 296 26 296 49
+    .span 282 26 282 49
     .param inner -> TypeDescriptor
-    .span 297 5 297 52
+    .span 283 5 283 52
     ret type_descriptor("array", null, [inner])
 .endfn
 
 .fn type_descriptor_function() -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 301 5 301 50
+    .span 287 5 287 50
     ret type_descriptor("function", null, [])
 .endfn
 
 .fn type_descriptor_named(name -> string) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 304 26 304 40
+    .span 290 26 290 40
     .param name -> string
-    .span 305 5 305 47
+    .span 291 5 291 47
     ret type_descriptor("named", name, [])
 .endfn
 
 .fn type_descriptor_unknown() -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 309 5 309 49
+    .span 295 5 295 49
     ret type_descriptor("unknown", null, [])
 .endfn
 
 .fn descriptor_trim(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 312 20 312 35
+    .span 298 20 298 35
     .param value -> string
-    .span 313 5 313 23
+    .span 299 5 299 23
     eval let mut start = 0
-    .span 314 5 314 32
+    .span 300 5 300 32
     eval let mut end = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 319 5 319 36
+        .span 305 5 305 36
         eval let ch = char_at(value, start)
         .if ch == " " || ch == "\n" || ch == "\t" || ch == "\r"
-            .span 321 13 321 31
+            .span 307 13 307 31
             eval start = start + 1
             continue
         .endif
@@ -677,141 +671,141 @@
         .if end <= start
             break
         .endif
-        .span 330 9 330 42
+        .span 316 9 316 42
         eval let ch = char_at(value, end - 1)
         .if ch == " " || ch == "\n" || ch == "\t" || ch == "\r"
-            .span 332 13 332 27
+            .span 318 13 318 27
             eval end = end - 1
             continue
         .endif
         break
     .endloop
-    .span 337 5 337 41
+    .span 323 5 323 41
     ret substring(value, start, end)
 .endfn
 
 .fn string_starts_with(value -> string, prefix -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 340 23 340 38
+    .span 326 23 326 38
     .param value -> string
-    .span 340 40 340 56
+    .span 326 40 326 56
     .param prefix -> string
     .if prefix.length > value.length
-        .span 342 9 342 22
+        .span 328 9 328 22
         ret false
     .endif
-    .span 344 5 344 23
+    .span 330 5 330 23
     eval let mut index = 0
     .loop
         .if index >= prefix.length
             break
         .endif
-        .span 349 9 349 46
+        .span 335 9 335 46
         eval let value_ch = char_at(value, index)
-        .span 350 9 350 48
+        .span 336 9 336 48
         eval let prefix_ch = char_at(prefix, index)
         .if value_ch != prefix_ch
-            .span 352 13 352 26
+            .span 338 13 338 26
             ret false
         .endif
-        .span 354 9 354 27
+        .span 340 9 340 27
         eval index = index + 1
     .endloop
-    .span 356 5 356 17
+    .span 342 5 342 17
     ret true
 .endfn
 
 .fn string_ends_with(value -> string, suffix -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 359 21 359 36
+    .span 345 21 345 36
     .param value -> string
-    .span 359 38 359 54
+    .span 345 38 345 54
     .param suffix -> string
     .if suffix.length > value.length
-        .span 361 9 361 22
+        .span 347 9 347 22
         ret false
     .endif
-    .span 363 5 363 51
+    .span 349 5 349 51
     eval let mut offset = value.length - suffix.length
-    .span 364 5 364 23
+    .span 350 5 350 23
     eval let mut index = 0
     .loop
         .if index >= suffix.length
             break
         .endif
-        .span 369 9 369 55
+        .span 355 9 355 55
         eval let value_ch = char_at(value, offset + index)
-        .span 370 9 370 48
+        .span 356 9 356 48
         eval let suffix_ch = char_at(suffix, index)
         .if value_ch != suffix_ch
-            .span 372 13 372 26
+            .span 358 13 358 26
             ret false
         .endif
-        .span 374 9 374 27
+        .span 360 9 360 27
         eval index = index + 1
     .endloop
-    .span 376 5 376 17
+    .span 362 5 362 17
     ret true
 .endfn
 
 .fn descriptor_find_top_level(value -> string, needle -> string) -> number
 .meta return number
 .meta effects none
-    .span 379 30 379 45
+    .span 365 30 365 45
     .param value -> string
-    .span 379 47 379 63
+    .span 365 47 365 63
     .param needle -> string
-    .span 380 5 380 42
+    .span 366 5 366 42
     eval let trimmed = descriptor_trim(value)
     .if needle.length != 1
-        .span 382 9 382 19
+        .span 368 9 368 19
         ret -1
     .endif
-    .span 384 5 384 37
+    .span 370 5 370 37
     eval let target = char_at(needle, 0)
-    .span 385 5 385 23
+    .span 371 5 371 23
     eval let mut index = 0
-    .span 386 5 386 29
+    .span 372 5 372 29
     eval let mut paren_depth = 0
-    .span 387 5 387 29
+    .span 373 5 373 29
     eval let mut angle_depth = 0
-    .span 388 5 388 31
+    .span 374 5 374 31
     eval let mut bracket_depth = 0
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 393 5 393 38
+        .span 379 5 379 38
         eval let ch = char_at(trimmed, index)
         .if ch == "("
-            .span 395 13 395 43
+            .span 381 13 381 43
             eval paren_depth = paren_depth + 1
         .else
             .if ch == ")"
                 .if paren_depth > 0
-                    .span 398 17 398 47
+                    .span 384 17 384 47
                     eval paren_depth = paren_depth - 1
                 .endif
             .else
                 .if ch == "<"
-                    .span 401 13 401 43
+                    .span 387 13 387 43
                     eval angle_depth = angle_depth + 1
                 .else
                     .if ch == ">"
                         .if angle_depth > 0
-                            .span 404 17 404 47
+                            .span 390 17 390 47
                             eval angle_depth = angle_depth - 1
                         .endif
                     .else
                         .if ch == "["
-                            .span 407 13 407 47
+                            .span 393 13 393 47
                             eval bracket_depth = bracket_depth + 1
                         .else
                             .if ch == "]"
                                 .if bracket_depth > 0
-                                    .span 410 17 410 51
+                                    .span 396 17 396 51
                                     eval bracket_depth = bracket_depth - 1
                                 .endif
                             .endif
@@ -821,75 +815,75 @@
             .endif
         .endif
         .if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0
-            .span 414 13 414 26
+            .span 400 13 400 26
             ret index
         .endif
-        .span 416 9 416 27
+        .span 402 9 402 27
         eval index = index + 1
     .endloop
-    .span 418 5 418 15
+    .span 404 5 404 15
     ret -1
 .endfn
 
 .fn descriptor_strip_outer_parens(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 421 34 421 49
+    .span 407 34 407 49
     .param value -> string
-    .span 422 5 422 46
+    .span 408 5 408 46
     eval let mut current = descriptor_trim(value)
     .loop
         .if current.length < 2
-            .span 425 13 425 28
+            .span 411 13 411 28
             ret current
         .endif
         .if char_at(current, 0) != "("
-            .span 428 13 428 28
+            .span 414 13 414 28
             ret current
         .endif
         .if char_at(current, current.length - 1) != ")"
-            .span 431 13 431 28
+            .span 417 13 417 28
             ret current
         .endif
-        .span 433 9 433 27
+        .span 419 9 419 27
         eval let mut depth = 0
-        .span 434 9 434 27
+        .span 420 9 420 27
         eval let mut index = 0
-        .span 435 9 435 30
+        .span 421 9 421 30
         eval let mut valid = true
         .loop
             .if index >= current.length
                 break
             .endif
-            .span 440 13 440 46
+            .span 426 13 426 46
             eval let ch = char_at(current, index)
             .if ch == "("
-                .span 442 17 442 35
+                .span 428 17 428 35
                 eval depth = depth + 1
             .else
                 .if ch == ")"
-                    .span 444 17 444 35
+                    .span 430 17 430 35
                     eval depth = depth - 1
                     .if depth < 0
-                        .span 446 21 446 35
+                        .span 432 21 432 35
                         eval valid = false
                         break
                     .endif
                     .if depth == 0 && index < current.length - 1
-                        .span 450 21 450 35
+                        .span 436 21 436 35
                         eval valid = false
                         break
                     .endif
                 .endif
             .endif
-            .span 454 13 454 31
+            .span 440 13 440 31
             eval index = index + 1
         .endloop
         .if !valid || depth != 0
-            .span 457 13 457 28
+            .span 443 13 443 28
             ret current
         .endif
-        .span 459 9 459 78
+        .span 445 9 445 78
         eval current = descriptor_trim(substring(current, 1, current.length - 1))
     .endloop
 .endfn
@@ -897,63 +891,63 @@
 .fn split_descriptor(value -> string, separator -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 463 21 463 36
+    .span 449 21 449 36
     .param value -> string
-    .span 463 38 463 57
+    .span 449 38 449 57
     .param separator -> string
-    .span 464 5 464 42
+    .span 450 5 450 42
     eval let trimmed = descriptor_trim(value)
     .if separator.length != 1
-        .span 466 9 466 26
+        .span 452 9 452 26
         ret [trimmed]
     .endif
-    .span 468 5 468 36
+    .span 454 5 454 36
     eval let mut parts -> string[] = []
-    .span 469 5 469 23
+    .span 455 5 455 23
     eval let mut start = 0
-    .span 470 5 470 23
+    .span 456 5 456 23
     eval let mut index = 0
-    .span 471 5 471 29
+    .span 457 5 457 29
     eval let mut paren_depth = 0
-    .span 472 5 472 29
+    .span 458 5 458 29
     eval let mut angle_depth = 0
-    .span 473 5 473 31
+    .span 459 5 459 31
     eval let mut bracket_depth = 0
-    .span 474 5 474 40
+    .span 460 5 460 40
     eval let target = char_at(separator, 0)
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 479 5 479 38
+        .span 465 5 465 38
         eval let ch = char_at(trimmed, index)
         .if ch == "("
-            .span 481 13 481 43
+            .span 467 13 467 43
             eval paren_depth = paren_depth + 1
         .else
             .if ch == ")"
                 .if paren_depth > 0
-                    .span 484 17 484 47
+                    .span 470 17 470 47
                     eval paren_depth = paren_depth - 1
                 .endif
             .else
                 .if ch == "<"
-                    .span 487 13 487 43
+                    .span 473 13 473 43
                     eval angle_depth = angle_depth + 1
                 .else
                     .if ch == ">"
                         .if angle_depth > 0
-                            .span 490 17 490 47
+                            .span 476 17 476 47
                             eval angle_depth = angle_depth - 1
                         .endif
                     .else
                         .if ch == "["
-                            .span 493 13 493 47
+                            .span 479 13 479 47
                             eval bracket_depth = bracket_depth + 1
                         .else
                             .if ch == "]"
                                 .if bracket_depth > 0
-                                    .span 496 17 496 51
+                                    .span 482 17 482 51
                                     eval bracket_depth = bracket_depth - 1
                                 .endif
                             .endif
@@ -963,713 +957,485 @@
             .endif
         .endif
         .if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0
-            .span 500 13 500 60
+            .span 486 13 486 60
             eval let segment = substring(trimmed, start, index)
-            .span 501 13 501 62
+            .span 487 13 487 62
             eval parts = parts.concat([descriptor_trim(segment)])
-            .span 502 13 502 31
+            .span 488 13 488 31
             eval start = index + 1
         .endif
-        .span 504 9 504 27
+        .span 490 9 490 27
         eval index = index + 1
     .endloop
-    .span 506 5 506 58
+    .span 492 5 492 58
     eval let tail = substring(trimmed, start, trimmed.length)
-    .span 507 5 507 46
+    .span 493 5 493 46
     eval let cleaned_tail = descriptor_trim(tail)
     .if cleaned_tail.length > 0 || parts.length == 0
-        .span 509 9 509 46
+        .span 495 9 495 46
         eval parts = parts.concat([cleaned_tail])
     .endif
-    .span 511 5 511 18
+    .span 497 5 497 18
     ret parts
 .endfn
 
 .fn parse_descriptor_list(parts -> string[]) -> TypeDescriptor[]
 .meta return TypeDescriptor[]
 .meta effects none
-    .span 514 26 514 43
+    .span 500 26 500 43
     .param parts -> string[]
-    .span 515 5 515 50
+    .span 501 5 501 50
     eval let mut descriptors -> TypeDescriptor[] = []
-    .span 516 5 516 23
+    .span 502 5 502 23
     eval let mut index = 0
     .loop
         .if index >= parts.length
             break
         .endif
-        .span 521 9 521 34
+        .span 507 9 507 34
         eval let entry = parts[index]
         .if entry.length > 0
-            .span 523 13 523 78
+            .span 509 13 509 78
             eval descriptors = descriptors.concat([parse_type_descriptor(entry)])
         .endif
-        .span 525 9 525 27
+        .span 511 9 511 27
         eval index = index + 1
     .endloop
-    .span 527 5 527 24
+    .span 513 5 513 24
     ret descriptors
 .endfn
 
 .fn parse_type_descriptor(text -> string) -> TypeDescriptor
 .meta return TypeDescriptor
 .meta effects none
-    .span 530 26 530 40
+    .span 516 26 516 40
     .param text -> string
-    .span 531 5 531 55
+    .span 517 5 517 55
     eval let trimmed = descriptor_strip_outer_parens(text)
     .if trimmed.length == 0
-        .span 533 9 533 42
+        .span 519 9 519 42
         ret type_descriptor_unknown()
     .endif
-    .span 535 5 535 54
+    .span 521 5 521 54
     eval let union_parts = split_descriptor(trimmed, "|")
     .if union_parts.length > 1
-        .span 537 9 537 74
+        .span 523 9 523 74
         ret type_descriptor_union(parse_descriptor_list(union_parts))
     .endif
-    .span 539 5 539 61
+    .span 525 5 525 61
     eval let intersection_parts = split_descriptor(trimmed, "&")
     .if intersection_parts.length > 1
-        .span 541 9 541 88
+        .span 527 9 527 88
         ret type_descriptor_intersection(parse_descriptor_list(intersection_parts))
     .endif
     .if string_ends_with(trimmed, "[]")
-        .span 544 9 544 68
+        .span 530 9 530 68
         eval let inner_text = substring(trimmed, 0, trimmed.length - 2)
-        .span 545 9 545 73
+        .span 531 9 531 73
         ret type_descriptor_array(parse_type_descriptor(inner_text))
     .endif
     .if string_starts_with(trimmed, "fn(")
-        .span 548 9 548 43
+        .span 534 9 534 43
         ret type_descriptor_function()
     .endif
     .if char_at(trimmed, trimmed.length - 1) == "?"
-        .span 551 9 551 67
+        .span 537 9 537 67
         eval let base_text = substring(trimmed, 0, trimmed.length - 1)
-        .span 552 9 552 64
+        .span 538 9 538 64
         eval let base_descriptor = parse_type_descriptor(base_text)
-        .span 553 9 553 65
+        .span 539 9 539 65
         eval let void_descriptor = type_descriptor_primitive("void")
-        .span 554 9 554 74
+        .span 540 9 540 74
         ret type_descriptor_union([base_descriptor, void_descriptor])
     .endif
-    .span 556 5 556 65
+    .span 542 5 542 65
     eval let generic_index = descriptor_find_top_level(trimmed, "<")
-    .span 557 5 557 34
+    .span 543 5 543 34
     eval let mut normalized = trimmed
     .if generic_index >= 0
-        .span 559 9 559 76
+        .span 545 9 545 76
         eval normalized = descriptor_trim(substring(trimmed, 0, generic_index))
     .endif
     .if string_starts_with(normalized, "runtime.")
-        .span 562 9 562 83
+        .span 548 9 548 83
         eval normalized = descriptor_trim(substring(normalized, 8, normalized.length))
     .endif
     .if normalized == "string" || normalized == "number" || normalized == "boolean" || normalized == "void"
-        .span 565 9 565 54
+        .span 551 9 551 54
         ret type_descriptor_primitive(normalized)
     .endif
-    .span 567 5 567 46
+    .span 553 5 553 46
     ret type_descriptor_named(normalized)
 .endfn
 
 .fn check_type_primitive(value -> any, name -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 570 25 570 37
+    .span 556 25 556 37
     .param value -> any
-    .span 570 39 570 53
+    .span 556 39 556 53
     .param name -> string
     .if name == "string"
-        .span 572 9 572 44
+        .span 558 9 558 44
         ret runtime_is_string_fn(value)
     .endif
     .if name == "number"
-        .span 575 9 575 44
+        .span 561 9 561 44
         ret runtime_is_number_fn(value)
     .endif
     .if name == "boolean"
-        .span 578 9 578 45
+        .span 564 9 564 45
         ret runtime_is_boolean_fn(value)
     .endif
     .if name == "void"
-        .span 581 9 581 42
+        .span 567 9 567 42
         ret runtime_is_void_fn(value)
     .endif
-    .span 583 5 583 18
+    .span 569 5 569 18
     ret false
 .endfn
 
 .fn check_type_descriptor(value -> any, descriptor -> TypeDescriptor) -> boolean
 .meta return boolean
 .meta effects none
-    .span 586 26 586 38
+    .span 572 26 572 38
     .param value -> any
-    .span 586 40 586 68
+    .span 572 40 572 68
     .param descriptor -> TypeDescriptor
     .if descriptor.kind == "primitive"
         .if descriptor.name == null
-            .span 589 13 589 26
+            .span 575 13 575 26
             ret false
         .endif
-        .span 591 9 591 61
+        .span 577 9 577 61
         ret check_type_primitive(value, descriptor.name)
     .endif
     .if descriptor.kind == "union"
-        .span 594 9 594 27
+        .span 580 9 580 27
         eval let mut index = 0
         .loop
             .if index >= descriptor.items.length
                 break
             .endif
             .if check_type_descriptor(value, descriptor.items[index])
-                .span 600 17 600 29
+                .span 586 17 586 29
                 ret true
             .endif
-            .span 602 13 602 31
+            .span 588 13 588 31
             eval index = index + 1
         .endloop
-        .span 604 9 604 22
+        .span 590 9 590 22
         ret false
     .endif
     .if descriptor.kind == "intersection"
-        .span 607 9 607 27
+        .span 593 9 593 27
         eval let mut index = 0
         .loop
             .if index >= descriptor.items.length
                 break
             .endif
             .if !check_type_descriptor(value, descriptor.items[index])
-                .span 613 17 613 30
+                .span 599 17 599 30
                 ret false
             .endif
-            .span 615 13 615 31
+            .span 601 13 601 31
             eval index = index + 1
         .endloop
-        .span 617 9 617 44
+        .span 603 9 603 44
         ret descriptor.items.length > 0
     .endif
     .if descriptor.kind == "array"
         .if descriptor.items.length == 0
-            .span 621 13 621 47
+            .span 607 13 607 47
             ret runtime_is_array_fn(value)
         .endif
         .if !runtime_is_array_fn(value)
-            .span 624 13 624 26
+            .span 610 13 610 26
             ret false
         .endif
-        .span 626 9 626 54
+        .span 612 9 612 54
         eval let element_descriptor = descriptor.items[0]
-        .span 627 9 627 27
+        .span 613 9 613 27
         eval let mut index = 0
         .loop
             .if index >= value.length
                 break
             .endif
             .if !check_type_descriptor(value[index], element_descriptor)
-                .span 633 17 633 30
+                .span 619 17 619 30
                 ret false
             .endif
-            .span 635 13 635 31
+            .span 621 13 621 31
             eval index = index + 1
         .endloop
-        .span 637 9 637 21
+        .span 623 9 623 21
         ret true
     .endif
     .if descriptor.kind == "function"
-        .span 640 9 640 46
+        .span 626 9 626 46
         ret runtime_is_callable_fn(value)
     .endif
     .if descriptor.kind == "named"
         .if descriptor.name == null
-            .span 644 13 644 26
+            .span 630 13 630 26
             ret false
         .endif
-        .span 646 9 646 73
+        .span 632 9 632 73
         eval let resolved = runtime_resolve_runtime_type_fn(descriptor.name)
-        .span 647 9 647 56
+        .span 633 9 633 56
         ret runtime_instance_of_fn(value, resolved)
     .endif
     .if descriptor.kind == "unknown"
-        .span 650 9 650 22
+        .span 636 9 636 22
         ret false
     .endif
-    .span 652 5 652 18
+    .span 638 5 638 18
     ret false
 .endfn
 
 .fn check_type(value -> any, descriptor -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 655 15 655 27
+    .span 641 15 641 27
     .param value -> any
-    .span 655 29 655 49
+    .span 641 29 641 49
     .param descriptor -> string
-    .span 656 5 656 52
+    .span 642 5 642 52
     eval let parsed = parse_type_descriptor(descriptor)
-    .span 657 5 657 49
+    .span 643 5 643 49
     ret check_type_descriptor(value, parsed)
 .endfn
 
 .fn serve(handler -> any, config -> any? = null) -> void ![io, net]
 .meta return void
 .meta effects io, net
-    .span 660 10 660 24
+    .span 646 10 646 24
     .param handler -> any
-    .span 660 26 660 47
+    .span 646 26 646 47
     .param config -> any? = null
-    .span 661 5 661 39
+    .span 647 5 647 39
     eval runtime_serve_fn(handler, config)
 .endfn
 
 .fn clamp(value -> number, minimum -> number, maximum -> number) -> number
 .meta return number
 .meta effects none
-    .span 664 10 664 25
+    .span 650 10 650 25
     .param value -> number
-    .span 664 27 664 44
+    .span 650 27 650 44
     .param minimum -> number
-    .span 664 46 664 63
+    .span 650 46 650 63
     .param maximum -> number
     .if value < minimum
-        .span 666 9 666 24
+        .span 652 9 652 24
         ret minimum
     .endif
     .if value > maximum
-        .span 669 9 669 24
+        .span 655 9 655 24
         ret maximum
     .endif
-    .span 671 5 671 18
+    .span 657 5 657 18
     ret value
 .endfn
 
 .fn substring(text -> string, start -> number, end -> number) -> string
 .meta return string
 .meta effects none
-    .span 674 14 674 28
+    .span 660 14 660 28
     .param text -> string
-    .span 674 30 674 45
+    .span 660 30 660 45
     .param start -> number
-    .span 674 47 674 60
+    .span 660 47 660 60
     .param end -> number
-    .span 675 5 675 30
+    .span 661 5 661 30
     eval let length = text.length
     .if length == 0
-        .span 677 9 677 19
+        .span 663 9 663 19
         ret ""
     .endif
-    .span 679 5 679 56
+    .span 665 5 665 56
     eval let mut normalized_start = clamp(start, 0, length)
-    .span 680 5 680 52
+    .span 666 5 666 52
     eval let mut normalized_end = clamp(end, 0, length)
     .if normalized_start >= normalized_end
-        .span 682 9 682 19
+        .span 668 9 668 19
         ret ""
     .endif
-    .span 684 5 684 38
+    .span 670 5 670 38
     eval let mut index = normalized_start
-    .span 685 5 685 35
+    .span 671 5 671 35
     eval let mut result -> string = ""
     .loop
         .if index >= normalized_end
             break
         .endif
-        .span 690 9 690 39
+        .span 676 9 676 39
         eval result = result + text[index]
-        .span 691 9 691 27
+        .span 677 9 677 27
         eval index = index + 1
     .endloop
-    .span 693 5 693 19
+    .span 679 5 679 19
     ret result
 .endfn
 
 .fn find_char(text -> string, character -> string, start -> number = 0) -> number
 .meta return number
 .meta effects none
-    .span 696 14 696 28
+    .span 682 14 682 28
     .param text -> string
-    .span 696 30 696 49
+    .span 682 30 682 49
     .param character -> string
-    .span 696 51 696 70
+    .span 682 51 682 70
     .param start -> number = 0
-    .span 697 5 697 30
+    .span 683 5 683 30
     eval let length = text.length
     .if length == 0
-        .span 699 9 699 19
+        .span 685 9 685 19
         ret -1
     .endif
-    .span 702 5 702 38
+    .span 688 5 688 38
     eval let mut normalized_start = start
     .if normalized_start < 0
-        .span 704 9 704 30
+        .span 690 9 690 30
         eval normalized_start = 0
     .endif
     .if normalized_start >= length
-        .span 707 9 707 19
+        .span 693 9 693 19
         ret -1
     .endif
-    .span 710 5 710 32
+    .span 696 5 696 32
     eval let mut target = character
     .if target.length == 2 && char_at(target, 0) == "\\"
-        .span 712 9 712 41
+        .span 698 9 698 41
         eval let escape = char_at(target, 1)
         .if escape == "n"
-            .span 714 13 714 27
+            .span 700 13 700 27
             eval target = "\n"
         .else
             .if escape == "r"
-                .span 716 13 716 27
+                .span 702 13 702 27
                 eval target = "\r"
             .else
                 .if escape == "t"
-                    .span 718 13 718 27
+                    .span 704 13 704 27
                     eval target = "\t"
                 .endif
             .endif
         .endif
     .endif
-    .span 722 5 722 38
+    .span 708 5 708 38
     eval let mut index = normalized_start
     .loop
         .if index >= length
             break
         .endif
         .if char_at(text, index) == target
-            .span 728 13 728 26
+            .span 714 13 714 26
             ret index
         .endif
-        .span 730 9 730 27
+        .span 716 9 716 27
         eval index = index + 1
     .endloop
-    .span 733 5 733 15
+    .span 719 5 719 15
     ret -1
 .endfn
 
 .fn match_exhaustive_failed(value -> any) -> void
 .meta return void
 .meta effects none
-    .span 736 28 736 40
+    .span 722 28 722 40
     .param value -> any
-    .span 737 5 737 64
+    .span 723 5 723 64
     eval let message = "Non-exhaustive match for value {{ value }}"
-    .span 738 5 738 43
+    .span 724 5 724 43
     eval runtime_raise_value_error_fn(message)
 .endfn
 
 .fn char_code(character -> string) -> number
 .meta return number
 .meta effects none
-    .span 741 14 741 33
+    .span 727 14 727 33
     .param character -> string
     .if character.length == 0
-        .span 743 9 743 19
+        .span 729 9 729 19
         ret -1
     .endif
-    .span 746 5 746 36
+    .span 732 5 732 36
     eval let ch = char_at(character, 0)
-    .span 748 5 748 31
+    .span 734 5 734 31
     eval let digits = "0123456789"
-    .span 749 5 749 48
+    .span 735 5 735 48
     eval let digit_index = find_char(digits, ch, 0)
     .if digit_index >= 0
-        .span 752 9 752 33
+        .span 738 9 738 33
         ret 48 + digit_index
     .endif
-    .span 755 5 755 50
+    .span 741 5 741 50
     eval let lowercase = "abcdefghijklmnopqrstuvwxyz"
-    .span 756 5 756 55
+    .span 742 5 742 55
     eval let lowercase_index = find_char(lowercase, ch, 0)
     .if lowercase_index >= 0
-        .span 759 9 759 37
+        .span 745 9 745 37
         ret 97 + lowercase_index
     .endif
-    .span 762 5 762 50
+    .span 748 5 748 50
     eval let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    .span 763 5 763 55
+    .span 749 5 749 55
     eval let uppercase_index = find_char(uppercase, ch, 0)
     .if uppercase_index >= 0
-        .span 766 9 766 37
+        .span 752 9 752 37
         ret 65 + uppercase_index
     .endif
     .if ch == " "
-        .span 770 9 770 19
+        .span 756 9 756 19
         ret 32
     .endif
     .if ch == "\n"
-        .span 774 9 774 19
+        .span 760 9 760 19
         ret 10
     .endif
     .if ch == "\r"
-        .span 778 9 778 19
+        .span 764 9 764 19
         ret 13
     .endif
     .if ch == "\t"
-        .span 782 9 782 18
+        .span 768 9 768 18
         ret 9
     .endif
     .if ch == "\""
-        .span 786 9 786 19
+        .span 772 9 772 19
         ret 34
     .endif
     .if ch == "\\"
-        .span 790 9 790 19
+        .span 776 9 776 19
         ret 92
     .endif
     .if ch == "_"
-        .span 794 9 794 19
+        .span 780 9 780 19
         ret 95
     .endif
-    .span 796 5 796 37
+    .span 782 5 782 37
     ret runtime_char_code_fn(ch)
-.endfn
-
-.span 799 1 799 30
-.init-span 799 25 799 29
-.let ZERO_WIDTH_JOINER = 8205
-
-.span 801 1 1113 3
-.init-span 801 30 1113 2
-.let GRAPHEME_EXTEND_RANGES = [#element:number, 768, 879, 1155, 1161, 1425, 1469, 1471, 1471, 1473, 1474, 1476, 1477, 1479, 1479, 1552, 1562, 1611, 1631, 1648, 1648, 1750, 1756, 1759, 1764, 1767, 1768, 1770, 1773, 1809, 1809, 1840, 1866, 1958, 1968, 2027, 2035, 2045, 2045, 2070, 2073, 2075, 2083, 2085, 2087, 2089, 2093, 2137, 2139, 2200, 2207, 2250, 2273, 2275, 2307, 2362, 2364, 2366, 2383, 2385, 2391, 2402, 2403, 2433, 2435, 2492, 2492, 2494, 2500, 2503, 2504, 2507, 2509, 2519, 2519, 2530, 2531, 2558, 2558, 2561, 2563, 2620, 2620, 2622, 2626, 2631, 2632, 2635, 2637, 2641, 2641, 2672, 2673, 2677, 2677, 2689, 2691, 2748, 2748, 2750, 2757, 2759, 2761, 2763, 2765, 2786, 2787, 2810, 2815, 2817, 2819, 2876, 2876, 2878, 2884, 2887, 2888, 2891, 2893, 2901, 2903, 2914, 2915, 2946, 2946, 3006, 3010, 3014, 3016, 3018, 3021, 3031, 3031, 3072, 3076, 3132, 3132, 3134, 3140, 3142, 3144, 3146, 3149, 3157, 3158, 3170, 3171, 3201, 3203, 3260, 3260, 3262, 3268, 3270, 3272, 3274, 3277, 3285, 3286, 3298, 3299, 3315, 3315, 3328, 3331, 3387, 3388, 3390, 3396, 3398, 3400, 3402, 3405, 3415, 3415, 3426, 3427, 3457, 3459, 3530, 3530, 3535, 3540, 3542, 3542, 3544, 3551, 3570, 3571, 3633, 3633, 3636, 3642, 3655, 3662, 3761, 3761, 3764, 3772, 3784, 3790, 3864, 3865, 3893, 3893, 3895, 3895, 3897, 3897, 3902, 3903, 3953, 3972, 3974, 3975, 3981, 3991, 3993, 4028, 4038, 4038, 4139, 4158, 4182, 4185, 4190, 4192, 4194, 4196, 4199, 4205, 4209, 4212, 4226, 4237, 4239, 4239, 4250, 4253, 4957, 4959, 5906, 5909, 5938, 5940, 5970, 5971, 6002, 6003, 6068, 6099, 6109, 6109, 6155, 6157, 6159, 6159, 6277, 6278, 6313, 6313, 6432, 6443, 6448, 6459, 6679, 6683, 6741, 6750, 6752, 6780, 6783, 6783, 6832, 6862, 6912, 6916, 6964, 6980, 7019, 7027, 7040, 7042, 7073, 7085, 7142, 7155, 7204, 7223, 7376, 7378, 7380, 7400, 7405, 7405, 7412, 7412, 7415, 7417, 7616, 7679, 8400, 8432, 11503, 11505, 11647, 11647, 11744, 11775, 12330, 12335, 12441, 12442, 42607, 42610, 42612, 42621, 42654, 42655, 42736, 42737, 43010, 43010, 43014, 43014, 43019, 43019, 43043, 43047, 43052, 43052, 43136, 43137, 43188, 43205, 43232, 43249, 43263, 43263, 43302, 43309, 43335, 43347, 43392, 43395, 43443, 43456, 43493, 43493, 43561, 43574, 43587, 43587, 43596, 43597, 43643, 43645, 43696, 43696, 43698, 43700, 43703, 43704, 43710, 43711, 43713, 43713, 43755, 43759, 43765, 43766, 44003, 44010, 44012, 44013, 64286, 64286, 65024, 65039, 65056, 65071, 66045, 66045, 66272, 66272, 66422, 66426, 68097, 68099, 68101, 68102, 68108, 68111, 68152, 68154, 68159, 68159, 68325, 68326, 68900, 68903, 69291, 69292, 69373, 69375, 69446, 69456, 69506, 69509, 69632, 69634, 69688, 69702, 69744, 69744, 69747, 69748, 69759, 69762, 69808, 69818, 69826, 69826, 69888, 69890, 69927, 69940, 69957, 69958, 70003, 70003, 70016, 70018, 70067, 70080, 70089, 70092, 70094, 70095, 70188, 70199, 70206, 70206, 70209, 70209, 70367, 70378, 70400, 70403, 70459, 70460, 70462, 70468, 70471, 70472, 70475, 70477, 70487, 70487, 70498, 70499, 70502, 70508, 70512, 70516, 70709, 70726, 70750, 70750, 70832, 70851, 71087, 71093, 71096, 71104, 71132, 71133, 71216, 71232, 71339, 71351, 71453, 71467, 71724, 71738, 71984, 71989, 71991, 71992, 71995, 71998, 72000, 72000, 72002, 72003, 72145, 72151, 72154, 72160, 72164, 72164, 72193, 72202, 72243, 72249, 72251, 72254, 72263, 72263, 72273, 72283, 72330, 72345, 72751, 72758, 72760, 72767, 72850, 72871, 72873, 72886, 73009, 73014, 73018, 73018, 73020, 73021, 73023, 73029, 73031, 73031, 73098, 73102, 73104, 73105, 73107, 73111, 73459, 73462, 73472, 73473, 73475, 73475, 73524, 73530, 73534, 73538, 78912, 78912, 78919, 78933, 92912, 92916, 92976, 92982, 94031, 94031, 94033, 94087, 94095, 94098, 94180, 94180, 94192, 94193, 113821, 113822, 118528, 118573, 118576, 118598, 119141, 119145, 119149, 119154, 119163, 119170, 119173, 119179, 119210, 119213, 119362, 119364, 121344, 121398, 121403, 121452, 121461, 121461, 121476, 121476, 121499, 121503, 121505, 121519, 122880, 122886, 122888, 122904, 122907, 122913, 122915, 122916, 122918, 122922, 123023, 123023, 123184, 123190, 123566, 123566, 123628, 123631, 124140, 124143, 125136, 125142, 125252, 125258, 127995, 127999, 917760, 917999]
-
-.fn is_regional_indicator(codepoint -> number) -> boolean
-.meta return boolean
-.meta effects none
-    .span 1115 26 1115 45
-    .param codepoint -> number
-    .span 1116 5 1116 55
-    ret codepoint >= 127462 && codepoint <= 127487
-.endfn
-
-.fn is_variation_selector(codepoint -> number) -> boolean
-.meta return boolean
-.meta effects none
-    .span 1119 26 1119 45
-    .param codepoint -> number
-    .if codepoint >= 65024 && codepoint <= 65039
-        .span 1121 9 1121 21
-        ret true
-    .endif
-    .span 1123 5 1123 55
-    ret codepoint >= 917760 && codepoint <= 917999
-.endfn
-
-.fn is_emoji_modifier(codepoint -> number) -> boolean
-.meta return boolean
-.meta effects none
-    .span 1126 22 1126 41
-    .param codepoint -> number
-    .span 1127 5 1127 55
-    ret codepoint >= 127995 && codepoint <= 127999
-.endfn
-
-.fn is_codepoint_in_ranges(codepoint -> number, ranges -> number[]) -> boolean
-.meta return boolean
-.meta effects none
-    .span 1130 27 1130 46
-    .param codepoint -> number
-    .span 1130 48 1130 66
-    .param ranges -> number[]
-    .span 1131 5 1131 23
-    eval let mut index = 0
-    .loop
-        .if index >= ranges.length
-            break
-        .endif
-        .span 1136 9 1136 35
-        eval let start = ranges[index]
-        .span 1137 9 1137 37
-        eval let end = ranges[index + 1]
-        .if codepoint < start
-            break
-        .endif
-        .if codepoint <= end
-            .span 1142 13 1142 25
-            ret true
-        .endif
-        .span 1144 9 1144 27
-        eval index = index + 2
-    .endloop
-    .span 1146 5 1146 18
-    ret false
-.endfn
-
-.fn is_grapheme_extend(codepoint -> number) -> boolean
-.meta return boolean
-.meta effects none
-    .span 1149 23 1149 42
-    .param codepoint -> number
-    .if codepoint < 0
-        .span 1151 9 1151 22
-        ret false
-    .endif
-    .if is_variation_selector(codepoint)
-        .span 1154 9 1154 21
-        ret true
-    .endif
-    .if is_emoji_modifier(codepoint)
-        .span 1157 9 1157 21
-        ret true
-    .endif
-    .span 1159 5 1159 70
-    ret is_codepoint_in_ranges(codepoint, GRAPHEME_EXTEND_RANGES)
-.endfn
-
-.fn iter_grapheme_clusters(text -> string) -> string[]
-.meta return string[]
-.meta effects none
-    .span 1162 27 1162 41
-    .param text -> string
-    .span 1163 5 1163 39
-    eval let mut clusters -> string[] = []
-    .if text.length == 0
-        .span 1165 9 1165 25
-        ret clusters
-    .endif
-    .span 1168 5 1168 40
-    eval let mut current = char_at(text, 0)
-    .span 1169 5 1169 44
-    eval let mut prev_code = char_code(current)
-    .span 1170 5 1170 62
-    eval let mut prev_was_joiner = prev_code == ZERO_WIDTH_JOINER
-    .span 1171 5 1171 60
-    eval let mut prev_was_ri = is_regional_indicator(prev_code)
-    .span 1172 5 1172 31
-    eval let mut ri_run_length = 0
-    .if prev_was_ri
-        .span 1174 9 1174 27
-        eval ri_run_length = 1
-    .endif
-    .span 1177 5 1177 23
-    eval let mut index = 1
-    .loop
-        .if index >= text.length
-            break
-        .endif
-        .span 1183 5 1183 42
-        eval let character = char_at(text, index)
-        .span 1184 9 1184 46
-        eval let codepoint = char_code(character)
-        .span 1185 9 1185 56
-        eval let is_joiner = codepoint == ZERO_WIDTH_JOINER
-        .span 1186 9 1186 55
-        eval let is_extend = is_grapheme_extend(codepoint)
-        .span 1187 9 1187 54
-        eval let is_ri = is_regional_indicator(codepoint)
-        .span 1189 9 1189 35
-        eval let mut start_new = false
-        .if prev_code == 13 && codepoint == 10
-            .span 1191 13 1191 31
-            eval start_new = false
-        .else
-            .if prev_was_joiner
-                .span 1193 13 1193 31
-                eval start_new = false
-            .else
-                .if is_joiner
-                    .span 1195 13 1195 31
-                    eval start_new = false
-                .else
-                    .if is_extend
-                        .span 1197 13 1197 31
-                        eval start_new = false
-                    .else
-                        .if is_ri && prev_was_ri && ri_run_length % 2 == 1
-                            .span 1199 13 1199 31
-                            eval start_new = false
-                        .else
-                            .span 1201 13 1201 30
-                            eval start_new = true
-                        .endif
-                    .endif
-                .endif
-            .endif
-        .endif
-        .if start_new
-            .span 1205 13 1205 51
-            eval clusters = clusters.concat([current])
-            .span 1206 13 1206 33
-            eval current = character
-            .if is_ri
-                .span 1208 17 1208 35
-                eval ri_run_length = 1
-            .else
-                .span 1210 17 1210 35
-                eval ri_run_length = 0
-            .endif
-        .else
-            .span 1213 13 1213 43
-            eval current = current + character
-            .if is_ri
-                .span 1215 17 1215 51
-                eval ri_run_length = ri_run_length + 1
-            .else
-                .if !is_joiner && !is_extend
-                    .span 1217 17 1217 35
-                    eval ri_run_length = 0
-                .endif
-            .endif
-        .endif
-        .span 1221 9 1221 31
-        eval prev_code = codepoint
-        .span 1222 9 1222 37
-        eval prev_was_joiner = is_joiner
-        .if is_joiner
-            .span 1224 13 1224 33
-            eval prev_was_ri = false
-            .span 1225 13 1225 31
-            eval ri_run_length = 0
-        .else
-            .if is_extend
-                noop
-            .else
-                .span 1229 13 1229 33
-                eval prev_was_ri = is_ri
-                .if !is_ri
-                    .span 1231 17 1231 35
-                    eval ri_run_length = 0
-                .endif
-            .endif
-        .endif
-        .span 1235 9 1235 27
-        eval index = index + 1
-    .endloop
-    .span 1238 5 1238 43
-    eval clusters = clusters.concat([current])
-    .span 1239 5 1239 21
-    ret clusters
 .endfn
 
 .fn grapheme_count(text -> string) -> number
 .meta return number
 .meta effects none
-    .span 1242 19 1242 33
+    .span 786 19 786 33
     .param text -> string
-    .span 1243 5 1243 49
-    eval let clusters = iter_grapheme_clusters(text)
-    .span 1244 5 1244 28
-    ret clusters.length
+    .span 787 5 787 44
+    ret runtime_grapheme_count_fn(text)
 .endfn
 
 .fn grapheme_at(text -> string, index -> number) -> string
 .meta return string
 .meta effects none
-    .span 1247 16 1247 30
+    .span 790 16 790 30
     .param text -> string
-    .span 1247 32 1247 47
+    .span 790 32 790 47
     .param index -> number
-    .if index < 0
-        .span 1249 9 1249 19
-        ret ""
-    .endif
-    .span 1251 5 1251 49
-    eval let clusters = iter_grapheme_clusters(text)
-    .if index >= clusters.length
-        .span 1253 9 1253 19
-        ret ""
-    .endif
-    .span 1255 5 1255 28
-    ret clusters[index]
+    .span 791 5 791 48
+    ret runtime_grapheme_at_fn(text, index)
 .endfn
 
 .export "" { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated }

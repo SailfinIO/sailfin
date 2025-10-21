@@ -2619,6 +2619,48 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_parallel_fn",
+        symbol: "sailfin_runtime_parallel",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_create_capability_grant",
+        symbol: "sailfin_runtime_create_capability_grant",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_create_filesystem_bridge",
+        symbol: "sailfin_runtime_create_filesystem_bridge",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_create_http_bridge",
+        symbol: "sailfin_runtime_create_http_bridge",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["net"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_create_model_bridge",
+        symbol: "sailfin_runtime_create_model_bridge",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["model"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_log_execution_fn",
+        symbol: "sailfin_runtime_log_execution",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_to_debug_string_fn",
         symbol: "sailfin_runtime_to_debug_string",
         return_type: "i8*",
@@ -2818,6 +2860,29 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["channel"],
     });
     
+    // Collection helpers
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_map_fn",
+        symbol: "sailfin_runtime_array_map",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_filter_fn",
+        symbol: "sailfin_runtime_array_filter",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_reduce_fn",
+        symbol: "sailfin_runtime_array_reduce",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*", "i8*"],
+        effects: [],
+    });
+
     // String utility helpers
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "substring",
@@ -2838,6 +2903,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "char_code",
         return_type: "double",
         parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_grapheme_count_fn",
+        symbol: "sailfin_runtime_grapheme_count",
+        return_type: "double",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_grapheme_at_fn",
+        symbol: "sailfin_runtime_grapheme_at",
+        return_type: "i8*",
+        parameter_types: ["i8*", "double"],
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

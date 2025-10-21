@@ -409,7 +409,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
     let mut type_annotation -> TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+        if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
         statement_tokens = append_token(statement_tokens, separator);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
@@ -961,8 +961,13 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let separator = parser_peek_raw(current);
-    let is_type_sep = separator.kind.variant == "Symbol"
-        && (separator.kind.value == ":" || separator.kind.value == "->");
+    let mut is_type_sep = false;
+    if separator.kind.variant == "Symbol" {
+        let separator_value = separator.kind.value;
+        if separator_value == ":" || separator_value == "->" {
+            is_type_sep = true;
+        }
+    }
     if !is_type_sep {
         return StructFieldParseResult { parser: parser, field: null, success: false };
     }
@@ -1392,14 +1397,20 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let separator = parser_peek_raw(current);
-    let is_type_sep = separator.kind.variant == "Symbol"
-        && (separator.kind.value == ":" || separator.kind.value == "->");
+    let is_symbol = separator.kind.variant == "Symbol";
+    let mut is_type_sep = false;
+    if is_symbol {
+        let symbol_value = separator.kind.value;
+        if symbol_value == ":" || symbol_value == "->" {
+            is_type_sep = true;
+        }
+    }
     if !is_type_sep {
         return StructFieldParseResult { parser: parser, field: null, success: false };
     }
     current = parser_advance_raw(current);
 
-    let capture = collect_until(skip_trivia(current), [";"]);
+    let capture = collect_until(skip_trivia(current), [";", ",", "}"]);
     current = capture.parser;
     let type_text = trim_text(tokens_to_text(capture.tokens));
     if type_text.length == 0 {
@@ -2704,9 +2715,12 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
             break;
         }
 
-        let should_stop = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0
-            && token.kind.variant == "Symbol"
-            && string_array_contains(terminators, token.kind.value);
+        let is_balanced = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+        let is_symbol = token.kind.variant == "Symbol";
+        let mut should_stop = false;
+        if is_balanced && is_symbol {
+            should_stop = string_array_contains(terminators, token.kind.value);
+        }
         if should_stop {
             break;
         }

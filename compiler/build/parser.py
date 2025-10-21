@@ -810,7 +810,11 @@ def parse_enum_variant_field(parser):
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
-    is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
+    is_type_sep = False
+    if separator.kind.variant == "Symbol":
+        separator_value = separator.kind.value
+        if separator_value == ":"  or  separator_value == "->":
+            is_type_sep = True
     if not is_type_sep:
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
@@ -1093,11 +1097,16 @@ def parse_struct_field(parser):
     current = parser_advance_raw(current)
     current = skip_trivia(current)
     separator = parser_peek_raw(current)
-    is_type_sep = separator.kind.variant == "Symbol"  and  (separator.kind.value == ":"  or  separator.kind.value == "->")
+    is_symbol = separator.kind.variant == "Symbol"
+    is_type_sep = False
+    if is_symbol:
+        symbol_value = separator.kind.value
+        if symbol_value == ":"  or  symbol_value == "->":
+            is_type_sep = True
     if not is_type_sep:
         return StructFieldParseResult(parser=parser, field=None, success=False)
     current = parser_advance_raw(current)
-    capture = collect_until(skip_trivia(current), [";"])
+    capture = collect_until(skip_trivia(current), [";", ",", "}"])
     current = capture.parser
     type_text = trim_text(tokens_to_text(capture.tokens))
     if len(type_text) == 0:
@@ -1962,7 +1971,11 @@ def collect_until(parser, terminators):
         token = parser_peek_raw(current)
         if token.kind.variant == "EndOfFile":
             break
-        should_stop = paren_depth == 0  and  brace_depth == 0  and  bracket_depth == 0  and  token.kind.variant == "Symbol"  and  string_array_contains(terminators, token.kind.value)
+        is_balanced = paren_depth == 0  and  brace_depth == 0  and  bracket_depth == 0
+        is_symbol = token.kind.variant == "Symbol"
+        should_stop = False
+        if is_balanced  and  is_symbol:
+            should_stop = string_array_contains(terminators, token.kind.value)
         if should_stop:
             break
         captured = append_token(captured, token)
