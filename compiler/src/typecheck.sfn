@@ -553,19 +553,22 @@ fn trim_text(value -> string) -> string {
 }
 
 fn slice_text(value -> string, start -> number, end -> number) -> string {
-    if start < 0 {
-        start = 0;
+    let mut normalized_start -> number = start;
+    let mut normalized_end -> number = end;
+
+    if normalized_start < 0 {
+        normalized_start = 0;
     }
-    if end > value.length {
-        end = value.length;
+    if normalized_end > value.length {
+        normalized_end = value.length;
     }
-    if end <= start {
+    if normalized_end <= normalized_start {
         return "";
     }
     let mut result -> string = "";
-    let mut index = start;
+    let mut index = normalized_start;
     loop {
-        if index >= end {
+        if index >= normalized_end {
             break;
         }
         result = result + value[index];

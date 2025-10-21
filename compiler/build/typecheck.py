@@ -388,16 +388,18 @@ def trim_text(value):
     return slice_text(value, start, end)
 
 def slice_text(value, start, end):
-    if start < 0:
-        start = 0
-    if end > len(value):
-        end = len(value)
-    if end <= start:
+    normalized_start = start
+    normalized_end = end
+    if normalized_start < 0:
+        normalized_start = 0
+    if normalized_end > len(value):
+        normalized_end = len(value)
+    if normalized_end <= normalized_start:
         return ""
     result = ""
-    index = start
+    index = normalized_start
     while True:
-        if index >= end:
+        if index >= normalized_end:
             break
         result = result + value[index]
         index += 1
