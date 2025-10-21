@@ -79,6 +79,12 @@ struct LayoutManifestApplication {
     diagnostics -> string[];
 }
 
+struct ImportedModuleContext {
+    manifests -> LayoutManifest[];
+    native_texts -> string[];
+    diagnostics -> string[];
+}
+
 struct LoweredLLVMFunction {
     lines -> string[];
     diagnostics -> string[];
@@ -492,13 +498,119 @@ struct BlockLoweringResult {
 }
 
 fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
-    // TODO: Layout manifests need to be passed from stage1 layer
-    // File I/O is not available in the LLVM lowering context
-    // For now, return empty array - this causes imported types to be represented as i8*
-    // which works but generates warnings about type coercion
-    return [];
+    let context = collect_imported_module_context(imports);
+    return context.manifests;
 }
 
+fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
+    let mut manifests -> LayoutManifest[] = [];
+    let mut native_texts -> string[] = [];
+    let mut diagnostics -> string[] = [];
+    let mut seen -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        let module_path = imports[index].module;
+        let slug = resolve_import_module_slug(module_path);
+        if slug.length == 0 {
+            index += 1;
+            continue;
+        }
+        if string_array_contains(seen, slug) {
+            index += 1;
+            continue;
+        }
+        seen = append_string(seen, slug);
+
+        let manifest_path = layout_manifest_path_for_slug(slug);
+        let native_text_path = native_text_path_for_slug(slug);
+
+        let mut manifest_structs -> NativeStruct[] = [];
+        let mut manifest_enums -> NativeEnum[] = [];
+        if fs.exists(manifest_path) {
+            let manifest_contents = fs.readFile(manifest_path);
+            let parsed_manifest = parse_layout_manifest(manifest_contents);
+            manifest_structs = parsed_manifest.structs;
+            manifest_enums = parsed_manifest.enums;
+        } else {
+            diagnostics = diagnostics.concat(["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"]);
+        }
+
+        let mut native_text -> string = "";
+        if fs.exists(native_text_path) {
+            native_text = fs.readFile(native_text_path);
+        } else {
+            diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
+        }
+
+        manifests = manifests.concat([LayoutManifest {
+            structs: manifest_structs,
+            enums: manifest_enums,
+            diagnostics: [],
+        }]);
+        native_texts = native_texts.concat([native_text]);
+        index += 1;
+    }
+
+    return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
+}
+
+fn resolve_import_module_slug(module -> string) -> string {
+    let trimmed = trim_text(module);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let normalized = normalize_import_module_path(trimmed);
+    let mut start_index -> number = 0;
+    loop {
+        if start_index >= normalized.length {
+            break;
+        }
+        let ch = normalized[start_index];
+        if ch == "." || ch == "/" {
+            start_index += 1;
+            continue;
+        }
+        break;
+    }
+    let mut candidate = normalized;
+    if start_index > 0 {
+        candidate = substring(normalized, start_index, normalized.length);
+    }
+    let last_slash = find_last_index_of_char(candidate, "/");
+    if last_slash >= 0 {
+        return substring(candidate, last_slash + 1, candidate.length);
+    }
+    return candidate;
+}
+
+fn layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".layout-manifest";
+}
+
+fn native_text_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".sfn-asm";
+}
+
+fn normalize_import_module_path(value -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\\" {
+            result = result + "/";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return result;
+}
 fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
     if manifest == null {
         return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
@@ -562,16 +674,25 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
     };
 }
 
-fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult {
-    return lower_to_llvm_with_context(native_module, [], []);
+fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return lower_to_llvm_with_context(native_module, [], [], []);
+    }
+    let parse = parse_native_artifact(artifact.contents);
+    let import_context = collect_imported_module_context(parse.imports);
+    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
 
 fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
-    return lower_to_llvm_with_context(native_module, imported_manifests, []);
+    return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
 }
 
-fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
     let mut diagnostics -> string[] = [];
+    if imported_diagnostics.length > 0 {
+        diagnostics = diagnostics.concat(imported_diagnostics);
+    }
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
@@ -619,7 +740,6 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         let mut manifest_for_module -> LayoutManifest? = null;
         if text_index < manifest_count {
             let candidate_manifest = imported_manifests[text_index];
-            diagnostics = diagnostics.concat(candidate_manifest.diagnostics);
             manifest_for_module = candidate_manifest;
         }
         if native_text.length == 0 {
@@ -632,9 +752,8 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             continue;
         }
 
-    let imported_parse = parse_native_artifact(native_text);
+        let imported_parse = parse_native_artifact(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
-        diagnostics = diagnostics.concat(applied_import.diagnostics);
 
         imported_structs = imported_structs.concat(applied_import.structs);
         imported_enums = imported_enums.concat(applied_import.enums);
@@ -652,7 +771,6 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
                 break;
             }
             let leftover_manifest = imported_manifests[manifest_index];
-            diagnostics = diagnostics.concat(leftover_manifest.diagnostics);
             imported_structs = imported_structs.concat(leftover_manifest.structs);
             imported_enums = imported_enums.concat(leftover_manifest.enums);
             manifest_index += 1;

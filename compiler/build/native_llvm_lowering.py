@@ -128,6 +128,15 @@ class LayoutManifestApplication:
     def __repr__(self):
         return runtime.struct_repr('LayoutManifestApplication', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class ImportedModuleContext:
+    def __init__(self, manifests, native_texts, diagnostics):
+        self.manifests = manifests
+        self.native_texts = native_texts
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('ImportedModuleContext', [runtime.struct_field('manifests', self.manifests), runtime.struct_field('native_texts', self.native_texts), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class LoweredLLVMFunction:
     def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
         self.lines = lines
@@ -744,7 +753,90 @@ class LoadLocalResult:
 
 def load_imported_layout_manifests(imports):
     # effects: io
-    return []
+    context = collect_imported_module_context(imports)
+    return context.manifests
+
+def collect_imported_module_context(imports):
+    # effects: io
+    manifests = []
+    native_texts = []
+    diagnostics = []
+    seen = []
+    index = 0
+    while True:
+        if index >= len(imports):
+            break
+        module_path = imports[index].module
+        slug = resolve_import_module_slug(module_path)
+        if len(slug) == 0:
+            index += 1
+            continue
+        if string_array_contains(seen, slug):
+            index += 1
+            continue
+        seen = append_string(seen, slug)
+        manifest_path = layout_manifest_path_for_slug(slug)
+        native_text_path = native_text_path_for_slug(slug)
+        manifest_structs = []
+        manifest_enums = []
+        if fs.exists(manifest_path):
+            manifest_contents = fs.readFile(manifest_path)
+            parsed_manifest = parse_layout_manifest(manifest_contents)
+            manifest_structs = parsed_manifest.structs
+            manifest_enums = parsed_manifest.enums
+        else:
+            diagnostics = (diagnostics) + (["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"])
+        native_text = ""
+        if fs.exists(native_text_path):
+            native_text = fs.readFile(native_text_path)
+        else:
+            diagnostics = (diagnostics) + (["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"])
+        manifests = (manifests) + ([LayoutManifest(structs=manifest_structs, enums=manifest_enums, diagnostics=[])])
+        native_texts = (native_texts) + ([native_text])
+        index += 1
+    return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
+
+def resolve_import_module_slug(module):
+    trimmed = trim_text(module)
+    if len(trimmed) == 0:
+        return ""
+    normalized = normalize_import_module_path(trimmed)
+    start_index = 0
+    while True:
+        if start_index >= len(normalized):
+            break
+        ch = normalized[start_index]
+        if ch == "."  or  ch == "/":
+            start_index += 1
+            continue
+        break
+    candidate = normalized
+    if start_index > 0:
+        candidate = substring(normalized, start_index, len(normalized))
+    last_slash = find_last_index_of_char(candidate, "/")
+    if last_slash >= 0:
+        return substring(candidate, last_slash + 1, len(candidate))
+    return candidate
+
+def layout_manifest_path_for_slug(slug):
+    return "build/stage2/" + slug + ".layout-manifest"
+
+def native_text_path_for_slug(slug):
+    return "build/stage2/" + slug + ".sfn-asm"
+
+def normalize_import_module_path(value):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(value):
+            break
+        ch = value[index]
+        if ch == "\\":
+            result = result + "/"
+        else:
+            result = result + ch
+        index += 1
+    return result
 
 def apply_layout_manifest_to_module(structs, enums, manifest):
     if manifest == None:
@@ -784,13 +876,21 @@ def apply_layout_manifest_entries(structs, enums, manifest):
     return LayoutManifestApplication(structs=updated_structs, enums=updated_enums, diagnostics=diagnostics)
 
 def lower_to_llvm(native_module):
-    return lower_to_llvm_with_context(native_module, [], [])
+    # effects: io
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return lower_to_llvm_with_context(native_module, [], [], [])
+    parse = parse_native_artifact(artifact.contents)
+    import_context = collect_imported_module_context(parse.imports)
+    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_with_manifests(native_module, imported_manifests):
-    return lower_to_llvm_with_context(native_module, imported_manifests, [])
+    return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
 
-def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts):
+def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
     diagnostics = []
+    if len(imported_diagnostics) > 0:
+        diagnostics = (diagnostics) + (imported_diagnostics)
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
@@ -821,7 +921,6 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         manifest_for_module = None
         if text_index < manifest_count:
             candidate_manifest = imported_manifests[text_index]
-            diagnostics = (diagnostics) + (candidate_manifest.diagnostics)
             manifest_for_module = candidate_manifest
         if len(native_text) == 0:
             if manifest_for_module != None:
@@ -832,7 +931,6 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
             continue
         imported_parse = parse_native_artifact(native_text)
         applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module)
-        diagnostics = (diagnostics) + (applied_import.diagnostics)
         imported_structs = (imported_structs) + (applied_import.structs)
         imported_enums = (imported_enums) + (applied_import.enums)
         imported_interfaces = (imported_interfaces) + (imported_parse.interfaces)
@@ -846,7 +944,6 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
             if manifest_index >= manifest_count:
                 break
             leftover_manifest = imported_manifests[manifest_index]
-            diagnostics = (diagnostics) + (leftover_manifest.diagnostics)
             imported_structs = (imported_structs) + (leftover_manifest.structs)
             imported_enums = (imported_enums) + (leftover_manifest.enums)
             manifest_index += 1

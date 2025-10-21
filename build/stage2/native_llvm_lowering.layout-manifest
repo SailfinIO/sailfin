@@ -60,6 +60,11 @@
 .layout field enums type=NativeEnum[] offset=8 size=8 align=8
 .layout field diagnostics type=string[] offset=16 size=8 align=8
 
+.layout struct name=ImportedModuleContext size=24 align=8
+.layout field manifests type=LayoutManifest[] offset=0 size=8 align=8
+.layout field native_texts type=string[] offset=8 size=8 align=8
+.layout field diagnostics type=string[] offset=16 size=8 align=8
+
 .layout struct name=LoweredLLVMFunction size=32 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8

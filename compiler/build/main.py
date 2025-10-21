@@ -145,9 +145,9 @@ def compile_to_native_llvm_with_context(source, manifest_contents, native_artifa
             manifests = (manifests) + ([LayoutManifest(structs=[], enums=[], diagnostics=[])])
         else:
             parsed = parse_layout_manifest(manifest_text)
-            manifests = (manifests) + ([parsed])
+            manifests = (manifests) + ([LayoutManifest(structs=parsed.structs, enums=parsed.enums, diagnostics=[])])
         manifest_index += 1
-    lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts)
+    lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, [])
     combined = []
     combined = (combined) + (native_result.diagnostics)
     combined = (combined) + (lowered.diagnostics)

@@ -80,6 +80,7 @@ source_filename = "sailfin"
 %StringPointerResult = type { { i8**, i64 }*, double, i8* }
 %LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %CapabilityManifest, { %StringConstant**, i64 }* }
 %LayoutManifestApplication = type { { %NativeStruct**, i64 }*, { %NativeEnum**, i64 }*, { i8**, i64 }* }
+%ImportedModuleContext = type { { %LayoutManifest**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
 %LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
 %BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
 %ParameterBinding = type { i8*, i8*, i8*, i8*, i1, %NativeSourceSpan* }
@@ -635,10 +636,10 @@ entry:
   %t9 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t84 = phi { %LayoutManifest*, i64 }* [ %t8, %entry ], [ %t82, %loop.latch2 ]
-  %t85 = phi double [ %t9, %entry ], [ %t83, %loop.latch2 ]
-  store { %LayoutManifest*, i64 }* %t84, { %LayoutManifest*, i64 }** %l1
-  store double %t85, double* %l2
+  %t95 = phi { %LayoutManifest*, i64 }* [ %t8, %entry ], [ %t93, %loop.latch2 ]
+  %t96 = phi double [ %t9, %entry ], [ %t94, %loop.latch2 ]
+  store { %LayoutManifest*, i64 }* %t95, { %LayoutManifest*, i64 }** %l1
+  store double %t96, double* %l2
   br label %loop.body1
 loop.body1:
   %t10 = load double, double* %l2
@@ -720,145 +721,165 @@ else7:
   store %LayoutManifest %t64, %LayoutManifest* %l4
   %t65 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
   %t66 = load %LayoutManifest, %LayoutManifest* %l4
-  %t67 = call noalias i8* @malloc(i64 24)
-  %t68 = bitcast i8* %t67 to %LayoutManifest*
-  store %LayoutManifest %t66, %LayoutManifest* %t68
-  %t69 = alloca [1 x i8*]
-  %t70 = getelementptr [1 x i8*], [1 x i8*]* %t69, i32 0, i32 0
-  %t71 = getelementptr i8*, i8** %t70, i64 0
-  store i8* %t67, i8** %t71
-  %t72 = alloca { i8**, i64 }
-  %t73 = getelementptr { i8**, i64 }, { i8**, i64 }* %t72, i32 0, i32 0
-  store i8** %t70, i8*** %t73
-  %t74 = getelementptr { i8**, i64 }, { i8**, i64 }* %t72, i32 0, i32 1
-  store i64 1, i64* %t74
-  %t75 = bitcast { %LayoutManifest*, i64 }* %t65 to { i8**, i64 }*
-  %t76 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t75, { i8**, i64 }* %t72)
-  %t77 = bitcast { i8**, i64 }* %t76 to { %LayoutManifest*, i64 }*
-  store { %LayoutManifest*, i64 }* %t77, { %LayoutManifest*, i64 }** %l1
+  %t67 = extractvalue %LayoutManifest %t66, 0
+  %t68 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t67, 0
+  %t69 = load %LayoutManifest, %LayoutManifest* %l4
+  %t70 = extractvalue %LayoutManifest %t69, 1
+  %t71 = insertvalue %LayoutManifest %t68, { %NativeEnum**, i64 }* %t70, 1
+  %t72 = alloca [0 x i8*]
+  %t73 = getelementptr [0 x i8*], [0 x i8*]* %t72, i32 0, i32 0
+  %t74 = alloca { i8**, i64 }
+  %t75 = getelementptr { i8**, i64 }, { i8**, i64 }* %t74, i32 0, i32 0
+  store i8** %t73, i8*** %t75
+  %t76 = getelementptr { i8**, i64 }, { i8**, i64 }* %t74, i32 0, i32 1
+  store i64 0, i64* %t76
+  %t77 = insertvalue %LayoutManifest %t71, { i8**, i64 }* %t74, 2
+  %t78 = call noalias i8* @malloc(i64 24)
+  %t79 = bitcast i8* %t78 to %LayoutManifest*
+  store %LayoutManifest %t77, %LayoutManifest* %t79
+  %t80 = alloca [1 x i8*]
+  %t81 = getelementptr [1 x i8*], [1 x i8*]* %t80, i32 0, i32 0
+  %t82 = getelementptr i8*, i8** %t81, i64 0
+  store i8* %t78, i8** %t82
+  %t83 = alloca { i8**, i64 }
+  %t84 = getelementptr { i8**, i64 }, { i8**, i64 }* %t83, i32 0, i32 0
+  store i8** %t81, i8*** %t84
+  %t85 = getelementptr { i8**, i64 }, { i8**, i64 }* %t83, i32 0, i32 1
+  store i64 1, i64* %t85
+  %t86 = bitcast { %LayoutManifest*, i64 }* %t65 to { i8**, i64 }*
+  %t87 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t86, { i8**, i64 }* %t83)
+  %t88 = bitcast { i8**, i64 }* %t87 to { %LayoutManifest*, i64 }*
+  store { %LayoutManifest*, i64 }* %t88, { %LayoutManifest*, i64 }** %l1
   br label %merge8
 merge8:
-  %t78 = phi { %LayoutManifest*, i64 }* [ %t62, %then6 ], [ %t77, %else7 ]
-  store { %LayoutManifest*, i64 }* %t78, { %LayoutManifest*, i64 }** %l1
-  %t79 = load double, double* %l2
-  %t80 = sitofp i64 1 to double
-  %t81 = fadd double %t79, %t80
-  store double %t81, double* %l2
+  %t89 = phi { %LayoutManifest*, i64 }* [ %t62, %then6 ], [ %t88, %else7 ]
+  store { %LayoutManifest*, i64 }* %t89, { %LayoutManifest*, i64 }** %l1
+  %t90 = load double, double* %l2
+  %t91 = sitofp i64 1 to double
+  %t92 = fadd double %t90, %t91
+  store double %t92, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t82 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t83 = load double, double* %l2
+  %t93 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
+  %t94 = load double, double* %l2
   br label %loop.header0
 afterloop3:
-  %t86 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t87 = extractvalue %EmitNativeResult %t86, 0
-  %t88 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t89 = call %LoweredLLVMResult @lower_to_llvm_with_context(%NativeModule %t87, { %LayoutManifest*, i64 }* %t88, { i8**, i64 }* %native_artifacts)
-  store %LoweredLLVMResult %t89, %LoweredLLVMResult* %l5
-  %t90 = alloca [0 x i8*]
-  %t91 = getelementptr [0 x i8*], [0 x i8*]* %t90, i32 0, i32 0
-  %t92 = alloca { i8**, i64 }
-  %t93 = getelementptr { i8**, i64 }, { i8**, i64 }* %t92, i32 0, i32 0
-  store i8** %t91, i8*** %t93
-  %t94 = getelementptr { i8**, i64 }, { i8**, i64 }* %t92, i32 0, i32 1
-  store i64 0, i64* %t94
-  store { i8**, i64 }* %t92, { i8**, i64 }** %l6
-  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t96 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t97 = extractvalue %EmitNativeResult %t96, 1
-  %t98 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t95, { i8**, i64 }* %t97)
-  store { i8**, i64 }* %t98, { i8**, i64 }** %l6
-  %t99 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t100 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t101 = extractvalue %LoweredLLVMResult %t100, 1
-  %t102 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t99, { i8**, i64 }* %t101)
-  store { i8**, i64 }* %t102, { i8**, i64 }** %l6
-  %t103 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t104 = load { i8**, i64 }, { i8**, i64 }* %t103
-  %t105 = extractvalue { i8**, i64 } %t104, 1
-  %t106 = icmp sgt i64 %t105, 0
-  %t107 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t108 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t109 = load double, double* %l2
-  %t110 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t97 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t98 = extractvalue %EmitNativeResult %t97, 0
+  %t99 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
+  %t100 = alloca [0 x i8*]
+  %t101 = getelementptr [0 x i8*], [0 x i8*]* %t100, i32 0, i32 0
+  %t102 = alloca { i8**, i64 }
+  %t103 = getelementptr { i8**, i64 }, { i8**, i64 }* %t102, i32 0, i32 0
+  store i8** %t101, i8*** %t103
+  %t104 = getelementptr { i8**, i64 }, { i8**, i64 }* %t102, i32 0, i32 1
+  store i64 0, i64* %t104
+  %t105 = call %LoweredLLVMResult @lower_to_llvm_with_context(%NativeModule %t98, { %LayoutManifest*, i64 }* %t99, { i8**, i64 }* %native_artifacts, { i8**, i64 }* %t102)
+  store %LoweredLLVMResult %t105, %LoweredLLVMResult* %l5
+  %t106 = alloca [0 x i8*]
+  %t107 = getelementptr [0 x i8*], [0 x i8*]* %t106, i32 0, i32 0
+  %t108 = alloca { i8**, i64 }
+  %t109 = getelementptr { i8**, i64 }, { i8**, i64 }* %t108, i32 0, i32 0
+  store i8** %t107, i8*** %t109
+  %t110 = getelementptr { i8**, i64 }, { i8**, i64 }* %t108, i32 0, i32 1
+  store i64 0, i64* %t110
+  store { i8**, i64 }* %t108, { i8**, i64 }** %l6
   %t111 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  br i1 %t106, label %then9, label %merge10
-then9:
-  %t112 = sitofp i64 0 to double
-  store double %t112, double* %l7
-  %t113 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t114 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t115 = load double, double* %l2
+  %t112 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t113 = extractvalue %EmitNativeResult %t112, 1
+  %t114 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t111, { i8**, i64 }* %t113)
+  store { i8**, i64 }* %t114, { i8**, i64 }** %l6
+  %t115 = load { i8**, i64 }*, { i8**, i64 }** %l6
   %t116 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t117 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t118 = load double, double* %l7
+  %t117 = extractvalue %LoweredLLVMResult %t116, 1
+  %t118 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t115, { i8**, i64 }* %t117)
+  store { i8**, i64 }* %t118, { i8**, i64 }** %l6
+  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t120 = load { i8**, i64 }, { i8**, i64 }* %t119
+  %t121 = extractvalue { i8**, i64 } %t120, 1
+  %t122 = icmp sgt i64 %t121, 0
+  %t123 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t124 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
+  %t125 = load double, double* %l2
+  %t126 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t127 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  br i1 %t122, label %then9, label %merge10
+then9:
+  %t128 = sitofp i64 0 to double
+  store double %t128, double* %l7
+  %t129 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t130 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
+  %t131 = load double, double* %l2
+  %t132 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t133 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t134 = load double, double* %l7
   br label %loop.header11
 loop.header11:
-  %t146 = phi double [ %t118, %then9 ], [ %t145, %loop.latch13 ]
-  store double %t146, double* %l7
+  %t162 = phi double [ %t134, %then9 ], [ %t161, %loop.latch13 ]
+  store double %t162, double* %l7
   br label %loop.body12
 loop.body12:
-  %t119 = load double, double* %l7
-  %t120 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t121 = load { i8**, i64 }, { i8**, i64 }* %t120
-  %t122 = extractvalue { i8**, i64 } %t121, 1
-  %t123 = sitofp i64 %t122 to double
-  %t124 = fcmp oge double %t119, %t123
-  %t125 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t126 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t127 = load double, double* %l2
-  %t128 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t130 = load double, double* %l7
-  br i1 %t124, label %then15, label %merge16
+  %t135 = load double, double* %l7
+  %t136 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t137 = load { i8**, i64 }, { i8**, i64 }* %t136
+  %t138 = extractvalue { i8**, i64 } %t137, 1
+  %t139 = sitofp i64 %t138 to double
+  %t140 = fcmp oge double %t135, %t139
+  %t141 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t142 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
+  %t143 = load double, double* %l2
+  %t144 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t145 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t146 = load double, double* %l7
+  br i1 %t140, label %then15, label %merge16
 then15:
   br label %afterloop14
 merge16:
-  %s131 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.131, i32 0, i32 0
-  %t132 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t133 = load double, double* %l7
-  %t134 = fptosi double %t133 to i64
-  %t135 = load { i8**, i64 }, { i8**, i64 }* %t132
-  %t136 = extractvalue { i8**, i64 } %t135, 0
-  %t137 = extractvalue { i8**, i64 } %t135, 1
-  %t138 = icmp uge i64 %t134, %t137
-  ; bounds check: %t138 (if true, out of bounds)
-  %t139 = getelementptr i8*, i8** %t136, i64 %t134
-  %t140 = load i8*, i8** %t139
-  %t141 = add i8* %s131, %t140
-  call void @sailfin_runtime_print_warn(i8* %t141)
-  %t142 = load double, double* %l7
-  %t143 = sitofp i64 1 to double
-  %t144 = fadd double %t142, %t143
-  store double %t144, double* %l7
+  %s147 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.147, i32 0, i32 0
+  %t148 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t149 = load double, double* %l7
+  %t150 = fptosi double %t149 to i64
+  %t151 = load { i8**, i64 }, { i8**, i64 }* %t148
+  %t152 = extractvalue { i8**, i64 } %t151, 0
+  %t153 = extractvalue { i8**, i64 } %t151, 1
+  %t154 = icmp uge i64 %t150, %t153
+  ; bounds check: %t154 (if true, out of bounds)
+  %t155 = getelementptr i8*, i8** %t152, i64 %t150
+  %t156 = load i8*, i8** %t155
+  %t157 = add i8* %s147, %t156
+  call void @sailfin_runtime_print_warn(i8* %t157)
+  %t158 = load double, double* %l7
+  %t159 = sitofp i64 1 to double
+  %t160 = fadd double %t158, %t159
+  store double %t160, double* %l7
   br label %loop.latch13
 loop.latch13:
-  %t145 = load double, double* %l7
+  %t161 = load double, double* %l7
   br label %loop.header11
 afterloop14:
   br label %merge10
 merge10:
-  %t147 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t148 = extractvalue %LoweredLLVMResult %t147, 0
-  %t149 = insertvalue %LoweredLLVMResult undef, i8* %t148, 0
-  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %t151 = insertvalue %LoweredLLVMResult %t149, { i8**, i64 }* %t150, 1
-  %t152 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t153 = extractvalue %LoweredLLVMResult %t152, 2
-  %t154 = insertvalue %LoweredLLVMResult %t151, %TraitMetadata %t153, 2
-  %t155 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t156 = extractvalue %LoweredLLVMResult %t155, 3
-  %t157 = insertvalue %LoweredLLVMResult %t154, { %FunctionEffectEntry**, i64 }* %t156, 3
-  %t158 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t159 = extractvalue %LoweredLLVMResult %t158, 4
-  %t160 = insertvalue %LoweredLLVMResult %t157, { %LifetimeRegionMetadata**, i64 }* %t159, 4
-  %t161 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t162 = extractvalue %LoweredLLVMResult %t161, 5
-  %t163 = insertvalue %LoweredLLVMResult %t160, %CapabilityManifest %t162, 5
-  %t164 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
-  %t165 = extractvalue %LoweredLLVMResult %t164, 6
-  %t166 = insertvalue %LoweredLLVMResult %t163, { %StringConstant**, i64 }* %t165, 6
-  ret %LoweredLLVMResult %t166
+  %t163 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t164 = extractvalue %LoweredLLVMResult %t163, 0
+  %t165 = insertvalue %LoweredLLVMResult undef, i8* %t164, 0
+  %t166 = load { i8**, i64 }*, { i8**, i64 }** %l6
+  %t167 = insertvalue %LoweredLLVMResult %t165, { i8**, i64 }* %t166, 1
+  %t168 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t169 = extractvalue %LoweredLLVMResult %t168, 2
+  %t170 = insertvalue %LoweredLLVMResult %t167, %TraitMetadata %t169, 2
+  %t171 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t172 = extractvalue %LoweredLLVMResult %t171, 3
+  %t173 = insertvalue %LoweredLLVMResult %t170, { %FunctionEffectEntry**, i64 }* %t172, 3
+  %t174 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t175 = extractvalue %LoweredLLVMResult %t174, 4
+  %t176 = insertvalue %LoweredLLVMResult %t173, { %LifetimeRegionMetadata**, i64 }* %t175, 4
+  %t177 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t178 = extractvalue %LoweredLLVMResult %t177, 5
+  %t179 = insertvalue %LoweredLLVMResult %t176, %CapabilityManifest %t178, 5
+  %t180 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
+  %t181 = extractvalue %LoweredLLVMResult %t180, 6
+  %t182 = insertvalue %LoweredLLVMResult %t179, { %StringConstant**, i64 }* %t181, 6
+  ret %LoweredLLVMResult %t182
 }
 
 ; fn compile_to_native_llvm_with_manifests effects: ![io]

@@ -153,12 +153,16 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
             manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
         } else {
             let parsed = parse_layout_manifest(manifest_text);
-            manifests = manifests.concat([parsed]);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
         }
         manifest_index += 1;
     }
 
-    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts);
+    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
     let mut combined -> string[] = [];
     combined = combined.concat(native_result.diagnostics);
     combined = combined.concat(lowered.diagnostics);
