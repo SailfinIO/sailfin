@@ -959,6 +959,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     context_functions = concat_native_functions(local_functions, imported_functions)
     context_functions = concat_native_functions(context_functions, imported_struct_methods)
     runtime_helpers = collect_runtime_helper_targets(local_functions)
+    runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     direct_effects = collect_direct_function_effects(context_functions)
     call_graph = collect_function_call_graph(context_functions)
     aggregated_effects = propagate_function_effects(direct_effects, call_graph)
@@ -2174,8 +2175,11 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.post", symbol="sailfin_intrinsic_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_read_file", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.readFile", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_file", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.writeFile", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.listDirectory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http_get", symbol="sailfin_adapter_http_get", return_type="i8*", parameter_types=["i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http_post", symbol="sailfin_adapter_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="model_invoke_with_prompt", symbol="sailfin_adapter_model_invoke_with_prompt", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["model"]))
@@ -5192,11 +5196,16 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics, string_constants=[])
     literal_candidate = trim_text(stripped)
     if literal_candidate == "runtime":
-        runtime_temp = format_temp_name(temp_index)
-        current_lines = lines
-        current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime")
-        operand = LLVMOperand(llvm_type="i8*", value=runtime_temp)
-        return ExpressionResult(lines=current_lines, temp_index=temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=[])
+        runtime_result = lower_runtime_global_reference(temp_index, lines)
+        combined_diagnostics = (diagnostics) + (runtime_result.diagnostics)
+        return ExpressionResult(lines=runtime_result.lines, temp_index=runtime_result.temp_index, operand=runtime_result.operand, diagnostics=combined_diagnostics, string_constants=runtime_result.string_constants)
+    if literal_candidate == "fs":
+        runtime_result = lower_runtime_global_reference(temp_index, lines)
+        diagnostics = (diagnostics) + (runtime_result.diagnostics)
+        if runtime_result.operand == None:
+            return ExpressionResult(lines=runtime_result.lines, temp_index=runtime_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=runtime_result.string_constants)
+        field_result = lower_dynamic_member_access("fs", runtime_result.operand, runtime_result.temp_index, runtime_result.lines, diagnostics, runtime_result.string_constants)
+        return ExpressionResult(lines=field_result.lines, temp_index=field_result.temp_index, operand=field_result.operand, diagnostics=field_result.diagnostics, string_constants=field_result.string_constants)
     if is_string_literal(literal_candidate):
         if is_character_literal(literal_candidate):
             char_value = get_character_literal_value(literal_candidate)
@@ -6027,8 +6036,7 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
             if enum_info_candidate != None:
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, True, current_temp, current_lines, diagnostics, collected_string_constants, expected_type)
             if base_operand.llvm_type == "i8*":
-                diagnostics = append_string(diagnostics, "llvm lowering: member access on opaque type `i8*` (field `" + parse.field + "`) - layout information not available (check if layout manifest exists)")
-                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants)
             if base_operand.llvm_type != "double"  and  base_operand.llvm_type != "i8":
                 diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
@@ -6039,6 +6047,8 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
             enum_info_candidate = find_enum_info_by_llvm_type(context, base_operand.llvm_type)
             if enum_info_candidate != None:
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, False, current_temp, current_lines, diagnostics, collected_string_constants, expected_type)
+            if base_operand.llvm_type == "i8*":
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants)
             if base_operand.llvm_type != "double"  and  base_operand.llvm_type != "i8":
                 diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
@@ -6062,6 +6072,35 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
     current_temp += 1
     operand = LLVMOperand(llvm_type=field_info.llvm_type, value=extract_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+
+def lower_dynamic_member_access(field, base_operand, temp_index, lines, diagnostics, string_constants):
+    current_lines = lines
+    current_temp = temp_index
+    collected = string_constants
+    sanitized_field = sanitize_symbol(field)
+    constant_name = "@.runtime.field." + sanitized_field
+    existing_constant = find_string_constant_by_name(collected, constant_name)
+    field_constant = StringConstant(name=constant_name, content=field, byte_count=len(field))
+    if existing_constant != None:
+        field_constant = existing_constant
+    else:
+        collected = (collected) + ([field_constant])
+    pointer_result = emit_string_constant_pointer(field_constant, current_temp, current_lines)
+    current_lines = pointer_result.lines
+    current_temp = pointer_result.temp_index
+    field_pointer = pointer_result.pointer
+    call_temp = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")")
+    current_temp += 1
+    operand = LLVMOperand(llvm_type="i8*", value=call_temp)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected)
+
+def lower_runtime_global_reference(temp_index, lines):
+    runtime_temp = format_temp_name(temp_index)
+    current_lines = lines
+    current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime")
+    operand = LLVMOperand(llvm_type="i8*", value=runtime_temp)
+    return ExpressionResult(lines=current_lines, temp_index=temp_index + 1, operand=operand, diagnostics=[], string_constants=[])
 
 def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, temp_index, lines, diagnostics, string_constants, expected_type):
     current_lines = lines

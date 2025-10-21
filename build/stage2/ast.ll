@@ -31,6 +31,8 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
+declare i8* @sailfin_runtime_get_field(i8*, i8*)
+
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**

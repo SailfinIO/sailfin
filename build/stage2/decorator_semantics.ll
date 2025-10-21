@@ -38,6 +38,7 @@ declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i1 @sailfin_runtime_is_whitespace_char(i8)
 declare i1 @sailfin_runtime_is_decimal_digit(i8)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
+declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 

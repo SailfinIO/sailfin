@@ -791,7 +791,8 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
     context_functions = concat_native_functions(context_functions, imported_struct_methods);
 
-    let runtime_helpers = collect_runtime_helper_targets(local_functions);
+    let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
+    runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     let direct_effects = collect_direct_function_effects(context_functions);
     let call_graph = collect_function_call_graph(context_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
@@ -2624,6 +2625,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.readFile",
+        symbol: "sailfin_adapter_fs_read_file",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_write_file",
         symbol: "sailfin_adapter_fs_write_file",
         return_type: "void",
@@ -2631,7 +2639,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.writeFile",
+        symbol: "sailfin_adapter_fs_write_file",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_list_directory",
+        symbol: "sailfin_adapter_fs_list_directory",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.listDirectory",
         symbol: "sailfin_adapter_fs_list_directory",
         return_type: "i8*",
         parameter_types: ["i8*"],
@@ -7480,14 +7502,25 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     
     // Handle runtime global as an opaque pointer (it's a Python object in the bootstrap runtime)
     if literal_candidate == "runtime" {
-        // Load @runtime (an external global i8* pointer to the Python runtime object)
-        // The actual runtime is provided by the bootstrap Python runtime
-        /// In the future the runtime will be native code instead of Python
-        let runtime_temp = format_temp_name(temp_index);
-        let mut current_lines = lines;
-        current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime");
-        let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
-        return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        let runtime_result = lower_runtime_global_reference(temp_index, lines);
+        let combined_diagnostics = diagnostics.concat(runtime_result.diagnostics);
+        return ExpressionResult {
+            lines: runtime_result.lines,
+            temp_index: runtime_result.temp_index,
+            operand: runtime_result.operand,
+            diagnostics: combined_diagnostics,
+            string_constants: runtime_result.string_constants,
+        };
+    }
+
+    if literal_candidate == "fs" {
+        let runtime_result = lower_runtime_global_reference(temp_index, lines);
+        diagnostics = diagnostics.concat(runtime_result.diagnostics);
+        if runtime_result.operand == null {
+            return ExpressionResult { lines: runtime_result.lines, temp_index: runtime_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: runtime_result.string_constants };
+        }
+        let field_result = lower_dynamic_member_access("fs", runtime_result.operand, runtime_result.temp_index, runtime_result.lines, diagnostics, runtime_result.string_constants);
+        return ExpressionResult { lines: field_result.lines, temp_index: field_result.temp_index, operand: field_result.operand, diagnostics: field_result.diagnostics, string_constants: field_result.string_constants };
     }
 
     if is_string_literal(literal_candidate) {
@@ -8696,10 +8729,8 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            // Handle opaque imported type (i8*) - this can happen if the layout manifest wasn't found
             if base_operand.llvm_type == "i8*" {
-                diagnostics = append_string(diagnostics, "llvm lowering: member access on opaque type `i8*` (field `" + parse.field + "`) - layout information not available (check if layout manifest exists)");
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
             
             // Suppress diagnostic for fallback types (double, i8) which indicate earlier failures
@@ -8715,6 +8746,9 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
             let enum_info_candidate = find_enum_info_by_llvm_type(context, base_operand.llvm_type);
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
+            }
+            if base_operand.llvm_type == "i8*" {
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
             // Suppress diagnostic for fallback types (double, i8) which indicate earlier failures
             if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
@@ -8748,6 +8782,42 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     current_temp += 1;
     let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: extract_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+}
+
+fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut collected -> StringConstant[] = string_constants;
+
+    let sanitized_field = sanitize_symbol(field);
+    let constant_name = "@.runtime.field." + sanitized_field;
+    let existing_constant = find_string_constant_by_name(collected, constant_name);
+    let mut field_constant -> StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
+    if existing_constant != null {
+        field_constant = existing_constant;
+    } else {
+        collected = collected.concat([field_constant]);
+    }
+
+    let pointer_result = emit_string_constant_pointer(field_constant, current_temp, current_lines);
+    current_lines = pointer_result.lines;
+    current_temp = pointer_result.temp_index;
+    let field_pointer = pointer_result.pointer;
+
+    let call_temp = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
+    current_temp += 1;
+
+    let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected };
+}
+
+fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let runtime_temp = format_temp_name(temp_index);
+    let mut current_lines = lines;
+    current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime");
+    let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
+    return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: [] };
 }
 
 fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {

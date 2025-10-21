@@ -190,7 +190,10 @@ declare void @sailfin_runtime_print_info(i8*)
 declare void @sailfin_runtime_print_error(i8*)
 ; intrinsic sailfin_runtime_print_warn requires capabilities: ![io]
 declare void @sailfin_runtime_print_warn(i8*)
+; intrinsic sailfin_adapter_fs_read_file requires capabilities: ![io]
+declare i8* @sailfin_adapter_fs_read_file(i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
+declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
@@ -1019,7 +1022,7 @@ afterfor3:
 ; fn compile_source_at_path effects: ![io]
 define %ModuleCompilationResult @compile_source_at_path(i8* %source_path) {
 entry:
-  %l0 = alloca double
+  %l0 = alloca i8*
   %l1 = alloca double
   %l2 = alloca %TypecheckResult
   %l3 = alloca %EmitNativeResult
@@ -1028,159 +1031,160 @@ entry:
   %l6 = alloca i8*
   %l7 = alloca i1
   %l8 = alloca { %ModuleDiagnostics*, i64 }*
-  store double 0.0, double* %l0
-  %t0 = load double, double* %l0
-  %t1 = call double @parse_program(i8* null)
-  store double %t1, double* %l1
-  %t2 = load double, double* %l1
-  %t3 = call %TypecheckResult @typecheck_program(i8* null)
-  store %TypecheckResult %t3, %TypecheckResult* %l2
-  %t4 = load %TypecheckResult, %TypecheckResult* %l2
-  %t5 = extractvalue %TypecheckResult %t4, 0
-  %t6 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t5
-  %t7 = extractvalue { %Diagnostic**, i64 } %t6, 1
-  %t8 = icmp sgt i64 %t7, 0
-  %t9 = load double, double* %l0
-  %t10 = load double, double* %l1
-  %t11 = load %TypecheckResult, %TypecheckResult* %l2
-  br i1 %t8, label %then0, label %merge1
+  %t0 = call i8* @sailfin_adapter_fs_read_file(i8* %source_path)
+  store i8* %t0, i8** %l0
+  %t1 = load i8*, i8** %l0
+  %t2 = call double @parse_program(i8* %t1)
+  store double %t2, double* %l1
+  %t3 = load double, double* %l1
+  %t4 = call %TypecheckResult @typecheck_program(i8* null)
+  store %TypecheckResult %t4, %TypecheckResult* %l2
+  %t5 = load %TypecheckResult, %TypecheckResult* %l2
+  %t6 = extractvalue %TypecheckResult %t5, 0
+  %t7 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t6
+  %t8 = extractvalue { %Diagnostic**, i64 } %t7, 1
+  %t9 = icmp sgt i64 %t8, 0
+  %t10 = load i8*, i8** %l0
+  %t11 = load double, double* %l1
+  %t12 = load %TypecheckResult, %TypecheckResult* %l2
+  br i1 %t9, label %then0, label %merge1
 then0:
-  %t12 = bitcast i8* null to %CompiledModule*
-  %t13 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t12, 0
-  %t14 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
-  %t15 = load %TypecheckResult, %TypecheckResult* %l2
-  %t16 = extractvalue %TypecheckResult %t15, 0
-  %t17 = load double, double* %l0
-  %t18 = bitcast { %Diagnostic**, i64 }* %t16 to { %Diagnostic*, i64 }*
-  %t19 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t18, i8* null)
-  %t20 = insertvalue %ModuleDiagnostics %t14, { i8**, i64 }* %t19, 1
-  %t21 = insertvalue %ModuleDiagnostics %t20, i1 1, 2
-  %t22 = alloca [1 x %ModuleDiagnostics]
-  %t23 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t22, i32 0, i32 0
-  %t24 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t23, i64 0
-  store %ModuleDiagnostics %t21, %ModuleDiagnostics* %t24
-  %t25 = alloca { %ModuleDiagnostics*, i64 }
-  %t26 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t25, i32 0, i32 0
-  store %ModuleDiagnostics* %t23, %ModuleDiagnostics** %t26
-  %t27 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t25, i32 0, i32 1
-  store i64 1, i64* %t27
-  %t28 = bitcast { %ModuleDiagnostics*, i64 }* %t25 to { %ModuleDiagnostics**, i64 }*
-  %t29 = insertvalue %ModuleCompilationResult %t13, { %ModuleDiagnostics**, i64 }* %t28, 1
-  ret %ModuleCompilationResult %t29
+  %t13 = bitcast i8* null to %CompiledModule*
+  %t14 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t13, 0
+  %t15 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
+  %t16 = load %TypecheckResult, %TypecheckResult* %l2
+  %t17 = extractvalue %TypecheckResult %t16, 0
+  %t18 = load i8*, i8** %l0
+  %t19 = bitcast { %Diagnostic**, i64 }* %t17 to { %Diagnostic*, i64 }*
+  %t20 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t19, i8* %t18)
+  %t21 = insertvalue %ModuleDiagnostics %t15, { i8**, i64 }* %t20, 1
+  %t22 = insertvalue %ModuleDiagnostics %t21, i1 1, 2
+  %t23 = alloca [1 x %ModuleDiagnostics]
+  %t24 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t23, i32 0, i32 0
+  %t25 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t24, i64 0
+  store %ModuleDiagnostics %t22, %ModuleDiagnostics* %t25
+  %t26 = alloca { %ModuleDiagnostics*, i64 }
+  %t27 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t26, i32 0, i32 0
+  store %ModuleDiagnostics* %t24, %ModuleDiagnostics** %t27
+  %t28 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t26, i32 0, i32 1
+  store i64 1, i64* %t28
+  %t29 = bitcast { %ModuleDiagnostics*, i64 }* %t26 to { %ModuleDiagnostics**, i64 }*
+  %t30 = insertvalue %ModuleCompilationResult %t14, { %ModuleDiagnostics**, i64 }* %t29, 1
+  ret %ModuleCompilationResult %t30
 merge1:
-  %t30 = load double, double* %l1
-  %t31 = call %EmitNativeResult @emit_native(i8* null)
-  store %EmitNativeResult %t31, %EmitNativeResult* %l3
-  %t32 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t33 = extractvalue %EmitNativeResult %t32, 0
-  %t34 = call %LoweredPythonResult @lower_to_python(%NativeModule %t33)
-  store %LoweredPythonResult %t34, %LoweredPythonResult* %l4
-  %t35 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t36 = extractvalue %EmitNativeResult %t35, 1
-  %t37 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t38 = extractvalue %LoweredPythonResult %t37, 1
-  %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t36, { i8**, i64 }* %t38)
-  store { i8**, i64 }* %t39, { i8**, i64 }** %l5
-  %t40 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t41 = extractvalue %LoweredPythonResult %t40, 0
-  store i8* %t41, i8** %l6
-  %t42 = load i8*, i8** %l6
-  %t43 = call i1 @needs_python_fallback(i8* %t42)
-  store i1 %t43, i1* %l7
-  %t44 = load i1, i1* %l7
-  %t45 = load double, double* %l0
-  %t46 = load double, double* %l1
-  %t47 = load %TypecheckResult, %TypecheckResult* %l2
-  %t48 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t49 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t50 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t51 = load i8*, i8** %l6
-  %t52 = load i1, i1* %l7
-  br i1 %t44, label %then2, label %merge3
+  %t31 = load double, double* %l1
+  %t32 = call %EmitNativeResult @emit_native(i8* null)
+  store %EmitNativeResult %t32, %EmitNativeResult* %l3
+  %t33 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t34 = extractvalue %EmitNativeResult %t33, 0
+  %t35 = call %LoweredPythonResult @lower_to_python(%NativeModule %t34)
+  store %LoweredPythonResult %t35, %LoweredPythonResult* %l4
+  %t36 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t37 = extractvalue %EmitNativeResult %t36, 1
+  %t38 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t39 = extractvalue %LoweredPythonResult %t38, 1
+  %t40 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t37, { i8**, i64 }* %t39)
+  store { i8**, i64 }* %t40, { i8**, i64 }** %l5
+  %t41 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t42 = extractvalue %LoweredPythonResult %t41, 0
+  store i8* %t42, i8** %l6
+  %t43 = load i8*, i8** %l6
+  %t44 = call i1 @needs_python_fallback(i8* %t43)
+  store i1 %t44, i1* %l7
+  %t45 = load i1, i1* %l7
+  %t46 = load i8*, i8** %l0
+  %t47 = load double, double* %l1
+  %t48 = load %TypecheckResult, %TypecheckResult* %l2
+  %t49 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t50 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t52 = load i8*, i8** %l6
+  %t53 = load i1, i1* %l7
+  br i1 %t45, label %then2, label %merge3
 then2:
-  %t53 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %s54 = getelementptr inbounds [86 x i8], [86 x i8]* @.str.54, i32 0, i32 0
-  %t55 = alloca [1 x i8*]
-  %t56 = getelementptr [1 x i8*], [1 x i8*]* %t55, i32 0, i32 0
-  %t57 = getelementptr i8*, i8** %t56, i64 0
-  store i8* %s54, i8** %t57
-  %t58 = alloca { i8**, i64 }
-  %t59 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 0
-  store i8** %t56, i8*** %t59
-  %t60 = getelementptr { i8**, i64 }, { i8**, i64 }* %t58, i32 0, i32 1
-  store i64 1, i64* %t60
-  %t61 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t53, { i8**, i64 }* %t58)
-  store { i8**, i64 }* %t61, { i8**, i64 }** %l5
-  %t62 = bitcast i8* null to %CompiledModule*
-  %t63 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t62, 0
-  %t64 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
-  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t66 = insertvalue %ModuleDiagnostics %t64, { i8**, i64 }* %t65, 1
-  %t67 = insertvalue %ModuleDiagnostics %t66, i1 1, 2
-  %t68 = alloca [1 x %ModuleDiagnostics]
-  %t69 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t68, i32 0, i32 0
-  %t70 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t69, i64 0
-  store %ModuleDiagnostics %t67, %ModuleDiagnostics* %t70
-  %t71 = alloca { %ModuleDiagnostics*, i64 }
-  %t72 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t71, i32 0, i32 0
-  store %ModuleDiagnostics* %t69, %ModuleDiagnostics** %t72
-  %t73 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t71, i32 0, i32 1
-  store i64 1, i64* %t73
-  %t74 = bitcast { %ModuleDiagnostics*, i64 }* %t71 to { %ModuleDiagnostics**, i64 }*
-  %t75 = insertvalue %ModuleCompilationResult %t63, { %ModuleDiagnostics**, i64 }* %t74, 1
-  ret %ModuleCompilationResult %t75
+  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %s55 = getelementptr inbounds [86 x i8], [86 x i8]* @.str.55, i32 0, i32 0
+  %t56 = alloca [1 x i8*]
+  %t57 = getelementptr [1 x i8*], [1 x i8*]* %t56, i32 0, i32 0
+  %t58 = getelementptr i8*, i8** %t57, i64 0
+  store i8* %s55, i8** %t58
+  %t59 = alloca { i8**, i64 }
+  %t60 = getelementptr { i8**, i64 }, { i8**, i64 }* %t59, i32 0, i32 0
+  store i8** %t57, i8*** %t60
+  %t61 = getelementptr { i8**, i64 }, { i8**, i64 }* %t59, i32 0, i32 1
+  store i64 1, i64* %t61
+  %t62 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t54, { i8**, i64 }* %t59)
+  store { i8**, i64 }* %t62, { i8**, i64 }** %l5
+  %t63 = bitcast i8* null to %CompiledModule*
+  %t64 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t63, 0
+  %t65 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
+  %t66 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t67 = insertvalue %ModuleDiagnostics %t65, { i8**, i64 }* %t66, 1
+  %t68 = insertvalue %ModuleDiagnostics %t67, i1 1, 2
+  %t69 = alloca [1 x %ModuleDiagnostics]
+  %t70 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t69, i32 0, i32 0
+  %t71 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t70, i64 0
+  store %ModuleDiagnostics %t68, %ModuleDiagnostics* %t71
+  %t72 = alloca { %ModuleDiagnostics*, i64 }
+  %t73 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t72, i32 0, i32 0
+  store %ModuleDiagnostics* %t70, %ModuleDiagnostics** %t73
+  %t74 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t72, i32 0, i32 1
+  store i64 1, i64* %t74
+  %t75 = bitcast { %ModuleDiagnostics*, i64 }* %t72 to { %ModuleDiagnostics**, i64 }*
+  %t76 = insertvalue %ModuleCompilationResult %t64, { %ModuleDiagnostics**, i64 }* %t75, 1
+  ret %ModuleCompilationResult %t76
 merge3:
-  %t76 = alloca [0 x %ModuleDiagnostics]
-  %t77 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t76, i32 0, i32 0
-  %t78 = alloca { %ModuleDiagnostics*, i64 }
-  %t79 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t78, i32 0, i32 0
-  store %ModuleDiagnostics* %t77, %ModuleDiagnostics** %t79
-  %t80 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t78, i32 0, i32 1
-  store i64 0, i64* %t80
-  store { %ModuleDiagnostics*, i64 }* %t78, { %ModuleDiagnostics*, i64 }** %l8
-  %t81 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t82 = load { i8**, i64 }, { i8**, i64 }* %t81
-  %t83 = extractvalue { i8**, i64 } %t82, 1
-  %t84 = icmp sgt i64 %t83, 0
-  %t85 = load double, double* %l0
-  %t86 = load double, double* %l1
-  %t87 = load %TypecheckResult, %TypecheckResult* %l2
-  %t88 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t89 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t90 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t91 = load i8*, i8** %l6
-  %t92 = load i1, i1* %l7
-  %t93 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  br i1 %t84, label %then4, label %merge5
+  %t77 = alloca [0 x %ModuleDiagnostics]
+  %t78 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* %t77, i32 0, i32 0
+  %t79 = alloca { %ModuleDiagnostics*, i64 }
+  %t80 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t79, i32 0, i32 0
+  store %ModuleDiagnostics* %t78, %ModuleDiagnostics** %t80
+  %t81 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t79, i32 0, i32 1
+  store i64 0, i64* %t81
+  store { %ModuleDiagnostics*, i64 }* %t79, { %ModuleDiagnostics*, i64 }** %l8
+  %t82 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t83 = load { i8**, i64 }, { i8**, i64 }* %t82
+  %t84 = extractvalue { i8**, i64 } %t83, 1
+  %t85 = icmp sgt i64 %t84, 0
+  %t86 = load i8*, i8** %l0
+  %t87 = load double, double* %l1
+  %t88 = load %TypecheckResult, %TypecheckResult* %l2
+  %t89 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t90 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t91 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t92 = load i8*, i8** %l6
+  %t93 = load i1, i1* %l7
+  %t94 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  br i1 %t85, label %then4, label %merge5
 then4:
-  %t94 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
-  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t96 = insertvalue %ModuleDiagnostics %t94, { i8**, i64 }* %t95, 1
-  %t97 = insertvalue %ModuleDiagnostics %t96, i1 0, 2
-  %t98 = alloca [1 x %ModuleDiagnostics]
-  %t99 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t98, i32 0, i32 0
-  %t100 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t99, i64 0
-  store %ModuleDiagnostics %t97, %ModuleDiagnostics* %t100
-  %t101 = alloca { %ModuleDiagnostics*, i64 }
-  %t102 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t101, i32 0, i32 0
-  store %ModuleDiagnostics* %t99, %ModuleDiagnostics** %t102
-  %t103 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t101, i32 0, i32 1
-  store i64 1, i64* %t103
-  store { %ModuleDiagnostics*, i64 }* %t101, { %ModuleDiagnostics*, i64 }** %l8
+  %t95 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
+  %t96 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t97 = insertvalue %ModuleDiagnostics %t95, { i8**, i64 }* %t96, 1
+  %t98 = insertvalue %ModuleDiagnostics %t97, i1 0, 2
+  %t99 = alloca [1 x %ModuleDiagnostics]
+  %t100 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* %t99, i32 0, i32 0
+  %t101 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t100, i64 0
+  store %ModuleDiagnostics %t98, %ModuleDiagnostics* %t101
+  %t102 = alloca { %ModuleDiagnostics*, i64 }
+  %t103 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t102, i32 0, i32 0
+  store %ModuleDiagnostics* %t100, %ModuleDiagnostics** %t103
+  %t104 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t102, i32 0, i32 1
+  store i64 1, i64* %t104
+  store { %ModuleDiagnostics*, i64 }* %t102, { %ModuleDiagnostics*, i64 }** %l8
   br label %merge5
 merge5:
-  %t104 = phi { %ModuleDiagnostics*, i64 }* [ %t101, %then4 ], [ %t93, %entry ]
-  store { %ModuleDiagnostics*, i64 }* %t104, { %ModuleDiagnostics*, i64 }** %l8
-  %t105 = insertvalue %CompiledModule undef, i8* %source_path, 0
-  %t106 = load i8*, i8** %l6
-  %t107 = insertvalue %CompiledModule %t105, i8* %t106, 1
-  %t108 = alloca %CompiledModule
-  store %CompiledModule %t107, %CompiledModule* %t108
-  %t109 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t108, 0
-  %t110 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  %t111 = bitcast { %ModuleDiagnostics*, i64 }* %t110 to { %ModuleDiagnostics**, i64 }*
-  %t112 = insertvalue %ModuleCompilationResult %t109, { %ModuleDiagnostics**, i64 }* %t111, 1
-  ret %ModuleCompilationResult %t112
+  %t105 = phi { %ModuleDiagnostics*, i64 }* [ %t102, %then4 ], [ %t94, %entry ]
+  store { %ModuleDiagnostics*, i64 }* %t105, { %ModuleDiagnostics*, i64 }** %l8
+  %t106 = insertvalue %CompiledModule undef, i8* %source_path, 0
+  %t107 = load i8*, i8** %l6
+  %t108 = insertvalue %CompiledModule %t106, i8* %t107, 1
+  %t109 = alloca %CompiledModule
+  store %CompiledModule %t108, %CompiledModule* %t109
+  %t110 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t109, 0
+  %t111 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t112 = bitcast { %ModuleDiagnostics*, i64 }* %t111 to { %ModuleDiagnostics**, i64 }*
+  %t113 = insertvalue %ModuleCompilationResult %t110, { %ModuleDiagnostics**, i64 }* %t112, 1
+  ret %ModuleCompilationResult %t113
 }
 
 define { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %entries, i8* %source) {
