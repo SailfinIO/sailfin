@@ -890,8 +890,8 @@
         .span 608 9 608 23
         ret source
     .endif
-    .span 610 5 610 52
-    eval let tail_end = tail_index + tail_marker.length
+    .span 610 5 610 66
+    eval let mut tail_end -> number = tail_index + tail_marker.length
     .span 611 5 611 54
     eval tail_end = advance_to_line_end(source, tail_end)
     .span 612 5 612 49
@@ -1206,35 +1206,39 @@
     .param start -> number
     .span 800 51 800 64
     .param end -> number
-    .if start < 0
-        .span 802 9 802 19
-        eval start = 0
+    .span 801 5 801 43
+    eval let mut start_index -> number = start
+    .if start_index < 0
+        .span 803 9 803 25
+        eval start_index = 0
     .endif
-    .if end < start
-        .span 805 9 805 21
-        eval end = start
+    .span 805 5 805 39
+    eval let mut end_index -> number = end
+    .if end_index < start_index
+        .span 807 9 807 33
+        eval end_index = start_index
     .endif
-    .if start >= value.length
-        .span 808 9 808 19
+    .if start_index >= value.length
+        .span 810 9 810 19
         ret ""
     .endif
-    .if end > value.length
-        .span 811 9 811 28
-        eval end = value.length
+    .if end_index > value.length
+        .span 813 9 813 34
+        eval end_index = value.length
     .endif
-    .span 813 5 813 37
-    eval let mut index -> number = start
-    .span 814 5 814 35
+    .span 815 5 815 43
+    eval let mut index -> number = start_index
+    .span 816 5 816 35
     eval let mut result -> string = ""
     .loop
-        .if index >= end
+        .if index >= end_index
             break
         .endif
-        .span 819 9 819 40
+        .span 821 9 821 40
         eval result = result + value[index]
-        .span 820 9 820 20
+        .span 822 9 822 20
         eval index += 1
     .endloop
-    .span 822 5 822 19
+    .span 824 5 824 19
     ret result
 .endfn

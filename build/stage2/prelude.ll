@@ -16,6 +16,7 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 @.str.0 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.21 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.5 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.19 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.35 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
@@ -266,11 +267,16 @@ then4:
   %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.9, i32 0, i32 0
   ret i8* %s9
 merge5:
-  %t10 = load i8*, i8** @runtime
-  %t11 = sitofp i64 1 to double
-  %t12 = fadd double %index, %t11
-  %t13 = call double @runtimesubstring(i8* %value, double %index, double %t12)
-  ret i8* null
+  %t10 = fptosi double %index to i64
+  %t11 = getelementptr i8, i8* %value, i64 %t10
+  %t12 = load i8, i8* %t11
+  %t13 = alloca [2 x i8], align 1
+  %t14 = getelementptr [2 x i8], [2 x i8]* %t13, i32 0, i32 0
+  store i8 %t12, i8* %t14
+  %t15 = getelementptr [2 x i8], [2 x i8]* %t13, i32 0, i32 1
+  store i8 0, i8* %t15
+  %t16 = getelementptr [2 x i8], [2 x i8]* %t13, i32 0, i32 0
+  ret i8* %t16
 }
 
 define %EnumType @enum_type(i8* %name) {
@@ -2846,6 +2852,8 @@ entry:
   %l0 = alloca i64
   %l1 = alloca double
   %l2 = alloca double
+  %l3 = alloca double
+  %l4 = alloca i8*
   %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
   store i64 %t0, i64* %l0
   %t1 = load i64, i64* %l0
@@ -2877,11 +2885,61 @@ then2:
   %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.19, i32 0, i32 0
   ret i8* %s19
 merge3:
-  %t20 = load i8*, i8** @runtime
-  %t21 = load double, double* %l1
-  %t22 = load double, double* %l2
-  %t23 = call double @runtimesubstring(i8* %text, double %t21, double %t22)
-  ret i8* null
+  %t20 = load double, double* %l1
+  store double %t20, double* %l3
+  %s21 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.21, i32 0, i32 0
+  store i8* %s21, i8** %l4
+  %t22 = load i64, i64* %l0
+  %t23 = load double, double* %l1
+  %t24 = load double, double* %l2
+  %t25 = load double, double* %l3
+  %t26 = load i8*, i8** %l4
+  br label %loop.header4
+loop.header4:
+  %t51 = phi i8* [ %t26, %entry ], [ %t49, %loop.latch6 ]
+  %t52 = phi double [ %t25, %entry ], [ %t50, %loop.latch6 ]
+  store i8* %t51, i8** %l4
+  store double %t52, double* %l3
+  br label %loop.body5
+loop.body5:
+  %t27 = load double, double* %l3
+  %t28 = load double, double* %l2
+  %t29 = fcmp oge double %t27, %t28
+  %t30 = load i64, i64* %l0
+  %t31 = load double, double* %l1
+  %t32 = load double, double* %l2
+  %t33 = load double, double* %l3
+  %t34 = load i8*, i8** %l4
+  br i1 %t29, label %then8, label %merge9
+then8:
+  br label %afterloop7
+merge9:
+  %t35 = load i8*, i8** %l4
+  %t36 = load double, double* %l3
+  %t37 = fptosi double %t36 to i64
+  %t38 = getelementptr i8, i8* %text, i64 %t37
+  %t39 = load i8, i8* %t38
+  %t40 = load i8, i8* %t35
+  %t41 = add i8 %t40, %t39
+  %t42 = alloca [2 x i8], align 1
+  %t43 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  store i8 %t41, i8* %t43
+  %t44 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 1
+  store i8 0, i8* %t44
+  %t45 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
+  store i8* %t45, i8** %l4
+  %t46 = load double, double* %l3
+  %t47 = sitofp i64 1 to double
+  %t48 = fadd double %t46, %t47
+  store double %t48, double* %l3
+  br label %loop.latch6
+loop.latch6:
+  %t49 = load i8*, i8** %l4
+  %t50 = load double, double* %l3
+  br label %loop.header4
+afterloop7:
+  %t53 = load i8*, i8** %l4
+  ret i8* %t53
 }
 
 define double @find_char(i8* %text, i8* %character, double %start) {

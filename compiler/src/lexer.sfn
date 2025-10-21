@@ -6,7 +6,7 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
-import { substring, find_char, char_code } from "./string_utils";
+import { substring, char_code } from "./string_utils";
 
 struct LexerState {
     source -> string;
@@ -72,15 +72,18 @@ fn lex(source -> string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
 
-                let newline_index -> number = find_char(state.source, "\n", state.index);
-                let carriage_index -> number = find_char(state.source, "\r", state.index);
-
-                let comment_end -> number = state.source.length;
-                if newline_index != -1 {
-                    comment_end = newline_index;
-                }
-                if carriage_index != -1 && carriage_index < comment_end {
-                    comment_end = carriage_index;
+                let mut comment_end -> number = state.source.length;
+                let mut scan_index -> number = state.index;
+                loop {
+                    if scan_index >= state.source.length {
+                        break;
+                    }
+                    let scan_character = state.source[scan_index];
+                    if scan_character == "\n" || scan_character == "\r" {
+                        comment_end = scan_index;
+                        break;
+                    }
+                    scan_index += 1;
                 }
 
                 let lexeme = slice(state.source, start_index, comment_end);

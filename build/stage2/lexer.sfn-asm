@@ -3,7 +3,7 @@
 
 .import "./token" { Token, TokenKind, eof_token }
 
-.import "./string_utils" { substring, find_char, char_code }
+.import "./string_utils" { substring, char_code }
 
 .struct LexerState
     .layout struct name=LexerState size=32 align=8
@@ -90,29 +90,33 @@
                 eval state.index += 2
                 .span 73 17 73 35
                 eval state.column += 2
-                .span 75 17 75 90
-                eval let newline_index -> number = find_char(state.source, "\n", state.index)
-                .span 76 17 76 91
-                eval let carriage_index -> number = find_char(state.source, "\r", state.index)
-                .span 78 17 78 65
-                eval let comment_end -> number = state.source.length
-                .if newline_index != -1
-                    .span 80 21 80 49
-                    eval comment_end = newline_index
-                .endif
-                .if carriage_index != -1 && carriage_index < comment_end
-                    .span 83 21 83 50
-                    eval comment_end = carriage_index
-                .endif
-                .span 86 17 86 76
+                .span 75 17 75 69
+                eval let mut comment_end -> number = state.source.length
+                .span 76 17 76 60
+                eval let mut scan_index -> number = state.index
+                .loop
+                    .if scan_index >= state.source.length
+                        break
+                    .endif
+                    .span 81 21 81 67
+                    eval let scan_character = state.source[scan_index]
+                    .if scan_character == "\n" || scan_character == "\r"
+                        .span 83 25 83 50
+                        eval comment_end = scan_index
+                        break
+                    .endif
+                    .span 86 21 86 37
+                    eval scan_index += 1
+                .endloop
+                .span 89 17 89 76
                 eval let lexeme = slice(state.source, start_index, comment_end)
-                .span 87 17 87 76
+                .span 90 17 90 76
                 eval let consumed_columns -> number = comment_end - state.index
-                .span 88 17 88 43
+                .span 91 17 91 43
                 eval state.index = comment_end
-                .span 89 17 89 50
+                .span 92 17 92 50
                 eval state.column += consumed_columns
-                .span 90 17 95 20
+                .span 93 17 98 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.Comment(),
                     lexeme: lexeme,
@@ -122,44 +126,44 @@
                 continue
             .endif
             .if next == "*"
-                .span 99 17 99 47
+                .span 102 17 102 47
                 eval let start_index = state.index
-                .span 100 17 100 45
+                .span 103 17 103 45
                 eval let start_line = state.line
-                .span 101 17 101 49
+                .span 104 17 104 49
                 eval let start_column = state.column
-                .span 103 17 103 34
+                .span 106 17 106 34
                 eval state.index += 2
-                .span 104 17 104 35
+                .span 107 17 107 35
                 eval state.column += 2
                 .loop
                     .if state.index >= state.source.length
                         break
                     .endif
                     .if state.source[state.index] == "*" && peek_next_char(state) == "/"
-                        .span 111 25 111 42
+                        .span 114 25 114 42
                         eval state.index += 2
-                        .span 112 25 112 43
+                        .span 115 25 115 43
                         eval state.column += 2
                         break
                     .endif
                     .if state.source[state.index] == "\n"
-                        .span 116 25 116 42
+                        .span 119 25 119 42
                         eval state.index += 1
-                        .span 117 25 117 41
+                        .span 120 25 120 41
                         eval state.line += 1
-                        .span 118 25 118 42
+                        .span 121 25 121 42
                         eval state.column = 1
                     .else
-                        .span 120 25 120 42
+                        .span 123 25 123 42
                         eval state.index += 1
-                        .span 121 25 121 43
+                        .span 124 25 124 43
                         eval state.column += 1
                     .endif
                 .endloop
-                .span 125 17 125 76
+                .span 128 17 128 76
                 eval let lexeme = slice(state.source, start_index, state.index)
-                .span 126 17 131 20
+                .span 129 17 134 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.Comment(),
                     lexeme: lexeme,
@@ -170,68 +174,68 @@
             .endif
         .endif
         .if is_double_quote(ch)
-            .span 137 13 137 43
+            .span 140 13 140 43
             eval let start_index = state.index
-            .span 138 13 138 41
+            .span 141 13 141 41
             eval let start_line = state.line
-            .span 139 13 139 45
+            .span 142 13 142 45
             eval let start_column = state.column
-            .span 141 13 141 30
+            .span 144 13 144 30
             eval state.index += 1
-            .span 142 13 142 31
+            .span 145 13 145 31
             eval state.column += 1
-            .span 144 13 144 40
+            .span 147 13 147 40
             eval let literal -> string = ""
-            .span 145 13 145 44
+            .span 148 13 148 44
             eval let escaped -> boolean = false
             .loop
                 .if state.index >= state.source.length
                     break
                 .endif
-                .span 151 17 151 57
+                .span 154 17 154 57
                 eval let current = state.source[state.index]
                 .if !escaped && is_double_quote(current)
-                    .span 153 21 153 38
+                    .span 156 21 156 38
                     eval state.index += 1
-                    .span 154 21 154 39
+                    .span 157 21 157 39
                     eval state.column += 1
                     break
                 .endif
                 .if !escaped && is_backslash(current)
-                    .span 158 21 158 36
+                    .span 161 21 161 36
                     eval escaped = true
-                    .span 159 21 159 38
+                    .span 162 21 162 38
                     eval state.index += 1
-                    .span 160 21 160 39
+                    .span 163 21 163 39
                     eval state.column += 1
                     continue
                 .endif
                 .if escaped
-                    .span 164 21 164 67
+                    .span 167 21 167 67
                     eval literal = literal + interpret_escape(current)
-                    .span 165 21 165 37
+                    .span 168 21 168 37
                     eval escaped = false
                 .else
-                    .span 167 21 167 49
+                    .span 170 21 170 49
                     eval literal = literal + current
                 .endif
                 .if current == "\n"
-                    .span 171 21 171 38
+                    .span 174 21 174 38
                     eval state.index += 1
-                    .span 172 21 172 37
+                    .span 175 21 175 37
                     eval state.line += 1
-                    .span 173 21 173 38
+                    .span 176 21 176 38
                     eval state.column = 1
                 .else
-                    .span 175 21 175 38
+                    .span 178 21 178 38
                     eval state.index += 1
-                    .span 176 21 176 39
+                    .span 179 21 179 39
                     eval state.column += 1
                 .endif
             .endloop
-            .span 180 13 180 72
+            .span 183 13 183 72
             eval let lexeme = slice(state.source, start_index, state.index)
-            .span 181 13 186 16
+            .span 184 13 189 16
             eval tokens = append(tokens, Token {
                 kind: TokenKind.StringLiteral { value: literal },
                 lexeme: lexeme,
@@ -241,15 +245,15 @@
             continue
         .endif
         .if is_digit(ch)
-            .span 191 13 191 43
+            .span 194 13 194 43
             eval let start_index = state.index
-            .span 192 13 192 41
+            .span 195 13 195 41
             eval let start_line = state.line
-            .span 193 13 193 45
+            .span 196 13 196 45
             eval let start_column = state.column
-            .span 195 13 195 30
+            .span 198 13 198 30
             eval state.index += 1
-            .span 196 13 196 31
+            .span 199 13 199 31
             eval state.column += 1
             .loop
                 .if state.index >= state.source.length
@@ -258,18 +262,18 @@
                 .if !is_digit(state.source[state.index])
                     break
                 .endif
-                .span 205 17 205 34
+                .span 208 17 208 34
                 eval state.index += 1
-                .span 206 17 206 35
+                .span 209 17 209 35
                 eval state.column += 1
             .endloop
             .if state.index < state.source.length && state.source[state.index] == "."
-                .span 210 17 210 118
+                .span 213 17 213 118
                 eval let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1])
                 .if next_is_digit
-                    .span 212 21 212 38
+                    .span 215 21 215 38
                     eval state.index += 1
-                    .span 213 21 213 39
+                    .span 216 21 216 39
                     eval state.column += 1
                     .loop
                         .if state.index >= state.source.length
@@ -278,16 +282,16 @@
                         .if !is_digit(state.source[state.index])
                             break
                         .endif
-                        .span 221 25 221 42
+                        .span 224 25 224 42
                         eval state.index += 1
-                        .span 222 25 222 43
+                        .span 225 25 225 43
                         eval state.column += 1
                     .endloop
                 .endif
             .endif
-            .span 227 13 227 72
+            .span 230 13 230 72
             eval let lexeme = slice(state.source, start_index, state.index)
-            .span 228 13 233 16
+            .span 231 13 236 16
             eval tokens = append(tokens, Token {
                 kind: TokenKind.NumberLiteral { value: lexeme },
                 lexeme: lexeme,
@@ -297,15 +301,15 @@
             continue
         .endif
         .if is_identifier_start(ch)
-            .span 238 13 238 37
+            .span 241 13 241 37
             eval let start = state.index
-            .span 239 13 239 41
+            .span 242 13 242 41
             eval let start_line = state.line
-            .span 240 13 240 45
+            .span 243 13 243 45
             eval let start_column = state.column
-            .span 241 13 241 30
+            .span 244 13 244 30
             eval state.index += 1
-            .span 242 13 242 31
+            .span 245 13 245 31
             eval state.column += 1
             .loop
                 .if state.index >= state.source.length
@@ -314,15 +318,15 @@
                 .if !is_identifier_part(state.source[state.index])
                     break
                 .endif
-                .span 250 17 250 34
+                .span 253 17 253 34
                 eval state.index += 1
-                .span 251 17 251 35
+                .span 254 17 254 35
                 eval state.column += 1
             .endloop
-            .span 253 13 253 65
+            .span 256 13 256 65
             eval let value = slice(state.source, start, state.index)
             .if value == "true" || value == "false"
-                .span 255 17 260 20
+                .span 258 17 263 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.BooleanLiteral { value: value },
                     lexeme: value,
@@ -330,7 +334,7 @@
                     column: start_column,
                 })
             .else
-                .span 262 17 267 20
+                .span 265 17 270 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.Identifier { value: value },
                     lexeme: value,
@@ -340,25 +344,25 @@
             .endif
             continue
         .endif
-        .span 272 9 272 37
+        .span 275 9 275 37
         eval let start_line = state.line
-        .span 273 9 273 41
+        .span 276 9 276 41
         eval let start_column = state.column
-        .span 274 9 274 25
+        .span 277 9 277 25
         eval let lexeme = ch
-        .span 275 9 275 49
+        .span 278 9 278 49
         eval let next_symbol = peek_next_char(state)
         .if next_symbol != ""
-            .span 277 13 277 41
+            .span 280 13 280 41
             eval let pair = ch + next_symbol
             .if is_two_char_symbol(pair)
-                .span 279 17 279 31
+                .span 282 17 282 31
                 eval lexeme = pair
-                .span 280 17 280 34
+                .span 283 17 283 34
                 eval state.index += 2
-                .span 281 17 281 35
+                .span 284 17 284 35
                 eval state.column += 2
-                .span 282 17 287 20
+                .span 285 17 290 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.Symbol { value: lexeme },
                     lexeme: lexeme,
@@ -368,18 +372,18 @@
                 continue
             .endif
         .endif
-        .span 292 9 292 26
+        .span 295 9 295 26
         eval state.index += 1
         .if ch == "\n"
-            .span 294 13 294 29
+            .span 297 13 297 29
             eval state.line += 1
-            .span 295 13 295 30
+            .span 298 13 298 30
             eval state.column = 1
         .else
-            .span 297 13 297 31
+            .span 300 13 300 31
             eval state.column += 1
         .endif
-        .span 300 9 305 12
+        .span 303 9 308 12
         eval tokens = append(tokens, Token {
             kind: TokenKind.Symbol { value: lexeme },
             lexeme: lexeme,
@@ -387,152 +391,152 @@
             column: start_column,
         })
     .endloop
-    .span 308 5 308 66
+    .span 311 5 311 66
     eval tokens = append(tokens, eof_token(state.line, state.column))
-    .span 309 5 309 19
+    .span 312 5 312 19
     ret tokens
 .endfn
 
 .fn is_whitespace(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 312 18 312 30
+    .span 315 18 315 30
     .param ch -> string
-    .span 313 5 313 64
+    .span 316 5 316 64
     ret ch == " " || ch == "\t" || ch == "\n" || ch == "\r"
 .endfn
 
 .fn is_identifier_start(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 316 24 316 36
+    .span 319 24 319 36
     .param ch -> string
-    .span 317 5 317 39
+    .span 320 5 320 39
     ret is_letter(ch) || ch == "_"
 .endfn
 
 .fn is_identifier_part(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 320 23 320 35
+    .span 323 23 323 35
     .param ch -> string
-    .span 321 5 321 52
+    .span 324 5 324 52
     ret is_identifier_start(ch) || is_digit(ch)
 .endfn
 
 .fn is_letter(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 324 14 324 26
+    .span 327 14 327 26
     .param ch -> string
-    .span 325 5 325 30
+    .span 328 5 328 30
     eval let code = char_code(ch)
-    .span 326 5 327 63
+    .span 329 5 330 63
     ret code >= char_code("a") && code <= char_code("z") || code >= char_code("A") && code <= char_code("Z")
 .endfn
 
 .fn is_digit(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 330 13 330 25
+    .span 333 13 333 25
     .param ch -> string
-    .span 331 5 331 30
+    .span 334 5 334 30
     eval let code = char_code(ch)
-    .span 332 5 332 61
+    .span 335 5 335 61
     ret code >= char_code("0") && code <= char_code("9")
 .endfn
 
 .fn is_double_quote(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 335 20 335 32
+    .span 338 20 338 32
     .param ch -> string
-    .span 336 5 336 32
+    .span 339 5 339 32
     ret char_code(ch) == 34
 .endfn
 
 .fn is_backslash(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 339 17 339 29
+    .span 342 17 342 29
     .param ch -> string
-    .span 340 5 340 32
+    .span 343 5 343 32
     ret char_code(ch) == 92
 .endfn
 
 .fn slice(text -> string, start -> number, end -> number) -> string
 .meta return string
 .meta effects none
-    .span 343 10 343 24
+    .span 346 10 346 24
     .param text -> string
-    .span 343 26 343 41
+    .span 346 26 346 41
     .param start -> number
-    .span 343 43 343 56
+    .span 346 43 346 56
     .param end -> number
-    .span 344 5 344 40
+    .span 347 5 347 40
     ret substring(text, start, end)
 .endfn
 
 .fn append(tokens -> Token[], token -> Token) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 347 11 347 28
+    .span 350 11 350 28
     .param tokens -> Token[]
-    .span 347 30 347 44
+    .span 350 30 350 44
     .param token -> Token
-    .span 348 5 348 35
+    .span 351 5 351 35
     ret tokens.concat([token])
 .endfn
 
 .fn peek_next_char(state -> LexerState) -> string
 .meta return string
 .meta effects none
-    .span 351 19 351 38
+    .span 354 19 354 38
     .param state -> LexerState
-    .span 352 5 352 38
+    .span 355 5 355 38
     eval let next_index = state.index + 1
     .if next_index >= state.source.length
-        .span 354 9 354 19
+        .span 357 9 357 19
         ret ""
     .endif
-    .span 356 5 356 37
+    .span 359 5 359 37
     ret state.source[next_index]
 .endfn
 
 .fn interpret_escape(ch -> string) -> string
 .meta return string
 .meta effects none
-    .span 359 21 359 33
+    .span 362 21 362 33
     .param ch -> string
     .if ch == "n"
-        .span 361 9 361 21
+        .span 364 9 364 21
         ret "\n"
     .endif
     .if ch == "t"
-        .span 364 9 364 21
+        .span 367 9 367 21
         ret "\t"
     .endif
     .if ch == "r"
-        .span 367 9 367 21
+        .span 370 9 370 21
         ret "\r"
     .endif
     .if is_double_quote(ch)
-        .span 370 9 370 21
+        .span 373 9 373 21
         ret "\""
     .endif
     .if is_backslash(ch)
-        .span 373 9 373 21
+        .span 376 9 376 21
         ret "\\"
     .endif
-    .span 375 5 375 15
+    .span 378 5 378 15
     ret ch
 .endfn
 
 .fn is_two_char_symbol(value -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 378 23 378 38
+    .span 381 23 381 38
     .param value -> string
-    .span 379 5 387 22
+    .span 382 5 390 22
     ret value == "->" || value == "=>" || value == "==" || value == "!=" || value == "<=" || value == ">=" || value == "&&" || value == "||" || value == ".."
 .endfn

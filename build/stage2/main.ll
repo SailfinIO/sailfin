@@ -209,7 +209,7 @@ declare noalias i8* @malloc(i64)
 @.str.15 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.8 = private unnamed_addr constant [13 x i8] c"return False\00"
 @.str.4 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.10 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.30 = private unnamed_addr constant [1 x i8] c"\00"
 
 ; fn compile_to_sailfin effects: ![io]
 define i8* @compile_to_sailfin(i8* %source) {
@@ -3455,80 +3455,115 @@ afterloop3:
 define i8* @slice_string(i8* %value, double %start, double %end) {
 entry:
   %l0 = alloca double
-  %l1 = alloca i8*
-  %t0 = sitofp i64 0 to double
-  %t1 = fcmp olt double %start, %t0
-  br i1 %t1, label %then0, label %merge1
+  %l1 = alloca double
+  %l2 = alloca double
+  %l3 = alloca i8*
+  store double %start, double* %l0
+  %t0 = load double, double* %l0
+  %t1 = sitofp i64 0 to double
+  %t2 = fcmp olt double %t0, %t1
+  %t3 = load double, double* %l0
+  br i1 %t2, label %then0, label %merge1
 then0:
+  %t4 = sitofp i64 0 to double
+  store double %t4, double* %l0
   br label %merge1
 merge1:
-  %t2 = fcmp olt double %end, %start
-  br i1 %t2, label %then2, label %merge3
+  %t5 = phi double [ %t4, %then0 ], [ %t3, %entry ]
+  store double %t5, double* %l0
+  store double %end, double* %l1
+  %t6 = load double, double* %l1
+  %t7 = load double, double* %l0
+  %t8 = fcmp olt double %t6, %t7
+  %t9 = load double, double* %l0
+  %t10 = load double, double* %l1
+  br i1 %t8, label %then2, label %merge3
 then2:
+  %t11 = load double, double* %l0
+  store double %t11, double* %l1
   br label %merge3
 merge3:
-  %t3 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t4 = sitofp i64 %t3 to double
-  %t5 = fcmp oge double %start, %t4
-  br i1 %t5, label %then4, label %merge5
+  %t12 = phi double [ %t11, %then2 ], [ %t10, %entry ]
+  store double %t12, double* %l1
+  %t13 = load double, double* %l0
+  %t14 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t15 = sitofp i64 %t14 to double
+  %t16 = fcmp oge double %t13, %t15
+  %t17 = load double, double* %l0
+  %t18 = load double, double* %l1
+  br i1 %t16, label %then4, label %merge5
 then4:
-  %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
-  ret i8* %s6
+  %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.19, i32 0, i32 0
+  ret i8* %s19
 merge5:
-  %t7 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t8 = sitofp i64 %t7 to double
-  %t9 = fcmp ogt double %end, %t8
-  br i1 %t9, label %then6, label %merge7
+  %t20 = load double, double* %l1
+  %t21 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t22 = sitofp i64 %t21 to double
+  %t23 = fcmp ogt double %t20, %t22
+  %t24 = load double, double* %l0
+  %t25 = load double, double* %l1
+  br i1 %t23, label %then6, label %merge7
 then6:
+  %t26 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t27 = sitofp i64 %t26 to double
+  store double %t27, double* %l1
   br label %merge7
 merge7:
-  store double %start, double* %l0
-  %s10 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.10, i32 0, i32 0
-  store i8* %s10, i8** %l1
-  %t11 = load double, double* %l0
-  %t12 = load i8*, i8** %l1
+  %t28 = phi double [ %t27, %then6 ], [ %t25, %entry ]
+  store double %t28, double* %l1
+  %t29 = load double, double* %l0
+  store double %t29, double* %l2
+  %s30 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.30, i32 0, i32 0
+  store i8* %s30, i8** %l3
+  %t31 = load double, double* %l0
+  %t32 = load double, double* %l1
+  %t33 = load double, double* %l2
+  %t34 = load i8*, i8** %l3
   br label %loop.header8
 loop.header8:
-  %t33 = phi i8* [ %t12, %entry ], [ %t31, %loop.latch10 ]
-  %t34 = phi double [ %t11, %entry ], [ %t32, %loop.latch10 ]
-  store i8* %t33, i8** %l1
-  store double %t34, double* %l0
+  %t58 = phi i8* [ %t34, %entry ], [ %t56, %loop.latch10 ]
+  %t59 = phi double [ %t33, %entry ], [ %t57, %loop.latch10 ]
+  store i8* %t58, i8** %l3
+  store double %t59, double* %l2
   br label %loop.body9
 loop.body9:
-  %t13 = load double, double* %l0
-  %t14 = fcmp oge double %t13, %end
-  %t15 = load double, double* %l0
-  %t16 = load i8*, i8** %l1
-  br i1 %t14, label %then12, label %merge13
+  %t35 = load double, double* %l2
+  %t36 = load double, double* %l1
+  %t37 = fcmp oge double %t35, %t36
+  %t38 = load double, double* %l0
+  %t39 = load double, double* %l1
+  %t40 = load double, double* %l2
+  %t41 = load i8*, i8** %l3
+  br i1 %t37, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t17 = load i8*, i8** %l1
-  %t18 = load double, double* %l0
-  %t19 = fptosi double %t18 to i64
-  %t20 = getelementptr i8, i8* %value, i64 %t19
-  %t21 = load i8, i8* %t20
-  %t22 = load i8, i8* %t17
-  %t23 = add i8 %t22, %t21
-  %t24 = alloca [2 x i8], align 1
-  %t25 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 0
-  store i8 %t23, i8* %t25
-  %t26 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 1
-  store i8 0, i8* %t26
-  %t27 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 0
-  store i8* %t27, i8** %l1
-  %t28 = load double, double* %l0
-  %t29 = sitofp i64 1 to double
-  %t30 = fadd double %t28, %t29
-  store double %t30, double* %l0
+  %t42 = load i8*, i8** %l3
+  %t43 = load double, double* %l2
+  %t44 = fptosi double %t43 to i64
+  %t45 = getelementptr i8, i8* %value, i64 %t44
+  %t46 = load i8, i8* %t45
+  %t47 = load i8, i8* %t42
+  %t48 = add i8 %t47, %t46
+  %t49 = alloca [2 x i8], align 1
+  %t50 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
+  store i8 %t48, i8* %t50
+  %t51 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 1
+  store i8 0, i8* %t51
+  %t52 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
+  store i8* %t52, i8** %l3
+  %t53 = load double, double* %l2
+  %t54 = sitofp i64 1 to double
+  %t55 = fadd double %t53, %t54
+  store double %t55, double* %l2
   br label %loop.latch10
 loop.latch10:
-  %t31 = load i8*, i8** %l1
-  %t32 = load double, double* %l0
+  %t56 = load i8*, i8** %l3
+  %t57 = load double, double* %l2
   br label %loop.header8
 afterloop11:
-  %t35 = load i8*, i8** %l1
-  ret i8* %t35
+  %t60 = load i8*, i8** %l3
+  ret i8* %t60
 }
 
 define double @add(double %a, double %b) {

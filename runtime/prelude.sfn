@@ -123,7 +123,7 @@ fn char_at(value -> string, index -> number) -> string {
     if index >= value.length {
         return "";
     }
-    return runtime.substring(value, index, index + 1);
+    return value[index];
 }
 
 fn enum_type(name -> string) -> EnumType {
@@ -664,7 +664,16 @@ fn substring(text -> string, start -> number, end -> number) -> string {
     if normalized_start >= normalized_end {
         return "";
     }
-    return runtime.substring(text, normalized_start, normalized_end);
+    let mut index = normalized_start;
+    let mut result -> string = "";
+    loop {
+        if index >= normalized_end {
+            break;
+        }
+        result = result + text[index];
+        index = index + 1;
+    }
+    return result;
 }
 
 fn find_char(text -> string, character -> string, start -> number = 0) -> number {
