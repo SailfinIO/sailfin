@@ -10248,7 +10248,7 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     return EnumLiteralParse { recognized: true, success: !fatal, enum_name: enum_name_part, variant_name: variant_name_part, fields: fields, diagnostics: diagnostics };
 }
 
-fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
+fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult ![io] {
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;

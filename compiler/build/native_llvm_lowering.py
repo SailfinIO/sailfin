@@ -4287,8 +4287,6 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         current_temp = lowered.temp_index
         operand = lowered.operand
         string_constants = lowered.string_constants
-        if instruction.name == 'collected_string_constants':
-            print.info('[stage1-let] ' + function.name + ' llvm_type=' + llvm_type + ' operand=' + str(operand) + ' string_constants_len=' + str(len(string_constants)))
     if len(llvm_type) == 0:
         if operand != None:
             llvm_type = operand.llvm_type
@@ -5296,10 +5294,6 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         normalised = normalise_number_literal(literal_candidate)
         operand = LLVMOperand(llvm_type="double", value=normalised)
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    if literal_candidate == "collected_string_constants":
-        import inspect
-        caller = inspect.stack()[1].function
-        print.info("[stage1-debug] unsupported collected_string_constants in " + caller)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
 
@@ -7059,6 +7053,7 @@ def parse_enum_literal(text):
     return EnumLiteralParse(recognized=True, success=not fatal, enum_name=enum_name_part, variant_name=variant_name_part, fields=fields, diagnostics=diagnostics)
 
 def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, context, expected_type):
+    # effects: io
     diagnostics = parse.diagnostics
     current_lines = lines
     current_temp = temp_index
@@ -7090,10 +7085,17 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
                 break
             literal_lookup_index += 1
         value_operand = None
-        if expected.name == 'string_constants':
-            print.info('[stage1-debug] struct ' + info.name + ' field ' + expected.name + ' llvm_type=' + expected.llvm_type)
         if literal_index >= 0:
             literal_field = parse.fields[literal_index]
+            if expected.name == "string_constants":
+                local_names = []
+                local_idx = 0
+                while True:
+                    if local_idx >= len(locals):
+                        break
+                    local_names = append_string(local_names, locals[local_idx].name)
+                    local_idx += 1
+                print.info("[sfn-debug] lower_struct_literal locals=" + join_strings(local_names, ", "))
             lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)
             diagnostics = (diagnostics) + (lowered.diagnostics)
             current_lines = lowered.lines

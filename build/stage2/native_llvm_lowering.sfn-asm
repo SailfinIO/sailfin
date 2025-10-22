@@ -14681,9 +14681,9 @@
     ret EnumLiteralParse { recognized: true, success: !fatal, enum_name: enum_name_part, variant_name: variant_name_part, fields: fields, diagnostics: diagnostics }
 .endfn
 
-.fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult
+.fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult ![io]
 .meta return ExpressionResult
-.meta effects none
+.meta effects io
     .span 10251 25 10251 52
     .param parse -> StructLiteralParse
     .span 10251 54 10251 84
@@ -14760,618 +14760,635 @@
         .if literal_index >= 0
             .span 10295 13 10295 61
             eval let literal_field = parse.fields[literal_index]
-            .span 10296 13 10296 152
+            .if expected.name == "string_constants"
+                .span 10297 17 10297 54
+                eval let mut local_names -> string[] = []
+                .span 10298 17 10298 49
+                eval let mut local_idx -> number = 0
+                .loop
+                    .if local_idx >= locals.length
+                        break
+                    .endif
+                    .span 10303 21 10303 86
+                    eval local_names = append_string(local_names, locals[local_idx].name)
+                    .span 10304 21 10304 36
+                    eval local_idx += 1
+                .endloop
+                .span 10306 17 10306 107
+                eval print.info("[sfn-debug] lower_struct_literal locals=" + join_strings(local_names, ", "))
+            .endif
+            .span 10308 13 10308 152
             eval let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)
-            .span 10297 13 10297 67
+            .span 10309 13 10309 67
             eval diagnostics = diagnostics.concat(lowered.diagnostics)
-            .span 10298 13 10298 43
+            .span 10310 13 10310 43
             eval current_lines = lowered.lines
-            .span 10299 13 10299 47
+            .span 10311 13 10311 47
             eval current_temp = lowered.temp_index
-            .span 10300 13 10300 119
+            .span 10312 13 10312 119
             eval collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
             .if lowered.operand != null
-                .span 10302 17 10302 120
+                .span 10314 17 10314 120
                 eval let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines)
-                .span 10303 17 10303 71
+                .span 10315 17 10315 71
                 eval diagnostics = diagnostics.concat(coerced.diagnostics)
-                .span 10304 17 10304 47
+                .span 10316 17 10316 47
                 eval current_lines = coerced.lines
-                .span 10305 17 10305 51
+                .span 10317 17 10317 51
                 eval current_temp = coerced.temp_index
                 .if coerced.operand != null
-                    .span 10307 21 10307 53
+                    .span 10319 21 10319 53
                     eval value_operand = coerced.operand
                 .endif
             .endif
             .if !string_array_contains(used_names, expected.name)
-                .span 10311 17 10311 71
+                .span 10323 17 10323 71
                 eval used_names = append_string(used_names, expected.name)
             .endif
         .else
-            .span 10314 13 10314 149
+            .span 10326 13 10326 149
             eval diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` missing field `" + expected.name + "`")
         .endif
-        .span 10317 9 10317 83
+        .span 10329 9 10329 83
         eval let mut value_text -> string = default_return_literal(expected.llvm_type)
         .if value_operand != null
-            .span 10319 13 10319 46
+            .span 10331 13 10331 46
             eval value_text = value_operand.value
         .endif
-        .span 10322 9 10322 54
+        .span 10334 9 10334 54
         eval let mut aggregate_source -> string = "undef"
         .if field_index > 0
-            .span 10324 13 10324 47
+            .span 10336 13 10336 47
             eval aggregate_source = previous_value
         .endif
-        .span 10327 9 10327 56
+        .span 10339 9 10339 56
         eval let temp_name = format_temp_name(current_temp)
-        .span 10328 9 10328 220
+        .span 10340 9 10340 220
         eval current_lines = append_string(current_lines, "  " + temp_name + " = insertvalue " + info.llvm_name + " " + aggregate_source + ", " + expected.llvm_type + " " + value_text + ", " + number_to_string(field_index))
-        .span 10329 9 10329 27
+        .span 10341 9 10341 27
         eval current_temp += 1
-        .span 10330 9 10330 36
+        .span 10342 9 10342 36
         eval previous_value = temp_name
-        .span 10332 9 10332 26
+        .span 10344 9 10344 26
         eval field_index += 1
     .endloop
-    .span 10335 5 10335 39
+    .span 10347 5 10347 39
     eval let mut extra_index -> number = 0
     .loop
         .if extra_index >= parse.fields.length
             break
         .endif
-        .span 10340 9 10340 55
+        .span 10352 9 10352 55
         eval let literal_field = parse.fields[extra_index]
         .if !string_array_contains(used_names, literal_field.name)
-            .span 10342 13 10342 163
+            .span 10354 13 10354 163
             eval diagnostics = append_string(diagnostics, "llvm lowering: struct literal for `" + info.name + "` provides unknown field `" + literal_field.name + "`")
         .endif
-        .span 10344 9 10344 26
+        .span 10356 9 10356 26
         eval extra_index += 1
     .endloop
     .if previous_value.length == 0
-        .span 10348 9 10348 91
+        .span 10360 9 10360 91
         eval let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" }
-        .span 10349 5 10349 170
+        .span 10361 5 10361 170
         ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants }
     .endif
-    .span 10352 5 10352 84
+    .span 10364 5 10364 84
     eval let operand = LLVMOperand { llvm_type: info.llvm_name, value: previous_value }
-    .span 10353 5 10353 170
+    .span 10365 5 10365 170
     ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants }
 .endfn
 
 .fn box_aggregate_operand(operand -> LLVMOperand, expected_pointer_type -> string, temp_index -> number, lines -> string[], context -> TypeContext) -> HeapBoxResult
 .meta return HeapBoxResult
 .meta effects none
-    .span 10356 26 10356 48
+    .span 10368 26 10368 48
     .param operand -> LLVMOperand
-    .span 10356 50 10356 81
+    .span 10368 50 10368 81
     .param expected_pointer_type -> string
-    .span 10356 83 10356 103
+    .span 10368 83 10368 103
     .param temp_index -> number
-    .span 10356 105 10356 122
+    .span 10368 105 10368 122
     .param lines -> string[]
-    .span 10356 124 10356 146
+    .span 10368 124 10368 146
     .param context -> TypeContext
-    .span 10357 5 10357 42
+    .span 10369 5 10369 42
     eval let mut diagnostics -> string[] = []
-    .span 10358 5 10358 47
+    .span 10370 5 10370 47
     eval let mut current_lines -> string[] = lines
-    .span 10359 5 10359 49
+    .span 10371 5 10371 49
     eval let mut current_temp -> number = temp_index
-    .span 10361 5 10361 73
+    .span 10373 5 10373 73
     eval let allocation = lookup_allocation_info(context, operand.llvm_type)
     .if allocation == null
-        .span 10363 9 10363 182
+        .span 10375 9 10375 182
         eval diagnostics = append_string(diagnostics, "llvm lowering: unable to allocate heap storage for `" + operand.llvm_type + "` when assigning to `" + expected_pointer_type + "`")
-        .span 10364 9 10364 122
+        .span 10376 9 10376 122
         ret HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics }
     .endif
     .if allocation.size <= 0
-        .span 10367 9 10367 138
+        .span 10379 9 10379 138
         eval diagnostics = append_string(diagnostics, "llvm lowering: computed heap allocation size for `" + operand.llvm_type + "` is zero")
-        .span 10368 9 10368 122
+        .span 10380 9 10380 122
         ret HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics }
     .endif
-    .span 10371 5 10371 54
+    .span 10383 5 10383 54
     eval let malloc_temp = format_temp_name(current_temp)
-    .span 10372 5 10372 23
+    .span 10384 5 10384 23
     eval current_temp += 1
-    .span 10373 5 10373 149
+    .span 10385 5 10385 149
     eval current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + number_to_string(allocation.size) + ")")
-    .span 10375 5 10375 57
+    .span 10387 5 10387 57
     eval let typed_ptr_temp = format_temp_name(current_temp)
-    .span 10376 5 10376 23
+    .span 10388 5 10388 23
     eval current_temp += 1
-    .span 10377 5 10377 142
+    .span 10389 5 10389 142
     eval current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*")
-    .span 10379 5 10379 155
+    .span 10391 5 10391 155
     eval current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp)
-    .span 10381 5 10381 84
+    .span 10393 5 10393 84
     eval let mut pointer_operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp }
-    .span 10382 5 10382 61
+    .span 10394 5 10394 61
     eval let trimmed_expected = trim_text(expected_pointer_type)
     .if trimmed_expected.length > 0 && trimmed_expected != "i8*"
-        .span 10384 9 10384 56
+        .span 10396 9 10396 56
         eval let cast_temp = format_temp_name(current_temp)
-        .span 10385 9 10385 27
+        .span 10397 9 10397 27
         eval current_temp += 1
-        .span 10386 9 10386 134
+        .span 10398 9 10398 134
         eval current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + trimmed_expected)
-        .span 10387 9 10387 89
+        .span 10399 9 10399 89
         eval pointer_operand = LLVMOperand { llvm_type: trimmed_expected, value: cast_temp }
     .endif
-    .span 10390 5 10390 129
+    .span 10402 5 10402 129
     ret HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: pointer_operand, diagnostics: diagnostics }
 .endfn
 
 .fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult
 .meta return ExpressionResult
 .meta effects none
-    .span 10393 23 10393 48
+    .span 10405 23 10405 48
     .param parse -> EnumLiteralParse
-    .span 10393 50 10393 80
+    .span 10405 50 10405 80
     .param bindings -> ParameterBinding[]
-    .span 10393 82 10393 106
+    .span 10405 82 10405 106
     .param locals -> LocalBinding[]
-    .span 10393 108 10393 128
+    .span 10405 108 10405 128
     .param temp_index -> number
-    .span 10393 130 10393 147
+    .span 10405 130 10405 147
     .param lines -> string[]
-    .span 10393 149 10393 178
+    .span 10405 149 10405 178
     .param functions -> NativeFunction[]
-    .span 10393 180 10393 202
+    .span 10405 180 10405 202
     .param context -> TypeContext
-    .span 10393 204 10393 227
+    .span 10405 204 10405 227
     .param expected_type -> string
-    .span 10394 5 10394 57
+    .span 10406 5 10406 57
     eval let mut diagnostics -> string[] = parse.diagnostics
-    .span 10395 5 10395 47
+    .span 10407 5 10407 47
     eval let mut current_lines -> string[] = lines
-    .span 10396 5 10396 49
+    .span 10408 5 10408 49
     eval let mut current_temp -> number = temp_index
-    .span 10398 5 10398 77
+    .span 10410 5 10410 77
     eval let enum_info = resolve_enum_info_for_literal(context, parse.enum_name)
     .if enum_info == null
         .if parse.enum_name.length > 0
-            .span 10401 13 10401 135
+            .span 10413 13 10413 135
             eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum `" + parse.enum_name + "`")
         .else
-            .span 10403 13 10403 109
+            .span 10415 13 10415 109
             eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum")
         .endif
-        .span 10405 5 10405 167
+        .span 10417 5 10417 167
         ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants }
     .endif
-    .span 10408 5 10408 81
+    .span 10420 5 10420 81
     eval let variant_info = resolve_enum_variant_info(enum_info, parse.variant_name)
     .if variant_info == null
-        .span 10410 9 10410 143
+        .span 10422 9 10422 143
         eval diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`")
-        .span 10411 5 10411 167
+        .span 10423 5 10423 167
         ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants }
     .endif
-    .span 10415 5 10415 45
+    .span 10427 5 10427 45
     eval let mut tag_llvm_type -> string = "i32"
     .if enum_info.tag_type == "i8"
-        .span 10417 9 10417 30
+        .span 10429 9 10429 30
         eval tag_llvm_type = "i8"
     .endif
     .if enum_info.tag_type == "i16"
-        .span 10420 9 10420 31
+        .span 10432 9 10432 31
         eval tag_llvm_type = "i16"
     .endif
     .if enum_info.tag_type == "i32"
-        .span 10423 9 10423 31
+        .span 10435 9 10435 31
         eval tag_llvm_type = "i32"
     .endif
     .if enum_info.tag_type == "i64"
-        .span 10426 9 10426 31
+        .span 10438 9 10438 31
         eval tag_llvm_type = "i64"
     .endif
-    .span 10431 5 10431 44
+    .span 10443 5 10443 44
     eval let mut enum_value -> string = "undef"
-    .span 10432 5 10432 43
+    .span 10444 5 10444 43
     eval let mut enum_alloca -> string? = null
     .if variant_info.fields.length > 0
-        .span 10436 9 10436 58
+        .span 10448 9 10448 58
         eval let alloca_temp = format_temp_name(current_temp)
-        .span 10437 9 10437 27
+        .span 10449 9 10449 27
         eval current_temp += 1
-        .span 10438 9 10438 111
+        .span 10450 9 10450 111
         eval current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + enum_info.llvm_name)
-        .span 10439 9 10439 35
+        .span 10451 9 10451 35
         eval enum_alloca = alloca_temp
-        .span 10442 9 10442 59
+        .span 10454 9 10454 59
         eval let tag_ptr_temp = format_temp_name(current_temp)
-        .span 10443 9 10443 27
+        .span 10455 9 10455 27
         eval current_temp += 1
-        .span 10444 9 10444 197
+        .span 10456 9 10456 197
         eval current_lines = append_string(current_lines, "  " + tag_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_temp + ", i32 0, i32 0")
-        .span 10445 9 10445 170
+        .span 10457 9 10457 170
         eval current_lines = append_string(current_lines, "  store " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", " + tag_llvm_type + "* " + tag_ptr_temp)
     .else
-        .span 10448 9 10448 55
+        .span 10460 9 10460 55
         eval let tag_temp = format_temp_name(current_temp)
-        .span 10449 9 10449 206
+        .span 10461 9 10461 206
         eval current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0")
-        .span 10450 9 10450 27
+        .span 10462 9 10462 27
         eval current_temp += 1
-        .span 10451 9 10451 31
+        .span 10463 9 10463 31
         eval enum_value = tag_temp
     .endif
     .if variant_info.fields.length > 0
-        .span 10457 9 10457 38
+        .span 10469 9 10469 38
         eval let alloca_ptr = enum_alloca
-        .span 10458 9 10458 45
+        .span 10470 9 10470 45
         eval let mut used_names -> string[] = []
-        .span 10459 9 10459 43
+        .span 10471 9 10471 43
         eval let mut field_index -> number = 0
         .loop
             .if field_index >= variant_info.fields.length
                 break
             .endif
-            .span 10464 13 10464 61
+            .span 10476 13 10476 61
             eval let expected = variant_info.fields[field_index]
-            .span 10465 13 10465 50
+            .span 10477 13 10477 50
             eval let mut literal_index -> number = -1
-            .span 10466 13 10466 56
+            .span 10478 13 10478 56
             eval let mut literal_lookup_index -> number = 0
             .loop
                 .if literal_lookup_index >= parse.fields.length
                     break
                 .endif
                 .if parse.fields[literal_lookup_index].name == expected.name
-                    .span 10472 21 10472 58
+                    .span 10484 21 10484 58
                     eval literal_index = literal_lookup_index
                     break
                 .endif
-                .span 10475 17 10475 43
+                .span 10487 17 10487 43
                 eval literal_lookup_index += 1
             .endloop
             .if literal_index >= 0
-                .span 10479 17 10479 65
+                .span 10491 17 10491 65
                 eval let literal_field = parse.fields[literal_index]
-                .span 10480 17 10480 156
+                .span 10492 17 10492 156
                 eval let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)
-                .span 10481 17 10481 71
+                .span 10493 17 10493 71
                 eval diagnostics = diagnostics.concat(lowered.diagnostics)
-                .span 10482 17 10482 47
+                .span 10494 17 10494 47
                 eval current_lines = lowered.lines
-                .span 10483 17 10483 51
+                .span 10495 17 10495 51
                 eval current_temp = lowered.temp_index
                 .if lowered.operand != null
-                    .span 10485 21 10485 61
+                    .span 10497 21 10497 61
                     eval let mut field_operand = lowered.operand
                     .if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type)
-                        .span 10487 25 10487 132
+                        .span 10499 25 10499 132
                         eval let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context)
-                        .span 10488 25 10488 77
+                        .span 10500 25 10500 77
                         eval diagnostics = diagnostics.concat(boxed.diagnostics)
-                        .span 10489 25 10489 53
+                        .span 10501 25 10501 53
                         eval current_lines = boxed.lines
-                        .span 10490 25 10490 57
+                        .span 10502 25 10502 57
                         eval current_temp = boxed.temp_index
                         .if boxed.operand != null
-                            .span 10492 29 10492 59
+                            .span 10504 29 10504 59
                             eval field_operand = boxed.operand
                         .endif
                     .endif
-                    .span 10495 21 10495 122
+                    .span 10507 21 10507 122
                     eval let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines)
-                    .span 10496 21 10496 75
+                    .span 10508 21 10508 75
                     eval diagnostics = diagnostics.concat(coerced.diagnostics)
-                    .span 10497 21 10497 51
+                    .span 10509 21 10509 51
                     eval current_lines = coerced.lines
-                    .span 10498 21 10498 55
+                    .span 10510 21 10510 55
                     eval current_temp = coerced.temp_index
                     .if coerced.operand != null && alloca_ptr != null
-                        .span 10501 25 10501 79
+                        .span 10513 25 10513 79
                         eval let payload_ptr_temp = format_temp_name(current_temp)
-                        .span 10502 25 10502 43
+                        .span 10514 25 10514 43
                         eval current_temp += 1
-                        .span 10503 25 10503 216
+                        .span 10515 25 10515 216
                         eval current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1")
-                        .span 10506 25 10506 82
+                        .span 10518 25 10518 82
                         eval let byte_array_ptr_temp = format_temp_name(current_temp)
-                        .span 10507 25 10507 43
+                        .span 10519 25 10519 43
                         eval current_temp += 1
-                        .span 10508 25 10508 197
+                        .span 10520 25 10520 197
                         eval current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
-                        .span 10512 25 10512 93
+                        .span 10524 25 10524 93
                         eval let field_absolute_offset = variant_info.fields[field_index].offset
-                        .span 10513 25 10513 99
+                        .span 10525 25 10525 99
                         eval let field_offset_in_payload = field_absolute_offset - variant_info.offset
-                        .span 10514 25 10514 85
+                        .span 10526 25 10526 85
                         eval let mut field_byte_ptr_temp -> string = byte_array_ptr_temp
                         .if field_offset_in_payload > 0
-                            .span 10516 29 10516 82
+                            .span 10528 29 10528 82
                             eval let offset_ptr_temp = format_temp_name(current_temp)
-                            .span 10517 29 10517 47
+                            .span 10529 29 10529 47
                             eval current_temp += 1
-                            .span 10518 29 10518 214
+                            .span 10530 29 10530 214
                             eval current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
-                            .span 10519 29 10519 67
+                            .span 10531 29 10531 67
                             eval field_byte_ptr_temp = offset_ptr_temp
                         .endif
-                        .span 10523 25 10523 77
+                        .span 10535 25 10535 77
                         eval let field_ptr_temp = format_temp_name(current_temp)
-                        .span 10524 25 10524 43
+                        .span 10536 25 10536 43
                         eval current_temp += 1
-                        .span 10525 25 10525 171
+                        .span 10537 25 10537 171
                         eval current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*")
-                        .span 10528 25 10528 185
+                        .span 10540 25 10540 185
                         eval current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp)
                     .endif
                 .endif
                 .if !string_array_contains(used_names, expected.name)
-                    .span 10532 21 10532 75
+                    .span 10544 21 10544 75
                     eval used_names = append_string(used_names, expected.name)
                 .endif
             .else
-                .span 10535 17 10535 184
+                .span 10547 17 10547 184
                 eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` missing field `" + expected.name + "`")
             .endif
-            .span 10538 13 10538 30
+            .span 10550 13 10550 30
             eval field_index += 1
         .endloop
-        .span 10541 9 10541 43
+        .span 10553 9 10553 43
         eval let mut extra_index -> number = 0
         .loop
             .if extra_index >= parse.fields.length
                 break
             .endif
-            .span 10546 13 10546 59
+            .span 10558 13 10558 59
             eval let literal_field = parse.fields[extra_index]
             .if !string_array_contains(used_names, literal_field.name)
-                .span 10548 17 10548 198
+                .span 10560 17 10560 198
                 eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`")
             .endif
-            .span 10550 13 10550 30
+            .span 10562 13 10562 30
             eval extra_index += 1
         .endloop
         .if alloca_ptr != null
-            .span 10555 13 10555 60
+            .span 10567 13 10567 60
             eval let load_temp = format_temp_name(current_temp)
-            .span 10556 13 10556 31
+            .span 10568 13 10568 31
             eval current_temp += 1
-            .span 10557 13 10557 160
+            .span 10569 13 10569 160
             eval current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr)
-            .span 10558 13 10558 36
+            .span 10570 13 10570 36
             eval enum_value = load_temp
         .endif
     .endif
-    .span 10562 5 10562 85
+    .span 10574 5 10574 85
     eval let operand = LLVMOperand { llvm_type: enum_info.llvm_name, value: enum_value }
-    .span 10563 5 10563 55
+    .span 10575 5 10575 55
     eval let empty_constants = empty_string_constant_set()
-    .span 10564 5 10564 159
+    .span 10576 5 10576 159
     ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: empty_constants }
 .endfn
 
 .fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission
 .meta return ComparisonEmission
 .meta effects none
-    .span 10567 32 10567 48
+    .span 10579 32 10579 48
     .param symbol -> string
-    .span 10567 50 10567 77
+    .span 10579 50 10579 77
     .param left_operand -> LLVMOperand
-    .span 10567 79 10567 107
+    .span 10579 79 10579 107
     .param right_operand -> LLVMOperand
-    .span 10567 109 10567 129
+    .span 10579 109 10579 129
     .param temp_index -> number
-    .span 10567 131 10567 148
+    .span 10579 131 10579 148
     .param lines -> string[]
-    .span 10568 5 10568 42
+    .span 10580 5 10580 42
     eval let mut diagnostics -> string[] = []
-    .span 10569 5 10569 47
+    .span 10581 5 10581 47
     eval let mut current_lines -> string[] = lines
     .if left_operand.llvm_type != right_operand.llvm_type
-        .span 10571 9 10571 181
+        .span 10583 9 10583 181
         eval diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`")
     .endif
-    .span 10573 5 10573 44
+    .span 10585 5 10585 44
     eval let llvm_type = left_operand.llvm_type
-    .span 10574 5 10574 72
+    .span 10586 5 10586 72
     eval let predicate = comparison_predicate_for_symbol(symbol, llvm_type)
     .if predicate.length == 0
-        .span 10576 9 10576 146
+        .span 10588 9 10588 146
         eval diagnostics = append_string(diagnostics, "llvm lowering: unsupported comparison operator `" + symbol + "` for type `" + llvm_type + "`")
-        .span 10577 9 10577 125
+        .span 10589 9 10589 125
         ret ComparisonEmission { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics }
     .endif
-    .span 10579 5 10579 50
+    .span 10591 5 10591 50
     eval let temp_name = format_temp_name(temp_index)
-    .span 10580 5 10580 162
+    .span 10592 5 10592 162
     eval current_lines = append_string(current_lines, "  " + temp_name + " = " + predicate + " " + llvm_type + " " + left_operand.value + ", " + right_operand.value)
-    .span 10581 5 10581 69
+    .span 10593 5 10593 69
     eval let operand = LLVMOperand { llvm_type: "i1", value: temp_name }
-    .span 10582 5 10582 128
+    .span 10594 5 10594 128
     ret ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics }
 .endfn
 
 .fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission
 .meta return ComparisonEmission
 .meta effects none
-    .span 10585 21 10585 48
+    .span 10597 21 10597 48
     .param left_operand -> LLVMOperand
-    .span 10585 50 10585 78
+    .span 10597 50 10597 78
     .param right_operand -> LLVMOperand
-    .span 10585 80 10585 100
+    .span 10597 80 10597 100
     .param temp_index -> number
-    .span 10585 102 10585 119
+    .span 10597 102 10597 119
     .param lines -> string[]
-    .span 10586 5 10586 42
+    .span 10598 5 10598 42
     eval let mut diagnostics -> string[] = []
-    .span 10587 5 10587 47
+    .span 10599 5 10599 47
     eval let mut current_lines -> string[] = lines
     .if left_operand.llvm_type != "i1"
-        .span 10589 9 10589 143
+        .span 10601 9 10601 143
         eval diagnostics = append_string(diagnostics, "llvm lowering: expected boolean operand for `and`, found `" + left_operand.llvm_type + "`")
     .endif
     .if right_operand.llvm_type != "i1"
-        .span 10592 9 10592 144
+        .span 10604 9 10604 144
         eval diagnostics = append_string(diagnostics, "llvm lowering: expected boolean operand for `and`, found `" + right_operand.llvm_type + "`")
     .endif
-    .span 10594 5 10594 50
+    .span 10606 5 10606 50
     eval let temp_name = format_temp_name(temp_index)
-    .span 10595 5 10595 133
+    .span 10607 5 10607 133
     eval current_lines = append_string(current_lines, "  " + temp_name + " = and i1 " + left_operand.value + ", " + right_operand.value)
-    .span 10596 5 10596 69
+    .span 10608 5 10608 69
     eval let operand = LLVMOperand { llvm_type: "i1", value: temp_name }
-    .span 10597 5 10597 128
+    .span 10609 5 10609 128
     ret ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics }
 .endfn
 
 .fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> string
 .meta return string
 .meta effects none
-    .span 10600 36 10600 52
+    .span 10612 36 10612 52
     .param symbol -> string
-    .span 10600 54 10600 73
+    .span 10612 54 10612 73
     .param llvm_type -> string
     .if llvm_type == "double"
         .if symbol == "=="
-            .span 10603 13 10603 31
+            .span 10615 13 10615 31
             ret "fcmp oeq"
         .endif
         .if symbol == "!="
-            .span 10606 13 10606 31
+            .span 10618 13 10618 31
             ret "fcmp une"
         .endif
         .if symbol == "<"
-            .span 10609 13 10609 31
+            .span 10621 13 10621 31
             ret "fcmp olt"
         .endif
         .if symbol == "<="
-            .span 10612 13 10612 31
+            .span 10624 13 10624 31
             ret "fcmp ole"
         .endif
         .if symbol == ">"
-            .span 10615 13 10615 31
+            .span 10627 13 10627 31
             ret "fcmp ogt"
         .endif
         .if symbol == ">="
-            .span 10618 13 10618 31
+            .span 10630 13 10630 31
             ret "fcmp oge"
         .endif
-        .span 10620 9 10620 19
+        .span 10632 9 10632 19
         ret ""
     .endif
     .if llvm_type == "i32" || llvm_type == "i64"
         .if symbol == "=="
-            .span 10624 13 10624 30
+            .span 10636 13 10636 30
             ret "icmp eq"
         .endif
         .if symbol == "!="
-            .span 10627 13 10627 30
+            .span 10639 13 10639 30
             ret "icmp ne"
         .endif
         .if symbol == "<"
-            .span 10630 13 10630 31
+            .span 10642 13 10642 31
             ret "icmp slt"
         .endif
         .if symbol == "<="
-            .span 10633 13 10633 31
+            .span 10645 13 10645 31
             ret "icmp sle"
         .endif
         .if symbol == ">"
-            .span 10636 13 10636 31
+            .span 10648 13 10648 31
             ret "icmp sgt"
         .endif
         .if symbol == ">="
-            .span 10639 13 10639 31
+            .span 10651 13 10651 31
             ret "icmp sge"
         .endif
-        .span 10641 9 10641 19
+        .span 10653 9 10653 19
         ret ""
     .endif
     .if llvm_type == "i1"
         .if symbol == "=="
-            .span 10645 13 10645 30
+            .span 10657 13 10657 30
             ret "icmp eq"
         .endif
         .if symbol == "!="
-            .span 10648 13 10648 30
+            .span 10660 13 10660 30
             ret "icmp ne"
         .endif
-        .span 10650 9 10650 19
+        .span 10662 9 10662 19
         ret ""
     .endif
     .if llvm_type == "i8"
         .if symbol == "=="
-            .span 10655 13 10655 30
+            .span 10667 13 10667 30
             ret "icmp eq"
         .endif
         .if symbol == "!="
-            .span 10658 13 10658 30
+            .span 10670 13 10670 30
             ret "icmp ne"
         .endif
         .if symbol == "<"
-            .span 10661 13 10661 31
+            .span 10673 13 10673 31
             ret "icmp slt"
         .endif
         .if symbol == "<="
-            .span 10664 13 10664 31
+            .span 10676 13 10676 31
             ret "icmp sle"
         .endif
         .if symbol == ">"
-            .span 10667 13 10667 31
+            .span 10679 13 10679 31
             ret "icmp sgt"
         .endif
         .if symbol == ">="
-            .span 10670 13 10670 31
+            .span 10682 13 10682 31
             ret "icmp sge"
         .endif
-        .span 10672 9 10672 19
+        .span 10684 9 10684 19
         ret ""
     .endif
     .if ends_with_pointer_suffix(llvm_type)
         .if symbol == "=="
-            .span 10677 13 10677 30
+            .span 10689 13 10689 30
             ret "icmp eq"
         .endif
         .if symbol == "!="
-            .span 10680 13 10680 30
+            .span 10692 13 10692 30
             ret "icmp ne"
         .endif
-        .span 10682 9 10682 19
+        .span 10694 9 10694 19
         ret ""
     .endif
-    .span 10684 5 10684 15
+    .span 10696 5 10696 15
     ret ""
 .endfn
 
 .fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[]) -> string[]
 .meta return string[]
 .meta effects none
-    .span 10687 28 10687 50
+    .span 10699 28 10699 50
     .param context -> TypeContext
-    .span 10687 52 10687 83
+    .span 10699 52 10699 83
     .param parameters -> NativeParameter[]
-    .span 10688 5 10688 36
+    .span 10700 5 10700 36
     eval let mut types -> string[] = []
-    .span 10689 5 10689 33
+    .span 10701 5 10701 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 10694 9 10694 88
+        .span 10706 9 10706 88
         eval let llvm_type = map_parameter_type(context, parameters[index].type_annotation)
         .if llvm_type.length == 0
-            .span 10696 13 10696 52
+            .span 10708 13 10708 52
             eval types = append_string(types, "double")
         .else
-            .span 10698 13 10698 53
+            .span 10710 13 10710 53
             eval types = append_string(types, llvm_type)
         .endif
-        .span 10700 9 10700 20
+        .span 10712 9 10712 20
         eval index += 1
     .endloop
-    .span 10702 5 10702 18
+    .span 10714 5 10714 18
     ret types
 .endfn
 
@@ -15390,1084 +15407,1063 @@
 .fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> string[]) -> LoadLocalResult
 .meta return LoadLocalResult
 .meta effects none
-    .span 10712 23 10712 44
+    .span 10724 23 10724 44
     .param local -> LocalBinding
-    .span 10712 46 10712 66
+    .span 10724 46 10724 66
     .param temp_index -> number
-    .span 10712 68 10712 85
+    .span 10724 68 10724 85
     .param lines -> string[]
-    .span 10713 5 10713 42
+    .span 10725 5 10725 42
     eval let mut diagnostics -> string[] = []
-    .span 10714 5 10714 50
+    .span 10726 5 10726 50
     eval let load_name = format_temp_name(temp_index)
-    .span 10715 5 10715 47
+    .span 10727 5 10727 47
     eval let mut current_lines -> string[] = lines
-    .span 10716 5 10716 147
+    .span 10728 5 10728 147
     eval current_lines = append_string(current_lines, "  " + load_name + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer)
-    .span 10717 5 10717 80
+    .span 10729 5 10729 80
     eval let operand = LLVMOperand { llvm_type: local.llvm_type, value: load_name }
-    .span 10718 5 10718 125
+    .span 10730 5 10730 125
     ret LoadLocalResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics }
 .endfn
 
 .fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_index -> number, lines -> string[]) -> CoercionResult
 .meta return CoercionResult
 .meta effects none
-    .span 10721 27 10721 49
+    .span 10733 27 10733 49
     .param operand -> LLVMOperand
-    .span 10721 51 10721 72
+    .span 10733 51 10733 72
     .param target_type -> string
-    .span 10721 74 10721 94
+    .span 10733 74 10733 94
     .param temp_index -> number
-    .span 10721 96 10721 113
+    .span 10733 96 10733 113
     .param lines -> string[]
-    .span 10722 5 10722 42
+    .span 10734 5 10734 42
     eval let mut diagnostics -> string[] = []
-    .span 10723 5 10723 47
+    .span 10735 5 10735 47
     eval let mut current_lines -> string[] = lines
     .if target_type.length == 0
-        .span 10725 9 10725 124
+        .span 10737 9 10737 124
         ret CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics }
     .endif
     .if operand.llvm_type == target_type
-        .span 10728 9 10728 124
+        .span 10740 9 10740 124
         ret CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics }
     .endif
     .if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type)
-        .span 10732 9 10732 67
+        .span 10744 9 10744 67
         eval let source_base = strip_pointer_suffix(operand.llvm_type)
         .if source_base == target_type
-            .span 10734 13 10734 58
+            .span 10746 13 10746 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10735 13 10735 152
+            .span 10747 13 10747 152
             eval current_lines = append_string(current_lines, "  " + temp_name + " = load " + target_type + ", " + operand.llvm_type + " " + operand.value)
-            .span 10736 13 10736 84
+            .span 10748 13 10748 84
             eval let coerced = LLVMOperand { llvm_type: target_type, value: temp_name }
-            .span 10737 13 10737 132
+            .span 10749 13 10749 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
     .endif
     .if target_type == "double"
         .if operand.llvm_type == "i64"
-            .span 10742 13 10742 58
+            .span 10754 13 10754 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10743 13 10743 126
+            .span 10755 13 10755 126
             eval current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i64 " + operand.value + " to double")
-            .span 10744 13 10744 81
+            .span 10756 13 10756 81
             eval let coerced = LLVMOperand { llvm_type: "double", value: temp_name }
-            .span 10745 13 10745 132
+            .span 10757 13 10757 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
         .if operand.llvm_type == "i1"
-            .span 10748 13 10748 58
+            .span 10760 13 10760 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10749 13 10749 125
+            .span 10761 13 10761 125
             eval current_lines = append_string(current_lines, "  " + temp_name + " = uitofp i1 " + operand.value + " to double")
-            .span 10750 13 10750 81
+            .span 10762 13 10762 81
             eval let coerced = LLVMOperand { llvm_type: "double", value: temp_name }
-            .span 10751 13 10751 132
+            .span 10763 13 10763 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
     .endif
     .if target_type == "i64"
         .if operand.llvm_type == "double"
-            .span 10756 13 10756 58
-            eval let temp_name = format_temp_name(temp_index)
-            .span 10757 13 10757 126
-            eval current_lines = append_string(current_lines, "  " + temp_name + " = fptosi double " + operand.value + " to i64")
-            .span 10758 13 10758 78
-            eval let coerced = LLVMOperand { llvm_type: "i64", value: temp_name }
-            .span 10759 13 10759 132
-            ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
-        .endif
-        .if operand.llvm_type == "i1"
-            .span 10762 13 10762 58
-            eval let temp_name = format_temp_name(temp_index)
-            .span 10763 13 10763 120
-            eval current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64")
-            .span 10764 13 10764 78
-            eval let coerced = LLVMOperand { llvm_type: "i64", value: temp_name }
-            .span 10765 13 10765 132
-            ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
-        .endif
-        .if operand.llvm_type == "i8"
             .span 10768 13 10768 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10769 13 10769 120
-            eval current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i64")
+            .span 10769 13 10769 126
+            eval current_lines = append_string(current_lines, "  " + temp_name + " = fptosi double " + operand.value + " to i64")
             .span 10770 13 10770 78
             eval let coerced = LLVMOperand { llvm_type: "i64", value: temp_name }
             .span 10771 13 10771 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
+        .if operand.llvm_type == "i1"
+            .span 10774 13 10774 58
+            eval let temp_name = format_temp_name(temp_index)
+            .span 10775 13 10775 120
+            eval current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64")
+            .span 10776 13 10776 78
+            eval let coerced = LLVMOperand { llvm_type: "i64", value: temp_name }
+            .span 10777 13 10777 132
+            ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
+        .endif
+        .if operand.llvm_type == "i8"
+            .span 10780 13 10780 58
+            eval let temp_name = format_temp_name(temp_index)
+            .span 10781 13 10781 120
+            eval current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i64")
+            .span 10782 13 10782 78
+            eval let coerced = LLVMOperand { llvm_type: "i64", value: temp_name }
+            .span 10783 13 10783 132
+            ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
+        .endif
     .endif
     .if target_type == "i1"
         .if operand.llvm_type == "double"
-            .span 10776 13 10776 58
+            .span 10788 13 10788 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10777 13 10777 126
+            .span 10789 13 10789 126
             eval current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0")
-            .span 10778 13 10778 77
+            .span 10790 13 10790 77
             eval let coerced = LLVMOperand { llvm_type: "i1", value: temp_name }
-            .span 10779 13 10779 132
+            .span 10791 13 10791 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
         .if operand.llvm_type == "i64"
-            .span 10782 13 10782 58
+            .span 10794 13 10794 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10783 13 10783 120
+            .span 10795 13 10795 120
             eval current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i64 " + operand.value + ", 0")
-            .span 10784 13 10784 77
+            .span 10796 13 10796 77
             eval let coerced = LLVMOperand { llvm_type: "i1", value: temp_name }
-            .span 10785 13 10785 132
+            .span 10797 13 10797 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
     .endif
     .if target_type == "i8" && operand.llvm_type == "i8*"
-        .span 10792 9 10792 58
+        .span 10804 9 10804 58
         eval let char_ptr_temp = format_temp_name(temp_index)
-        .span 10793 9 10793 64
+        .span 10805 9 10805 64
         eval let char_value_temp = format_temp_name(temp_index + 1)
-        .span 10794 9 10794 134
+        .span 10806 9 10806 134
         eval current_lines = append_string(current_lines, "  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0")
-        .span 10795 9 10795 115
+        .span 10807 9 10807 115
         eval current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp)
-        .span 10796 9 10796 79
+        .span 10808 9 10808 79
         eval let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp }
-        .span 10797 9 10797 128
+        .span 10809 9 10809 128
         ret CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics }
     .endif
     .if target_type == "i8*" && operand.llvm_type == "i8"
-        .span 10803 9 10803 56
+        .span 10815 9 10815 56
         eval let alloca_temp = format_temp_name(temp_index)
-        .span 10804 9 10804 57
+        .span 10816 9 10816 57
         eval let char_ptr = format_temp_name(temp_index + 1)
-        .span 10805 9 10805 57
+        .span 10817 9 10817 57
         eval let null_ptr = format_temp_name(temp_index + 2)
-        .span 10806 9 10806 59
+        .span 10818 9 10818 59
         eval let result_ptr = format_temp_name(temp_index + 3)
-        .span 10807 9 10807 106
+        .span 10819 9 10819 106
         eval current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca [2 x i8], align 1")
-        .span 10809 9 10809 146
+        .span 10821 9 10821 146
         eval current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0")
-        .span 10810 9 10810 107
+        .span 10822 9 10822 107
         eval current_lines = append_string(current_lines, "  store i8 " + operand.value + ", i8* " + char_ptr)
-        .span 10812 9 10812 146
+        .span 10824 9 10824 146
         eval current_lines = append_string(current_lines, "  " + null_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 1")
-        .span 10813 9 10813 87
+        .span 10825 9 10825 87
         eval current_lines = append_string(current_lines, "  store i8 0, i8* " + null_ptr)
-        .span 10815 9 10815 148
+        .span 10827 9 10827 148
         eval current_lines = append_string(current_lines, "  " + result_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0")
-        .span 10816 9 10816 75
+        .span 10828 9 10828 75
         eval let coerced = LLVMOperand { llvm_type: "i8*", value: result_ptr }
-        .span 10817 9 10817 128
+        .span 10829 9 10829 128
         ret CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: coerced, diagnostics: diagnostics }
     .endif
     .if target_type == "i8*" && ends_with_pointer_suffix(operand.llvm_type)
-        .span 10823 9 10823 54
+        .span 10835 9 10835 54
         eval let temp_name = format_temp_name(temp_index)
-        .span 10824 9 10824 142
+        .span 10836 9 10836 142
         eval current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*")
-        .span 10825 9 10825 74
+        .span 10837 9 10837 74
         eval let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name }
-        .span 10826 9 10826 128
+        .span 10838 9 10838 128
         ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
     .endif
     .if operand.llvm_type == "i8*" && ends_with_pointer_suffix(target_type)
-        .span 10830 9 10830 54
+        .span 10842 9 10842 54
         eval let temp_name = format_temp_name(temp_index)
-        .span 10831 9 10831 131
+        .span 10843 9 10843 131
         eval current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target_type)
-        .span 10832 9 10832 80
+        .span 10844 9 10844 80
         eval let coerced = LLVMOperand { llvm_type: target_type, value: temp_name }
-        .span 10833 9 10833 128
+        .span 10845 9 10845 128
         ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
     .endif
     .if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type)
-        .span 10838 9 10838 69
+        .span 10850 9 10850 69
         eval let expected_value_type = strip_pointer_suffix(target_type)
         .if expected_value_type == operand.llvm_type
-            .span 10841 13 10841 60
+            .span 10853 13 10853 60
             eval let alloca_temp = format_temp_name(temp_index)
-            .span 10842 13 10842 113
+            .span 10854 13 10854 113
             eval current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type)
-            .span 10843 13 10843 153
+            .span 10855 13 10855 153
             eval current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp)
-            .span 10844 13 10844 86
+            .span 10856 13 10856 86
             eval let coerced = LLVMOperand { llvm_type: target_type, value: alloca_temp }
-            .span 10845 13 10845 132
+            .span 10857 13 10857 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
     .endif
     .if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type)
-        .span 10850 9 10850 76
+        .span 10862 9 10862 76
         eval let source_element = array_pointer_element_type(operand.llvm_type)
-        .span 10851 9 10851 70
+        .span 10863 9 10863 70
         eval let target_element = array_pointer_element_type(target_type)
         .if source_element.length > 0 && target_element.length > 0
-            .span 10854 13 10854 58
+            .span 10866 13 10866 58
             eval let temp_name = format_temp_name(temp_index)
-            .span 10855 13 10855 157
+            .span 10867 13 10867 157
             eval current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
-            .span 10856 13 10856 84
+            .span 10868 13 10868 84
             eval let coerced = LLVMOperand { llvm_type: target_type, value: temp_name }
-            .span 10857 13 10857 132
+            .span 10869 13 10869 132
             ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
         .endif
-        .span 10861 9 10861 54
+        .span 10873 9 10873 54
         eval let temp_name = format_temp_name(temp_index)
-        .span 10862 9 10862 153
+        .span 10874 9 10874 153
         eval current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type)
-        .span 10863 9 10863 80
+        .span 10875 9 10875 80
         eval let coerced = LLVMOperand { llvm_type: target_type, value: temp_name }
-        .span 10864 9 10864 128
+        .span 10876 9 10876 128
         ret CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics }
     .endif
     .if operand.value == "null" && ends_with_pointer_suffix(target_type)
-        .span 10867 9 10867 77
+        .span 10879 9 10879 77
         eval let coerced = LLVMOperand { llvm_type: target_type, value: "null" }
-        .span 10868 9 10868 124
+        .span 10880 9 10880 124
         ret CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics }
     .endif
     .if operand.value == "null" && !ends_with_pointer_suffix(target_type)
-        .span 10871 9 10871 59
+        .span 10883 9 10883 59
         eval let literal = default_return_literal(target_type)
-        .span 10872 9 10872 78
+        .span 10884 9 10884 78
         eval let coerced = LLVMOperand { llvm_type: target_type, value: literal }
-        .span 10873 9 10873 124
+        .span 10885 9 10885 124
         ret CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics }
     .endif
     .if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type)
-        .span 10876 9 10876 60
+        .span 10888 9 10888 60
         eval let mut pointer_type -> string = operand.llvm_type
-        .span 10877 9 10877 57
+        .span 10889 9 10889 57
         eval let mut pointer_value -> string = operand.value
-        .span 10878 9 10878 59
+        .span 10890 9 10890 59
         eval let mut pointer_temp_index -> number = temp_index
-        .span 10879 9 10879 60
+        .span 10891 9 10891 60
         eval let base_type = strip_pointer_suffix(pointer_type)
         .if base_type != target_type
-            .span 10881 13 10881 58
+            .span 10893 13 10893 58
             eval let desired_pointer_type = target_type + "*"
-            .span 10882 13 10882 69
+            .span 10894 13 10894 69
             eval let bitcast_temp = format_temp_name(pointer_temp_index)
-            .span 10883 13 10883 164
+            .span 10895 13 10895 164
             eval current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type)
-            .span 10884 13 10884 49
+            .span 10896 13 10896 49
             eval pointer_type = desired_pointer_type
-            .span 10885 13 10885 42
+            .span 10897 13 10897 42
             eval pointer_value = bitcast_temp
-            .span 10886 13 10886 37
+            .span 10898 13 10898 37
             eval pointer_temp_index += 1
         .endif
-        .span 10888 9 10888 62
+        .span 10900 9 10900 62
         eval let load_temp = format_temp_name(pointer_temp_index)
-        .span 10889 9 10889 143
+        .span 10901 9 10901 143
         eval current_lines = append_string(current_lines, "  " + load_temp + " = load " + target_type + ", " + pointer_type + " " + pointer_value)
-        .span 10890 9 10890 80
+        .span 10902 9 10902 80
         eval let coerced = LLVMOperand { llvm_type: target_type, value: load_temp }
-        .span 10891 9 10891 136
+        .span 10903 9 10903 136
         ret CoercionResult { lines: current_lines, temp_index: pointer_temp_index + 1, operand: coerced, diagnostics: diagnostics }
     .endif
-    .span 10893 5 10893 150
+    .span 10905 5 10905 150
     eval diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`")
-    .span 10894 5 10894 117
+    .span 10906 5 10906 117
     ret CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics }
 .endfn
 
 .fn dominant_type(first -> string, second -> string) -> string
 .meta return string
 .meta effects none
-    .span 10897 18 10897 33
+    .span 10909 18 10909 33
     .param first -> string
-    .span 10897 35 10897 51
+    .span 10909 35 10909 51
     .param second -> string
     .if first.length == 0
-        .span 10899 9 10899 23
+        .span 10911 9 10911 23
         ret second
     .endif
     .if second.length == 0
-        .span 10902 9 10902 22
+        .span 10914 9 10914 22
         ret first
     .endif
     .if first == second
-        .span 10905 9 10905 22
+        .span 10917 9 10917 22
         ret first
     .endif
     .if first == "i8" && second == "i8*" || first == "i8*" && second == "i8"
-        .span 10910 9 10910 21
+        .span 10922 9 10922 21
         ret "i8"
     .endif
     .if first == "double" || second == "double"
-        .span 10913 9 10913 25
+        .span 10925 9 10925 25
         ret "double"
     .endif
     .if first == "i64" || second == "i64"
-        .span 10916 9 10916 22
+        .span 10928 9 10928 22
         ret "i64"
     .endif
     .if first == "i8" && second == "i64" || first == "i64" && second == "i8"
-        .span 10920 9 10920 22
+        .span 10932 9 10932 22
         ret "i64"
     .endif
     .if first == "i1" || second == "i1"
-        .span 10923 9 10923 21
+        .span 10935 9 10935 21
         ret "i1"
     .endif
-    .span 10925 5 10925 18
+    .span 10937 5 10937 18
     ret first
 .endfn
 
 .fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> BinaryAlignmentResult
 .meta return BinaryAlignmentResult
 .meta effects none
-    .span 10928 23 10928 42
+    .span 10940 23 10940 42
     .param left -> LLVMOperand
-    .span 10928 44 10928 64
+    .span 10940 44 10940 64
     .param right -> LLVMOperand
-    .span 10928 66 10928 86
+    .span 10940 66 10940 86
     .param temp_index -> number
-    .span 10928 88 10928 105
+    .span 10940 88 10940 105
     .param lines -> string[]
-    .span 10929 5 10929 42
+    .span 10941 5 10941 42
     eval let mut diagnostics -> string[] = []
-    .span 10930 5 10930 47
+    .span 10942 5 10942 47
     eval let mut current_lines -> string[] = lines
-    .span 10931 5 10931 49
+    .span 10943 5 10943 49
     eval let mut current_temp -> number = temp_index
-    .span 10932 5 10932 33
+    .span 10944 5 10944 33
     eval let mut left_operand = left
-    .span 10933 5 10933 35
+    .span 10945 5 10945 35
     eval let mut right_operand = right
     .if left_operand.value == "null" && ends_with_pointer_suffix(right_operand.llvm_type)
-        .span 10935 9 10935 90
+        .span 10947 9 10947 90
         eval left_operand = LLVMOperand { llvm_type: right_operand.llvm_type, value: "null" }
     .endif
     .if right_operand.value == "null" && ends_with_pointer_suffix(left_operand.llvm_type)
-        .span 10938 9 10938 90
+        .span 10950 9 10950 90
         eval right_operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: "null" }
     .endif
     .if left_operand.llvm_type == right_operand.llvm_type
-        .span 10941 9 10948 11
+        .span 10953 9 10960 11
         ret BinaryAlignmentResult { lines: current_lines, temp_index: current_temp, left: left_operand, right: right_operand, diagnostics: diagnostics, result_type: left_operand.llvm_type }
     .endif
-    .span 10950 5 10950 86
+    .span 10962 5 10962 86
     eval let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type)
-    .span 10951 5 10951 104
+    .span 10963 5 10963 104
     eval let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines)
-    .span 10952 5 10952 65
+    .span 10964 5 10964 65
     eval diagnostics = diagnostics.concat(left_coercion.diagnostics)
     .if left_coercion.operand == null
-        .span 10954 9 10954 162
+        .span 10966 9 10966 162
         eval diagnostics = append_string(diagnostics, "llvm lowering: unable to convert left operand from `" + left_operand.llvm_type + "` to `" + target_type + "`")
-        .span 10955 9 10962 11
+        .span 10967 9 10974 11
         ret BinaryAlignmentResult { lines: left_coercion.lines, temp_index: left_coercion.temp_index, left: null, right: null, diagnostics: diagnostics, result_type: target_type }
     .endif
-    .span 10964 5 10964 42
+    .span 10976 5 10976 42
     eval left_operand = left_coercion.operand
-    .span 10965 5 10965 41
+    .span 10977 5 10977 41
     eval current_lines = left_coercion.lines
-    .span 10966 5 10966 45
+    .span 10978 5 10978 45
     eval current_temp = left_coercion.temp_index
-    .span 10968 5 10968 106
+    .span 10980 5 10980 106
     eval let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines)
-    .span 10969 5 10969 66
+    .span 10981 5 10981 66
     eval diagnostics = diagnostics.concat(right_coercion.diagnostics)
     .if right_coercion.operand == null
-        .span 10971 9 10971 164
+        .span 10983 9 10983 164
         eval diagnostics = append_string(diagnostics, "llvm lowering: unable to convert right operand from `" + right_operand.llvm_type + "` to `" + target_type + "`")
-        .span 10972 9 10979 11
+        .span 10984 9 10991 11
         ret BinaryAlignmentResult { lines: right_coercion.lines, temp_index: right_coercion.temp_index, left: null, right: null, diagnostics: diagnostics, result_type: target_type }
     .endif
-    .span 10981 5 10981 44
+    .span 10993 5 10993 44
     eval right_operand = right_coercion.operand
-    .span 10982 5 10982 42
+    .span 10994 5 10994 42
     eval current_lines = right_coercion.lines
-    .span 10983 5 10983 46
+    .span 10995 5 10995 46
     eval current_temp = right_coercion.temp_index
-    .span 10985 5 10992 7
+    .span 10997 5 11004 7
     ret BinaryAlignmentResult { lines: current_lines, temp_index: current_temp, left: left_operand, right: right_operand, diagnostics: diagnostics, result_type: target_type }
 .endfn
 
 .fn strip_enclosing_parentheses(expression -> string) -> string
 .meta return string
 .meta effects none
-    .span 10995 32 10995 52
+    .span 11007 32 11007 52
     .param expression -> string
-    .span 10996 5 10996 41
+    .span 11008 5 11008 41
     eval let trimmed = trim_text(expression)
     .if trimmed.length < 2
-        .span 10998 9 10998 24
+        .span 11010 9 11010 24
         ret trimmed
     .endif
     .if trimmed[0] != "(" || trimmed[trimmed.length - 1] != ")"
-        .span 11001 9 11001 24
+        .span 11013 9 11013 24
         ret trimmed
     .endif
-    .span 11003 5 11003 33
+    .span 11015 5 11015 33
     eval let mut depth -> number = 0
-    .span 11004 5 11004 33
+    .span 11016 5 11016 33
     eval let mut index -> number = 0
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 11009 9 11009 33
+        .span 11021 9 11021 33
         eval let ch = trimmed[index]
         .if ch == "("
-            .span 11011 13 11011 24
+            .span 11023 13 11023 24
             eval depth += 1
         .else
             .if ch == ")"
-                .span 11013 13 11013 24
+                .span 11025 13 11025 24
                 eval depth -= 1
                 .if depth == 0
                     .if index == trimmed.length - 1
-                        .span 11016 21 11016 75
+                        .span 11028 21 11028 75
                         eval let inner = substring(trimmed, 1, trimmed.length - 1)
-                        .span 11017 21 11017 63
+                        .span 11029 21 11029 63
                         ret strip_enclosing_parentheses(inner)
                     .endif
-                    .span 11019 17 11019 32
+                    .span 11031 17 11031 32
                     ret trimmed
                 .endif
             .endif
         .endif
-        .span 11022 9 11022 20
+        .span 11034 9 11034 20
         eval index += 1
     .endloop
-    .span 11024 5 11024 20
+    .span 11036 5 11036 20
     ret trimmed
 .endfn
 
 .fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch
 .meta return OperatorMatch
 .meta effects none
-    .span 11027 28 11027 48
+    .span 11039 28 11039 48
     .param expression -> string
-    .span 11027 50 11027 69
+    .span 11039 50 11039 69
     .param operators -> string
-    .span 11028 5 11028 39
+    .span 11040 5 11040 39
     eval let mut paren_depth -> number = 0
-    .span 11029 5 11029 41
+    .span 11041 5 11041 41
     eval let mut bracket_depth -> number = 0
-    .span 11030 5 11030 39
+    .span 11042 5 11042 39
     eval let mut brace_depth -> number = 0
-    .span 11031 5 11031 39
+    .span 11043 5 11043 39
     eval let mut angle_depth -> number = 0
-    .span 11032 5 11032 42
+    .span 11044 5 11044 42
     eval let mut in_single -> boolean = false
-    .span 11033 5 11033 42
+    .span 11045 5 11045 42
     eval let mut in_double -> boolean = false
-    .span 11034 5 11034 44
+    .span 11046 5 11046 44
     eval let mut escape_next -> boolean = false
-    .span 11035 5 11035 44
+    .span 11047 5 11047 44
     eval let mut candidate_index -> number = -1
-    .span 11036 5 11036 45
+    .span 11048 5 11048 45
     eval let mut candidate_symbol -> string = ""
-    .span 11037 5 11037 33
+    .span 11049 5 11049 33
     eval let mut index -> number = 0
     .loop
         .if index >= expression.length
             break
         .endif
-        .span 11042 9 11042 36
+        .span 11054 9 11054 36
         eval let ch = expression[index]
         .if in_double
             .if escape_next
-                .span 11045 17 11045 37
+                .span 11057 17 11057 37
                 eval escape_next = false
-                .span 11046 17 11046 28
+                .span 11058 17 11058 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\\"
-                .span 11050 17 11050 36
+                .span 11062 17 11062 36
                 eval escape_next = true
-                .span 11051 17 11051 28
+                .span 11063 17 11063 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\""
-                .span 11055 17 11055 35
+                .span 11067 17 11067 35
                 eval in_double = false
             .endif
-            .span 11057 13 11057 24
+            .span 11069 13 11069 24
             eval index += 1
             continue
         .endif
         .if in_single
             .if escape_next
-                .span 11062 17 11062 37
+                .span 11074 17 11074 37
                 eval escape_next = false
-                .span 11063 17 11063 28
+                .span 11075 17 11075 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\\"
-                .span 11067 17 11067 36
+                .span 11079 17 11079 36
                 eval escape_next = true
-                .span 11068 17 11068 28
+                .span 11080 17 11080 28
                 eval index += 1
                 continue
             .endif
             .if ch == "'"
-                .span 11072 17 11072 35
+                .span 11084 17 11084 35
                 eval in_single = false
             .endif
-            .span 11074 13 11074 24
+            .span 11086 13 11086 24
             eval index += 1
             continue
         .endif
         .if ch == "\""
-            .span 11078 13 11078 30
+            .span 11090 13 11090 30
             eval in_double = true
-            .span 11079 13 11079 24
+            .span 11091 13 11091 24
             eval index += 1
             continue
         .endif
         .if ch == "'"
-            .span 11083 13 11083 30
+            .span 11095 13 11095 30
             eval in_single = true
-            .span 11084 13 11084 24
+            .span 11096 13 11096 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 11088 13 11088 30
+            .span 11100 13 11100 30
             eval paren_depth += 1
-            .span 11089 13 11089 24
+            .span 11101 13 11101 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if paren_depth > 0
-                .span 11094 17 11094 34
+                .span 11106 17 11106 34
                 eval paren_depth -= 1
-            .endif
-            .span 11096 13 11096 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "["
-            .span 11100 13 11100 32
-            eval bracket_depth += 1
-            .span 11101 13 11101 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "]"
-            .if bracket_depth > 0
-                .span 11106 17 11106 36
-                eval bracket_depth -= 1
             .endif
             .span 11108 13 11108 24
             eval index += 1
             continue
         .endif
-        .if ch == "{"
-            .span 11112 13 11112 30
-            eval brace_depth += 1
+        .if ch == "["
+            .span 11112 13 11112 32
+            eval bracket_depth += 1
             .span 11113 13 11113 24
             eval index += 1
             continue
         .endif
-        .if ch == "}"
-            .if brace_depth > 0
-                .span 11118 17 11118 34
-                eval brace_depth -= 1
+        .if ch == "]"
+            .if bracket_depth > 0
+                .span 11118 17 11118 36
+                eval bracket_depth -= 1
             .endif
             .span 11120 13 11120 24
             eval index += 1
             continue
         .endif
-        .if ch == "<"
+        .if ch == "{"
             .span 11124 13 11124 30
-            eval angle_depth += 1
+            eval brace_depth += 1
             .span 11125 13 11125 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "}"
+            .if brace_depth > 0
+                .span 11130 17 11130 34
+                eval brace_depth -= 1
+            .endif
+            .span 11132 13 11132 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "<"
+            .span 11136 13 11136 30
+            eval angle_depth += 1
+            .span 11137 13 11137 24
             eval index += 1
             continue
         .endif
         .if ch == ">"
             .if angle_depth > 0
-                .span 11130 17 11130 34
+                .span 11142 17 11142 34
                 eval angle_depth -= 1
             .endif
-            .span 11132 13 11132 24
+            .span 11144 13 11144 24
             eval index += 1
             continue
         .endif
         .if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 && contains_char(operators, ch)
             .if ch == "-"
                 .if is_binary_minus(expression, index)
-                    .span 11138 21 11138 45
+                    .span 11150 21 11150 45
                     eval candidate_index = index
-                    .span 11139 21 11139 80
+                    .span 11151 21 11151 80
                     eval candidate_symbol = substring(expression, index, index + 1)
                 .endif
             .else
-                .span 11142 17 11142 41
+                .span 11154 17 11154 41
                 eval candidate_index = index
-                .span 11143 17 11143 76
+                .span 11155 17 11155 76
                 eval candidate_symbol = substring(expression, index, index + 1)
             .endif
         .endif
-        .span 11146 9 11146 20
+        .span 11158 9 11158 20
         eval index += 1
     .endloop
     .if candidate_index >= 0
-        .span 11149 9 11149 98
+        .span 11161 9 11161 98
         ret OperatorMatch { index: candidate_index, symbol: candidate_symbol, success: true }
     .endif
-    .span 11151 5 11151 68
+    .span 11163 5 11163 68
     ret OperatorMatch { index: -1, symbol: "", success: false }
 .endfn
 
 .fn find_comparison_operator(expression -> string) -> OperatorMatch
 .meta return OperatorMatch
 .meta effects none
-    .span 11154 29 11154 49
+    .span 11166 29 11166 49
     .param expression -> string
-    .span 11155 5 11155 33
+    .span 11167 5 11167 33
     eval let mut depth -> number = 0
-    .span 11156 5 11156 33
+    .span 11168 5 11168 33
     eval let mut index -> number = 0
-    .span 11157 5 11157 42
+    .span 11169 5 11169 42
     eval let mut in_string -> boolean = false
-    .span 11158 5 11158 44
+    .span 11170 5 11170 44
     eval let mut escape_next -> boolean = false
     .loop
         .if index >= expression.length
             break
         .endif
-        .span 11163 9 11163 36
+        .span 11175 9 11175 36
         eval let ch = expression[index]
         .if in_string
             .if escape_next
-                .span 11166 17 11166 37
+                .span 11178 17 11178 37
                 eval escape_next = false
-                .span 11167 17 11167 28
+                .span 11179 17 11179 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\\"
-                .span 11171 17 11171 36
+                .span 11183 17 11183 36
                 eval escape_next = true
-                .span 11172 17 11172 28
+                .span 11184 17 11184 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\""
-                .span 11176 17 11176 35
+                .span 11188 17 11188 35
                 eval in_string = false
             .endif
-            .span 11178 13 11178 24
+            .span 11190 13 11190 24
             eval index += 1
             continue
         .endif
         .if ch == "\""
-            .span 11182 13 11182 30
+            .span 11194 13 11194 30
             eval in_string = true
-            .span 11183 13 11183 24
+            .span 11195 13 11195 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 11187 13 11187 24
+            .span 11199 13 11199 24
             eval depth += 1
-            .span 11188 13 11188 24
+            .span 11200 13 11200 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if depth > 0
-                .span 11193 17 11193 28
+                .span 11205 17 11205 28
                 eval depth -= 1
             .endif
-            .span 11195 13 11195 24
+            .span 11207 13 11207 24
             eval index += 1
             continue
         .endif
         .if depth > 0
-            .span 11199 13 11199 24
+            .span 11211 13 11211 24
             eval index += 1
             continue
         .endif
         .if index + 1 < expression.length
-            .span 11203 13 11203 63
+            .span 11215 13 11215 63
             eval let two = substring(expression, index, index + 2)
             .if two == "==" || two == "!=" || two == "<=" || two == ">="
-                .span 11205 17 11205 83
+                .span 11217 17 11217 83
                 ret OperatorMatch { index: index, symbol: two, success: true }
             .endif
         .endif
         .if ch == "<" || ch == ">"
-            .span 11209 13 11209 115
+            .span 11221 13 11221 115
             ret OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true }
         .endif
-        .span 11211 9 11211 20
+        .span 11223 9 11223 20
         eval index += 1
     .endloop
-    .span 11213 5 11213 68
+    .span 11225 5 11225 68
     ret OperatorMatch { index: -1, symbol: "", success: false }
 .endfn
 
 .fn find_logical_operator(expression -> string) -> OperatorMatch
 .meta return OperatorMatch
 .meta effects none
-    .span 11216 26 11216 46
+    .span 11228 26 11228 46
     .param expression -> string
-    .span 11217 5 11217 33
+    .span 11229 5 11229 33
     eval let mut depth -> number = 0
-    .span 11218 5 11218 33
+    .span 11230 5 11230 33
     eval let mut index -> number = 0
-    .span 11219 5 11219 42
+    .span 11231 5 11231 42
     eval let mut in_string -> boolean = false
-    .span 11220 5 11220 44
+    .span 11232 5 11232 44
     eval let mut escape_next -> boolean = false
     .loop
         .if index + 1 >= expression.length
             break
         .endif
-        .span 11226 9 11226 36
+        .span 11238 9 11238 36
         eval let ch = expression[index]
         .if in_string
             .if escape_next
-                .span 11229 17 11229 37
+                .span 11241 17 11241 37
                 eval escape_next = false
-                .span 11230 17 11230 28
+                .span 11242 17 11242 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\\"
-                .span 11234 17 11234 36
+                .span 11246 17 11246 36
                 eval escape_next = true
-                .span 11235 17 11235 28
+                .span 11247 17 11247 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\""
-                .span 11239 17 11239 35
+                .span 11251 17 11251 35
                 eval in_string = false
             .endif
-            .span 11241 13 11241 24
+            .span 11253 13 11253 24
             eval index += 1
             continue
         .endif
         .if ch == "\""
-            .span 11245 13 11245 30
+            .span 11257 13 11257 30
             eval in_string = true
-            .span 11246 13 11246 24
+            .span 11258 13 11258 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 11250 13 11250 24
+            .span 11262 13 11262 24
             eval depth += 1
-            .span 11251 13 11251 24
+            .span 11263 13 11263 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if depth > 0
-                .span 11256 17 11256 28
+                .span 11268 17 11268 28
                 eval depth -= 1
             .endif
-            .span 11258 13 11258 24
+            .span 11270 13 11270 24
             eval index += 1
             continue
         .endif
         .if depth == 0
-            .span 11262 13 11262 63
+            .span 11274 13 11274 63
             eval let two = substring(expression, index, index + 2)
             .if two == "||"
-                .span 11264 17 11264 84
+                .span 11276 17 11276 84
                 ret OperatorMatch { index: index, symbol: "||", success: true }
             .endif
         .endif
-        .span 11267 9 11267 20
+        .span 11279 9 11279 20
         eval index += 1
     .endloop
-    .span 11270 5 11270 15
+    .span 11282 5 11282 15
     eval depth = 0
-    .span 11271 5 11271 15
+    .span 11283 5 11283 15
     eval index = 0
-    .span 11272 5 11272 23
+    .span 11284 5 11284 23
     eval in_string = false
-    .span 11273 5 11273 25
+    .span 11285 5 11285 25
     eval escape_next = false
     .loop
         .if index + 1 >= expression.length
             break
         .endif
-        .span 11278 9 11278 36
+        .span 11290 9 11290 36
         eval let ch = expression[index]
         .if in_string
             .if escape_next
-                .span 11281 17 11281 37
+                .span 11293 17 11293 37
                 eval escape_next = false
-                .span 11282 17 11282 28
+                .span 11294 17 11294 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\\"
-                .span 11286 17 11286 36
+                .span 11298 17 11298 36
                 eval escape_next = true
-                .span 11287 17 11287 28
+                .span 11299 17 11299 28
                 eval index += 1
                 continue
             .endif
             .if ch == "\""
-                .span 11291 17 11291 35
+                .span 11303 17 11303 35
                 eval in_string = false
             .endif
-            .span 11293 13 11293 24
+            .span 11305 13 11305 24
             eval index += 1
             continue
         .endif
         .if ch == "\""
-            .span 11297 13 11297 30
+            .span 11309 13 11309 30
             eval in_string = true
-            .span 11298 13 11298 24
+            .span 11310 13 11310 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 11302 13 11302 24
+            .span 11314 13 11314 24
             eval depth += 1
-            .span 11303 13 11303 24
+            .span 11315 13 11315 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if depth > 0
-                .span 11308 17 11308 28
+                .span 11320 17 11320 28
                 eval depth -= 1
             .endif
-            .span 11310 13 11310 24
+            .span 11322 13 11322 24
             eval index += 1
             continue
         .endif
         .if depth == 0
-            .span 11314 13 11314 63
+            .span 11326 13 11326 63
             eval let two = substring(expression, index, index + 2)
             .if two == "&&"
-                .span 11316 17 11316 84
+                .span 11328 17 11328 84
                 ret OperatorMatch { index: index, symbol: "&&", success: true }
             .endif
         .endif
-        .span 11319 9 11319 20
+        .span 11331 9 11331 20
         eval index += 1
     .endloop
-    .span 11321 5 11321 68
+    .span 11333 5 11333 68
     ret OperatorMatch { index: -1, symbol: "", success: false }
 .endfn
 
 .fn contains_char(set -> string, ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11324 18 11324 31
+    .span 11336 18 11336 31
     .param set -> string
-    .span 11324 33 11324 45
+    .span 11336 33 11336 45
     .param ch -> string
-    .span 11325 5 11325 33
+    .span 11337 5 11337 33
     eval let mut index -> number = 0
     .loop
         .if index >= set.length
             break
         .endif
         .if set[index] == ch
-            .span 11331 13 11331 25
+            .span 11343 13 11343 25
             ret true
         .endif
-        .span 11333 9 11333 20
+        .span 11345 9 11345 20
         eval index += 1
     .endloop
-    .span 11335 5 11335 18
+    .span 11347 5 11347 18
     ret false
 .endfn
 
 .fn is_binary_minus(expression -> string, index -> number) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11338 20 11338 40
+    .span 11350 20 11350 40
     .param expression -> string
-    .span 11338 42 11338 57
+    .span 11350 42 11350 57
     .param index -> number
-    .span 11339 5 11339 68
+    .span 11351 5 11351 68
     eval let previous = find_previous_non_space_char(expression, index)
-    .span 11340 5 11340 60
+    .span 11352 5 11352 60
     eval let next = find_next_non_space_char(expression, index)
     .if previous == null
-        .span 11342 9 11342 22
+        .span 11354 9 11354 22
         ret false
     .endif
-    .span 11344 5 11344 30
+    .span 11356 5 11356 30
     eval let prev_char = previous
     .if prev_char == "+" || prev_char == "-" || prev_char == "*" || prev_char == "/" || prev_char == "(" || prev_char == ","
-        .span 11346 9 11346 22
+        .span 11358 9 11358 22
         ret false
     .endif
     .if next == null
-        .span 11349 9 11349 22
+        .span 11361 9 11361 22
         ret false
     .endif
-    .span 11351 5 11351 26
+    .span 11363 5 11363 26
     eval let next_char = next
     .if next_char == "+" || next_char == "-" || next_char == "*" || next_char == "/" || next_char == ")" || next_char == ","
-        .span 11353 9 11353 22
+        .span 11365 9 11365 22
         ret false
     .endif
-    .span 11355 5 11355 17
+    .span 11367 5 11367 17
     ret true
 .endfn
 
 .fn find_previous_non_space_char(value -> string, index -> number) -> string?
 .meta return string?
 .meta effects none
-    .span 11358 33 11358 48
+    .span 11370 33 11370 48
     .param value -> string
-    .span 11358 50 11358 65
+    .span 11370 50 11370 65
     .param index -> number
-    .span 11359 5 11359 40
+    .span 11371 5 11371 40
     eval let mut position -> number = index
     .loop
         .if position <= 0
             break
         .endif
-        .span 11364 9 11364 23
+        .span 11376 9 11376 23
         eval position -= 1
-        .span 11365 9 11365 34
+        .span 11377 9 11377 34
         eval let ch = value[position]
         .if !is_trim_char(ch)
-            .span 11367 13 11367 23
+            .span 11379 13 11379 23
             ret ch
         .endif
     .endloop
-    .span 11370 5 11370 17
+    .span 11382 5 11382 17
     ret null
 .endfn
 
 .fn find_next_non_space_char(value -> string, index -> number) -> string?
 .meta return string?
 .meta effects none
-    .span 11373 29 11373 44
+    .span 11385 29 11385 44
     .param value -> string
-    .span 11373 46 11373 61
+    .span 11385 46 11385 61
     .param index -> number
-    .span 11374 5 11374 44
+    .span 11386 5 11386 44
     eval let mut position -> number = index + 1
     .loop
         .if position >= value.length
             break
         .endif
-        .span 11379 9 11379 34
+        .span 11391 9 11391 34
         eval let ch = value[position]
         .if !is_trim_char(ch)
-            .span 11381 13 11381 23
+            .span 11393 13 11393 23
             ret ch
         .endif
-        .span 11383 9 11383 23
+        .span 11395 9 11395 23
         eval position += 1
     .endloop
-    .span 11385 5 11385 17
+    .span 11397 5 11397 17
     ret null
 .endfn
 
 .fn find_call_site(expression -> string) -> number
 .meta return number
 .meta effects none
-    .span 11388 19 11388 39
+    .span 11400 19 11400 39
     .param expression -> string
-    .span 11389 5 11389 33
+    .span 11401 5 11401 33
     eval let mut depth -> number = 0
-    .span 11390 5 11390 33
+    .span 11402 5 11402 33
     eval let mut index -> number = 0
     .loop
         .if index >= expression.length
             break
         .endif
-        .span 11395 9 11395 36
+        .span 11407 9 11407 36
         eval let ch = expression[index]
         .if ch == "("
             .if depth == 0
-                .span 11398 17 11398 30
+                .span 11410 17 11410 30
                 ret index
             .endif
-            .span 11400 13 11400 24
+            .span 11412 13 11412 24
             eval depth += 1
         .else
             .if ch == ")"
                 .if depth > 0
-                    .span 11403 17 11403 28
+                    .span 11415 17 11415 28
                     eval depth -= 1
                 .endif
             .endif
         .endif
-        .span 11406 9 11406 20
+        .span 11418 9 11418 20
         eval index += 1
     .endloop
-    .span 11408 5 11408 15
+    .span 11420 5 11420 15
     ret -1
 .endfn
 
 .fn split_call_arguments(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 11411 25 11411 39
+    .span 11423 25 11423 39
     .param text -> string
-    .span 11412 5 11412 35
+    .span 11424 5 11424 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 11414 9 11414 19
+        .span 11426 9 11426 19
         ret []
     .endif
-    .span 11416 5 11416 38
+    .span 11428 5 11428 38
     eval let mut entries -> string[] = []
-    .span 11417 5 11417 36
+    .span 11429 5 11429 36
     eval let mut current -> string = ""
-    .span 11418 5 11418 39
+    .span 11430 5 11430 39
     eval let mut paren_depth -> number = 0
-    .span 11419 5 11419 41
+    .span 11431 5 11431 41
     eval let mut bracket_depth -> number = 0
-    .span 11420 5 11420 39
+    .span 11432 5 11432 39
     eval let mut brace_depth -> number = 0
-    .span 11421 5 11421 42
+    .span 11433 5 11433 42
     eval let mut in_single -> boolean = false
-    .span 11422 5 11422 42
+    .span 11434 5 11434 42
     eval let mut in_double -> boolean = false
-    .span 11423 5 11423 39
+    .span 11435 5 11435 39
     eval let mut escape -> boolean = false
-    .span 11424 5 11424 33
+    .span 11436 5 11436 33
     eval let mut index -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 11429 9 11429 30
+        .span 11441 9 11441 30
         eval let ch = text[index]
         .if in_double
-            .span 11431 13 11431 36
-            eval current = current + ch
-            .if escape
-                .span 11433 17 11433 32
-                eval escape = false
-            .else
-                .if ch == "\\"
-                    .span 11435 17 11435 31
-                    eval escape = true
-                .else
-                    .if ch == "\""
-                        .span 11437 17 11437 35
-                        eval in_double = false
-                    .endif
-                .endif
-            .endif
-            .span 11439 13 11439 24
-            eval index += 1
-            continue
-        .endif
-        .if in_single
             .span 11443 13 11443 36
             eval current = current + ch
             .if escape
@@ -16478,9 +16474,9 @@
                     .span 11447 17 11447 31
                     eval escape = true
                 .else
-                    .if ch == "'"
+                    .if ch == "\""
                         .span 11449 17 11449 35
-                        eval in_single = false
+                        eval in_double = false
                     .endif
                 .endif
             .endif
@@ -16488,73 +16484,94 @@
             eval index += 1
             continue
         .endif
-        .if ch == "\""
-            .span 11455 13 11455 30
-            eval in_double = true
-            .span 11456 13 11456 36
+        .if in_single
+            .span 11455 13 11455 36
             eval current = current + ch
-            .span 11457 13 11457 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "'"
-            .span 11461 13 11461 30
-            eval in_single = true
-            .span 11462 13 11462 36
-            eval current = current + ch
+            .if escape
+                .span 11457 17 11457 32
+                eval escape = false
+            .else
+                .if ch == "\\"
+                    .span 11459 17 11459 31
+                    eval escape = true
+                .else
+                    .if ch == "'"
+                        .span 11461 17 11461 35
+                        eval in_single = false
+                    .endif
+                .endif
+            .endif
             .span 11463 13 11463 24
             eval index += 1
             continue
         .endif
-        .if ch == "("
+        .if ch == "\""
             .span 11467 13 11467 30
-            eval paren_depth += 1
+            eval in_double = true
             .span 11468 13 11468 36
+            eval current = current + ch
+            .span 11469 13 11469 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "'"
+            .span 11473 13 11473 30
+            eval in_single = true
+            .span 11474 13 11474 36
+            eval current = current + ch
+            .span 11475 13 11475 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "("
+            .span 11479 13 11479 30
+            eval paren_depth += 1
+            .span 11480 13 11480 36
             eval current = current + ch
         .else
             .if ch == ")"
                 .if paren_depth > 0
-                    .span 11471 17 11471 34
+                    .span 11483 17 11483 34
                     eval paren_depth -= 1
                 .endif
-                .span 11473 13 11473 36
+                .span 11485 13 11485 36
                 eval current = current + ch
             .else
                 .if ch == "["
-                    .span 11475 13 11475 32
+                    .span 11487 13 11487 32
                     eval bracket_depth += 1
-                    .span 11476 13 11476 36
+                    .span 11488 13 11488 36
                     eval current = current + ch
                 .else
                     .if ch == "]"
                         .if bracket_depth > 0
-                            .span 11479 17 11479 36
+                            .span 11491 17 11491 36
                             eval bracket_depth -= 1
                         .endif
-                        .span 11481 13 11481 36
+                        .span 11493 13 11493 36
                         eval current = current + ch
                     .else
                         .if ch == "{"
-                            .span 11483 13 11483 30
+                            .span 11495 13 11495 30
                             eval brace_depth += 1
-                            .span 11484 13 11484 36
+                            .span 11496 13 11496 36
                             eval current = current + ch
                         .else
                             .if ch == "}"
                                 .if brace_depth > 0
-                                    .span 11487 17 11487 34
+                                    .span 11499 17 11499 34
                                     eval brace_depth -= 1
                                 .endif
-                                .span 11489 13 11489 36
+                                .span 11501 13 11501 36
                                 eval current = current + ch
                             .else
                                 .if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
-                                    .span 11491 13 11491 66
+                                    .span 11503 13 11503 66
                                     eval entries = append_string(entries, trim_text(current))
-                                    .span 11492 13 11492 26
+                                    .span 11504 13 11504 26
                                     eval current = ""
                                 .else
-                                    .span 11494 13 11494 36
+                                    .span 11506 13 11506 36
                                     eval current = current + ch
                                 .endif
                             .endif
@@ -16563,72 +16580,51 @@
                 .endif
             .endif
         .endif
-        .span 11496 9 11496 20
+        .span 11508 9 11508 20
         eval index += 1
     .endloop
-    .span 11498 5 11498 58
+    .span 11510 5 11510 58
     eval entries = append_string(entries, trim_text(current))
-    .span 11499 5 11499 20
+    .span 11511 5 11511 20
     ret entries
 .endfn
 
 .fn split_array_elements(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 11502 25 11502 39
+    .span 11514 25 11514 39
     .param text -> string
-    .span 11503 5 11503 35
+    .span 11515 5 11515 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 11505 9 11505 19
+        .span 11517 9 11517 19
         ret []
     .endif
-    .span 11507 5 11507 38
+    .span 11519 5 11519 38
     eval let mut entries -> string[] = []
-    .span 11508 5 11508 36
+    .span 11520 5 11520 36
     eval let mut current -> string = ""
-    .span 11509 5 11509 39
+    .span 11521 5 11521 39
     eval let mut paren_depth -> number = 0
-    .span 11510 5 11510 41
+    .span 11522 5 11522 41
     eval let mut bracket_depth -> number = 0
-    .span 11511 5 11511 39
+    .span 11523 5 11523 39
     eval let mut brace_depth -> number = 0
-    .span 11512 5 11512 33
+    .span 11524 5 11524 33
     eval let mut index -> number = 0
-    .span 11513 5 11513 42
+    .span 11525 5 11525 42
     eval let mut in_single -> boolean = false
-    .span 11514 5 11514 42
+    .span 11526 5 11526 42
     eval let mut in_double -> boolean = false
-    .span 11515 5 11515 39
+    .span 11527 5 11527 39
     eval let mut escape -> boolean = false
     .loop
         .if index >= text.length
             break
         .endif
-        .span 11520 9 11520 30
+        .span 11532 9 11532 30
         eval let ch = text[index]
         .if in_double
-            .span 11522 13 11522 36
-            eval current = current + ch
-            .if escape
-                .span 11524 17 11524 32
-                eval escape = false
-            .else
-                .if ch == "\\"
-                    .span 11526 17 11526 31
-                    eval escape = true
-                .else
-                    .if ch == "\""
-                        .span 11528 17 11528 35
-                        eval in_double = false
-                    .endif
-                .endif
-            .endif
-            .span 11530 13 11530 24
-            eval index += 1
-            continue
-        .endif
-        .if in_single
             .span 11534 13 11534 36
             eval current = current + ch
             .if escape
@@ -16639,9 +16635,9 @@
                     .span 11538 17 11538 31
                     eval escape = true
                 .else
-                    .if ch == "'"
+                    .if ch == "\""
                         .span 11540 17 11540 35
-                        eval in_single = false
+                        eval in_double = false
                     .endif
                 .endif
             .endif
@@ -16649,51 +16645,72 @@
             eval index += 1
             continue
         .endif
-        .if ch == "\""
-            .span 11546 13 11546 30
-            eval in_double = true
-            .span 11547 13 11547 36
+        .if in_single
+            .span 11546 13 11546 36
             eval current = current + ch
-            .span 11548 13 11548 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "'"
-            .span 11552 13 11552 30
-            eval in_single = true
-            .span 11553 13 11553 36
-            eval current = current + ch
+            .if escape
+                .span 11548 17 11548 32
+                eval escape = false
+            .else
+                .if ch == "\\"
+                    .span 11550 17 11550 31
+                    eval escape = true
+                .else
+                    .if ch == "'"
+                        .span 11552 17 11552 35
+                        eval in_single = false
+                    .endif
+                .endif
+            .endif
             .span 11554 13 11554 24
             eval index += 1
             continue
         .endif
-        .if ch == "("
+        .if ch == "\""
             .span 11558 13 11558 30
+            eval in_double = true
+            .span 11559 13 11559 36
+            eval current = current + ch
+            .span 11560 13 11560 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "'"
+            .span 11564 13 11564 30
+            eval in_single = true
+            .span 11565 13 11565 36
+            eval current = current + ch
+            .span 11566 13 11566 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "("
+            .span 11570 13 11570 30
             eval paren_depth += 1
         .else
             .if ch == ")"
                 .if paren_depth > 0
-                    .span 11561 17 11561 34
+                    .span 11573 17 11573 34
                     eval paren_depth -= 1
                 .endif
             .else
                 .if ch == "["
-                    .span 11564 13 11564 32
+                    .span 11576 13 11576 32
                     eval bracket_depth += 1
                 .else
                     .if ch == "]"
                         .if bracket_depth > 0
-                            .span 11567 17 11567 36
+                            .span 11579 17 11579 36
                             eval bracket_depth -= 1
                         .endif
                     .else
                         .if ch == "{"
-                            .span 11570 13 11570 30
+                            .span 11582 13 11582 30
                             eval brace_depth += 1
                         .else
                             .if ch == "}"
                                 .if brace_depth > 0
-                                    .span 11573 17 11573 34
+                                    .span 11585 17 11585 34
                                     eval brace_depth -= 1
                                 .endif
                             .endif
@@ -16703,487 +16720,487 @@
             .endif
         .endif
         .if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
-            .span 11578 13 11578 66
+            .span 11590 13 11590 66
             eval entries = append_string(entries, trim_text(current))
-            .span 11579 13 11579 26
+            .span 11591 13 11591 26
             eval current = ""
         .else
-            .span 11581 13 11581 36
+            .span 11593 13 11593 36
             eval current = current + ch
         .endif
-        .span 11583 9 11583 20
+        .span 11595 9 11595 20
         eval index += 1
     .endloop
     .if current.length > 0
-        .span 11587 9 11587 62
+        .span 11599 9 11599 62
         eval entries = append_string(entries, trim_text(current))
     .endif
-    .span 11590 5 11590 39
+    .span 11602 5 11602 39
     eval let mut filtered -> string[] = []
-    .span 11591 5 11591 15
+    .span 11603 5 11603 15
     eval index = 0
     .loop
         .if index >= entries.length
             break
         .endif
-        .span 11596 9 11596 47
+        .span 11608 9 11608 47
         eval let entry = trim_text(entries[index])
         .if entry.length > 0
-            .span 11598 13 11598 55
+            .span 11610 13 11610 55
             eval filtered = append_string(filtered, entry)
         .endif
-        .span 11600 9 11600 20
+        .span 11612 9 11612 20
         eval index += 1
     .endloop
-    .span 11602 5 11602 21
+    .span 11614 5 11614 21
     ret filtered
 .endfn
 
 .fn parse_array_literal_metadata(entries -> string[], context -> TypeContext) -> ArrayLiteralMetadata
 .meta return ArrayLiteralMetadata
 .meta effects none
-    .span 11605 33 11605 52
+    .span 11617 33 11617 52
     .param entries -> string[]
-    .span 11605 54 11605 76
+    .span 11617 54 11617 76
     .param context -> TypeContext
     .if entries.length == 0
-        .span 11607 9 11607 74
+        .span 11619 9 11619 74
         ret ArrayLiteralMetadata { element_type: "", start_index: 0 }
     .endif
-    .span 11609 5 11609 39
+    .span 11621 5 11621 39
     eval let first = trim_text(entries[0])
     .if first.length < 9
-        .span 11611 9 11611 74
+        .span 11623 9 11623 74
         ret ArrayLiteralMetadata { element_type: "", start_index: 0 }
     .endif
-    .span 11613 5 11613 41
+    .span 11625 5 11625 41
     eval let prefix = substring(first, 0, 9)
     .if prefix != "#element:"
-        .span 11615 9 11615 74
+        .span 11627 9 11627 74
         ret ArrayLiteralMetadata { element_type: "", start_index: 0 }
     .endif
-    .span 11617 5 11617 67
+    .span 11629 5 11629 67
     eval let annotation = trim_text(substring(first, 9, first.length))
     .if annotation.length == 0
-        .span 11619 9 11619 74
+        .span 11631 9 11631 74
         ret ArrayLiteralMetadata { element_type: "", start_index: 1 }
     .endif
-    .span 11621 5 11621 63
+    .span 11633 5 11633 63
     eval let mapped = map_metadata_annotation(context, annotation)
-    .span 11622 5 11622 74
+    .span 11634 5 11634 74
     ret ArrayLiteralMetadata { element_type: mapped, start_index: 1 }
 .endfn
 
 .fn map_metadata_annotation(context -> TypeContext, annotation -> string) -> string
 .meta return string
 .meta effects none
-    .span 11625 28 11625 50
+    .span 11637 28 11637 50
     .param context -> TypeContext
-    .span 11625 52 11625 72
+    .span 11637 52 11637 72
     .param annotation -> string
-    .span 11626 5 11626 41
+    .span 11638 5 11638 41
     eval let trimmed = trim_text(annotation)
     .if trimmed.length == 0
-        .span 11628 9 11628 19
+        .span 11640 9 11640 19
         ret ""
     .endif
-    .span 11630 5 11630 58
+    .span 11642 5 11642 58
     eval let primitive = map_primitive_type(context, trimmed)
     .if primitive.length > 0
-        .span 11632 9 11632 26
+        .span 11644 9 11644 26
         ret primitive
     .endif
     .if trimmed.length > 2
-        .span 11636 9 11636 77
+        .span 11648 9 11648 77
         eval let suffix = substring(trimmed, trimmed.length - 2, trimmed.length)
         .if suffix == "[]"
-            .span 11638 13 11638 89
+            .span 11650 13 11650 89
             eval let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2))
-            .span 11639 13 11639 81
+            .span 11651 13 11651 81
             eval let inner_type = map_metadata_annotation(context, inner_annotation)
             .if inner_type.length == 0
-                .span 11641 17 11641 27
+                .span 11653 17 11653 27
                 ret ""
             .endif
-            .span 11643 13 11643 73
+            .span 11655 13 11655 73
             eval let struct_type = array_struct_type_for_element(inner_type)
-            .span 11644 13 11644 38
+            .span 11656 13 11656 38
             ret struct_type + "*"
         .endif
     .endif
-    .span 11647 5 11647 15
+    .span 11659 5 11659 15
     ret ""
 .endfn
 
 .fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string
 .meta return string
 .meta effects none
-    .span 11650 30 11650 46
+    .span 11662 30 11662 46
     .param symbol -> string
-    .span 11650 48 11650 67
+    .span 11662 48 11662 67
     .param llvm_type -> string
     .if llvm_type == "double"
         .if symbol == "+"
-            .span 11653 13 11653 27
+            .span 11665 13 11665 27
             ret "fadd"
         .endif
         .if symbol == "-"
-            .span 11656 13 11656 27
+            .span 11668 13 11668 27
             ret "fsub"
         .endif
         .if symbol == "*"
-            .span 11659 13 11659 27
+            .span 11671 13 11671 27
             ret "fmul"
         .endif
         .if symbol == "/"
-            .span 11662 13 11662 27
+            .span 11674 13 11674 27
             ret "fdiv"
         .endif
         .if symbol == "%"
-            .span 11665 13 11665 27
+            .span 11677 13 11677 27
             ret "frem"
         .endif
     .endif
     .if symbol == "+"
-        .span 11669 9 11669 22
+        .span 11681 9 11681 22
         ret "add"
     .endif
     .if symbol == "-"
-        .span 11672 9 11672 22
+        .span 11684 9 11684 22
         ret "sub"
     .endif
     .if symbol == "*"
-        .span 11675 9 11675 22
+        .span 11687 9 11687 22
         ret "mul"
     .endif
     .if symbol == "/"
-        .span 11678 9 11678 23
+        .span 11690 9 11690 23
         ret "sdiv"
     .endif
     .if symbol == "%"
-        .span 11681 9 11681 23
+        .span 11693 9 11693 23
         ret "srem"
     .endif
-    .span 11683 5 11683 18
+    .span 11695 5 11695 18
     ret "add"
 .endfn
 
 .fn format_temp_name(index -> number) -> string
 .meta return string
 .meta effects none
-    .span 11686 21 11686 36
+    .span 11698 21 11698 36
     .param index -> number
-    .span 11687 5 11687 43
+    .span 11699 5 11699 43
     ret "%t" + number_to_string(index)
 .endfn
 
 .fn format_local_pointer_name(index -> number) -> string
 .meta return string
 .meta effects none
-    .span 11690 30 11690 45
+    .span 11702 30 11702 45
     .param index -> number
-    .span 11691 5 11691 43
+    .span 11703 5 11703 43
     ret "%l" + number_to_string(index)
 .endfn
 
 .fn format_typed_operand(operand -> LLVMOperand) -> string
 .meta return string
 .meta effects none
-    .span 11694 25 11694 47
+    .span 11706 25 11706 47
     .param operand -> LLVMOperand
-    .span 11695 5 11695 52
+    .span 11707 5 11707 52
     ret operand.llvm_type + " " + operand.value
 .endfn
 
 .fn ends_with_pointer_suffix(value -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11698 29 11698 44
+    .span 11710 29 11710 44
     .param value -> string
-    .span 11699 5 11699 36
+    .span 11711 5 11711 36
     eval let trimmed = trim_text(value)
     .if trimmed.length == 0
-        .span 11701 9 11701 22
+        .span 11713 9 11713 22
         ret false
     .endif
-    .span 11703 5 11703 47
+    .span 11715 5 11715 47
     ret trimmed[trimmed.length - 1] == "*"
 .endfn
 
 .fn strip_pointer_suffix(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 11706 25 11706 40
+    .span 11718 25 11718 40
     .param value -> string
-    .span 11707 5 11707 36
+    .span 11719 5 11719 36
     eval let trimmed = trim_text(value)
     .if trimmed.length == 0
-        .span 11709 9 11709 24
+        .span 11721 9 11721 24
         ret trimmed
     .endif
     .if trimmed[trimmed.length - 1] != "*"
-        .span 11712 9 11712 24
+        .span 11724 9 11724 24
         ret trimmed
     .endif
-    .span 11714 5 11714 65
+    .span 11726 5 11726 65
     ret trim_text(substring(trimmed, 0, trimmed.length - 1))
 .endfn
 
 .fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11717 17 11717 42
+    .span 11729 17 11729 42
     .param type_annotation -> string
-    .span 11717 44 11717 63
+    .span 11729 44 11729 63
     .param llvm_type -> string
-    .span 11718 5 11718 46
+    .span 11730 5 11730 46
     eval let trimmed = trim_text(type_annotation)
     .if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<")
-        .span 11720 9 11720 22
+        .span 11732 9 11732 22
         ret false
     .endif
     .if trimmed == "Affine" || trimmed == "Linear"
-        .span 11723 9 11723 22
+        .span 11735 9 11735 22
         ret false
     .endif
     .if llvm_type == "double"
-        .span 11726 9 11726 21
-        ret true
-    .endif
-    .if llvm_type == "i32"
-        .span 11729 9 11729 21
-        ret true
-    .endif
-    .if llvm_type == "i64"
-        .span 11732 9 11732 21
-        ret true
-    .endif
-    .if llvm_type == "i1"
-        .span 11735 9 11735 21
-        ret true
-    .endif
-    .if ends_with_pointer_suffix(llvm_type)
         .span 11738 9 11738 21
         ret true
     .endif
-    .if trimmed.length == 0
+    .if llvm_type == "i32"
         .span 11741 9 11741 21
         ret true
     .endif
-    .if trimmed[0] == "&"
+    .if llvm_type == "i64"
         .span 11744 9 11744 21
         ret true
     .endif
+    .if llvm_type == "i1"
+        .span 11747 9 11747 21
+        ret true
+    .endif
+    .if ends_with_pointer_suffix(llvm_type)
+        .span 11750 9 11750 21
+        ret true
+    .endif
+    .if trimmed.length == 0
+        .span 11753 9 11753 21
+        ret true
+    .endif
+    .if trimmed[0] == "&"
+        .span 11756 9 11756 21
+        ret true
+    .endif
     .if starts_with(trimmed, "mut ")
-        .span 11747 9 11747 50
+        .span 11759 9 11759 50
         eval let stripped = strip_mut_prefix(trimmed)
         .if stripped.length > 0
             .if stripped[0] == "&"
-                .span 11750 17 11750 29
+                .span 11762 17 11762 29
                 ret true
             .endif
         .endif
     .endif
-    .span 11754 5 11754 18
+    .span 11766 5 11766 18
     ret false
 .endfn
 
 .fn default_return_literal(llvm_type -> string) -> string
 .meta return string
 .meta effects none
-    .span 11757 27 11757 46
+    .span 11769 27 11769 46
     .param llvm_type -> string
     .if llvm_type == "double"
-        .span 11759 9 11759 22
+        .span 11771 9 11771 22
         ret "0.0"
     .endif
     .if llvm_type == "i32"
-        .span 11762 9 11762 20
+        .span 11774 9 11774 20
         ret "0"
     .endif
     .if llvm_type == "i64"
-        .span 11765 9 11765 20
+        .span 11777 9 11777 20
         ret "0"
     .endif
     .if llvm_type == "i1"
-        .span 11768 9 11768 24
+        .span 11780 9 11780 24
         ret "false"
     .endif
     .if ends_with_pointer_suffix(llvm_type)
-        .span 11771 9 11771 23
+        .span 11783 9 11783 23
         ret "null"
     .endif
-    .span 11773 5 11773 30
+    .span 11785 5 11785 30
     ret "zeroinitializer"
 .endfn
 
 .fn starts_with(value -> string, prefix -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11776 16 11776 31
+    .span 11788 16 11788 31
     .param value -> string
-    .span 11776 33 11776 49
+    .span 11788 33 11788 49
     .param prefix -> string
     .if prefix.length == 0
-        .span 11778 9 11778 21
+        .span 11790 9 11790 21
         ret true
     .endif
     .if value.length < prefix.length
-        .span 11781 9 11781 22
+        .span 11793 9 11793 22
         ret false
     .endif
-    .span 11783 5 11783 51
+    .span 11795 5 11795 51
     eval let head = substring(value, 0, prefix.length)
-    .span 11784 5 11784 27
+    .span 11796 5 11796 27
     ret head == prefix
 .endfn
 
 .fn contains_text(haystack -> string, needle -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11787 18 11787 36
+    .span 11799 18 11799 36
     .param haystack -> string
-    .span 11787 38 11787 54
+    .span 11799 38 11799 54
     .param needle -> string
     .if needle.length == 0
-        .span 11789 9 11789 21
+        .span 11801 9 11801 21
         ret true
     .endif
     .if haystack.length < needle.length
-        .span 11792 9 11792 22
+        .span 11804 9 11804 22
         ret false
     .endif
-    .span 11794 5 11794 33
+    .span 11806 5 11806 33
     eval let mut index -> number = 0
     .loop
         .if index + needle.length > haystack.length
             break
         .endif
-        .span 11799 9 11799 75
+        .span 11811 9 11811 75
         eval let candidate = substring(haystack, index, index + needle.length)
         .if candidate == needle
-            .span 11801 13 11801 25
+            .span 11813 13 11813 25
             ret true
         .endif
-        .span 11803 9 11803 20
+        .span 11815 9 11815 20
         eval index += 1
     .endloop
-    .span 11805 5 11805 18
+    .span 11817 5 11817 18
     ret false
 .endfn
 
 .fn strip_mut_prefix(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 11808 21 11808 36
+    .span 11820 21 11820 36
     .param value -> string
-    .span 11809 5 11809 36
+    .span 11821 5 11821 36
     eval let trimmed = trim_text(value)
     .if trimmed.length < 4
-        .span 11811 9 11811 24
+        .span 11823 9 11823 24
         ret trimmed
     .endif
-    .span 11813 5 11813 43
+    .span 11825 5 11825 43
     eval let prefix = substring(trimmed, 0, 4)
     .if prefix == "mut "
-        .span 11815 9 11815 65
+        .span 11827 9 11827 65
         ret trim_text(substring(trimmed, 4, trimmed.length))
     .endif
-    .span 11817 5 11817 20
+    .span 11829 5 11829 20
     ret trimmed
 .endfn
 
 .fn is_simple_identifier(value -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 11820 25 11820 40
+    .span 11832 25 11832 40
     .param value -> string
-    .span 11821 5 11821 36
+    .span 11833 5 11833 36
     eval let trimmed = trim_text(value)
     .if trimmed.length == 0
-        .span 11823 9 11823 22
+        .span 11835 9 11835 22
         ret false
     .endif
-    .span 11825 5 11825 28
+    .span 11837 5 11837 28
     eval let first = trimmed[0]
     .if first >= "0" && first <= "9"
-        .span 11827 9 11827 22
+        .span 11839 9 11839 22
         ret false
     .endif
-    .span 11829 5 11829 46
+    .span 11841 5 11841 46
     eval let sanitized = sanitize_symbol(trimmed)
     .if sanitized != trimmed
-        .span 11831 9 11831 22
+        .span 11843 9 11843 22
         ret false
     .endif
-    .span 11833 5 11833 17
+    .span 11845 5 11845 17
     ret true
 .endfn
 
 .fn find_top_level_range_separator(value -> string) -> number
 .meta return number
 .meta effects none
-    .span 11836 35 11836 50
+    .span 11848 35 11848 50
     .param value -> string
-    .span 11837 5 11837 39
+    .span 11849 5 11849 39
     eval let mut paren_depth -> number = 0
-    .span 11838 5 11838 41
+    .span 11850 5 11850 41
     eval let mut bracket_depth -> number = 0
-    .span 11839 5 11839 39
+    .span 11851 5 11851 39
     eval let mut brace_depth -> number = 0
-    .span 11840 5 11840 33
+    .span 11852 5 11852 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 11845 9 11845 31
+        .span 11857 9 11857 31
         eval let ch = value[index]
         .if ch == "("
-            .span 11847 13 11847 30
+            .span 11859 13 11859 30
             eval paren_depth += 1
-            .span 11848 13 11848 24
+            .span 11860 13 11860 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if paren_depth > 0
-                .span 11853 17 11853 34
+                .span 11865 17 11865 34
                 eval paren_depth -= 1
-            .endif
-            .span 11855 13 11855 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "["
-            .span 11859 13 11859 32
-            eval bracket_depth += 1
-            .span 11860 13 11860 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "]"
-            .if bracket_depth > 0
-                .span 11865 17 11865 36
-                eval bracket_depth -= 1
             .endif
             .span 11867 13 11867 24
             eval index += 1
             continue
         .endif
-        .if ch == "{"
-            .span 11871 13 11871 30
-            eval brace_depth += 1
+        .if ch == "["
+            .span 11871 13 11871 32
+            eval bracket_depth += 1
             .span 11872 13 11872 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "]"
+            .if bracket_depth > 0
+                .span 11877 17 11877 36
+                eval bracket_depth -= 1
+            .endif
+            .span 11879 13 11879 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{"
+            .span 11883 13 11883 30
+            eval brace_depth += 1
+            .span 11884 13 11884 24
             eval index += 1
             continue
         .endif
         .if ch == "}"
             .if brace_depth > 0
-                .span 11877 17 11877 34
+                .span 11889 17 11889 34
                 eval brace_depth -= 1
             .endif
-            .span 11879 13 11879 24
+            .span 11891 13 11891 24
             eval index += 1
             continue
         .endif
@@ -17191,67 +17208,67 @@
             .if index + 1 < value.length
                 .if value[index + 1] == "."
                     .if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
-                        .span 11886 25 11886 38
+                        .span 11898 25 11898 38
                         ret index
                     .endif
                 .endif
             .endif
         .endif
-        .span 11891 9 11891 20
+        .span 11903 9 11903 20
         eval index += 1
     .endloop
-    .span 11893 5 11893 15
+    .span 11905 5 11905 15
     ret -1
 .endfn
 
 .fn find_top_level_range_separator_from(value -> string, start_index -> number) -> number
 .meta return number
 .meta effects none
-    .span 11896 40 11896 55
+    .span 11908 40 11908 55
     .param value -> string
-    .span 11896 57 11896 78
+    .span 11908 57 11908 78
     .param start_index -> number
-    .span 11897 5 11897 39
+    .span 11909 5 11909 39
     eval let mut paren_depth -> number = 0
-    .span 11898 5 11898 41
+    .span 11910 5 11910 41
     eval let mut bracket_depth -> number = 0
-    .span 11899 5 11899 39
+    .span 11911 5 11911 39
     eval let mut brace_depth -> number = 0
-    .span 11900 5 11900 33
+    .span 11912 5 11912 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 11905 9 11905 31
+        .span 11917 9 11917 31
         eval let ch = value[index]
         .if ch == "("
-            .span 11907 13 11907 30
+            .span 11919 13 11919 30
             eval paren_depth += 1
         .else
             .if ch == ")"
                 .if paren_depth > 0
-                    .span 11910 17 11910 34
+                    .span 11922 17 11922 34
                     eval paren_depth -= 1
                 .endif
             .else
                 .if ch == "["
-                    .span 11913 13 11913 32
+                    .span 11925 13 11925 32
                     eval bracket_depth += 1
                 .else
                     .if ch == "]"
                         .if bracket_depth > 0
-                            .span 11916 17 11916 36
+                            .span 11928 17 11928 36
                             eval bracket_depth -= 1
                         .endif
                     .else
                         .if ch == "{"
-                            .span 11919 13 11919 30
+                            .span 11931 13 11931 30
                             eval brace_depth += 1
                         .else
                             .if ch == "}"
                                 .if brace_depth > 0
-                                    .span 11922 17 11922 34
+                                    .span 11934 17 11934 34
                                     eval brace_depth -= 1
                                 .endif
                             .endif
@@ -17265,163 +17282,163 @@
                 .if index + 1 < value.length
                     .if value[index + 1] == "."
                         .if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
-                            .span 11930 29 11930 42
+                            .span 11942 29 11942 42
                             ret index
                         .endif
                     .endif
                 .endif
             .endif
         .endif
-        .span 11936 9 11936 20
+        .span 11948 9 11948 20
         eval index += 1
     .endloop
-    .span 11938 5 11938 15
+    .span 11950 5 11950 15
     ret -1
 .endfn
 
 .fn find_member_access_separator(value -> string) -> number
 .meta return number
 .meta effects none
-    .span 11941 33 11941 48
+    .span 11953 33 11953 48
     .param value -> string
-    .span 11942 5 11942 39
+    .span 11954 5 11954 39
     eval let mut paren_depth -> number = 0
-    .span 11943 5 11943 41
+    .span 11955 5 11955 41
     eval let mut bracket_depth -> number = 0
-    .span 11944 5 11944 39
+    .span 11956 5 11956 39
     eval let mut brace_depth -> number = 0
-    .span 11945 5 11945 42
+    .span 11957 5 11957 42
     eval let mut in_single -> boolean = false
-    .span 11946 5 11946 42
+    .span 11958 5 11958 42
     eval let mut in_double -> boolean = false
-    .span 11947 5 11947 39
+    .span 11959 5 11959 39
     eval let mut escape -> boolean = false
-    .span 11948 5 11948 33
+    .span 11960 5 11960 33
     eval let mut index -> number = 0
-    .span 11949 5 11949 39
+    .span 11961 5 11961 39
     eval let mut last_index -> number = -1
     .loop
         .if index >= value.length
             break
         .endif
-        .span 11954 9 11954 31
+        .span 11966 9 11966 31
         eval let ch = value[index]
         .if in_single
             .if escape
-                .span 11957 17 11957 32
+                .span 11969 17 11969 32
                 eval escape = false
             .else
                 .if ch == "\\"
-                    .span 11959 17 11959 31
+                    .span 11971 17 11971 31
                     eval escape = true
                 .else
                     .if ch == "'"
-                        .span 11961 17 11961 35
+                        .span 11973 17 11973 35
                         eval in_single = false
                     .endif
                 .endif
             .endif
-            .span 11963 13 11963 24
+            .span 11975 13 11975 24
             eval index += 1
             continue
         .endif
         .if in_double
             .if escape
-                .span 11968 17 11968 32
+                .span 11980 17 11980 32
                 eval escape = false
             .else
                 .if ch == "\\"
-                    .span 11970 17 11970 31
+                    .span 11982 17 11982 31
                     eval escape = true
                 .else
                     .if ch == "\""
-                        .span 11972 17 11972 35
+                        .span 11984 17 11984 35
                         eval in_double = false
                     .endif
                 .endif
             .endif
-            .span 11974 13 11974 24
+            .span 11986 13 11986 24
             eval index += 1
             continue
         .endif
         .if ch == "'"
-            .span 11978 13 11978 30
+            .span 11990 13 11990 30
             eval in_single = true
-            .span 11979 13 11979 24
+            .span 11991 13 11991 24
             eval index += 1
             continue
         .endif
         .if ch == "\""
-            .span 11983 13 11983 30
+            .span 11995 13 11995 30
             eval in_double = true
-            .span 11984 13 11984 24
+            .span 11996 13 11996 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 11988 13 11988 30
+            .span 12000 13 12000 30
             eval paren_depth += 1
-            .span 11989 13 11989 24
+            .span 12001 13 12001 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if paren_depth > 0
-                .span 11994 17 11994 34
+                .span 12006 17 12006 34
                 eval paren_depth -= 1
-            .endif
-            .span 11996 13 11996 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "["
-            .span 12000 13 12000 32
-            eval bracket_depth += 1
-            .span 12001 13 12001 24
-            eval index += 1
-            continue
-        .endif
-        .if ch == "]"
-            .if bracket_depth > 0
-                .span 12006 17 12006 36
-                eval bracket_depth -= 1
             .endif
             .span 12008 13 12008 24
             eval index += 1
             continue
         .endif
-        .if ch == "{"
-            .span 12012 13 12012 30
-            eval brace_depth += 1
+        .if ch == "["
+            .span 12012 13 12012 32
+            eval bracket_depth += 1
             .span 12013 13 12013 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "]"
+            .if bracket_depth > 0
+                .span 12018 17 12018 36
+                eval bracket_depth -= 1
+            .endif
+            .span 12020 13 12020 24
+            eval index += 1
+            continue
+        .endif
+        .if ch == "{"
+            .span 12024 13 12024 30
+            eval brace_depth += 1
+            .span 12025 13 12025 24
             eval index += 1
             continue
         .endif
         .if ch == "}"
             .if brace_depth > 0
-                .span 12018 17 12018 34
+                .span 12030 17 12030 34
                 eval brace_depth -= 1
             .endif
-            .span 12020 13 12020 24
+            .span 12032 13 12032 24
             eval index += 1
             continue
         .endif
         .if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
             .if ch == "."
                 .if index > 0
-                    .span 12026 21 12026 53
+                    .span 12038 21 12038 53
                     eval let previous = value[index - 1]
                     .if previous == "."
-                        .span 12028 25 12028 36
+                        .span 12040 25 12040 36
                         eval index += 1
                         continue
                     .endif
                     .if is_digit_char(previous)
                         .if index + 1 < value.length
-                            .span 12033 29 12033 63
+                            .span 12045 29 12045 63
                             eval let next_digit = value[index + 1]
                             .if is_digit_char(next_digit)
-                                .span 12035 33 12035 44
+                                .span 12047 33 12047 44
                                 eval index += 1
                                 continue
                             .endif
@@ -17429,278 +17446,278 @@
                     .endif
                 .endif
                 .if index + 1 < value.length
-                    .span 12042 21 12042 54
+                    .span 12054 21 12054 54
                     eval let next_char = value[index + 1]
                     .if next_char == "."
-                        .span 12044 25 12044 36
+                        .span 12056 25 12056 36
                         eval index += 1
                         continue
                     .endif
                 .endif
-                .span 12048 17 12048 36
+                .span 12060 17 12060 36
                 eval last_index = index
             .endif
         .endif
-        .span 12051 9 12051 20
+        .span 12063 9 12063 20
         eval index += 1
     .endloop
-    .span 12053 5 12053 23
+    .span 12065 5 12065 23
     ret last_index
 .endfn
 
 .fn parse_member_access(expression -> string) -> MemberAccessParse
 .meta return MemberAccessParse
 .meta effects none
-    .span 12056 24 12056 44
+    .span 12068 24 12068 44
     .param expression -> string
-    .span 12057 5 12057 41
+    .span 12069 5 12069 41
     eval let trimmed = trim_text(expression)
     .if trimmed.length == 0
-        .span 12059 9 12059 74
-        ret MemberAccessParse { success: false, base: "", field: "" }
-    .endif
-    .span 12061 5 12061 59
-    eval let separator = find_member_access_separator(trimmed)
-    .if separator < 0
-        .span 12063 9 12063 74
-        ret MemberAccessParse { success: false, base: "", field: "" }
-    .endif
-    .span 12065 5 12065 60
-    eval let base = trim_text(substring(trimmed, 0, separator))
-    .span 12066 5 12066 78
-    eval let field = trim_text(substring(trimmed, separator + 1, trimmed.length))
-    .if base.length == 0 || field.length == 0
-        .span 12068 9 12068 74
-        ret MemberAccessParse { success: false, base: "", field: "" }
-    .endif
-    .if !is_simple_identifier(field)
         .span 12071 9 12071 74
         ret MemberAccessParse { success: false, base: "", field: "" }
     .endif
-    .span 12073 5 12073 74
+    .span 12073 5 12073 59
+    eval let separator = find_member_access_separator(trimmed)
+    .if separator < 0
+        .span 12075 9 12075 74
+        ret MemberAccessParse { success: false, base: "", field: "" }
+    .endif
+    .span 12077 5 12077 60
+    eval let base = trim_text(substring(trimmed, 0, separator))
+    .span 12078 5 12078 78
+    eval let field = trim_text(substring(trimmed, separator + 1, trimmed.length))
+    .if base.length == 0 || field.length == 0
+        .span 12080 9 12080 74
+        ret MemberAccessParse { success: false, base: "", field: "" }
+    .endif
+    .if !is_simple_identifier(field)
+        .span 12083 9 12083 74
+        ret MemberAccessParse { success: false, base: "", field: "" }
+    .endif
+    .span 12085 5 12085 74
     ret MemberAccessParse { success: true, base: base, field: field }
 .endfn
 
 .fn parse_index_expression(expression -> string) -> IndexExpressionParse
 .meta return IndexExpressionParse
 .meta effects none
-    .span 12076 27 12076 47
+    .span 12088 27 12088 47
     .param expression -> string
-    .span 12077 5 12077 41
+    .span 12089 5 12089 41
     eval let trimmed = trim_text(expression)
     .if trimmed.length == 0
-        .span 12079 9 12079 77
+        .span 12091 9 12091 77
         ret IndexExpressionParse { success: false, base: "", index: "" }
     .endif
-    .span 12083 5 12083 41
+    .span 12095 5 12095 41
     eval let mut bracket_depth -> number = 0
-    .span 12084 5 12084 43
+    .span 12096 5 12096 43
     eval let mut index_position -> number = -1
-    .span 12085 5 12085 46
+    .span 12097 5 12097 46
     eval let mut i -> number = trimmed.length - 1
     .if trimmed[trimmed.length - 1] != "]"
-        .span 12089 9 12089 77
+        .span 12101 9 12101 77
         ret IndexExpressionParse { success: false, base: "", index: "" }
     .endif
-    .span 12093 5 12093 23
+    .span 12105 5 12105 23
     eval bracket_depth = 1
-    .span 12094 5 12094 28
+    .span 12106 5 12106 28
     eval i = trimmed.length - 2
     .loop
         .if i < 0
             break
         .endif
-        .span 12099 9 12099 29
+        .span 12111 9 12111 29
         eval let ch = trimmed[i]
         .if ch == "]"
-            .span 12101 13 12101 32
+            .span 12113 13 12113 32
             eval bracket_depth += 1
         .endif
         .if ch == "["
-            .span 12104 13 12104 32
+            .span 12116 13 12116 32
             eval bracket_depth -= 1
             .if bracket_depth == 0
-                .span 12106 17 12106 36
+                .span 12118 17 12118 36
                 eval index_position = i
                 break
             .endif
         .endif
-        .span 12110 9 12110 16
+        .span 12122 9 12122 16
         eval i -= 1
     .endloop
     .if index_position < 0
-        .span 12114 9 12114 77
+        .span 12126 9 12126 77
         ret IndexExpressionParse { success: false, base: "", index: "" }
     .endif
-    .span 12117 5 12117 65
+    .span 12129 5 12129 65
     eval let base = trim_text(substring(trimmed, 0, index_position))
-    .span 12118 5 12118 87
+    .span 12130 5 12130 87
     eval let index = trim_text(substring(trimmed, index_position + 1, trimmed.length - 1))
     .if base.length == 0 || index.length == 0
-        .span 12121 9 12121 77
+        .span 12133 9 12133 77
         ret IndexExpressionParse { success: false, base: "", index: "" }
     .endif
-    .span 12124 5 12124 77
+    .span 12136 5 12136 77
     ret IndexExpressionParse { success: true, base: base, index: index }
 .endfn
 
 .fn parse_range_iterable(iterable -> string) -> RangeIterableParse
 .meta return RangeIterableParse
 .meta effects none
-    .span 12127 25 12127 43
+    .span 12139 25 12139 43
     .param iterable -> string
-    .span 12128 5 12128 39
+    .span 12140 5 12140 39
     eval let trimmed = trim_text(iterable)
-    .span 12129 5 12129 42
+    .span 12141 5 12141 42
     eval let mut diagnostics -> string[] = []
     .if trimmed.length == 0
-        .span 12131 9 12131 104
+        .span 12143 9 12143 104
         eval diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable expression is empty")
-        .span 12132 9 12132 112
+        .span 12144 9 12144 112
         ret RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics }
     .endif
-    .span 12134 5 12134 67
+    .span 12146 5 12146 67
     eval let first_separator = find_top_level_range_separator(trimmed)
-    .span 12135 5 12135 43
+    .span 12147 5 12147 43
     eval let mut has_stride -> boolean = false
-    .span 12136 5 12136 40
+    .span 12148 5 12148 40
     eval let mut stride_text -> string = ""
     .if first_separator < 0
-        .span 12138 9 12138 119
+        .span 12150 9 12150 119
         eval diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable must use `start..end` range syntax")
-        .span 12139 9 12139 112
+        .span 12151 9 12151 112
         ret RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics }
     .endif
-    .span 12141 5 12141 94
+    .span 12153 5 12153 94
     eval let second_separator = find_top_level_range_separator_from(trimmed, first_separator + 2)
-    .span 12142 5 12142 72
+    .span 12154 5 12154 72
     eval let start_text = trim_text(substring(trimmed, 0, first_separator))
-    .span 12143 5 12143 91
+    .span 12155 5 12155 91
     eval let mut end_text = trim_text(substring(trimmed, first_separator + 2, trimmed.length))
     .if second_separator >= 0
-        .span 12145 9 12145 89
+        .span 12157 9 12157 89
         eval end_text = trim_text(substring(trimmed, first_separator + 2, second_separator))
-        .span 12146 9 12146 91
+        .span 12158 9 12158 91
         eval stride_text = trim_text(substring(trimmed, second_separator + 2, trimmed.length))
-        .span 12147 9 12147 45
+        .span 12159 9 12159 45
         eval has_stride = stride_text.length > 0
     .endif
     .if start_text.length == 0
-        .span 12150 9 12150 106
+        .span 12162 9 12162 106
         eval diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing start expression")
     .endif
     .if end_text.length == 0
-        .span 12153 9 12153 104
+        .span 12165 9 12165 104
         eval diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing end expression")
     .endif
     .if has_stride && stride_text.length == 0
-        .span 12156 9 12156 107
+        .span 12168 9 12168 107
         eval diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing stride expression")
     .endif
-    .span 12158 5 12158 107
+    .span 12170 5 12170 107
     eval let success = start_text.length > 0 && end_text.length > 0 && (!has_stride || stride_text.length > 0)
-    .span 12159 5 12159 133
+    .span 12171 5 12171 133
     ret RangeIterableParse { success: success, start: start_text, end: end_text, stride: stride_text, diagnostics: diagnostics }
 .endfn
 
 .fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding?
 .meta return LocalBinding?
 .meta effects none
-    .span 12162 23 12162 47
+    .span 12174 23 12174 47
     .param locals -> LocalBinding[]
-    .span 12162 49 12162 63
+    .span 12174 49 12174 63
     .param name -> string
-    .span 12163 5 12163 33
+    .span 12175 5 12175 33
     eval let mut index -> number = 0
     .loop
         .if index >= locals.length
             break
         .endif
-        .span 12168 9 12168 35
+        .span 12180 9 12180 35
         eval let entry = locals[index]
         .if entry.name == name
-            .span 12170 13 12170 26
+            .span 12182 13 12182 26
             ret entry
         .endif
-        .span 12172 9 12172 20
+        .span 12184 9 12184 20
         eval index += 1
     .endloop
-    .span 12174 5 12174 17
+    .span 12186 5 12186 17
     ret null
 .endfn
 
 .fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> ScopeMetadata
 .meta return ScopeMetadata
 .meta effects none
-    .span 12177 28 12177 42
+    .span 12189 28 12189 42
     .param base -> string
-    .span 12177 44 12177 68
+    .span 12189 44 12189 68
     .param locals -> LocalBinding[]
-    .span 12177 70 12177 100
+    .span 12189 70 12189 100
     .param bindings -> ParameterBinding[]
-    .span 12177 102 12177 125
+    .span 12189 102 12189 125
     .param function_name -> string
-    .span 12178 5 12178 50
+    .span 12190 5 12190 50
     eval let local = find_local_binding(locals, base)
     .if local != null
-        .span 12180 9 12180 91
+        .span 12192 9 12192 91
         ret ScopeMetadata { scope_id: local.scope_id, scope_depth: local.scope_depth }
     .endif
-    .span 12182 5 12182 60
+    .span 12194 5 12194 60
     eval let parameter = find_parameter_binding(bindings, base)
     .if parameter != null
-        .span 12184 9 12184 96
+        .span 12196 9 12196 96
         ret ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 }
     .endif
-    .span 12186 5 12186 92
+    .span 12198 5 12198 92
     ret ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 }
 .endfn
 
 .fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[]
 .meta return LifetimeRegionMetadata[]
 .meta effects none
-    .span 12189 27 12189 61
+    .span 12201 27 12201 61
     .param values -> LifetimeRegionMetadata[]
-    .span 12189 63 12189 94
+    .span 12201 63 12201 94
     .param value -> LifetimeRegionMetadata
-    .span 12190 5 12190 35
+    .span 12202 5 12202 35
     ret values.concat([value])
 .endfn
 
 .fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[]
 .meta return LifetimeReleaseEvent[]
 .meta effects none
-    .span 12193 34 12193 66
+    .span 12205 34 12205 66
     .param events -> LifetimeReleaseEvent[]
-    .span 12193 68 12193 97
+    .span 12205 68 12205 97
     .param event -> LifetimeReleaseEvent
-    .span 12194 5 12194 35
+    .span 12206 5 12206 35
     ret events.concat([event])
 .endfn
 
 .fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[]
 .meta return LifetimeRegionMetadata[]
 .meta effects none
-    .span 12197 34 12197 69
+    .span 12209 34 12209 69
     .param regions -> LifetimeRegionMetadata[]
-    .span 12197 71 12197 90
+    .span 12209 71 12209 90
     .param region_id -> number
-    .span 12197 92 12197 110
+    .span 12209 92 12209 110
     .param scope_id -> string
-    .span 12197 112 12197 133
+    .span 12209 112 12209 133
     .param scope_depth -> number
-    .span 12198 5 12198 53
+    .span 12210 5 12210 53
     eval let mut result -> LifetimeRegionMetadata[] = []
-    .span 12199 5 12199 33
+    .span 12211 5 12211 33
     eval let mut index -> number = 0
     .loop
         .if index >= regions.length
             break
         .endif
-        .span 12204 9 12204 36
+        .span 12216 9 12216 36
         eval let entry = regions[index]
         .if entry.id == region_id
-            .span 12206 13 12219 15
+            .span 12218 13 12231 15
             eval let updated = LifetimeRegionMetadata {
                 id: entry.id,
                 binding: entry.binding,
@@ -17715,798 +17732,798 @@
                 end_scope_depth: scope_depth,
                 released: true,
             }
-            .span 12220 13 12220 62
+            .span 12232 13 12232 62
             eval result = append_lifetime_region(result, updated)
         .else
-            .span 12222 13 12222 60
+            .span 12234 13 12234 60
             eval result = append_lifetime_region(result, entry)
         .endif
-        .span 12224 9 12224 20
+        .span 12236 9 12236 20
         eval index += 1
     .endloop
-    .span 12226 5 12226 19
+    .span 12238 5 12238 19
     ret result
 .endfn
 
 .fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -> LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[]
 .meta return LifetimeRegionMetadata[]
 .meta effects none
-    .span 12229 34 12229 69
+    .span 12241 34 12241 69
     .param regions -> LifetimeRegionMetadata[]
-    .span 12229 71 12229 105
+    .span 12241 71 12241 105
     .param releases -> LifetimeReleaseEvent[]
     .if releases.length == 0
-        .span 12231 9 12231 24
+        .span 12243 9 12243 24
         ret regions
     .endif
-    .span 12233 5 12233 67
+    .span 12245 5 12245 67
     eval let mut current_regions -> LifetimeRegionMetadata[] = regions
-    .span 12234 5 12234 33
+    .span 12246 5 12246 33
     eval let mut index -> number = 0
     .loop
         .if index >= releases.length
             break
         .endif
-        .span 12239 9 12239 39
+        .span 12251 9 12251 39
         eval let release = releases[index]
-        .span 12240 9 12240 132
+        .span 12252 9 12252 132
         eval current_regions = mark_lifetime_region_released(current_regions, release.region_id, release.scope_id, release.scope_depth)
-        .span 12241 9 12241 20
+        .span 12253 9 12253 20
         eval index += 1
     .endloop
-    .span 12243 5 12243 28
+    .span 12255 5 12255 28
     ret current_regions
 .endfn
 
 .fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata
 .meta return LifetimeRegionMetadata
 .meta effects none
-    .span 12246 34 12246 46
+    .span 12258 34 12258 46
     .param id -> number
-    .span 12246 48 12246 65
+    .span 12258 48 12258 65
     .param binding -> string
-    .span 12246 67 12246 93
+    .span 12258 67 12258 93
     .param ownership -> OwnershipInfo
-    .span 12246 95 12246 113
+    .span 12258 95 12258 113
     .param scope_id -> string
-    .span 12246 115 12246 136
+    .span 12258 115 12258 136
     .param scope_depth -> number
-    .span 12246 138 12246 161
+    .span 12258 138 12258 161
     .param base_scope_id -> string
-    .span 12246 163 12246 189
+    .span 12258 163 12258 189
     .param base_scope_depth -> number
-    .span 12247 5 12260 7
+    .span 12259 5 12272 7
     ret LifetimeRegionMetadata { id: id, binding: binding, base: ownership.base, mutable: ownership.mutable, start_span: ownership.span, scope_id: scope_id, scope_depth: scope_depth, base_scope_id: base_scope_id, base_scope_depth: base_scope_depth, end_scope_id: "", end_scope_depth: 0, released: false }
 .endfn
 
 .fn format_root_scope_id(function_name -> string) -> string
 .meta return string
 .meta effects none
-    .span 12263 25 12263 48
+    .span 12275 25 12275 48
     .param function_name -> string
-    .span 12264 5 12264 66
+    .span 12276 5 12276 66
     eval let mut sanitized -> string = sanitize_symbol(function_name)
     .if sanitized.length == 0
-        .span 12266 9 12266 26
+        .span 12278 9 12278 26
         eval sanitized = "fn"
     .endif
-    .span 12268 5 12268 30
+    .span 12280 5 12280 30
     ret "fn:" + sanitized
 .endfn
 
 .fn make_child_scope_id(parent -> string, child -> string) -> string
 .meta return string
 .meta effects none
-    .span 12271 24 12271 40
+    .span 12283 24 12283 40
     .param parent -> string
-    .span 12271 42 12271 57
+    .span 12283 42 12283 57
     .param child -> string
-    .span 12272 5 12272 64
+    .span 12284 5 12284 64
     eval let mut sanitized_child -> string = sanitize_symbol(child)
     .if sanitized_child.length == 0
-        .span 12274 9 12274 35
+        .span 12286 9 12286 35
         eval sanitized_child = "scope"
     .endif
     .if parent.length == 0
-        .span 12277 9 12277 32
+        .span 12289 9 12289 32
         ret sanitized_child
     .endif
-    .span 12279 5 12279 44
+    .span 12291 5 12291 44
     ret parent + "::" + sanitized_child
 .endfn
 
 .fn is_scope_descendant(parent -> string, candidate -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12282 24 12282 40
+    .span 12294 24 12294 40
     .param parent -> string
-    .span 12282 42 12282 61
+    .span 12294 42 12294 61
     .param candidate -> string
     .if parent.length == 0
-        .span 12284 9 12284 21
+        .span 12296 9 12296 21
         ret true
     .endif
     .if candidate.length == 0
-        .span 12287 9 12287 22
+        .span 12299 9 12299 22
         ret false
     .endif
     .if candidate == parent
-        .span 12290 9 12290 21
+        .span 12302 9 12302 21
         ret true
     .endif
-    .span 12292 5 12292 32
+    .span 12304 5 12304 32
     eval let prefix = parent + "::"
     .if candidate.length <= prefix.length
-        .span 12294 9 12294 22
+        .span 12306 9 12306 22
         ret false
     .endif
-    .span 12296 5 12296 43
+    .span 12308 5 12308 43
     ret starts_with(candidate, prefix)
 .endfn
 
 .fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[]
 .meta return LocalBinding[]
 .meta effects none
-    .span 12299 25 12299 49
+    .span 12311 25 12311 49
     .param values -> LocalBinding[]
-    .span 12299 51 12299 72
+    .span 12311 51 12311 72
     .param value -> LocalBinding
-    .span 12300 5 12300 35
+    .span 12312 5 12312 35
     ret values.concat([value])
 .endfn
 
 .fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[]
 .meta return LLVMOperand[]
 .meta effects none
-    .span 12303 24 12303 47
+    .span 12315 24 12315 47
     .param values -> LLVMOperand[]
-    .span 12303 49 12303 69
+    .span 12315 49 12315 69
     .param value -> LLVMOperand
-    .span 12304 5 12304 35
+    .span 12316 5 12316 35
     ret values.concat([value])
 .endfn
 
 .fn append_struct_literal_field(values -> StructLiteralField[], value -> StructLiteralField) -> StructLiteralField[]
 .meta return StructLiteralField[]
 .meta effects none
-    .span 12307 32 12307 62
+    .span 12319 32 12319 62
     .param values -> StructLiteralField[]
-    .span 12307 64 12307 91
+    .span 12319 64 12319 91
     .param value -> StructLiteralField
-    .span 12308 5 12308 35
+    .span 12320 5 12320 35
     ret values.concat([value])
 .endfn
 
 .fn append_native_struct(values -> NativeStruct[], value -> NativeStruct) -> NativeStruct[]
 .meta return NativeStruct[]
 .meta effects none
-    .span 12311 25 12311 49
+    .span 12323 25 12323 49
     .param values -> NativeStruct[]
-    .span 12311 51 12311 72
+    .span 12323 51 12323 72
     .param value -> NativeStruct
-    .span 12312 5 12312 35
+    .span 12324 5 12324 35
     ret values.concat([value])
 .endfn
 
 .fn append_native_enum(values -> NativeEnum[], value -> NativeEnum) -> NativeEnum[]
 .meta return NativeEnum[]
 .meta effects none
-    .span 12315 23 12315 45
+    .span 12327 23 12327 45
     .param values -> NativeEnum[]
-    .span 12315 47 12315 66
+    .span 12327 47 12327 66
     .param value -> NativeEnum
-    .span 12316 5 12316 35
+    .span 12328 5 12328 35
     ret values.concat([value])
 .endfn
 
 .fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMOperand) -> LLVMOperand[]
 .meta return LLVMOperand[]
 .meta effects none
-    .span 12319 25 12319 48
+    .span 12331 25 12331 48
     .param values -> LLVMOperand[]
-    .span 12319 50 12319 65
+    .span 12331 50 12331 65
     .param index -> number
-    .span 12319 67 12319 87
+    .span 12331 67 12331 87
     .param value -> LLVMOperand
-    .span 12320 5 12320 42
+    .span 12332 5 12332 42
     eval let mut result -> LLVMOperand[] = []
-    .span 12321 5 12321 35
+    .span 12333 5 12333 35
     eval let mut current -> number = 0
     .loop
         .if current >= values.length
             break
         .endif
         .if current == index
-            .span 12327 13 12327 57
+            .span 12339 13 12339 57
             eval result = append_llvm_operand(result, value)
         .else
-            .span 12329 13 12329 67
+            .span 12341 13 12341 67
             eval result = append_llvm_operand(result, values[current])
         .endif
-        .span 12331 9 12331 22
+        .span 12343 9 12343 22
         eval current += 1
     .endloop
-    .span 12333 5 12333 19
+    .span 12345 5 12345 19
     ret result
 .endfn
 
 .fn replace_native_struct(values -> NativeStruct[], index -> number, value -> NativeStruct) -> NativeStruct[]
 .meta return NativeStruct[]
 .meta effects none
-    .span 12336 26 12336 50
+    .span 12348 26 12348 50
     .param values -> NativeStruct[]
-    .span 12336 52 12336 67
+    .span 12348 52 12348 67
     .param index -> number
-    .span 12336 69 12336 90
+    .span 12348 69 12348 90
     .param value -> NativeStruct
-    .span 12337 5 12337 43
+    .span 12349 5 12349 43
     eval let mut result -> NativeStruct[] = []
-    .span 12338 5 12338 35
+    .span 12350 5 12350 35
     eval let mut current -> number = 0
     .loop
         .if current >= values.length
             break
         .endif
         .if current == index
-            .span 12344 13 12344 58
+            .span 12356 13 12356 58
             eval result = append_native_struct(result, value)
         .else
-            .span 12346 13 12346 68
+            .span 12358 13 12358 68
             eval result = append_native_struct(result, values[current])
         .endif
-        .span 12348 9 12348 22
+        .span 12360 9 12360 22
         eval current += 1
     .endloop
-    .span 12350 5 12350 19
+    .span 12362 5 12362 19
     ret result
 .endfn
 
 .fn replace_native_enum(values -> NativeEnum[], index -> number, value -> NativeEnum) -> NativeEnum[]
 .meta return NativeEnum[]
 .meta effects none
-    .span 12353 24 12353 46
+    .span 12365 24 12365 46
     .param values -> NativeEnum[]
-    .span 12353 48 12353 63
+    .span 12365 48 12365 63
     .param index -> number
-    .span 12353 65 12353 84
+    .span 12365 65 12365 84
     .param value -> NativeEnum
-    .span 12354 5 12354 41
+    .span 12366 5 12366 41
     eval let mut result -> NativeEnum[] = []
-    .span 12355 5 12355 35
+    .span 12367 5 12367 35
     eval let mut current -> number = 0
     .loop
         .if current >= values.length
             break
         .endif
         .if current == index
-            .span 12361 13 12361 56
+            .span 12373 13 12373 56
             eval result = append_native_enum(result, value)
         .else
-            .span 12363 13 12363 66
+            .span 12375 13 12375 66
             eval result = append_native_enum(result, values[current])
         .endif
-        .span 12365 9 12365 22
+        .span 12377 9 12377 22
         eval current += 1
     .endloop
-    .span 12367 5 12367 19
+    .span 12379 5 12379 19
     ret result
 .endfn
 
 .fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction?
 .meta return NativeFunction?
 .meta effects none
-    .span 12370 26 12370 55
+    .span 12382 26 12382 55
     .param functions -> NativeFunction[]
-    .span 12370 57 12370 71
+    .span 12382 57 12382 71
     .param name -> string
-    .span 12371 5 12371 33
+    .span 12383 5 12383 33
     eval let mut index -> number = 0
     .loop
         .if index >= functions.length
             break
         .endif
         .if functions[index].name == name
-            .span 12377 13 12377 37
+            .span 12389 13 12389 37
             ret functions[index]
         .endif
-        .span 12379 9 12379 20
+        .span 12391 9 12391 20
         eval index += 1
     .endloop
-    .span 12381 5 12381 17
+    .span 12393 5 12393 17
     ret null
 .endfn
 
 .fn find_struct_index(structs -> NativeStruct[], name -> string) -> number
 .meta return number
 .meta effects none
-    .span 12384 22 12384 47
+    .span 12396 22 12396 47
     .param structs -> NativeStruct[]
-    .span 12384 49 12384 63
+    .span 12396 49 12396 63
     .param name -> string
-    .span 12385 5 12385 33
+    .span 12397 5 12397 33
     eval let mut index -> number = 0
     .loop
         .if index >= structs.length
             break
         .endif
         .if structs[index].name == name
-            .span 12391 13 12391 26
+            .span 12403 13 12403 26
             ret index
         .endif
-        .span 12393 9 12393 20
+        .span 12405 9 12405 20
         eval index += 1
     .endloop
-    .span 12395 5 12395 15
+    .span 12407 5 12407 15
     ret -1
 .endfn
 
 .fn find_enum_index(enums -> NativeEnum[], name -> string) -> number
 .meta return number
 .meta effects none
-    .span 12398 20 12398 41
+    .span 12410 20 12410 41
     .param enums -> NativeEnum[]
-    .span 12398 43 12398 57
+    .span 12410 43 12410 57
     .param name -> string
-    .span 12399 5 12399 33
+    .span 12411 5 12411 33
     eval let mut index -> number = 0
     .loop
         .if index >= enums.length
             break
         .endif
         .if enums[index].name == name
-            .span 12405 13 12405 26
+            .span 12417 13 12417 26
             ret index
         .endif
-        .span 12407 9 12407 20
+        .span 12419 9 12419 20
         eval index += 1
     .endloop
-    .span 12409 5 12409 15
+    .span 12421 5 12421 15
     ret -1
 .endfn
 
 .fn number_to_string(value -> number) -> string
 .meta return string
 .meta effects none
-    .span 12412 21 12412 36
+    .span 12424 21 12424 36
     .param value -> number
     .if value == 0
-        .span 12414 9 12414 20
+        .span 12426 9 12426 20
         ret "0"
     .endif
-    .span 12416 5 12416 31
+    .span 12428 5 12428 31
     eval let digits = "0123456789"
-    .span 12417 5 12417 41
+    .span 12429 5 12429 41
     eval let mut remaining -> number = value
-    .span 12418 5 12418 35
+    .span 12430 5 12430 35
     eval let mut output -> string = ""
     .loop
         .if remaining <= 0
             break
         .endif
-        .span 12423 9 12423 44
+        .span 12435 9 12435 44
         eval let mut temp -> number = remaining
-        .span 12424 9 12424 40
+        .span 12436 9 12436 40
         eval let mut quotient -> number = 0
         .loop
             .if temp < 10
                 break
             .endif
-            .span 12429 13 12429 24
+            .span 12441 13 12441 24
             eval temp -= 10
-            .span 12430 13 12430 27
+            .span 12442 13 12442 27
             eval quotient += 1
         .endloop
-        .span 12432 9 12432 26
+        .span 12444 9 12444 26
         eval let digit = temp
-        .span 12433 9 12433 54
+        .span 12445 9 12445 54
         eval let ch = substring(digits, digit, digit + 1)
-        .span 12434 9 12434 30
+        .span 12446 9 12446 30
         eval output = ch + output
-        .span 12435 9 12435 30
+        .span 12447 9 12447 30
         eval remaining = quotient
     .endloop
-    .span 12437 5 12437 19
+    .span 12449 5 12449 19
     ret output
 .endfn
 
 .fn lower_char_code(code -> number) -> number
 .meta return number
 .meta effects none
-    .span 12440 20 12440 34
+    .span 12452 20 12452 34
     .param code -> number
-    .span 12441 5 12441 34
+    .span 12453 5 12453 34
     eval let upper_a = char_code("A")
-    .span 12442 5 12442 34
+    .span 12454 5 12454 34
     eval let upper_z = char_code("Z")
     .if code >= upper_a && code <= upper_z
-        .span 12444 9 12444 38
+        .span 12456 9 12456 38
         eval let lower_a = char_code("a")
-        .span 12445 9 12445 43
+        .span 12457 9 12457 43
         ret code + lower_a - upper_a
     .endif
-    .span 12447 5 12447 17
+    .span 12459 5 12459 17
     ret code
 .endfn
 
 .fn matches_case_insensitive(value -> string, expected -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12450 29 12450 44
+    .span 12462 29 12462 44
     .param value -> string
-    .span 12450 46 12450 64
+    .span 12462 46 12462 64
     .param expected -> string
     .if value.length != expected.length
-        .span 12452 9 12452 22
+        .span 12464 9 12464 22
         ret false
     .endif
-    .span 12454 5 12454 33
+    .span 12466 5 12466 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 12459 9 12459 59
+        .span 12471 9 12471 59
         eval let value_ch = substring(value, index, index + 1)
-        .span 12460 9 12460 65
+        .span 12472 9 12472 65
         eval let expected_ch = substring(expected, index, index + 1)
-        .span 12461 9 12461 63
+        .span 12473 9 12473 63
         eval let value_code = lower_char_code(char_code(value_ch))
-        .span 12462 9 12462 69
+        .span 12474 9 12474 69
         eval let expected_code = lower_char_code(char_code(expected_ch))
         .if value_code != expected_code
-            .span 12464 13 12464 26
+            .span 12476 13 12476 26
             ret false
         .endif
-        .span 12466 9 12466 20
+        .span 12478 9 12478 20
         eval index += 1
     .endloop
-    .span 12468 5 12468 17
+    .span 12480 5 12480 17
     ret true
 .endfn
 
 .fn is_boolean_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12471 23 12471 37
+    .span 12483 23 12483 37
     .param text -> string
-    .span 12472 5 12472 35
+    .span 12484 5 12484 35
     eval let trimmed = trim_text(text)
     .if matches_case_insensitive(trimmed, "true")
-        .span 12474 9 12474 21
+        .span 12486 9 12486 21
         ret true
     .endif
     .if matches_case_insensitive(trimmed, "false")
-        .span 12477 9 12477 21
+        .span 12489 9 12489 21
         ret true
     .endif
-    .span 12479 5 12479 18
+    .span 12491 5 12491 18
     ret false
 .endfn
 
 .fn is_null_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12482 20 12482 34
+    .span 12494 20 12494 34
     .param text -> string
-    .span 12483 5 12483 35
+    .span 12495 5 12495 35
     eval let trimmed = trim_text(text)
     .if matches_case_insensitive(trimmed, "null")
-        .span 12485 9 12485 21
+        .span 12497 9 12497 21
         ret true
     .endif
-    .span 12487 5 12487 18
+    .span 12499 5 12499 18
     ret false
 .endfn
 
 .fn is_digit_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12490 18 12490 30
+    .span 12502 18 12502 30
     .param ch -> string
     .if index_of("0123456789", ch) >= 0
-        .span 12492 9 12492 21
+        .span 12504 9 12504 21
         ret true
     .endif
-    .span 12494 5 12494 18
+    .span 12506 5 12506 18
     ret false
 .endfn
 
 .fn is_integer_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12497 23 12497 37
+    .span 12509 23 12509 37
     .param text -> string
-    .span 12498 5 12498 35
+    .span 12510 5 12510 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 12500 9 12500 22
+        .span 12512 9 12512 22
         ret false
     .endif
-    .span 12502 5 12502 33
+    .span 12514 5 12514 33
     eval let mut index -> number = 0
     .if trimmed[0] == "-"
         .if trimmed.length == 1
-            .span 12505 13 12505 26
+            .span 12517 13 12517 26
             ret false
         .endif
-        .span 12507 9 12507 19
+        .span 12519 9 12519 19
         eval index = 1
     .endif
-    .span 12509 5 12509 42
+    .span 12521 5 12521 42
     eval let mut has_digit -> boolean = false
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 12514 9 12514 33
+        .span 12526 9 12526 33
         eval let ch = trimmed[index]
         .if ch >= "0" && ch <= "9"
-            .span 12516 13 12516 30
+            .span 12528 13 12528 30
             eval has_digit = true
-            .span 12517 13 12517 24
+            .span 12529 13 12529 24
             eval index += 1
             continue
         .endif
-        .span 12520 9 12520 22
+        .span 12532 9 12532 22
         ret false
     .endloop
-    .span 12522 5 12522 22
+    .span 12534 5 12534 22
     ret has_digit
 .endfn
 
 .fn is_number_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12525 22 12525 36
+    .span 12537 22 12537 36
     .param text -> string
-    .span 12526 5 12526 33
+    .span 12538 5 12538 33
     eval let mut index -> number = 0
-    .span 12527 5 12527 42
+    .span 12539 5 12539 42
     eval let mut has_digit -> boolean = false
-    .span 12528 5 12528 44
+    .span 12540 5 12540 44
     eval let mut has_decimal -> boolean = false
-    .span 12529 5 12529 35
+    .span 12541 5 12541 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 12531 9 12531 22
+        .span 12543 9 12543 22
         ret false
     .endif
     .if trimmed[0] == "-"
         .if trimmed.length == 1
-            .span 12535 13 12535 26
+            .span 12547 13 12547 26
             ret false
         .endif
-        .span 12537 9 12537 19
+        .span 12549 9 12549 19
         eval index = 1
     .endif
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 12543 9 12543 33
+        .span 12555 9 12555 33
         eval let ch = trimmed[index]
         .if ch >= "0" && ch <= "9"
-            .span 12545 13 12545 30
+            .span 12557 13 12557 30
             eval has_digit = true
-            .span 12546 13 12546 24
+            .span 12558 13 12558 24
             eval index += 1
             continue
         .endif
         .if ch == "."
             .if has_decimal
-                .span 12551 17 12551 30
+                .span 12563 17 12563 30
                 ret false
             .endif
-            .span 12553 13 12553 32
+            .span 12565 13 12565 32
             eval has_decimal = true
-            .span 12554 13 12554 24
+            .span 12566 13 12566 24
             eval index += 1
             continue
         .endif
-        .span 12557 9 12557 22
+        .span 12569 9 12569 22
         ret false
     .endloop
-    .span 12559 5 12559 22
+    .span 12571 5 12571 22
     ret has_digit
 .endfn
 
 .fn normalise_number_literal(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 12562 29 12562 43
+    .span 12574 29 12574 43
     .param text -> string
-    .span 12563 5 12563 35
+    .span 12575 5 12575 35
     eval let trimmed = trim_text(text)
     .if index_of(trimmed, ".") >= 0
-        .span 12565 9 12565 24
+        .span 12577 9 12577 24
         ret trimmed
     .endif
-    .span 12567 5 12567 27
+    .span 12579 5 12579 27
     ret trimmed + ".0"
 .endfn
 
 .fn is_string_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12570 22 12570 36
+    .span 12582 22 12582 36
     .param text -> string
-    .span 12571 5 12571 35
+    .span 12583 5 12583 35
     eval let trimmed = trim_text(text)
     .if trimmed.length < 2
-        .span 12573 9 12573 22
+        .span 12585 9 12585 22
         ret false
     .endif
     .if trimmed[0] != "\""
-        .span 12576 9 12576 22
+        .span 12588 9 12588 22
         ret false
     .endif
     .if trimmed[trimmed.length - 1] != "\""
-        .span 12579 9 12579 22
+        .span 12591 9 12591 22
         ret false
     .endif
-    .span 12581 5 12581 17
+    .span 12593 5 12593 17
     ret true
 .endfn
 
 .fn is_character_literal(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12584 25 12584 39
+    .span 12596 25 12596 39
     .param text -> string
     .if text.length < 2
-        .span 12587 9 12587 22
+        .span 12599 9 12599 22
         ret false
     .endif
     .if text[0] != "\"" || text[text.length - 1] != "\""
-        .span 12590 9 12590 22
+        .span 12602 9 12602 22
         ret false
     .endif
-    .span 12592 5 12592 53
+    .span 12604 5 12604 53
     eval let inner = substring(text, 1, text.length - 1)
     .if inner.length == 2 && inner[0] == "\\"
-        .span 12595 9 12595 21
+        .span 12607 9 12607 21
         ret true
     .endif
-    .span 12598 5 12598 30
+    .span 12610 5 12610 30
     ret inner.length == 1
 .endfn
 
 .fn get_character_literal_value(text -> string) -> number
 .meta return number
 .meta effects none
-    .span 12601 32 12601 46
+    .span 12613 32 12613 46
     .param text -> string
-    .span 12602 5 12602 53
+    .span 12614 5 12614 53
     eval let inner = substring(text, 1, text.length - 1)
     .if inner.length == 0
-        .span 12604 9 12604 18
+        .span 12616 9 12616 18
         ret 0
     .endif
     .if inner.length == 2 && inner[0] == "\\"
-        .span 12608 9 12608 31
+        .span 12620 9 12620 31
         eval let escape = inner[1]
         .if escape == "n"
-            .span 12610 13 12610 36
+            .span 12622 13 12622 36
             ret char_code("\n")
         .else
             .if escape == "r"
-                .span 12612 13 12612 36
+                .span 12624 13 12624 36
                 ret char_code("\r")
             .else
                 .if escape == "t"
-                    .span 12614 13 12614 36
+                    .span 12626 13 12626 36
                     ret char_code("\t")
                 .else
                     .if escape == "\""
-                        .span 12616 13 12616 36
+                        .span 12628 13 12628 36
                         ret char_code("\"")
                     .else
                         .if escape == "\\"
-                            .span 12618 13 12618 36
+                            .span 12630 13 12630 36
                             ret char_code("\\")
                         .endif
                     .endif
                 .endif
             .endif
         .endif
-        .span 12620 9 12620 34
+        .span 12632 9 12632 34
         ret char_code(escape)
     .endif
-    .span 12622 5 12622 32
+    .span 12634 5 12634 32
     ret char_code(inner[0])
 .endfn
 
 .fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult
 .meta return ExpressionResult
 .meta effects none
-    .span 12625 25 12625 42
+    .span 12637 25 12637 42
     .param literal -> string
-    .span 12625 44 12625 64
+    .span 12637 44 12637 64
     .param temp_index -> number
-    .span 12625 66 12625 83
+    .span 12637 66 12637 83
     .param lines -> string[]
-    .span 12626 5 12626 52
+    .span 12638 5 12638 52
     eval let content = unescape_string_literal(literal)
-    .span 12627 5 12627 63
+    .span 12639 5 12639 63
     eval let global_name = "@.str." + number_to_string(temp_index)
-    .span 12628 5 12628 103
+    .span 12640 5 12640 103
     eval let constant = StringConstant { name: global_name, content: content, byte_count: content.length }
-    .span 12629 5 12629 54
+    .span 12641 5 12641 54
     eval let base_constants = empty_string_constant_set()
-    .span 12630 5 12630 73
+    .span 12642 5 12642 73
     eval let constant_set = append_string_constant(base_constants, constant)
-    .span 12632 5 12632 76
+    .span 12644 5 12644 76
     eval let array_type = "[" + number_to_string(content.length + 1) + " x i8]"
-    .span 12633 5 12633 163
+    .span 12645 5 12645 163
     eval let gep_instr = "  %s" + number_to_string(temp_index) + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + global_name + ", i32 0, i32 0"
-    .span 12634 5 12634 57
+    .span 12646 5 12646 57
     eval let updated_lines = append_string(lines, gep_instr)
-    .span 12636 5 12636 96
+    .span 12648 5 12648 96
     eval let operand = LLVMOperand { llvm_type: "i8*", value: "%s" + number_to_string(temp_index) }
-    .span 12637 5 12643 7
+    .span 12649 5 12655 7
     ret ExpressionResult { lines: updated_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: constant_set }
 .endfn
 
 .fn unescape_string_literal(literal -> string) -> string
 .meta return string
 .meta effects none
-    .span 12646 28 12646 45
+    .span 12658 28 12658 45
     .param literal -> string
     .if literal.length < 2
-        .span 12648 9 12648 19
+        .span 12660 9 12660 19
         ret ""
     .endif
-    .span 12650 5 12650 25
+    .span 12662 5 12662 25
     eval let start_index = 1
-    .span 12651 5 12651 40
+    .span 12663 5 12663 40
     eval let end_index = literal.length - 1
-    .span 12652 5 12652 60
+    .span 12664 5 12664 60
     eval let inner = substring(literal, start_index, end_index)
-    .span 12654 5 12654 35
+    .span 12666 5 12666 35
     eval let mut result -> string = ""
-    .span 12655 5 12655 33
+    .span 12667 5 12667 33
     eval let mut index -> number = 0
     .loop
         .if index >= inner.length
             break
         .endif
-        .span 12660 9 12660 31
+        .span 12672 9 12672 31
         eval let ch = inner[index]
         .if ch == "\\" && index + 1 < inner.length
-            .span 12662 13 12662 41
+            .span 12674 13 12674 41
             eval let next = inner[index + 1]
             .if next == "n"
-                .span 12664 17 12664 40
+                .span 12676 17 12676 40
                 eval result = result + "\n"
-                .span 12665 17 12665 28
+                .span 12677 17 12677 28
                 eval index += 2
                 continue
             .else
                 .if next == "r"
-                    .span 12668 17 12668 40
+                    .span 12680 17 12680 40
                     eval result = result + "\r"
-                    .span 12669 17 12669 28
+                    .span 12681 17 12681 28
                     eval index += 2
                     continue
                 .else
                     .if next == "t"
-                        .span 12672 17 12672 40
+                        .span 12684 17 12684 40
                         eval result = result + "\t"
-                        .span 12673 17 12673 28
+                        .span 12685 17 12685 28
                         eval index += 2
                         continue
                     .else
                         .if next == "\""
-                            .span 12676 17 12676 40
+                            .span 12688 17 12688 40
                             eval result = result + "\""
-                            .span 12677 17 12677 28
+                            .span 12689 17 12689 28
                             eval index += 2
                             continue
                         .else
                             .if next == "\\"
-                                .span 12680 17 12680 40
+                                .span 12692 17 12692 40
                                 eval result = result + "\\"
-                                .span 12681 17 12681 28
+                                .span 12693 17 12693 28
                                 eval index += 2
                                 continue
                             .endif
@@ -18515,32 +18532,32 @@
                 .endif
             .endif
         .endif
-        .span 12685 9 12685 30
+        .span 12697 9 12697 30
         eval result = result + ch
-        .span 12686 9 12686 20
+        .span 12698 9 12698 20
         eval index += 1
     .endloop
-    .span 12688 5 12688 19
+    .span 12700 5 12700 19
     ret result
 .endfn
 
 .fn trim_text(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 12691 14 12691 29
+    .span 12703 14 12703 29
     .param value -> string
-    .span 12692 5 12692 33
+    .span 12704 5 12704 33
     eval let mut start -> number = 0
-    .span 12693 5 12693 42
+    .span 12705 5 12705 42
     eval let mut end -> number = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 12698 9 12698 31
+        .span 12710 9 12710 31
         eval let ch = value[start]
         .if is_trim_char(ch)
-            .span 12700 13 12700 24
+            .span 12712 13 12712 24
             eval start += 1
             continue
         .endif
@@ -18550,176 +18567,176 @@
         .if end <= start
             break
         .endif
-        .span 12709 9 12709 33
+        .span 12721 9 12721 33
         eval let ch = value[end - 1]
         .if is_trim_char(ch)
-            .span 12711 13 12711 22
+            .span 12723 13 12723 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if start == 0 && end == value.length
-        .span 12717 9 12717 22
+        .span 12729 9 12729 22
         ret value
     .endif
-    .span 12719 5 12719 41
+    .span 12731 5 12731 41
     ret substring(value, start, end)
 .endfn
 
 .fn is_trim_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12722 17 12722 29
+    .span 12734 17 12734 29
     .param ch -> string
-    .span 12723 5 12723 64
+    .span 12735 5 12735 64
     ret ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
 .endfn
 
 .fn index_of(value -> string, target -> string) -> number
 .meta return number
 .meta effects none
-    .span 12726 13 12726 28
+    .span 12738 13 12738 28
     .param value -> string
-    .span 12726 30 12726 46
+    .span 12738 30 12738 46
     .param target -> string
     .if target.length == 0
-        .span 12728 9 12728 18
+        .span 12740 9 12740 18
         ret 0
     .endif
-    .span 12730 5 12730 33
+    .span 12742 5 12742 33
     eval let mut index -> number = 0
     .loop
         .if index + target.length > value.length
             break
         .endif
-        .span 12735 9 12735 43
+        .span 12747 9 12747 43
         eval let mut match_index -> number = 0
-        .span 12736 9 12736 43
+        .span 12748 9 12748 43
         eval let mut matches -> boolean = true
         .loop
             .if match_index >= target.length
                 break
             .endif
             .if value[index + match_index] != target[match_index]
-                .span 12742 17 12742 33
+                .span 12754 17 12754 33
                 eval matches = false
                 break
             .endif
-            .span 12745 13 12745 30
+            .span 12757 13 12757 30
             eval match_index += 1
         .endloop
         .if matches
-            .span 12748 13 12748 26
+            .span 12760 13 12760 26
             ret index
         .endif
-        .span 12750 9 12750 20
+        .span 12762 9 12762 20
         eval index += 1
     .endloop
-    .span 12752 5 12752 15
+    .span 12764 5 12764 15
     ret -1
 .endfn
 
 .fn find_last_index_of_char(value -> string, target -> string) -> number
 .meta return number
 .meta effects none
-    .span 12755 28 12755 43
+    .span 12767 28 12767 43
     .param value -> string
-    .span 12755 45 12755 61
+    .span 12767 45 12767 61
     .param target -> string
     .if target.length != 1
-        .span 12757 9 12757 19
+        .span 12769 9 12769 19
         ret -1
     .endif
-    .span 12759 5 12759 44
+    .span 12771 5 12771 44
     eval let mut index -> number = value.length
     .loop
         .if index <= 0
             break
         .endif
-        .span 12764 9 12764 20
+        .span 12776 9 12776 20
         eval index -= 1
         .if value[index] == target
-            .span 12766 13 12766 26
+            .span 12778 13 12778 26
             ret index
         .endif
     .endloop
-    .span 12769 5 12769 15
+    .span 12781 5 12781 15
     ret -1
 .endfn
 
 .fn append_string(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 12772 18 12772 36
+    .span 12784 18 12784 36
     .param values -> string[]
-    .span 12772 38 12772 53
+    .span 12784 38 12784 53
     .param value -> string
-    .span 12773 5 12773 35
+    .span 12785 5 12785 35
     ret values.concat([value])
 .endfn
 
 .fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[]
 .meta return MatchArmMutations[]
 .meta effects none
-    .span 12776 31 12776 58
+    .span 12788 31 12788 58
     .param list -> MatchArmMutations[]
-    .span 12776 60 12776 84
+    .span 12788 60 12788 84
     .param arm -> MatchArmMutations
-    .span 12777 5 12777 31
+    .span 12789 5 12789 31
     ret list.concat([arm])
 .endfn
 
 .fn string_array_contains(values -> string[], target -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12780 26 12780 44
+    .span 12792 26 12792 44
     .param values -> string[]
-    .span 12780 46 12780 62
+    .span 12792 46 12792 62
     .param target -> string
-    .span 12781 5 12781 33
+    .span 12793 5 12793 33
     eval let mut index -> number = 0
     .loop
         .if index >= values.length
             break
         .endif
         .if values[index] == target
-            .span 12787 13 12787 25
+            .span 12799 13 12799 25
             ret true
         .endif
-        .span 12789 9 12789 20
+        .span 12801 9 12801 20
         eval index += 1
     .endloop
-    .span 12791 5 12791 18
+    .span 12803 5 12803 18
     ret false
 .endfn
 
 .fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[]
 .meta return ParameterBinding[]
 .meta effects none
-    .span 12794 29 12794 56
+    .span 12806 29 12806 56
     .param first -> ParameterBinding[]
-    .span 12794 58 12794 86
+    .span 12806 58 12806 86
     .param second -> ParameterBinding[]
-    .span 12795 5 12795 47
+    .span 12807 5 12807 47
     eval let mut result -> ParameterBinding[] = []
-    .span 12796 5 12796 33
+    .span 12808 5 12808 33
     eval let mut index -> number = 0
     .loop
         .if index >= first.length
             break
         .endif
-        .span 12801 9 12801 36
+        .span 12813 9 12813 36
         eval let primary = first[index]
-        .span 12802 9 12802 61
+        .span 12814 9 12814 61
         eval let mut consumed_flag -> boolean = primary.consumed
-        .span 12803 9 12803 72
+        .span 12815 9 12815 72
         eval let counterpart = find_parameter_binding(second, primary.name)
         .if counterpart != null
-            .span 12805 13 12805 67
+            .span 12817 13 12817 67
             eval consumed_flag = consumed_flag || counterpart.consumed
         .endif
-        .span 12807 9 12814 12
+        .span 12819 9 12826 12
         eval result = append_parameter_binding(result, ParameterBinding {
             name: primary.name,
             llvm_name: primary.llvm_name,
@@ -18728,347 +18745,347 @@
             consumed: consumed_flag,
             span: primary.span,
         })
-        .span 12815 9 12815 20
+        .span 12827 9 12827 20
         eval index += 1
     .endloop
-    .span 12817 5 12817 19
+    .span 12829 5 12829 19
     ret result
 .endfn
 
 .fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[]
 .meta return ParameterBinding[]
 .meta effects none
-    .span 12820 29 12820 59
+    .span 12832 29 12832 59
     .param bindings -> ParameterBinding[]
-    .span 12820 61 12820 88
+    .span 12832 61 12832 88
     .param binding -> ParameterBinding
-    .span 12821 5 12821 39
+    .span 12833 5 12833 39
     ret bindings.concat([binding])
 .endfn
 
 .fn join_with_separator(values -> string[], separator -> string) -> string
 .meta return string
 .meta effects none
-    .span 12824 24 12824 42
+    .span 12836 24 12836 42
     .param values -> string[]
-    .span 12824 44 12824 63
+    .span 12836 44 12836 63
     .param separator -> string
     .if values.length == 0
-        .span 12826 9 12826 19
+        .span 12838 9 12838 19
         ret ""
     .endif
-    .span 12828 5 12828 42
+    .span 12840 5 12840 42
     eval let mut result -> string = values[0]
-    .span 12829 5 12829 33
+    .span 12841 5 12841 33
     eval let mut index -> number = 1
     .loop
         .if index >= values.length
             break
         .endif
-        .span 12834 9 12834 53
+        .span 12846 9 12846 53
         eval result = result + separator + values[index]
-        .span 12835 9 12835 20
+        .span 12847 9 12847 20
         eval index += 1
     .endloop
-    .span 12837 5 12837 19
+    .span 12849 5 12849 19
     ret result
 .endfn
 
 .fn empty_string_constant_set() -> StringConstant[]
 .meta return StringConstant[]
 .meta effects none
-    .span 12841 5 12841 15
+    .span 12853 5 12853 15
     ret []
 .endfn
 
 .fn string_constant_singleton(constant -> StringConstant) -> StringConstant[]
 .meta return StringConstant[]
 .meta effects none
-    .span 12844 30 12844 56
+    .span 12856 30 12856 56
     .param constant -> StringConstant
-    .span 12845 5 12845 23
+    .span 12857 5 12857 23
     ret [constant]
 .endfn
 
 .fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[]
 .meta return StringConstant[]
 .meta effects none
-    .span 12848 27 12848 56
+    .span 12860 27 12860 56
     .param constants -> StringConstant[]
-    .span 12849 5 12849 43
+    .span 12861 5 12861 43
     eval let mut copy -> StringConstant[] = []
-    .span 12850 5 12850 33
+    .span 12862 5 12862 33
     eval let mut index -> number = 0
     .loop
         .if index >= constants.length
             break
         .endif
-        .span 12855 9 12855 63
+        .span 12867 9 12867 63
         eval copy = append_string_constant(copy, constants[index])
-        .span 12856 9 12856 20
+        .span 12868 9 12868 20
         eval index += 1
     .endloop
-    .span 12858 5 12858 17
+    .span 12870 5 12870 17
     ret copy
 .endfn
 
 .fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[]
 .meta return StringConstant[]
 .meta effects none
-    .span 12861 27 12861 50
+    .span 12873 27 12873 50
     .param set -> StringConstant[]
-    .span 12861 52 12861 78
+    .span 12873 52 12873 78
     .param constant -> StringConstant
-    .span 12862 5 12862 35
+    .span 12874 5 12874 35
     ret set.concat([constant])
 .endfn
 
 .fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[]
 .meta return StringConstant[]
 .meta effects none
-    .span 12865 27 12865 55
+    .span 12877 27 12877 55
     .param existing -> StringConstant[]
-    .span 12865 57 12865 90
+    .span 12877 57 12877 90
     .param new_constants -> StringConstant[]
-    .span 12866 5 12866 51
+    .span 12878 5 12878 51
     eval let mut result -> StringConstant[] = existing
-    .span 12867 5 12867 33
+    .span 12879 5 12879 33
     eval let mut index -> number = 0
     .loop
         .if index >= new_constants.length
             break
         .endif
-        .span 12872 9 12872 46
+        .span 12884 9 12884 46
         eval let candidate = new_constants[index]
-        .span 12873 9 12873 82
+        .span 12885 9 12885 82
         eval let found_by_name = find_string_constant_by_name(result, candidate.name)
         .if found_by_name == null
-            .span 12875 13 12875 64
+            .span 12887 13 12887 64
             eval result = append_string_constant(result, candidate)
         .endif
-        .span 12877 9 12877 20
+        .span 12889 9 12889 20
         eval index += 1
     .endloop
-    .span 12879 5 12879 19
+    .span 12891 5 12891 19
     ret result
 .endfn
 
 .fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant?
 .meta return StringConstant?
 .meta effects none
-    .span 12882 25 12882 54
+    .span 12894 25 12894 54
     .param constants -> StringConstant[]
-    .span 12882 56 12882 73
+    .span 12894 56 12894 73
     .param content -> string
-    .span 12883 5 12883 33
+    .span 12895 5 12895 33
     eval let mut index -> number = 0
     .loop
         .if index >= constants.length
             break
         .endif
-        .span 12888 9 12888 42
+        .span 12900 9 12900 42
         eval let candidate = constants[index]
         .if candidate.content == content
-            .span 12890 13 12890 30
+            .span 12902 13 12902 30
             ret candidate
         .endif
-        .span 12892 9 12892 20
+        .span 12904 9 12904 20
         eval index += 1
     .endloop
-    .span 12894 5 12894 17
+    .span 12906 5 12906 17
     ret null
 .endfn
 
 .fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant?
 .meta return StringConstant?
 .meta effects none
-    .span 12897 33 12897 62
+    .span 12909 33 12909 62
     .param constants -> StringConstant[]
-    .span 12897 64 12897 78
+    .span 12909 64 12909 78
     .param name -> string
-    .span 12898 5 12898 33
+    .span 12910 5 12910 33
     eval let mut index -> number = 0
     .loop
         .if index >= constants.length
             break
         .endif
-        .span 12903 9 12903 42
+        .span 12915 9 12915 42
         eval let candidate = constants[index]
         .if candidate.name == name
-            .span 12905 13 12905 30
+            .span 12917 13 12917 30
             ret candidate
         .endif
-        .span 12907 9 12907 20
+        .span 12919 9 12919 20
         eval index += 1
     .endloop
-    .span 12909 5 12909 17
+    .span 12921 5 12921 17
     ret null
 .endfn
 
 .fn render_string_constants(constants -> StringConstant[]) -> string[]
 .meta return string[]
 .meta effects none
-    .span 12912 28 12912 57
+    .span 12924 28 12924 57
     .param constants -> StringConstant[]
-    .span 12913 5 12913 36
+    .span 12925 5 12925 36
     eval let mut lines -> string[] = []
-    .span 12914 5 12914 33
+    .span 12926 5 12926 33
     eval let mut index -> number = 0
     .loop
         .if index >= constants.length
             break
         .endif
-        .span 12919 9 12919 41
+        .span 12931 9 12931 41
         eval let constant = constants[index]
-        .span 12920 9 12920 64
+        .span 12932 9 12932 64
         eval let escaped = escape_string_for_llvm(constant.content)
-        .span 12921 9 12921 68
+        .span 12933 9 12933 68
         eval let length_str = number_to_string(constant.byte_count + 1)
-        .span 12922 9 12922 129
+        .span 12934 9 12934 129
         eval let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\""
-        .span 12923 9 12923 51
+        .span 12935 9 12935 51
         eval lines = append_string(lines, declaration)
-        .span 12924 9 12924 20
+        .span 12936 9 12936 20
         eval index += 1
     .endloop
-    .span 12926 5 12926 18
+    .span 12938 5 12938 18
     ret lines
 .endfn
 
 .fn escape_string_for_llvm(content -> string) -> string
 .meta return string
 .meta effects none
-    .span 12929 27 12929 44
+    .span 12941 27 12941 44
     .param content -> string
-    .span 12930 5 12930 35
+    .span 12942 5 12942 35
     eval let mut result -> string = ""
-    .span 12931 5 12931 33
+    .span 12943 5 12943 33
     eval let mut index -> number = 0
     .loop
         .if index >= content.length
             break
         .endif
-        .span 12936 9 12936 33
+        .span 12948 9 12948 33
         eval let ch = content[index]
         .if ch == "\n"
-            .span 12938 13 12938 38
+            .span 12950 13 12950 38
             eval result = result + "\\0A"
         .else
             .if ch == "\r"
-                .span 12940 13 12940 38
+                .span 12952 13 12952 38
                 eval result = result + "\\0D"
             .else
                 .if ch == "\t"
-                    .span 12942 13 12942 38
+                    .span 12954 13 12954 38
                     eval result = result + "\\09"
                 .else
                     .if ch == "\""
-                        .span 12944 13 12944 38
+                        .span 12956 13 12956 38
                         eval result = result + "\\22"
                     .else
                         .if ch == "\\"
-                            .span 12946 13 12946 38
+                            .span 12958 13 12958 38
                             eval result = result + "\\5C"
                         .else
-                            .span 12948 13 12948 34
+                            .span 12960 13 12960 34
                             eval result = result + ch
                         .endif
                     .endif
                 .endif
             .endif
         .endif
-        .span 12950 9 12950 20
+        .span 12962 9 12962 20
         eval index += 1
     .endloop
-    .span 12952 5 12952 19
+    .span 12964 5 12964 19
     ret result
 .endfn
 
 .fn is_symbol_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 12956 19 12956 31
+    .span 12968 19 12968 31
     .param ch -> string
     .if ch.length == 0
-        .span 12958 9 12958 22
+        .span 12970 9 12970 22
         ret false
     .endif
     .if ch == "_"
-        .span 12961 9 12961 21
+        .span 12973 9 12973 21
         ret true
     .endif
-    .span 12963 5 12963 30
+    .span 12975 5 12975 30
     eval let code = char_code(ch)
-    .span 12964 5 12964 34
+    .span 12976 5 12976 34
     eval let lower_a = char_code("a")
-    .span 12965 5 12965 34
+    .span 12977 5 12977 34
     eval let lower_z = char_code("z")
     .if code >= lower_a && code <= lower_z
-        .span 12967 9 12967 21
+        .span 12979 9 12979 21
         ret true
     .endif
-    .span 12969 5 12969 34
+    .span 12981 5 12981 34
     eval let upper_a = char_code("A")
-    .span 12970 5 12970 34
+    .span 12982 5 12982 34
     eval let upper_z = char_code("Z")
     .if code >= upper_a && code <= upper_z
-        .span 12972 9 12972 21
+        .span 12984 9 12984 21
         ret true
     .endif
-    .span 12974 5 12974 31
+    .span 12986 5 12986 31
     eval let zero = char_code("0")
-    .span 12975 5 12975 31
+    .span 12987 5 12987 31
     eval let nine = char_code("9")
     .if code >= zero && code <= nine
-        .span 12977 9 12977 21
+        .span 12989 9 12989 21
         ret true
     .endif
-    .span 12979 5 12979 18
+    .span 12991 5 12991 18
     ret false
 .endfn
 
 .fn sanitize_symbol(name -> string) -> string
 .meta return string
 .meta effects none
-    .span 12982 20 12982 34
+    .span 12994 20 12994 34
     .param name -> string
     .if name.length == 0
-        .span 12984 9 12984 20
+        .span 12996 9 12996 20
         ret "_"
     .endif
-    .span 12986 5 12986 35
+    .span 12998 5 12998 35
     eval let mut result -> string = ""
-    .span 12987 5 12987 33
+    .span 12999 5 12999 33
     eval let mut index -> number = 0
     .loop
         .if index >= name.length
             break
         .endif
-        .span 12992 9 12992 30
+        .span 13004 9 13004 30
         eval let ch = name[index]
         .if is_symbol_char(ch)
-            .span 12994 13 12994 34
+            .span 13006 13 13006 34
             eval result = result + ch
         .endif
-        .span 12996 9 12996 20
+        .span 13008 9 13008 20
         eval index += 1
     .endloop
     .if result.length == 0
-        .span 12999 9 12999 20
+        .span 13011 9 13011 20
         ret "_"
     .endif
-    .span 13001 5 13001 27
+    .span 13013 5 13013 27
     eval let first = result[0]
-    .span 13002 5 13002 39
+    .span 13014 5 13014 39
     eval let first_code = char_code(first)
-    .span 13003 5 13003 31
+    .span 13015 5 13015 31
     eval let zero = char_code("0")
-    .span 13004 5 13004 31
+    .span 13016 5 13016 31
     eval let nine = char_code("9")
     .if first_code >= zero && first_code <= nine
-        .span 13006 9 13006 31
+        .span 13018 9 13018 31
         eval result = "_" + result
     .endif
-    .span 13008 5 13008 19
+    .span 13020 5 13020 19
     ret result
 .endfn
