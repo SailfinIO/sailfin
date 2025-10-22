@@ -97,15 +97,6 @@ class StringConstant:
     def __repr__(self):
         return runtime.struct_repr('StringConstant', [runtime.struct_field('name', self.name), runtime.struct_field('content', self.content), runtime.struct_field('byte_count', self.byte_count)])
 
-class StringConstantSet:
-    def __init__(self, names, contents, byte_counts):
-        self.names = names
-        self.contents = contents
-        self.byte_counts = byte_counts
-
-    def __repr__(self):
-        return runtime.struct_repr('StringConstantSet', [runtime.struct_field('names', self.names), runtime.struct_field('contents', self.contents), runtime.struct_field('byte_counts', self.byte_counts)])
-
 class StringPointerResult:
     def __init__(self, lines, temp_index, pointer):
         self.lines = lines
@@ -8956,34 +8947,31 @@ def join_with_separator(values, separator):
     return result
 
 def empty_string_constant_set():
-    empty_names = []
-    empty_contents = []
-    empty_counts = []
-    return StringConstantSet(names=empty_names, contents=empty_contents, byte_counts=empty_counts)
+    return []
 
 def string_constant_singleton(constant):
-    empty_set = empty_string_constant_set()
-    return append_string_constant(empty_set, constant)
+    return [constant]
 
 def clone_string_constants(constants):
-    names_copy = constants.names
-    contents_copy = constants.contents
-    byte_counts_copy = constants.byte_counts
-    return StringConstantSet(names=names_copy, contents=contents_copy, byte_counts=byte_counts_copy)
+    copy = []
+    index = 0
+    while True:
+        if index >= len(constants):
+            break
+        copy = append_string_constant(copy, constants[index])
+        index += 1
+    return copy
 
 def append_string_constant(set, constant):
-    updated_names = (set.names) + ([constant.name])
-    updated_contents = (set.contents) + ([constant.content])
-    updated_counts = (set.byte_counts) + ([constant.byte_count])
-    return StringConstantSet(names=updated_names, contents=updated_contents, byte_counts=updated_counts)
+    return (set) + ([constant])
 
 def merge_string_constants(existing, new_constants):
     result = existing
     index = 0
     while True:
-        if index >= len(new_constants.names):
+        if index >= len(new_constants):
             break
-        candidate = string_constant_from_set(new_constants, index)
+        candidate = new_constants[index]
         found_by_name = find_string_constant_by_name(result, candidate.name)
         if found_by_name == None:
             result = append_string_constant(result, candidate)
@@ -8993,36 +8981,32 @@ def merge_string_constants(existing, new_constants):
 def find_string_constant(constants, content):
     index = 0
     while True:
-        if index >= len(constants.contents):
+        if index >= len(constants):
             break
-        if constants.contents[index] == content:
-            return string_constant_from_set(constants, index)
+        candidate = constants[index]
+        if candidate.content == content:
+            return candidate
         index += 1
     return None
 
 def find_string_constant_by_name(constants, name):
     index = 0
     while True:
-        if index >= len(constants.names):
+        if index >= len(constants):
             break
-        if constants.names[index] == name:
-            return string_constant_from_set(constants, index)
+        candidate = constants[index]
+        if candidate.name == name:
+            return candidate
         index += 1
     return None
-
-def string_constant_from_set(constants, index):
-    name = constants.names[index]
-    content = constants.contents[index]
-    byte_count = constants.byte_counts[index]
-    return StringConstant(name=name, content=content, byte_count=byte_count)
 
 def render_string_constants(constants):
     lines = []
     index = 0
     while True:
-        if index >= len(constants.names):
+        if index >= len(constants):
             break
-        constant = string_constant_from_set(constants, index)
+        constant = constants[index]
         escaped = escape_string_for_llvm(constant.content)
         length_str = number_to_string(constant.byte_count + 1)
         declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\""

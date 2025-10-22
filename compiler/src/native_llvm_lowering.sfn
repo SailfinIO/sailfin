@@ -57,12 +57,6 @@ struct StringConstant {
     byte_count -> number;
 }
 
-struct StringConstantSet {
-    names -> string[];
-    contents -> string[];
-    byte_counts -> number[];
-}
-
 struct StringPointerResult {
     lines -> string[];
     temp_index -> number;
@@ -76,7 +70,7 @@ struct LoweredLLVMResult {
     function_effects -> FunctionEffectEntry[];
     lifetime_regions -> LifetimeRegionMetadata[];
     capability_manifest -> CapabilityManifest;
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct LayoutManifestApplication {
@@ -95,14 +89,14 @@ struct LoweredLLVMFunction {
     lines -> string[];
     diagnostics -> string[];
     lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct BodyResult {
     lines -> string[];
     diagnostics -> string[];
     lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct ParameterBinding {
@@ -130,7 +124,7 @@ struct ExpressionResult {
     temp_index -> number;
     operand -> LLVMOperand?;
     diagnostics -> string[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct ArrayLiteralMetadata {
@@ -362,7 +356,7 @@ struct ExpressionStatementResult {
     lifetime_releases -> LifetimeReleaseEvent[];
     next_region_id -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct LetLoweringResult {
@@ -376,7 +370,7 @@ struct LetLoweringResult {
     lifetime_regions -> LifetimeRegionMetadata[];
     next_region_id -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct InlineLetParseResult {
@@ -452,7 +446,7 @@ struct MatchCaseCondition {
     field_bindings -> MatchFieldBinding[];
     enum_info -> EnumTypeInfo?;
     variant_info -> EnumVariantInfo?;
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct ConditionConversion {
@@ -460,7 +454,7 @@ struct ConditionConversion {
     temp_index -> number;
     operand -> LLVMOperand?;
     diagnostics -> string[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 struct ComparisonEmission {
@@ -500,7 +494,7 @@ struct BlockLoweringResult {
     next_lifetime_region_id -> number;
     next_index -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstantSet;
+    string_constants -> StringConstant[];
 }
 
 fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
@@ -866,7 +860,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
-    let mut all_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut all_string_constants -> StringConstant[] = empty_string_constant_set();
     loop {
         if index >= local_functions.length {
             break;
@@ -3488,7 +3482,7 @@ fn lower_instruction_range(
     let mut index -> number = start_index;
     let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     loop {
         if index >= end {
@@ -3975,7 +3969,7 @@ fn lower_loop_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -4250,7 +4244,7 @@ fn lower_for_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -5022,7 +5016,7 @@ fn lower_match_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -5348,7 +5342,7 @@ fn lower_match_case_condition(
     let mut field_bindings -> MatchFieldBinding[] = [];
     let mut matched_enum_info -> EnumTypeInfo? = null;
     let mut matched_variant_info -> EnumVariantInfo? = null;
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     if !case.is_default {
         // Try to parse the pattern as an enum literal pattern
@@ -5986,7 +5980,7 @@ fn lower_if_instruction(
     diagnostics = diagnostics.concat(condition.diagnostics);
     current_lines = condition.lines;
     current_temp = condition.temp_index;
-    let mut collected_string_constants -> StringConstantSet = condition.string_constants;
+    let mut collected_string_constants -> StringConstant[] = condition.string_constants;
 
     if condition.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`");
@@ -6294,7 +6288,7 @@ fn lower_let_instruction(
         }
     }
 
-    let mut string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut string_constants -> StringConstant[] = empty_string_constant_set();
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
@@ -6433,7 +6427,7 @@ fn lower_expression_statement(
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut mutations -> LocalMutation[] = [];
-    let mut string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut string_constants -> StringConstant[] = empty_string_constant_set();
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -7612,7 +7606,7 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
     return result;
 }
 
-fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet) -> ExpressionResult {
+fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
     // Helper function to avoid nested null checks in lower_expression
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
     let mut current_diagnostics = diagnostics.concat(coerced.diagnostics);
@@ -8253,7 +8247,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
 
 fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;
-    let mut string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut string_constants -> StringConstant[] = empty_string_constant_set();
     
     // Create labels for control flow (use temp_index for uniqueness)
     let label_id = number_to_string(temp_index);
@@ -8354,7 +8348,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = diagnostics.concat(left_result.diagnostics);
-    let mut string_constants -> StringConstantSet = left_result.string_constants;
+    let mut string_constants -> StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -8395,7 +8389,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = diagnostics.concat(left_result.diagnostics);
-    let mut string_constants -> StringConstantSet = left_result.string_constants;
+    let mut string_constants -> StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -8426,7 +8420,7 @@ fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> P
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut string_constants -> StringConstant[] = empty_string_constant_set();
     
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed && expression `" + expression + "`");
@@ -8511,7 +8505,7 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut string_constants -> StringConstant[] = empty_string_constant_set();
     
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed || expression `" + expression + "`");
@@ -8593,7 +8587,7 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
 
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
     let trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
@@ -9019,7 +9013,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstantSet = base_result.string_constants;
+    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
     if base_result.operand == null {
     return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
@@ -9129,10 +9123,10 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
-fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet) -> ExpressionResult {
+fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstantSet = string_constants;
+    let mut collected -> StringConstant[] = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
     let constant_name = "@.runtime.field." + sanitized_field;
@@ -9166,10 +9160,10 @@ fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> Ex
     return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
 }
 
-fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet, expected_type -> string) -> ExpressionResult {
+fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstantSet = string_constants;
+    let mut collected -> StringConstant[] = string_constants;
     let mut messages -> string[] = diagnostics;
 
     let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
@@ -9443,7 +9437,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     // Lower the base expression to get the array operand
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstantSet = base_result.string_constants;
+    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
     
     if base_result.operand == null {
     return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -9593,7 +9587,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let trimmed_expected = trim_text(expected_type);
     let mut expected_element_type -> string = "";
@@ -10247,7 +10241,7 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let info = resolve_struct_info_for_literal(context, parse.type_name);
     if info == null {
@@ -12832,40 +12826,39 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
     return result;
 }
 
-fn empty_string_constant_set() -> StringConstantSet {
-    let empty_names -> string[] = [];
-    let empty_contents -> string[] = [];
-    let empty_counts -> number[] = [];
-    return StringConstantSet { names: empty_names, contents: empty_contents, byte_counts: empty_counts };
+fn empty_string_constant_set() -> StringConstant[] {
+    return [];
 }
 
-fn string_constant_singleton(constant -> StringConstant) -> StringConstantSet {
-    let empty_set = empty_string_constant_set();
-    return append_string_constant(empty_set, constant);
+fn string_constant_singleton(constant -> StringConstant) -> StringConstant[] {
+    return [constant];
 }
 
-fn clone_string_constants(constants -> StringConstantSet) -> StringConstantSet {
-    let names_copy = constants.names;
-    let contents_copy = constants.contents;
-    let byte_counts_copy = constants.byte_counts;
-    return StringConstantSet { names: names_copy, contents: contents_copy, byte_counts: byte_counts_copy };
-}
-
-fn append_string_constant(set -> StringConstantSet, constant -> StringConstant) -> StringConstantSet {
-    let updated_names = set.names.concat([constant.name]);
-    let updated_contents = set.contents.concat([constant.content]);
-    let updated_counts = set.byte_counts.concat([constant.byte_count]);
-    return StringConstantSet { names: updated_names, contents: updated_contents, byte_counts: updated_counts };
-}
-
-fn merge_string_constants(existing -> StringConstantSet, new_constants -> StringConstantSet) -> StringConstantSet {
-    let mut result = existing;
+fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
+    let mut copy -> StringConstant[] = [];
     let mut index -> number = 0;
     loop {
-        if index >= new_constants.names.length {
+        if index >= constants.length {
             break;
         }
-        let candidate = string_constant_from_set(new_constants, index);
+        copy = append_string_constant(copy, constants[index]);
+        index += 1;
+    }
+    return copy;
+}
+
+fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[] {
+    return set.concat([constant]);
+}
+
+fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
+    let mut result -> StringConstant[] = existing;
+    let mut index -> number = 0;
+    loop {
+        if index >= new_constants.length {
+            break;
+        }
+        let candidate = new_constants[index];
         let found_by_name = find_string_constant_by_name(result, candidate.name);
         if found_by_name == null {
             result = append_string_constant(result, candidate);
@@ -12875,49 +12868,44 @@ fn merge_string_constants(existing -> StringConstantSet, new_constants -> String
     return result;
 }
 
-fn find_string_constant(constants -> StringConstantSet, content -> string) -> StringConstant? {
+fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant? {
     let mut index -> number = 0;
     loop {
-        if index >= constants.contents.length {
+        if index >= constants.length {
             break;
         }
-        if constants.contents[index] == content {
-            return string_constant_from_set(constants, index);
+        let candidate = constants[index];
+        if candidate.content == content {
+            return candidate;
         }
         index += 1;
     }
     return null;
 }
 
-fn find_string_constant_by_name(constants -> StringConstantSet, name -> string) -> StringConstant? {
+fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant? {
     let mut index -> number = 0;
     loop {
-        if index >= constants.names.length {
+        if index >= constants.length {
             break;
         }
-        if constants.names[index] == name {
-            return string_constant_from_set(constants, index);
+        let candidate = constants[index];
+        if candidate.name == name {
+            return candidate;
         }
         index += 1;
     }
     return null;
 }
 
-fn string_constant_from_set(constants -> StringConstantSet, index -> number) -> StringConstant {
-    let name = constants.names[index];
-    let content = constants.contents[index];
-    let byte_count = constants.byte_counts[index];
-    return StringConstant { name: name, content: content, byte_count: byte_count };
-}
-
-fn render_string_constants(constants -> StringConstantSet) -> string[] {
+fn render_string_constants(constants -> StringConstant[]) -> string[] {
     let mut lines -> string[] = [];
     let mut index -> number = 0;
     loop {
-        if index >= constants.names.length {
+        if index >= constants.length {
             break;
         }
-        let constant = string_constant_from_set(constants, index);
+        let constant = constants[index];
         let escaped = escape_string_for_llvm(constant.content);
         let length_str = number_to_string(constant.byte_count + 1);
         let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
