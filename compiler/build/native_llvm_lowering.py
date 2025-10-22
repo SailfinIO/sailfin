@@ -4287,6 +4287,8 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         current_temp = lowered.temp_index
         operand = lowered.operand
         string_constants = lowered.string_constants
+        if instruction.name == 'collected_string_constants':
+            print.info('[stage1-let] ' + function.name + ' llvm_type=' + llvm_type + ' operand=' + str(operand) + ' string_constants_len=' + str(len(string_constants)))
     if len(llvm_type) == 0:
         if operand != None:
             llvm_type = operand.llvm_type
@@ -5294,6 +5296,10 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         normalised = normalise_number_literal(literal_candidate)
         operand = LLVMOperand(llvm_type="double", value=normalised)
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+    if literal_candidate == "collected_string_constants":
+        import inspect
+        caller = inspect.stack()[1].function
+        print.info("[stage1-debug] unsupported collected_string_constants in " + caller)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
 
@@ -6198,18 +6204,21 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
     operand = LLVMOperand(llvm_type=field_info.llvm_type, value=extract_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
+def make_expression_result(lines, temp_index, operand, diagnostics, string_constants):
+    return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
+
 def lower_dynamic_member_access(field, base_operand, temp_index, lines, diagnostics, string_constants):
     current_lines = lines
     current_temp = temp_index
-    collected = string_constants
+    dynamic_string_constants = string_constants
     sanitized_field = sanitize_symbol(field)
     constant_name = "@.runtime.field." + sanitized_field
-    existing_constant = find_string_constant_by_name(collected, constant_name)
+    existing_constant = find_string_constant_by_name(dynamic_string_constants, constant_name)
     field_constant = StringConstant(name=constant_name, content=field, byte_count=len(field))
     if existing_constant != None:
         field_constant = existing_constant
     else:
-        collected = append_string_constant(collected, field_constant)
+        dynamic_string_constants = append_string_constant(dynamic_string_constants, field_constant)
     pointer_result = emit_string_constant_pointer(field_constant, current_temp, current_lines)
     current_lines = pointer_result.lines
     current_temp = pointer_result.temp_index
@@ -6218,7 +6227,7 @@ def lower_dynamic_member_access(field, base_operand, temp_index, lines, diagnost
     current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")")
     current_temp += 1
     operand = LLVMOperand(llvm_type="i8*", value=call_temp)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected)
+    return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants)
 
 def lower_runtime_global_reference(temp_index, lines):
     runtime_temp = format_temp_name(temp_index)
@@ -6231,7 +6240,7 @@ def lower_runtime_global_reference(temp_index, lines):
 def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, temp_index, lines, diagnostics, string_constants, expected_type):
     current_lines = lines
     current_temp = temp_index
-    collected = string_constants
+    enum_string_constants = string_constants
     messages = diagnostics
     tag_operand = LLVMOperand(llvm_type=enum_info.tag_type, value="")
     if pointer_available:
@@ -6250,13 +6259,13 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
     if parse.field == "variant":
         sanitized_enum = sanitize_symbol(enum_info.name)
         default_constant_name = "@.enum." + sanitized_enum + ".variant.default"
-        existing_default = find_string_constant_by_name(collected, default_constant_name)
+        existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name)
         default_constant = StringConstant(name=default_constant_name, content="", byte_count=0)
         if existing_default != None:
             default_constant = existing_default
         else:
             default_constant = StringConstant(name=default_constant_name, content="", byte_count=0)
-            collected = append_string_constant(collected, default_constant)
+            enum_string_constants = append_string_constant(enum_string_constants, default_constant)
         default_pointer_result = emit_string_constant_pointer(default_constant, current_temp, current_lines)
         current_lines = default_pointer_result.lines
         current_temp = default_pointer_result.temp_index
@@ -6268,13 +6277,13 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             variant_info = enum_info.variants[variant_index]
             sanitized_variant = sanitize_symbol(variant_info.name)
             constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant"
-            existing_variant = find_string_constant_by_name(collected, constant_name)
+            existing_variant = find_string_constant_by_name(enum_string_constants, constant_name)
             variant_constant = StringConstant(name=constant_name, content="", byte_count=0)
             if existing_variant != None:
                 variant_constant = existing_variant
             else:
                 variant_constant = StringConstant(name=constant_name, content=variant_info.name, byte_count=len(variant_info.name))
-                collected = append_string_constant(collected, variant_constant)
+                enum_string_constants = append_string_constant(enum_string_constants, variant_constant)
             pointer_result = emit_string_constant_pointer(variant_constant, current_temp, current_lines)
             current_lines = pointer_result.lines
             current_temp = pointer_result.temp_index
@@ -6288,7 +6297,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             current_pointer = select_temp
             variant_index += 1
         operand = LLVMOperand(llvm_type="i8*", value=current_pointer)
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=messages, string_constants=collected)
+        return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants)
     matched_variants = []
     matched_fields = []
     variant_check_index = 0
@@ -6303,7 +6312,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         variant_check_index += 1
     if len(matched_variants) == 0:
         messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
+        return make_expression_result(current_lines, current_temp, None, messages, enum_string_constants)
     selected_variants = matched_variants
     selected_fields = matched_fields
     if len(expected_type) > 0:
@@ -6326,7 +6335,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` compatible with expected type `" + expected_type + "`")
         else:
             messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
+        return make_expression_result(current_lines, current_temp, None, messages, enum_string_constants)
     first_type = selected_fields[0].llvm_type
     base_type = first_type
     first_pointer_depth = 0
@@ -6363,7 +6372,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         type_index += 1
     if not consistent_base:
         messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
+        return make_expression_result(current_lines, current_temp, None, messages, enum_string_constants)
     field_type = selected_fields[0].llvm_type
     pointer_coercion = False
     if pointer_depth_mismatch:
@@ -6372,7 +6381,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             field_type = base_type + "*"
         else:
             messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
-            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=messages, string_constants=collected)
+            return make_expression_result(current_lines, current_temp, None, messages, enum_string_constants)
     enum_pointer_value = base_operand.value
     if not pointer_available:
         alloca_temp = format_temp_name(current_temp)
@@ -6424,7 +6433,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         current_value_text = select_temp
         match_index += 1
     operand = LLVMOperand(llvm_type=field_type, value=current_value_text)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=messages, string_constants=collected)
+    return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants)
 
 def emit_string_constant_pointer(constant, temp_index, lines):
     current_lines = lines
@@ -7081,6 +7090,8 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
                 break
             literal_lookup_index += 1
         value_operand = None
+        if expected.name == 'string_constants':
+            print.info('[stage1-debug] struct ' + info.name + ' field ' + expected.name + ' llvm_type=' + expected.llvm_type)
         if literal_index >= 0:
             literal_field = parse.fields[literal_index]
             lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)

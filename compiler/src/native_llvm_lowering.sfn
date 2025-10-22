@@ -9123,19 +9123,29 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
+fn make_expression_result(lines -> string[], temp_index -> number, operand -> LLVMOperand?, diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants,
+    };
+}
+
 fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstant[] = string_constants;
+    let mut dynamic_string_constants -> StringConstant[] = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
     let constant_name = "@.runtime.field." + sanitized_field;
-    let existing_constant = find_string_constant_by_name(collected, constant_name);
+    let existing_constant = find_string_constant_by_name(dynamic_string_constants, constant_name);
     let mut field_constant -> StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
     if existing_constant != null {
         field_constant = existing_constant;
     } else {
-        collected = append_string_constant(collected, field_constant);
+        dynamic_string_constants = append_string_constant(dynamic_string_constants, field_constant);
     }
 
     let pointer_result = emit_string_constant_pointer(field_constant, current_temp, current_lines);
@@ -9148,7 +9158,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     current_temp += 1;
 
     let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected };
+    return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }
 
 fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> ExpressionResult {
@@ -9160,10 +9170,11 @@ fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> Ex
     return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
 }
 
+
 fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstant[] = string_constants;
+    let mut enum_string_constants -> StringConstant[] = string_constants;
     let mut messages -> string[] = diagnostics;
 
     let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
@@ -9185,13 +9196,13 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
-        let existing_default = find_string_constant_by_name(collected, default_constant_name);
+        let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
         let mut default_constant -> StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
         if existing_default != null {
             default_constant = existing_default;
         } else {
             default_constant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
-            collected = append_string_constant(collected, default_constant);
+            enum_string_constants = append_string_constant(enum_string_constants, default_constant);
         }
 
         let default_pointer_result = emit_string_constant_pointer(default_constant, current_temp, current_lines);
@@ -9207,13 +9218,13 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             let variant_info = enum_info.variants[variant_index];
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant";
-            let existing_variant = find_string_constant_by_name(collected, constant_name);
+            let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
             let mut variant_constant -> StringConstant = StringConstant { name: constant_name, content: "", byte_count: 0 };
             if existing_variant != null {
                 variant_constant = existing_variant;
             } else {
                 variant_constant = StringConstant { name: constant_name, content: variant_info.name, byte_count: variant_info.name.length };
-                collected = append_string_constant(collected, variant_constant);
+                enum_string_constants = append_string_constant(enum_string_constants, variant_constant);
             }
 
             let pointer_result = emit_string_constant_pointer(variant_constant, current_temp, current_lines);
@@ -9234,7 +9245,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         }
 
         let operand = LLVMOperand { llvm_type: "i8*", value: current_pointer };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: messages, string_constants: collected };
+        return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
     }
 
     let mut matched_variants -> EnumVariantInfo[] = [];
@@ -9255,7 +9266,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
 
     if matched_variants.length == 0 {
         messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: messages, string_constants: collected };
+        return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
     let mut selected_variants -> EnumVariantInfo[] = matched_variants;
@@ -9288,7 +9299,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         } else {
             messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
         }
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: messages, string_constants: collected };
+        return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
     let first_type = selected_fields[0].llvm_type;
@@ -9339,7 +9350,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
 
     if !consistent_base {
         messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: messages, string_constants: collected };
+        return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
     let mut field_type -> string = selected_fields[0].llvm_type;
@@ -9350,7 +9361,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             field_type = base_type + "*";
         } else {
             messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: messages, string_constants: collected };
+            return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
         }
     }
 
@@ -9421,7 +9432,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     let operand = LLVMOperand { llvm_type: field_type, value: current_value_text };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: messages, string_constants: collected };
+    return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
 fn emit_string_constant_pointer(constant -> StringConstant, temp_index -> number, lines -> string[]) -> StringPointerResult {
@@ -10282,6 +10293,18 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
         let mut value_operand -> LLVMOperand? = null;
         if literal_index >= 0 {
             let literal_field = parse.fields[literal_index];
+            if expected.name == "string_constants" {
+                let mut local_names -> string[] = [];
+                let mut local_idx -> number = 0;
+                loop {
+                    if local_idx >= locals.length {
+                        break;
+                    }
+                    local_names = append_string(local_names, locals[local_idx].name);
+                    local_idx += 1;
+                }
+                print.info("[sfn-debug] lower_struct_literal locals=" + join_strings(local_names, ", ") );
+            }
             let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             current_lines = lowered.lines;
