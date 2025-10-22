@@ -195,7 +195,7 @@ fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> 
 }
 
 fn main() ![io] {
-    print.info("Sailfin compiler (stage 0)");
+    print.info("Sailfin compiler");
 }
 
 fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {

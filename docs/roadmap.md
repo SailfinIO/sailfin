@@ -80,15 +80,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Add regression tests validating native adapters match Python adapter behavior for all existing examples in `examples/io/` and `examples/ai/`.
   - [ ] Document native adapter FFI contracts and platform-specific requirements in `docs/runtime_audit.md`.
 
-- [ ] **Runtime type metadata emission** — Generate module-level type descriptors during compilation so `check_type` can validate types without Python runtime bridges.
-
-  - [ ] Extend `.sfn-asm` format to include `.typedef` metadata sections carrying struct/enum/interface descriptors with field names, types, and layout information.
-  - [ ] Update `compiler/src/emit_native.sfn` to emit typedef metadata for all user-defined types in each module.
-  - [ ] Implement `runtime/type_registry.sfn` that loads typedef metadata and provides `check_type(value, type_name)` functionality natively.
-  - [ ] Replace `runtime_support.resolve_runtime_type` Python helper with native `type_registry.check_type` implementation.
-  - [ ] Add tests in `compiler/tests/test_native_llvm_execution.py` validating type checks execute correctly for structs, enums, and interface values.
-  - [ ] Update `docs/runtime_audit.md` marking `resolve_runtime_type` as removed and document the native type registry.
-
 - [ ] **Port async runtime glue to Sailfin** — Reimplement `asyncio`-based helpers (`spawn`, `channel`, `serve`) as native Sailfin modules with capability enforcement.
 
   - [ ] Create `runtime/async_runtime.sfn` implementing:
@@ -101,20 +92,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [ ] Native spawn with channel communication (validate task executes and channel send/receive works).
     - [ ] Native serve with mock request handling (validate handler registration and dispatch).
   - [ ] Convert `examples/concurrency/*.sfn` to use native async runtime and validate all examples execute correctly.
-
-- [ ] **Unicode normalization for native runtime** — Expose NFC/NFD normalization routines so Stage2 pipelines handle locale-aware text without Python dependencies.
-  - [ ] Integrate ICU library (or Rust `unicode-normalization`) via FFI for normalization operations.
-  - [ ] Create `runtime/unicode.sfn` exposing:
-    - [ ] `normalize_nfc(string) -> string` — canonical composition.
-    - [ ] `normalize_nfd(string) -> string` — canonical decomposition.
-    - [ ] `normalize_nfkc(string) -> string` — compatibility composition.
-    - [ ] `normalize_nfkd(string) -> string` — compatibility decomposition.
-  - [ ] Update `runtime/prelude.sfn` string helpers to use native normalization for case folding and comparison operations.
-  - [ ] Add tests in `compiler/tests/test_string_utils.py` validating normalization behavior matches Unicode spec for:
-    - [ ] Composed characters (é vs e + combining accent).
-    - [ ] Compatibility forms (ligatures, full-width characters).
-    - [ ] Mixed scripts (Latin, Greek, Cyrillic with combining marks).
-  - [ ] Document Unicode normalization API and locale handling strategy in `docs/spec.md`.
 
 5. **Toolchain De-Pythonisation**
 
