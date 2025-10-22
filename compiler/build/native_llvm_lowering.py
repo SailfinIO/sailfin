@@ -5170,6 +5170,26 @@ def update_local_ownership(locals, name, ownership):
         index += 1
     return result
 
+def lower_logical_not_with_operand(operand, temp_index, lines, diagnostics, string_constants):
+    coerced = coerce_operand_to_type(operand, "i1", temp_index, lines)
+    current_diagnostics = (diagnostics) + (coerced.diagnostics)
+    current_lines = coerced.lines
+    current_temp = coerced.temp_index
+    if coerced.operand != None:
+        bool_operand = coerced.operand
+        result_temp = format_temp_name(current_temp)
+        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1")
+        current_temp += 1
+        result_operand = LLVMOperand(llvm_type="i1", value=result_temp)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=current_diagnostics, string_constants=string_constants)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=current_diagnostics, string_constants=string_constants)
+
+def lower_logical_not_result(result, base_diagnostics):
+    combined = (base_diagnostics) + (result.diagnostics)
+    if result.operand == None:
+        return ExpressionResult(lines=result.lines, temp_index=result.temp_index, operand=None, diagnostics=combined, string_constants=result.string_constants)
+    return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants)
+
 def lower_expression(expression, bindings, locals, temp_index, lines, functions, context, expected_type):
     trimmed = trim_text(expression)
     diagnostics = []
@@ -5192,23 +5212,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
             operand_text = trim_text(substring(stripped, 1, len(stripped)))
             if len(operand_text) > 0:
                 lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "")
-                diagnostics = lowered_operand.diagnostics
-                current_lines = lowered_operand.lines
-                current_temp = lowered_operand.temp_index
-                if lowered_operand.operand != None:
-                    operand = lowered_operand.operand
-                    coerced = coerce_operand_to_type(operand, "i1", current_temp, current_lines)
-                    diagnostics = (diagnostics) + (coerced.diagnostics)
-                    current_lines = coerced.lines
-                    current_temp = coerced.temp_index
-                    if coerced.operand != None:
-                        bool_operand = coerced.operand
-                        result_temp = format_temp_name(current_temp)
-                        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1")
-                        current_temp += 1
-                        result_operand = LLVMOperand(llvm_type="i1", value=result_temp)
-                        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=lowered_operand.string_constants)
-                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=lowered_operand.string_constants)
+                return lower_logical_not_result(lowered_operand, diagnostics)
     logical = find_logical_operator(stripped)
     if logical.success:
         if logical.symbol == "&&":
@@ -5536,14 +5540,7 @@ def format_span_location(span):
     return start + "-" + end
 
 def format_suspension_location(keyword, borrow_span, suspension_span):
-    parts = []
-    if borrow_span != None:
-        parts = append_string(parts, "borrow at " + format_span_location(borrow_span))
-    if suspension_span != None:
-        parts = append_string(parts, keyword + " at " + format_span_location(suspension_span))
-    if len(parts) == 0:
-        return ""
-    return " (" + join_with_separator(parts, ", ") + ")"
+    return ""
 
 def detect_borrow_conflicts(ownership, locals, binding_name, function_name):
     diagnostics = []

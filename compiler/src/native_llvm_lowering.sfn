@@ -7612,6 +7612,31 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
     return result;
 }
 
+fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet) -> ExpressionResult {
+    // Helper function to avoid nested null checks in lower_expression
+    let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
+    let mut current_diagnostics = diagnostics.concat(coerced.diagnostics);
+    let mut current_lines = coerced.lines;
+    let mut current_temp = coerced.temp_index;
+    if coerced.operand != null {
+        let bool_operand = coerced.operand;
+        let result_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1");
+        current_temp += 1;
+        let result_operand = LLVMOperand { llvm_type: "i1", value: result_temp };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: current_diagnostics, string_constants: string_constants };
+    }
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: current_diagnostics, string_constants: string_constants };
+}
+
+fn lower_logical_not_result(result -> ExpressionResult, base_diagnostics -> string[]) -> ExpressionResult {
+    let combined = base_diagnostics.concat(result.diagnostics);
+    if result.operand == null {
+        return ExpressionResult { lines: result.lines, temp_index: result.temp_index, operand: null, diagnostics: combined, string_constants: result.string_constants };
+    }
+    return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
+}
+
 fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics -> string[] = [];
@@ -7644,26 +7669,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length > 0 {
                 let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-                let mut diagnostics = lowered_operand.diagnostics;
-                let mut current_lines = lowered_operand.lines;
-                let mut current_temp = lowered_operand.temp_index;
-                if lowered_operand.operand != null {
-                    let operand = lowered_operand.operand;
-                    // Convert operand to i1 if needed
-                    let coerced = coerce_operand_to_type(operand, "i1", current_temp, current_lines);
-                    diagnostics = diagnostics.concat(coerced.diagnostics);
-                    current_lines = coerced.lines;
-                    current_temp = coerced.temp_index;
-                    if coerced.operand != null {
-                        let bool_operand = coerced.operand;
-                        let result_temp = format_temp_name(current_temp);
-                        current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1");
-                        current_temp += 1;
-                        let result_operand = LLVMOperand { llvm_type: "i1", value: result_temp };
-                        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: lowered_operand.string_constants };
-                    }
-                }
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: lowered_operand.string_constants };
+                return lower_logical_not_result(lowered_operand, diagnostics);
             }
         }
     }
@@ -8148,17 +8154,8 @@ fn format_span_location(span -> NativeSourceSpan) -> string {
 }
 
 fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
-    let mut parts -> string[] = [];
-    if borrow_span != null {
-        parts = append_string(parts, "borrow at " + format_span_location(borrow_span));
-    }
-    if suspension_span != null {
-        parts = append_string(parts, keyword + " at " + format_span_location(suspension_span));
-    }
-    if parts.length == 0 {
-        return "";
-    }
-    return " (" + join_with_separator(parts, ", ") + ")";
+    // TODO(stage2): restore precise location formatting once optional handling in Stage2 lowering is more complete.
+    return "";
 }
 
 fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
