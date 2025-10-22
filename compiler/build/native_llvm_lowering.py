@@ -2264,10 +2264,8 @@ def find_runtime_helper(target):
 
 def collect_function_effect_entry(function):
     combined = []
-    function_effects = function.effects
-    combined = merge_effect_lists(combined, function_effects)
-    borrow_effects = collect_function_borrow_effects(function)
-    combined = merge_effect_lists(combined, borrow_effects)
+    combined = merge_effect_lists(combined, function.effects)
+    combined = merge_effect_lists(combined, collect_function_borrow_effects(function))
     return FunctionEffectEntry(name=function.name, effects=combined)
 
 def append_function_effect_entry(values, entry):
@@ -2616,7 +2614,8 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
             current_next_local = lowered.next_local_id
             current_next_region = lowered.next_region_id
             current_mutations = (current_mutations) + (lowered.mutations)
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+            temp_constants = collected_string_constants
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
         else:
             if instruction.variant == "Expression":
                 trimmed_expression = trim_text(instruction.expression)
@@ -2639,7 +2638,8 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             current_next_local = lowered.next_local_id
                             current_next_region = lowered.next_region_id
                             current_mutations = (current_mutations) + (lowered.mutations)
-                            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+                            temp_constants = collected_string_constants
+                            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                             handled_inline_let = True
                 if not handled_inline_let:
                     lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label)
@@ -2652,7 +2652,8 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
                     current_next_region = lowered.next_region_id
                     current_mutations = (current_mutations) + (lowered.mutations)
-                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+                    temp_constants = collected_string_constants
+                    collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
             else:
                 if instruction.variant == "Return":
                     lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context)
@@ -2665,7 +2666,8 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
                     current_next_region = lowered.next_region_id
                     current_mutations = (current_mutations) + (lowered.mutations)
-                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+                    temp_constants = collected_string_constants
+                    collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                     terminated = True
                     index += 1
                     if index < end:

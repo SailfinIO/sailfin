@@ -14938,8 +14938,6 @@ afterloop3:
 define %FunctionEffectEntry @collect_function_effect_entry(%NativeFunction %function) {
 entry:
   %l0 = alloca { i8**, i64 }*
-  %l1 = alloca { i8**, i64 }*
-  %l2 = alloca { i8**, i64 }*
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -14948,15 +14946,14 @@ entry:
   %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
-  %t5 = extractvalue %NativeFunction %function, 3
-  store { i8**, i64 }* %t5, { i8**, i64 }** %l1
-  %t6 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t7 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t8 = call { i8**, i64 }* @merge_effect_lists({ i8**, i64 }* %t6, { i8**, i64 }* %t7)
-  store { i8**, i64 }* %t8, { i8**, i64 }** %l0
+  %t5 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t6 = extractvalue %NativeFunction %function, 3
+  %t7 = call { i8**, i64 }* @merge_effect_lists({ i8**, i64 }* %t5, { i8**, i64 }* %t6)
+  store { i8**, i64 }* %t7, { i8**, i64 }** %l0
+  %t8 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t9 = call { i8**, i64 }* @collect_function_borrow_effects(%NativeFunction %function)
-  store { i8**, i64 }* %t9, { i8**, i64 }** %l2
-  %t10 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t10 = call { i8**, i64 }* @merge_effect_lists({ i8**, i64 }* %t8, { i8**, i64 }* %t9)
+  store { i8**, i64 }* %t10, { i8**, i64 }** %l0
   %t11 = extractvalue %NativeFunction %function, 0
   %t12 = insertvalue %FunctionEffectEntry undef, i8* %t11, 0
   %t13 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -17434,20 +17431,24 @@ entry:
   %l14 = alloca %StringConstantSet
   %l15 = alloca %NativeInstruction*
   %l16 = alloca %LetLoweringResult
-  %l17 = alloca i8*
-  %l18 = alloca i1
-  %l19 = alloca i8*
-  %l20 = alloca %InlineLetParseResult
-  %l21 = alloca %NativeInstruction
-  %l22 = alloca %LetLoweringResult
-  %l23 = alloca %ExpressionStatementResult
-  %l24 = alloca %ExpressionStatementResult
-  %l25 = alloca %BlockLoweringResult
-  %l26 = alloca %BlockLoweringResult
-  %l27 = alloca %BlockLoweringResult
-  %l28 = alloca %LoopContext
-  %l29 = alloca %LoopContext
+  %l17 = alloca %StringConstantSet
+  %l18 = alloca i8*
+  %l19 = alloca i1
+  %l20 = alloca i8*
+  %l21 = alloca %InlineLetParseResult
+  %l22 = alloca %NativeInstruction
+  %l23 = alloca %LetLoweringResult
+  %l24 = alloca %StringConstantSet
+  %l25 = alloca %ExpressionStatementResult
+  %l26 = alloca %StringConstantSet
+  %l27 = alloca %ExpressionStatementResult
+  %l28 = alloca %StringConstantSet
+  %l29 = alloca %BlockLoweringResult
   %l30 = alloca %BlockLoweringResult
+  %l31 = alloca %BlockLoweringResult
+  %l32 = alloca %LoopContext
+  %l33 = alloca %LoopContext
+  %l34 = alloca %BlockLoweringResult
   %t0 = alloca [0 x i8*]
   %t1 = getelementptr [0 x i8*], [0 x i8*]* %t0, i32 0, i32 0
   %t2 = alloca { i8**, i64 }
@@ -17502,34 +17503,34 @@ entry:
   %t30 = load %StringConstantSet, %StringConstantSet* %l14
   br label %loop.header0
 loop.header0:
-  %t2127 = phi { i8**, i64 }* [ %t16, %entry ], [ %t2113, %loop.latch2 ]
-  %t2128 = phi { %LifetimeRegionMetadata*, i64 }* [ %t28, %entry ], [ %t2114, %loop.latch2 ]
-  %t2129 = phi { i8**, i64 }* [ %t17, %entry ], [ %t2115, %loop.latch2 ]
-  %t2130 = phi { i8**, i64 }* [ %t18, %entry ], [ %t2116, %loop.latch2 ]
-  %t2131 = phi { %LocalBinding*, i64 }* [ %t19, %entry ], [ %t2117, %loop.latch2 ]
-  %t2132 = phi { %ParameterBinding*, i64 }* [ %t20, %entry ], [ %t2118, %loop.latch2 ]
-  %t2133 = phi double [ %t21, %entry ], [ %t2119, %loop.latch2 ]
-  %t2134 = phi double [ %t23, %entry ], [ %t2120, %loop.latch2 ]
-  %t2135 = phi double [ %t24, %entry ], [ %t2121, %loop.latch2 ]
-  %t2136 = phi { %LocalMutation*, i64 }* [ %t29, %entry ], [ %t2122, %loop.latch2 ]
-  %t2137 = phi %StringConstantSet [ %t30, %entry ], [ %t2123, %loop.latch2 ]
-  %t2138 = phi i1 [ %t25, %entry ], [ %t2124, %loop.latch2 ]
-  %t2139 = phi double [ %t27, %entry ], [ %t2125, %loop.latch2 ]
-  %t2140 = phi double [ %t22, %entry ], [ %t2126, %loop.latch2 ]
-  store { i8**, i64 }* %t2127, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t2128, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t2129, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t2130, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t2131, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t2132, { %ParameterBinding*, i64 }** %l4
-  store double %t2133, double* %l5
-  store double %t2134, double* %l7
-  store double %t2135, double* %l8
-  store { %LocalMutation*, i64 }* %t2136, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t2137, %StringConstantSet* %l14
-  store i1 %t2138, i1* %l9
-  store double %t2139, double* %l11
-  store double %t2140, double* %l6
+  %t2132 = phi { i8**, i64 }* [ %t16, %entry ], [ %t2118, %loop.latch2 ]
+  %t2133 = phi { %LifetimeRegionMetadata*, i64 }* [ %t28, %entry ], [ %t2119, %loop.latch2 ]
+  %t2134 = phi { i8**, i64 }* [ %t17, %entry ], [ %t2120, %loop.latch2 ]
+  %t2135 = phi { i8**, i64 }* [ %t18, %entry ], [ %t2121, %loop.latch2 ]
+  %t2136 = phi { %LocalBinding*, i64 }* [ %t19, %entry ], [ %t2122, %loop.latch2 ]
+  %t2137 = phi { %ParameterBinding*, i64 }* [ %t20, %entry ], [ %t2123, %loop.latch2 ]
+  %t2138 = phi double [ %t21, %entry ], [ %t2124, %loop.latch2 ]
+  %t2139 = phi double [ %t23, %entry ], [ %t2125, %loop.latch2 ]
+  %t2140 = phi double [ %t24, %entry ], [ %t2126, %loop.latch2 ]
+  %t2141 = phi { %LocalMutation*, i64 }* [ %t29, %entry ], [ %t2127, %loop.latch2 ]
+  %t2142 = phi %StringConstantSet [ %t30, %entry ], [ %t2128, %loop.latch2 ]
+  %t2143 = phi i1 [ %t25, %entry ], [ %t2129, %loop.latch2 ]
+  %t2144 = phi double [ %t27, %entry ], [ %t2130, %loop.latch2 ]
+  %t2145 = phi double [ %t22, %entry ], [ %t2131, %loop.latch2 ]
+  store { i8**, i64 }* %t2132, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t2133, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t2134, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2135, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t2136, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t2137, { %ParameterBinding*, i64 }** %l4
+  store double %t2138, double* %l5
+  store double %t2139, double* %l7
+  store double %t2140, double* %l8
+  store { %LocalMutation*, i64 }* %t2141, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t2142, %StringConstantSet* %l14
+  store i1 %t2143, i1* %l9
+  store double %t2144, double* %l11
+  store double %t2145, double* %l6
   br label %loop.body1
 loop.body1:
   %t31 = load double, double* %l11
@@ -17695,2263 +17696,2272 @@ then6:
   %t173 = bitcast { i8**, i64 }* %t172 to { %LocalMutation*, i64 }*
   store { %LocalMutation*, i64 }* %t173, { %LocalMutation*, i64 }** %l13
   %t174 = load %StringConstantSet, %StringConstantSet* %l14
-  %t175 = load %LetLoweringResult, %LetLoweringResult* %l16
-  %t176 = extractvalue %LetLoweringResult %t175, 10
-  %t177 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t174, %StringConstantSet %t176)
-  store %StringConstantSet %t177, %StringConstantSet* %l14
+  store %StringConstantSet %t174, %StringConstantSet* %l17
+  %t175 = load %StringConstantSet, %StringConstantSet* %l17
+  %t176 = load %LetLoweringResult, %LetLoweringResult* %l16
+  %t177 = extractvalue %LetLoweringResult %t176, 10
+  %t178 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t175, %StringConstantSet %t177)
+  store %StringConstantSet %t178, %StringConstantSet* %l14
   br label %merge8
 else7:
-  %t178 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t179 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t178, i32 0, i32 0
-  %t180 = load i32, i32* %t179
-  %t181 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t182 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t183 = icmp eq i32 %t180, 0
-  %t184 = select i1 %t183, i8* %t182, i8* %t181
-  %t185 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t186 = icmp eq i32 %t180, 1
-  %t187 = select i1 %t186, i8* %t185, i8* %t184
-  %t188 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t189 = icmp eq i32 %t180, 2
-  %t190 = select i1 %t189, i8* %t188, i8* %t187
-  %t191 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t192 = icmp eq i32 %t180, 3
-  %t193 = select i1 %t192, i8* %t191, i8* %t190
-  %t194 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t195 = icmp eq i32 %t180, 4
-  %t196 = select i1 %t195, i8* %t194, i8* %t193
-  %t197 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t198 = icmp eq i32 %t180, 5
-  %t199 = select i1 %t198, i8* %t197, i8* %t196
-  %t200 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t201 = icmp eq i32 %t180, 6
-  %t202 = select i1 %t201, i8* %t200, i8* %t199
-  %t203 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t204 = icmp eq i32 %t180, 7
-  %t205 = select i1 %t204, i8* %t203, i8* %t202
-  %t206 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t207 = icmp eq i32 %t180, 8
-  %t208 = select i1 %t207, i8* %t206, i8* %t205
-  %t209 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t210 = icmp eq i32 %t180, 9
-  %t211 = select i1 %t210, i8* %t209, i8* %t208
-  %t212 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t213 = icmp eq i32 %t180, 10
-  %t214 = select i1 %t213, i8* %t212, i8* %t211
-  %t215 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t216 = icmp eq i32 %t180, 11
-  %t217 = select i1 %t216, i8* %t215, i8* %t214
-  %t218 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t219 = icmp eq i32 %t180, 12
-  %t220 = select i1 %t219, i8* %t218, i8* %t217
-  %t221 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t222 = icmp eq i32 %t180, 13
-  %t223 = select i1 %t222, i8* %t221, i8* %t220
-  %t224 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t225 = icmp eq i32 %t180, 14
-  %t226 = select i1 %t225, i8* %t224, i8* %t223
-  %t227 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t228 = icmp eq i32 %t180, 15
-  %t229 = select i1 %t228, i8* %t227, i8* %t226
-  %t230 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t231 = icmp eq i32 %t180, 16
-  %t232 = select i1 %t231, i8* %t230, i8* %t229
-  %s233 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.233, i32 0, i32 0
-  %t234 = icmp eq i8* %t232, %s233
-  %t235 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t236 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t237 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t238 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t239 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t240 = load double, double* %l5
-  %t241 = load double, double* %l6
-  %t242 = load double, double* %l7
-  %t243 = load double, double* %l8
-  %t244 = load i1, i1* %l9
-  %t245 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t246 = load double, double* %l11
-  %t247 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t248 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t249 = load %StringConstantSet, %StringConstantSet* %l14
-  %t250 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t234, label %then9, label %else10
-then9:
+  %t179 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t180 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t179, i32 0, i32 0
+  %t181 = load i32, i32* %t180
+  %t182 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t183 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t184 = icmp eq i32 %t181, 0
+  %t185 = select i1 %t184, i8* %t183, i8* %t182
+  %t186 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t187 = icmp eq i32 %t181, 1
+  %t188 = select i1 %t187, i8* %t186, i8* %t185
+  %t189 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t190 = icmp eq i32 %t181, 2
+  %t191 = select i1 %t190, i8* %t189, i8* %t188
+  %t192 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t193 = icmp eq i32 %t181, 3
+  %t194 = select i1 %t193, i8* %t192, i8* %t191
+  %t195 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t196 = icmp eq i32 %t181, 4
+  %t197 = select i1 %t196, i8* %t195, i8* %t194
+  %t198 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t199 = icmp eq i32 %t181, 5
+  %t200 = select i1 %t199, i8* %t198, i8* %t197
+  %t201 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t202 = icmp eq i32 %t181, 6
+  %t203 = select i1 %t202, i8* %t201, i8* %t200
+  %t204 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t205 = icmp eq i32 %t181, 7
+  %t206 = select i1 %t205, i8* %t204, i8* %t203
+  %t207 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t208 = icmp eq i32 %t181, 8
+  %t209 = select i1 %t208, i8* %t207, i8* %t206
+  %t210 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t211 = icmp eq i32 %t181, 9
+  %t212 = select i1 %t211, i8* %t210, i8* %t209
+  %t213 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t214 = icmp eq i32 %t181, 10
+  %t215 = select i1 %t214, i8* %t213, i8* %t212
+  %t216 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t217 = icmp eq i32 %t181, 11
+  %t218 = select i1 %t217, i8* %t216, i8* %t215
+  %t219 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t220 = icmp eq i32 %t181, 12
+  %t221 = select i1 %t220, i8* %t219, i8* %t218
+  %t222 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t223 = icmp eq i32 %t181, 13
+  %t224 = select i1 %t223, i8* %t222, i8* %t221
+  %t225 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t226 = icmp eq i32 %t181, 14
+  %t227 = select i1 %t226, i8* %t225, i8* %t224
+  %t228 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t229 = icmp eq i32 %t181, 15
+  %t230 = select i1 %t229, i8* %t228, i8* %t227
+  %t231 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t232 = icmp eq i32 %t181, 16
+  %t233 = select i1 %t232, i8* %t231, i8* %t230
+  %s234 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.234, i32 0, i32 0
+  %t235 = icmp eq i8* %t233, %s234
+  %t236 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t237 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t238 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t239 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t240 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t241 = load double, double* %l5
+  %t242 = load double, double* %l6
+  %t243 = load double, double* %l7
+  %t244 = load double, double* %l8
+  %t245 = load i1, i1* %l9
+  %t246 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t247 = load double, double* %l11
+  %t248 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t249 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t250 = load %StringConstantSet, %StringConstantSet* %l14
   %t251 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t252 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t251, i32 0, i32 0
-  %t253 = load i32, i32* %t252
-  %t254 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t251, i32 0, i32 1
-  %t255 = bitcast [16 x i8]* %t254 to i8*
-  %t256 = bitcast i8* %t255 to i8**
-  %t257 = load i8*, i8** %t256
-  %t258 = icmp eq i32 %t253, 0
-  %t259 = select i1 %t258, i8* %t257, i8* null
-  %t260 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t251, i32 0, i32 1
-  %t261 = bitcast [16 x i8]* %t260 to i8*
-  %t262 = bitcast i8* %t261 to i8**
-  %t263 = load i8*, i8** %t262
-  %t264 = icmp eq i32 %t253, 1
-  %t265 = select i1 %t264, i8* %t263, i8* %t259
-  %t266 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t251, i32 0, i32 1
-  %t267 = bitcast [8 x i8]* %t266 to i8*
-  %t268 = bitcast i8* %t267 to i8**
-  %t269 = load i8*, i8** %t268
-  %t270 = icmp eq i32 %t253, 12
-  %t271 = select i1 %t270, i8* %t269, i8* %t265
-  %t272 = call i8* @trim_text(i8* %t271)
-  store i8* %t272, i8** %l17
-  store i1 0, i1* %l18
-  %t273 = load i8*, i8** %l17
-  %t274 = call i64 @sailfin_runtime_string_length(i8* %t273)
-  %t275 = icmp sge i64 %t274, 4
-  %t276 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t277 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t278 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t279 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t280 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t281 = load double, double* %l5
-  %t282 = load double, double* %l6
-  %t283 = load double, double* %l7
-  %t284 = load double, double* %l8
-  %t285 = load i1, i1* %l9
-  %t286 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t287 = load double, double* %l11
-  %t288 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t289 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t290 = load %StringConstantSet, %StringConstantSet* %l14
-  %t291 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t292 = load i8*, i8** %l17
-  %t293 = load i1, i1* %l18
-  br i1 %t275, label %then12, label %merge13
+  br i1 %t235, label %then9, label %else10
+then9:
+  %t252 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t253 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t252, i32 0, i32 0
+  %t254 = load i32, i32* %t253
+  %t255 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t252, i32 0, i32 1
+  %t256 = bitcast [16 x i8]* %t255 to i8*
+  %t257 = bitcast i8* %t256 to i8**
+  %t258 = load i8*, i8** %t257
+  %t259 = icmp eq i32 %t254, 0
+  %t260 = select i1 %t259, i8* %t258, i8* null
+  %t261 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t252, i32 0, i32 1
+  %t262 = bitcast [16 x i8]* %t261 to i8*
+  %t263 = bitcast i8* %t262 to i8**
+  %t264 = load i8*, i8** %t263
+  %t265 = icmp eq i32 %t254, 1
+  %t266 = select i1 %t265, i8* %t264, i8* %t260
+  %t267 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t252, i32 0, i32 1
+  %t268 = bitcast [8 x i8]* %t267 to i8*
+  %t269 = bitcast i8* %t268 to i8**
+  %t270 = load i8*, i8** %t269
+  %t271 = icmp eq i32 %t254, 12
+  %t272 = select i1 %t271, i8* %t270, i8* %t266
+  %t273 = call i8* @trim_text(i8* %t272)
+  store i8* %t273, i8** %l18
+  store i1 0, i1* %l19
+  %t274 = load i8*, i8** %l18
+  %t275 = call i64 @sailfin_runtime_string_length(i8* %t274)
+  %t276 = icmp sge i64 %t275, 4
+  %t277 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t278 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t279 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t280 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t281 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t282 = load double, double* %l5
+  %t283 = load double, double* %l6
+  %t284 = load double, double* %l7
+  %t285 = load double, double* %l8
+  %t286 = load i1, i1* %l9
+  %t287 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t288 = load double, double* %l11
+  %t289 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t290 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t291 = load %StringConstantSet, %StringConstantSet* %l14
+  %t292 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t293 = load i8*, i8** %l18
+  %t294 = load i1, i1* %l19
+  br i1 %t276, label %then12, label %merge13
 then12:
-  %t294 = load i8*, i8** %l17
-  %t295 = call i8* @sailfin_runtime_substring(i8* %t294, i64 0, i64 4)
-  store i8* %t295, i8** %l19
-  %t296 = load i8*, i8** %l19
-  %s297 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.297, i32 0, i32 0
-  %t298 = icmp eq i8* %t296, %s297
-  %t299 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t300 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t301 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t302 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t303 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t304 = load double, double* %l5
-  %t305 = load double, double* %l6
-  %t306 = load double, double* %l7
-  %t307 = load double, double* %l8
-  %t308 = load i1, i1* %l9
-  %t309 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t310 = load double, double* %l11
-  %t311 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t312 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t313 = load %StringConstantSet, %StringConstantSet* %l14
-  %t314 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t315 = load i8*, i8** %l17
-  %t316 = load i1, i1* %l18
-  %t317 = load i8*, i8** %l19
-  br i1 %t298, label %then14, label %merge15
+  %t295 = load i8*, i8** %l18
+  %t296 = call i8* @sailfin_runtime_substring(i8* %t295, i64 0, i64 4)
+  store i8* %t296, i8** %l20
+  %t297 = load i8*, i8** %l20
+  %s298 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.298, i32 0, i32 0
+  %t299 = icmp eq i8* %t297, %s298
+  %t300 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t301 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t302 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t303 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t304 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t305 = load double, double* %l5
+  %t306 = load double, double* %l6
+  %t307 = load double, double* %l7
+  %t308 = load double, double* %l8
+  %t309 = load i1, i1* %l9
+  %t310 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t311 = load double, double* %l11
+  %t312 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t313 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t314 = load %StringConstantSet, %StringConstantSet* %l14
+  %t315 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t316 = load i8*, i8** %l18
+  %t317 = load i1, i1* %l19
+  %t318 = load i8*, i8** %l20
+  br i1 %t299, label %then14, label %merge15
 then14:
-  %t318 = load i8*, i8** %l17
-  %t319 = call %InlineLetParseResult @parse_inline_let_expression(i8* %t318)
-  store %InlineLetParseResult %t319, %InlineLetParseResult* %l20
-  %t320 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t321 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t322 = extractvalue %InlineLetParseResult %t321, 5
-  %t323 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t320, { i8**, i64 }* %t322)
-  store { i8**, i64 }* %t323, { i8**, i64 }** %l0
-  %t324 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t325 = extractvalue %InlineLetParseResult %t324, 0
-  %t326 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t327 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t328 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t329 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t330 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t331 = load double, double* %l5
-  %t332 = load double, double* %l6
-  %t333 = load double, double* %l7
-  %t334 = load double, double* %l8
-  %t335 = load i1, i1* %l9
-  %t336 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t337 = load double, double* %l11
-  %t338 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t339 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t340 = load %StringConstantSet, %StringConstantSet* %l14
-  %t341 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t342 = load i8*, i8** %l17
-  %t343 = load i1, i1* %l18
-  %t344 = load i8*, i8** %l19
-  %t345 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  br i1 %t325, label %then16, label %merge17
+  %t319 = load i8*, i8** %l18
+  %t320 = call %InlineLetParseResult @parse_inline_let_expression(i8* %t319)
+  store %InlineLetParseResult %t320, %InlineLetParseResult* %l21
+  %t321 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t322 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t323 = extractvalue %InlineLetParseResult %t322, 5
+  %t324 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t321, { i8**, i64 }* %t323)
+  store { i8**, i64 }* %t324, { i8**, i64 }** %l0
+  %t325 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t326 = extractvalue %InlineLetParseResult %t325, 0
+  %t327 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t328 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t329 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t330 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t331 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t332 = load double, double* %l5
+  %t333 = load double, double* %l6
+  %t334 = load double, double* %l7
+  %t335 = load double, double* %l8
+  %t336 = load i1, i1* %l9
+  %t337 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t338 = load double, double* %l11
+  %t339 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t340 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t341 = load %StringConstantSet, %StringConstantSet* %l14
+  %t342 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t343 = load i8*, i8** %l18
+  %t344 = load i1, i1* %l19
+  %t345 = load i8*, i8** %l20
+  %t346 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  br i1 %t326, label %then16, label %merge17
 then16:
-  %t346 = alloca %NativeInstruction
-  %t347 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 0
-  store i32 2, i32* %t347
-  %t348 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t349 = extractvalue %InlineLetParseResult %t348, 1
-  %t350 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t351 = bitcast [48 x i8]* %t350 to i8*
-  %t352 = bitcast i8* %t351 to i8**
-  store i8* %t349, i8** %t352
-  %t353 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t354 = extractvalue %InlineLetParseResult %t353, 2
-  %t355 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t356 = bitcast [48 x i8]* %t355 to i8*
-  %t357 = getelementptr inbounds i8, i8* %t356, i64 8
-  %t358 = bitcast i8* %t357 to i1*
-  store i1 %t354, i1* %t358
-  %t359 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t360 = extractvalue %InlineLetParseResult %t359, 3
-  %t361 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t362 = bitcast [48 x i8]* %t361 to i8*
-  %t363 = getelementptr inbounds i8, i8* %t362, i64 16
-  %t364 = bitcast i8* %t363 to i8**
-  store i8* %t360, i8** %t364
-  %t365 = load %InlineLetParseResult, %InlineLetParseResult* %l20
-  %t366 = extractvalue %InlineLetParseResult %t365, 4
-  %t367 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t368 = bitcast [48 x i8]* %t367 to i8*
-  %t369 = getelementptr inbounds i8, i8* %t368, i64 24
-  %t370 = bitcast i8* %t369 to i8**
-  store i8* %t366, i8** %t370
-  %t371 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t372 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t371, i32 0, i32 0
-  %t373 = load i32, i32* %t372
-  %t374 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t371, i32 0, i32 1
-  %t375 = bitcast [16 x i8]* %t374 to i8*
-  %t376 = getelementptr inbounds i8, i8* %t375, i64 8
-  %t377 = bitcast i8* %t376 to %NativeSourceSpan**
-  %t378 = load %NativeSourceSpan*, %NativeSourceSpan** %t377
-  %t379 = icmp eq i32 %t373, 0
-  %t380 = select i1 %t379, %NativeSourceSpan* %t378, %NativeSourceSpan* null
-  %t381 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t371, i32 0, i32 1
-  %t382 = bitcast [16 x i8]* %t381 to i8*
-  %t383 = getelementptr inbounds i8, i8* %t382, i64 8
-  %t384 = bitcast i8* %t383 to %NativeSourceSpan**
-  %t385 = load %NativeSourceSpan*, %NativeSourceSpan** %t384
-  %t386 = icmp eq i32 %t373, 1
-  %t387 = select i1 %t386, %NativeSourceSpan* %t385, %NativeSourceSpan* %t380
-  %t388 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t371, i32 0, i32 1
-  %t389 = bitcast [48 x i8]* %t388 to i8*
-  %t390 = getelementptr inbounds i8, i8* %t389, i64 32
-  %t391 = bitcast i8* %t390 to %NativeSourceSpan**
-  %t392 = load %NativeSourceSpan*, %NativeSourceSpan** %t391
-  %t393 = icmp eq i32 %t373, 2
-  %t394 = select i1 %t393, %NativeSourceSpan* %t392, %NativeSourceSpan* %t387
-  %t395 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t396 = bitcast [48 x i8]* %t395 to i8*
-  %t397 = getelementptr inbounds i8, i8* %t396, i64 32
-  %t398 = bitcast i8* %t397 to %NativeSourceSpan**
-  store %NativeSourceSpan* %t394, %NativeSourceSpan** %t398
-  %t399 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t400 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t399, i32 0, i32 0
-  %t401 = load i32, i32* %t400
-  %t402 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t399, i32 0, i32 1
-  %t403 = bitcast [16 x i8]* %t402 to i8*
-  %t404 = getelementptr inbounds i8, i8* %t403, i64 8
-  %t405 = bitcast i8* %t404 to %NativeSourceSpan**
-  %t406 = load %NativeSourceSpan*, %NativeSourceSpan** %t405
-  %t407 = icmp eq i32 %t401, 0
-  %t408 = select i1 %t407, %NativeSourceSpan* %t406, %NativeSourceSpan* null
-  %t409 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t399, i32 0, i32 1
-  %t410 = bitcast [16 x i8]* %t409 to i8*
-  %t411 = getelementptr inbounds i8, i8* %t410, i64 8
-  %t412 = bitcast i8* %t411 to %NativeSourceSpan**
-  %t413 = load %NativeSourceSpan*, %NativeSourceSpan** %t412
-  %t414 = icmp eq i32 %t401, 1
-  %t415 = select i1 %t414, %NativeSourceSpan* %t413, %NativeSourceSpan* %t408
-  %t416 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t399, i32 0, i32 1
-  %t417 = bitcast [48 x i8]* %t416 to i8*
-  %t418 = getelementptr inbounds i8, i8* %t417, i64 32
-  %t419 = bitcast i8* %t418 to %NativeSourceSpan**
-  %t420 = load %NativeSourceSpan*, %NativeSourceSpan** %t419
-  %t421 = icmp eq i32 %t401, 2
-  %t422 = select i1 %t421, %NativeSourceSpan* %t420, %NativeSourceSpan* %t415
-  %t423 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t346, i32 0, i32 1
-  %t424 = bitcast [48 x i8]* %t423 to i8*
-  %t425 = getelementptr inbounds i8, i8* %t424, i64 40
-  %t426 = bitcast i8* %t425 to %NativeSourceSpan**
-  store %NativeSourceSpan* %t422, %NativeSourceSpan** %t426
-  %t427 = load %NativeInstruction, %NativeInstruction* %t346
-  store %NativeInstruction %t427, %NativeInstruction* %l21
-  %t428 = load %NativeInstruction, %NativeInstruction* %l21
-  %t429 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t430 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t431 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t432 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t433 = load double, double* %l5
-  %t434 = load double, double* %l7
-  %t435 = load double, double* %l8
-  %t436 = call %LetLoweringResult @lower_let_instruction(%NativeFunction %function, %NativeInstruction %t428, { %ParameterBinding*, i64 }* %t429, { %LocalBinding*, i64 }* %t430, { i8**, i64 }* %t431, { i8**, i64 }* %t432, double %t433, double %t434, double %t435, { %NativeFunction*, i64 }* %functions, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
-  store %LetLoweringResult %t436, %LetLoweringResult* %l22
-  %t437 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t438 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t439 = extractvalue %LetLoweringResult %t438, 5
-  %t440 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t437, { i8**, i64 }* %t439)
-  store { i8**, i64 }* %t440, { i8**, i64 }** %l0
-  %t441 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t442 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t443 = extractvalue %LetLoweringResult %t442, 7
-  %t444 = bitcast { %LifetimeRegionMetadata*, i64 }* %t441 to { i8**, i64 }*
-  %t445 = bitcast { %LifetimeRegionMetadata**, i64 }* %t443 to { i8**, i64 }*
-  %t446 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t444, { i8**, i64 }* %t445)
-  %t447 = bitcast { i8**, i64 }* %t446 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t447, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t448 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t449 = extractvalue %LetLoweringResult %t448, 0
-  store { i8**, i64 }* %t449, { i8**, i64 }** %l1
-  %t450 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t451 = extractvalue %LetLoweringResult %t450, 1
-  store { i8**, i64 }* %t451, { i8**, i64 }** %l2
-  %t452 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t453 = extractvalue %LetLoweringResult %t452, 2
-  %t454 = bitcast { %LocalBinding**, i64 }* %t453 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t454, { %LocalBinding*, i64 }** %l3
-  %t455 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t456 = extractvalue %LetLoweringResult %t455, 3
-  %t457 = bitcast { %ParameterBinding**, i64 }* %t456 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t457, { %ParameterBinding*, i64 }** %l4
-  %t458 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t459 = extractvalue %LetLoweringResult %t458, 4
-  store double %t459, double* %l5
-  %t460 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t461 = extractvalue %LetLoweringResult %t460, 6
-  store double %t461, double* %l7
-  %t462 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t463 = extractvalue %LetLoweringResult %t462, 8
-  store double %t463, double* %l8
-  %t464 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t465 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t466 = extractvalue %LetLoweringResult %t465, 9
-  %t467 = bitcast { %LocalMutation*, i64 }* %t464 to { i8**, i64 }*
-  %t468 = bitcast { %LocalMutation**, i64 }* %t466 to { i8**, i64 }*
-  %t469 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t467, { i8**, i64 }* %t468)
-  %t470 = bitcast { i8**, i64 }* %t469 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t470, { %LocalMutation*, i64 }** %l13
-  %t471 = load %StringConstantSet, %StringConstantSet* %l14
-  %t472 = load %LetLoweringResult, %LetLoweringResult* %l22
-  %t473 = extractvalue %LetLoweringResult %t472, 10
-  %t474 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t471, %StringConstantSet %t473)
-  store %StringConstantSet %t474, %StringConstantSet* %l14
-  store i1 1, i1* %l18
+  %t347 = alloca %NativeInstruction
+  %t348 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 0
+  store i32 2, i32* %t348
+  %t349 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t350 = extractvalue %InlineLetParseResult %t349, 1
+  %t351 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t352 = bitcast [48 x i8]* %t351 to i8*
+  %t353 = bitcast i8* %t352 to i8**
+  store i8* %t350, i8** %t353
+  %t354 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t355 = extractvalue %InlineLetParseResult %t354, 2
+  %t356 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t357 = bitcast [48 x i8]* %t356 to i8*
+  %t358 = getelementptr inbounds i8, i8* %t357, i64 8
+  %t359 = bitcast i8* %t358 to i1*
+  store i1 %t355, i1* %t359
+  %t360 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t361 = extractvalue %InlineLetParseResult %t360, 3
+  %t362 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t363 = bitcast [48 x i8]* %t362 to i8*
+  %t364 = getelementptr inbounds i8, i8* %t363, i64 16
+  %t365 = bitcast i8* %t364 to i8**
+  store i8* %t361, i8** %t365
+  %t366 = load %InlineLetParseResult, %InlineLetParseResult* %l21
+  %t367 = extractvalue %InlineLetParseResult %t366, 4
+  %t368 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t369 = bitcast [48 x i8]* %t368 to i8*
+  %t370 = getelementptr inbounds i8, i8* %t369, i64 24
+  %t371 = bitcast i8* %t370 to i8**
+  store i8* %t367, i8** %t371
+  %t372 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t373 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t372, i32 0, i32 0
+  %t374 = load i32, i32* %t373
+  %t375 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t372, i32 0, i32 1
+  %t376 = bitcast [16 x i8]* %t375 to i8*
+  %t377 = getelementptr inbounds i8, i8* %t376, i64 8
+  %t378 = bitcast i8* %t377 to %NativeSourceSpan**
+  %t379 = load %NativeSourceSpan*, %NativeSourceSpan** %t378
+  %t380 = icmp eq i32 %t374, 0
+  %t381 = select i1 %t380, %NativeSourceSpan* %t379, %NativeSourceSpan* null
+  %t382 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t372, i32 0, i32 1
+  %t383 = bitcast [16 x i8]* %t382 to i8*
+  %t384 = getelementptr inbounds i8, i8* %t383, i64 8
+  %t385 = bitcast i8* %t384 to %NativeSourceSpan**
+  %t386 = load %NativeSourceSpan*, %NativeSourceSpan** %t385
+  %t387 = icmp eq i32 %t374, 1
+  %t388 = select i1 %t387, %NativeSourceSpan* %t386, %NativeSourceSpan* %t381
+  %t389 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t372, i32 0, i32 1
+  %t390 = bitcast [48 x i8]* %t389 to i8*
+  %t391 = getelementptr inbounds i8, i8* %t390, i64 32
+  %t392 = bitcast i8* %t391 to %NativeSourceSpan**
+  %t393 = load %NativeSourceSpan*, %NativeSourceSpan** %t392
+  %t394 = icmp eq i32 %t374, 2
+  %t395 = select i1 %t394, %NativeSourceSpan* %t393, %NativeSourceSpan* %t388
+  %t396 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t397 = bitcast [48 x i8]* %t396 to i8*
+  %t398 = getelementptr inbounds i8, i8* %t397, i64 32
+  %t399 = bitcast i8* %t398 to %NativeSourceSpan**
+  store %NativeSourceSpan* %t395, %NativeSourceSpan** %t399
+  %t400 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t401 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t400, i32 0, i32 0
+  %t402 = load i32, i32* %t401
+  %t403 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t400, i32 0, i32 1
+  %t404 = bitcast [16 x i8]* %t403 to i8*
+  %t405 = getelementptr inbounds i8, i8* %t404, i64 8
+  %t406 = bitcast i8* %t405 to %NativeSourceSpan**
+  %t407 = load %NativeSourceSpan*, %NativeSourceSpan** %t406
+  %t408 = icmp eq i32 %t402, 0
+  %t409 = select i1 %t408, %NativeSourceSpan* %t407, %NativeSourceSpan* null
+  %t410 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t400, i32 0, i32 1
+  %t411 = bitcast [16 x i8]* %t410 to i8*
+  %t412 = getelementptr inbounds i8, i8* %t411, i64 8
+  %t413 = bitcast i8* %t412 to %NativeSourceSpan**
+  %t414 = load %NativeSourceSpan*, %NativeSourceSpan** %t413
+  %t415 = icmp eq i32 %t402, 1
+  %t416 = select i1 %t415, %NativeSourceSpan* %t414, %NativeSourceSpan* %t409
+  %t417 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t400, i32 0, i32 1
+  %t418 = bitcast [48 x i8]* %t417 to i8*
+  %t419 = getelementptr inbounds i8, i8* %t418, i64 32
+  %t420 = bitcast i8* %t419 to %NativeSourceSpan**
+  %t421 = load %NativeSourceSpan*, %NativeSourceSpan** %t420
+  %t422 = icmp eq i32 %t402, 2
+  %t423 = select i1 %t422, %NativeSourceSpan* %t421, %NativeSourceSpan* %t416
+  %t424 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t347, i32 0, i32 1
+  %t425 = bitcast [48 x i8]* %t424 to i8*
+  %t426 = getelementptr inbounds i8, i8* %t425, i64 40
+  %t427 = bitcast i8* %t426 to %NativeSourceSpan**
+  store %NativeSourceSpan* %t423, %NativeSourceSpan** %t427
+  %t428 = load %NativeInstruction, %NativeInstruction* %t347
+  store %NativeInstruction %t428, %NativeInstruction* %l22
+  %t429 = load %NativeInstruction, %NativeInstruction* %l22
+  %t430 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t431 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t432 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t433 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t434 = load double, double* %l5
+  %t435 = load double, double* %l7
+  %t436 = load double, double* %l8
+  %t437 = call %LetLoweringResult @lower_let_instruction(%NativeFunction %function, %NativeInstruction %t429, { %ParameterBinding*, i64 }* %t430, { %LocalBinding*, i64 }* %t431, { i8**, i64 }* %t432, { i8**, i64 }* %t433, double %t434, double %t435, double %t436, { %NativeFunction*, i64 }* %functions, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
+  store %LetLoweringResult %t437, %LetLoweringResult* %l23
+  %t438 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t439 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t440 = extractvalue %LetLoweringResult %t439, 5
+  %t441 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t438, { i8**, i64 }* %t440)
+  store { i8**, i64 }* %t441, { i8**, i64 }** %l0
+  %t442 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t443 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t444 = extractvalue %LetLoweringResult %t443, 7
+  %t445 = bitcast { %LifetimeRegionMetadata*, i64 }* %t442 to { i8**, i64 }*
+  %t446 = bitcast { %LifetimeRegionMetadata**, i64 }* %t444 to { i8**, i64 }*
+  %t447 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t445, { i8**, i64 }* %t446)
+  %t448 = bitcast { i8**, i64 }* %t447 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t448, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t449 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t450 = extractvalue %LetLoweringResult %t449, 0
+  store { i8**, i64 }* %t450, { i8**, i64 }** %l1
+  %t451 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t452 = extractvalue %LetLoweringResult %t451, 1
+  store { i8**, i64 }* %t452, { i8**, i64 }** %l2
+  %t453 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t454 = extractvalue %LetLoweringResult %t453, 2
+  %t455 = bitcast { %LocalBinding**, i64 }* %t454 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t455, { %LocalBinding*, i64 }** %l3
+  %t456 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t457 = extractvalue %LetLoweringResult %t456, 3
+  %t458 = bitcast { %ParameterBinding**, i64 }* %t457 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t458, { %ParameterBinding*, i64 }** %l4
+  %t459 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t460 = extractvalue %LetLoweringResult %t459, 4
+  store double %t460, double* %l5
+  %t461 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t462 = extractvalue %LetLoweringResult %t461, 6
+  store double %t462, double* %l7
+  %t463 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t464 = extractvalue %LetLoweringResult %t463, 8
+  store double %t464, double* %l8
+  %t465 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t466 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t467 = extractvalue %LetLoweringResult %t466, 9
+  %t468 = bitcast { %LocalMutation*, i64 }* %t465 to { i8**, i64 }*
+  %t469 = bitcast { %LocalMutation**, i64 }* %t467 to { i8**, i64 }*
+  %t470 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t468, { i8**, i64 }* %t469)
+  %t471 = bitcast { i8**, i64 }* %t470 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t471, { %LocalMutation*, i64 }** %l13
+  %t472 = load %StringConstantSet, %StringConstantSet* %l14
+  store %StringConstantSet %t472, %StringConstantSet* %l24
+  %t473 = load %StringConstantSet, %StringConstantSet* %l24
+  %t474 = load %LetLoweringResult, %LetLoweringResult* %l23
+  %t475 = extractvalue %LetLoweringResult %t474, 10
+  %t476 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t473, %StringConstantSet %t475)
+  store %StringConstantSet %t476, %StringConstantSet* %l14
+  store i1 1, i1* %l19
   br label %merge17
 merge17:
-  %t475 = phi { i8**, i64 }* [ %t440, %then16 ], [ %t326, %then14 ]
-  %t476 = phi { %LifetimeRegionMetadata*, i64 }* [ %t447, %then16 ], [ %t338, %then14 ]
-  %t477 = phi { i8**, i64 }* [ %t449, %then16 ], [ %t327, %then14 ]
-  %t478 = phi { i8**, i64 }* [ %t451, %then16 ], [ %t328, %then14 ]
-  %t479 = phi { %LocalBinding*, i64 }* [ %t454, %then16 ], [ %t329, %then14 ]
-  %t480 = phi { %ParameterBinding*, i64 }* [ %t457, %then16 ], [ %t330, %then14 ]
-  %t481 = phi double [ %t459, %then16 ], [ %t331, %then14 ]
-  %t482 = phi double [ %t461, %then16 ], [ %t333, %then14 ]
-  %t483 = phi double [ %t463, %then16 ], [ %t334, %then14 ]
-  %t484 = phi { %LocalMutation*, i64 }* [ %t470, %then16 ], [ %t339, %then14 ]
-  %t485 = phi %StringConstantSet [ %t474, %then16 ], [ %t340, %then14 ]
-  %t486 = phi i1 [ 1, %then16 ], [ %t343, %then14 ]
-  store { i8**, i64 }* %t475, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t476, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t477, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t478, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t479, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t480, { %ParameterBinding*, i64 }** %l4
-  store double %t481, double* %l5
-  store double %t482, double* %l7
-  store double %t483, double* %l8
-  store { %LocalMutation*, i64 }* %t484, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t485, %StringConstantSet* %l14
-  store i1 %t486, i1* %l18
+  %t477 = phi { i8**, i64 }* [ %t441, %then16 ], [ %t327, %then14 ]
+  %t478 = phi { %LifetimeRegionMetadata*, i64 }* [ %t448, %then16 ], [ %t339, %then14 ]
+  %t479 = phi { i8**, i64 }* [ %t450, %then16 ], [ %t328, %then14 ]
+  %t480 = phi { i8**, i64 }* [ %t452, %then16 ], [ %t329, %then14 ]
+  %t481 = phi { %LocalBinding*, i64 }* [ %t455, %then16 ], [ %t330, %then14 ]
+  %t482 = phi { %ParameterBinding*, i64 }* [ %t458, %then16 ], [ %t331, %then14 ]
+  %t483 = phi double [ %t460, %then16 ], [ %t332, %then14 ]
+  %t484 = phi double [ %t462, %then16 ], [ %t334, %then14 ]
+  %t485 = phi double [ %t464, %then16 ], [ %t335, %then14 ]
+  %t486 = phi { %LocalMutation*, i64 }* [ %t471, %then16 ], [ %t340, %then14 ]
+  %t487 = phi %StringConstantSet [ %t476, %then16 ], [ %t341, %then14 ]
+  %t488 = phi i1 [ 1, %then16 ], [ %t344, %then14 ]
+  store { i8**, i64 }* %t477, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t478, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t479, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t480, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t481, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t482, { %ParameterBinding*, i64 }** %l4
+  store double %t483, double* %l5
+  store double %t484, double* %l7
+  store double %t485, double* %l8
+  store { %LocalMutation*, i64 }* %t486, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t487, %StringConstantSet* %l14
+  store i1 %t488, i1* %l19
   br label %merge15
 merge15:
-  %t487 = phi { i8**, i64 }* [ %t323, %then14 ], [ %t299, %then12 ]
-  %t488 = phi { i8**, i64 }* [ %t440, %then14 ], [ %t299, %then12 ]
-  %t489 = phi { %LifetimeRegionMetadata*, i64 }* [ %t447, %then14 ], [ %t311, %then12 ]
-  %t490 = phi { i8**, i64 }* [ %t449, %then14 ], [ %t300, %then12 ]
-  %t491 = phi { i8**, i64 }* [ %t451, %then14 ], [ %t301, %then12 ]
-  %t492 = phi { %LocalBinding*, i64 }* [ %t454, %then14 ], [ %t302, %then12 ]
-  %t493 = phi { %ParameterBinding*, i64 }* [ %t457, %then14 ], [ %t303, %then12 ]
-  %t494 = phi double [ %t459, %then14 ], [ %t304, %then12 ]
-  %t495 = phi double [ %t461, %then14 ], [ %t306, %then12 ]
-  %t496 = phi double [ %t463, %then14 ], [ %t307, %then12 ]
-  %t497 = phi { %LocalMutation*, i64 }* [ %t470, %then14 ], [ %t312, %then12 ]
-  %t498 = phi %StringConstantSet [ %t474, %then14 ], [ %t313, %then12 ]
-  %t499 = phi i1 [ 1, %then14 ], [ %t316, %then12 ]
-  store { i8**, i64 }* %t487, { i8**, i64 }** %l0
-  store { i8**, i64 }* %t488, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t489, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t490, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t491, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t492, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t493, { %ParameterBinding*, i64 }** %l4
-  store double %t494, double* %l5
-  store double %t495, double* %l7
-  store double %t496, double* %l8
-  store { %LocalMutation*, i64 }* %t497, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t498, %StringConstantSet* %l14
-  store i1 %t499, i1* %l18
+  %t489 = phi { i8**, i64 }* [ %t324, %then14 ], [ %t300, %then12 ]
+  %t490 = phi { i8**, i64 }* [ %t441, %then14 ], [ %t300, %then12 ]
+  %t491 = phi { %LifetimeRegionMetadata*, i64 }* [ %t448, %then14 ], [ %t312, %then12 ]
+  %t492 = phi { i8**, i64 }* [ %t450, %then14 ], [ %t301, %then12 ]
+  %t493 = phi { i8**, i64 }* [ %t452, %then14 ], [ %t302, %then12 ]
+  %t494 = phi { %LocalBinding*, i64 }* [ %t455, %then14 ], [ %t303, %then12 ]
+  %t495 = phi { %ParameterBinding*, i64 }* [ %t458, %then14 ], [ %t304, %then12 ]
+  %t496 = phi double [ %t460, %then14 ], [ %t305, %then12 ]
+  %t497 = phi double [ %t462, %then14 ], [ %t307, %then12 ]
+  %t498 = phi double [ %t464, %then14 ], [ %t308, %then12 ]
+  %t499 = phi { %LocalMutation*, i64 }* [ %t471, %then14 ], [ %t313, %then12 ]
+  %t500 = phi %StringConstantSet [ %t476, %then14 ], [ %t314, %then12 ]
+  %t501 = phi i1 [ 1, %then14 ], [ %t317, %then12 ]
+  store { i8**, i64 }* %t489, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t490, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t491, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t492, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t493, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t494, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t495, { %ParameterBinding*, i64 }** %l4
+  store double %t496, double* %l5
+  store double %t497, double* %l7
+  store double %t498, double* %l8
+  store { %LocalMutation*, i64 }* %t499, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t500, %StringConstantSet* %l14
+  store i1 %t501, i1* %l19
   br label %merge13
 merge13:
-  %t500 = phi { i8**, i64 }* [ %t323, %then12 ], [ %t276, %then9 ]
-  %t501 = phi { i8**, i64 }* [ %t440, %then12 ], [ %t276, %then9 ]
-  %t502 = phi { %LifetimeRegionMetadata*, i64 }* [ %t447, %then12 ], [ %t288, %then9 ]
-  %t503 = phi { i8**, i64 }* [ %t449, %then12 ], [ %t277, %then9 ]
-  %t504 = phi { i8**, i64 }* [ %t451, %then12 ], [ %t278, %then9 ]
-  %t505 = phi { %LocalBinding*, i64 }* [ %t454, %then12 ], [ %t279, %then9 ]
-  %t506 = phi { %ParameterBinding*, i64 }* [ %t457, %then12 ], [ %t280, %then9 ]
-  %t507 = phi double [ %t459, %then12 ], [ %t281, %then9 ]
-  %t508 = phi double [ %t461, %then12 ], [ %t283, %then9 ]
-  %t509 = phi double [ %t463, %then12 ], [ %t284, %then9 ]
-  %t510 = phi { %LocalMutation*, i64 }* [ %t470, %then12 ], [ %t289, %then9 ]
-  %t511 = phi %StringConstantSet [ %t474, %then12 ], [ %t290, %then9 ]
-  %t512 = phi i1 [ 1, %then12 ], [ %t293, %then9 ]
-  store { i8**, i64 }* %t500, { i8**, i64 }** %l0
-  store { i8**, i64 }* %t501, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t502, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t503, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t504, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t505, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t506, { %ParameterBinding*, i64 }** %l4
-  store double %t507, double* %l5
-  store double %t508, double* %l7
-  store double %t509, double* %l8
-  store { %LocalMutation*, i64 }* %t510, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t511, %StringConstantSet* %l14
-  store i1 %t512, i1* %l18
-  %t513 = load i1, i1* %l18
-  %t514 = xor i1 %t513, 1
-  %t515 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t516 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t517 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t518 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t519 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t520 = load double, double* %l5
-  %t521 = load double, double* %l6
-  %t522 = load double, double* %l7
-  %t523 = load double, double* %l8
-  %t524 = load i1, i1* %l9
-  %t525 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t526 = load double, double* %l11
-  %t527 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t528 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t529 = load %StringConstantSet, %StringConstantSet* %l14
-  %t530 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t531 = load i8*, i8** %l17
-  %t532 = load i1, i1* %l18
-  br i1 %t514, label %then18, label %merge19
+  %t502 = phi { i8**, i64 }* [ %t324, %then12 ], [ %t277, %then9 ]
+  %t503 = phi { i8**, i64 }* [ %t441, %then12 ], [ %t277, %then9 ]
+  %t504 = phi { %LifetimeRegionMetadata*, i64 }* [ %t448, %then12 ], [ %t289, %then9 ]
+  %t505 = phi { i8**, i64 }* [ %t450, %then12 ], [ %t278, %then9 ]
+  %t506 = phi { i8**, i64 }* [ %t452, %then12 ], [ %t279, %then9 ]
+  %t507 = phi { %LocalBinding*, i64 }* [ %t455, %then12 ], [ %t280, %then9 ]
+  %t508 = phi { %ParameterBinding*, i64 }* [ %t458, %then12 ], [ %t281, %then9 ]
+  %t509 = phi double [ %t460, %then12 ], [ %t282, %then9 ]
+  %t510 = phi double [ %t462, %then12 ], [ %t284, %then9 ]
+  %t511 = phi double [ %t464, %then12 ], [ %t285, %then9 ]
+  %t512 = phi { %LocalMutation*, i64 }* [ %t471, %then12 ], [ %t290, %then9 ]
+  %t513 = phi %StringConstantSet [ %t476, %then12 ], [ %t291, %then9 ]
+  %t514 = phi i1 [ 1, %then12 ], [ %t294, %then9 ]
+  store { i8**, i64 }* %t502, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t503, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t504, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t505, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t506, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t507, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t508, { %ParameterBinding*, i64 }** %l4
+  store double %t509, double* %l5
+  store double %t510, double* %l7
+  store double %t511, double* %l8
+  store { %LocalMutation*, i64 }* %t512, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t513, %StringConstantSet* %l14
+  store i1 %t514, i1* %l19
+  %t515 = load i1, i1* %l19
+  %t516 = xor i1 %t515, 1
+  %t517 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t518 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t519 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t520 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t521 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t522 = load double, double* %l5
+  %t523 = load double, double* %l6
+  %t524 = load double, double* %l7
+  %t525 = load double, double* %l8
+  %t526 = load i1, i1* %l9
+  %t527 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t528 = load double, double* %l11
+  %t529 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t530 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t531 = load %StringConstantSet, %StringConstantSet* %l14
+  %t532 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t533 = load i8*, i8** %l18
+  %t534 = load i1, i1* %l19
+  br i1 %t516, label %then18, label %merge19
 then18:
-  %t533 = extractvalue %NativeFunction %function, 0
-  %t534 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t535 = load i8*, i8** %l17
-  %t536 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t537 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t538 = load double, double* %l5
-  %t539 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t540 = load double, double* %l8
-  %t541 = load %NativeInstruction, %NativeInstruction* %t534
-  %t542 = call %ExpressionStatementResult @lower_expression_statement(i8* %t533, %NativeInstruction %t541, i8* %t535, { %ParameterBinding*, i64 }* %t536, { %LocalBinding*, i64 }* %t537, double %t538, { i8**, i64 }* %t539, double %t540, i8* %scope_id, double %scope_depth, { %NativeFunction*, i64 }* %functions, %TypeContext %context, i8* %current_label)
-  store %ExpressionStatementResult %t542, %ExpressionStatementResult* %l23
-  %t543 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t544 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t545 = extractvalue %ExpressionStatementResult %t544, 4
-  %t546 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t543, { i8**, i64 }* %t545)
-  store { i8**, i64 }* %t546, { i8**, i64 }** %l0
-  %t547 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t548 = extractvalue %ExpressionStatementResult %t547, 0
-  store { i8**, i64 }* %t548, { i8**, i64 }** %l1
-  %t549 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t550 = extractvalue %ExpressionStatementResult %t549, 1
-  store double %t550, double* %l5
-  %t551 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t552 = extractvalue %ExpressionStatementResult %t551, 2
-  %t553 = bitcast { %LocalBinding**, i64 }* %t552 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t553, { %LocalBinding*, i64 }** %l3
-  %t554 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t555 = extractvalue %ExpressionStatementResult %t554, 3
-  %t556 = bitcast { %ParameterBinding**, i64 }* %t555 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t556, { %ParameterBinding*, i64 }** %l4
-  %t557 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t558 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t559 = extractvalue %ExpressionStatementResult %t558, 5
-  %t560 = bitcast { %LifetimeRegionMetadata*, i64 }* %t557 to { i8**, i64 }*
-  %t561 = bitcast { %LifetimeRegionMetadata**, i64 }* %t559 to { i8**, i64 }*
-  %t562 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t560, { i8**, i64 }* %t561)
-  %t563 = bitcast { i8**, i64 }* %t562 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t563, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t564 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t565 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t566 = extractvalue %ExpressionStatementResult %t565, 6
-  %t567 = bitcast { %LifetimeReleaseEvent**, i64 }* %t566 to { %LifetimeReleaseEvent*, i64 }*
-  %t568 = call { %LifetimeRegionMetadata*, i64 }* @apply_lifetime_release_events({ %LifetimeRegionMetadata*, i64 }* %t564, { %LifetimeReleaseEvent*, i64 }* %t567)
-  store { %LifetimeRegionMetadata*, i64 }* %t568, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t569 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t570 = extractvalue %ExpressionStatementResult %t569, 7
-  store double %t570, double* %l8
-  %t571 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t572 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t573 = extractvalue %ExpressionStatementResult %t572, 8
-  %t574 = bitcast { %LocalMutation*, i64 }* %t571 to { i8**, i64 }*
-  %t575 = bitcast { %LocalMutation**, i64 }* %t573 to { i8**, i64 }*
-  %t576 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t574, { i8**, i64 }* %t575)
-  %t577 = bitcast { i8**, i64 }* %t576 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t577, { %LocalMutation*, i64 }** %l13
-  %t578 = load %StringConstantSet, %StringConstantSet* %l14
-  %t579 = load %ExpressionStatementResult, %ExpressionStatementResult* %l23
-  %t580 = extractvalue %ExpressionStatementResult %t579, 9
-  %t581 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t578, %StringConstantSet %t580)
-  store %StringConstantSet %t581, %StringConstantSet* %l14
+  %t535 = extractvalue %NativeFunction %function, 0
+  %t536 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t537 = load i8*, i8** %l18
+  %t538 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t539 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t540 = load double, double* %l5
+  %t541 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t542 = load double, double* %l8
+  %t543 = load %NativeInstruction, %NativeInstruction* %t536
+  %t544 = call %ExpressionStatementResult @lower_expression_statement(i8* %t535, %NativeInstruction %t543, i8* %t537, { %ParameterBinding*, i64 }* %t538, { %LocalBinding*, i64 }* %t539, double %t540, { i8**, i64 }* %t541, double %t542, i8* %scope_id, double %scope_depth, { %NativeFunction*, i64 }* %functions, %TypeContext %context, i8* %current_label)
+  store %ExpressionStatementResult %t544, %ExpressionStatementResult* %l25
+  %t545 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t546 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t547 = extractvalue %ExpressionStatementResult %t546, 4
+  %t548 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t545, { i8**, i64 }* %t547)
+  store { i8**, i64 }* %t548, { i8**, i64 }** %l0
+  %t549 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t550 = extractvalue %ExpressionStatementResult %t549, 0
+  store { i8**, i64 }* %t550, { i8**, i64 }** %l1
+  %t551 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t552 = extractvalue %ExpressionStatementResult %t551, 1
+  store double %t552, double* %l5
+  %t553 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t554 = extractvalue %ExpressionStatementResult %t553, 2
+  %t555 = bitcast { %LocalBinding**, i64 }* %t554 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t555, { %LocalBinding*, i64 }** %l3
+  %t556 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t557 = extractvalue %ExpressionStatementResult %t556, 3
+  %t558 = bitcast { %ParameterBinding**, i64 }* %t557 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t558, { %ParameterBinding*, i64 }** %l4
+  %t559 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t560 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t561 = extractvalue %ExpressionStatementResult %t560, 5
+  %t562 = bitcast { %LifetimeRegionMetadata*, i64 }* %t559 to { i8**, i64 }*
+  %t563 = bitcast { %LifetimeRegionMetadata**, i64 }* %t561 to { i8**, i64 }*
+  %t564 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t562, { i8**, i64 }* %t563)
+  %t565 = bitcast { i8**, i64 }* %t564 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t565, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t566 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t567 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t568 = extractvalue %ExpressionStatementResult %t567, 6
+  %t569 = bitcast { %LifetimeReleaseEvent**, i64 }* %t568 to { %LifetimeReleaseEvent*, i64 }*
+  %t570 = call { %LifetimeRegionMetadata*, i64 }* @apply_lifetime_release_events({ %LifetimeRegionMetadata*, i64 }* %t566, { %LifetimeReleaseEvent*, i64 }* %t569)
+  store { %LifetimeRegionMetadata*, i64 }* %t570, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t571 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t572 = extractvalue %ExpressionStatementResult %t571, 7
+  store double %t572, double* %l8
+  %t573 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t574 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t575 = extractvalue %ExpressionStatementResult %t574, 8
+  %t576 = bitcast { %LocalMutation*, i64 }* %t573 to { i8**, i64 }*
+  %t577 = bitcast { %LocalMutation**, i64 }* %t575 to { i8**, i64 }*
+  %t578 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t576, { i8**, i64 }* %t577)
+  %t579 = bitcast { i8**, i64 }* %t578 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t579, { %LocalMutation*, i64 }** %l13
+  %t580 = load %StringConstantSet, %StringConstantSet* %l14
+  store %StringConstantSet %t580, %StringConstantSet* %l26
+  %t581 = load %StringConstantSet, %StringConstantSet* %l26
+  %t582 = load %ExpressionStatementResult, %ExpressionStatementResult* %l25
+  %t583 = extractvalue %ExpressionStatementResult %t582, 9
+  %t584 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t581, %StringConstantSet %t583)
+  store %StringConstantSet %t584, %StringConstantSet* %l14
   br label %merge19
 merge19:
-  %t582 = phi { i8**, i64 }* [ %t546, %then18 ], [ %t515, %then9 ]
-  %t583 = phi { i8**, i64 }* [ %t548, %then18 ], [ %t516, %then9 ]
-  %t584 = phi double [ %t550, %then18 ], [ %t520, %then9 ]
-  %t585 = phi { %LocalBinding*, i64 }* [ %t553, %then18 ], [ %t518, %then9 ]
-  %t586 = phi { %ParameterBinding*, i64 }* [ %t556, %then18 ], [ %t519, %then9 ]
-  %t587 = phi { %LifetimeRegionMetadata*, i64 }* [ %t563, %then18 ], [ %t527, %then9 ]
-  %t588 = phi { %LifetimeRegionMetadata*, i64 }* [ %t568, %then18 ], [ %t527, %then9 ]
-  %t589 = phi double [ %t570, %then18 ], [ %t523, %then9 ]
-  %t590 = phi { %LocalMutation*, i64 }* [ %t577, %then18 ], [ %t528, %then9 ]
-  %t591 = phi %StringConstantSet [ %t581, %then18 ], [ %t529, %then9 ]
-  store { i8**, i64 }* %t582, { i8**, i64 }** %l0
-  store { i8**, i64 }* %t583, { i8**, i64 }** %l1
-  store double %t584, double* %l5
-  store { %LocalBinding*, i64 }* %t585, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t586, { %ParameterBinding*, i64 }** %l4
-  store { %LifetimeRegionMetadata*, i64 }* %t587, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { %LifetimeRegionMetadata*, i64 }* %t588, { %LifetimeRegionMetadata*, i64 }** %l12
-  store double %t589, double* %l8
-  store { %LocalMutation*, i64 }* %t590, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t591, %StringConstantSet* %l14
+  %t585 = phi { i8**, i64 }* [ %t548, %then18 ], [ %t517, %then9 ]
+  %t586 = phi { i8**, i64 }* [ %t550, %then18 ], [ %t518, %then9 ]
+  %t587 = phi double [ %t552, %then18 ], [ %t522, %then9 ]
+  %t588 = phi { %LocalBinding*, i64 }* [ %t555, %then18 ], [ %t520, %then9 ]
+  %t589 = phi { %ParameterBinding*, i64 }* [ %t558, %then18 ], [ %t521, %then9 ]
+  %t590 = phi { %LifetimeRegionMetadata*, i64 }* [ %t565, %then18 ], [ %t529, %then9 ]
+  %t591 = phi { %LifetimeRegionMetadata*, i64 }* [ %t570, %then18 ], [ %t529, %then9 ]
+  %t592 = phi double [ %t572, %then18 ], [ %t525, %then9 ]
+  %t593 = phi { %LocalMutation*, i64 }* [ %t579, %then18 ], [ %t530, %then9 ]
+  %t594 = phi %StringConstantSet [ %t584, %then18 ], [ %t531, %then9 ]
+  store { i8**, i64 }* %t585, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t586, { i8**, i64 }** %l1
+  store double %t587, double* %l5
+  store { %LocalBinding*, i64 }* %t588, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t589, { %ParameterBinding*, i64 }** %l4
+  store { %LifetimeRegionMetadata*, i64 }* %t590, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { %LifetimeRegionMetadata*, i64 }* %t591, { %LifetimeRegionMetadata*, i64 }** %l12
+  store double %t592, double* %l8
+  store { %LocalMutation*, i64 }* %t593, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t594, %StringConstantSet* %l14
   br label %merge11
 else10:
-  %t592 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t593 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t592, i32 0, i32 0
-  %t594 = load i32, i32* %t593
-  %t595 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t596 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t597 = icmp eq i32 %t594, 0
-  %t598 = select i1 %t597, i8* %t596, i8* %t595
-  %t599 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t600 = icmp eq i32 %t594, 1
+  %t595 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t596 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t595, i32 0, i32 0
+  %t597 = load i32, i32* %t596
+  %t598 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t599 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t600 = icmp eq i32 %t597, 0
   %t601 = select i1 %t600, i8* %t599, i8* %t598
-  %t602 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t603 = icmp eq i32 %t594, 2
+  %t602 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t603 = icmp eq i32 %t597, 1
   %t604 = select i1 %t603, i8* %t602, i8* %t601
-  %t605 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t606 = icmp eq i32 %t594, 3
+  %t605 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t606 = icmp eq i32 %t597, 2
   %t607 = select i1 %t606, i8* %t605, i8* %t604
-  %t608 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t609 = icmp eq i32 %t594, 4
+  %t608 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t609 = icmp eq i32 %t597, 3
   %t610 = select i1 %t609, i8* %t608, i8* %t607
-  %t611 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t612 = icmp eq i32 %t594, 5
+  %t611 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t612 = icmp eq i32 %t597, 4
   %t613 = select i1 %t612, i8* %t611, i8* %t610
-  %t614 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t615 = icmp eq i32 %t594, 6
+  %t614 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t615 = icmp eq i32 %t597, 5
   %t616 = select i1 %t615, i8* %t614, i8* %t613
-  %t617 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t618 = icmp eq i32 %t594, 7
+  %t617 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t618 = icmp eq i32 %t597, 6
   %t619 = select i1 %t618, i8* %t617, i8* %t616
-  %t620 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t621 = icmp eq i32 %t594, 8
+  %t620 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t621 = icmp eq i32 %t597, 7
   %t622 = select i1 %t621, i8* %t620, i8* %t619
-  %t623 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t624 = icmp eq i32 %t594, 9
+  %t623 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t624 = icmp eq i32 %t597, 8
   %t625 = select i1 %t624, i8* %t623, i8* %t622
-  %t626 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t627 = icmp eq i32 %t594, 10
+  %t626 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t627 = icmp eq i32 %t597, 9
   %t628 = select i1 %t627, i8* %t626, i8* %t625
-  %t629 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t630 = icmp eq i32 %t594, 11
+  %t629 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t630 = icmp eq i32 %t597, 10
   %t631 = select i1 %t630, i8* %t629, i8* %t628
-  %t632 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t633 = icmp eq i32 %t594, 12
+  %t632 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t633 = icmp eq i32 %t597, 11
   %t634 = select i1 %t633, i8* %t632, i8* %t631
-  %t635 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t636 = icmp eq i32 %t594, 13
+  %t635 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t636 = icmp eq i32 %t597, 12
   %t637 = select i1 %t636, i8* %t635, i8* %t634
-  %t638 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t639 = icmp eq i32 %t594, 14
+  %t638 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t639 = icmp eq i32 %t597, 13
   %t640 = select i1 %t639, i8* %t638, i8* %t637
-  %t641 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t642 = icmp eq i32 %t594, 15
+  %t641 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t642 = icmp eq i32 %t597, 14
   %t643 = select i1 %t642, i8* %t641, i8* %t640
-  %t644 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t645 = icmp eq i32 %t594, 16
+  %t644 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t645 = icmp eq i32 %t597, 15
   %t646 = select i1 %t645, i8* %t644, i8* %t643
-  %s647 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.647, i32 0, i32 0
-  %t648 = icmp eq i8* %t646, %s647
-  %t649 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t650 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t651 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t652 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t653 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t654 = load double, double* %l5
-  %t655 = load double, double* %l6
-  %t656 = load double, double* %l7
-  %t657 = load double, double* %l8
-  %t658 = load i1, i1* %l9
-  %t659 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t660 = load double, double* %l11
-  %t661 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t662 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t663 = load %StringConstantSet, %StringConstantSet* %l14
-  %t664 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t648, label %then20, label %else21
+  %t647 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t648 = icmp eq i32 %t597, 16
+  %t649 = select i1 %t648, i8* %t647, i8* %t646
+  %s650 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.650, i32 0, i32 0
+  %t651 = icmp eq i8* %t649, %s650
+  %t652 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t653 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t654 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t655 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t656 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t657 = load double, double* %l5
+  %t658 = load double, double* %l6
+  %t659 = load double, double* %l7
+  %t660 = load double, double* %l8
+  %t661 = load i1, i1* %l9
+  %t662 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t663 = load double, double* %l11
+  %t664 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t665 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t666 = load %StringConstantSet, %StringConstantSet* %l14
+  %t667 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t651, label %then20, label %else21
 then20:
-  %t665 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t666 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t667 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t668 = load double, double* %l5
-  %t669 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t670 = load double, double* %l8
-  %t671 = load %NativeInstruction, %NativeInstruction* %t665
-  %t672 = call %ExpressionStatementResult @lower_return_instruction(%NativeFunction %function, %NativeInstruction %t671, i8* %llvm_return, { %ParameterBinding*, i64 }* %t666, { %LocalBinding*, i64 }* %t667, double %t668, { i8**, i64 }* %t669, double %t670, i8* %scope_id, double %scope_depth, { %NativeFunction*, i64 }* %functions, %TypeContext %context)
-  store %ExpressionStatementResult %t672, %ExpressionStatementResult* %l24
-  %t673 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t674 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t675 = extractvalue %ExpressionStatementResult %t674, 4
-  %t676 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t673, { i8**, i64 }* %t675)
-  store { i8**, i64 }* %t676, { i8**, i64 }** %l0
-  %t677 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t678 = extractvalue %ExpressionStatementResult %t677, 0
-  store { i8**, i64 }* %t678, { i8**, i64 }** %l1
-  %t679 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t680 = extractvalue %ExpressionStatementResult %t679, 1
-  store double %t680, double* %l5
-  %t681 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t682 = extractvalue %ExpressionStatementResult %t681, 2
-  %t683 = bitcast { %LocalBinding**, i64 }* %t682 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t683, { %LocalBinding*, i64 }** %l3
-  %t684 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t685 = extractvalue %ExpressionStatementResult %t684, 3
-  %t686 = bitcast { %ParameterBinding**, i64 }* %t685 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t686, { %ParameterBinding*, i64 }** %l4
-  %t687 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t688 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t689 = extractvalue %ExpressionStatementResult %t688, 5
-  %t690 = bitcast { %LifetimeRegionMetadata*, i64 }* %t687 to { i8**, i64 }*
-  %t691 = bitcast { %LifetimeRegionMetadata**, i64 }* %t689 to { i8**, i64 }*
-  %t692 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t690, { i8**, i64 }* %t691)
-  %t693 = bitcast { i8**, i64 }* %t692 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t693, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t694 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t695 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t696 = extractvalue %ExpressionStatementResult %t695, 6
-  %t697 = bitcast { %LifetimeReleaseEvent**, i64 }* %t696 to { %LifetimeReleaseEvent*, i64 }*
-  %t698 = call { %LifetimeRegionMetadata*, i64 }* @apply_lifetime_release_events({ %LifetimeRegionMetadata*, i64 }* %t694, { %LifetimeReleaseEvent*, i64 }* %t697)
-  store { %LifetimeRegionMetadata*, i64 }* %t698, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t699 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t700 = extractvalue %ExpressionStatementResult %t699, 7
-  store double %t700, double* %l8
-  %t701 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t702 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t703 = extractvalue %ExpressionStatementResult %t702, 8
-  %t704 = bitcast { %LocalMutation*, i64 }* %t701 to { i8**, i64 }*
-  %t705 = bitcast { %LocalMutation**, i64 }* %t703 to { i8**, i64 }*
-  %t706 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t704, { i8**, i64 }* %t705)
-  %t707 = bitcast { i8**, i64 }* %t706 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t707, { %LocalMutation*, i64 }** %l13
-  %t708 = load %StringConstantSet, %StringConstantSet* %l14
-  %t709 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  %t710 = extractvalue %ExpressionStatementResult %t709, 9
-  %t711 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t708, %StringConstantSet %t710)
-  store %StringConstantSet %t711, %StringConstantSet* %l14
+  %t668 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t669 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t670 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t671 = load double, double* %l5
+  %t672 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t673 = load double, double* %l8
+  %t674 = load %NativeInstruction, %NativeInstruction* %t668
+  %t675 = call %ExpressionStatementResult @lower_return_instruction(%NativeFunction %function, %NativeInstruction %t674, i8* %llvm_return, { %ParameterBinding*, i64 }* %t669, { %LocalBinding*, i64 }* %t670, double %t671, { i8**, i64 }* %t672, double %t673, i8* %scope_id, double %scope_depth, { %NativeFunction*, i64 }* %functions, %TypeContext %context)
+  store %ExpressionStatementResult %t675, %ExpressionStatementResult* %l27
+  %t676 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t677 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t678 = extractvalue %ExpressionStatementResult %t677, 4
+  %t679 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t676, { i8**, i64 }* %t678)
+  store { i8**, i64 }* %t679, { i8**, i64 }** %l0
+  %t680 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t681 = extractvalue %ExpressionStatementResult %t680, 0
+  store { i8**, i64 }* %t681, { i8**, i64 }** %l1
+  %t682 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t683 = extractvalue %ExpressionStatementResult %t682, 1
+  store double %t683, double* %l5
+  %t684 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t685 = extractvalue %ExpressionStatementResult %t684, 2
+  %t686 = bitcast { %LocalBinding**, i64 }* %t685 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t686, { %LocalBinding*, i64 }** %l3
+  %t687 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t688 = extractvalue %ExpressionStatementResult %t687, 3
+  %t689 = bitcast { %ParameterBinding**, i64 }* %t688 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t689, { %ParameterBinding*, i64 }** %l4
+  %t690 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t691 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t692 = extractvalue %ExpressionStatementResult %t691, 5
+  %t693 = bitcast { %LifetimeRegionMetadata*, i64 }* %t690 to { i8**, i64 }*
+  %t694 = bitcast { %LifetimeRegionMetadata**, i64 }* %t692 to { i8**, i64 }*
+  %t695 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t693, { i8**, i64 }* %t694)
+  %t696 = bitcast { i8**, i64 }* %t695 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t696, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t697 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t698 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t699 = extractvalue %ExpressionStatementResult %t698, 6
+  %t700 = bitcast { %LifetimeReleaseEvent**, i64 }* %t699 to { %LifetimeReleaseEvent*, i64 }*
+  %t701 = call { %LifetimeRegionMetadata*, i64 }* @apply_lifetime_release_events({ %LifetimeRegionMetadata*, i64 }* %t697, { %LifetimeReleaseEvent*, i64 }* %t700)
+  store { %LifetimeRegionMetadata*, i64 }* %t701, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t702 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t703 = extractvalue %ExpressionStatementResult %t702, 7
+  store double %t703, double* %l8
+  %t704 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t705 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t706 = extractvalue %ExpressionStatementResult %t705, 8
+  %t707 = bitcast { %LocalMutation*, i64 }* %t704 to { i8**, i64 }*
+  %t708 = bitcast { %LocalMutation**, i64 }* %t706 to { i8**, i64 }*
+  %t709 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t707, { i8**, i64 }* %t708)
+  %t710 = bitcast { i8**, i64 }* %t709 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t710, { %LocalMutation*, i64 }** %l13
+  %t711 = load %StringConstantSet, %StringConstantSet* %l14
+  store %StringConstantSet %t711, %StringConstantSet* %l28
+  %t712 = load %StringConstantSet, %StringConstantSet* %l28
+  %t713 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t714 = extractvalue %ExpressionStatementResult %t713, 9
+  %t715 = call %StringConstantSet @merge_string_constants(%StringConstantSet %t712, %StringConstantSet %t714)
+  store %StringConstantSet %t715, %StringConstantSet* %l14
   store i1 1, i1* %l9
-  %t712 = load double, double* %l11
-  %t713 = sitofp i64 1 to double
-  %t714 = fadd double %t712, %t713
-  store double %t714, double* %l11
-  %t715 = load double, double* %l11
-  %t716 = fcmp olt double %t715, %end
-  %t717 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t718 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t719 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t720 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t721 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t722 = load double, double* %l5
-  %t723 = load double, double* %l6
-  %t724 = load double, double* %l7
-  %t725 = load double, double* %l8
-  %t726 = load i1, i1* %l9
-  %t727 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t728 = load double, double* %l11
-  %t729 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t730 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t731 = load %StringConstantSet, %StringConstantSet* %l14
-  %t732 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t733 = load %ExpressionStatementResult, %ExpressionStatementResult* %l24
-  br i1 %t716, label %then23, label %merge24
+  %t716 = load double, double* %l11
+  %t717 = sitofp i64 1 to double
+  %t718 = fadd double %t716, %t717
+  store double %t718, double* %l11
+  %t719 = load double, double* %l11
+  %t720 = fcmp olt double %t719, %end
+  %t721 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t722 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t723 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t724 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t725 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t726 = load double, double* %l5
+  %t727 = load double, double* %l6
+  %t728 = load double, double* %l7
+  %t729 = load double, double* %l8
+  %t730 = load i1, i1* %l9
+  %t731 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t732 = load double, double* %l11
+  %t733 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t734 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t735 = load %StringConstantSet, %StringConstantSet* %l14
+  %t736 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t737 = load %ExpressionStatementResult, %ExpressionStatementResult* %l27
+  %t738 = load %StringConstantSet, %StringConstantSet* %l28
+  br i1 %t720, label %then23, label %merge24
 then23:
-  %t734 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s735 = getelementptr inbounds [54 x i8], [54 x i8]* @.str.735, i32 0, i32 0
-  %t736 = extractvalue %NativeFunction %function, 0
-  %t737 = add i8* %s735, %t736
-  %t738 = load i8, i8* %t737
-  %t739 = add i8 %t738, 96
-  %t740 = alloca [2 x i8], align 1
-  %t741 = getelementptr [2 x i8], [2 x i8]* %t740, i32 0, i32 0
-  store i8 %t739, i8* %t741
-  %t742 = getelementptr [2 x i8], [2 x i8]* %t740, i32 0, i32 1
-  store i8 0, i8* %t742
-  %t743 = getelementptr [2 x i8], [2 x i8]* %t740, i32 0, i32 0
-  %t744 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t734, i8* %t743)
-  store { i8**, i64 }* %t744, { i8**, i64 }** %l0
+  %t739 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s740 = getelementptr inbounds [54 x i8], [54 x i8]* @.str.740, i32 0, i32 0
+  %t741 = extractvalue %NativeFunction %function, 0
+  %t742 = add i8* %s740, %t741
+  %t743 = load i8, i8* %t742
+  %t744 = add i8 %t743, 96
+  %t745 = alloca [2 x i8], align 1
+  %t746 = getelementptr [2 x i8], [2 x i8]* %t745, i32 0, i32 0
+  store i8 %t744, i8* %t746
+  %t747 = getelementptr [2 x i8], [2 x i8]* %t745, i32 0, i32 1
+  store i8 0, i8* %t747
+  %t748 = getelementptr [2 x i8], [2 x i8]* %t745, i32 0, i32 0
+  %t749 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t739, i8* %t748)
+  store { i8**, i64 }* %t749, { i8**, i64 }** %l0
   br label %merge24
 merge24:
-  %t745 = phi { i8**, i64 }* [ %t744, %then23 ], [ %t717, %then20 ]
-  store { i8**, i64 }* %t745, { i8**, i64 }** %l0
+  %t750 = phi { i8**, i64 }* [ %t749, %then23 ], [ %t721, %then20 ]
+  store { i8**, i64 }* %t750, { i8**, i64 }** %l0
   br label %afterloop3
 else21:
-  %t746 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t747 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t746, i32 0, i32 0
-  %t748 = load i32, i32* %t747
-  %t749 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t750 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t751 = icmp eq i32 %t748, 0
-  %t752 = select i1 %t751, i8* %t750, i8* %t749
-  %t753 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t754 = icmp eq i32 %t748, 1
-  %t755 = select i1 %t754, i8* %t753, i8* %t752
-  %t756 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t757 = icmp eq i32 %t748, 2
-  %t758 = select i1 %t757, i8* %t756, i8* %t755
-  %t759 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t760 = icmp eq i32 %t748, 3
-  %t761 = select i1 %t760, i8* %t759, i8* %t758
-  %t762 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t763 = icmp eq i32 %t748, 4
-  %t764 = select i1 %t763, i8* %t762, i8* %t761
-  %t765 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t766 = icmp eq i32 %t748, 5
-  %t767 = select i1 %t766, i8* %t765, i8* %t764
-  %t768 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t769 = icmp eq i32 %t748, 6
-  %t770 = select i1 %t769, i8* %t768, i8* %t767
-  %t771 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t772 = icmp eq i32 %t748, 7
-  %t773 = select i1 %t772, i8* %t771, i8* %t770
-  %t774 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t775 = icmp eq i32 %t748, 8
-  %t776 = select i1 %t775, i8* %t774, i8* %t773
-  %t777 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t778 = icmp eq i32 %t748, 9
-  %t779 = select i1 %t778, i8* %t777, i8* %t776
-  %t780 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t781 = icmp eq i32 %t748, 10
-  %t782 = select i1 %t781, i8* %t780, i8* %t779
-  %t783 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t784 = icmp eq i32 %t748, 11
-  %t785 = select i1 %t784, i8* %t783, i8* %t782
-  %t786 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t787 = icmp eq i32 %t748, 12
-  %t788 = select i1 %t787, i8* %t786, i8* %t785
-  %t789 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t790 = icmp eq i32 %t748, 13
-  %t791 = select i1 %t790, i8* %t789, i8* %t788
-  %t792 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t793 = icmp eq i32 %t748, 14
-  %t794 = select i1 %t793, i8* %t792, i8* %t791
-  %t795 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t796 = icmp eq i32 %t748, 15
-  %t797 = select i1 %t796, i8* %t795, i8* %t794
-  %t798 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t799 = icmp eq i32 %t748, 16
-  %t800 = select i1 %t799, i8* %t798, i8* %t797
-  %s801 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.801, i32 0, i32 0
-  %t802 = icmp eq i8* %t800, %s801
-  %t803 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t804 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t805 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t806 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t807 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t808 = load double, double* %l5
-  %t809 = load double, double* %l6
-  %t810 = load double, double* %l7
-  %t811 = load double, double* %l8
-  %t812 = load i1, i1* %l9
-  %t813 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t814 = load double, double* %l11
-  %t815 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t816 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t817 = load %StringConstantSet, %StringConstantSet* %l14
-  %t818 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t802, label %then25, label %else26
-then25:
+  %t751 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t752 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t751, i32 0, i32 0
+  %t753 = load i32, i32* %t752
+  %t754 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t755 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t756 = icmp eq i32 %t753, 0
+  %t757 = select i1 %t756, i8* %t755, i8* %t754
+  %t758 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t759 = icmp eq i32 %t753, 1
+  %t760 = select i1 %t759, i8* %t758, i8* %t757
+  %t761 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t762 = icmp eq i32 %t753, 2
+  %t763 = select i1 %t762, i8* %t761, i8* %t760
+  %t764 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t765 = icmp eq i32 %t753, 3
+  %t766 = select i1 %t765, i8* %t764, i8* %t763
+  %t767 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t768 = icmp eq i32 %t753, 4
+  %t769 = select i1 %t768, i8* %t767, i8* %t766
+  %t770 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t771 = icmp eq i32 %t753, 5
+  %t772 = select i1 %t771, i8* %t770, i8* %t769
+  %t773 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t774 = icmp eq i32 %t753, 6
+  %t775 = select i1 %t774, i8* %t773, i8* %t772
+  %t776 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t777 = icmp eq i32 %t753, 7
+  %t778 = select i1 %t777, i8* %t776, i8* %t775
+  %t779 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t780 = icmp eq i32 %t753, 8
+  %t781 = select i1 %t780, i8* %t779, i8* %t778
+  %t782 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t783 = icmp eq i32 %t753, 9
+  %t784 = select i1 %t783, i8* %t782, i8* %t781
+  %t785 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t786 = icmp eq i32 %t753, 10
+  %t787 = select i1 %t786, i8* %t785, i8* %t784
+  %t788 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t789 = icmp eq i32 %t753, 11
+  %t790 = select i1 %t789, i8* %t788, i8* %t787
+  %t791 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t792 = icmp eq i32 %t753, 12
+  %t793 = select i1 %t792, i8* %t791, i8* %t790
+  %t794 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t795 = icmp eq i32 %t753, 13
+  %t796 = select i1 %t795, i8* %t794, i8* %t793
+  %t797 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t798 = icmp eq i32 %t753, 14
+  %t799 = select i1 %t798, i8* %t797, i8* %t796
+  %t800 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t801 = icmp eq i32 %t753, 15
+  %t802 = select i1 %t801, i8* %t800, i8* %t799
+  %t803 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t804 = icmp eq i32 %t753, 16
+  %t805 = select i1 %t804, i8* %t803, i8* %t802
+  %s806 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.806, i32 0, i32 0
+  %t807 = icmp eq i8* %t805, %s806
+  %t808 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t809 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t810 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t811 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t812 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t813 = load double, double* %l5
+  %t814 = load double, double* %l6
+  %t815 = load double, double* %l7
+  %t816 = load double, double* %l8
+  %t817 = load i1, i1* %l9
+  %t818 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
   %t819 = load double, double* %l11
-  %t820 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t821 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t822 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t823 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t824 = load double, double* %l5
-  %t825 = load double, double* %l6
-  %t826 = load double, double* %l7
-  %t827 = load double, double* %l8
-  %t828 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t829 = call %BlockLoweringResult @lower_if_instruction(%NativeFunction %function, double %t819, i8* %llvm_return, { %ParameterBinding*, i64 }* %t820, { %LocalBinding*, i64 }* %t821, { i8**, i64 }* %t822, { i8**, i64 }* %t823, double %t824, double %t825, double %t826, double %t827, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t828, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
-  store %BlockLoweringResult %t829, %BlockLoweringResult* %l25
-  %t830 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t831 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t832 = extractvalue %BlockLoweringResult %t831, 6
-  %t833 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t830, { i8**, i64 }* %t832)
-  store { i8**, i64 }* %t833, { i8**, i64 }** %l0
-  %t834 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t835 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t836 = extractvalue %BlockLoweringResult %t835, 9
-  %t837 = bitcast { %LifetimeRegionMetadata*, i64 }* %t834 to { i8**, i64 }*
-  %t838 = bitcast { %LifetimeRegionMetadata**, i64 }* %t836 to { i8**, i64 }*
-  %t839 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t837, { i8**, i64 }* %t838)
-  %t840 = bitcast { i8**, i64 }* %t839 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t840, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t841 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t842 = extractvalue %BlockLoweringResult %t841, 0
-  store { i8**, i64 }* %t842, { i8**, i64 }** %l1
-  %t843 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t844 = extractvalue %BlockLoweringResult %t843, 1
-  store { i8**, i64 }* %t844, { i8**, i64 }** %l2
-  %t845 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t846 = extractvalue %BlockLoweringResult %t845, 2
-  %t847 = bitcast { %LocalBinding**, i64 }* %t846 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t847, { %LocalBinding*, i64 }** %l3
-  %t848 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t849 = extractvalue %BlockLoweringResult %t848, 3
-  %t850 = bitcast { %ParameterBinding**, i64 }* %t849 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t850, { %ParameterBinding*, i64 }** %l4
-  %t851 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t852 = extractvalue %BlockLoweringResult %t851, 4
-  store double %t852, double* %l5
-  %t853 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t854 = extractvalue %BlockLoweringResult %t853, 5
-  store double %t854, double* %l6
-  %t855 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t856 = extractvalue %BlockLoweringResult %t855, 8
-  store double %t856, double* %l7
-  %t857 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t858 = extractvalue %BlockLoweringResult %t857, 10
-  store double %t858, double* %l8
-  %t859 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t860 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t861 = extractvalue %BlockLoweringResult %t860, 12
-  %t862 = bitcast { %LocalMutation*, i64 }* %t859 to { i8**, i64 }*
-  %t863 = bitcast { %LocalMutation**, i64 }* %t861 to { i8**, i64 }*
-  %t864 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t862, { i8**, i64 }* %t863)
-  %t865 = bitcast { i8**, i64 }* %t864 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t865, { %LocalMutation*, i64 }** %l13
-  %t866 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t867 = extractvalue %BlockLoweringResult %t866, 7
-  store i1 %t867, i1* %l9
-  %t868 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  %t869 = extractvalue %BlockLoweringResult %t868, 11
-  store double %t869, double* %l11
-  %t870 = load i1, i1* %l9
-  %t871 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t872 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t873 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t874 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t875 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t876 = load double, double* %l5
-  %t877 = load double, double* %l6
-  %t878 = load double, double* %l7
-  %t879 = load double, double* %l8
-  %t880 = load i1, i1* %l9
-  %t881 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t882 = load double, double* %l11
-  %t883 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t884 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t885 = load %StringConstantSet, %StringConstantSet* %l14
-  %t886 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t887 = load %BlockLoweringResult, %BlockLoweringResult* %l25
-  br i1 %t870, label %then28, label %merge29
+  %t820 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t821 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t822 = load %StringConstantSet, %StringConstantSet* %l14
+  %t823 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t807, label %then25, label %else26
+then25:
+  %t824 = load double, double* %l11
+  %t825 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t826 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t827 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t828 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t829 = load double, double* %l5
+  %t830 = load double, double* %l6
+  %t831 = load double, double* %l7
+  %t832 = load double, double* %l8
+  %t833 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t834 = call %BlockLoweringResult @lower_if_instruction(%NativeFunction %function, double %t824, i8* %llvm_return, { %ParameterBinding*, i64 }* %t825, { %LocalBinding*, i64 }* %t826, { i8**, i64 }* %t827, { i8**, i64 }* %t828, double %t829, double %t830, double %t831, double %t832, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t833, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
+  store %BlockLoweringResult %t834, %BlockLoweringResult* %l29
+  %t835 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t836 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t837 = extractvalue %BlockLoweringResult %t836, 6
+  %t838 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t835, { i8**, i64 }* %t837)
+  store { i8**, i64 }* %t838, { i8**, i64 }** %l0
+  %t839 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t840 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t841 = extractvalue %BlockLoweringResult %t840, 9
+  %t842 = bitcast { %LifetimeRegionMetadata*, i64 }* %t839 to { i8**, i64 }*
+  %t843 = bitcast { %LifetimeRegionMetadata**, i64 }* %t841 to { i8**, i64 }*
+  %t844 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t842, { i8**, i64 }* %t843)
+  %t845 = bitcast { i8**, i64 }* %t844 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t845, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t846 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t847 = extractvalue %BlockLoweringResult %t846, 0
+  store { i8**, i64 }* %t847, { i8**, i64 }** %l1
+  %t848 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t849 = extractvalue %BlockLoweringResult %t848, 1
+  store { i8**, i64 }* %t849, { i8**, i64 }** %l2
+  %t850 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t851 = extractvalue %BlockLoweringResult %t850, 2
+  %t852 = bitcast { %LocalBinding**, i64 }* %t851 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t852, { %LocalBinding*, i64 }** %l3
+  %t853 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t854 = extractvalue %BlockLoweringResult %t853, 3
+  %t855 = bitcast { %ParameterBinding**, i64 }* %t854 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t855, { %ParameterBinding*, i64 }** %l4
+  %t856 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t857 = extractvalue %BlockLoweringResult %t856, 4
+  store double %t857, double* %l5
+  %t858 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t859 = extractvalue %BlockLoweringResult %t858, 5
+  store double %t859, double* %l6
+  %t860 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t861 = extractvalue %BlockLoweringResult %t860, 8
+  store double %t861, double* %l7
+  %t862 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t863 = extractvalue %BlockLoweringResult %t862, 10
+  store double %t863, double* %l8
+  %t864 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t865 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t866 = extractvalue %BlockLoweringResult %t865, 12
+  %t867 = bitcast { %LocalMutation*, i64 }* %t864 to { i8**, i64 }*
+  %t868 = bitcast { %LocalMutation**, i64 }* %t866 to { i8**, i64 }*
+  %t869 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t867, { i8**, i64 }* %t868)
+  %t870 = bitcast { i8**, i64 }* %t869 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t870, { %LocalMutation*, i64 }** %l13
+  %t871 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t872 = extractvalue %BlockLoweringResult %t871, 7
+  store i1 %t872, i1* %l9
+  %t873 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  %t874 = extractvalue %BlockLoweringResult %t873, 11
+  store double %t874, double* %l11
+  %t875 = load i1, i1* %l9
+  %t876 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t877 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t878 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t879 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t880 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t881 = load double, double* %l5
+  %t882 = load double, double* %l6
+  %t883 = load double, double* %l7
+  %t884 = load double, double* %l8
+  %t885 = load i1, i1* %l9
+  %t886 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t887 = load double, double* %l11
+  %t888 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t889 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t890 = load %StringConstantSet, %StringConstantSet* %l14
+  %t891 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t892 = load %BlockLoweringResult, %BlockLoweringResult* %l29
+  br i1 %t875, label %then28, label %merge29
 then28:
   br label %afterloop3
 merge29:
   br label %loop.latch2
 else26:
-  %t888 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t889 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t888, i32 0, i32 0
-  %t890 = load i32, i32* %t889
-  %t891 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t892 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t893 = icmp eq i32 %t890, 0
-  %t894 = select i1 %t893, i8* %t892, i8* %t891
-  %t895 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t896 = icmp eq i32 %t890, 1
-  %t897 = select i1 %t896, i8* %t895, i8* %t894
-  %t898 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t899 = icmp eq i32 %t890, 2
-  %t900 = select i1 %t899, i8* %t898, i8* %t897
-  %t901 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t902 = icmp eq i32 %t890, 3
-  %t903 = select i1 %t902, i8* %t901, i8* %t900
-  %t904 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t905 = icmp eq i32 %t890, 4
-  %t906 = select i1 %t905, i8* %t904, i8* %t903
-  %t907 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t908 = icmp eq i32 %t890, 5
-  %t909 = select i1 %t908, i8* %t907, i8* %t906
-  %t910 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t911 = icmp eq i32 %t890, 6
-  %t912 = select i1 %t911, i8* %t910, i8* %t909
-  %t913 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t914 = icmp eq i32 %t890, 7
-  %t915 = select i1 %t914, i8* %t913, i8* %t912
-  %t916 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t917 = icmp eq i32 %t890, 8
-  %t918 = select i1 %t917, i8* %t916, i8* %t915
-  %t919 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t920 = icmp eq i32 %t890, 9
-  %t921 = select i1 %t920, i8* %t919, i8* %t918
-  %t922 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t923 = icmp eq i32 %t890, 10
-  %t924 = select i1 %t923, i8* %t922, i8* %t921
-  %t925 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t926 = icmp eq i32 %t890, 11
-  %t927 = select i1 %t926, i8* %t925, i8* %t924
-  %t928 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t929 = icmp eq i32 %t890, 12
-  %t930 = select i1 %t929, i8* %t928, i8* %t927
-  %t931 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t932 = icmp eq i32 %t890, 13
-  %t933 = select i1 %t932, i8* %t931, i8* %t930
-  %t934 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t935 = icmp eq i32 %t890, 14
-  %t936 = select i1 %t935, i8* %t934, i8* %t933
-  %t937 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t938 = icmp eq i32 %t890, 15
-  %t939 = select i1 %t938, i8* %t937, i8* %t936
-  %t940 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t941 = icmp eq i32 %t890, 16
-  %t942 = select i1 %t941, i8* %t940, i8* %t939
-  %s943 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.943, i32 0, i32 0
-  %t944 = icmp eq i8* %t942, %s943
-  %t945 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t946 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t947 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t948 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t949 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t950 = load double, double* %l5
-  %t951 = load double, double* %l6
-  %t952 = load double, double* %l7
-  %t953 = load double, double* %l8
-  %t954 = load i1, i1* %l9
-  %t955 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t956 = load double, double* %l11
-  %t957 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t958 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t959 = load %StringConstantSet, %StringConstantSet* %l14
-  %t960 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t944, label %then30, label %else31
-then30:
+  %t893 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t894 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t893, i32 0, i32 0
+  %t895 = load i32, i32* %t894
+  %t896 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t897 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t898 = icmp eq i32 %t895, 0
+  %t899 = select i1 %t898, i8* %t897, i8* %t896
+  %t900 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t901 = icmp eq i32 %t895, 1
+  %t902 = select i1 %t901, i8* %t900, i8* %t899
+  %t903 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t904 = icmp eq i32 %t895, 2
+  %t905 = select i1 %t904, i8* %t903, i8* %t902
+  %t906 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t907 = icmp eq i32 %t895, 3
+  %t908 = select i1 %t907, i8* %t906, i8* %t905
+  %t909 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t910 = icmp eq i32 %t895, 4
+  %t911 = select i1 %t910, i8* %t909, i8* %t908
+  %t912 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t913 = icmp eq i32 %t895, 5
+  %t914 = select i1 %t913, i8* %t912, i8* %t911
+  %t915 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t916 = icmp eq i32 %t895, 6
+  %t917 = select i1 %t916, i8* %t915, i8* %t914
+  %t918 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t919 = icmp eq i32 %t895, 7
+  %t920 = select i1 %t919, i8* %t918, i8* %t917
+  %t921 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t922 = icmp eq i32 %t895, 8
+  %t923 = select i1 %t922, i8* %t921, i8* %t920
+  %t924 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t925 = icmp eq i32 %t895, 9
+  %t926 = select i1 %t925, i8* %t924, i8* %t923
+  %t927 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t928 = icmp eq i32 %t895, 10
+  %t929 = select i1 %t928, i8* %t927, i8* %t926
+  %t930 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t931 = icmp eq i32 %t895, 11
+  %t932 = select i1 %t931, i8* %t930, i8* %t929
+  %t933 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t934 = icmp eq i32 %t895, 12
+  %t935 = select i1 %t934, i8* %t933, i8* %t932
+  %t936 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t937 = icmp eq i32 %t895, 13
+  %t938 = select i1 %t937, i8* %t936, i8* %t935
+  %t939 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t940 = icmp eq i32 %t895, 14
+  %t941 = select i1 %t940, i8* %t939, i8* %t938
+  %t942 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t943 = icmp eq i32 %t895, 15
+  %t944 = select i1 %t943, i8* %t942, i8* %t941
+  %t945 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t946 = icmp eq i32 %t895, 16
+  %t947 = select i1 %t946, i8* %t945, i8* %t944
+  %s948 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.948, i32 0, i32 0
+  %t949 = icmp eq i8* %t947, %s948
+  %t950 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t951 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t952 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t953 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t954 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t955 = load double, double* %l5
+  %t956 = load double, double* %l6
+  %t957 = load double, double* %l7
+  %t958 = load double, double* %l8
+  %t959 = load i1, i1* %l9
+  %t960 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
   %t961 = load double, double* %l11
-  %t962 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t963 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t964 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t965 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t966 = load double, double* %l5
-  %t967 = load double, double* %l6
-  %t968 = load double, double* %l7
-  %t969 = load double, double* %l8
-  %t970 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t971 = call %BlockLoweringResult @lower_loop_instruction(%NativeFunction %function, double %t961, i8* %llvm_return, { %ParameterBinding*, i64 }* %t962, { %LocalBinding*, i64 }* %t963, { i8**, i64 }* %t964, { i8**, i64 }* %t965, double %t966, double %t967, double %t968, double %t969, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t970, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
-  store %BlockLoweringResult %t971, %BlockLoweringResult* %l26
-  %t972 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t973 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t974 = extractvalue %BlockLoweringResult %t973, 6
-  %t975 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t972, { i8**, i64 }* %t974)
-  store { i8**, i64 }* %t975, { i8**, i64 }** %l0
-  %t976 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t977 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t978 = extractvalue %BlockLoweringResult %t977, 9
-  %t979 = bitcast { %LifetimeRegionMetadata*, i64 }* %t976 to { i8**, i64 }*
-  %t980 = bitcast { %LifetimeRegionMetadata**, i64 }* %t978 to { i8**, i64 }*
-  %t981 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t979, { i8**, i64 }* %t980)
-  %t982 = bitcast { i8**, i64 }* %t981 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t982, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t983 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t984 = extractvalue %BlockLoweringResult %t983, 0
-  store { i8**, i64 }* %t984, { i8**, i64 }** %l1
-  %t985 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t986 = extractvalue %BlockLoweringResult %t985, 1
-  store { i8**, i64 }* %t986, { i8**, i64 }** %l2
-  %t987 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t988 = extractvalue %BlockLoweringResult %t987, 2
-  %t989 = bitcast { %LocalBinding**, i64 }* %t988 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t989, { %LocalBinding*, i64 }** %l3
-  %t990 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t991 = extractvalue %BlockLoweringResult %t990, 3
-  %t992 = bitcast { %ParameterBinding**, i64 }* %t991 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t992, { %ParameterBinding*, i64 }** %l4
-  %t993 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t994 = extractvalue %BlockLoweringResult %t993, 4
-  store double %t994, double* %l5
-  %t995 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t996 = extractvalue %BlockLoweringResult %t995, 5
-  store double %t996, double* %l6
-  %t997 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t998 = extractvalue %BlockLoweringResult %t997, 8
-  store double %t998, double* %l7
-  %t999 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t1000 = extractvalue %BlockLoweringResult %t999, 10
-  store double %t1000, double* %l8
-  %t1001 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1002 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t1003 = extractvalue %BlockLoweringResult %t1002, 12
-  %t1004 = bitcast { %LocalMutation*, i64 }* %t1001 to { i8**, i64 }*
-  %t1005 = bitcast { %LocalMutation**, i64 }* %t1003 to { i8**, i64 }*
-  %t1006 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1004, { i8**, i64 }* %t1005)
-  %t1007 = bitcast { i8**, i64 }* %t1006 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t1007, { %LocalMutation*, i64 }** %l13
-  %t1008 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t1009 = extractvalue %BlockLoweringResult %t1008, 7
-  store i1 %t1009, i1* %l9
-  %t1010 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  %t1011 = extractvalue %BlockLoweringResult %t1010, 11
-  store double %t1011, double* %l11
-  %t1012 = load i1, i1* %l9
-  %t1013 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1014 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1015 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1016 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1017 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1018 = load double, double* %l5
-  %t1019 = load double, double* %l6
-  %t1020 = load double, double* %l7
-  %t1021 = load double, double* %l8
-  %t1022 = load i1, i1* %l9
-  %t1023 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1024 = load double, double* %l11
-  %t1025 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1026 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1027 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1028 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1029 = load %BlockLoweringResult, %BlockLoweringResult* %l26
-  br i1 %t1012, label %then33, label %merge34
+  %t962 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t963 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t964 = load %StringConstantSet, %StringConstantSet* %l14
+  %t965 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t949, label %then30, label %else31
+then30:
+  %t966 = load double, double* %l11
+  %t967 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t968 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t969 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t970 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t971 = load double, double* %l5
+  %t972 = load double, double* %l6
+  %t973 = load double, double* %l7
+  %t974 = load double, double* %l8
+  %t975 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t976 = call %BlockLoweringResult @lower_loop_instruction(%NativeFunction %function, double %t966, i8* %llvm_return, { %ParameterBinding*, i64 }* %t967, { %LocalBinding*, i64 }* %t968, { i8**, i64 }* %t969, { i8**, i64 }* %t970, double %t971, double %t972, double %t973, double %t974, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t975, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
+  store %BlockLoweringResult %t976, %BlockLoweringResult* %l30
+  %t977 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t978 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t979 = extractvalue %BlockLoweringResult %t978, 6
+  %t980 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t977, { i8**, i64 }* %t979)
+  store { i8**, i64 }* %t980, { i8**, i64 }** %l0
+  %t981 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t982 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t983 = extractvalue %BlockLoweringResult %t982, 9
+  %t984 = bitcast { %LifetimeRegionMetadata*, i64 }* %t981 to { i8**, i64 }*
+  %t985 = bitcast { %LifetimeRegionMetadata**, i64 }* %t983 to { i8**, i64 }*
+  %t986 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t984, { i8**, i64 }* %t985)
+  %t987 = bitcast { i8**, i64 }* %t986 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t987, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t988 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t989 = extractvalue %BlockLoweringResult %t988, 0
+  store { i8**, i64 }* %t989, { i8**, i64 }** %l1
+  %t990 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t991 = extractvalue %BlockLoweringResult %t990, 1
+  store { i8**, i64 }* %t991, { i8**, i64 }** %l2
+  %t992 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t993 = extractvalue %BlockLoweringResult %t992, 2
+  %t994 = bitcast { %LocalBinding**, i64 }* %t993 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t994, { %LocalBinding*, i64 }** %l3
+  %t995 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t996 = extractvalue %BlockLoweringResult %t995, 3
+  %t997 = bitcast { %ParameterBinding**, i64 }* %t996 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t997, { %ParameterBinding*, i64 }** %l4
+  %t998 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t999 = extractvalue %BlockLoweringResult %t998, 4
+  store double %t999, double* %l5
+  %t1000 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1001 = extractvalue %BlockLoweringResult %t1000, 5
+  store double %t1001, double* %l6
+  %t1002 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1003 = extractvalue %BlockLoweringResult %t1002, 8
+  store double %t1003, double* %l7
+  %t1004 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1005 = extractvalue %BlockLoweringResult %t1004, 10
+  store double %t1005, double* %l8
+  %t1006 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1007 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1008 = extractvalue %BlockLoweringResult %t1007, 12
+  %t1009 = bitcast { %LocalMutation*, i64 }* %t1006 to { i8**, i64 }*
+  %t1010 = bitcast { %LocalMutation**, i64 }* %t1008 to { i8**, i64 }*
+  %t1011 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1009, { i8**, i64 }* %t1010)
+  %t1012 = bitcast { i8**, i64 }* %t1011 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t1012, { %LocalMutation*, i64 }** %l13
+  %t1013 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1014 = extractvalue %BlockLoweringResult %t1013, 7
+  store i1 %t1014, i1* %l9
+  %t1015 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  %t1016 = extractvalue %BlockLoweringResult %t1015, 11
+  store double %t1016, double* %l11
+  %t1017 = load i1, i1* %l9
+  %t1018 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1019 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1020 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1021 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1022 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1023 = load double, double* %l5
+  %t1024 = load double, double* %l6
+  %t1025 = load double, double* %l7
+  %t1026 = load double, double* %l8
+  %t1027 = load i1, i1* %l9
+  %t1028 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1029 = load double, double* %l11
+  %t1030 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1031 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1032 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1033 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1034 = load %BlockLoweringResult, %BlockLoweringResult* %l30
+  br i1 %t1017, label %then33, label %merge34
 then33:
   br label %afterloop3
 merge34:
   br label %loop.latch2
 else31:
-  %t1030 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1031 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1030, i32 0, i32 0
-  %t1032 = load i32, i32* %t1031
-  %t1033 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1034 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1035 = icmp eq i32 %t1032, 0
-  %t1036 = select i1 %t1035, i8* %t1034, i8* %t1033
-  %t1037 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1038 = icmp eq i32 %t1032, 1
-  %t1039 = select i1 %t1038, i8* %t1037, i8* %t1036
-  %t1040 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1041 = icmp eq i32 %t1032, 2
-  %t1042 = select i1 %t1041, i8* %t1040, i8* %t1039
-  %t1043 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1044 = icmp eq i32 %t1032, 3
-  %t1045 = select i1 %t1044, i8* %t1043, i8* %t1042
-  %t1046 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1047 = icmp eq i32 %t1032, 4
-  %t1048 = select i1 %t1047, i8* %t1046, i8* %t1045
-  %t1049 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1050 = icmp eq i32 %t1032, 5
-  %t1051 = select i1 %t1050, i8* %t1049, i8* %t1048
-  %t1052 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1053 = icmp eq i32 %t1032, 6
-  %t1054 = select i1 %t1053, i8* %t1052, i8* %t1051
-  %t1055 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1056 = icmp eq i32 %t1032, 7
-  %t1057 = select i1 %t1056, i8* %t1055, i8* %t1054
-  %t1058 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1059 = icmp eq i32 %t1032, 8
-  %t1060 = select i1 %t1059, i8* %t1058, i8* %t1057
-  %t1061 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1062 = icmp eq i32 %t1032, 9
-  %t1063 = select i1 %t1062, i8* %t1061, i8* %t1060
-  %t1064 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1065 = icmp eq i32 %t1032, 10
-  %t1066 = select i1 %t1065, i8* %t1064, i8* %t1063
-  %t1067 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1068 = icmp eq i32 %t1032, 11
-  %t1069 = select i1 %t1068, i8* %t1067, i8* %t1066
-  %t1070 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1071 = icmp eq i32 %t1032, 12
-  %t1072 = select i1 %t1071, i8* %t1070, i8* %t1069
-  %t1073 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1074 = icmp eq i32 %t1032, 13
-  %t1075 = select i1 %t1074, i8* %t1073, i8* %t1072
-  %t1076 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1077 = icmp eq i32 %t1032, 14
-  %t1078 = select i1 %t1077, i8* %t1076, i8* %t1075
-  %t1079 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1080 = icmp eq i32 %t1032, 15
-  %t1081 = select i1 %t1080, i8* %t1079, i8* %t1078
-  %t1082 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1083 = icmp eq i32 %t1032, 16
-  %t1084 = select i1 %t1083, i8* %t1082, i8* %t1081
-  %s1085 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1085, i32 0, i32 0
-  %t1086 = icmp eq i8* %t1084, %s1085
-  %t1087 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1088 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1089 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1090 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1091 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1092 = load double, double* %l5
-  %t1093 = load double, double* %l6
-  %t1094 = load double, double* %l7
-  %t1095 = load double, double* %l8
-  %t1096 = load i1, i1* %l9
-  %t1097 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1098 = load double, double* %l11
-  %t1099 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1100 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1101 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1102 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1086, label %then35, label %else36
-then35:
+  %t1035 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1036 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1035, i32 0, i32 0
+  %t1037 = load i32, i32* %t1036
+  %t1038 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1039 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1040 = icmp eq i32 %t1037, 0
+  %t1041 = select i1 %t1040, i8* %t1039, i8* %t1038
+  %t1042 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1043 = icmp eq i32 %t1037, 1
+  %t1044 = select i1 %t1043, i8* %t1042, i8* %t1041
+  %t1045 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1046 = icmp eq i32 %t1037, 2
+  %t1047 = select i1 %t1046, i8* %t1045, i8* %t1044
+  %t1048 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1049 = icmp eq i32 %t1037, 3
+  %t1050 = select i1 %t1049, i8* %t1048, i8* %t1047
+  %t1051 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1052 = icmp eq i32 %t1037, 4
+  %t1053 = select i1 %t1052, i8* %t1051, i8* %t1050
+  %t1054 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1055 = icmp eq i32 %t1037, 5
+  %t1056 = select i1 %t1055, i8* %t1054, i8* %t1053
+  %t1057 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1058 = icmp eq i32 %t1037, 6
+  %t1059 = select i1 %t1058, i8* %t1057, i8* %t1056
+  %t1060 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1061 = icmp eq i32 %t1037, 7
+  %t1062 = select i1 %t1061, i8* %t1060, i8* %t1059
+  %t1063 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1064 = icmp eq i32 %t1037, 8
+  %t1065 = select i1 %t1064, i8* %t1063, i8* %t1062
+  %t1066 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1067 = icmp eq i32 %t1037, 9
+  %t1068 = select i1 %t1067, i8* %t1066, i8* %t1065
+  %t1069 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1070 = icmp eq i32 %t1037, 10
+  %t1071 = select i1 %t1070, i8* %t1069, i8* %t1068
+  %t1072 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1073 = icmp eq i32 %t1037, 11
+  %t1074 = select i1 %t1073, i8* %t1072, i8* %t1071
+  %t1075 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1076 = icmp eq i32 %t1037, 12
+  %t1077 = select i1 %t1076, i8* %t1075, i8* %t1074
+  %t1078 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1079 = icmp eq i32 %t1037, 13
+  %t1080 = select i1 %t1079, i8* %t1078, i8* %t1077
+  %t1081 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1082 = icmp eq i32 %t1037, 14
+  %t1083 = select i1 %t1082, i8* %t1081, i8* %t1080
+  %t1084 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1085 = icmp eq i32 %t1037, 15
+  %t1086 = select i1 %t1085, i8* %t1084, i8* %t1083
+  %t1087 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1088 = icmp eq i32 %t1037, 16
+  %t1089 = select i1 %t1088, i8* %t1087, i8* %t1086
+  %s1090 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1090, i32 0, i32 0
+  %t1091 = icmp eq i8* %t1089, %s1090
+  %t1092 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1093 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1094 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1095 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1096 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1097 = load double, double* %l5
+  %t1098 = load double, double* %l6
+  %t1099 = load double, double* %l7
+  %t1100 = load double, double* %l8
+  %t1101 = load i1, i1* %l9
+  %t1102 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
   %t1103 = load double, double* %l11
-  %t1104 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1105 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1106 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1107 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1108 = load double, double* %l5
-  %t1109 = load double, double* %l6
-  %t1110 = load double, double* %l7
-  %t1111 = load double, double* %l8
-  %t1112 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1113 = call %BlockLoweringResult @lower_match_instruction(%NativeFunction %function, double %t1103, i8* %llvm_return, { %ParameterBinding*, i64 }* %t1104, { %LocalBinding*, i64 }* %t1105, { i8**, i64 }* %t1106, { i8**, i64 }* %t1107, double %t1108, double %t1109, double %t1110, double %t1111, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t1112, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
-  store %BlockLoweringResult %t1113, %BlockLoweringResult* %l27
-  %t1114 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1115 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1116 = extractvalue %BlockLoweringResult %t1115, 6
-  %t1117 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1114, { i8**, i64 }* %t1116)
-  store { i8**, i64 }* %t1117, { i8**, i64 }** %l0
-  %t1118 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1119 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1120 = extractvalue %BlockLoweringResult %t1119, 9
-  %t1121 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1118 to { i8**, i64 }*
-  %t1122 = bitcast { %LifetimeRegionMetadata**, i64 }* %t1120 to { i8**, i64 }*
-  %t1123 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1121, { i8**, i64 }* %t1122)
-  %t1124 = bitcast { i8**, i64 }* %t1123 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t1124, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1125 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1126 = extractvalue %BlockLoweringResult %t1125, 0
-  store { i8**, i64 }* %t1126, { i8**, i64 }** %l1
-  %t1127 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1128 = extractvalue %BlockLoweringResult %t1127, 1
-  store { i8**, i64 }* %t1128, { i8**, i64 }** %l2
-  %t1129 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1130 = extractvalue %BlockLoweringResult %t1129, 2
-  %t1131 = bitcast { %LocalBinding**, i64 }* %t1130 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t1131, { %LocalBinding*, i64 }** %l3
-  %t1132 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1133 = extractvalue %BlockLoweringResult %t1132, 3
-  %t1134 = bitcast { %ParameterBinding**, i64 }* %t1133 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t1134, { %ParameterBinding*, i64 }** %l4
-  %t1135 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1136 = extractvalue %BlockLoweringResult %t1135, 4
-  store double %t1136, double* %l5
-  %t1137 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1138 = extractvalue %BlockLoweringResult %t1137, 5
-  store double %t1138, double* %l6
-  %t1139 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1140 = extractvalue %BlockLoweringResult %t1139, 8
-  store double %t1140, double* %l7
-  %t1141 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1142 = extractvalue %BlockLoweringResult %t1141, 10
-  store double %t1142, double* %l8
-  %t1143 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1144 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1145 = extractvalue %BlockLoweringResult %t1144, 12
-  %t1146 = bitcast { %LocalMutation*, i64 }* %t1143 to { i8**, i64 }*
-  %t1147 = bitcast { %LocalMutation**, i64 }* %t1145 to { i8**, i64 }*
-  %t1148 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1146, { i8**, i64 }* %t1147)
-  %t1149 = bitcast { i8**, i64 }* %t1148 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t1149, { %LocalMutation*, i64 }** %l13
-  %t1150 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1151 = extractvalue %BlockLoweringResult %t1150, 7
-  store i1 %t1151, i1* %l9
-  %t1152 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  %t1153 = extractvalue %BlockLoweringResult %t1152, 11
-  store double %t1153, double* %l11
-  %t1154 = load i1, i1* %l9
-  %t1155 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1156 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1157 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1158 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1159 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1160 = load double, double* %l5
-  %t1161 = load double, double* %l6
-  %t1162 = load double, double* %l7
-  %t1163 = load double, double* %l8
-  %t1164 = load i1, i1* %l9
-  %t1165 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1166 = load double, double* %l11
-  %t1167 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1168 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1169 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1170 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1171 = load %BlockLoweringResult, %BlockLoweringResult* %l27
-  br i1 %t1154, label %then38, label %merge39
+  %t1104 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1105 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1106 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1107 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1091, label %then35, label %else36
+then35:
+  %t1108 = load double, double* %l11
+  %t1109 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1110 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1111 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1112 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1113 = load double, double* %l5
+  %t1114 = load double, double* %l6
+  %t1115 = load double, double* %l7
+  %t1116 = load double, double* %l8
+  %t1117 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1118 = call %BlockLoweringResult @lower_match_instruction(%NativeFunction %function, double %t1108, i8* %llvm_return, { %ParameterBinding*, i64 }* %t1109, { %LocalBinding*, i64 }* %t1110, { i8**, i64 }* %t1111, { i8**, i64 }* %t1112, double %t1113, double %t1114, double %t1115, double %t1116, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t1117, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
+  store %BlockLoweringResult %t1118, %BlockLoweringResult* %l31
+  %t1119 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1120 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1121 = extractvalue %BlockLoweringResult %t1120, 6
+  %t1122 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1119, { i8**, i64 }* %t1121)
+  store { i8**, i64 }* %t1122, { i8**, i64 }** %l0
+  %t1123 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1124 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1125 = extractvalue %BlockLoweringResult %t1124, 9
+  %t1126 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1123 to { i8**, i64 }*
+  %t1127 = bitcast { %LifetimeRegionMetadata**, i64 }* %t1125 to { i8**, i64 }*
+  %t1128 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1126, { i8**, i64 }* %t1127)
+  %t1129 = bitcast { i8**, i64 }* %t1128 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t1129, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1130 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1131 = extractvalue %BlockLoweringResult %t1130, 0
+  store { i8**, i64 }* %t1131, { i8**, i64 }** %l1
+  %t1132 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1133 = extractvalue %BlockLoweringResult %t1132, 1
+  store { i8**, i64 }* %t1133, { i8**, i64 }** %l2
+  %t1134 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1135 = extractvalue %BlockLoweringResult %t1134, 2
+  %t1136 = bitcast { %LocalBinding**, i64 }* %t1135 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t1136, { %LocalBinding*, i64 }** %l3
+  %t1137 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1138 = extractvalue %BlockLoweringResult %t1137, 3
+  %t1139 = bitcast { %ParameterBinding**, i64 }* %t1138 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t1139, { %ParameterBinding*, i64 }** %l4
+  %t1140 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1141 = extractvalue %BlockLoweringResult %t1140, 4
+  store double %t1141, double* %l5
+  %t1142 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1143 = extractvalue %BlockLoweringResult %t1142, 5
+  store double %t1143, double* %l6
+  %t1144 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1145 = extractvalue %BlockLoweringResult %t1144, 8
+  store double %t1145, double* %l7
+  %t1146 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1147 = extractvalue %BlockLoweringResult %t1146, 10
+  store double %t1147, double* %l8
+  %t1148 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1149 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1150 = extractvalue %BlockLoweringResult %t1149, 12
+  %t1151 = bitcast { %LocalMutation*, i64 }* %t1148 to { i8**, i64 }*
+  %t1152 = bitcast { %LocalMutation**, i64 }* %t1150 to { i8**, i64 }*
+  %t1153 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1151, { i8**, i64 }* %t1152)
+  %t1154 = bitcast { i8**, i64 }* %t1153 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t1154, { %LocalMutation*, i64 }** %l13
+  %t1155 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1156 = extractvalue %BlockLoweringResult %t1155, 7
+  store i1 %t1156, i1* %l9
+  %t1157 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  %t1158 = extractvalue %BlockLoweringResult %t1157, 11
+  store double %t1158, double* %l11
+  %t1159 = load i1, i1* %l9
+  %t1160 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1161 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1162 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1163 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1164 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1165 = load double, double* %l5
+  %t1166 = load double, double* %l6
+  %t1167 = load double, double* %l7
+  %t1168 = load double, double* %l8
+  %t1169 = load i1, i1* %l9
+  %t1170 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1171 = load double, double* %l11
+  %t1172 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1173 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1174 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1175 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1176 = load %BlockLoweringResult, %BlockLoweringResult* %l31
+  br i1 %t1159, label %then38, label %merge39
 then38:
   br label %afterloop3
 merge39:
   br label %loop.latch2
 else36:
-  %t1173 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1174 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1173, i32 0, i32 0
-  %t1175 = load i32, i32* %t1174
-  %t1176 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1177 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1178 = icmp eq i32 %t1175, 0
-  %t1179 = select i1 %t1178, i8* %t1177, i8* %t1176
-  %t1180 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1181 = icmp eq i32 %t1175, 1
-  %t1182 = select i1 %t1181, i8* %t1180, i8* %t1179
-  %t1183 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1184 = icmp eq i32 %t1175, 2
-  %t1185 = select i1 %t1184, i8* %t1183, i8* %t1182
-  %t1186 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1187 = icmp eq i32 %t1175, 3
-  %t1188 = select i1 %t1187, i8* %t1186, i8* %t1185
-  %t1189 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1190 = icmp eq i32 %t1175, 4
-  %t1191 = select i1 %t1190, i8* %t1189, i8* %t1188
-  %t1192 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1193 = icmp eq i32 %t1175, 5
-  %t1194 = select i1 %t1193, i8* %t1192, i8* %t1191
-  %t1195 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1196 = icmp eq i32 %t1175, 6
-  %t1197 = select i1 %t1196, i8* %t1195, i8* %t1194
-  %t1198 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1199 = icmp eq i32 %t1175, 7
-  %t1200 = select i1 %t1199, i8* %t1198, i8* %t1197
-  %t1201 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1202 = icmp eq i32 %t1175, 8
-  %t1203 = select i1 %t1202, i8* %t1201, i8* %t1200
-  %t1204 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1205 = icmp eq i32 %t1175, 9
-  %t1206 = select i1 %t1205, i8* %t1204, i8* %t1203
-  %t1207 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1208 = icmp eq i32 %t1175, 10
-  %t1209 = select i1 %t1208, i8* %t1207, i8* %t1206
-  %t1210 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1211 = icmp eq i32 %t1175, 11
-  %t1212 = select i1 %t1211, i8* %t1210, i8* %t1209
-  %t1213 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1214 = icmp eq i32 %t1175, 12
-  %t1215 = select i1 %t1214, i8* %t1213, i8* %t1212
-  %t1216 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1217 = icmp eq i32 %t1175, 13
-  %t1218 = select i1 %t1217, i8* %t1216, i8* %t1215
-  %t1219 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1220 = icmp eq i32 %t1175, 14
-  %t1221 = select i1 %t1220, i8* %t1219, i8* %t1218
-  %t1222 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1223 = icmp eq i32 %t1175, 15
-  %t1224 = select i1 %t1223, i8* %t1222, i8* %t1221
-  %t1225 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1226 = icmp eq i32 %t1175, 16
-  %t1227 = select i1 %t1226, i8* %t1225, i8* %t1224
-  %s1228 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1228, i32 0, i32 0
-  %t1229 = icmp eq i8* %t1227, %s1228
-  br label %logical_or_entry_1172
+  %t1178 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1179 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1178, i32 0, i32 0
+  %t1180 = load i32, i32* %t1179
+  %t1181 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1182 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1183 = icmp eq i32 %t1180, 0
+  %t1184 = select i1 %t1183, i8* %t1182, i8* %t1181
+  %t1185 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1186 = icmp eq i32 %t1180, 1
+  %t1187 = select i1 %t1186, i8* %t1185, i8* %t1184
+  %t1188 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1189 = icmp eq i32 %t1180, 2
+  %t1190 = select i1 %t1189, i8* %t1188, i8* %t1187
+  %t1191 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1192 = icmp eq i32 %t1180, 3
+  %t1193 = select i1 %t1192, i8* %t1191, i8* %t1190
+  %t1194 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1195 = icmp eq i32 %t1180, 4
+  %t1196 = select i1 %t1195, i8* %t1194, i8* %t1193
+  %t1197 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1198 = icmp eq i32 %t1180, 5
+  %t1199 = select i1 %t1198, i8* %t1197, i8* %t1196
+  %t1200 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1201 = icmp eq i32 %t1180, 6
+  %t1202 = select i1 %t1201, i8* %t1200, i8* %t1199
+  %t1203 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1204 = icmp eq i32 %t1180, 7
+  %t1205 = select i1 %t1204, i8* %t1203, i8* %t1202
+  %t1206 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1207 = icmp eq i32 %t1180, 8
+  %t1208 = select i1 %t1207, i8* %t1206, i8* %t1205
+  %t1209 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1210 = icmp eq i32 %t1180, 9
+  %t1211 = select i1 %t1210, i8* %t1209, i8* %t1208
+  %t1212 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1213 = icmp eq i32 %t1180, 10
+  %t1214 = select i1 %t1213, i8* %t1212, i8* %t1211
+  %t1215 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1216 = icmp eq i32 %t1180, 11
+  %t1217 = select i1 %t1216, i8* %t1215, i8* %t1214
+  %t1218 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1219 = icmp eq i32 %t1180, 12
+  %t1220 = select i1 %t1219, i8* %t1218, i8* %t1217
+  %t1221 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1222 = icmp eq i32 %t1180, 13
+  %t1223 = select i1 %t1222, i8* %t1221, i8* %t1220
+  %t1224 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1225 = icmp eq i32 %t1180, 14
+  %t1226 = select i1 %t1225, i8* %t1224, i8* %t1223
+  %t1227 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1228 = icmp eq i32 %t1180, 15
+  %t1229 = select i1 %t1228, i8* %t1227, i8* %t1226
+  %t1230 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1231 = icmp eq i32 %t1180, 16
+  %t1232 = select i1 %t1231, i8* %t1230, i8* %t1229
+  %s1233 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1233, i32 0, i32 0
+  %t1234 = icmp eq i8* %t1232, %s1233
+  br label %logical_or_entry_1177
 
-logical_or_entry_1172:
-  br i1 %t1229, label %logical_or_merge_1172, label %logical_or_right_1172
+logical_or_entry_1177:
+  br i1 %t1234, label %logical_or_merge_1177, label %logical_or_right_1177
 
-logical_or_right_1172:
-  %t1230 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1231 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1230, i32 0, i32 0
-  %t1232 = load i32, i32* %t1231
-  %t1233 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1234 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1235 = icmp eq i32 %t1232, 0
-  %t1236 = select i1 %t1235, i8* %t1234, i8* %t1233
-  %t1237 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1238 = icmp eq i32 %t1232, 1
-  %t1239 = select i1 %t1238, i8* %t1237, i8* %t1236
-  %t1240 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1241 = icmp eq i32 %t1232, 2
-  %t1242 = select i1 %t1241, i8* %t1240, i8* %t1239
-  %t1243 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1244 = icmp eq i32 %t1232, 3
-  %t1245 = select i1 %t1244, i8* %t1243, i8* %t1242
-  %t1246 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1247 = icmp eq i32 %t1232, 4
-  %t1248 = select i1 %t1247, i8* %t1246, i8* %t1245
-  %t1249 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1250 = icmp eq i32 %t1232, 5
-  %t1251 = select i1 %t1250, i8* %t1249, i8* %t1248
-  %t1252 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1253 = icmp eq i32 %t1232, 6
-  %t1254 = select i1 %t1253, i8* %t1252, i8* %t1251
-  %t1255 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1256 = icmp eq i32 %t1232, 7
-  %t1257 = select i1 %t1256, i8* %t1255, i8* %t1254
-  %t1258 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1259 = icmp eq i32 %t1232, 8
-  %t1260 = select i1 %t1259, i8* %t1258, i8* %t1257
-  %t1261 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1262 = icmp eq i32 %t1232, 9
-  %t1263 = select i1 %t1262, i8* %t1261, i8* %t1260
-  %t1264 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1265 = icmp eq i32 %t1232, 10
-  %t1266 = select i1 %t1265, i8* %t1264, i8* %t1263
-  %t1267 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1268 = icmp eq i32 %t1232, 11
-  %t1269 = select i1 %t1268, i8* %t1267, i8* %t1266
-  %t1270 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1271 = icmp eq i32 %t1232, 12
-  %t1272 = select i1 %t1271, i8* %t1270, i8* %t1269
-  %t1273 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1274 = icmp eq i32 %t1232, 13
-  %t1275 = select i1 %t1274, i8* %t1273, i8* %t1272
-  %t1276 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1277 = icmp eq i32 %t1232, 14
-  %t1278 = select i1 %t1277, i8* %t1276, i8* %t1275
-  %t1279 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1280 = icmp eq i32 %t1232, 15
-  %t1281 = select i1 %t1280, i8* %t1279, i8* %t1278
-  %t1282 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1283 = icmp eq i32 %t1232, 16
-  %t1284 = select i1 %t1283, i8* %t1282, i8* %t1281
-  %s1285 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1285, i32 0, i32 0
-  %t1286 = icmp eq i8* %t1284, %s1285
-  br label %logical_or_right_end_1172
+logical_or_right_1177:
+  %t1235 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1236 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1235, i32 0, i32 0
+  %t1237 = load i32, i32* %t1236
+  %t1238 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1239 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1240 = icmp eq i32 %t1237, 0
+  %t1241 = select i1 %t1240, i8* %t1239, i8* %t1238
+  %t1242 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1243 = icmp eq i32 %t1237, 1
+  %t1244 = select i1 %t1243, i8* %t1242, i8* %t1241
+  %t1245 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1246 = icmp eq i32 %t1237, 2
+  %t1247 = select i1 %t1246, i8* %t1245, i8* %t1244
+  %t1248 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1249 = icmp eq i32 %t1237, 3
+  %t1250 = select i1 %t1249, i8* %t1248, i8* %t1247
+  %t1251 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1252 = icmp eq i32 %t1237, 4
+  %t1253 = select i1 %t1252, i8* %t1251, i8* %t1250
+  %t1254 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1255 = icmp eq i32 %t1237, 5
+  %t1256 = select i1 %t1255, i8* %t1254, i8* %t1253
+  %t1257 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1258 = icmp eq i32 %t1237, 6
+  %t1259 = select i1 %t1258, i8* %t1257, i8* %t1256
+  %t1260 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1261 = icmp eq i32 %t1237, 7
+  %t1262 = select i1 %t1261, i8* %t1260, i8* %t1259
+  %t1263 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1264 = icmp eq i32 %t1237, 8
+  %t1265 = select i1 %t1264, i8* %t1263, i8* %t1262
+  %t1266 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1267 = icmp eq i32 %t1237, 9
+  %t1268 = select i1 %t1267, i8* %t1266, i8* %t1265
+  %t1269 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1270 = icmp eq i32 %t1237, 10
+  %t1271 = select i1 %t1270, i8* %t1269, i8* %t1268
+  %t1272 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1273 = icmp eq i32 %t1237, 11
+  %t1274 = select i1 %t1273, i8* %t1272, i8* %t1271
+  %t1275 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1276 = icmp eq i32 %t1237, 12
+  %t1277 = select i1 %t1276, i8* %t1275, i8* %t1274
+  %t1278 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1279 = icmp eq i32 %t1237, 13
+  %t1280 = select i1 %t1279, i8* %t1278, i8* %t1277
+  %t1281 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1282 = icmp eq i32 %t1237, 14
+  %t1283 = select i1 %t1282, i8* %t1281, i8* %t1280
+  %t1284 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1285 = icmp eq i32 %t1237, 15
+  %t1286 = select i1 %t1285, i8* %t1284, i8* %t1283
+  %t1287 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1288 = icmp eq i32 %t1237, 16
+  %t1289 = select i1 %t1288, i8* %t1287, i8* %t1286
+  %s1290 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1290, i32 0, i32 0
+  %t1291 = icmp eq i8* %t1289, %s1290
+  br label %logical_or_right_end_1177
 
-logical_or_right_end_1172:
-  br label %logical_or_merge_1172
+logical_or_right_end_1177:
+  br label %logical_or_merge_1177
 
-logical_or_merge_1172:
-  %t1287 = phi i1 [ true, %logical_or_entry_1172 ], [ %t1286, %logical_or_right_end_1172 ]
-  %t1288 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1289 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1290 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1291 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1292 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1293 = load double, double* %l5
-  %t1294 = load double, double* %l6
-  %t1295 = load double, double* %l7
-  %t1296 = load double, double* %l8
-  %t1297 = load i1, i1* %l9
-  %t1298 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1299 = load double, double* %l11
-  %t1300 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1301 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1302 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1303 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1287, label %then40, label %else41
+logical_or_merge_1177:
+  %t1292 = phi i1 [ true, %logical_or_entry_1177 ], [ %t1291, %logical_or_right_end_1177 ]
+  %t1293 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1294 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1295 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1296 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1297 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1298 = load double, double* %l5
+  %t1299 = load double, double* %l6
+  %t1300 = load double, double* %l7
+  %t1301 = load double, double* %l8
+  %t1302 = load i1, i1* %l9
+  %t1303 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1304 = load double, double* %l11
+  %t1305 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1306 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1307 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1308 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1292, label %then40, label %else41
 then40:
   br label %afterloop3
 else41:
-  %t1305 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1306 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1305, i32 0, i32 0
-  %t1307 = load i32, i32* %t1306
-  %t1308 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1309 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1310 = icmp eq i32 %t1307, 0
-  %t1311 = select i1 %t1310, i8* %t1309, i8* %t1308
-  %t1312 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1313 = icmp eq i32 %t1307, 1
-  %t1314 = select i1 %t1313, i8* %t1312, i8* %t1311
-  %t1315 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1316 = icmp eq i32 %t1307, 2
-  %t1317 = select i1 %t1316, i8* %t1315, i8* %t1314
-  %t1318 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1319 = icmp eq i32 %t1307, 3
-  %t1320 = select i1 %t1319, i8* %t1318, i8* %t1317
-  %t1321 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1322 = icmp eq i32 %t1307, 4
-  %t1323 = select i1 %t1322, i8* %t1321, i8* %t1320
-  %t1324 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1325 = icmp eq i32 %t1307, 5
-  %t1326 = select i1 %t1325, i8* %t1324, i8* %t1323
-  %t1327 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1328 = icmp eq i32 %t1307, 6
-  %t1329 = select i1 %t1328, i8* %t1327, i8* %t1326
-  %t1330 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1331 = icmp eq i32 %t1307, 7
-  %t1332 = select i1 %t1331, i8* %t1330, i8* %t1329
-  %t1333 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1334 = icmp eq i32 %t1307, 8
-  %t1335 = select i1 %t1334, i8* %t1333, i8* %t1332
-  %t1336 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1337 = icmp eq i32 %t1307, 9
-  %t1338 = select i1 %t1337, i8* %t1336, i8* %t1335
-  %t1339 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1340 = icmp eq i32 %t1307, 10
-  %t1341 = select i1 %t1340, i8* %t1339, i8* %t1338
-  %t1342 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1343 = icmp eq i32 %t1307, 11
-  %t1344 = select i1 %t1343, i8* %t1342, i8* %t1341
-  %t1345 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1346 = icmp eq i32 %t1307, 12
-  %t1347 = select i1 %t1346, i8* %t1345, i8* %t1344
-  %t1348 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1349 = icmp eq i32 %t1307, 13
-  %t1350 = select i1 %t1349, i8* %t1348, i8* %t1347
-  %t1351 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1352 = icmp eq i32 %t1307, 14
-  %t1353 = select i1 %t1352, i8* %t1351, i8* %t1350
-  %t1354 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1355 = icmp eq i32 %t1307, 15
-  %t1356 = select i1 %t1355, i8* %t1354, i8* %t1353
-  %t1357 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1358 = icmp eq i32 %t1307, 16
-  %t1359 = select i1 %t1358, i8* %t1357, i8* %t1356
-  %s1360 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1360, i32 0, i32 0
-  %t1361 = icmp eq i8* %t1359, %s1360
-  br label %logical_or_entry_1304
+  %t1310 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1311 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1310, i32 0, i32 0
+  %t1312 = load i32, i32* %t1311
+  %t1313 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1314 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1315 = icmp eq i32 %t1312, 0
+  %t1316 = select i1 %t1315, i8* %t1314, i8* %t1313
+  %t1317 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1318 = icmp eq i32 %t1312, 1
+  %t1319 = select i1 %t1318, i8* %t1317, i8* %t1316
+  %t1320 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1321 = icmp eq i32 %t1312, 2
+  %t1322 = select i1 %t1321, i8* %t1320, i8* %t1319
+  %t1323 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1324 = icmp eq i32 %t1312, 3
+  %t1325 = select i1 %t1324, i8* %t1323, i8* %t1322
+  %t1326 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1327 = icmp eq i32 %t1312, 4
+  %t1328 = select i1 %t1327, i8* %t1326, i8* %t1325
+  %t1329 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1330 = icmp eq i32 %t1312, 5
+  %t1331 = select i1 %t1330, i8* %t1329, i8* %t1328
+  %t1332 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1333 = icmp eq i32 %t1312, 6
+  %t1334 = select i1 %t1333, i8* %t1332, i8* %t1331
+  %t1335 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1336 = icmp eq i32 %t1312, 7
+  %t1337 = select i1 %t1336, i8* %t1335, i8* %t1334
+  %t1338 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1339 = icmp eq i32 %t1312, 8
+  %t1340 = select i1 %t1339, i8* %t1338, i8* %t1337
+  %t1341 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1342 = icmp eq i32 %t1312, 9
+  %t1343 = select i1 %t1342, i8* %t1341, i8* %t1340
+  %t1344 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1345 = icmp eq i32 %t1312, 10
+  %t1346 = select i1 %t1345, i8* %t1344, i8* %t1343
+  %t1347 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1348 = icmp eq i32 %t1312, 11
+  %t1349 = select i1 %t1348, i8* %t1347, i8* %t1346
+  %t1350 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1351 = icmp eq i32 %t1312, 12
+  %t1352 = select i1 %t1351, i8* %t1350, i8* %t1349
+  %t1353 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1354 = icmp eq i32 %t1312, 13
+  %t1355 = select i1 %t1354, i8* %t1353, i8* %t1352
+  %t1356 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1357 = icmp eq i32 %t1312, 14
+  %t1358 = select i1 %t1357, i8* %t1356, i8* %t1355
+  %t1359 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1360 = icmp eq i32 %t1312, 15
+  %t1361 = select i1 %t1360, i8* %t1359, i8* %t1358
+  %t1362 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1363 = icmp eq i32 %t1312, 16
+  %t1364 = select i1 %t1363, i8* %t1362, i8* %t1361
+  %s1365 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1365, i32 0, i32 0
+  %t1366 = icmp eq i8* %t1364, %s1365
+  br label %logical_or_entry_1309
 
-logical_or_entry_1304:
-  br i1 %t1361, label %logical_or_merge_1304, label %logical_or_right_1304
+logical_or_entry_1309:
+  br i1 %t1366, label %logical_or_merge_1309, label %logical_or_right_1309
 
-logical_or_right_1304:
-  %t1363 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1364 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1363, i32 0, i32 0
-  %t1365 = load i32, i32* %t1364
-  %t1366 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1367 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1368 = icmp eq i32 %t1365, 0
-  %t1369 = select i1 %t1368, i8* %t1367, i8* %t1366
-  %t1370 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1371 = icmp eq i32 %t1365, 1
-  %t1372 = select i1 %t1371, i8* %t1370, i8* %t1369
-  %t1373 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1374 = icmp eq i32 %t1365, 2
-  %t1375 = select i1 %t1374, i8* %t1373, i8* %t1372
-  %t1376 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1377 = icmp eq i32 %t1365, 3
-  %t1378 = select i1 %t1377, i8* %t1376, i8* %t1375
-  %t1379 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1380 = icmp eq i32 %t1365, 4
-  %t1381 = select i1 %t1380, i8* %t1379, i8* %t1378
-  %t1382 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1383 = icmp eq i32 %t1365, 5
-  %t1384 = select i1 %t1383, i8* %t1382, i8* %t1381
-  %t1385 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1386 = icmp eq i32 %t1365, 6
-  %t1387 = select i1 %t1386, i8* %t1385, i8* %t1384
-  %t1388 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1389 = icmp eq i32 %t1365, 7
-  %t1390 = select i1 %t1389, i8* %t1388, i8* %t1387
-  %t1391 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1392 = icmp eq i32 %t1365, 8
-  %t1393 = select i1 %t1392, i8* %t1391, i8* %t1390
-  %t1394 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1395 = icmp eq i32 %t1365, 9
-  %t1396 = select i1 %t1395, i8* %t1394, i8* %t1393
-  %t1397 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1398 = icmp eq i32 %t1365, 10
-  %t1399 = select i1 %t1398, i8* %t1397, i8* %t1396
-  %t1400 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1401 = icmp eq i32 %t1365, 11
-  %t1402 = select i1 %t1401, i8* %t1400, i8* %t1399
-  %t1403 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1404 = icmp eq i32 %t1365, 12
-  %t1405 = select i1 %t1404, i8* %t1403, i8* %t1402
-  %t1406 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1407 = icmp eq i32 %t1365, 13
-  %t1408 = select i1 %t1407, i8* %t1406, i8* %t1405
-  %t1409 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1410 = icmp eq i32 %t1365, 14
-  %t1411 = select i1 %t1410, i8* %t1409, i8* %t1408
-  %t1412 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1413 = icmp eq i32 %t1365, 15
-  %t1414 = select i1 %t1413, i8* %t1412, i8* %t1411
-  %t1415 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1416 = icmp eq i32 %t1365, 16
-  %t1417 = select i1 %t1416, i8* %t1415, i8* %t1414
-  %s1418 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1418, i32 0, i32 0
-  %t1419 = icmp eq i8* %t1417, %s1418
-  br label %logical_or_entry_1362
+logical_or_right_1309:
+  %t1368 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1369 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1368, i32 0, i32 0
+  %t1370 = load i32, i32* %t1369
+  %t1371 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1372 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1373 = icmp eq i32 %t1370, 0
+  %t1374 = select i1 %t1373, i8* %t1372, i8* %t1371
+  %t1375 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1376 = icmp eq i32 %t1370, 1
+  %t1377 = select i1 %t1376, i8* %t1375, i8* %t1374
+  %t1378 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1379 = icmp eq i32 %t1370, 2
+  %t1380 = select i1 %t1379, i8* %t1378, i8* %t1377
+  %t1381 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1382 = icmp eq i32 %t1370, 3
+  %t1383 = select i1 %t1382, i8* %t1381, i8* %t1380
+  %t1384 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1385 = icmp eq i32 %t1370, 4
+  %t1386 = select i1 %t1385, i8* %t1384, i8* %t1383
+  %t1387 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1388 = icmp eq i32 %t1370, 5
+  %t1389 = select i1 %t1388, i8* %t1387, i8* %t1386
+  %t1390 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1391 = icmp eq i32 %t1370, 6
+  %t1392 = select i1 %t1391, i8* %t1390, i8* %t1389
+  %t1393 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1394 = icmp eq i32 %t1370, 7
+  %t1395 = select i1 %t1394, i8* %t1393, i8* %t1392
+  %t1396 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1397 = icmp eq i32 %t1370, 8
+  %t1398 = select i1 %t1397, i8* %t1396, i8* %t1395
+  %t1399 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1400 = icmp eq i32 %t1370, 9
+  %t1401 = select i1 %t1400, i8* %t1399, i8* %t1398
+  %t1402 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1403 = icmp eq i32 %t1370, 10
+  %t1404 = select i1 %t1403, i8* %t1402, i8* %t1401
+  %t1405 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1406 = icmp eq i32 %t1370, 11
+  %t1407 = select i1 %t1406, i8* %t1405, i8* %t1404
+  %t1408 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1409 = icmp eq i32 %t1370, 12
+  %t1410 = select i1 %t1409, i8* %t1408, i8* %t1407
+  %t1411 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1412 = icmp eq i32 %t1370, 13
+  %t1413 = select i1 %t1412, i8* %t1411, i8* %t1410
+  %t1414 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1415 = icmp eq i32 %t1370, 14
+  %t1416 = select i1 %t1415, i8* %t1414, i8* %t1413
+  %t1417 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1418 = icmp eq i32 %t1370, 15
+  %t1419 = select i1 %t1418, i8* %t1417, i8* %t1416
+  %t1420 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1421 = icmp eq i32 %t1370, 16
+  %t1422 = select i1 %t1421, i8* %t1420, i8* %t1419
+  %s1423 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1423, i32 0, i32 0
+  %t1424 = icmp eq i8* %t1422, %s1423
+  br label %logical_or_entry_1367
 
-logical_or_entry_1362:
-  br i1 %t1419, label %logical_or_merge_1362, label %logical_or_right_1362
+logical_or_entry_1367:
+  br i1 %t1424, label %logical_or_merge_1367, label %logical_or_right_1367
 
-logical_or_right_1362:
-  %t1420 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1421 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1420, i32 0, i32 0
-  %t1422 = load i32, i32* %t1421
-  %t1423 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1424 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1425 = icmp eq i32 %t1422, 0
-  %t1426 = select i1 %t1425, i8* %t1424, i8* %t1423
-  %t1427 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1428 = icmp eq i32 %t1422, 1
-  %t1429 = select i1 %t1428, i8* %t1427, i8* %t1426
-  %t1430 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1431 = icmp eq i32 %t1422, 2
-  %t1432 = select i1 %t1431, i8* %t1430, i8* %t1429
-  %t1433 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1434 = icmp eq i32 %t1422, 3
-  %t1435 = select i1 %t1434, i8* %t1433, i8* %t1432
-  %t1436 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1437 = icmp eq i32 %t1422, 4
-  %t1438 = select i1 %t1437, i8* %t1436, i8* %t1435
-  %t1439 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1440 = icmp eq i32 %t1422, 5
-  %t1441 = select i1 %t1440, i8* %t1439, i8* %t1438
-  %t1442 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1443 = icmp eq i32 %t1422, 6
-  %t1444 = select i1 %t1443, i8* %t1442, i8* %t1441
-  %t1445 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1446 = icmp eq i32 %t1422, 7
-  %t1447 = select i1 %t1446, i8* %t1445, i8* %t1444
-  %t1448 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1449 = icmp eq i32 %t1422, 8
-  %t1450 = select i1 %t1449, i8* %t1448, i8* %t1447
-  %t1451 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1452 = icmp eq i32 %t1422, 9
-  %t1453 = select i1 %t1452, i8* %t1451, i8* %t1450
-  %t1454 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1455 = icmp eq i32 %t1422, 10
-  %t1456 = select i1 %t1455, i8* %t1454, i8* %t1453
-  %t1457 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1458 = icmp eq i32 %t1422, 11
-  %t1459 = select i1 %t1458, i8* %t1457, i8* %t1456
-  %t1460 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1461 = icmp eq i32 %t1422, 12
-  %t1462 = select i1 %t1461, i8* %t1460, i8* %t1459
-  %t1463 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1464 = icmp eq i32 %t1422, 13
-  %t1465 = select i1 %t1464, i8* %t1463, i8* %t1462
-  %t1466 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1467 = icmp eq i32 %t1422, 14
-  %t1468 = select i1 %t1467, i8* %t1466, i8* %t1465
-  %t1469 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1470 = icmp eq i32 %t1422, 15
-  %t1471 = select i1 %t1470, i8* %t1469, i8* %t1468
-  %t1472 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1473 = icmp eq i32 %t1422, 16
-  %t1474 = select i1 %t1473, i8* %t1472, i8* %t1471
-  %s1475 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1475, i32 0, i32 0
-  %t1476 = icmp eq i8* %t1474, %s1475
-  br label %logical_or_right_end_1362
+logical_or_right_1367:
+  %t1425 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1426 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1425, i32 0, i32 0
+  %t1427 = load i32, i32* %t1426
+  %t1428 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1429 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1430 = icmp eq i32 %t1427, 0
+  %t1431 = select i1 %t1430, i8* %t1429, i8* %t1428
+  %t1432 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1433 = icmp eq i32 %t1427, 1
+  %t1434 = select i1 %t1433, i8* %t1432, i8* %t1431
+  %t1435 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1436 = icmp eq i32 %t1427, 2
+  %t1437 = select i1 %t1436, i8* %t1435, i8* %t1434
+  %t1438 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1439 = icmp eq i32 %t1427, 3
+  %t1440 = select i1 %t1439, i8* %t1438, i8* %t1437
+  %t1441 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1442 = icmp eq i32 %t1427, 4
+  %t1443 = select i1 %t1442, i8* %t1441, i8* %t1440
+  %t1444 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1445 = icmp eq i32 %t1427, 5
+  %t1446 = select i1 %t1445, i8* %t1444, i8* %t1443
+  %t1447 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1448 = icmp eq i32 %t1427, 6
+  %t1449 = select i1 %t1448, i8* %t1447, i8* %t1446
+  %t1450 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1451 = icmp eq i32 %t1427, 7
+  %t1452 = select i1 %t1451, i8* %t1450, i8* %t1449
+  %t1453 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1454 = icmp eq i32 %t1427, 8
+  %t1455 = select i1 %t1454, i8* %t1453, i8* %t1452
+  %t1456 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1457 = icmp eq i32 %t1427, 9
+  %t1458 = select i1 %t1457, i8* %t1456, i8* %t1455
+  %t1459 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1460 = icmp eq i32 %t1427, 10
+  %t1461 = select i1 %t1460, i8* %t1459, i8* %t1458
+  %t1462 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1463 = icmp eq i32 %t1427, 11
+  %t1464 = select i1 %t1463, i8* %t1462, i8* %t1461
+  %t1465 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1466 = icmp eq i32 %t1427, 12
+  %t1467 = select i1 %t1466, i8* %t1465, i8* %t1464
+  %t1468 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1469 = icmp eq i32 %t1427, 13
+  %t1470 = select i1 %t1469, i8* %t1468, i8* %t1467
+  %t1471 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1472 = icmp eq i32 %t1427, 14
+  %t1473 = select i1 %t1472, i8* %t1471, i8* %t1470
+  %t1474 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1475 = icmp eq i32 %t1427, 15
+  %t1476 = select i1 %t1475, i8* %t1474, i8* %t1473
+  %t1477 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1478 = icmp eq i32 %t1427, 16
+  %t1479 = select i1 %t1478, i8* %t1477, i8* %t1476
+  %s1480 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1480, i32 0, i32 0
+  %t1481 = icmp eq i8* %t1479, %s1480
+  br label %logical_or_right_end_1367
 
-logical_or_right_end_1362:
-  br label %logical_or_merge_1362
+logical_or_right_end_1367:
+  br label %logical_or_merge_1367
 
-logical_or_merge_1362:
-  %t1477 = phi i1 [ true, %logical_or_entry_1362 ], [ %t1476, %logical_or_right_end_1362 ]
-  br label %logical_or_right_end_1304
+logical_or_merge_1367:
+  %t1482 = phi i1 [ true, %logical_or_entry_1367 ], [ %t1481, %logical_or_right_end_1367 ]
+  br label %logical_or_right_end_1309
 
-logical_or_right_end_1304:
-  br label %logical_or_merge_1304
+logical_or_right_end_1309:
+  br label %logical_or_merge_1309
 
-logical_or_merge_1304:
-  %t1478 = phi i1 [ true, %logical_or_entry_1304 ], [ %t1477, %logical_or_right_end_1304 ]
-  %t1479 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1480 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1481 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1482 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1483 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1484 = load double, double* %l5
-  %t1485 = load double, double* %l6
-  %t1486 = load double, double* %l7
-  %t1487 = load double, double* %l8
-  %t1488 = load i1, i1* %l9
-  %t1489 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1490 = load double, double* %l11
-  %t1491 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1492 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1493 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1494 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1478, label %then43, label %else44
+logical_or_merge_1309:
+  %t1483 = phi i1 [ true, %logical_or_entry_1309 ], [ %t1482, %logical_or_right_end_1309 ]
+  %t1484 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1485 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1486 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1487 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1488 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1489 = load double, double* %l5
+  %t1490 = load double, double* %l6
+  %t1491 = load double, double* %l7
+  %t1492 = load double, double* %l8
+  %t1493 = load i1, i1* %l9
+  %t1494 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1495 = load double, double* %l11
+  %t1496 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1497 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1498 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1499 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1483, label %then43, label %else44
 then43:
   br label %afterloop3
 else44:
-  %t1495 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1496 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1495, i32 0, i32 0
-  %t1497 = load i32, i32* %t1496
-  %t1498 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1499 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1500 = icmp eq i32 %t1497, 0
-  %t1501 = select i1 %t1500, i8* %t1499, i8* %t1498
-  %t1502 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1503 = icmp eq i32 %t1497, 1
-  %t1504 = select i1 %t1503, i8* %t1502, i8* %t1501
-  %t1505 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1506 = icmp eq i32 %t1497, 2
-  %t1507 = select i1 %t1506, i8* %t1505, i8* %t1504
-  %t1508 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1509 = icmp eq i32 %t1497, 3
-  %t1510 = select i1 %t1509, i8* %t1508, i8* %t1507
-  %t1511 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1512 = icmp eq i32 %t1497, 4
-  %t1513 = select i1 %t1512, i8* %t1511, i8* %t1510
-  %t1514 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1515 = icmp eq i32 %t1497, 5
-  %t1516 = select i1 %t1515, i8* %t1514, i8* %t1513
-  %t1517 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1518 = icmp eq i32 %t1497, 6
-  %t1519 = select i1 %t1518, i8* %t1517, i8* %t1516
-  %t1520 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1521 = icmp eq i32 %t1497, 7
-  %t1522 = select i1 %t1521, i8* %t1520, i8* %t1519
-  %t1523 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1524 = icmp eq i32 %t1497, 8
-  %t1525 = select i1 %t1524, i8* %t1523, i8* %t1522
-  %t1526 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1527 = icmp eq i32 %t1497, 9
-  %t1528 = select i1 %t1527, i8* %t1526, i8* %t1525
-  %t1529 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1530 = icmp eq i32 %t1497, 10
-  %t1531 = select i1 %t1530, i8* %t1529, i8* %t1528
-  %t1532 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1533 = icmp eq i32 %t1497, 11
-  %t1534 = select i1 %t1533, i8* %t1532, i8* %t1531
-  %t1535 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1536 = icmp eq i32 %t1497, 12
-  %t1537 = select i1 %t1536, i8* %t1535, i8* %t1534
-  %t1538 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1539 = icmp eq i32 %t1497, 13
-  %t1540 = select i1 %t1539, i8* %t1538, i8* %t1537
-  %t1541 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1542 = icmp eq i32 %t1497, 14
-  %t1543 = select i1 %t1542, i8* %t1541, i8* %t1540
-  %t1544 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1545 = icmp eq i32 %t1497, 15
-  %t1546 = select i1 %t1545, i8* %t1544, i8* %t1543
-  %t1547 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1548 = icmp eq i32 %t1497, 16
-  %t1549 = select i1 %t1548, i8* %t1547, i8* %t1546
-  %s1550 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1550, i32 0, i32 0
-  %t1551 = icmp eq i8* %t1549, %s1550
-  %t1552 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1553 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1554 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1555 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1556 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1557 = load double, double* %l5
-  %t1558 = load double, double* %l6
-  %t1559 = load double, double* %l7
-  %t1560 = load double, double* %l8
-  %t1561 = load i1, i1* %l9
-  %t1562 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1563 = load double, double* %l11
-  %t1564 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1565 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1566 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1567 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1551, label %then46, label %else47
+  %t1500 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1501 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1500, i32 0, i32 0
+  %t1502 = load i32, i32* %t1501
+  %t1503 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1504 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1505 = icmp eq i32 %t1502, 0
+  %t1506 = select i1 %t1505, i8* %t1504, i8* %t1503
+  %t1507 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1508 = icmp eq i32 %t1502, 1
+  %t1509 = select i1 %t1508, i8* %t1507, i8* %t1506
+  %t1510 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1511 = icmp eq i32 %t1502, 2
+  %t1512 = select i1 %t1511, i8* %t1510, i8* %t1509
+  %t1513 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1514 = icmp eq i32 %t1502, 3
+  %t1515 = select i1 %t1514, i8* %t1513, i8* %t1512
+  %t1516 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1517 = icmp eq i32 %t1502, 4
+  %t1518 = select i1 %t1517, i8* %t1516, i8* %t1515
+  %t1519 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1520 = icmp eq i32 %t1502, 5
+  %t1521 = select i1 %t1520, i8* %t1519, i8* %t1518
+  %t1522 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1523 = icmp eq i32 %t1502, 6
+  %t1524 = select i1 %t1523, i8* %t1522, i8* %t1521
+  %t1525 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1526 = icmp eq i32 %t1502, 7
+  %t1527 = select i1 %t1526, i8* %t1525, i8* %t1524
+  %t1528 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1529 = icmp eq i32 %t1502, 8
+  %t1530 = select i1 %t1529, i8* %t1528, i8* %t1527
+  %t1531 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1532 = icmp eq i32 %t1502, 9
+  %t1533 = select i1 %t1532, i8* %t1531, i8* %t1530
+  %t1534 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1535 = icmp eq i32 %t1502, 10
+  %t1536 = select i1 %t1535, i8* %t1534, i8* %t1533
+  %t1537 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1538 = icmp eq i32 %t1502, 11
+  %t1539 = select i1 %t1538, i8* %t1537, i8* %t1536
+  %t1540 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1541 = icmp eq i32 %t1502, 12
+  %t1542 = select i1 %t1541, i8* %t1540, i8* %t1539
+  %t1543 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1544 = icmp eq i32 %t1502, 13
+  %t1545 = select i1 %t1544, i8* %t1543, i8* %t1542
+  %t1546 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1547 = icmp eq i32 %t1502, 14
+  %t1548 = select i1 %t1547, i8* %t1546, i8* %t1545
+  %t1549 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1550 = icmp eq i32 %t1502, 15
+  %t1551 = select i1 %t1550, i8* %t1549, i8* %t1548
+  %t1552 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1553 = icmp eq i32 %t1502, 16
+  %t1554 = select i1 %t1553, i8* %t1552, i8* %t1551
+  %s1555 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1555, i32 0, i32 0
+  %t1556 = icmp eq i8* %t1554, %s1555
+  %t1557 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1558 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1559 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1560 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1561 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1562 = load double, double* %l5
+  %t1563 = load double, double* %l6
+  %t1564 = load double, double* %l7
+  %t1565 = load double, double* %l8
+  %t1566 = load i1, i1* %l9
+  %t1567 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1568 = load double, double* %l11
+  %t1569 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1570 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1571 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1572 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1556, label %then46, label %else47
 then46:
-  %t1568 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1569 = load { %LoopContext*, i64 }, { %LoopContext*, i64 }* %t1568
-  %t1570 = extractvalue { %LoopContext*, i64 } %t1569, 1
-  %t1571 = icmp eq i64 %t1570, 0
-  %t1572 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1573 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1574 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1575 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1576 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1577 = load double, double* %l5
-  %t1578 = load double, double* %l6
-  %t1579 = load double, double* %l7
-  %t1580 = load double, double* %l8
-  %t1581 = load i1, i1* %l9
-  %t1582 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1583 = load double, double* %l11
-  %t1584 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1585 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1586 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1587 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1571, label %then49, label %else50
+  %t1573 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1574 = load { %LoopContext*, i64 }, { %LoopContext*, i64 }* %t1573
+  %t1575 = extractvalue { %LoopContext*, i64 } %t1574, 1
+  %t1576 = icmp eq i64 %t1575, 0
+  %t1577 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1578 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1579 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1580 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1581 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1582 = load double, double* %l5
+  %t1583 = load double, double* %l6
+  %t1584 = load double, double* %l7
+  %t1585 = load double, double* %l8
+  %t1586 = load i1, i1* %l9
+  %t1587 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1588 = load double, double* %l11
+  %t1589 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1590 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1591 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1592 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1576, label %then49, label %else50
 then49:
-  %t1588 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1589 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.1589, i32 0, i32 0
-  %t1590 = extractvalue %NativeFunction %function, 0
-  %t1591 = add i8* %s1589, %t1590
-  %t1592 = load i8, i8* %t1591
-  %t1593 = add i8 %t1592, 96
-  %t1594 = alloca [2 x i8], align 1
-  %t1595 = getelementptr [2 x i8], [2 x i8]* %t1594, i32 0, i32 0
-  store i8 %t1593, i8* %t1595
-  %t1596 = getelementptr [2 x i8], [2 x i8]* %t1594, i32 0, i32 1
-  store i8 0, i8* %t1596
-  %t1597 = getelementptr [2 x i8], [2 x i8]* %t1594, i32 0, i32 0
-  %t1598 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1588, i8* %t1597)
-  store { i8**, i64 }* %t1598, { i8**, i64 }** %l0
+  %t1593 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1594 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.1594, i32 0, i32 0
+  %t1595 = extractvalue %NativeFunction %function, 0
+  %t1596 = add i8* %s1594, %t1595
+  %t1597 = load i8, i8* %t1596
+  %t1598 = add i8 %t1597, 96
+  %t1599 = alloca [2 x i8], align 1
+  %t1600 = getelementptr [2 x i8], [2 x i8]* %t1599, i32 0, i32 0
+  store i8 %t1598, i8* %t1600
+  %t1601 = getelementptr [2 x i8], [2 x i8]* %t1599, i32 0, i32 1
+  store i8 0, i8* %t1601
+  %t1602 = getelementptr [2 x i8], [2 x i8]* %t1599, i32 0, i32 0
+  %t1603 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1593, i8* %t1602)
+  store { i8**, i64 }* %t1603, { i8**, i64 }** %l0
   br label %merge51
 else50:
-  %t1599 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1600 = call %LoopContext @last_loop_context({ %LoopContext*, i64 }* %t1599)
-  store %LoopContext %t1600, %LoopContext* %l28
-  %t1601 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1602 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1602, i32 0, i32 0
-  %t1603 = load %LoopContext, %LoopContext* %l28
-  %t1604 = extractvalue %LoopContext %t1603, 0
-  %t1605 = add i8* %s1602, %t1604
-  %t1606 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1601, i8* %t1605)
-  store { i8**, i64 }* %t1606, { i8**, i64 }** %l1
+  %t1604 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1605 = call %LoopContext @last_loop_context({ %LoopContext*, i64 }* %t1604)
+  store %LoopContext %t1605, %LoopContext* %l32
+  %t1606 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1607 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1607, i32 0, i32 0
+  %t1608 = load %LoopContext, %LoopContext* %l32
+  %t1609 = extractvalue %LoopContext %t1608, 0
+  %t1610 = add i8* %s1607, %t1609
+  %t1611 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1606, i8* %t1610)
+  store { i8**, i64 }* %t1611, { i8**, i64 }** %l1
   store i1 1, i1* %l9
   br label %merge51
 merge51:
-  %t1607 = phi { i8**, i64 }* [ %t1598, %then49 ], [ %t1572, %else50 ]
-  %t1608 = phi { i8**, i64 }* [ %t1573, %then49 ], [ %t1606, %else50 ]
-  %t1609 = phi i1 [ %t1581, %then49 ], [ 1, %else50 ]
-  store { i8**, i64 }* %t1607, { i8**, i64 }** %l0
-  store { i8**, i64 }* %t1608, { i8**, i64 }** %l1
-  store i1 %t1609, i1* %l9
-  %t1610 = load double, double* %l11
-  %t1611 = sitofp i64 1 to double
-  %t1612 = fadd double %t1610, %t1611
-  store double %t1612, double* %l11
-  %t1614 = load double, double* %l11
-  %t1615 = fcmp olt double %t1614, %end
-  br label %logical_and_entry_1613
+  %t1612 = phi { i8**, i64 }* [ %t1603, %then49 ], [ %t1577, %else50 ]
+  %t1613 = phi { i8**, i64 }* [ %t1578, %then49 ], [ %t1611, %else50 ]
+  %t1614 = phi i1 [ %t1586, %then49 ], [ 1, %else50 ]
+  store { i8**, i64 }* %t1612, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t1613, { i8**, i64 }** %l1
+  store i1 %t1614, i1* %l9
+  %t1615 = load double, double* %l11
+  %t1616 = sitofp i64 1 to double
+  %t1617 = fadd double %t1615, %t1616
+  store double %t1617, double* %l11
+  %t1619 = load double, double* %l11
+  %t1620 = fcmp olt double %t1619, %end
+  br label %logical_and_entry_1618
 
-logical_and_entry_1613:
-  br i1 %t1615, label %logical_and_right_1613, label %logical_and_merge_1613
+logical_and_entry_1618:
+  br i1 %t1620, label %logical_and_right_1618, label %logical_and_merge_1618
 
-logical_and_right_1613:
-  %t1616 = load i1, i1* %l9
-  br label %logical_and_right_end_1613
+logical_and_right_1618:
+  %t1621 = load i1, i1* %l9
+  br label %logical_and_right_end_1618
 
-logical_and_right_end_1613:
-  br label %logical_and_merge_1613
+logical_and_right_end_1618:
+  br label %logical_and_merge_1618
 
-logical_and_merge_1613:
-  %t1617 = phi i1 [ false, %logical_and_entry_1613 ], [ %t1616, %logical_and_right_end_1613 ]
-  %t1618 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1619 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1620 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1621 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1622 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1623 = load double, double* %l5
-  %t1624 = load double, double* %l6
-  %t1625 = load double, double* %l7
-  %t1626 = load double, double* %l8
-  %t1627 = load i1, i1* %l9
-  %t1628 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1629 = load double, double* %l11
-  %t1630 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1631 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1632 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1633 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1617, label %then52, label %merge53
+logical_and_merge_1618:
+  %t1622 = phi i1 [ false, %logical_and_entry_1618 ], [ %t1621, %logical_and_right_end_1618 ]
+  %t1623 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1624 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1625 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1626 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1627 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1628 = load double, double* %l5
+  %t1629 = load double, double* %l6
+  %t1630 = load double, double* %l7
+  %t1631 = load double, double* %l8
+  %t1632 = load i1, i1* %l9
+  %t1633 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1634 = load double, double* %l11
+  %t1635 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1636 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1637 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1638 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1622, label %then52, label %merge53
 then52:
-  %t1634 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1635 = getelementptr inbounds [53 x i8], [53 x i8]* @.str.1635, i32 0, i32 0
-  %t1636 = extractvalue %NativeFunction %function, 0
-  %t1637 = add i8* %s1635, %t1636
-  %t1638 = load i8, i8* %t1637
-  %t1639 = add i8 %t1638, 96
-  %t1640 = alloca [2 x i8], align 1
-  %t1641 = getelementptr [2 x i8], [2 x i8]* %t1640, i32 0, i32 0
-  store i8 %t1639, i8* %t1641
-  %t1642 = getelementptr [2 x i8], [2 x i8]* %t1640, i32 0, i32 1
-  store i8 0, i8* %t1642
-  %t1643 = getelementptr [2 x i8], [2 x i8]* %t1640, i32 0, i32 0
-  %t1644 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1634, i8* %t1643)
-  store { i8**, i64 }* %t1644, { i8**, i64 }** %l0
+  %t1639 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1640 = getelementptr inbounds [53 x i8], [53 x i8]* @.str.1640, i32 0, i32 0
+  %t1641 = extractvalue %NativeFunction %function, 0
+  %t1642 = add i8* %s1640, %t1641
+  %t1643 = load i8, i8* %t1642
+  %t1644 = add i8 %t1643, 96
+  %t1645 = alloca [2 x i8], align 1
+  %t1646 = getelementptr [2 x i8], [2 x i8]* %t1645, i32 0, i32 0
+  store i8 %t1644, i8* %t1646
+  %t1647 = getelementptr [2 x i8], [2 x i8]* %t1645, i32 0, i32 1
+  store i8 0, i8* %t1647
+  %t1648 = getelementptr [2 x i8], [2 x i8]* %t1645, i32 0, i32 0
+  %t1649 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1639, i8* %t1648)
+  store { i8**, i64 }* %t1649, { i8**, i64 }** %l0
   br label %merge53
 merge53:
-  %t1645 = phi { i8**, i64 }* [ %t1644, %then52 ], [ %t1618, %then46 ]
-  store { i8**, i64 }* %t1645, { i8**, i64 }** %l0
+  %t1650 = phi { i8**, i64 }* [ %t1649, %then52 ], [ %t1623, %then46 ]
+  store { i8**, i64 }* %t1650, { i8**, i64 }** %l0
   br label %afterloop3
 else47:
-  %t1646 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1647 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1646, i32 0, i32 0
-  %t1648 = load i32, i32* %t1647
-  %t1649 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1650 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1651 = icmp eq i32 %t1648, 0
-  %t1652 = select i1 %t1651, i8* %t1650, i8* %t1649
-  %t1653 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1654 = icmp eq i32 %t1648, 1
-  %t1655 = select i1 %t1654, i8* %t1653, i8* %t1652
-  %t1656 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1657 = icmp eq i32 %t1648, 2
-  %t1658 = select i1 %t1657, i8* %t1656, i8* %t1655
-  %t1659 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1660 = icmp eq i32 %t1648, 3
-  %t1661 = select i1 %t1660, i8* %t1659, i8* %t1658
-  %t1662 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1663 = icmp eq i32 %t1648, 4
-  %t1664 = select i1 %t1663, i8* %t1662, i8* %t1661
-  %t1665 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1666 = icmp eq i32 %t1648, 5
-  %t1667 = select i1 %t1666, i8* %t1665, i8* %t1664
-  %t1668 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1669 = icmp eq i32 %t1648, 6
-  %t1670 = select i1 %t1669, i8* %t1668, i8* %t1667
-  %t1671 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1672 = icmp eq i32 %t1648, 7
-  %t1673 = select i1 %t1672, i8* %t1671, i8* %t1670
-  %t1674 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1675 = icmp eq i32 %t1648, 8
-  %t1676 = select i1 %t1675, i8* %t1674, i8* %t1673
-  %t1677 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1678 = icmp eq i32 %t1648, 9
-  %t1679 = select i1 %t1678, i8* %t1677, i8* %t1676
-  %t1680 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1681 = icmp eq i32 %t1648, 10
-  %t1682 = select i1 %t1681, i8* %t1680, i8* %t1679
-  %t1683 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1684 = icmp eq i32 %t1648, 11
-  %t1685 = select i1 %t1684, i8* %t1683, i8* %t1682
-  %t1686 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1687 = icmp eq i32 %t1648, 12
-  %t1688 = select i1 %t1687, i8* %t1686, i8* %t1685
-  %t1689 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1690 = icmp eq i32 %t1648, 13
-  %t1691 = select i1 %t1690, i8* %t1689, i8* %t1688
-  %t1692 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1693 = icmp eq i32 %t1648, 14
-  %t1694 = select i1 %t1693, i8* %t1692, i8* %t1691
-  %t1695 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1696 = icmp eq i32 %t1648, 15
-  %t1697 = select i1 %t1696, i8* %t1695, i8* %t1694
-  %t1698 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1699 = icmp eq i32 %t1648, 16
-  %t1700 = select i1 %t1699, i8* %t1698, i8* %t1697
-  %s1701 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1701, i32 0, i32 0
-  %t1702 = icmp eq i8* %t1700, %s1701
-  %t1703 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1704 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1705 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1706 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1707 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1708 = load double, double* %l5
-  %t1709 = load double, double* %l6
-  %t1710 = load double, double* %l7
-  %t1711 = load double, double* %l8
-  %t1712 = load i1, i1* %l9
-  %t1713 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1714 = load double, double* %l11
-  %t1715 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1716 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1717 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1718 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1702, label %then54, label %else55
+  %t1651 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1652 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1651, i32 0, i32 0
+  %t1653 = load i32, i32* %t1652
+  %t1654 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1655 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1656 = icmp eq i32 %t1653, 0
+  %t1657 = select i1 %t1656, i8* %t1655, i8* %t1654
+  %t1658 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1659 = icmp eq i32 %t1653, 1
+  %t1660 = select i1 %t1659, i8* %t1658, i8* %t1657
+  %t1661 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1662 = icmp eq i32 %t1653, 2
+  %t1663 = select i1 %t1662, i8* %t1661, i8* %t1660
+  %t1664 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1665 = icmp eq i32 %t1653, 3
+  %t1666 = select i1 %t1665, i8* %t1664, i8* %t1663
+  %t1667 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1668 = icmp eq i32 %t1653, 4
+  %t1669 = select i1 %t1668, i8* %t1667, i8* %t1666
+  %t1670 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1671 = icmp eq i32 %t1653, 5
+  %t1672 = select i1 %t1671, i8* %t1670, i8* %t1669
+  %t1673 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1674 = icmp eq i32 %t1653, 6
+  %t1675 = select i1 %t1674, i8* %t1673, i8* %t1672
+  %t1676 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1677 = icmp eq i32 %t1653, 7
+  %t1678 = select i1 %t1677, i8* %t1676, i8* %t1675
+  %t1679 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1680 = icmp eq i32 %t1653, 8
+  %t1681 = select i1 %t1680, i8* %t1679, i8* %t1678
+  %t1682 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1683 = icmp eq i32 %t1653, 9
+  %t1684 = select i1 %t1683, i8* %t1682, i8* %t1681
+  %t1685 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1686 = icmp eq i32 %t1653, 10
+  %t1687 = select i1 %t1686, i8* %t1685, i8* %t1684
+  %t1688 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1689 = icmp eq i32 %t1653, 11
+  %t1690 = select i1 %t1689, i8* %t1688, i8* %t1687
+  %t1691 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1692 = icmp eq i32 %t1653, 12
+  %t1693 = select i1 %t1692, i8* %t1691, i8* %t1690
+  %t1694 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1695 = icmp eq i32 %t1653, 13
+  %t1696 = select i1 %t1695, i8* %t1694, i8* %t1693
+  %t1697 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1698 = icmp eq i32 %t1653, 14
+  %t1699 = select i1 %t1698, i8* %t1697, i8* %t1696
+  %t1700 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1701 = icmp eq i32 %t1653, 15
+  %t1702 = select i1 %t1701, i8* %t1700, i8* %t1699
+  %t1703 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1704 = icmp eq i32 %t1653, 16
+  %t1705 = select i1 %t1704, i8* %t1703, i8* %t1702
+  %s1706 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1706, i32 0, i32 0
+  %t1707 = icmp eq i8* %t1705, %s1706
+  %t1708 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1709 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1710 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1711 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1712 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1713 = load double, double* %l5
+  %t1714 = load double, double* %l6
+  %t1715 = load double, double* %l7
+  %t1716 = load double, double* %l8
+  %t1717 = load i1, i1* %l9
+  %t1718 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1719 = load double, double* %l11
+  %t1720 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1721 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1722 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1723 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1707, label %then54, label %else55
 then54:
-  %t1719 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1720 = load { %LoopContext*, i64 }, { %LoopContext*, i64 }* %t1719
-  %t1721 = extractvalue { %LoopContext*, i64 } %t1720, 1
-  %t1722 = icmp eq i64 %t1721, 0
-  %t1723 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1724 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1725 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1726 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1727 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1728 = load double, double* %l5
-  %t1729 = load double, double* %l6
-  %t1730 = load double, double* %l7
-  %t1731 = load double, double* %l8
-  %t1732 = load i1, i1* %l9
-  %t1733 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1734 = load double, double* %l11
-  %t1735 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1736 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1737 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1738 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1722, label %then57, label %else58
+  %t1724 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1725 = load { %LoopContext*, i64 }, { %LoopContext*, i64 }* %t1724
+  %t1726 = extractvalue { %LoopContext*, i64 } %t1725, 1
+  %t1727 = icmp eq i64 %t1726, 0
+  %t1728 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1729 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1730 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1731 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1732 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1733 = load double, double* %l5
+  %t1734 = load double, double* %l6
+  %t1735 = load double, double* %l7
+  %t1736 = load double, double* %l8
+  %t1737 = load i1, i1* %l9
+  %t1738 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1739 = load double, double* %l11
+  %t1740 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1741 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1742 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1743 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1727, label %then57, label %else58
 then57:
-  %t1739 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1740 = getelementptr inbounds [44 x i8], [44 x i8]* @.str.1740, i32 0, i32 0
-  %t1741 = extractvalue %NativeFunction %function, 0
-  %t1742 = add i8* %s1740, %t1741
-  %t1743 = load i8, i8* %t1742
-  %t1744 = add i8 %t1743, 96
-  %t1745 = alloca [2 x i8], align 1
-  %t1746 = getelementptr [2 x i8], [2 x i8]* %t1745, i32 0, i32 0
-  store i8 %t1744, i8* %t1746
-  %t1747 = getelementptr [2 x i8], [2 x i8]* %t1745, i32 0, i32 1
-  store i8 0, i8* %t1747
-  %t1748 = getelementptr [2 x i8], [2 x i8]* %t1745, i32 0, i32 0
-  %t1749 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1739, i8* %t1748)
-  store { i8**, i64 }* %t1749, { i8**, i64 }** %l0
+  %t1744 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1745 = getelementptr inbounds [44 x i8], [44 x i8]* @.str.1745, i32 0, i32 0
+  %t1746 = extractvalue %NativeFunction %function, 0
+  %t1747 = add i8* %s1745, %t1746
+  %t1748 = load i8, i8* %t1747
+  %t1749 = add i8 %t1748, 96
+  %t1750 = alloca [2 x i8], align 1
+  %t1751 = getelementptr [2 x i8], [2 x i8]* %t1750, i32 0, i32 0
+  store i8 %t1749, i8* %t1751
+  %t1752 = getelementptr [2 x i8], [2 x i8]* %t1750, i32 0, i32 1
+  store i8 0, i8* %t1752
+  %t1753 = getelementptr [2 x i8], [2 x i8]* %t1750, i32 0, i32 0
+  %t1754 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1744, i8* %t1753)
+  store { i8**, i64 }* %t1754, { i8**, i64 }** %l0
   br label %merge59
 else58:
-  %t1750 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1751 = call %LoopContext @last_loop_context({ %LoopContext*, i64 }* %t1750)
-  store %LoopContext %t1751, %LoopContext* %l29
-  %t1752 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %s1753 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1753, i32 0, i32 0
-  %t1754 = load %LoopContext, %LoopContext* %l29
-  %t1755 = extractvalue %LoopContext %t1754, 1
-  %t1756 = add i8* %s1753, %t1755
-  %t1757 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1752, i8* %t1756)
-  store { i8**, i64 }* %t1757, { i8**, i64 }** %l1
+  %t1755 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1756 = call %LoopContext @last_loop_context({ %LoopContext*, i64 }* %t1755)
+  store %LoopContext %t1756, %LoopContext* %l33
+  %t1757 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %s1758 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.1758, i32 0, i32 0
+  %t1759 = load %LoopContext, %LoopContext* %l33
+  %t1760 = extractvalue %LoopContext %t1759, 1
+  %t1761 = add i8* %s1758, %t1760
+  %t1762 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1757, i8* %t1761)
+  store { i8**, i64 }* %t1762, { i8**, i64 }** %l1
   store i1 1, i1* %l9
   br label %merge59
 merge59:
-  %t1758 = phi { i8**, i64 }* [ %t1749, %then57 ], [ %t1723, %else58 ]
-  %t1759 = phi { i8**, i64 }* [ %t1724, %then57 ], [ %t1757, %else58 ]
-  %t1760 = phi i1 [ %t1732, %then57 ], [ 1, %else58 ]
-  store { i8**, i64 }* %t1758, { i8**, i64 }** %l0
-  store { i8**, i64 }* %t1759, { i8**, i64 }** %l1
-  store i1 %t1760, i1* %l9
-  %t1761 = load double, double* %l11
-  %t1762 = sitofp i64 1 to double
-  %t1763 = fadd double %t1761, %t1762
-  store double %t1763, double* %l11
-  %t1765 = load double, double* %l11
-  %t1766 = fcmp olt double %t1765, %end
-  br label %logical_and_entry_1764
+  %t1763 = phi { i8**, i64 }* [ %t1754, %then57 ], [ %t1728, %else58 ]
+  %t1764 = phi { i8**, i64 }* [ %t1729, %then57 ], [ %t1762, %else58 ]
+  %t1765 = phi i1 [ %t1737, %then57 ], [ 1, %else58 ]
+  store { i8**, i64 }* %t1763, { i8**, i64 }** %l0
+  store { i8**, i64 }* %t1764, { i8**, i64 }** %l1
+  store i1 %t1765, i1* %l9
+  %t1766 = load double, double* %l11
+  %t1767 = sitofp i64 1 to double
+  %t1768 = fadd double %t1766, %t1767
+  store double %t1768, double* %l11
+  %t1770 = load double, double* %l11
+  %t1771 = fcmp olt double %t1770, %end
+  br label %logical_and_entry_1769
 
-logical_and_entry_1764:
-  br i1 %t1766, label %logical_and_right_1764, label %logical_and_merge_1764
+logical_and_entry_1769:
+  br i1 %t1771, label %logical_and_right_1769, label %logical_and_merge_1769
 
-logical_and_right_1764:
-  %t1767 = load i1, i1* %l9
-  br label %logical_and_right_end_1764
+logical_and_right_1769:
+  %t1772 = load i1, i1* %l9
+  br label %logical_and_right_end_1769
 
-logical_and_right_end_1764:
-  br label %logical_and_merge_1764
+logical_and_right_end_1769:
+  br label %logical_and_merge_1769
 
-logical_and_merge_1764:
-  %t1768 = phi i1 [ false, %logical_and_entry_1764 ], [ %t1767, %logical_and_right_end_1764 ]
-  %t1769 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1770 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1771 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1772 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1773 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1774 = load double, double* %l5
-  %t1775 = load double, double* %l6
-  %t1776 = load double, double* %l7
-  %t1777 = load double, double* %l8
-  %t1778 = load i1, i1* %l9
-  %t1779 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1780 = load double, double* %l11
-  %t1781 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1782 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1783 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1784 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1768, label %then60, label %merge61
+logical_and_merge_1769:
+  %t1773 = phi i1 [ false, %logical_and_entry_1769 ], [ %t1772, %logical_and_right_end_1769 ]
+  %t1774 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1775 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1776 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1777 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1778 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1779 = load double, double* %l5
+  %t1780 = load double, double* %l6
+  %t1781 = load double, double* %l7
+  %t1782 = load double, double* %l8
+  %t1783 = load i1, i1* %l9
+  %t1784 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1785 = load double, double* %l11
+  %t1786 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1787 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1788 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1789 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1773, label %then60, label %merge61
 then60:
-  %t1785 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s1786 = getelementptr inbounds [56 x i8], [56 x i8]* @.str.1786, i32 0, i32 0
-  %t1787 = extractvalue %NativeFunction %function, 0
-  %t1788 = add i8* %s1786, %t1787
-  %t1789 = load i8, i8* %t1788
-  %t1790 = add i8 %t1789, 96
-  %t1791 = alloca [2 x i8], align 1
-  %t1792 = getelementptr [2 x i8], [2 x i8]* %t1791, i32 0, i32 0
-  store i8 %t1790, i8* %t1792
-  %t1793 = getelementptr [2 x i8], [2 x i8]* %t1791, i32 0, i32 1
-  store i8 0, i8* %t1793
-  %t1794 = getelementptr [2 x i8], [2 x i8]* %t1791, i32 0, i32 0
-  %t1795 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1785, i8* %t1794)
-  store { i8**, i64 }* %t1795, { i8**, i64 }** %l0
+  %t1790 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s1791 = getelementptr inbounds [56 x i8], [56 x i8]* @.str.1791, i32 0, i32 0
+  %t1792 = extractvalue %NativeFunction %function, 0
+  %t1793 = add i8* %s1791, %t1792
+  %t1794 = load i8, i8* %t1793
+  %t1795 = add i8 %t1794, 96
+  %t1796 = alloca [2 x i8], align 1
+  %t1797 = getelementptr [2 x i8], [2 x i8]* %t1796, i32 0, i32 0
+  store i8 %t1795, i8* %t1797
+  %t1798 = getelementptr [2 x i8], [2 x i8]* %t1796, i32 0, i32 1
+  store i8 0, i8* %t1798
+  %t1799 = getelementptr [2 x i8], [2 x i8]* %t1796, i32 0, i32 0
+  %t1800 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t1790, i8* %t1799)
+  store { i8**, i64 }* %t1800, { i8**, i64 }** %l0
   br label %merge61
 merge61:
-  %t1796 = phi { i8**, i64 }* [ %t1795, %then60 ], [ %t1769, %then54 ]
-  store { i8**, i64 }* %t1796, { i8**, i64 }** %l0
+  %t1801 = phi { i8**, i64 }* [ %t1800, %then60 ], [ %t1774, %then54 ]
+  store { i8**, i64 }* %t1801, { i8**, i64 }** %l0
   br label %afterloop3
 else55:
-  %t1797 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1798 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1797, i32 0, i32 0
-  %t1799 = load i32, i32* %t1798
-  %t1800 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1801 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1802 = icmp eq i32 %t1799, 0
-  %t1803 = select i1 %t1802, i8* %t1801, i8* %t1800
-  %t1804 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1805 = icmp eq i32 %t1799, 1
-  %t1806 = select i1 %t1805, i8* %t1804, i8* %t1803
-  %t1807 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1808 = icmp eq i32 %t1799, 2
-  %t1809 = select i1 %t1808, i8* %t1807, i8* %t1806
-  %t1810 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1811 = icmp eq i32 %t1799, 3
-  %t1812 = select i1 %t1811, i8* %t1810, i8* %t1809
-  %t1813 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1814 = icmp eq i32 %t1799, 4
-  %t1815 = select i1 %t1814, i8* %t1813, i8* %t1812
-  %t1816 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1817 = icmp eq i32 %t1799, 5
-  %t1818 = select i1 %t1817, i8* %t1816, i8* %t1815
-  %t1819 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1820 = icmp eq i32 %t1799, 6
-  %t1821 = select i1 %t1820, i8* %t1819, i8* %t1818
-  %t1822 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1823 = icmp eq i32 %t1799, 7
-  %t1824 = select i1 %t1823, i8* %t1822, i8* %t1821
-  %t1825 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1826 = icmp eq i32 %t1799, 8
-  %t1827 = select i1 %t1826, i8* %t1825, i8* %t1824
-  %t1828 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1829 = icmp eq i32 %t1799, 9
-  %t1830 = select i1 %t1829, i8* %t1828, i8* %t1827
-  %t1831 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1832 = icmp eq i32 %t1799, 10
-  %t1833 = select i1 %t1832, i8* %t1831, i8* %t1830
-  %t1834 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1835 = icmp eq i32 %t1799, 11
-  %t1836 = select i1 %t1835, i8* %t1834, i8* %t1833
-  %t1837 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1838 = icmp eq i32 %t1799, 12
-  %t1839 = select i1 %t1838, i8* %t1837, i8* %t1836
-  %t1840 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1841 = icmp eq i32 %t1799, 13
-  %t1842 = select i1 %t1841, i8* %t1840, i8* %t1839
-  %t1843 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1844 = icmp eq i32 %t1799, 14
-  %t1845 = select i1 %t1844, i8* %t1843, i8* %t1842
-  %t1846 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1847 = icmp eq i32 %t1799, 15
-  %t1848 = select i1 %t1847, i8* %t1846, i8* %t1845
-  %t1849 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1850 = icmp eq i32 %t1799, 16
-  %t1851 = select i1 %t1850, i8* %t1849, i8* %t1848
-  %s1852 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1852, i32 0, i32 0
-  %t1853 = icmp eq i8* %t1851, %s1852
-  %t1854 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1855 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1856 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1857 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1858 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1859 = load double, double* %l5
-  %t1860 = load double, double* %l6
-  %t1861 = load double, double* %l7
-  %t1862 = load double, double* %l8
-  %t1863 = load i1, i1* %l9
-  %t1864 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1865 = load double, double* %l11
-  %t1866 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1867 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1868 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1869 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1853, label %then62, label %else63
-then62:
+  %t1802 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1803 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1802, i32 0, i32 0
+  %t1804 = load i32, i32* %t1803
+  %t1805 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1806 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1807 = icmp eq i32 %t1804, 0
+  %t1808 = select i1 %t1807, i8* %t1806, i8* %t1805
+  %t1809 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1810 = icmp eq i32 %t1804, 1
+  %t1811 = select i1 %t1810, i8* %t1809, i8* %t1808
+  %t1812 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1813 = icmp eq i32 %t1804, 2
+  %t1814 = select i1 %t1813, i8* %t1812, i8* %t1811
+  %t1815 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1816 = icmp eq i32 %t1804, 3
+  %t1817 = select i1 %t1816, i8* %t1815, i8* %t1814
+  %t1818 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1819 = icmp eq i32 %t1804, 4
+  %t1820 = select i1 %t1819, i8* %t1818, i8* %t1817
+  %t1821 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1822 = icmp eq i32 %t1804, 5
+  %t1823 = select i1 %t1822, i8* %t1821, i8* %t1820
+  %t1824 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1825 = icmp eq i32 %t1804, 6
+  %t1826 = select i1 %t1825, i8* %t1824, i8* %t1823
+  %t1827 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1828 = icmp eq i32 %t1804, 7
+  %t1829 = select i1 %t1828, i8* %t1827, i8* %t1826
+  %t1830 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1831 = icmp eq i32 %t1804, 8
+  %t1832 = select i1 %t1831, i8* %t1830, i8* %t1829
+  %t1833 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1834 = icmp eq i32 %t1804, 9
+  %t1835 = select i1 %t1834, i8* %t1833, i8* %t1832
+  %t1836 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1837 = icmp eq i32 %t1804, 10
+  %t1838 = select i1 %t1837, i8* %t1836, i8* %t1835
+  %t1839 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1840 = icmp eq i32 %t1804, 11
+  %t1841 = select i1 %t1840, i8* %t1839, i8* %t1838
+  %t1842 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1843 = icmp eq i32 %t1804, 12
+  %t1844 = select i1 %t1843, i8* %t1842, i8* %t1841
+  %t1845 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1846 = icmp eq i32 %t1804, 13
+  %t1847 = select i1 %t1846, i8* %t1845, i8* %t1844
+  %t1848 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1849 = icmp eq i32 %t1804, 14
+  %t1850 = select i1 %t1849, i8* %t1848, i8* %t1847
+  %t1851 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1852 = icmp eq i32 %t1804, 15
+  %t1853 = select i1 %t1852, i8* %t1851, i8* %t1850
+  %t1854 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1855 = icmp eq i32 %t1804, 16
+  %t1856 = select i1 %t1855, i8* %t1854, i8* %t1853
+  %s1857 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1857, i32 0, i32 0
+  %t1858 = icmp eq i8* %t1856, %s1857
+  %t1859 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1860 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1861 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1862 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1863 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1864 = load double, double* %l5
+  %t1865 = load double, double* %l6
+  %t1866 = load double, double* %l7
+  %t1867 = load double, double* %l8
+  %t1868 = load i1, i1* %l9
+  %t1869 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
   %t1870 = load double, double* %l11
-  %t1871 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1872 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1873 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1874 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1875 = load double, double* %l5
-  %t1876 = load double, double* %l6
-  %t1877 = load double, double* %l7
-  %t1878 = load double, double* %l8
-  %t1879 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1880 = call %BlockLoweringResult @lower_for_instruction(%NativeFunction %function, double %t1870, i8* %llvm_return, { %ParameterBinding*, i64 }* %t1871, { %LocalBinding*, i64 }* %t1872, { i8**, i64 }* %t1873, { i8**, i64 }* %t1874, double %t1875, double %t1876, double %t1877, double %t1878, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t1879, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
-  store %BlockLoweringResult %t1880, %BlockLoweringResult* %l30
-  %t1881 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1882 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1883 = extractvalue %BlockLoweringResult %t1882, 6
-  %t1884 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1881, { i8**, i64 }* %t1883)
-  store { i8**, i64 }* %t1884, { i8**, i64 }** %l0
-  %t1885 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1886 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1887 = extractvalue %BlockLoweringResult %t1886, 9
-  %t1888 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1885 to { i8**, i64 }*
-  %t1889 = bitcast { %LifetimeRegionMetadata**, i64 }* %t1887 to { i8**, i64 }*
-  %t1890 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1888, { i8**, i64 }* %t1889)
-  %t1891 = bitcast { i8**, i64 }* %t1890 to { %LifetimeRegionMetadata*, i64 }*
-  store { %LifetimeRegionMetadata*, i64 }* %t1891, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1892 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1893 = extractvalue %BlockLoweringResult %t1892, 0
-  store { i8**, i64 }* %t1893, { i8**, i64 }** %l1
-  %t1894 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1895 = extractvalue %BlockLoweringResult %t1894, 1
-  store { i8**, i64 }* %t1895, { i8**, i64 }** %l2
-  %t1896 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1897 = extractvalue %BlockLoweringResult %t1896, 2
-  %t1898 = bitcast { %LocalBinding**, i64 }* %t1897 to { %LocalBinding*, i64 }*
-  store { %LocalBinding*, i64 }* %t1898, { %LocalBinding*, i64 }** %l3
-  %t1899 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1900 = extractvalue %BlockLoweringResult %t1899, 3
-  %t1901 = bitcast { %ParameterBinding**, i64 }* %t1900 to { %ParameterBinding*, i64 }*
-  store { %ParameterBinding*, i64 }* %t1901, { %ParameterBinding*, i64 }** %l4
-  %t1902 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1903 = extractvalue %BlockLoweringResult %t1902, 4
-  store double %t1903, double* %l5
-  %t1904 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1905 = extractvalue %BlockLoweringResult %t1904, 5
-  store double %t1905, double* %l6
-  %t1906 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1907 = extractvalue %BlockLoweringResult %t1906, 8
-  store double %t1907, double* %l7
-  %t1908 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1909 = extractvalue %BlockLoweringResult %t1908, 10
-  store double %t1909, double* %l8
-  %t1910 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1911 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1912 = extractvalue %BlockLoweringResult %t1911, 12
-  %t1913 = bitcast { %LocalMutation*, i64 }* %t1910 to { i8**, i64 }*
-  %t1914 = bitcast { %LocalMutation**, i64 }* %t1912 to { i8**, i64 }*
-  %t1915 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1913, { i8**, i64 }* %t1914)
-  %t1916 = bitcast { i8**, i64 }* %t1915 to { %LocalMutation*, i64 }*
-  store { %LocalMutation*, i64 }* %t1916, { %LocalMutation*, i64 }** %l13
-  %t1917 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1918 = extractvalue %BlockLoweringResult %t1917, 7
-  store i1 %t1918, i1* %l9
-  %t1919 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  %t1920 = extractvalue %BlockLoweringResult %t1919, 11
-  store double %t1920, double* %l11
-  %t1921 = load i1, i1* %l9
-  %t1922 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1923 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1924 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1925 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t1926 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t1927 = load double, double* %l5
-  %t1928 = load double, double* %l6
-  %t1929 = load double, double* %l7
-  %t1930 = load double, double* %l8
-  %t1931 = load i1, i1* %l9
-  %t1932 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t1933 = load double, double* %l11
-  %t1934 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t1935 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t1936 = load %StringConstantSet, %StringConstantSet* %l14
-  %t1937 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1938 = load %BlockLoweringResult, %BlockLoweringResult* %l30
-  br i1 %t1921, label %then65, label %merge66
+  %t1871 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1872 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1873 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1874 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t1858, label %then62, label %else63
+then62:
+  %t1875 = load double, double* %l11
+  %t1876 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1877 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1878 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1879 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1880 = load double, double* %l5
+  %t1881 = load double, double* %l6
+  %t1882 = load double, double* %l7
+  %t1883 = load double, double* %l8
+  %t1884 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1885 = call %BlockLoweringResult @lower_for_instruction(%NativeFunction %function, double %t1875, i8* %llvm_return, { %ParameterBinding*, i64 }* %t1876, { %LocalBinding*, i64 }* %t1877, { i8**, i64 }* %t1878, { i8**, i64 }* %t1879, double %t1880, double %t1881, double %t1882, double %t1883, { %NativeFunction*, i64 }* %functions, { %LoopContext*, i64 }* %t1884, double %end, %TypeContext %context, i8* %scope_id, double %scope_depth, i8* %current_label)
+  store %BlockLoweringResult %t1885, %BlockLoweringResult* %l34
+  %t1886 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1887 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1888 = extractvalue %BlockLoweringResult %t1887, 6
+  %t1889 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1886, { i8**, i64 }* %t1888)
+  store { i8**, i64 }* %t1889, { i8**, i64 }** %l0
+  %t1890 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1891 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1892 = extractvalue %BlockLoweringResult %t1891, 9
+  %t1893 = bitcast { %LifetimeRegionMetadata*, i64 }* %t1890 to { i8**, i64 }*
+  %t1894 = bitcast { %LifetimeRegionMetadata**, i64 }* %t1892 to { i8**, i64 }*
+  %t1895 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1893, { i8**, i64 }* %t1894)
+  %t1896 = bitcast { i8**, i64 }* %t1895 to { %LifetimeRegionMetadata*, i64 }*
+  store { %LifetimeRegionMetadata*, i64 }* %t1896, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1897 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1898 = extractvalue %BlockLoweringResult %t1897, 0
+  store { i8**, i64 }* %t1898, { i8**, i64 }** %l1
+  %t1899 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1900 = extractvalue %BlockLoweringResult %t1899, 1
+  store { i8**, i64 }* %t1900, { i8**, i64 }** %l2
+  %t1901 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1902 = extractvalue %BlockLoweringResult %t1901, 2
+  %t1903 = bitcast { %LocalBinding**, i64 }* %t1902 to { %LocalBinding*, i64 }*
+  store { %LocalBinding*, i64 }* %t1903, { %LocalBinding*, i64 }** %l3
+  %t1904 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1905 = extractvalue %BlockLoweringResult %t1904, 3
+  %t1906 = bitcast { %ParameterBinding**, i64 }* %t1905 to { %ParameterBinding*, i64 }*
+  store { %ParameterBinding*, i64 }* %t1906, { %ParameterBinding*, i64 }** %l4
+  %t1907 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1908 = extractvalue %BlockLoweringResult %t1907, 4
+  store double %t1908, double* %l5
+  %t1909 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1910 = extractvalue %BlockLoweringResult %t1909, 5
+  store double %t1910, double* %l6
+  %t1911 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1912 = extractvalue %BlockLoweringResult %t1911, 8
+  store double %t1912, double* %l7
+  %t1913 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1914 = extractvalue %BlockLoweringResult %t1913, 10
+  store double %t1914, double* %l8
+  %t1915 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1916 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1917 = extractvalue %BlockLoweringResult %t1916, 12
+  %t1918 = bitcast { %LocalMutation*, i64 }* %t1915 to { i8**, i64 }*
+  %t1919 = bitcast { %LocalMutation**, i64 }* %t1917 to { i8**, i64 }*
+  %t1920 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t1918, { i8**, i64 }* %t1919)
+  %t1921 = bitcast { i8**, i64 }* %t1920 to { %LocalMutation*, i64 }*
+  store { %LocalMutation*, i64 }* %t1921, { %LocalMutation*, i64 }** %l13
+  %t1922 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1923 = extractvalue %BlockLoweringResult %t1922, 7
+  store i1 %t1923, i1* %l9
+  %t1924 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  %t1925 = extractvalue %BlockLoweringResult %t1924, 11
+  store double %t1925, double* %l11
+  %t1926 = load i1, i1* %l9
+  %t1927 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t1928 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t1929 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t1930 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t1931 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t1932 = load double, double* %l5
+  %t1933 = load double, double* %l6
+  %t1934 = load double, double* %l7
+  %t1935 = load double, double* %l8
+  %t1936 = load i1, i1* %l9
+  %t1937 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t1938 = load double, double* %l11
+  %t1939 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t1940 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t1941 = load %StringConstantSet, %StringConstantSet* %l14
+  %t1942 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1943 = load %BlockLoweringResult, %BlockLoweringResult* %l34
+  br i1 %t1926, label %then65, label %merge66
 then65:
   br label %afterloop3
 merge66:
   br label %loop.latch2
 else63:
-  %t1939 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t1940 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1939, i32 0, i32 0
-  %t1941 = load i32, i32* %t1940
-  %t1942 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t1943 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t1944 = icmp eq i32 %t1941, 0
-  %t1945 = select i1 %t1944, i8* %t1943, i8* %t1942
-  %t1946 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t1947 = icmp eq i32 %t1941, 1
-  %t1948 = select i1 %t1947, i8* %t1946, i8* %t1945
-  %t1949 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t1950 = icmp eq i32 %t1941, 2
-  %t1951 = select i1 %t1950, i8* %t1949, i8* %t1948
-  %t1952 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t1953 = icmp eq i32 %t1941, 3
-  %t1954 = select i1 %t1953, i8* %t1952, i8* %t1951
-  %t1955 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t1956 = icmp eq i32 %t1941, 4
-  %t1957 = select i1 %t1956, i8* %t1955, i8* %t1954
-  %t1958 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t1959 = icmp eq i32 %t1941, 5
-  %t1960 = select i1 %t1959, i8* %t1958, i8* %t1957
-  %t1961 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t1962 = icmp eq i32 %t1941, 6
-  %t1963 = select i1 %t1962, i8* %t1961, i8* %t1960
-  %t1964 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t1965 = icmp eq i32 %t1941, 7
-  %t1966 = select i1 %t1965, i8* %t1964, i8* %t1963
-  %t1967 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t1968 = icmp eq i32 %t1941, 8
-  %t1969 = select i1 %t1968, i8* %t1967, i8* %t1966
-  %t1970 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t1971 = icmp eq i32 %t1941, 9
-  %t1972 = select i1 %t1971, i8* %t1970, i8* %t1969
-  %t1973 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t1974 = icmp eq i32 %t1941, 10
-  %t1975 = select i1 %t1974, i8* %t1973, i8* %t1972
-  %t1976 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t1977 = icmp eq i32 %t1941, 11
-  %t1978 = select i1 %t1977, i8* %t1976, i8* %t1975
-  %t1979 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t1980 = icmp eq i32 %t1941, 12
-  %t1981 = select i1 %t1980, i8* %t1979, i8* %t1978
-  %t1982 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t1983 = icmp eq i32 %t1941, 13
-  %t1984 = select i1 %t1983, i8* %t1982, i8* %t1981
-  %t1985 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t1986 = icmp eq i32 %t1941, 14
-  %t1987 = select i1 %t1986, i8* %t1985, i8* %t1984
-  %t1988 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t1989 = icmp eq i32 %t1941, 15
-  %t1990 = select i1 %t1989, i8* %t1988, i8* %t1987
-  %t1991 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t1992 = icmp eq i32 %t1941, 16
-  %t1993 = select i1 %t1992, i8* %t1991, i8* %t1990
-  %s1994 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1994, i32 0, i32 0
-  %t1995 = icmp eq i8* %t1993, %s1994
-  %t1996 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t1997 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t1998 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t1999 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t2000 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t2001 = load double, double* %l5
-  %t2002 = load double, double* %l6
-  %t2003 = load double, double* %l7
-  %t2004 = load double, double* %l8
-  %t2005 = load i1, i1* %l9
-  %t2006 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
-  %t2007 = load double, double* %l11
-  %t2008 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t2009 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t2010 = load %StringConstantSet, %StringConstantSet* %l14
-  %t2011 = load %NativeInstruction*, %NativeInstruction** %l15
-  br i1 %t1995, label %then67, label %else68
+  %t1944 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t1945 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1944, i32 0, i32 0
+  %t1946 = load i32, i32* %t1945
+  %t1947 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t1948 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t1949 = icmp eq i32 %t1946, 0
+  %t1950 = select i1 %t1949, i8* %t1948, i8* %t1947
+  %t1951 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t1952 = icmp eq i32 %t1946, 1
+  %t1953 = select i1 %t1952, i8* %t1951, i8* %t1950
+  %t1954 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t1955 = icmp eq i32 %t1946, 2
+  %t1956 = select i1 %t1955, i8* %t1954, i8* %t1953
+  %t1957 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t1958 = icmp eq i32 %t1946, 3
+  %t1959 = select i1 %t1958, i8* %t1957, i8* %t1956
+  %t1960 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t1961 = icmp eq i32 %t1946, 4
+  %t1962 = select i1 %t1961, i8* %t1960, i8* %t1959
+  %t1963 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t1964 = icmp eq i32 %t1946, 5
+  %t1965 = select i1 %t1964, i8* %t1963, i8* %t1962
+  %t1966 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t1967 = icmp eq i32 %t1946, 6
+  %t1968 = select i1 %t1967, i8* %t1966, i8* %t1965
+  %t1969 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t1970 = icmp eq i32 %t1946, 7
+  %t1971 = select i1 %t1970, i8* %t1969, i8* %t1968
+  %t1972 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t1973 = icmp eq i32 %t1946, 8
+  %t1974 = select i1 %t1973, i8* %t1972, i8* %t1971
+  %t1975 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t1976 = icmp eq i32 %t1946, 9
+  %t1977 = select i1 %t1976, i8* %t1975, i8* %t1974
+  %t1978 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t1979 = icmp eq i32 %t1946, 10
+  %t1980 = select i1 %t1979, i8* %t1978, i8* %t1977
+  %t1981 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t1982 = icmp eq i32 %t1946, 11
+  %t1983 = select i1 %t1982, i8* %t1981, i8* %t1980
+  %t1984 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t1985 = icmp eq i32 %t1946, 12
+  %t1986 = select i1 %t1985, i8* %t1984, i8* %t1983
+  %t1987 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t1988 = icmp eq i32 %t1946, 13
+  %t1989 = select i1 %t1988, i8* %t1987, i8* %t1986
+  %t1990 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t1991 = icmp eq i32 %t1946, 14
+  %t1992 = select i1 %t1991, i8* %t1990, i8* %t1989
+  %t1993 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t1994 = icmp eq i32 %t1946, 15
+  %t1995 = select i1 %t1994, i8* %t1993, i8* %t1992
+  %t1996 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t1997 = icmp eq i32 %t1946, 16
+  %t1998 = select i1 %t1997, i8* %t1996, i8* %t1995
+  %s1999 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1999, i32 0, i32 0
+  %t2000 = icmp eq i8* %t1998, %s1999
+  %t2001 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t2002 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2003 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2004 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t2005 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t2006 = load double, double* %l5
+  %t2007 = load double, double* %l6
+  %t2008 = load double, double* %l7
+  %t2009 = load double, double* %l8
+  %t2010 = load i1, i1* %l9
+  %t2011 = load { %LoopContext*, i64 }*, { %LoopContext*, i64 }** %l10
+  %t2012 = load double, double* %l11
+  %t2013 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t2014 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t2015 = load %StringConstantSet, %StringConstantSet* %l14
+  %t2016 = load %NativeInstruction*, %NativeInstruction** %l15
+  br i1 %t2000, label %then67, label %else68
 then67:
   br label %merge69
 else68:
-  %t2012 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s2013 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.2013, i32 0, i32 0
-  %t2014 = load %NativeInstruction*, %NativeInstruction** %l15
-  %t2015 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t2014, i32 0, i32 0
-  %t2016 = load i32, i32* %t2015
-  %t2017 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
-  %t2018 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
-  %t2019 = icmp eq i32 %t2016, 0
-  %t2020 = select i1 %t2019, i8* %t2018, i8* %t2017
-  %t2021 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
-  %t2022 = icmp eq i32 %t2016, 1
-  %t2023 = select i1 %t2022, i8* %t2021, i8* %t2020
-  %t2024 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
-  %t2025 = icmp eq i32 %t2016, 2
-  %t2026 = select i1 %t2025, i8* %t2024, i8* %t2023
-  %t2027 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
-  %t2028 = icmp eq i32 %t2016, 3
-  %t2029 = select i1 %t2028, i8* %t2027, i8* %t2026
-  %t2030 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
-  %t2031 = icmp eq i32 %t2016, 4
-  %t2032 = select i1 %t2031, i8* %t2030, i8* %t2029
-  %t2033 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
-  %t2034 = icmp eq i32 %t2016, 5
-  %t2035 = select i1 %t2034, i8* %t2033, i8* %t2032
-  %t2036 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
-  %t2037 = icmp eq i32 %t2016, 6
-  %t2038 = select i1 %t2037, i8* %t2036, i8* %t2035
-  %t2039 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
-  %t2040 = icmp eq i32 %t2016, 7
-  %t2041 = select i1 %t2040, i8* %t2039, i8* %t2038
-  %t2042 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
-  %t2043 = icmp eq i32 %t2016, 8
-  %t2044 = select i1 %t2043, i8* %t2042, i8* %t2041
-  %t2045 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
-  %t2046 = icmp eq i32 %t2016, 9
-  %t2047 = select i1 %t2046, i8* %t2045, i8* %t2044
-  %t2048 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
-  %t2049 = icmp eq i32 %t2016, 10
-  %t2050 = select i1 %t2049, i8* %t2048, i8* %t2047
-  %t2051 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
-  %t2052 = icmp eq i32 %t2016, 11
-  %t2053 = select i1 %t2052, i8* %t2051, i8* %t2050
-  %t2054 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
-  %t2055 = icmp eq i32 %t2016, 12
-  %t2056 = select i1 %t2055, i8* %t2054, i8* %t2053
-  %t2057 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
-  %t2058 = icmp eq i32 %t2016, 13
-  %t2059 = select i1 %t2058, i8* %t2057, i8* %t2056
-  %t2060 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
-  %t2061 = icmp eq i32 %t2016, 14
-  %t2062 = select i1 %t2061, i8* %t2060, i8* %t2059
-  %t2063 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
-  %t2064 = icmp eq i32 %t2016, 15
-  %t2065 = select i1 %t2064, i8* %t2063, i8* %t2062
-  %t2066 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
-  %t2067 = icmp eq i32 %t2016, 16
-  %t2068 = select i1 %t2067, i8* %t2066, i8* %t2065
-  %t2069 = add i8* %s2013, %t2068
-  %s2070 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.2070, i32 0, i32 0
-  %t2071 = add i8* %t2069, %s2070
-  %t2072 = extractvalue %NativeFunction %function, 0
-  %t2073 = add i8* %t2071, %t2072
-  %t2074 = load i8, i8* %t2073
-  %t2075 = add i8 %t2074, 96
-  %t2076 = alloca [2 x i8], align 1
-  %t2077 = getelementptr [2 x i8], [2 x i8]* %t2076, i32 0, i32 0
-  store i8 %t2075, i8* %t2077
-  %t2078 = getelementptr [2 x i8], [2 x i8]* %t2076, i32 0, i32 1
-  store i8 0, i8* %t2078
-  %t2079 = getelementptr [2 x i8], [2 x i8]* %t2076, i32 0, i32 0
-  %t2080 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t2012, i8* %t2079)
-  store { i8**, i64 }* %t2080, { i8**, i64 }** %l0
+  %t2017 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s2018 = getelementptr inbounds [41 x i8], [41 x i8]* @.str.2018, i32 0, i32 0
+  %t2019 = load %NativeInstruction*, %NativeInstruction** %l15
+  %t2020 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t2019, i32 0, i32 0
+  %t2021 = load i32, i32* %t2020
+  %t2022 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.NativeInstruction.variant.default, i32 0, i32 0
+  %t2023 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.Return.variant, i32 0, i32 0
+  %t2024 = icmp eq i32 %t2021, 0
+  %t2025 = select i1 %t2024, i8* %t2023, i8* %t2022
+  %t2026 = getelementptr inbounds [11 x i8], [11 x i8]* @.enum.NativeInstruction.Expression.variant, i32 0, i32 0
+  %t2027 = icmp eq i32 %t2021, 1
+  %t2028 = select i1 %t2027, i8* %t2026, i8* %t2025
+  %t2029 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.Let.variant, i32 0, i32 0
+  %t2030 = icmp eq i32 %t2021, 2
+  %t2031 = select i1 %t2030, i8* %t2029, i8* %t2028
+  %t2032 = getelementptr inbounds [3 x i8], [3 x i8]* @.enum.NativeInstruction.If.variant, i32 0, i32 0
+  %t2033 = icmp eq i32 %t2021, 3
+  %t2034 = select i1 %t2033, i8* %t2032, i8* %t2031
+  %t2035 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Else.variant, i32 0, i32 0
+  %t2036 = icmp eq i32 %t2021, 4
+  %t2037 = select i1 %t2036, i8* %t2035, i8* %t2034
+  %t2038 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.EndIf.variant, i32 0, i32 0
+  %t2039 = icmp eq i32 %t2021, 5
+  %t2040 = select i1 %t2039, i8* %t2038, i8* %t2037
+  %t2041 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.NativeInstruction.For.variant, i32 0, i32 0
+  %t2042 = icmp eq i32 %t2021, 6
+  %t2043 = select i1 %t2042, i8* %t2041, i8* %t2040
+  %t2044 = getelementptr inbounds [7 x i8], [7 x i8]* @.enum.NativeInstruction.EndFor.variant, i32 0, i32 0
+  %t2045 = icmp eq i32 %t2021, 7
+  %t2046 = select i1 %t2045, i8* %t2044, i8* %t2043
+  %t2047 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Loop.variant, i32 0, i32 0
+  %t2048 = icmp eq i32 %t2021, 8
+  %t2049 = select i1 %t2048, i8* %t2047, i8* %t2046
+  %t2050 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.EndLoop.variant, i32 0, i32 0
+  %t2051 = icmp eq i32 %t2021, 9
+  %t2052 = select i1 %t2051, i8* %t2050, i8* %t2049
+  %t2053 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Break.variant, i32 0, i32 0
+  %t2054 = icmp eq i32 %t2021, 10
+  %t2055 = select i1 %t2054, i8* %t2053, i8* %t2052
+  %t2056 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.Continue.variant, i32 0, i32 0
+  %t2057 = icmp eq i32 %t2021, 11
+  %t2058 = select i1 %t2057, i8* %t2056, i8* %t2055
+  %t2059 = getelementptr inbounds [6 x i8], [6 x i8]* @.enum.NativeInstruction.Match.variant, i32 0, i32 0
+  %t2060 = icmp eq i32 %t2021, 12
+  %t2061 = select i1 %t2060, i8* %t2059, i8* %t2058
+  %t2062 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Case.variant, i32 0, i32 0
+  %t2063 = icmp eq i32 %t2021, 13
+  %t2064 = select i1 %t2063, i8* %t2062, i8* %t2061
+  %t2065 = getelementptr inbounds [9 x i8], [9 x i8]* @.enum.NativeInstruction.EndMatch.variant, i32 0, i32 0
+  %t2066 = icmp eq i32 %t2021, 14
+  %t2067 = select i1 %t2066, i8* %t2065, i8* %t2064
+  %t2068 = getelementptr inbounds [5 x i8], [5 x i8]* @.enum.NativeInstruction.Noop.variant, i32 0, i32 0
+  %t2069 = icmp eq i32 %t2021, 15
+  %t2070 = select i1 %t2069, i8* %t2068, i8* %t2067
+  %t2071 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
+  %t2072 = icmp eq i32 %t2021, 16
+  %t2073 = select i1 %t2072, i8* %t2071, i8* %t2070
+  %t2074 = add i8* %s2018, %t2073
+  %s2075 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.2075, i32 0, i32 0
+  %t2076 = add i8* %t2074, %s2075
+  %t2077 = extractvalue %NativeFunction %function, 0
+  %t2078 = add i8* %t2076, %t2077
+  %t2079 = load i8, i8* %t2078
+  %t2080 = add i8 %t2079, 96
+  %t2081 = alloca [2 x i8], align 1
+  %t2082 = getelementptr [2 x i8], [2 x i8]* %t2081, i32 0, i32 0
+  store i8 %t2080, i8* %t2082
+  %t2083 = getelementptr [2 x i8], [2 x i8]* %t2081, i32 0, i32 1
+  store i8 0, i8* %t2083
+  %t2084 = getelementptr [2 x i8], [2 x i8]* %t2081, i32 0, i32 0
+  %t2085 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t2017, i8* %t2084)
+  store { i8**, i64 }* %t2085, { i8**, i64 }** %l0
   br label %merge69
 merge69:
-  %t2081 = phi { i8**, i64 }* [ %t1996, %then67 ], [ %t2080, %else68 ]
-  store { i8**, i64 }* %t2081, { i8**, i64 }** %l0
+  %t2086 = phi { i8**, i64 }* [ %t2001, %then67 ], [ %t2085, %else68 ]
+  store { i8**, i64 }* %t2086, { i8**, i64 }** %l0
   br label %merge64
 merge64:
   br label %merge56
@@ -19972,119 +19982,119 @@ merge27:
 merge22:
   br label %merge11
 merge11:
-  %t2082 = phi { i8**, i64 }* [ %t323, %then9 ], [ %t676, %else10 ]
-  %t2083 = phi { %LifetimeRegionMetadata*, i64 }* [ %t447, %then9 ], [ %t693, %else10 ]
-  %t2084 = phi { i8**, i64 }* [ %t449, %then9 ], [ %t678, %else10 ]
-  %t2085 = phi { i8**, i64 }* [ %t451, %then9 ], [ %t844, %else10 ]
-  %t2086 = phi { %LocalBinding*, i64 }* [ %t454, %then9 ], [ %t683, %else10 ]
-  %t2087 = phi { %ParameterBinding*, i64 }* [ %t457, %then9 ], [ %t686, %else10 ]
-  %t2088 = phi double [ %t459, %then9 ], [ %t680, %else10 ]
-  %t2089 = phi double [ %t461, %then9 ], [ %t856, %else10 ]
-  %t2090 = phi double [ %t463, %then9 ], [ %t700, %else10 ]
-  %t2091 = phi { %LocalMutation*, i64 }* [ %t470, %then9 ], [ %t707, %else10 ]
-  %t2092 = phi %StringConstantSet [ %t474, %then9 ], [ %t711, %else10 ]
-  %t2093 = phi i1 [ %t244, %then9 ], [ 1, %else10 ]
-  %t2094 = phi double [ %t246, %then9 ], [ %t714, %else10 ]
-  %t2095 = phi double [ %t241, %then9 ], [ %t854, %else10 ]
-  store { i8**, i64 }* %t2082, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t2083, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t2084, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t2085, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t2086, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t2087, { %ParameterBinding*, i64 }** %l4
-  store double %t2088, double* %l5
-  store double %t2089, double* %l7
-  store double %t2090, double* %l8
-  store { %LocalMutation*, i64 }* %t2091, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t2092, %StringConstantSet* %l14
-  store i1 %t2093, i1* %l9
-  store double %t2094, double* %l11
-  store double %t2095, double* %l6
+  %t2087 = phi { i8**, i64 }* [ %t324, %then9 ], [ %t679, %else10 ]
+  %t2088 = phi { %LifetimeRegionMetadata*, i64 }* [ %t448, %then9 ], [ %t696, %else10 ]
+  %t2089 = phi { i8**, i64 }* [ %t450, %then9 ], [ %t681, %else10 ]
+  %t2090 = phi { i8**, i64 }* [ %t452, %then9 ], [ %t849, %else10 ]
+  %t2091 = phi { %LocalBinding*, i64 }* [ %t455, %then9 ], [ %t686, %else10 ]
+  %t2092 = phi { %ParameterBinding*, i64 }* [ %t458, %then9 ], [ %t689, %else10 ]
+  %t2093 = phi double [ %t460, %then9 ], [ %t683, %else10 ]
+  %t2094 = phi double [ %t462, %then9 ], [ %t861, %else10 ]
+  %t2095 = phi double [ %t464, %then9 ], [ %t703, %else10 ]
+  %t2096 = phi { %LocalMutation*, i64 }* [ %t471, %then9 ], [ %t710, %else10 ]
+  %t2097 = phi %StringConstantSet [ %t476, %then9 ], [ %t715, %else10 ]
+  %t2098 = phi i1 [ %t245, %then9 ], [ 1, %else10 ]
+  %t2099 = phi double [ %t247, %then9 ], [ %t718, %else10 ]
+  %t2100 = phi double [ %t242, %then9 ], [ %t859, %else10 ]
+  store { i8**, i64 }* %t2087, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t2088, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t2089, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2090, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t2091, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t2092, { %ParameterBinding*, i64 }** %l4
+  store double %t2093, double* %l5
+  store double %t2094, double* %l7
+  store double %t2095, double* %l8
+  store { %LocalMutation*, i64 }* %t2096, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t2097, %StringConstantSet* %l14
+  store i1 %t2098, i1* %l9
+  store double %t2099, double* %l11
+  store double %t2100, double* %l6
   br label %merge8
 merge8:
-  %t2096 = phi { i8**, i64 }* [ %t143, %then6 ], [ %t323, %else7 ]
-  %t2097 = phi { %LifetimeRegionMetadata*, i64 }* [ %t150, %then6 ], [ %t447, %else7 ]
-  %t2098 = phi { i8**, i64 }* [ %t152, %then6 ], [ %t449, %else7 ]
-  %t2099 = phi { i8**, i64 }* [ %t154, %then6 ], [ %t451, %else7 ]
-  %t2100 = phi { %LocalBinding*, i64 }* [ %t157, %then6 ], [ %t454, %else7 ]
-  %t2101 = phi { %ParameterBinding*, i64 }* [ %t160, %then6 ], [ %t457, %else7 ]
-  %t2102 = phi double [ %t162, %then6 ], [ %t459, %else7 ]
-  %t2103 = phi double [ %t164, %then6 ], [ %t461, %else7 ]
-  %t2104 = phi double [ %t166, %then6 ], [ %t463, %else7 ]
-  %t2105 = phi { %LocalMutation*, i64 }* [ %t173, %then6 ], [ %t470, %else7 ]
-  %t2106 = phi %StringConstantSet [ %t177, %then6 ], [ %t474, %else7 ]
-  %t2107 = phi i1 [ %t123, %then6 ], [ 1, %else7 ]
-  %t2108 = phi double [ %t125, %then6 ], [ %t714, %else7 ]
-  %t2109 = phi double [ %t120, %then6 ], [ %t854, %else7 ]
-  store { i8**, i64 }* %t2096, { i8**, i64 }** %l0
-  store { %LifetimeRegionMetadata*, i64 }* %t2097, { %LifetimeRegionMetadata*, i64 }** %l12
-  store { i8**, i64 }* %t2098, { i8**, i64 }** %l1
-  store { i8**, i64 }* %t2099, { i8**, i64 }** %l2
-  store { %LocalBinding*, i64 }* %t2100, { %LocalBinding*, i64 }** %l3
-  store { %ParameterBinding*, i64 }* %t2101, { %ParameterBinding*, i64 }** %l4
-  store double %t2102, double* %l5
-  store double %t2103, double* %l7
-  store double %t2104, double* %l8
-  store { %LocalMutation*, i64 }* %t2105, { %LocalMutation*, i64 }** %l13
-  store %StringConstantSet %t2106, %StringConstantSet* %l14
-  store i1 %t2107, i1* %l9
-  store double %t2108, double* %l11
-  store double %t2109, double* %l6
-  %t2110 = load double, double* %l11
-  %t2111 = sitofp i64 1 to double
-  %t2112 = fadd double %t2110, %t2111
-  store double %t2112, double* %l11
+  %t2101 = phi { i8**, i64 }* [ %t143, %then6 ], [ %t324, %else7 ]
+  %t2102 = phi { %LifetimeRegionMetadata*, i64 }* [ %t150, %then6 ], [ %t448, %else7 ]
+  %t2103 = phi { i8**, i64 }* [ %t152, %then6 ], [ %t450, %else7 ]
+  %t2104 = phi { i8**, i64 }* [ %t154, %then6 ], [ %t452, %else7 ]
+  %t2105 = phi { %LocalBinding*, i64 }* [ %t157, %then6 ], [ %t455, %else7 ]
+  %t2106 = phi { %ParameterBinding*, i64 }* [ %t160, %then6 ], [ %t458, %else7 ]
+  %t2107 = phi double [ %t162, %then6 ], [ %t460, %else7 ]
+  %t2108 = phi double [ %t164, %then6 ], [ %t462, %else7 ]
+  %t2109 = phi double [ %t166, %then6 ], [ %t464, %else7 ]
+  %t2110 = phi { %LocalMutation*, i64 }* [ %t173, %then6 ], [ %t471, %else7 ]
+  %t2111 = phi %StringConstantSet [ %t178, %then6 ], [ %t476, %else7 ]
+  %t2112 = phi i1 [ %t123, %then6 ], [ 1, %else7 ]
+  %t2113 = phi double [ %t125, %then6 ], [ %t718, %else7 ]
+  %t2114 = phi double [ %t120, %then6 ], [ %t859, %else7 ]
+  store { i8**, i64 }* %t2101, { i8**, i64 }** %l0
+  store { %LifetimeRegionMetadata*, i64 }* %t2102, { %LifetimeRegionMetadata*, i64 }** %l12
+  store { i8**, i64 }* %t2103, { i8**, i64 }** %l1
+  store { i8**, i64 }* %t2104, { i8**, i64 }** %l2
+  store { %LocalBinding*, i64 }* %t2105, { %LocalBinding*, i64 }** %l3
+  store { %ParameterBinding*, i64 }* %t2106, { %ParameterBinding*, i64 }** %l4
+  store double %t2107, double* %l5
+  store double %t2108, double* %l7
+  store double %t2109, double* %l8
+  store { %LocalMutation*, i64 }* %t2110, { %LocalMutation*, i64 }** %l13
+  store %StringConstantSet %t2111, %StringConstantSet* %l14
+  store i1 %t2112, i1* %l9
+  store double %t2113, double* %l11
+  store double %t2114, double* %l6
+  %t2115 = load double, double* %l11
+  %t2116 = sitofp i64 1 to double
+  %t2117 = fadd double %t2115, %t2116
+  store double %t2117, double* %l11
   br label %loop.latch2
 loop.latch2:
-  %t2113 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t2114 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t2115 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t2116 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t2117 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t2118 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t2119 = load double, double* %l5
-  %t2120 = load double, double* %l7
-  %t2121 = load double, double* %l8
-  %t2122 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t2123 = load %StringConstantSet, %StringConstantSet* %l14
-  %t2124 = load i1, i1* %l9
-  %t2125 = load double, double* %l11
-  %t2126 = load double, double* %l6
+  %t2118 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t2119 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t2120 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2121 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2122 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t2123 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t2124 = load double, double* %l5
+  %t2125 = load double, double* %l7
+  %t2126 = load double, double* %l8
+  %t2127 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t2128 = load %StringConstantSet, %StringConstantSet* %l14
+  %t2129 = load i1, i1* %l9
+  %t2130 = load double, double* %l11
+  %t2131 = load double, double* %l6
   br label %loop.header0
 afterloop3:
-  %t2141 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t2142 = insertvalue %BlockLoweringResult undef, { i8**, i64 }* %t2141, 0
-  %t2143 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t2144 = insertvalue %BlockLoweringResult %t2142, { i8**, i64 }* %t2143, 1
-  %t2145 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
-  %t2146 = bitcast { %LocalBinding*, i64 }* %t2145 to { %LocalBinding**, i64 }*
-  %t2147 = insertvalue %BlockLoweringResult %t2144, { %LocalBinding**, i64 }* %t2146, 2
-  %t2148 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
-  %t2149 = bitcast { %ParameterBinding*, i64 }* %t2148 to { %ParameterBinding**, i64 }*
-  %t2150 = insertvalue %BlockLoweringResult %t2147, { %ParameterBinding**, i64 }* %t2149, 3
-  %t2151 = load double, double* %l5
-  %t2152 = insertvalue %BlockLoweringResult %t2150, double %t2151, 4
-  %t2153 = load double, double* %l6
-  %t2154 = insertvalue %BlockLoweringResult %t2152, double %t2153, 5
-  %t2155 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t2156 = insertvalue %BlockLoweringResult %t2154, { i8**, i64 }* %t2155, 6
-  %t2157 = load i1, i1* %l9
-  %t2158 = insertvalue %BlockLoweringResult %t2156, i1 %t2157, 7
-  %t2159 = load double, double* %l7
-  %t2160 = insertvalue %BlockLoweringResult %t2158, double %t2159, 8
-  %t2161 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
-  %t2162 = bitcast { %LifetimeRegionMetadata*, i64 }* %t2161 to { %LifetimeRegionMetadata**, i64 }*
-  %t2163 = insertvalue %BlockLoweringResult %t2160, { %LifetimeRegionMetadata**, i64 }* %t2162, 9
-  %t2164 = load double, double* %l8
-  %t2165 = insertvalue %BlockLoweringResult %t2163, double %t2164, 10
-  %t2166 = load double, double* %l11
-  %t2167 = insertvalue %BlockLoweringResult %t2165, double %t2166, 11
-  %t2168 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
-  %t2169 = bitcast { %LocalMutation*, i64 }* %t2168 to { %LocalMutation**, i64 }*
-  %t2170 = insertvalue %BlockLoweringResult %t2167, { %LocalMutation**, i64 }* %t2169, 12
-  %t2171 = load %StringConstantSet, %StringConstantSet* %l14
-  %t2172 = insertvalue %BlockLoweringResult %t2170, %StringConstantSet %t2171, 13
-  ret %BlockLoweringResult %t2172
+  %t2146 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t2147 = insertvalue %BlockLoweringResult undef, { i8**, i64 }* %t2146, 0
+  %t2148 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t2149 = insertvalue %BlockLoweringResult %t2147, { i8**, i64 }* %t2148, 1
+  %t2150 = load { %LocalBinding*, i64 }*, { %LocalBinding*, i64 }** %l3
+  %t2151 = bitcast { %LocalBinding*, i64 }* %t2150 to { %LocalBinding**, i64 }*
+  %t2152 = insertvalue %BlockLoweringResult %t2149, { %LocalBinding**, i64 }* %t2151, 2
+  %t2153 = load { %ParameterBinding*, i64 }*, { %ParameterBinding*, i64 }** %l4
+  %t2154 = bitcast { %ParameterBinding*, i64 }* %t2153 to { %ParameterBinding**, i64 }*
+  %t2155 = insertvalue %BlockLoweringResult %t2152, { %ParameterBinding**, i64 }* %t2154, 3
+  %t2156 = load double, double* %l5
+  %t2157 = insertvalue %BlockLoweringResult %t2155, double %t2156, 4
+  %t2158 = load double, double* %l6
+  %t2159 = insertvalue %BlockLoweringResult %t2157, double %t2158, 5
+  %t2160 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t2161 = insertvalue %BlockLoweringResult %t2159, { i8**, i64 }* %t2160, 6
+  %t2162 = load i1, i1* %l9
+  %t2163 = insertvalue %BlockLoweringResult %t2161, i1 %t2162, 7
+  %t2164 = load double, double* %l7
+  %t2165 = insertvalue %BlockLoweringResult %t2163, double %t2164, 8
+  %t2166 = load { %LifetimeRegionMetadata*, i64 }*, { %LifetimeRegionMetadata*, i64 }** %l12
+  %t2167 = bitcast { %LifetimeRegionMetadata*, i64 }* %t2166 to { %LifetimeRegionMetadata**, i64 }*
+  %t2168 = insertvalue %BlockLoweringResult %t2165, { %LifetimeRegionMetadata**, i64 }* %t2167, 9
+  %t2169 = load double, double* %l8
+  %t2170 = insertvalue %BlockLoweringResult %t2168, double %t2169, 10
+  %t2171 = load double, double* %l11
+  %t2172 = insertvalue %BlockLoweringResult %t2170, double %t2171, 11
+  %t2173 = load { %LocalMutation*, i64 }*, { %LocalMutation*, i64 }** %l13
+  %t2174 = bitcast { %LocalMutation*, i64 }* %t2173 to { %LocalMutation**, i64 }*
+  %t2175 = insertvalue %BlockLoweringResult %t2172, { %LocalMutation**, i64 }* %t2174, 12
+  %t2176 = load %StringConstantSet, %StringConstantSet* %l14
+  %t2177 = insertvalue %BlockLoweringResult %t2175, %StringConstantSet %t2176, 13
+  ret %BlockLoweringResult %t2177
 }
 
 define %IfStructure @collect_if_structure({ %NativeInstruction*, i64 }* %instructions, double %start_index, double %end, i8* %function_name) {

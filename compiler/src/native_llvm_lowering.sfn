@@ -3034,10 +3034,10 @@ fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {
 
 fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEntry {
     let mut combined -> string[] = [];
-    let function_effects = function.effects;
-    combined = merge_effect_lists(combined, function_effects);
-    let borrow_effects = collect_function_borrow_effects(function);
-    combined = merge_effect_lists(combined, borrow_effects);
+    // Inline field access to avoid stage2 lowering issue
+    combined = merge_effect_lists(combined, function.effects);
+    // Inline to avoid lowering issues
+    combined = merge_effect_lists(combined, collect_function_borrow_effects(function));
     return FunctionEffectEntry { name: function.name, effects: combined };
 }
 
@@ -3508,7 +3508,8 @@ fn lower_instruction_range(
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
         } else if instruction.variant == "Expression" {
             let trimmed_expression = trim_text(instruction.expression);
             let mut handled_inline_let -> boolean = false;
@@ -3537,7 +3538,8 @@ fn lower_instruction_range(
                         current_next_local = lowered.next_local_id;
                         current_next_region = lowered.next_region_id;
                         current_mutations = current_mutations.concat(lowered.mutations);
-                        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                        let temp_constants = collected_string_constants;
+                        collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
                         handled_inline_let = true;
                     }
                 }
@@ -3553,7 +3555,8 @@ fn lower_instruction_range(
                 collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
                 current_next_region = lowered.next_region_id;
                 current_mutations = current_mutations.concat(lowered.mutations);
-                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             }
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
@@ -3566,7 +3569,8 @@ fn lower_instruction_range(
             collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
             current_next_region = lowered.next_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = true;
             index += 1;
             if index < end {
