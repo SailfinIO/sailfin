@@ -77,16 +77,17 @@ source_filename = "sailfin"
 %RuntimeHelperDescriptor = type { i8*, i8*, i8*, { i8**, i64 }*, { i8**, i64 }* }
 %FunctionCallEntry = type { i8*, { i8**, i64 }* }
 %StringConstant = type { i8*, i8*, double }
+%StringConstantSet = type { { i8**, i64 }*, { i8**, i64 }*, { double*, i64 }* }
 %StringPointerResult = type { { i8**, i64 }*, double, i8* }
-%LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %CapabilityManifest, { %StringConstant**, i64 }* }
+%LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %CapabilityManifest, %StringConstantSet }
 %LayoutManifestApplication = type { { %NativeStruct**, i64 }*, { %NativeEnum**, i64 }*, { i8**, i64 }* }
 %ImportedModuleContext = type { { %LayoutManifest**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
-%LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
-%BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
+%LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %StringConstantSet }
+%BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %StringConstantSet }
 %ParameterBinding = type { i8*, i8*, i8*, i8*, i1, %NativeSourceSpan* }
 %ParameterPreparation = type { { i8**, i64 }*, { %ParameterBinding**, i64 }*, { i8**, i64 }* }
 %LLVMOperand = type { i8*, i8* }
-%ExpressionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant**, i64 }* }
+%ExpressionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, %StringConstantSet }
 %ArrayLiteralMetadata = type { i8*, double }
 %OwnershipInfo = type { i8*, i8*, i1, %NativeSourceSpan*, double }
 %OwnershipConsumption = type { i8*, i8* }
@@ -117,8 +118,8 @@ source_filename = "sailfin"
 %BorrowParseResult = type { i1, i1, i8*, i1, { i8**, i64 }* }
 %BorrowArgumentParse = type { i1, i8*, { i8**, i64 }* }
 %TernaryParseResult = type { i1, i8*, i8*, i8*, { i8**, i64 }* }
-%ExpressionStatementResult = type { { i8**, i64 }*, double, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %LifetimeReleaseEvent**, i64 }*, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
-%LetLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, { i8**, i64 }*, double, { %LifetimeRegionMetadata**, i64 }*, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
+%ExpressionStatementResult = type { { i8**, i64 }*, double, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %LifetimeReleaseEvent**, i64 }*, double, { %LocalMutation**, i64 }*, %StringConstantSet }
+%LetLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, { i8**, i64 }*, double, { %LifetimeRegionMetadata**, i64 }*, double, { %LocalMutation**, i64 }*, %StringConstantSet }
 %InlineLetParseResult = type { i1, i8*, i1, i8*, i8*, { i8**, i64 }* }
 %BlockLabelResult = type { i8*, double }
 %IfStructure = type { double, double, double, double, i1, double, { i8**, i64 }* }
@@ -128,12 +129,12 @@ source_filename = "sailfin"
 %MatchCaseStructure = type { i8*, i8*, double, double, i1 }
 %MatchStructure = type { { %MatchCaseStructure**, i64 }*, double, { i8**, i64 }* }
 %MatchFieldBinding = type { i8*, i8*, double }
-%MatchCaseCondition = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, i1, { %MatchFieldBinding**, i64 }*, %EnumTypeInfo*, %EnumVariantInfo*, { %StringConstant**, i64 }* }
-%ConditionConversion = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant**, i64 }* }
+%MatchCaseCondition = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, i1, { %MatchFieldBinding**, i64 }*, %EnumTypeInfo*, %EnumVariantInfo*, %StringConstantSet }
+%ConditionConversion = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, %StringConstantSet }
 %ComparisonEmission = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %CoercionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %BinaryAlignmentResult = type { { i8**, i64 }*, double, %LLVMOperand*, %LLVMOperand*, { i8**, i64 }*, i8* }
-%BlockLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, double, { i8**, i64 }*, i1, double, { %LifetimeRegionMetadata**, i64 }*, double, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
+%BlockLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, double, { i8**, i64 }*, i1, double, { %LifetimeRegionMetadata**, i64 }*, double, double, { %LocalMutation**, i64 }*, %StringConstantSet }
 %PhiMergeResult = type { { i8**, i64 }*, double }
 %PhiInputEntry = type { i8*, i8* }
 %PhiStoreEntry = type { i8*, i8* }
@@ -202,7 +203,7 @@ declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.0 = private unnamed_addr constant [27 x i8] c"Sailfin compiler (stage 0)\00"
+@.str.0 = private unnamed_addr constant [17 x i8] c"Sailfin compiler\00"
 @.str.1 = private unnamed_addr constant [13 x i8] c"[typecheck] \00"
 @.str.18 = private unnamed_addr constant [12 x i8] c"  --> line \00"
 @.str.22 = private unnamed_addr constant [10 x i8] c", column \00"
@@ -491,7 +492,7 @@ merge1:
   %t71 = insertvalue %LoweredLLVMResult %t68, %CapabilityManifest %t70, 5
   %t72 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t73 = extractvalue %LoweredLLVMResult %t72, 6
-  %t74 = insertvalue %LoweredLLVMResult %t71, { %StringConstant**, i64 }* %t73, 6
+  %t74 = insertvalue %LoweredLLVMResult %t71, %StringConstantSet %t73, 6
   ret %LoweredLLVMResult %t74
 }
 
@@ -604,7 +605,7 @@ merge1:
   %t71 = insertvalue %LoweredLLVMResult %t68, %CapabilityManifest %t70, 5
   %t72 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t73 = extractvalue %LoweredLLVMResult %t72, 6
-  %t74 = insertvalue %LoweredLLVMResult %t71, { %StringConstant**, i64 }* %t73, 6
+  %t74 = insertvalue %LoweredLLVMResult %t71, %StringConstantSet %t73, 6
   %t75 = insertvalue %LLVMCompilationResult undef, %LoweredLLVMResult %t74, 0
   %t76 = load %EmitNativeResult, %EmitNativeResult* %l0
   %t77 = extractvalue %EmitNativeResult %t76, 0
@@ -882,7 +883,7 @@ merge10:
   %t179 = insertvalue %LoweredLLVMResult %t176, %CapabilityManifest %t178, 5
   %t180 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
   %t181 = extractvalue %LoweredLLVMResult %t180, 6
-  %t182 = insertvalue %LoweredLLVMResult %t179, { %StringConstant**, i64 }* %t181, 6
+  %t182 = insertvalue %LoweredLLVMResult %t179, %StringConstantSet %t181, 6
   ret %LoweredLLVMResult %t182
 }
 
@@ -903,7 +904,7 @@ entry:
 ; fn main effects: ![io]
 define void @main() {
 entry:
-  %s0 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.0, i32 0, i32 0
   call void @sailfin_runtime_print_info(i8* %s0)
   ret void
 }

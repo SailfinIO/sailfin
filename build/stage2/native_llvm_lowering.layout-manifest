@@ -41,19 +41,24 @@
 .layout field content type=string offset=8 size=8 align=8
 .layout field byte_count type=number offset=16 size=8 align=8
 
+.layout struct name=StringConstantSet size=24 align=8
+.layout field names type=string[] offset=0 size=8 align=8
+.layout field contents type=string[] offset=8 size=8 align=8
+.layout field byte_counts type=number[] offset=16 size=8 align=8
+
 .layout struct name=StringPointerResult size=24 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field pointer type=string offset=16 size=8 align=8
 
-.layout struct name=LoweredLLVMResult size=64 align=8
+.layout struct name=LoweredLLVMResult size=80 align=8
 .layout field ir type=string offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8
 .layout field trait_metadata type=TraitMetadata offset=16 size=16 align=8
 .layout field function_effects type=FunctionEffectEntry[] offset=32 size=8 align=8
 .layout field lifetime_regions type=LifetimeRegionMetadata[] offset=40 size=8 align=8
 .layout field capability_manifest type=CapabilityManifest offset=48 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=56 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=56 size=24 align=8
 
 .layout struct name=LayoutManifestApplication size=24 align=8
 .layout field structs type=NativeStruct[] offset=0 size=8 align=8
@@ -65,17 +70,17 @@
 .layout field native_texts type=string[] offset=8 size=8 align=8
 .layout field diagnostics type=string[] offset=16 size=8 align=8
 
-.layout struct name=LoweredLLVMFunction size=32 align=8
+.layout struct name=LoweredLLVMFunction size=48 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8
 .layout field lifetime_regions type=LifetimeRegionMetadata[] offset=16 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=24 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=24 size=24 align=8
 
-.layout struct name=BodyResult size=32 align=8
+.layout struct name=BodyResult size=48 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8
 .layout field lifetime_regions type=LifetimeRegionMetadata[] offset=16 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=24 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=24 size=24 align=8
 
 .layout struct name=ParameterBinding size=48 align=8
 .layout field name type=string offset=0 size=8 align=8
@@ -94,12 +99,12 @@
 .layout field llvm_type type=string offset=0 size=8 align=8
 .layout field value type=string offset=8 size=8 align=8
 
-.layout struct name=ExpressionResult size=40 align=8
+.layout struct name=ExpressionResult size=56 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field operand type=LLVMOperand? offset=16 size=8 align=8
 .layout field diagnostics type=string[] offset=24 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=32 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=32 size=24 align=8
 
 .layout struct name=ArrayLiteralMetadata size=16 align=8
 .layout field element_type type=string offset=0 size=8 align=8
@@ -290,7 +295,7 @@
 .layout field false_value type=string offset=24 size=8 align=8
 .layout field diagnostics type=string[] offset=32 size=8 align=8
 
-.layout struct name=ExpressionStatementResult size=80 align=8
+.layout struct name=ExpressionStatementResult size=96 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field locals type=LocalBinding[] offset=16 size=8 align=8
@@ -300,9 +305,9 @@
 .layout field lifetime_releases type=LifetimeReleaseEvent[] offset=48 size=8 align=8
 .layout field next_region_id type=number offset=56 size=8 align=8
 .layout field mutations type=LocalMutation[] offset=64 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=72 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=72 size=24 align=8
 
-.layout struct name=LetLoweringResult size=88 align=8
+.layout struct name=LetLoweringResult size=104 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field allocas type=string[] offset=8 size=8 align=8
 .layout field locals type=LocalBinding[] offset=16 size=8 align=8
@@ -313,7 +318,7 @@
 .layout field lifetime_regions type=LifetimeRegionMetadata[] offset=56 size=8 align=8
 .layout field next_region_id type=number offset=64 size=8 align=8
 .layout field mutations type=LocalMutation[] offset=72 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=80 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=80 size=24 align=8
 
 .layout struct name=InlineLetParseResult size=48 align=8
 .layout field success type=boolean offset=0 size=1 align=1
@@ -370,7 +375,7 @@
 .layout field field_type type=string offset=8 size=8 align=8
 .layout field field_offset type=number offset=16 size=8 align=8
 
-.layout struct name=MatchCaseCondition size=72 align=8
+.layout struct name=MatchCaseCondition size=88 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field operand type=LLVMOperand? offset=16 size=8 align=8
@@ -379,14 +384,14 @@
 .layout field field_bindings type=MatchFieldBinding[] offset=40 size=8 align=8
 .layout field enum_info type=EnumTypeInfo? offset=48 size=8 align=8
 .layout field variant_info type=EnumVariantInfo? offset=56 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=64 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=64 size=24 align=8
 
-.layout struct name=ConditionConversion size=40 align=8
+.layout struct name=ConditionConversion size=56 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field operand type=LLVMOperand? offset=16 size=8 align=8
 .layout field diagnostics type=string[] offset=24 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=32 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=32 size=24 align=8
 
 .layout struct name=ComparisonEmission size=32 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
@@ -408,7 +413,7 @@
 .layout field diagnostics type=string[] offset=32 size=8 align=8
 .layout field result_type type=string offset=40 size=8 align=8
 
-.layout struct name=BlockLoweringResult size=112 align=8
+.layout struct name=BlockLoweringResult size=128 align=8
 .layout field lines type=string[] offset=0 size=8 align=8
 .layout field allocas type=string[] offset=8 size=8 align=8
 .layout field locals type=LocalBinding[] offset=16 size=8 align=8
@@ -422,7 +427,7 @@
 .layout field next_lifetime_region_id type=number offset=80 size=8 align=8
 .layout field next_index type=number offset=88 size=8 align=8
 .layout field mutations type=LocalMutation[] offset=96 size=8 align=8
-.layout field string_constants type=StringConstant[] offset=104 size=8 align=8
+.layout field string_constants type=StringConstantSet offset=104 size=24 align=8
 
 .layout struct name=PhiMergeResult size=16 align=8
 .layout field lines type=string[] offset=0 size=8 align=8

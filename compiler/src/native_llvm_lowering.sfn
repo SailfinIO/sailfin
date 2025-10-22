@@ -57,6 +57,12 @@ struct StringConstant {
     byte_count -> number;
 }
 
+struct StringConstantSet {
+    names -> string[];
+    contents -> string[];
+    byte_counts -> number[];
+}
+
 struct StringPointerResult {
     lines -> string[];
     temp_index -> number;
@@ -70,7 +76,7 @@ struct LoweredLLVMResult {
     function_effects -> FunctionEffectEntry[];
     lifetime_regions -> LifetimeRegionMetadata[];
     capability_manifest -> CapabilityManifest;
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct LayoutManifestApplication {
@@ -89,14 +95,14 @@ struct LoweredLLVMFunction {
     lines -> string[];
     diagnostics -> string[];
     lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct BodyResult {
     lines -> string[];
     diagnostics -> string[];
     lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct ParameterBinding {
@@ -124,7 +130,7 @@ struct ExpressionResult {
     temp_index -> number;
     operand -> LLVMOperand?;
     diagnostics -> string[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct ArrayLiteralMetadata {
@@ -356,7 +362,7 @@ struct ExpressionStatementResult {
     lifetime_releases -> LifetimeReleaseEvent[];
     next_region_id -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct LetLoweringResult {
@@ -370,7 +376,7 @@ struct LetLoweringResult {
     lifetime_regions -> LifetimeRegionMetadata[];
     next_region_id -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct InlineLetParseResult {
@@ -446,7 +452,7 @@ struct MatchCaseCondition {
     field_bindings -> MatchFieldBinding[];
     enum_info -> EnumTypeInfo?;
     variant_info -> EnumVariantInfo?;
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct ConditionConversion {
@@ -454,7 +460,7 @@ struct ConditionConversion {
     temp_index -> number;
     operand -> LLVMOperand?;
     diagnostics -> string[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 struct ComparisonEmission {
@@ -494,7 +500,7 @@ struct BlockLoweringResult {
     next_lifetime_region_id -> number;
     next_index -> number;
     mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
+    string_constants -> StringConstantSet;
 }
 
 fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
@@ -696,6 +702,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        let empty_constants = empty_string_constant_set();
         return LoweredLLVMResult {
             ir: "",
             diagnostics: diagnostics,
@@ -703,7 +710,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             function_effects: [],
             lifetime_regions: [],
             capability_manifest: empty_capability_manifest(),
-            string_constants: [],
+            string_constants: empty_constants,
         };
     }
 
@@ -859,7 +866,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
-    let mut all_string_constants -> StringConstant[] = [];
+    let mut all_string_constants -> StringConstantSet = empty_string_constant_set();
     loop {
         if index >= local_functions.length {
             break;
@@ -3027,7 +3034,8 @@ fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {
 
 fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEntry {
     let mut combined -> string[] = [];
-    combined = merge_effect_lists(combined, function.effects);
+    let function_effects = function.effects;
+    combined = merge_effect_lists(combined, function_effects);
     let borrow_effects = collect_function_borrow_effects(function);
     combined = merge_effect_lists(combined, borrow_effects);
     return FunctionEffectEntry { name: function.name, effects: combined };
@@ -3339,7 +3347,8 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     let llvm_return = map_return_type(context, function.return_type);
     if llvm_return.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name);
-        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: [] };
+        let empty_constants = empty_string_constant_set();
+        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
     let preparation = prepare_parameters(function, context);
@@ -3479,7 +3488,7 @@ fn lower_instruction_range(
     let mut index -> number = start_index;
     let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     loop {
         if index >= end {
@@ -3768,7 +3777,8 @@ fn lower_instruction_range(
         lifetime_regions: collected_lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: index,
-        mutations: current_mutations, string_constants: collected_string_constants,
+        mutations: current_mutations,
+        string_constants: collected_string_constants,
     };
 }
 fn collect_if_structure(
@@ -3961,7 +3971,7 @@ fn lower_loop_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -4200,7 +4210,8 @@ fn lower_loop_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
-        mutations: collected_mutations, string_constants: collected_string_constants,
+        mutations: collected_mutations,
+        string_constants: collected_string_constants,
     };
 }
 
@@ -4235,7 +4246,7 @@ fn lower_for_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -4859,6 +4870,7 @@ fn lower_for_instruction(
 
     current_locals = locals;
 
+    let empty_constants = empty_string_constant_set();
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -4872,7 +4884,7 @@ fn lower_for_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: next_index,
-        mutations: collected_mutations, string_constants: [],
+        mutations: collected_mutations, string_constants: empty_constants,
     };
 }
 
@@ -5006,7 +5018,7 @@ fn lower_match_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
     diagnostics = diagnostics.concat(structure.diagnostics);
@@ -5296,6 +5308,7 @@ fn lower_match_instruction(
         current_temp = phi_result.temp_index;
     }
 
+    let result_string_constants = collected_string_constants;
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -5309,7 +5322,7 @@ fn lower_match_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.end_index + 1,
-        mutations: collected_mutations, string_constants: [],
+        mutations: collected_mutations, string_constants: result_string_constants,
     };
 }
 
@@ -5331,7 +5344,7 @@ fn lower_match_case_condition(
     let mut field_bindings -> MatchFieldBinding[] = [];
     let mut matched_enum_info -> EnumTypeInfo? = null;
     let mut matched_variant_info -> EnumVariantInfo? = null;
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     if !case.is_default {
         // Try to parse the pattern as an enum literal pattern
@@ -5494,7 +5507,7 @@ fn lower_match_case_condition(
         field_bindings: field_bindings,
         enum_info: matched_enum_info,
         variant_info: matched_variant_info,
-        string_constants: collected_string_constants,
+    string_constants: collected_string_constants,
     };
 }
 
@@ -5969,7 +5982,7 @@ fn lower_if_instruction(
     diagnostics = diagnostics.concat(condition.diagnostics);
     current_lines = condition.lines;
     current_temp = condition.temp_index;
-    let mut collected_string_constants -> StringConstant[] = condition.string_constants;
+    let mut collected_string_constants -> StringConstantSet = condition.string_constants;
 
     if condition.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`");
@@ -6188,7 +6201,7 @@ fn lower_if_instruction(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
-        mutations: collected_mutations, string_constants: collected_string_constants,
+    mutations: collected_mutations, string_constants: collected_string_constants,
     };
 }
 
@@ -6277,7 +6290,7 @@ fn lower_let_instruction(
         }
     }
 
-    let mut string_constants -> StringConstant[] = [];
+    let mut string_constants -> StringConstantSet = empty_string_constant_set();
     if instruction.value == null || instruction.value.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
@@ -6286,7 +6299,7 @@ fn lower_let_instruction(
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         operand = lowered.operand;
-        string_constants = lowered.string_constants;
+    string_constants = lowered.string_constants;
     }
 
     if llvm_type.length == 0 {
@@ -6416,7 +6429,7 @@ fn lower_expression_statement(
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
     let mut mutations -> LocalMutation[] = [];
-    let mut string_constants -> StringConstant[] = [];
+    let mut string_constants -> StringConstantSet = empty_string_constant_set();
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
@@ -6889,7 +6902,8 @@ fn lower_return_instruction(
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
         }
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: []};
+        let empty_constants = empty_string_constant_set();
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: empty_constants };
     }
 
     let mut current_locals -> LocalBinding[] = locals;
@@ -7597,9 +7611,10 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
 fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics -> string[] = [];
+    let empty_constants = empty_string_constant_set();
     if trimmed.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: empty expression encountered");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let stripped = strip_enclosing_parentheses(trimmed);
@@ -7615,7 +7630,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
     let borrow_parse = parse_borrow_expression(stripped);
     if borrow_parse.recognized {
-        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
+    return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
     // Check for unary prefix operators (!, -, +)
@@ -7707,7 +7722,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     if struct_parse.recognized {
         if !struct_parse.success {
             diagnostics = diagnostics.concat(struct_parse.diagnostics);
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
         }
         let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
         let combined = diagnostics.concat(lowered_struct.diagnostics);
@@ -7729,14 +7744,14 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let parameter = find_parameter_binding(bindings, stripped);
     if parameter != null {
         let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let local = find_local_binding(locals, stripped);
     if local != null {
         let load_result = load_local_operand(local, temp_index, lines);
         diagnostics = diagnostics.concat(load_result.diagnostics);
-        return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let literal_candidate = trim_text(stripped);
@@ -7769,7 +7784,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         if is_character_literal(literal_candidate) {
             let char_value = get_character_literal_value(literal_candidate);
             let operand = LLVMOperand { llvm_type: "i8", value: number_to_string(char_value) };
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
         }
         return lower_string_literal(literal_candidate, temp_index, lines);
     }
@@ -7780,29 +7795,29 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             value = "1";
         }
         let operand = LLVMOperand { llvm_type: "i1", value: value };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     if is_null_literal(literal_candidate) {
         // Represent null as a null pointer (i8* null)
         // This allows null to be used in optional fields and pointer contexts
         let operand = LLVMOperand { llvm_type: "i8*", value: "null" };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     if is_integer_literal(literal_candidate) {
         let operand = LLVMOperand { llvm_type: "i64", value: literal_candidate };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     if is_number_literal(literal_candidate) {
         let normalised = normalise_number_literal(literal_candidate);
         let operand = LLVMOperand { llvm_type: "double", value: normalised };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`");
-    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }
 
 fn parse_borrow_expression(text -> string) -> BorrowParseResult {
@@ -8213,30 +8228,31 @@ fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -
 
 fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;
+    let empty_constants = empty_string_constant_set();
     if !parse.success {
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let mut target = strip_enclosing_parentheses(parse.target);
     target = trim_text(target);
     if target.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let local = find_local_binding(locals, target);
     if local == null {
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let pointer_type = local.llvm_type + "*";
     let operand = LLVMOperand { llvm_type: pointer_type, value: local.pointer };
-    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: [] };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
 }
 
 fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let mut diagnostics -> string[] = parse.diagnostics;
-    let mut string_constants -> StringConstant[] = [];
+    let mut string_constants -> StringConstantSet = empty_string_constant_set();
     
     // Create labels for control flow (use temp_index for uniqueness)
     let label_id = number_to_string(temp_index);
@@ -8331,12 +8347,13 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     let mut diagnostics -> string[] = [];
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed binary expression `" + expression + "`");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        let empty_constants = empty_string_constant_set();
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = diagnostics.concat(left_result.diagnostics);
-    let mut string_constants -> StringConstant[] = left_result.string_constants;
+    let mut string_constants -> StringConstantSet = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -8371,12 +8388,13 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     let mut diagnostics -> string[] = [];
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed comparison expression `" + expression + "`");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        let empty_constants = empty_string_constant_set();
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = diagnostics.concat(left_result.diagnostics);
-    let mut string_constants -> StringConstant[] = left_result.string_constants;
+    let mut string_constants -> StringConstantSet = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -8407,11 +8425,11 @@ fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> P
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstant[] = [];
+    let mut string_constants -> StringConstantSet = empty_string_constant_set();
     
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed && expression `" + expression + "`");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
     
     // Create labels for short-circuit control flow (use temp_index for uniqueness)
@@ -8492,7 +8510,7 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstant[] = [];
+    let mut string_constants -> StringConstantSet = empty_string_constant_set();
     
     if left_text.length == 0 || right_text.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: malformed || expression `" + expression + "`");
@@ -8574,11 +8592,12 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
 
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
+    let empty_constants = empty_string_constant_set();
     let trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
@@ -8986,7 +9005,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if llvm_return == "void" {
         let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
         current_lines = append_string(current_lines, call_line);
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let temp_name = format_temp_name(current_temp);
@@ -8999,9 +9018,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
+    let mut collected_string_constants -> StringConstantSet = base_result.string_constants;
     if base_result.operand == null {
-        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let mut current_lines -> string[] = base_result.lines;
@@ -9039,7 +9058,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         current_lines = append_string(current_lines, "  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let mut struct_info -> StructTypeInfo? = null;
@@ -9087,7 +9106,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     let field_info = find_struct_field_info(info, parse.field);
     if field_info == null {
         diagnostics = append_string(diagnostics, "llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     if pointer_available {
@@ -9099,7 +9118,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: load_name };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let extract_name = format_temp_name(current_temp);
@@ -9109,10 +9128,10 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
-fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
+fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstant[] = string_constants;
+    let mut collected -> StringConstantSet = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
     let constant_name = "@.runtime.field." + sanitized_field;
@@ -9121,7 +9140,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     if existing_constant != null {
         field_constant = existing_constant;
     } else {
-        collected = collected.concat([field_constant]);
+        collected = append_string_constant(collected, field_constant);
     }
 
     let pointer_result = emit_string_constant_pointer(field_constant, current_temp, current_lines);
@@ -9142,13 +9161,14 @@ fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> Ex
     let mut current_lines = lines;
     current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime");
     let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
-    return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: [] };
+    let empty_constants = empty_string_constant_set();
+    return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
 }
 
-fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {
+fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstantSet, expected_type -> string) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected -> StringConstant[] = string_constants;
+    let mut collected -> StringConstantSet = string_constants;
     let mut messages -> string[] = diagnostics;
 
     let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
@@ -9171,12 +9191,12 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
         let existing_default = find_string_constant_by_name(collected, default_constant_name);
-    let mut default_constant -> StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
+        let mut default_constant -> StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
         if existing_default != null {
             default_constant = existing_default;
         } else {
             default_constant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
-            collected = collected.concat([default_constant]);
+            collected = append_string_constant(collected, default_constant);
         }
 
         let default_pointer_result = emit_string_constant_pointer(default_constant, current_temp, current_lines);
@@ -9198,7 +9218,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
                 variant_constant = existing_variant;
             } else {
                 variant_constant = StringConstant { name: constant_name, content: variant_info.name, byte_count: variant_info.name.length };
-                collected = collected.concat([variant_constant]);
+                collected = append_string_constant(collected, variant_constant);
             }
 
             let pointer_result = emit_string_constant_pointer(variant_constant, current_temp, current_lines);
@@ -9422,10 +9442,10 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     // Lower the base expression to get the array operand
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
+    let mut collected_string_constants -> StringConstantSet = base_result.string_constants;
     
     if base_result.operand == null {
-        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     
     let mut current_lines -> string[] = base_result.lines;
@@ -9441,7 +9461,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     
     if index_result.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: index expression produced no value");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     
     let index_operand = index_result.operand;
@@ -9453,7 +9473,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     current_temp = index_coercion.temp_index;
     if index_coercion.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce index expression to i64");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     let coerced_index = index_coercion.operand;
 
@@ -9502,7 +9522,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     
     if element_type.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     
     // For heap arrays, we need to extract the data pointer and length, then bounds check
@@ -9550,7 +9570,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         current_temp += 1;
         
         let operand = LLVMOperand { llvm_type: element_type, value: element_value };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     } else if is_string {
         // Strings are lowered as contiguous UTF-8 bytes (i8*), so address and materialize the requested code unit.
         let char_pointer = format_temp_name(current_temp);
@@ -9560,7 +9580,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         current_lines = append_string(current_lines, "  " + loaded_char + " = load i8, i8* " + char_pointer);
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "i8", value: loaded_char };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     
     // If we get here, unsupported array type
@@ -9572,7 +9592,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     let trimmed_expected = trim_text(expected_type);
     let mut expected_element_type -> string = "";
@@ -9629,7 +9649,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
 
     if inferred_element_type.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported array literal element type");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let element_type = inferred_element_type;
@@ -10226,7 +10246,7 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
-    let mut collected_string_constants -> StringConstant[] = [];
+    let mut collected_string_constants -> StringConstantSet = empty_string_constant_set();
 
     let info = resolve_struct_info_for_literal(context, parse.type_name);
     if info == null {
@@ -10235,12 +10255,12 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct");
         }
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     if info.fields.length == 0 {
         let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let mut used_names -> string[] = [];
@@ -10320,7 +10340,7 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
 
     if previous_value.length == 0 {
         let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let operand = LLVMOperand { llvm_type: info.llvm_name, value: previous_value };
@@ -10376,13 +10396,13 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum");
         }
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let variant_info = resolve_enum_variant_info(enum_info, parse.variant_name);
     if variant_info == null {
         diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     // Map tag type to LLVM integer type
@@ -10534,7 +10554,8 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
     }
 
     let operand = LLVMOperand { llvm_type: enum_info.llvm_name, value: enum_value };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: [] };
+    let empty_constants = empty_string_constant_set();
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
 }
 
 fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
@@ -10848,19 +10869,20 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type) {
         let mut pointer_type -> string = operand.llvm_type;
         let mut pointer_value -> string = operand.value;
+        let mut pointer_temp_index -> number = temp_index;
         let base_type = strip_pointer_suffix(pointer_type);
         if base_type != target_type {
             let desired_pointer_type = target_type + "*";
-            let bitcast_temp = format_temp_name(temp_index);
+            let bitcast_temp = format_temp_name(pointer_temp_index);
             current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type);
             pointer_type = desired_pointer_type;
             pointer_value = bitcast_temp;
-            temp_index += 1;
+            pointer_temp_index += 1;
         }
-        let load_temp = format_temp_name(temp_index);
+        let load_temp = format_temp_name(pointer_temp_index);
         current_lines = append_string(current_lines, "  " + load_temp + " = load " + target_type + ", " + pointer_type + " " + pointer_value);
         let coerced = LLVMOperand { llvm_type: target_type, value: load_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        return CoercionResult { lines: current_lines, temp_index: pointer_temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`");
     return CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
@@ -12598,6 +12620,8 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
     let content = unescape_string_literal(literal);
     let global_name = "@.str." + number_to_string(temp_index);
     let constant = StringConstant { name: global_name, content: content, byte_count: content.length };
+    let base_constants = empty_string_constant_set();
+    let constant_set = append_string_constant(base_constants, constant);
 
     let array_type = "[" + number_to_string(content.length + 1) + " x i8]";
     let gep_instr = "  %s" + number_to_string(temp_index) + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + global_name + ", i32 0, i32 0";
@@ -12609,7 +12633,7 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
         temp_index: temp_index + 1,
         operand: operand,
         diagnostics: [],
-        string_constants: [constant]
+        string_constants: constant_set
     };
 }
 
@@ -12807,59 +12831,92 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
     return result;
 }
 
-fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
-    let mut result -> StringConstant[] = existing;
+fn empty_string_constant_set() -> StringConstantSet {
+    let empty_names -> string[] = [];
+    let empty_contents -> string[] = [];
+    let empty_counts -> number[] = [];
+    return StringConstantSet { names: empty_names, contents: empty_contents, byte_counts: empty_counts };
+}
+
+fn string_constant_singleton(constant -> StringConstant) -> StringConstantSet {
+    let empty_set = empty_string_constant_set();
+    return append_string_constant(empty_set, constant);
+}
+
+fn clone_string_constants(constants -> StringConstantSet) -> StringConstantSet {
+    let names_copy = constants.names;
+    let contents_copy = constants.contents;
+    let byte_counts_copy = constants.byte_counts;
+    return StringConstantSet { names: names_copy, contents: contents_copy, byte_counts: byte_counts_copy };
+}
+
+fn append_string_constant(set -> StringConstantSet, constant -> StringConstant) -> StringConstantSet {
+    let updated_names = set.names.concat([constant.name]);
+    let updated_contents = set.contents.concat([constant.content]);
+    let updated_counts = set.byte_counts.concat([constant.byte_count]);
+    return StringConstantSet { names: updated_names, contents: updated_contents, byte_counts: updated_counts };
+}
+
+fn merge_string_constants(existing -> StringConstantSet, new_constants -> StringConstantSet) -> StringConstantSet {
+    let mut result = existing;
     let mut index -> number = 0;
     loop {
-        if index >= new_constants.length {
+        if index >= new_constants.names.length {
             break;
         }
-        let candidate = new_constants[index];
+        let candidate = string_constant_from_set(new_constants, index);
         let found_by_name = find_string_constant_by_name(result, candidate.name);
         if found_by_name == null {
-            result = result.concat([candidate]);
+            result = append_string_constant(result, candidate);
         }
         index += 1;
     }
     return result;
 }
 
-fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant? {
+fn find_string_constant(constants -> StringConstantSet, content -> string) -> StringConstant? {
     let mut index -> number = 0;
     loop {
-        if index >= constants.length {
+        if index >= constants.contents.length {
             break;
         }
-        if constants[index].content == content {
-            return constants[index];
+        if constants.contents[index] == content {
+            return string_constant_from_set(constants, index);
         }
         index += 1;
     }
     return null;
 }
 
-fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant? {
+fn find_string_constant_by_name(constants -> StringConstantSet, name -> string) -> StringConstant? {
     let mut index -> number = 0;
     loop {
-        if index >= constants.length {
+        if index >= constants.names.length {
             break;
         }
-        if constants[index].name == name {
-            return constants[index];
+        if constants.names[index] == name {
+            return string_constant_from_set(constants, index);
         }
         index += 1;
     }
     return null;
 }
 
-fn render_string_constants(constants -> StringConstant[]) -> string[] {
+fn string_constant_from_set(constants -> StringConstantSet, index -> number) -> StringConstant {
+    let name = constants.names[index];
+    let content = constants.contents[index];
+    let byte_count = constants.byte_counts[index];
+    return StringConstant { name: name, content: content, byte_count: byte_count };
+}
+
+fn render_string_constants(constants -> StringConstantSet) -> string[] {
     let mut lines -> string[] = [];
     let mut index -> number = 0;
     loop {
-        if index >= constants.length {
+        if index >= constants.names.length {
             break;
         }
-        let constant = constants[index];
+        let constant = string_constant_from_set(constants, index);
         let escaped = escape_string_for_llvm(constant.content);
         let length_str = number_to_string(constant.byte_count + 1);
         let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";

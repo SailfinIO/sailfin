@@ -168,7 +168,7 @@ def compile_to_native_llvm_with_manifests(source, manifest_contents):
 
 def main():
     # effects: io
-    print.info("Sailfin compiler (stage 0)")
+    print.info("Sailfin compiler")
 
 def compile_project(sources):
     # effects: io

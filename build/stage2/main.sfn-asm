@@ -271,8 +271,8 @@
 .fn main() ![io]
 .meta return void
 .meta effects io
-    .span 198 5 198 46
-    eval print.info("Sailfin compiler (stage 0)")
+    .span 198 5 198 36
+    eval print.info("Sailfin compiler")
 .endfn
 
 .fn compile_project(sources -> string[]) -> ProjectCompilation ![io]
