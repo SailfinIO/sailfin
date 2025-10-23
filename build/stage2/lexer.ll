@@ -7,22 +7,26 @@ source_filename = "sailfin"
 %TokenKind = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.1 = private unnamed_addr constant [3 x i8] c"->\00"
-@.str.4 = private unnamed_addr constant [3 x i8] c"=>\00"
-@.str.7 = private unnamed_addr constant [3 x i8] c"==\00"
-@.str.10 = private unnamed_addr constant [3 x i8] c"!=\00"
-@.str.13 = private unnamed_addr constant [3 x i8] c"<=\00"
-@.str.16 = private unnamed_addr constant [3 x i8] c">=\00"
-@.str.19 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.22 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.24 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
+@.str.len2.h193445474 = private unnamed_addr constant [3 x i8] c"=>\00"
+@.str.len2.h193445441 = private unnamed_addr constant [3 x i8] c"==\00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
+@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define { %Token*, i64 }* @lex(i8* %source) {
 entry:
@@ -663,7 +667,7 @@ then44:
   %t424 = load %LexerState, %LexerState* %l0
   %t425 = getelementptr %LexerState, %LexerState %t424, i32 0, i32 3
   store double %t423, double* %t425
-  %s426 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.426, i32 0, i32 0
+  %s426 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s426, i8** %l23
   store i1 0, i1* %l24
   %t427 = load %LexerState, %LexerState* %l0
@@ -831,7 +835,7 @@ then56:
   store i8 0, i8* %t533
   %t534 = getelementptr [2 x i8], [2 x i8]* %t531, i32 0, i32 0
   %t535 = call i8* @interpret_escape(i8* %t534)
-  %t536 = add i8* %t529, %t535
+  %t536 = call i8* @sailfin_runtime_string_concat(i8* %t529, i8* %t535)
   store i8* %t536, i8** %l23
   store i1 0, i1* %l24
   br label %merge58
@@ -1360,7 +1364,7 @@ afterloop89:
   %t913 = call i8* @slice(i8* %t909, double %t910, double %t912)
   store i8* %t913, i8** %l35
   %t915 = load i8*, i8** %l35
-  %s916 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.916, i32 0, i32 0
+  %s916 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t917 = icmp eq i8* %t915, %s916
   br label %logical_or_entry_914
 
@@ -1369,7 +1373,7 @@ logical_or_entry_914:
 
 logical_or_right_914:
   %t918 = load i8*, i8** %l35
-  %s919 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.919, i32 0, i32 0
+  %s919 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t920 = icmp eq i8* %t918, %s919
   br label %logical_or_right_end_914
 
@@ -1445,7 +1449,7 @@ merge85:
   %t968 = call i8* @peek_next_char(%LexerState %t967)
   store i8* %t968, i8** %l39
   %t969 = load i8*, i8** %l39
-  %s970 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.970, i32 0, i32 0
+  %s970 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t971 = icmp ne i8* %t969, %s970
   %t972 = load %LexerState, %LexerState* %l0
   %t973 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -1890,7 +1894,7 @@ entry:
   %t8 = load double, double* %l0
   br i1 %t7, label %then0, label %merge1
 then0:
-  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.9, i32 0, i32 0
+  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s9
 merge1:
   %t10 = extractvalue %LexerState %state, 0
@@ -1972,7 +1976,7 @@ merge9:
 
 define i1 @is_two_char_symbol(i8* %value) {
 entry:
-  %s1 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1, i32 0, i32 0
+  %s1 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t2 = icmp eq i8* %value, %s1
   br label %logical_or_entry_0
 
@@ -1980,7 +1984,7 @@ logical_or_entry_0:
   br i1 %t2, label %logical_or_merge_0, label %logical_or_right_0
 
 logical_or_right_0:
-  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193445474, i32 0, i32 0
   %t5 = icmp eq i8* %value, %s4
   br label %logical_or_entry_3
 
@@ -1988,7 +1992,7 @@ logical_or_entry_3:
   br i1 %t5, label %logical_or_merge_3, label %logical_or_right_3
 
 logical_or_right_3:
-  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193445441, i32 0, i32 0
   %t8 = icmp eq i8* %value, %s7
   br label %logical_or_entry_6
 
@@ -1996,7 +2000,7 @@ logical_or_entry_6:
   br i1 %t8, label %logical_or_merge_6, label %logical_or_right_6
 
 logical_or_right_6:
-  %s10 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t11 = icmp eq i8* %value, %s10
   br label %logical_or_entry_9
 
@@ -2004,7 +2008,7 @@ logical_or_entry_9:
   br i1 %t11, label %logical_or_merge_9, label %logical_or_right_9
 
 logical_or_right_9:
-  %s13 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.13, i32 0, i32 0
+  %s13 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193444352, i32 0, i32 0
   %t14 = icmp eq i8* %value, %s13
   br label %logical_or_entry_12
 
@@ -2012,7 +2016,7 @@ logical_or_entry_12:
   br i1 %t14, label %logical_or_merge_12, label %logical_or_right_12
 
 logical_or_right_12:
-  %s16 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193446530, i32 0, i32 0
   %t17 = icmp eq i8* %value, %s16
   br label %logical_or_entry_15
 
@@ -2020,7 +2024,7 @@ logical_or_entry_15:
   br i1 %t17, label %logical_or_merge_15, label %logical_or_right_15
 
 logical_or_right_15:
-  %s19 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.19, i32 0, i32 0
+  %s19 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193419635, i32 0, i32 0
   %t20 = icmp eq i8* %value, %s19
   br label %logical_or_entry_18
 
@@ -2028,7 +2032,7 @@ logical_or_entry_18:
   br i1 %t20, label %logical_or_merge_18, label %logical_or_right_18
 
 logical_or_right_18:
-  %s22 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193516127, i32 0, i32 0
   %t23 = icmp eq i8* %value, %s22
   br label %logical_or_entry_21
 
@@ -2036,7 +2040,7 @@ logical_or_entry_21:
   br i1 %t23, label %logical_or_merge_21, label %logical_or_right_21
 
 logical_or_right_21:
-  %s24 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.24, i32 0, i32 0
+  %s24 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428611, i32 0, i32 0
   %t25 = icmp eq i8* %value, %s24
   br label %logical_or_right_end_21
 

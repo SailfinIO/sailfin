@@ -69,21 +69,30 @@ source_filename = "sailfin"
 %LiteralValue = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i1 @sailfin_runtime_is_decimal_digit(i8)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.3 = private unnamed_addr constant [7 x i8] c"import\00"
-@.str.16 = private unnamed_addr constant [5 x i8] c"from\00"
-@.str.13 = private unnamed_addr constant [4 x i8] c"let\00"
-@.str.4 = private unnamed_addr constant [5 x i8] c"type\00"
-@.str.46 = private unnamed_addr constant [3 x i8] c"fn\00"
-@.str.44 = private unnamed_addr constant [3 x i8] c"fn\00"
+@.str.len6.h483393773 = private unnamed_addr constant [7 x i8] c"import\00"
+@.str.len4.h259337567 = private unnamed_addr constant [5 x i8] c"from\00"
+@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
+@.str.len3.h2090468623 = private unnamed_addr constant [4 x i8] c"let\00"
+@.str.len6.h789690461 = private unnamed_addr constant [7 x i8] c"struct\00"
+@.str.len4.h276192845 = private unnamed_addr constant [5 x i8] c"type\00"
+@.str.len9.h1313193687 = private unnamed_addr constant [10 x i8] c"interface\00"
+@.str.len4.h258014432 = private unnamed_addr constant [5 x i8] c"enum\00"
+@.str.len2.h193491707 = private unnamed_addr constant [3 x i8] c"fn\00"
+@.str.len5.h238194529 = private unnamed_addr constant [6 x i8] c"model\00"
+@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
+@.str.len4.h275477867 = private unnamed_addr constant [5 x i8] c"test\00"
 @.enum.TokenKind.variant.default = private unnamed_addr constant [1 x i8] c"\00"
 @.enum.TokenKind.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
 @.enum.TokenKind.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
@@ -93,15 +102,21 @@ declare noalias i8* @malloc(i64)
 @.enum.TokenKind.Whitespace.variant = private unnamed_addr constant [11 x i8] c"Whitespace\00"
 @.enum.TokenKind.Comment.variant = private unnamed_addr constant [8 x i8] c"Comment\00"
 @.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
-@.str.103 = private unnamed_addr constant [7 x i8] c"Symbol\00"
-@.str.42 = private unnamed_addr constant [3 x i8] c"fn\00"
-@.str.14 = private unnamed_addr constant [4 x i8] c"for\00"
-@.str.22 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.23 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.20 = private unnamed_addr constant [3 x i8] c"if\00"
-@.str.348 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.0 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.str.len10.h1589343988 = private unnamed_addr constant [11 x i8] c"implements\00"
+@.str.len3.h2090263825 = private unnamed_addr constant [4 x i8] c"for\00"
+@.str.len2.h193494974 = private unnamed_addr constant [3 x i8] c"in\00"
+@.str.len4.h266345381 = private unnamed_addr constant [5 x i8] c"loop\00"
+@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
+@.str.len2.h193494710 = private unnamed_addr constant [3 x i8] c"if\00"
+@.str.len5.h222164317 = private unnamed_addr constant [6 x i8] c"match\00"
+@.str.len6.h1128151960 = private unnamed_addr constant [7 x i8] c"prompt\00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len4.h279180071 = private unnamed_addr constant [5 x i8] c"with\00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define %Program @parse_program(i8* %source) {
 entry:
@@ -176,7 +191,7 @@ loop.body1:
   %t40 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t41 = icmp eq i32 %t17, 7
   %t42 = select i1 %t41, i8* %t40, i8* %t39
-  %s43 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.43, i32 0, i32 0
+  %s43 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t44 = icmp eq i8* %t42, %s43
   %t45 = load %Parser, %Parser* %l0
   %t46 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l1
@@ -241,7 +256,7 @@ entry:
   %t12 = call %Token @parser_peek_raw(%Parser %t11)
   store %Token %t12, %Token* %l4
   %t13 = load %Token, %Token* %l4
-  %s14 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h483393773, i32 0, i32 0
   %t15 = call i1 @identifier_matches(%Token %t13, i8* %s14)
   %t16 = load %Parser, %Parser* %l0
   %t17 = load %Parser, %Parser* %l1
@@ -270,7 +285,7 @@ merge3:
   ret %StatementParseResult %t33
 merge1:
   %t34 = load %Token, %Token* %l4
-  %s35 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.35, i32 0, i32 0
+  %s35 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h42978514, i32 0, i32 0
   %t36 = call i1 @identifier_matches(%Token %t34, i8* %s35)
   %t37 = load %Parser, %Parser* %l0
   %t38 = load %Parser, %Parser* %l1
@@ -299,7 +314,7 @@ merge7:
   ret %StatementParseResult %t54
 merge5:
   %t55 = load %Token, %Token* %l4
-  %s56 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090468623, i32 0, i32 0
   %t57 = call i1 @identifier_matches(%Token %t55, i8* %s56)
   %t58 = load %Parser, %Parser* %l0
   %t59 = load %Parser, %Parser* %l1
@@ -328,7 +343,7 @@ merge11:
   ret %StatementParseResult %t75
 merge9:
   %t76 = load %Token, %Token* %l4
-  %s77 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.77, i32 0, i32 0
+  %s77 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h238194529, i32 0, i32 0
   %t78 = call i1 @identifier_matches(%Token %t76, i8* %s77)
   %t79 = load %Parser, %Parser* %l0
   %t80 = load %Parser, %Parser* %l1
@@ -359,7 +374,7 @@ merge15:
   ret %StatementParseResult %t98
 merge13:
   %t99 = load %Token, %Token* %l4
-  %s100 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.100, i32 0, i32 0
+  %s100 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2003786807, i32 0, i32 0
   %t101 = call i1 @identifier_matches(%Token %t99, i8* %s100)
   %t102 = load %Parser, %Parser* %l0
   %t103 = load %Parser, %Parser* %l1
@@ -390,7 +405,7 @@ merge19:
   ret %StatementParseResult %t121
 merge17:
   %t122 = load %Token, %Token* %l4
-  %s123 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.123, i32 0, i32 0
+  %s123 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275832617, i32 0, i32 0
   %t124 = call i1 @identifier_matches(%Token %t122, i8* %s123)
   %t125 = load %Parser, %Parser* %l0
   %t126 = load %Parser, %Parser* %l1
@@ -421,7 +436,7 @@ merge23:
   ret %StatementParseResult %t144
 merge21:
   %t145 = load %Token, %Token* %l4
-  %s146 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.146, i32 0, i32 0
+  %s146 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275477867, i32 0, i32 0
   %t147 = call i1 @identifier_matches(%Token %t145, i8* %s146)
   %t148 = load %Parser, %Parser* %l0
   %t149 = load %Parser, %Parser* %l1
@@ -452,7 +467,7 @@ merge27:
   ret %StatementParseResult %t167
 merge25:
   %t168 = load %Token, %Token* %l4
-  %s169 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.169, i32 0, i32 0
+  %s169 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t170 = call i1 @identifier_matches(%Token %t168, i8* %s169)
   %t171 = load %Parser, %Parser* %l0
   %t172 = load %Parser, %Parser* %l1
@@ -468,7 +483,7 @@ then28:
   ret %StatementParseResult %t179
 merge29:
   %t180 = load %Token, %Token* %l4
-  %s181 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.181, i32 0, i32 0
+  %s181 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t182 = call i1 @identifier_matches(%Token %t180, i8* %s181)
   %t183 = load %Parser, %Parser* %l0
   %t184 = load %Parser, %Parser* %l1
@@ -483,7 +498,7 @@ then30:
   store %Parser %t190, %Parser* %l5
   %t191 = load %Parser, %Parser* %l5
   %t192 = call %Token @parser_peek_raw(%Parser %t191)
-  %s193 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.193, i32 0, i32 0
+  %s193 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t194 = call i1 @identifier_matches(%Token %t192, i8* %s193)
   %t195 = load %Parser, %Parser* %l0
   %t196 = load %Parser, %Parser* %l1
@@ -502,7 +517,7 @@ merge33:
   br label %merge31
 merge31:
   %t205 = load %Token, %Token* %l4
-  %s206 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.206, i32 0, i32 0
+  %s206 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789690461, i32 0, i32 0
   %t207 = call i1 @identifier_matches(%Token %t205, i8* %s206)
   %t208 = load %Parser, %Parser* %l0
   %t209 = load %Parser, %Parser* %l1
@@ -518,7 +533,7 @@ then34:
   ret %StatementParseResult %t216
 merge35:
   %t217 = load %Token, %Token* %l4
-  %s218 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.218, i32 0, i32 0
+  %s218 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h276192845, i32 0, i32 0
   %t219 = call i1 @identifier_matches(%Token %t217, i8* %s218)
   %t220 = load %Parser, %Parser* %l0
   %t221 = load %Parser, %Parser* %l1
@@ -534,7 +549,7 @@ then36:
   ret %StatementParseResult %t228
 merge37:
   %t229 = load %Token, %Token* %l4
-  %s230 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.230, i32 0, i32 0
+  %s230 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1313193687, i32 0, i32 0
   %t231 = call i1 @identifier_matches(%Token %t229, i8* %s230)
   %t232 = load %Parser, %Parser* %l0
   %t233 = load %Parser, %Parser* %l1
@@ -550,7 +565,7 @@ then38:
   ret %StatementParseResult %t240
 merge39:
   %t241 = load %Token, %Token* %l4
-  %s242 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.242, i32 0, i32 0
+  %s242 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258014432, i32 0, i32 0
   %t243 = call i1 @identifier_matches(%Token %t241, i8* %s242)
   %t244 = load %Parser, %Parser* %l0
   %t245 = load %Parser, %Parser* %l1
@@ -598,7 +613,7 @@ entry:
   %t1 = call %Parser @skip_trivia(%Parser %t0)
   store %Parser %t1, %Parser* %l0
   %t2 = load %Parser, %Parser* %l0
-  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h483393773, i32 0, i32 0
   %t4 = call %Parser @consume_keyword(%Parser %t2, i8* %s3)
   store %Parser %t4, %Parser* %l0
   %t5 = load %Parser, %Parser* %l0
@@ -616,7 +631,7 @@ entry:
   %t14 = call %Parser @skip_trivia(%Parser %t13)
   store %Parser %t14, %Parser* %l0
   %t15 = load %Parser, %Parser* %l0
-  %s16 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259337567, i32 0, i32 0
   %t17 = call %Parser @consume_keyword(%Parser %t15, i8* %s16)
   store %Parser %t17, %Parser* %l0
   %t18 = load %Parser, %Parser* %l0
@@ -679,7 +694,7 @@ entry:
   %t67 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t68 = icmp eq i32 %t44, 7
   %t69 = select i1 %t68, i8* %t67, i8* %t66
-  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.70, i32 0, i32 0
+  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t71 = icmp eq i8* %t69, %s70
   br label %logical_and_entry_40
 
@@ -783,7 +798,7 @@ entry:
   %t1 = call %Parser @skip_trivia(%Parser %t0)
   store %Parser %t1, %Parser* %l0
   %t2 = load %Parser, %Parser* %l0
-  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h42978514, i32 0, i32 0
   %t4 = call %Parser @consume_keyword(%Parser %t2, i8* %s3)
   store %Parser %t4, %Parser* %l0
   %t5 = load %Parser, %Parser* %l0
@@ -801,7 +816,7 @@ entry:
   %t14 = call %Parser @skip_trivia(%Parser %t13)
   store %Parser %t14, %Parser* %l0
   %t15 = load %Parser, %Parser* %l0
-  %s16 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259337567, i32 0, i32 0
   %t17 = call %Parser @consume_keyword(%Parser %t15, i8* %s16)
   store %Parser %t17, %Parser* %l0
   %t18 = load %Parser, %Parser* %l0
@@ -864,7 +879,7 @@ entry:
   %t67 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t68 = icmp eq i32 %t44, 7
   %t69 = select i1 %t68, i8* %t67, i8* %t66
-  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.70, i32 0, i32 0
+  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t71 = icmp eq i8* %t69, %s70
   br label %logical_and_entry_40
 
@@ -997,7 +1012,7 @@ entry:
   %t11 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t9, %Token %t10)
   store { %Token*, i64 }* %t11, { %Token*, i64 }** %l1
   %t12 = load %Parser, %Parser* %l0
-  %s13 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.13, i32 0, i32 0
+  %s13 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090468623, i32 0, i32 0
   %t14 = call %Parser @consume_keyword(%Parser %t12, i8* %s13)
   store %Parser %t14, %Parser* %l0
   store i1 0, i1* %l3
@@ -1008,7 +1023,7 @@ entry:
   %t18 = call %Token @parser_peek_raw(%Parser %t17)
   store %Token %t18, %Token* %l4
   %t19 = load %Token, %Token* %l4
-  %s20 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.20, i32 0, i32 0
+  %s20 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t21 = call i1 @identifier_matches(%Token %t19, i8* %s20)
   %t22 = load %Parser, %Parser* %l0
   %t23 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -1022,7 +1037,7 @@ then0:
   %t29 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t27, %Token %t28)
   store { %Token*, i64 }* %t29, { %Token*, i64 }** %l1
   %t30 = load %Parser, %Parser* %l0
-  %s31 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t32 = call %Parser @consume_keyword(%Parser %t30, i8* %s31)
   store %Parser %t32, %Parser* %l0
   store i1 1, i1* %l3
@@ -1086,7 +1101,7 @@ merge1:
   %t79 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t80 = icmp eq i32 %t56, 7
   %t81 = select i1 %t80, i8* %t79, i8* %t78
-  %s82 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.82, i32 0, i32 0
+  %s82 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t83 = icmp eq i8* %t81, %s82
   br label %logical_and_entry_53
 
@@ -1179,7 +1194,7 @@ logical_or_right_52:
   %t152 = load i8*, i8** %t151
   %t153 = icmp eq i32 %t123, 4
   %t154 = select i1 %t153, i8* %t152, i8* %t148
-  %s155 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.155, i32 0, i32 0
+  %s155 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t156 = icmp eq i8* %t154, %s155
   br label %logical_or_right_end_52
 
@@ -1375,7 +1390,7 @@ merge3:
   %t296 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t297 = icmp eq i32 %t273, 7
   %t298 = select i1 %t297, i8* %t296, i8* %t295
-  %s299 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.299, i32 0, i32 0
+  %s299 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t300 = icmp eq i8* %t298, %s299
   br label %logical_and_entry_270
 
@@ -1626,7 +1641,7 @@ merge13:
   %t489 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t490 = icmp eq i32 %t466, 7
   %t491 = select i1 %t490, i8* %t489, i8* %t488
-  %s492 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.492, i32 0, i32 0
+  %s492 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t493 = icmp eq i8* %t491, %s492
   br label %logical_and_entry_463
 
@@ -1831,7 +1846,7 @@ loop.body1:
   %t45 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t46 = icmp eq i32 %t22, 7
   %t47 = select i1 %t46, i8* %t45, i8* %t44
-  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.48, i32 0, i32 0
+  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t49 = icmp eq i8* %t47, %s48
   br label %logical_and_entry_19
 
@@ -1921,7 +1936,7 @@ merge5:
   %t117 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t118 = icmp eq i32 %t94, 7
   %t119 = select i1 %t118, i8* %t117, i8* %t116
-  %s120 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.120, i32 0, i32 0
+  %s120 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t121 = icmp ne i8* %t119, %s120
   %t122 = load %Parser, %Parser* %l0
   %t123 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
@@ -1944,7 +1959,7 @@ merge7:
   %t132 = call %Token @parser_peek_raw(%Parser %t131)
   store %Token %t132, %Token* %l5
   %t133 = load %Token, %Token* %l5
-  %s134 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.134, i32 0, i32 0
+  %s134 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193486427, i32 0, i32 0
   %t135 = call i1 @identifier_matches(%Token %t133, i8* %s134)
   %t136 = load %Parser, %Parser* %l0
   %t137 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
@@ -1955,7 +1970,7 @@ merge7:
   br i1 %t135, label %then8, label %merge9
 then8:
   %t142 = load %Parser, %Parser* %l0
-  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.143, i32 0, i32 0
+  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193486427, i32 0, i32 0
   %t144 = call %Parser @consume_keyword(%Parser %t142, i8* %s143)
   store %Parser %t144, %Parser* %l0
   %t145 = load %Parser, %Parser* %l0
@@ -1992,7 +2007,7 @@ then8:
   %t174 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t175 = icmp eq i32 %t151, 7
   %t176 = select i1 %t175, i8* %t174, i8* %t173
-  %s177 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.177, i32 0, i32 0
+  %s177 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t178 = icmp eq i8* %t176, %s177
   %t179 = load %Parser, %Parser* %l0
   %t180 = load { %NamedSpecifier*, i64 }*, { %NamedSpecifier*, i64 }** %l1
@@ -2084,7 +2099,7 @@ merge9:
   %t244 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t245 = icmp eq i32 %t221, 7
   %t246 = select i1 %t245, i8* %t244, i8* %t243
-  %s247 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.247, i32 0, i32 0
+  %s247 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t248 = icmp eq i8* %t246, %s247
   br label %logical_and_entry_218
 
@@ -2191,7 +2206,7 @@ afterloop3:
   %t330 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t331 = icmp eq i32 %t307, 7
   %t332 = select i1 %t331, i8* %t330, i8* %t329
-  %s333 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.333, i32 0, i32 0
+  %s333 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t334 = icmp eq i8* %t332, %s333
   br label %logical_and_entry_303
 
@@ -2453,7 +2468,7 @@ entry:
   %t1 = call %Parser @skip_trivia(%Parser %t0)
   store %Parser %t1, %Parser* %l0
   %t2 = load %Parser, %Parser* %l0
-  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789690461, i32 0, i32 0
   %t4 = call %Parser @consume_keyword(%Parser %t2, i8* %s3)
   store %Parser %t4, %Parser* %l0
   %t5 = load %Parser, %Parser* %l0
@@ -2603,7 +2618,7 @@ loop.body1:
   %t106 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t107 = icmp eq i32 %t83, 7
   %t108 = select i1 %t107, i8* %t106, i8* %t105
-  %s109 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.109, i32 0, i32 0
+  %s109 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t110 = icmp eq i8* %t108, %s109
   br label %logical_and_entry_80
 
@@ -2704,7 +2719,7 @@ merge5:
   %t189 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t190 = icmp eq i32 %t166, 7
   %t191 = select i1 %t190, i8* %t189, i8* %t188
-  %s192 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.192, i32 0, i32 0
+  %s192 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t193 = icmp eq i8* %t191, %s192
   %t194 = load %Parser, %Parser* %l0
   %t195 = load %Token, %Token* %l1
@@ -2945,7 +2960,7 @@ entry:
   %t2 = call %Parser @skip_trivia(%Parser %t1)
   store %Parser %t2, %Parser* %l0
   %t3 = load %Parser, %Parser* %l0
-  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h276192845, i32 0, i32 0
   %t5 = call %Parser @consume_keyword(%Parser %t3, i8* %s4)
   store %Parser %t5, %Parser* %l0
   %t6 = load %Parser, %Parser* %l0
@@ -2982,7 +2997,7 @@ entry:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t39 = icmp ne i8* %t37, %s38
   %t40 = load %Parser, %Parser* %l0
   %t41 = load %Parser, %Parser* %l1
@@ -3054,7 +3069,7 @@ merge1:
   %t93 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t94 = icmp eq i32 %t70, 7
   %t95 = select i1 %t94, i8* %t93, i8* %t92
-  %s96 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.96, i32 0, i32 0
+  %s96 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t97 = icmp ne i8* %t95, %s96
   br label %logical_or_entry_67
 
@@ -3200,7 +3215,7 @@ merge5:
   %t210 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t211 = icmp eq i32 %t187, 7
   %t212 = select i1 %t211, i8* %t210, i8* %t209
-  %s213 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.213, i32 0, i32 0
+  %s213 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t214 = icmp eq i8* %t212, %s213
   br label %logical_and_entry_183
 
@@ -3337,7 +3352,7 @@ entry:
   %t2 = call %Parser @skip_trivia(%Parser %t1)
   store %Parser %t2, %Parser* %l0
   %t3 = load %Parser, %Parser* %l0
-  %s4 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1313193687, i32 0, i32 0
   %t5 = call %Parser @consume_keyword(%Parser %t3, i8* %s4)
   store %Parser %t5, %Parser* %l0
   %t6 = load %Parser, %Parser* %l0
@@ -3374,7 +3389,7 @@ entry:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t39 = icmp ne i8* %t37, %s38
   %t40 = load %Parser, %Parser* %l0
   %t41 = load %Parser, %Parser* %l1
@@ -3491,7 +3506,7 @@ loop.body3:
   %t120 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t121 = icmp eq i32 %t97, 7
   %t122 = select i1 %t121, i8* %t120, i8* %t119
-  %s123 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.123, i32 0, i32 0
+  %s123 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t124 = icmp eq i8* %t122, %s123
   br label %logical_and_entry_94
 
@@ -3587,7 +3602,7 @@ merge7:
   %t198 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t199 = icmp eq i32 %t175, 7
   %t200 = select i1 %t199, i8* %t198, i8* %t197
-  %s201 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.201, i32 0, i32 0
+  %s201 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t202 = icmp eq i8* %t200, %s201
   %t203 = load %Parser, %Parser* %l0
   %t204 = load %Parser, %Parser* %l1
@@ -3742,7 +3757,7 @@ entry:
   %t2 = call %Parser @skip_trivia(%Parser %t1)
   store %Parser %t2, %Parser* %l0
   %t3 = load %Parser, %Parser* %l0
-  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258014432, i32 0, i32 0
   %t5 = call %Parser @consume_keyword(%Parser %t3, i8* %s4)
   store %Parser %t5, %Parser* %l0
   %t6 = load %Parser, %Parser* %l0
@@ -3779,7 +3794,7 @@ entry:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t39 = icmp ne i8* %t37, %s38
   %t40 = load %Parser, %Parser* %l0
   %t41 = load %Parser, %Parser* %l1
@@ -3896,7 +3911,7 @@ loop.body3:
   %t120 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t121 = icmp eq i32 %t97, 7
   %t122 = select i1 %t121, i8* %t120, i8* %t119
-  %s123 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.123, i32 0, i32 0
+  %s123 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t124 = icmp eq i8* %t122, %s123
   br label %logical_and_entry_94
 
@@ -3992,7 +4007,7 @@ merge7:
   %t198 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t199 = icmp eq i32 %t175, 7
   %t200 = select i1 %t199, i8* %t198, i8* %t197
-  %s201 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.201, i32 0, i32 0
+  %s201 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t202 = icmp eq i8* %t200, %s201
   %t203 = load %Parser, %Parser* %l0
   %t204 = load %Parser, %Parser* %l1
@@ -4140,7 +4155,7 @@ entry:
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
   store %Token %t2, %Token* %l3
   %t3 = load %Token, %Token* %l3
-  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t5 = call i1 @identifier_matches(%Token %t3, i8* %s4)
   %t6 = load %Parser, %Parser* %l0
   %t7 = load %Parser, %Parser* %l1
@@ -4154,7 +4169,7 @@ then0:
   store %Parser %t12, %Parser* %l4
   %t13 = load %Parser, %Parser* %l4
   %t14 = call %Token @parser_peek_raw(%Parser %t13)
-  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.15, i32 0, i32 0
+  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t16 = call i1 @identifier_matches(%Token %t14, i8* %s15)
   %t17 = load %Parser, %Parser* %l0
   %t18 = load %Parser, %Parser* %l1
@@ -4164,7 +4179,7 @@ then0:
   br i1 %t16, label %then2, label %merge3
 then2:
   %t22 = load %Parser, %Parser* %l1
-  %s23 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.23, i32 0, i32 0
+  %s23 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t24 = call %Parser @consume_keyword(%Parser %t22, i8* %s23)
   store %Parser %t24, %Parser* %l1
   store i1 1, i1* %l2
@@ -4185,7 +4200,7 @@ merge1:
   store %Parser %t30, %Parser* %l1
   %t31 = load %Parser, %Parser* %l1
   %t32 = call %Token @parser_peek_raw(%Parser %t31)
-  %s33 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.33, i32 0, i32 0
+  %s33 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t34 = call i1 @identifier_matches(%Token %t32, i8* %s33)
   %t35 = xor i1 %t34, 1
   %t36 = load %Parser, %Parser* %l0
@@ -4202,7 +4217,7 @@ then4:
   ret %InterfaceMemberParseResult %t44
 merge5:
   %t45 = load %Parser, %Parser* %l1
-  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.46, i32 0, i32 0
+  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t47 = call %Parser @consume_keyword(%Parser %t45, i8* %s46)
   store %Parser %t47, %Parser* %l1
   %t48 = load %Parser, %Parser* %l1
@@ -4239,7 +4254,7 @@ merge5:
   %t77 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t78 = icmp eq i32 %t54, 7
   %t79 = select i1 %t78, i8* %t77, i8* %t76
-  %s80 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.80, i32 0, i32 0
+  %s80 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t81 = icmp ne i8* %t79, %s80
   %t82 = load %Parser, %Parser* %l0
   %t83 = load %Parser, %Parser* %l1
@@ -4339,7 +4354,7 @@ merge7:
   %t156 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t157 = icmp eq i32 %t133, 7
   %t158 = select i1 %t157, i8* %t156, i8* %t155
-  %s159 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.159, i32 0, i32 0
+  %s159 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t160 = icmp eq i8* %t158, %s159
   br label %logical_and_entry_130
 
@@ -4432,7 +4447,7 @@ logical_or_right_129:
   %t229 = load i8*, i8** %t228
   %t230 = icmp eq i32 %t200, 4
   %t231 = select i1 %t230, i8* %t229, i8* %t225
-  %s232 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.232, i32 0, i32 0
+  %s232 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t233 = icmp eq i8* %t231, %s232
   br label %logical_or_right_end_129
 
@@ -4599,7 +4614,7 @@ then12:
   %t359 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t360 = icmp eq i32 %t336, 7
   %t361 = select i1 %t360, i8* %t359, i8* %t358
-  %s362 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.362, i32 0, i32 0
+  %s362 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t363 = icmp eq i8* %t361, %s362
   br label %logical_and_entry_333
 
@@ -4754,7 +4769,7 @@ entry:
   %t28 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t29 = icmp eq i32 %t5, 7
   %t30 = select i1 %t29, i8* %t28, i8* %t27
-  %s31 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t32 = icmp ne i8* %t30, %s31
   %t33 = load %Parser, %Parser* %l0
   %t34 = load %Parser, %Parser* %l1
@@ -4828,7 +4843,7 @@ merge1:
   %t88 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t89 = icmp eq i32 %t65, 7
   %t90 = select i1 %t89, i8* %t88, i8* %t87
-  %s91 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.91, i32 0, i32 0
+  %s91 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t92 = icmp eq i8* %t90, %s91
   br label %logical_and_entry_62
 
@@ -4941,7 +4956,7 @@ loop.body5:
   %t176 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t177 = icmp eq i32 %t153, 7
   %t178 = select i1 %t177, i8* %t176, i8* %t175
-  %s179 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.179, i32 0, i32 0
+  %s179 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t180 = icmp eq i8* %t178, %s179
   br label %logical_and_entry_150
 
@@ -5036,7 +5051,7 @@ merge9:
   %t253 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t254 = icmp eq i32 %t230, 7
   %t255 = select i1 %t254, i8* %t253, i8* %t252
-  %s256 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.256, i32 0, i32 0
+  %s256 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t257 = icmp eq i8* %t255, %s256
   %t258 = load %Parser, %Parser* %l0
   %t259 = load %Parser, %Parser* %l1
@@ -5152,7 +5167,7 @@ merge3:
   %t341 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t342 = icmp eq i32 %t318, 7
   %t343 = select i1 %t342, i8* %t341, i8* %t340
-  %s344 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.344, i32 0, i32 0
+  %s344 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t345 = icmp eq i8* %t343, %s344
   br label %logical_and_entry_315
 
@@ -5276,7 +5291,7 @@ entry:
   %t3 = load %Token, %Token* %l2
   store %Token %t3, %Token* %l3
   %t4 = load %Token, %Token* %l3
-  %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t6 = call i1 @identifier_matches(%Token %t4, i8* %s5)
   %t7 = load %Parser, %Parser* %l0
   %t8 = load i1, i1* %l1
@@ -5332,7 +5347,7 @@ merge1:
   %t46 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t47 = icmp eq i32 %t23, 7
   %t48 = select i1 %t47, i8* %t46, i8* %t45
-  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.49, i32 0, i32 0
+  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t50 = icmp ne i8* %t48, %s49
   %t51 = load %Parser, %Parser* %l0
   %t52 = load i1, i1* %l1
@@ -5399,7 +5414,7 @@ merge3:
   %t100 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t101 = icmp eq i32 %t77, 7
   %t102 = select i1 %t101, i8* %t100, i8* %t99
-  %s103 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.103, i32 0, i32 0
+  %s103 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t104 = icmp eq i8* %t102, %s103
   %t105 = load %Parser, %Parser* %l0
   %t106 = load i1, i1* %l1
@@ -5457,7 +5472,7 @@ logical_or_entry_147:
 
 logical_or_right_147:
   %t151 = load i8*, i8** %l8
-  %s152 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.152, i32 0, i32 0
+  %s152 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t153 = icmp eq i8* %t151, %s152
   br label %logical_or_right_end_147
 
@@ -5661,7 +5676,7 @@ merge19:
   %t299 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t300 = icmp eq i32 %t276, 7
   %t301 = select i1 %t300, i8* %t299, i8* %t298
-  %s302 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.302, i32 0, i32 0
+  %s302 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t303 = icmp eq i8* %t301, %s302
   %t304 = load %Parser, %Parser* %l0
   %t305 = load i1, i1* %l1
@@ -5818,7 +5833,7 @@ then25:
   %t443 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t444 = icmp eq i32 %t420, 7
   %t445 = select i1 %t444, i8* %t443, i8* %t442
-  %s446 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.446, i32 0, i32 0
+  %s446 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t447 = icmp eq i8* %t445, %s446
   br label %logical_and_entry_417
 
@@ -5970,7 +5985,7 @@ entry:
   %t29 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t30 = icmp eq i32 %t6, 7
   %t31 = select i1 %t30, i8* %t29, i8* %t28
-  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.32, i32 0, i32 0
+  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t33 = icmp eq i8* %t31, %s32
   br label %logical_and_entry_3
 
@@ -6062,7 +6077,7 @@ entry:
   %t2 = call %Parser @skip_trivia(%Parser %t1)
   store %Parser %t2, %Parser* %l0
   %t3 = load %Parser, %Parser* %l0
-  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h238194529, i32 0, i32 0
   %t5 = call %Parser @consume_keyword(%Parser %t3, i8* %s4)
   store %Parser %t5, %Parser* %l0
   %t6 = load %Parser, %Parser* %l0
@@ -6245,7 +6260,7 @@ loop.body3:
   %t134 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t135 = icmp eq i32 %t111, 7
   %t136 = select i1 %t135, i8* %t134, i8* %t133
-  %s137 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.137, i32 0, i32 0
+  %s137 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t138 = icmp eq i8* %t136, %s137
   br label %logical_and_entry_108
 
@@ -6344,7 +6359,7 @@ merge7:
   %t215 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t216 = icmp eq i32 %t192, 7
   %t217 = select i1 %t216, i8* %t215, i8* %t214
-  %s218 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.218, i32 0, i32 0
+  %s218 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t219 = icmp eq i8* %t217, %s218
   %t220 = load %Parser, %Parser* %l0
   %t221 = load %Parser, %Parser* %l1
@@ -6449,7 +6464,7 @@ merge11:
   %t295 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t296 = icmp eq i32 %t272, 7
   %t297 = select i1 %t296, i8* %t295, i8* %t294
-  %s298 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.298, i32 0, i32 0
+  %s298 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t299 = icmp eq i8* %t297, %s298
   br label %logical_and_entry_269
 
@@ -6551,7 +6566,7 @@ merge13:
   %t379 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t380 = icmp eq i32 %t356, 7
   %t381 = select i1 %t380, i8* %t379, i8* %t378
-  %s382 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.382, i32 0, i32 0
+  %s382 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t383 = icmp eq i8* %t381, %s382
   %t384 = load %Parser, %Parser* %l0
   %t385 = load %Parser, %Parser* %l1
@@ -6653,7 +6668,7 @@ entry:
   %t1 = call %Parser @skip_trivia(%Parser %t0)
   store %Parser %t1, %Parser* %l0
   %t2 = load %Parser, %Parser* %l0
-  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2003786807, i32 0, i32 0
   %t4 = call %Parser @consume_keyword(%Parser %t2, i8* %s3)
   store %Parser %t4, %Parser* %l0
   %t5 = load %Parser, %Parser* %l0
@@ -6746,7 +6761,7 @@ entry:
   %t73 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t74 = icmp eq i32 %t50, 7
   %t75 = select i1 %t74, i8* %t73, i8* %t72
-  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.76, i32 0, i32 0
+  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t77 = icmp eq i8* %t75, %s76
   br label %logical_and_entry_47
 
@@ -6839,7 +6854,7 @@ logical_or_right_46:
   %t146 = load i8*, i8** %t145
   %t147 = icmp eq i32 %t117, 4
   %t148 = select i1 %t147, i8* %t146, i8* %t142
-  %s149 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.149, i32 0, i32 0
+  %s149 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t150 = icmp eq i8* %t148, %s149
   br label %logical_or_right_end_46
 
@@ -7020,7 +7035,7 @@ entry:
   %t1 = call %Parser @skip_trivia(%Parser %t0)
   store %Parser %t1, %Parser* %l0
   %t2 = load %Parser, %Parser* %l0
-  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275832617, i32 0, i32 0
   %t4 = call %Parser @consume_keyword(%Parser %t2, i8* %s3)
   store %Parser %t4, %Parser* %l0
   %t5 = load %Parser, %Parser* %l0
@@ -7104,7 +7119,7 @@ entry:
   %t67 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t68 = icmp eq i32 %t44, 7
   %t69 = select i1 %t68, i8* %t67, i8* %t66
-  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.70, i32 0, i32 0
+  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t71 = icmp eq i8* %t69, %s70
   br label %logical_and_entry_41
 
@@ -7197,7 +7212,7 @@ logical_or_right_40:
   %t140 = load i8*, i8** %t139
   %t141 = icmp eq i32 %t111, 4
   %t142 = select i1 %t141, i8* %t140, i8* %t136
-  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.143, i32 0, i32 0
+  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t144 = icmp eq i8* %t142, %s143
   br label %logical_or_right_end_40
 
@@ -7371,7 +7386,7 @@ entry:
   %t2 = call %Parser @skip_trivia(%Parser %t1)
   store %Parser %t2, %Parser* %l0
   %t3 = load %Parser, %Parser* %l0
-  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275477867, i32 0, i32 0
   %t5 = call %Parser @consume_keyword(%Parser %t3, i8* %s4)
   store %Parser %t5, %Parser* %l0
   %t6 = load %Parser, %Parser* %l0
@@ -7521,7 +7536,7 @@ entry:
   br i1 %starts_with_async, label %then0, label %else1
 then0:
   %t4 = load %Parser, %Parser* %l0
-  %s5 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t6 = call %Parser @consume_keyword(%Parser %t4, i8* %s5)
   store %Parser %t6, %Parser* %l0
   store i1 1, i1* %l1
@@ -7531,7 +7546,7 @@ else1:
   %t8 = call %Token @parser_peek_raw(%Parser %t7)
   store %Token %t8, %Token* %l2
   %t9 = load %Token, %Token* %l2
-  %s10 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t11 = call i1 @identifier_matches(%Token %t9, i8* %s10)
   %t12 = load %Parser, %Parser* %l0
   %t13 = load i1, i1* %l1
@@ -7546,7 +7561,7 @@ then3:
   %t19 = call %Token @parser_peek_raw(%Parser %t18)
   store %Token %t19, %Token* %l4
   %t20 = load %Token, %Token* %l4
-  %s21 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.21, i32 0, i32 0
+  %s21 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t22 = call i1 @identifier_matches(%Token %t20, i8* %s21)
   %t23 = load %Parser, %Parser* %l0
   %t24 = load i1, i1* %l1
@@ -7556,7 +7571,7 @@ then3:
   br i1 %t22, label %then5, label %merge6
 then5:
   %t28 = load %Parser, %Parser* %l0
-  %s29 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.29, i32 0, i32 0
+  %s29 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t30 = call %Parser @consume_keyword(%Parser %t28, i8* %s29)
   store %Parser %t30, %Parser* %l0
   %t31 = load %Parser, %Parser* %l0
@@ -7589,7 +7604,7 @@ merge2:
   %t42 = call %Parser @skip_trivia(%Parser %t41)
   store %Parser %t42, %Parser* %l0
   %t43 = load %Parser, %Parser* %l0
-  %s44 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.44, i32 0, i32 0
+  %s44 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t45 = call %Parser @consume_keyword(%Parser %t43, i8* %s44)
   store %Parser %t45, %Parser* %l0
   %t46 = load %Parser, %Parser* %l0
@@ -7682,7 +7697,7 @@ merge2:
   %t114 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t115 = icmp eq i32 %t91, 7
   %t116 = select i1 %t115, i8* %t114, i8* %t113
-  %s117 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.117, i32 0, i32 0
+  %s117 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t118 = icmp eq i8* %t116, %s117
   br label %logical_and_entry_88
 
@@ -7775,7 +7790,7 @@ logical_or_right_87:
   %t187 = load i8*, i8** %t186
   %t188 = icmp eq i32 %t158, 4
   %t189 = select i1 %t188, i8* %t187, i8* %t183
-  %s190 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.190, i32 0, i32 0
+  %s190 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t191 = icmp eq i8* %t189, %s190
   br label %logical_or_right_end_87
 
@@ -7978,7 +7993,7 @@ entry:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t39 = icmp eq i8* %t37, %s38
   br label %logical_and_entry_9
 
@@ -8101,7 +8116,7 @@ loop.body3:
   %t128 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t129 = icmp eq i32 %t105, 7
   %t130 = select i1 %t129, i8* %t128, i8* %t127
-  %s131 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.131, i32 0, i32 0
+  %s131 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t132 = icmp eq i8* %t130, %s131
   br label %logical_and_entry_102
 
@@ -8196,7 +8211,7 @@ merge7:
   %t205 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t206 = icmp eq i32 %t182, 7
   %t207 = select i1 %t206, i8* %t205, i8* %t204
-  %s208 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.208, i32 0, i32 0
+  %s208 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t209 = icmp eq i8* %t207, %s208
   br label %logical_and_entry_179
 
@@ -8288,7 +8303,7 @@ merge9:
   %t279 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t280 = icmp eq i32 %t256, 7
   %t281 = select i1 %t280, i8* %t279, i8* %t278
-  %s282 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.282, i32 0, i32 0
+  %s282 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t283 = icmp eq i8* %t281, %s282
   %t284 = load %Parser, %Parser* %l0
   %t285 = load { %Parameter*, i64 }*, { %Parameter*, i64 }** %l1
@@ -8338,7 +8353,7 @@ entry:
   %t3 = load %Token, %Token* %l2
   store %Token %t3, %Token* %l3
   %t4 = load %Token, %Token* %l3
-  %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t6 = call i1 @identifier_matches(%Token %t4, i8* %s5)
   %t7 = load %Parser, %Parser* %l0
   %t8 = load i1, i1* %l1
@@ -8394,7 +8409,7 @@ merge1:
   %t46 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t47 = icmp eq i32 %t23, 7
   %t48 = select i1 %t47, i8* %t46, i8* %t45
-  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.49, i32 0, i32 0
+  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t50 = icmp ne i8* %t48, %s49
   %t51 = load %Parser, %Parser* %l0
   %t52 = load i1, i1* %l1
@@ -8460,7 +8475,7 @@ merge3:
   %t100 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t101 = icmp eq i32 %t77, 7
   %t102 = select i1 %t101, i8* %t100, i8* %t99
-  %s103 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.103, i32 0, i32 0
+  %s103 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t104 = icmp eq i8* %t102, %s103
   store i1 %t104, i1* %l7
   store i1 0, i1* %l8
@@ -8522,7 +8537,7 @@ logical_or_entry_149:
 
 logical_or_right_149:
   %t153 = load i8*, i8** %l9
-  %s154 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.154, i32 0, i32 0
+  %s154 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t155 = icmp eq i8* %t153, %s154
   br label %logical_or_right_end_149
 
@@ -8657,7 +8672,7 @@ merge11:
   %t253 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t254 = icmp eq i32 %t230, 7
   %t255 = select i1 %t254, i8* %t253, i8* %t252
-  %s256 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.256, i32 0, i32 0
+  %s256 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t257 = icmp ne i8* %t255, %s256
   br label %logical_or_entry_227
 
@@ -8795,7 +8810,7 @@ entry:
   %t28 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t29 = icmp eq i32 %t5, 7
   %t30 = select i1 %t29, i8* %t28, i8* %t27
-  %s31 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t32 = icmp ne i8* %t30, %s31
   %t33 = load %Parser, %Parser* %l0
   %t34 = load %Token, %Token* %l1
@@ -8847,7 +8862,7 @@ merge1:
   %t73 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t74 = icmp eq i32 %t50, 7
   %t75 = select i1 %t74, i8* %t73, i8* %t72
-  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.76, i32 0, i32 0
+  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t77 = icmp ne i8* %t75, %s76
   br label %logical_or_entry_47
 
@@ -8970,7 +8985,7 @@ merge3:
   %t171 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t172 = icmp eq i32 %t148, 7
   %t173 = select i1 %t172, i8* %t171, i8* %t170
-  %s174 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.174, i32 0, i32 0
+  %s174 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t175 = icmp ne i8* %t173, %s174
   br label %logical_or_entry_145
 
@@ -9099,7 +9114,7 @@ entry:
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
   store %Token %t2, %Token* %l2
   %t3 = load %Token, %Token* %l2
-  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t5 = call i1 @identifier_matches(%Token %t3, i8* %s4)
   %t6 = load %Parser, %Parser* %l0
   %t7 = load i1, i1* %l1
@@ -9112,7 +9127,7 @@ then0:
   store %Parser %t11, %Parser* %l3
   %t12 = load %Parser, %Parser* %l3
   %t13 = call %Token @parser_peek_raw(%Parser %t12)
-  %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t15 = call i1 @identifier_matches(%Token %t13, i8* %s14)
   %t16 = load %Parser, %Parser* %l0
   %t17 = load i1, i1* %l1
@@ -9121,7 +9136,7 @@ then0:
   br i1 %t15, label %then2, label %merge3
 then2:
   %t20 = load %Parser, %Parser* %l0
-  %s21 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.21, i32 0, i32 0
+  %s21 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1921561325, i32 0, i32 0
   %t22 = call %Parser @consume_keyword(%Parser %t20, i8* %s21)
   store %Parser %t22, %Parser* %l0
   store i1 1, i1* %l1
@@ -9142,7 +9157,7 @@ merge1:
   store %Parser %t28, %Parser* %l0
   %t29 = load %Parser, %Parser* %l0
   %t30 = call %Token @parser_peek_raw(%Parser %t29)
-  %s31 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t32 = call i1 @identifier_matches(%Token %t30, i8* %s31)
   %t33 = xor i1 %t32, 1
   %t34 = load %Parser, %Parser* %l0
@@ -9157,7 +9172,7 @@ then4:
   ret %MethodParseResult %t40
 merge5:
   %t41 = load %Parser, %Parser* %l0
-  %s42 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.42, i32 0, i32 0
+  %s42 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t43 = call %Parser @consume_keyword(%Parser %t41, i8* %s42)
   store %Parser %t43, %Parser* %l0
   %t44 = load %Parser, %Parser* %l0
@@ -9194,7 +9209,7 @@ merge5:
   %t73 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t74 = icmp eq i32 %t50, 7
   %t75 = select i1 %t74, i8* %t73, i8* %t72
-  %s76 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.76, i32 0, i32 0
+  %s76 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t77 = icmp ne i8* %t75, %s76
   %t78 = load %Parser, %Parser* %l0
   %t79 = load i1, i1* %l1
@@ -9292,7 +9307,7 @@ merge7:
   %t150 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t151 = icmp eq i32 %t127, 7
   %t152 = select i1 %t151, i8* %t150, i8* %t149
-  %s153 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.153, i32 0, i32 0
+  %s153 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t154 = icmp eq i8* %t152, %s153
   br label %logical_and_entry_124
 
@@ -9385,7 +9400,7 @@ logical_or_right_123:
   %t223 = load i8*, i8** %t222
   %t224 = icmp eq i32 %t194, 4
   %t225 = select i1 %t224, i8* %t223, i8* %t219
-  %s226 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.226, i32 0, i32 0
+  %s226 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t227 = icmp eq i8* %t225, %s226
   br label %logical_or_right_end_123
 
@@ -9605,7 +9620,7 @@ loop.body1:
   %t37 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t38 = icmp eq i32 %t14, 7
   %t39 = select i1 %t38, i8* %t37, i8* %t36
-  %s40 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.40, i32 0, i32 0
+  %s40 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t41 = icmp ne i8* %t39, %s40
   br label %logical_or_entry_11
 
@@ -9703,7 +9718,7 @@ merge5:
   %t114 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t115 = icmp eq i32 %t91, 7
   %t116 = select i1 %t115, i8* %t114, i8* %t113
-  %s117 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.117, i32 0, i32 0
+  %s117 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t118 = icmp ne i8* %t116, %s117
   %t119 = load %Parser, %Parser* %l0
   %t120 = load { %Decorator*, i64 }*, { %Decorator*, i64 }** %l1
@@ -9764,7 +9779,7 @@ merge7:
   %t164 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t165 = icmp eq i32 %t141, 7
   %t166 = select i1 %t165, i8* %t164, i8* %t163
-  %s167 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.167, i32 0, i32 0
+  %s167 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t168 = icmp eq i8* %t166, %s167
   br label %logical_and_entry_138
 
@@ -9960,7 +9975,7 @@ merge18:
   %t310 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t311 = icmp eq i32 %t287, 7
   %t312 = select i1 %t311, i8* %t310, i8* %t309
-  %s313 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.313, i32 0, i32 0
+  %s313 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t314 = icmp eq i8* %t312, %s313
   %t315 = load %Parser, %Parser* %l0
   %t316 = load { %Decorator*, i64 }*, { %Decorator*, i64 }** %l1
@@ -10675,7 +10690,7 @@ entry:
   %t29 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t30 = icmp eq i32 %t6, 7
   %t31 = select i1 %t30, i8* %t29, i8* %t28
-  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.32, i32 0, i32 0
+  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t33 = icmp ne i8* %t31, %s32
   br label %logical_or_entry_3
 
@@ -10800,7 +10815,7 @@ loop.body3:
   %t119 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t120 = icmp eq i32 %t96, 7
   %t121 = select i1 %t120, i8* %t119, i8* %t118
-  %s122 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.122, i32 0, i32 0
+  %s122 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t123 = icmp eq i8* %t121, %s122
   %t124 = load %Parser, %Parser* %l0
   %t125 = load %Token, %Token* %l1
@@ -10839,7 +10854,7 @@ merge7:
   %t154 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t155 = icmp eq i32 %t131, 7
   %t156 = select i1 %t155, i8* %t154, i8* %t153
-  %s157 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.157, i32 0, i32 0
+  %s157 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t158 = icmp eq i8* %t156, %s157
   %t159 = load %Parser, %Parser* %l0
   %t160 = load %Token, %Token* %l1
@@ -11232,7 +11247,7 @@ entry:
   store %Parser %t0, %Parser* %l0
   %t1 = load %Parser, %Parser* %l0
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1589343988, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -11251,7 +11266,7 @@ then0:
   ret %ImplementsParseResult %t14
 merge1:
   %t15 = load %Parser, %Parser* %l0
-  %s16 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1589343988, i32 0, i32 0
   %t17 = call %Parser @consume_keyword(%Parser %t15, i8* %s16)
   store %Parser %t17, %Parser* %l0
   %t18 = load %Parser, %Parser* %l0
@@ -11402,7 +11417,7 @@ entry:
   %t7 = call %Token @parser_peek_raw(%Parser %t6)
   store %Token %t7, %Token* %l4
   %t8 = load %Token, %Token* %l4
-  %s9 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.9, i32 0, i32 0
+  %s9 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t10 = call i1 @identifier_matches(%Token %t8, i8* %s9)
   %t11 = load %Parser, %Parser* %l0
   %t12 = load { %Token**, i64 }*, { %Token**, i64 }** %l1
@@ -11469,7 +11484,7 @@ merge1:
   %t60 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t61 = icmp eq i32 %t37, 7
   %t62 = select i1 %t61, i8* %t60, i8* %t59
-  %s63 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.63, i32 0, i32 0
+  %s63 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t64 = icmp eq i8* %t62, %s63
   br label %logical_and_entry_34
 
@@ -11562,7 +11577,7 @@ logical_or_right_33:
   %t133 = load i8*, i8** %t132
   %t134 = icmp eq i32 %t104, 4
   %t135 = select i1 %t134, i8* %t133, i8* %t129
-  %s136 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.136, i32 0, i32 0
+  %s136 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t137 = icmp eq i8* %t135, %s136
   br label %logical_or_right_end_33
 
@@ -11681,7 +11696,7 @@ merge3:
   %t221 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t222 = icmp eq i32 %t198, 7
   %t223 = select i1 %t222, i8* %t221, i8* %t220
-  %s224 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.224, i32 0, i32 0
+  %s224 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t225 = icmp eq i8* %t223, %s224
   br label %logical_and_entry_195
 
@@ -11856,7 +11871,7 @@ entry:
   %t30 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t31 = icmp eq i32 %t7, 7
   %t32 = select i1 %t31, i8* %t30, i8* %t29
-  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.33, i32 0, i32 0
+  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t34 = icmp ne i8* %t32, %s33
   br label %logical_or_entry_4
 
@@ -11992,7 +12007,7 @@ loop.body3:
   %t130 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t131 = icmp eq i32 %t107, 7
   %t132 = select i1 %t131, i8* %t130, i8* %t129
-  %s133 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.133, i32 0, i32 0
+  %s133 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t134 = icmp eq i8* %t132, %s133
   br label %logical_and_entry_104
 
@@ -12083,7 +12098,7 @@ merge7:
   %t203 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t204 = icmp eq i32 %t180, 7
   %t205 = select i1 %t204, i8* %t203, i8* %t202
-  %s206 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.206, i32 0, i32 0
+  %s206 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t207 = icmp eq i8* %t205, %s206
   %t208 = load %Parser, %Parser* %l0
   %t209 = load %Token, %Token* %l1
@@ -12135,7 +12150,7 @@ then8:
   %t249 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t250 = icmp eq i32 %t226, 7
   %t251 = select i1 %t250, i8* %t249, i8* %t248
-  %s252 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.252, i32 0, i32 0
+  %s252 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t253 = icmp eq i8* %t251, %s252
   br label %logical_and_entry_223
 
@@ -12275,7 +12290,7 @@ entry:
   %t30 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t31 = icmp eq i32 %t7, 7
   %t32 = select i1 %t31, i8* %t30, i8* %t29
-  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.33, i32 0, i32 0
+  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t34 = icmp ne i8* %t32, %s33
   br label %logical_or_entry_4
 
@@ -12341,7 +12356,7 @@ then0:
   %t80 = getelementptr { %Token**, i64 }, { %Token**, i64 }* %t78, i32 0, i32 1
   store i64 0, i64* %t80
   %t81 = insertvalue %Block undef, { %Token**, i64 }* %t78, 0
-  %s82 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.82, i32 0, i32 0
+  %s82 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t83 = insertvalue %Block %t81, i8* %s82, 1
   %t84 = alloca [0 x %Statement*]
   %t85 = getelementptr [0 x %Statement*], [0 x %Statement*]* %t84, i32 0, i32 0
@@ -12420,7 +12435,7 @@ loop.body3:
   %t137 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t138 = icmp eq i32 %t114, 7
   %t139 = select i1 %t138, i8* %t137, i8* %t136
-  %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.140, i32 0, i32 0
+  %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t141 = icmp eq i8* %t139, %s140
   br label %logical_and_entry_111
 
@@ -12519,7 +12534,7 @@ merge7:
   %t217 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t218 = icmp eq i32 %t194, 7
   %t219 = select i1 %t218, i8* %t217, i8* %t216
-  %s220 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.220, i32 0, i32 0
+  %s220 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t221 = icmp eq i8* %t219, %s220
   %t222 = load %Parser, %Parser* %l0
   %t223 = load %Token, %Token* %l1
@@ -12657,7 +12672,7 @@ merge11:
   %t336 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t337 = icmp eq i32 %t268, 22
   %t338 = select i1 %t337, i8* %t336, i8* %t335
-  %s339 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.339, i32 0, i32 0
+  %s339 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
   %t340 = icmp eq i8* %t338, %s339
   %t341 = load %Parser, %Parser* %l0
   %t342 = load %Token, %Token* %l1
@@ -12786,7 +12801,7 @@ entry:
   %t8 = call %Token @parser_peek_raw(%Parser %t7)
   store %Token %t8, %Token* %l5
   %t9 = load %Token, %Token* %l5
-  %s10 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090263825, i32 0, i32 0
   %t11 = call i1 @identifier_matches(%Token %t9, i8* %s10)
   %t12 = load %Parser, %Parser* %l0
   %t13 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12803,7 +12818,7 @@ then0:
   ret %BlockStatementParseResult %t21
 merge1:
   %t22 = load %Token, %Token* %l5
-  %s23 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.23, i32 0, i32 0
+  %s23 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h266345381, i32 0, i32 0
   %t24 = call i1 @identifier_matches(%Token %t22, i8* %s23)
   %t25 = load %Parser, %Parser* %l0
   %t26 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12820,7 +12835,7 @@ then2:
   ret %BlockStatementParseResult %t34
 merge3:
   %t35 = load %Token, %Token* %l5
-  %s36 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.36, i32 0, i32 0
+  %s36 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
   %t37 = call i1 @identifier_matches(%Token %t35, i8* %s36)
   %t38 = load %Parser, %Parser* %l0
   %t39 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12854,7 +12869,7 @@ merge7:
   ret %BlockStatementParseResult %t60
 merge5:
   %t61 = load %Token, %Token* %l5
-  %s62 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.62, i32 0, i32 0
+  %s62 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h528348603, i32 0, i32 0
   %t63 = call i1 @identifier_matches(%Token %t61, i8* %s62)
   %t64 = load %Parser, %Parser* %l0
   %t65 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12888,7 +12903,7 @@ merge11:
   ret %BlockStatementParseResult %t86
 merge9:
   %t87 = load %Token, %Token* %l5
-  %s88 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.88, i32 0, i32 0
+  %s88 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494710, i32 0, i32 0
   %t89 = call i1 @identifier_matches(%Token %t87, i8* %s88)
   %t90 = load %Parser, %Parser* %l0
   %t91 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12905,7 +12920,7 @@ then12:
   ret %BlockStatementParseResult %t99
 merge13:
   %t100 = load %Token, %Token* %l5
-  %s101 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.101, i32 0, i32 0
+  %s101 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h222164317, i32 0, i32 0
   %t102 = call i1 @identifier_matches(%Token %t100, i8* %s101)
   %t103 = load %Parser, %Parser* %l0
   %t104 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12922,7 +12937,7 @@ then14:
   ret %BlockStatementParseResult %t112
 merge15:
   %t113 = load %Token, %Token* %l5
-  %s114 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.114, i32 0, i32 0
+  %s114 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1128151960, i32 0, i32 0
   %t115 = call i1 @identifier_matches(%Token %t113, i8* %s114)
   %t116 = load %Parser, %Parser* %l0
   %t117 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12939,7 +12954,7 @@ then16:
   ret %BlockStatementParseResult %t125
 merge17:
   %t126 = load %Token, %Token* %l5
-  %s127 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.127, i32 0, i32 0
+  %s127 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h279180071, i32 0, i32 0
   %t128 = call i1 @identifier_matches(%Token %t126, i8* %s127)
   %t129 = load %Parser, %Parser* %l0
   %t130 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -12956,7 +12971,7 @@ then18:
   ret %BlockStatementParseResult %t138
 merge19:
   %t139 = load %Token, %Token* %l5
-  %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.140, i32 0, i32 0
+  %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1061063223, i32 0, i32 0
   %t141 = call i1 @identifier_matches(%Token %t139, i8* %s140)
   %t142 = load %Parser, %Parser* %l0
   %t143 = load %DecoratorParseResult, %DecoratorParseResult* %l1
@@ -13037,7 +13052,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090263825, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -13052,7 +13067,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090263825, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -13095,7 +13110,7 @@ then2:
   ret %BlockStatementParseResult %t44
 merge3:
   %t45 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
-  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.46, i32 0, i32 0
+  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494974, i32 0, i32 0
   %t47 = call double @find_top_level_identifier({ %Token*, i64 }* %t45, i8* %s46)
   store double %t47, double* %l4
   %t48 = load double, double* %l4
@@ -13252,7 +13267,7 @@ merge9:
   %t167 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t168 = icmp eq i32 %t144, 7
   %t169 = select i1 %t168, i8* %t167, i8* %t166
-  %s170 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.170, i32 0, i32 0
+  %s170 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t171 = icmp eq i8* %t169, %s170
   br label %logical_and_entry_141
 
@@ -13370,7 +13385,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h266345381, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -13385,7 +13400,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h266345381, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -13446,7 +13461,7 @@ merge3:
   %t64 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t65 = icmp eq i32 %t41, 7
   %t66 = select i1 %t65, i8* %t64, i8* %t63
-  %s67 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.67, i32 0, i32 0
+  %s67 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t68 = icmp eq i8* %t66, %s67
   br label %logical_and_entry_38
 
@@ -13548,7 +13563,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -13563,7 +13578,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -13600,7 +13615,7 @@ merge1:
   %t46 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t47 = icmp eq i32 %t23, 7
   %t48 = select i1 %t47, i8* %t46, i8* %t45
-  %s49 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.49, i32 0, i32 0
+  %s49 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t50 = icmp eq i8* %t48, %s49
   br label %logical_and_entry_20
 
@@ -13684,7 +13699,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h528348603, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -13699,7 +13714,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h528348603, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -13736,7 +13751,7 @@ merge1:
   %t46 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t47 = icmp eq i32 %t23, 7
   %t48 = select i1 %t47, i8* %t46, i8* %t45
-  %s49 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.49, i32 0, i32 0
+  %s49 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t50 = icmp eq i8* %t48, %s49
   br label %logical_and_entry_20
 
@@ -13830,7 +13845,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494710, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -13845,7 +13860,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494710, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -13927,7 +13942,7 @@ merge5:
   store %ElseBranch* %t72, %ElseBranch** %l7
   %t73 = load %Parser, %Parser* %l1
   %t74 = call %Token @parser_peek_raw(%Parser %t73)
-  %s75 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.75, i32 0, i32 0
+  %s75 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h257940116, i32 0, i32 0
   %t76 = call i1 @identifier_matches(%Token %t74, i8* %s75)
   %t77 = load %Parser, %Parser* %l0
   %t78 = load %Parser, %Parser* %l1
@@ -13940,7 +13955,7 @@ merge5:
   br i1 %t76, label %then6, label %merge7
 then6:
   %t85 = load %Parser, %Parser* %l1
-  %s86 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.86, i32 0, i32 0
+  %s86 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h257940116, i32 0, i32 0
   %t87 = call %Parser @consume_keyword(%Parser %t85, i8* %s86)
   store %Parser %t87, %Parser* %l1
   %t88 = load %Parser, %Parser* %l1
@@ -13950,7 +13965,7 @@ then6:
   %t91 = call %Token @parser_peek_raw(%Parser %t90)
   store %Token %t91, %Token* %l8
   %t92 = load %Token, %Token* %l8
-  %s93 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.93, i32 0, i32 0
+  %s93 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494710, i32 0, i32 0
   %t94 = call i1 @identifier_matches(%Token %t92, i8* %s93)
   %t95 = load %Parser, %Parser* %l0
   %t96 = load %Parser, %Parser* %l1
@@ -14111,7 +14126,7 @@ merge10:
   %t219 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t220 = icmp eq i32 %t196, 7
   %t221 = select i1 %t220, i8* %t219, i8* %t218
-  %s222 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.222, i32 0, i32 0
+  %s222 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t223 = icmp eq i8* %t221, %s222
   br label %logical_and_entry_193
 
@@ -14253,7 +14268,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h222164317, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -14268,7 +14283,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h222164317, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -14387,7 +14402,7 @@ then6:
   %t109 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t110 = icmp eq i32 %t86, 7
   %t111 = select i1 %t110, i8* %t109, i8* %t108
-  %s112 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.112, i32 0, i32 0
+  %s112 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t113 = icmp eq i8* %t111, %s112
   br label %logical_and_entry_83
 
@@ -14542,7 +14557,7 @@ entry:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t39 = icmp ne i8* %t37, %s38
   br label %logical_or_entry_9
 
@@ -14666,7 +14681,7 @@ loop.body3:
   %t127 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t128 = icmp eq i32 %t104, 7
   %t129 = select i1 %t128, i8* %t127, i8* %t126
-  %s130 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.130, i32 0, i32 0
+  %s130 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t131 = icmp eq i8* %t129, %s130
   br label %logical_and_entry_101
 
@@ -14757,7 +14772,7 @@ merge7:
   %t200 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t201 = icmp eq i32 %t177, 7
   %t202 = select i1 %t201, i8* %t200, i8* %t199
-  %s203 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.203, i32 0, i32 0
+  %s203 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t204 = icmp eq i8* %t202, %s203
   %t205 = load %Parser, %Parser* %l0
   %t206 = load %Token, %Token* %l1
@@ -14861,7 +14876,7 @@ merge11:
   %t277 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t278 = icmp eq i32 %t254, 7
   %t279 = select i1 %t278, i8* %t277, i8* %t276
-  %s280 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.280, i32 0, i32 0
+  %s280 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t281 = icmp eq i8* %t279, %s280
   br label %logical_and_entry_251
 
@@ -14978,14 +14993,14 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h255172967, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = load %Parser, %Parser* %l0
   %t6 = load %Parser, %Parser* %l1
   br i1 %t4, label %then0, label %merge1
 then0:
   %t7 = load %Parser, %Parser* %l1
-  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h255172967, i32 0, i32 0
   %t9 = call %Parser @consume_keyword(%Parser %t7, i8* %s8)
   store %Parser %t9, %Parser* %l1
   %t10 = load %Parser, %Parser* %l1
@@ -15125,7 +15140,7 @@ merge7:
   %t113 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t114 = icmp eq i32 %t90, 7
   %t115 = select i1 %t114, i8* %t113, i8* %t112
-  %s116 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.116, i32 0, i32 0
+  %s116 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t117 = icmp eq i8* %t115, %s116
   br label %logical_and_entry_87
 
@@ -15225,7 +15240,7 @@ merge14:
   br label %merge12
 else11:
   %t190 = load %Token, %Token* %l6
-  %s191 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.191, i32 0, i32 0
+  %s191 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1061063223, i32 0, i32 0
   %t192 = call i1 @identifier_matches(%Token %t190, i8* %s191)
   %t193 = load %Parser, %Parser* %l0
   %t194 = load %Parser, %Parser* %l1
@@ -15405,7 +15420,7 @@ merge25:
   %t328 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t329 = icmp eq i32 %t305, 7
   %t330 = select i1 %t329, i8* %t328, i8* %t327
-  %s331 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.331, i32 0, i32 0
+  %s331 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t332 = icmp eq i8* %t330, %s331
   br label %logical_and_entry_302
 
@@ -15696,7 +15711,7 @@ afterloop33:
   %t551 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t552 = icmp eq i32 %t528, 7
   %t553 = select i1 %t552, i8* %t551, i8* %t550
-  %s554 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.554, i32 0, i32 0
+  %s554 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t555 = icmp eq i8* %t553, %s554
   br label %logical_and_entry_525
 
@@ -15890,7 +15905,7 @@ entry:
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
   store %Token %t2, %Token* %l2
   %t3 = load %Token, %Token* %l2
-  %s4 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1128151960, i32 0, i32 0
   %t5 = call i1 @identifier_matches(%Token %t3, i8* %s4)
   %t6 = xor i1 %t5, 1
   %t7 = load %Parser, %Parser* %l0
@@ -15906,7 +15921,7 @@ then0:
   ret %BlockStatementParseResult %t14
 merge1:
   %t15 = load %Parser, %Parser* %l1
-  %s16 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1128151960, i32 0, i32 0
   %t17 = call %Parser @consume_keyword(%Parser %t15, i8* %s16)
   store %Parser %t17, %Parser* %l1
   %t18 = load %Parser, %Parser* %l1
@@ -15915,7 +15930,7 @@ merge1:
   %t20 = load %Parser, %Parser* %l1
   %t21 = call %Token @parser_peek_raw(%Parser %t20)
   store %Token %t21, %Token* %l3
-  %s22 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s22, i8** %l4
   %t23 = load %Token, %Token* %l3
   %t24 = extractvalue %Token %t23, 0
@@ -15945,7 +15960,7 @@ merge1:
   %t48 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t49 = icmp eq i32 %t25, 7
   %t50 = select i1 %t49, i8* %t48, i8* %t47
-  %s51 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.51, i32 0, i32 0
+  %s51 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t52 = icmp eq i8* %t50, %s51
   %t53 = load %Parser, %Parser* %l0
   %t54 = load %Parser, %Parser* %l1
@@ -15990,7 +16005,7 @@ else3:
   %t87 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t88 = icmp eq i32 %t64, 7
   %t89 = select i1 %t88, i8* %t87, i8* %t86
-  %s90 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.90, i32 0, i32 0
+  %s90 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
   %t91 = icmp eq i8* %t89, %s90
   %t92 = load %Parser, %Parser* %l0
   %t93 = load %Parser, %Parser* %l1
@@ -16082,7 +16097,7 @@ merge9:
   %t160 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t161 = icmp eq i32 %t137, 7
   %t162 = select i1 %t161, i8* %t160, i8* %t159
-  %s163 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.163, i32 0, i32 0
+  %s163 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t164 = icmp eq i8* %t162, %s163
   br label %logical_and_entry_133
 
@@ -16213,7 +16228,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h279180071, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -16228,7 +16243,7 @@ then0:
   ret %BlockStatementParseResult %t12
 merge1:
   %t13 = load %Parser, %Parser* %l1
-  %s14 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.14, i32 0, i32 0
+  %s14 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h279180071, i32 0, i32 0
   %t15 = call %Parser @consume_keyword(%Parser %t13, i8* %s14)
   store %Parser %t15, %Parser* %l1
   %t16 = load %Parser, %Parser* %l1
@@ -16404,7 +16419,7 @@ merge11:
   %t145 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t146 = icmp eq i32 %t122, 7
   %t147 = select i1 %t146, i8* %t145, i8* %t144
-  %s148 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.148, i32 0, i32 0
+  %s148 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t149 = icmp eq i8* %t147, %s148
   br label %logical_and_entry_118
 
@@ -16524,7 +16539,7 @@ entry:
   store %Parser %t0, %Parser* %l1
   %t1 = load %Parser, %Parser* %l1
   %t2 = call %Token @parser_peek_raw(%Parser %t1)
-  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1061063223, i32 0, i32 0
   %t4 = call i1 @identifier_matches(%Token %t2, i8* %s3)
   %t5 = xor i1 %t4, 1
   %t6 = load %Parser, %Parser* %l0
@@ -16552,7 +16567,7 @@ merge1:
   %t21 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t18, %Token %t20)
   store { %Token*, i64 }* %t21, { %Token*, i64 }** %l2
   %t22 = load %Parser, %Parser* %l1
-  %s23 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.23, i32 0, i32 0
+  %s23 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1061063223, i32 0, i32 0
   %t24 = call %Parser @consume_keyword(%Parser %t22, i8* %s23)
   store %Parser %t24, %Parser* %l1
   %t25 = load %Parser, %Parser* %l1
@@ -16696,7 +16711,7 @@ afterloop7:
   %t129 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t130 = icmp eq i32 %t106, 7
   %t131 = select i1 %t130, i8* %t129, i8* %t128
-  %s132 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.132, i32 0, i32 0
+  %s132 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t133 = icmp eq i8* %t131, %s132
   br label %logical_and_entry_103
 
@@ -16857,7 +16872,7 @@ merge1:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t39 = icmp eq i8* %t37, %s38
   %t40 = load %Parser, %Parser* %l0
   %t41 = load %Token, %Token* %l1
@@ -16897,7 +16912,7 @@ merge3:
   %t71 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t72 = icmp eq i32 %t48, 7
   %t73 = select i1 %t72, i8* %t71, i8* %t70
-  %s74 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.74, i32 0, i32 0
+  %s74 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t75 = icmp eq i8* %t73, %s74
   %t76 = load %Parser, %Parser* %l0
   %t77 = load %Token, %Token* %l1
@@ -17124,7 +17139,7 @@ merge17:
   %t241 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t242 = icmp eq i32 %t218, 7
   %t243 = select i1 %t242, i8* %t241, i8* %t240
-  %s244 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.244, i32 0, i32 0
+  %s244 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t245 = icmp ne i8* %t243, %s244
   br label %logical_or_entry_215
 
@@ -17305,7 +17320,7 @@ loop.body1:
   %t43 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t44 = icmp eq i32 %t20, 7
   %t45 = select i1 %t44, i8* %t43, i8* %t42
-  %s46 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.46, i32 0, i32 0
+  %s46 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t47 = icmp eq i8* %t45, %s46
   %t48 = load %Parser, %Parser* %l0
   %t49 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -17513,7 +17528,7 @@ merge5:
   %t186 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t187 = icmp eq i32 %t163, 7
   %t188 = select i1 %t187, i8* %t186, i8* %t185
-  %s189 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.189, i32 0, i32 0
+  %s189 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t190 = icmp eq i8* %t188, %s189
   %t191 = load %Parser, %Parser* %l0
   %t192 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -17596,7 +17611,7 @@ entry:
   %t24 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
-  %s27 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.27, i32 0, i32 0
+  %s27 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t28 = icmp ne i8* %t26, %s27
   br i1 %t28, label %then0, label %merge1
 then0:
@@ -17676,7 +17691,7 @@ entry:
   %t24 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
-  %s27 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.27, i32 0, i32 0
+  %s27 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t28 = icmp eq i8* %t26, %s27
   br i1 %t28, label %then0, label %merge1
 then0:
@@ -17761,7 +17776,7 @@ entry:
   %t24 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
-  %s27 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.27, i32 0, i32 0
+  %s27 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
   %t28 = icmp eq i8* %t26, %s27
   br i1 %t28, label %then0, label %merge1
 then0:
@@ -18003,7 +18018,7 @@ entry:
   %t30 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t31 = icmp eq i32 %t7, 7
   %t32 = select i1 %t31, i8* %t30, i8* %t29
-  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.33, i32 0, i32 0
+  %s33 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t34 = icmp eq i8* %t32, %s33
   br label %logical_and_entry_4
 
@@ -18144,7 +18159,7 @@ loop.body1:
   %t40 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t41 = icmp eq i32 %t17, 7
   %t42 = select i1 %t41, i8* %t40, i8* %t39
-  %s43 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.43, i32 0, i32 0
+  %s43 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t44 = icmp eq i8* %t42, %s43
   %t45 = load %Parser, %Parser* %l0
   %t46 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -18220,7 +18235,7 @@ logical_and_merge_51:
   %t89 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t90 = icmp eq i32 %t66, 7
   %t91 = select i1 %t90, i8* %t89, i8* %t88
-  %s92 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.92, i32 0, i32 0
+  %s92 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t93 = icmp eq i8* %t91, %s92
   store i1 %t93, i1* %l7
   store i1 0, i1* %l8
@@ -18337,7 +18352,7 @@ merge9:
   %t181 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t182 = icmp eq i32 %t158, 7
   %t183 = select i1 %t182, i8* %t181, i8* %t180
-  %s184 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.184, i32 0, i32 0
+  %s184 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t185 = icmp eq i8* %t183, %s184
   %t186 = load %Parser, %Parser* %l0
   %t187 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -18690,7 +18705,7 @@ entry:
   %t29 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t30 = icmp eq i32 %t6, 7
   %t31 = select i1 %t30, i8* %t29, i8* %t28
-  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.32, i32 0, i32 0
+  %s32 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t33 = icmp ne i8* %t31, %s32
   br label %logical_or_entry_3
 
@@ -18816,7 +18831,7 @@ loop.body3:
   %t120 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t121 = icmp eq i32 %t97, 7
   %t122 = select i1 %t121, i8* %t120, i8* %t119
-  %s123 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.123, i32 0, i32 0
+  %s123 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t124 = icmp eq i8* %t122, %s123
   %t125 = load %Parser, %Parser* %l0
   %t126 = load %Token, %Token* %l1
@@ -18865,7 +18880,7 @@ merge7:
   %t163 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t164 = icmp eq i32 %t140, 7
   %t165 = select i1 %t164, i8* %t163, i8* %t162
-  %s166 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.166, i32 0, i32 0
+  %s166 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t167 = icmp eq i8* %t165, %s166
   %t168 = load %Parser, %Parser* %l0
   %t169 = load %Token, %Token* %l1
@@ -19059,7 +19074,7 @@ loop.body1:
   %t35 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t36 = icmp eq i32 %t12, 7
   %t37 = select i1 %t36, i8* %t35, i8* %t34
-  %s38 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t39 = icmp eq i8* %t37, %s38
   %t40 = load %Parser, %Parser* %l0
   %t41 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -19106,7 +19121,7 @@ merge5:
   %t76 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t77 = icmp eq i32 %t53, 7
   %t78 = select i1 %t77, i8* %t76, i8* %t75
-  %s79 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.79, i32 0, i32 0
+  %s79 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t80 = icmp eq i8* %t78, %s79
   %t81 = load %Parser, %Parser* %l0
   %t82 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -19150,7 +19165,7 @@ then6:
   %t117 = select i1 %t116, i8* %t115, i8* %t111
   store i8* %t117, i8** %l3
   %t119 = load i8*, i8** %l3
-  %s120 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.120, i32 0, i32 0
+  %s120 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193445474, i32 0, i32 0
   %t121 = icmp eq i8* %t119, %s120
   br label %logical_or_entry_118
 
@@ -19159,7 +19174,7 @@ logical_or_entry_118:
 
 logical_or_right_118:
   %t122 = load i8*, i8** %l3
-  %s123 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.123, i32 0, i32 0
+  %s123 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t124 = icmp eq i8* %t122, %s123
   br label %logical_or_right_end_118
 
@@ -19265,7 +19280,7 @@ then0:
   ret %MatchCaseTokenSplit %t18
 merge1:
   %t19 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
-  %s20 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.20, i32 0, i32 0
+  %s20 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193494710, i32 0, i32 0
   %t21 = call double @find_top_level_identifier({ %Token*, i64 }* %t19, i8* %s20)
   store double %t21, double* %l1
   %t22 = load double, double* %l1
@@ -19466,7 +19481,7 @@ merge9:
   %t108 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t109 = icmp eq i32 %t61, 15
   %t110 = select i1 %t109, i8* %t108, i8* %t107
-  %s111 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.111, i32 0, i32 0
+  %s111 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089530004, i32 0, i32 0
   %t112 = icmp eq i8* %t110, %s111
   %t113 = load double, double* %l0
   %t114 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
@@ -19545,7 +19560,7 @@ then12:
   br label %merge14
 else13:
   %t156 = load i8*, i8** %l7
-  %s157 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.157, i32 0, i32 0
+  %s157 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t158 = icmp eq i8* %t156, %s157
   %t159 = load double, double* %l0
   %t160 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
@@ -19558,7 +19573,7 @@ then15:
   %t165 = alloca %Expression
   %t166 = getelementptr inbounds %Expression, %Expression* %t165, i32 0, i32 0
   store i32 3, i32* %t166
-  %s167 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.167, i32 0, i32 0
+  %s167 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t168 = getelementptr inbounds %Expression, %Expression* %t165, i32 0, i32 1
   %t169 = bitcast [8 x i8]* %t168 to i8*
   %t170 = bitcast i8* %t169 to i8**
@@ -19568,7 +19583,7 @@ then15:
   br label %merge17
 else16:
   %t172 = load i8*, i8** %l7
-  %s173 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.173, i32 0, i32 0
+  %s173 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t174 = icmp eq i8* %t172, %s173
   %t175 = load double, double* %l0
   %t176 = load { %Token*, i64 }*, { %Token*, i64 }** %l3
@@ -19581,7 +19596,7 @@ then18:
   %t181 = alloca %Expression
   %t182 = getelementptr inbounds %Expression, %Expression* %t181, i32 0, i32 0
   store i32 3, i32* %t182
-  %s183 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.183, i32 0, i32 0
+  %s183 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t184 = getelementptr inbounds %Expression, %Expression* %t181, i32 0, i32 1
   %t185 = bitcast [8 x i8]* %t184 to i8*
   %t186 = bitcast i8* %t185 to i8**
@@ -19701,7 +19716,7 @@ entry:
   %t47 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t48 = icmp eq i32 %t0, 15
   %t49 = select i1 %t48, i8* %t47, i8* %t46
-  %s50 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.50, i32 0, i32 0
+  %s50 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089530004, i32 0, i32 0
   %t51 = icmp eq i8* %t49, %s50
   br i1 %t51, label %then0, label %merge1
 then0:
@@ -19751,7 +19766,7 @@ then2:
   %t90 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t91 = icmp eq i32 %t67, 7
   %t92 = select i1 %t91, i8* %t90, i8* %t89
-  %s93 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.93, i32 0, i32 0
+  %s93 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
   %t94 = icmp eq i8* %t92, %s93
   %t95 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t96 = load %Token, %Token* %l1
@@ -19830,7 +19845,7 @@ merge5:
   %t162 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t163 = icmp eq i32 %t139, 7
   %t164 = select i1 %t163, i8* %t162, i8* %t161
-  %s165 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.165, i32 0, i32 0
+  %s165 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1318614710, i32 0, i32 0
   %t166 = icmp eq i8* %t164, %s165
   %t167 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t168 = load %Token, %Token* %l1
@@ -19909,7 +19924,7 @@ merge7:
   %t234 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t235 = icmp eq i32 %t211, 7
   %t236 = select i1 %t235, i8* %t234, i8* %t233
-  %s237 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.237, i32 0, i32 0
+  %s237 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1570408460, i32 0, i32 0
   %t238 = icmp eq i8* %t236, %s237
   %t239 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t240 = load %Token, %Token* %l1
@@ -20034,7 +20049,7 @@ then10:
   ret %Expression %t320
 merge11:
   %t321 = load i8*, i8** %l2
-  %s322 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.322, i32 0, i32 0
+  %s322 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t323 = icmp eq i8* %t321, %s322
   %t324 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t325 = load i8*, i8** %l2
@@ -20043,7 +20058,7 @@ then12:
   %t326 = alloca %Expression
   %t327 = getelementptr inbounds %Expression, %Expression* %t326, i32 0, i32 0
   store i32 3, i32* %t327
-  %s328 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.328, i32 0, i32 0
+  %s328 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t329 = getelementptr inbounds %Expression, %Expression* %t326, i32 0, i32 1
   %t330 = bitcast [8 x i8]* %t329 to i8*
   %t331 = bitcast i8* %t330 to i8**
@@ -20052,7 +20067,7 @@ then12:
   ret %Expression %t332
 merge13:
   %t333 = load i8*, i8** %l2
-  %s334 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.334, i32 0, i32 0
+  %s334 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t335 = icmp eq i8* %t333, %s334
   %t336 = load { %Token*, i64 }*, { %Token*, i64 }** %l0
   %t337 = load i8*, i8** %l2
@@ -20061,7 +20076,7 @@ then14:
   %t338 = alloca %Expression
   %t339 = getelementptr inbounds %Expression, %Expression* %t338, i32 0, i32 0
   store i32 3, i32* %t339
-  %s340 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.340, i32 0, i32 0
+  %s340 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t341 = getelementptr inbounds %Expression, %Expression* %t338, i32 0, i32 1
   %t342 = bitcast [8 x i8]* %t341 to i8*
   %t343 = bitcast i8* %t342 to i8**
@@ -20732,7 +20747,7 @@ merge5:
   %t49 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t50 = icmp eq i32 %t26, 7
   %t51 = select i1 %t50, i8* %t49, i8* %t48
-  %s52 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.52, i32 0, i32 0
+  %s52 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t53 = icmp eq i8* %t51, %s52
   %t54 = load double, double* %l0
   %t55 = load double, double* %l1
@@ -20964,7 +20979,7 @@ merge5:
   %t53 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t54 = icmp eq i32 %t30, 7
   %t55 = select i1 %t54, i8* %t53, i8* %t52
-  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t57 = icmp eq i8* %t55, %s56
   %t58 = load double, double* %l0
   %t59 = load double, double* %l1
@@ -21407,7 +21422,7 @@ then0:
   %t6 = alloca %Expression
   %t7 = getelementptr inbounds %Expression, %Expression* %t6, i32 0, i32 0
   store i32 15, i32* %t7
-  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t9 = getelementptr inbounds %Expression, %Expression* %t6, i32 0, i32 1
   %t10 = bitcast [8 x i8]* %t9 to i8*
   %t11 = bitcast i8* %t10 to i8**
@@ -21536,7 +21551,7 @@ entry:
   %t24 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
-  %s27 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.27, i32 0, i32 0
+  %s27 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1570408460, i32 0, i32 0
   %t28 = icmp eq i8* %t26, %s27
   br i1 %t28, label %then0, label %merge1
 then0:
@@ -21613,7 +21628,7 @@ merge1:
   %t93 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t94 = icmp eq i32 %t70, 7
   %t95 = select i1 %t94, i8* %t93, i8* %t92
-  %s96 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.96, i32 0, i32 0
+  %s96 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1318614710, i32 0, i32 0
   %t97 = icmp eq i8* %t95, %s96
   br i1 %t97, label %then2, label %merge3
 then2:
@@ -21690,7 +21705,7 @@ merge3:
   %t162 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t163 = icmp eq i32 %t139, 7
   %t164 = select i1 %t163, i8* %t162, i8* %t161
-  %s165 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.165, i32 0, i32 0
+  %s165 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
   %t166 = icmp eq i8* %t164, %s165
   br i1 %t166, label %then4, label %merge5
 then4:
@@ -21767,14 +21782,14 @@ merge5:
   %t231 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t232 = icmp eq i32 %t208, 7
   %t233 = select i1 %t232, i8* %t231, i8* %t230
-  %s234 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.234, i32 0, i32 0
+  %s234 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t235 = icmp eq i8* %t233, %s234
   br i1 %t235, label %then6, label %merge7
 then6:
   %t236 = call i8* @identifier_text(%Token %token)
   store i8* %t236, i8** %l0
   %t237 = load i8*, i8** %l0
-  %s238 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.238, i32 0, i32 0
+  %s238 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t239 = icmp eq i8* %t237, %s238
   %t240 = load i8*, i8** %l0
   br i1 %t239, label %then8, label %merge9
@@ -21782,7 +21797,7 @@ then8:
   %t241 = alloca %Expression
   %t242 = getelementptr inbounds %Expression, %Expression* %t241, i32 0, i32 0
   store i32 3, i32* %t242
-  %s243 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.243, i32 0, i32 0
+  %s243 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t244 = getelementptr inbounds %Expression, %Expression* %t241, i32 0, i32 1
   %t245 = bitcast [8 x i8]* %t244 to i8*
   %t246 = bitcast i8* %t245 to i8**
@@ -21793,7 +21808,7 @@ then8:
   ret %Expression* %t248
 merge9:
   %t249 = load i8*, i8** %l0
-  %s250 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.250, i32 0, i32 0
+  %s250 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t251 = icmp eq i8* %t249, %s250
   %t252 = load i8*, i8** %l0
   br i1 %t251, label %then10, label %merge11
@@ -21801,7 +21816,7 @@ then10:
   %t253 = alloca %Expression
   %t254 = getelementptr inbounds %Expression, %Expression* %t253, i32 0, i32 0
   store i32 3, i32* %t254
-  %s255 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.255, i32 0, i32 0
+  %s255 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t256 = getelementptr inbounds %Expression, %Expression* %t253, i32 0, i32 1
   %t257 = bitcast [8 x i8]* %t256 to i8*
   %t258 = bitcast i8* %t257 to i8**
@@ -21812,7 +21827,7 @@ then10:
   ret %Expression* %t260
 merge11:
   %t261 = load i8*, i8** %l0
-  %s262 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.262, i32 0, i32 0
+  %s262 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
   %t263 = icmp eq i8* %t261, %s262
   %t264 = load i8*, i8** %l0
   br i1 %t263, label %then12, label %merge13
@@ -21997,7 +22012,7 @@ logical_and_right_49:
   %t77 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t78 = icmp eq i32 %t54, 7
   %t79 = select i1 %t78, i8* %t77, i8* %t76
-  %s80 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.80, i32 0, i32 0
+  %s80 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t81 = icmp eq i8* %t79, %s80
   br label %logical_and_entry_51
 
@@ -22095,7 +22110,7 @@ merge7:
   %t152 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t153 = icmp eq i32 %t129, 7
   %t154 = select i1 %t153, i8* %t152, i8* %t151
-  %s155 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.155, i32 0, i32 0
+  %s155 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t156 = icmp eq i8* %t154, %s155
   %t157 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t158 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -22531,7 +22546,7 @@ merge1:
   %t40 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t41 = icmp eq i32 %t17, 7
   %t42 = select i1 %t41, i8* %t40, i8* %t39
-  %s43 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.43, i32 0, i32 0
+  %s43 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t44 = icmp ne i8* %t42, %s43
   br label %logical_or_entry_14
 
@@ -22675,7 +22690,7 @@ merge9:
   %t145 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t146 = icmp eq i32 %t122, 7
   %t147 = select i1 %t146, i8* %t145, i8* %t144
-  %s148 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.148, i32 0, i32 0
+  %s148 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t149 = icmp eq i8* %t147, %s148
   %t150 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t151 = load %Token, %Token* %l1
@@ -22833,7 +22848,7 @@ entry:
 then0:
   %t3 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t4 = insertvalue %LambdaParameterParseResult undef, %ExpressionTokens %t3, 0
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t6 = insertvalue %Parameter undef, i8* %s5, 0
   %t7 = bitcast i8* null to %TypeAnnotation*
   %t8 = insertvalue %Parameter %t6, %TypeAnnotation* %t7, 1
@@ -22881,7 +22896,7 @@ merge1:
   %t46 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t47 = icmp eq i32 %t23, 7
   %t48 = select i1 %t47, i8* %t46, i8* %t45
-  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.49, i32 0, i32 0
+  %s49 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t50 = icmp eq i8* %t48, %s49
   br label %logical_and_entry_20
 
@@ -22890,7 +22905,7 @@ logical_and_entry_20:
 
 logical_and_right_20:
   %t51 = load %Token, %Token* %l3
-  %s52 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.52, i32 0, i32 0
+  %s52 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521984, i32 0, i32 0
   %t53 = call i1 @identifier_matches(%Token %t51, i8* %s52)
   br label %logical_and_right_end_20
 
@@ -22919,7 +22934,7 @@ then2:
 then4:
   %t67 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t68 = insertvalue %LambdaParameterParseResult undef, %ExpressionTokens %t67, 0
-  %s69 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.69, i32 0, i32 0
+  %s69 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t70 = insertvalue %Parameter undef, i8* %s69, 0
   %t71 = bitcast i8* null to %TypeAnnotation*
   %t72 = insertvalue %Parameter %t70, %TypeAnnotation* %t71, 1
@@ -22969,7 +22984,7 @@ merge3:
   %t109 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t110 = icmp eq i32 %t86, 7
   %t111 = select i1 %t110, i8* %t109, i8* %t108
-  %s112 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.112, i32 0, i32 0
+  %s112 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t113 = icmp ne i8* %t111, %s112
   %t114 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t115 = load double, double* %l1
@@ -22980,7 +22995,7 @@ merge3:
 then6:
   %t119 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t120 = insertvalue %LambdaParameterParseResult undef, %ExpressionTokens %t119, 0
-  %s121 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.121, i32 0, i32 0
+  %s121 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t122 = insertvalue %Parameter undef, i8* %s121, 0
   %t123 = bitcast i8* null to %TypeAnnotation*
   %t124 = insertvalue %Parameter %t122, %TypeAnnotation* %t123, 1
@@ -23044,7 +23059,7 @@ then8:
   %t176 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t177 = icmp eq i32 %t153, 7
   %t178 = select i1 %t177, i8* %t176, i8* %t175
-  %s179 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.179, i32 0, i32 0
+  %s179 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t180 = icmp eq i8* %t178, %s179
   br label %logical_and_entry_150
 
@@ -23137,7 +23152,7 @@ logical_or_right_149:
   %t249 = load i8*, i8** %t248
   %t250 = icmp eq i32 %t220, 4
   %t251 = select i1 %t250, i8* %t249, i8* %t245
-  %s252 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.252, i32 0, i32 0
+  %s252 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t253 = icmp eq i8* %t251, %s252
   br label %logical_or_right_end_149
 
@@ -23301,7 +23316,7 @@ then16:
   %t372 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t373 = icmp eq i32 %t349, 7
   %t374 = select i1 %t373, i8* %t372, i8* %t371
-  %s375 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.375, i32 0, i32 0
+  %s375 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t376 = icmp eq i8* %t374, %s375
   br label %logical_and_entry_346
 
@@ -23529,7 +23544,7 @@ merge1:
   %t43 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t44 = icmp eq i32 %t20, 7
   %t45 = select i1 %t44, i8* %t43, i8* %t42
-  %s46 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.46, i32 0, i32 0
+  %s46 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t47 = icmp eq i8* %t45, %s46
   br label %logical_and_entry_17
 
@@ -23683,7 +23698,7 @@ merge11:
   %t159 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t160 = icmp eq i32 %t136, 7
   %t161 = select i1 %t160, i8* %t159, i8* %t158
-  %s162 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.162, i32 0, i32 0
+  %s162 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t163 = icmp eq i8* %t161, %s162
   %t164 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t165 = load { %Parameter*, i64 }*, { %Parameter*, i64 }** %l1
@@ -23873,7 +23888,7 @@ merge1:
   %t32 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t33 = icmp eq i32 %t9, 7
   %t34 = select i1 %t33, i8* %t32, i8* %t31
-  %s35 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.35, i32 0, i32 0
+  %s35 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t36 = icmp ne i8* %t34, %s35
   br label %logical_or_entry_6
 
@@ -23882,7 +23897,7 @@ logical_or_entry_6:
 
 logical_or_right_6:
   %t37 = load %Token, %Token* %l1
-  %s38 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t39 = call i1 @identifier_matches(%Token %t37, i8* %s38)
   %t40 = xor i1 %t39, 1
   br label %logical_or_right_end_6
@@ -23942,7 +23957,7 @@ merge5:
   %t80 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t81 = icmp eq i32 %t57, 7
   %t82 = select i1 %t81, i8* %t80, i8* %t79
-  %s83 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.83, i32 0, i32 0
+  %s83 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t84 = icmp ne i8* %t82, %s83
   br label %logical_or_entry_54
 
@@ -24070,7 +24085,7 @@ then10:
   %t181 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t182 = icmp eq i32 %t158, 7
   %t183 = select i1 %t182, i8* %t181, i8* %t180
-  %s184 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.184, i32 0, i32 0
+  %s184 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t185 = icmp eq i8* %t183, %s184
   br label %logical_and_entry_155
 
@@ -24163,7 +24178,7 @@ logical_or_right_154:
   %t254 = load i8*, i8** %t253
   %t255 = icmp eq i32 %t225, 4
   %t256 = select i1 %t255, i8* %t254, i8* %t250
-  %s257 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.257, i32 0, i32 0
+  %s257 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428050, i32 0, i32 0
   %t258 = icmp eq i8* %t256, %s257
   br label %logical_or_right_end_154
 
@@ -24301,7 +24316,7 @@ merge21:
   %t345 = load { %Token**, i64 }*, { %Token**, i64 }** %l10
   %t346 = insertvalue %TokenKind undef, i32 7, 0
   %t347 = insertvalue %Token undef, %TokenKind %t346, 0
-  %s348 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.348, i32 0, i32 0
+  %s348 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t349 = insertvalue %Token %t347, i8* %s348, 1
   %t350 = sitofp i64 0 to double
   %t351 = insertvalue %Token %t349, double %t350, 2
@@ -24427,7 +24442,7 @@ merge7:
   %t45 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t46 = icmp eq i32 %t22, 7
   %t47 = select i1 %t46, i8* %t45, i8* %t44
-  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.48, i32 0, i32 0
+  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t49 = icmp ne i8* %t47, %s48
   %t50 = load %ExpressionParseResult, %ExpressionParseResult* %l0
   %t51 = load %ExpressionTokens, %ExpressionTokens* %l1
@@ -24529,7 +24544,7 @@ merge15:
   %t126 = extractvalue %ExpressionParseResult %t125, 0
   store %ExpressionTokens %t126, %ExpressionTokens* %l1
   %t127 = load i8*, i8** %l4
-  %s128 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.128, i32 0, i32 0
+  %s128 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428611, i32 0, i32 0
   %t129 = icmp eq i8* %t127, %s128
   %t130 = load %ExpressionParseResult, %ExpressionParseResult* %l0
   %t131 = load %ExpressionTokens, %ExpressionTokens* %l1
@@ -24660,7 +24675,7 @@ merge1:
   %t28 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t29 = icmp eq i32 %t5, 7
   %t30 = select i1 %t29, i8* %t28, i8* %t27
-  %s31 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t32 = icmp eq i8* %t30, %s31
   %t33 = load %Token, %Token* %l0
   br i1 %t32, label %then2, label %merge3
@@ -24799,7 +24814,7 @@ merge3:
   %t137 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t138 = icmp eq i32 %t114, 7
   %t139 = select i1 %t138, i8* %t137, i8* %t136
-  %s140 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.140, i32 0, i32 0
+  %s140 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t141 = icmp eq i8* %t139, %s140
   br label %logical_and_entry_111
 
@@ -24808,7 +24823,7 @@ logical_and_entry_111:
 
 logical_and_right_111:
   %t142 = load %Token, %Token* %l0
-  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.143, i32 0, i32 0
+  %s143 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t144 = call i1 @identifier_matches(%Token %t142, i8* %s143)
   br label %logical_and_right_end_111
 
@@ -24899,7 +24914,7 @@ merge1:
   %t28 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t29 = icmp eq i32 %t5, 7
   %t30 = select i1 %t29, i8* %t28, i8* %t27
-  %s31 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1570408460, i32 0, i32 0
   %t32 = icmp eq i8* %t30, %s31
   %t33 = load %Token, %Token* %l0
   br i1 %t32, label %then2, label %merge3
@@ -24981,7 +24996,7 @@ merge3:
   %t103 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t104 = icmp eq i32 %t80, 7
   %t105 = select i1 %t104, i8* %t103, i8* %t102
-  %s106 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.106, i32 0, i32 0
+  %s106 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1318614710, i32 0, i32 0
   %t107 = icmp eq i8* %t105, %s106
   %t108 = load %Token, %Token* %l0
   br i1 %t107, label %then4, label %merge5
@@ -25063,7 +25078,7 @@ merge5:
   %t178 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t179 = icmp eq i32 %t155, 7
   %t180 = select i1 %t179, i8* %t178, i8* %t177
-  %s181 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.181, i32 0, i32 0
+  %s181 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
   %t182 = icmp eq i8* %t180, %s181
   %t183 = load %Token, %Token* %l0
   br i1 %t182, label %then6, label %merge7
@@ -25145,7 +25160,7 @@ merge7:
   %t253 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t254 = icmp eq i32 %t230, 7
   %t255 = select i1 %t254, i8* %t253, i8* %t252
-  %s256 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.256, i32 0, i32 0
+  %s256 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t257 = icmp eq i8* %t255, %s256
   %t258 = load %Token, %Token* %l0
   br i1 %t257, label %then8, label %merge9
@@ -25154,7 +25169,7 @@ then8:
   %t260 = call i8* @identifier_text(%Token %t259)
   store i8* %t260, i8** %l1
   %t261 = load i8*, i8** %l1
-  %s262 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.262, i32 0, i32 0
+  %s262 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t263 = icmp eq i8* %t261, %s262
   %t264 = load %Token, %Token* %l0
   %t265 = load i8*, i8** %l1
@@ -25165,7 +25180,7 @@ then10:
   %t268 = alloca %Expression
   %t269 = getelementptr inbounds %Expression, %Expression* %t268, i32 0, i32 0
   store i32 3, i32* %t269
-  %s270 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.270, i32 0, i32 0
+  %s270 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t271 = getelementptr inbounds %Expression, %Expression* %t268, i32 0, i32 1
   %t272 = bitcast [8 x i8]* %t271 to i8*
   %t273 = bitcast i8* %t272 to i8**
@@ -25176,7 +25191,7 @@ then10:
   ret %ExpressionParseResult %t276
 merge11:
   %t277 = load i8*, i8** %l1
-  %s278 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.278, i32 0, i32 0
+  %s278 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t279 = icmp eq i8* %t277, %s278
   %t280 = load %Token, %Token* %l0
   %t281 = load i8*, i8** %l1
@@ -25187,7 +25202,7 @@ then12:
   %t284 = alloca %Expression
   %t285 = getelementptr inbounds %Expression, %Expression* %t284, i32 0, i32 0
   store i32 3, i32* %t285
-  %s286 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.286, i32 0, i32 0
+  %s286 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t287 = getelementptr inbounds %Expression, %Expression* %t284, i32 0, i32 1
   %t288 = bitcast [8 x i8]* %t287 to i8*
   %t289 = bitcast i8* %t288 to i8**
@@ -25198,7 +25213,7 @@ then12:
   ret %ExpressionParseResult %t292
 merge13:
   %t293 = load i8*, i8** %l1
-  %s294 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.294, i32 0, i32 0
+  %s294 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
   %t295 = icmp eq i8* %t293, %s294
   %t296 = load %Token, %Token* %l0
   %t297 = load i8*, i8** %l1
@@ -25254,7 +25269,7 @@ merge9:
   %t340 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t341 = icmp eq i32 %t317, 7
   %t342 = select i1 %t341, i8* %t340, i8* %t339
-  %s343 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.343, i32 0, i32 0
+  %s343 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t344 = icmp eq i8* %t342, %s343
   br label %logical_and_entry_314
 
@@ -25371,7 +25386,7 @@ merge21:
   %t431 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t432 = icmp eq i32 %t408, 7
   %t433 = select i1 %t432, i8* %t431, i8* %t430
-  %s434 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.434, i32 0, i32 0
+  %s434 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t435 = icmp ne i8* %t433, %s434
   br label %logical_or_entry_405
 
@@ -25470,7 +25485,7 @@ merge17:
   %t512 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t513 = icmp eq i32 %t489, 7
   %t514 = select i1 %t513, i8* %t512, i8* %t511
-  %s515 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.515, i32 0, i32 0
+  %s515 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t516 = icmp eq i8* %t514, %s515
   br label %logical_and_entry_486
 
@@ -25583,7 +25598,7 @@ merge25:
   %t602 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t603 = icmp eq i32 %t579, 7
   %t604 = select i1 %t603, i8* %t602, i8* %t601
-  %s605 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.605, i32 0, i32 0
+  %s605 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t606 = icmp eq i8* %t604, %s605
   br label %logical_and_entry_576
 
@@ -25737,7 +25752,7 @@ merge5:
   %t33 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t34 = icmp eq i32 %t10, 7
   %t35 = select i1 %t34, i8* %t33, i8* %t32
-  %s36 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.36, i32 0, i32 0
+  %s36 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t37 = icmp ne i8* %t35, %s36
   %t38 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t39 = load %Expression, %Expression* %l1
@@ -25837,7 +25852,7 @@ merge11:
   %t119 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t120 = icmp eq i32 %t96, 7
   %t121 = select i1 %t120, i8* %t119, i8* %t118
-  %s122 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.122, i32 0, i32 0
+  %s122 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t123 = icmp ne i8* %t121, %s122
   %t124 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t125 = load %Expression, %Expression* %l1
@@ -26005,7 +26020,7 @@ merge23:
   %t247 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t248 = icmp eq i32 %t224, 7
   %t249 = select i1 %t248, i8* %t247, i8* %t246
-  %s250 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.250, i32 0, i32 0
+  %s250 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t251 = icmp ne i8* %t249, %s250
   br label %logical_or_entry_221
 
@@ -26223,7 +26238,7 @@ merge1:
   %t45 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t46 = icmp eq i32 %t22, 7
   %t47 = select i1 %t46, i8* %t45, i8* %t44
-  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.48, i32 0, i32 0
+  %s48 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t49 = icmp eq i8* %t47, %s48
   br label %logical_and_entry_18
 
@@ -26383,7 +26398,7 @@ merge11:
   %t164 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t165 = icmp eq i32 %t141, 7
   %t166 = select i1 %t165, i8* %t164, i8* %t163
-  %s167 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.167, i32 0, i32 0
+  %s167 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t168 = icmp eq i8* %t166, %s167
   br label %logical_and_entry_138
 
@@ -26474,7 +26489,7 @@ merge13:
   %t238 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t239 = icmp eq i32 %t215, 7
   %t240 = select i1 %t239, i8* %t238, i8* %t237
-  %s241 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.241, i32 0, i32 0
+  %s241 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t242 = icmp eq i8* %t240, %s241
   br label %logical_and_entry_212
 
@@ -26625,7 +26640,7 @@ merge1:
   %t44 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t45 = icmp eq i32 %t21, 7
   %t46 = select i1 %t45, i8* %t44, i8* %t43
-  %s47 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.47, i32 0, i32 0
+  %s47 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t48 = icmp eq i8* %t46, %s47
   br label %logical_and_entry_17
 
@@ -26785,7 +26800,7 @@ merge11:
   %t163 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t164 = icmp eq i32 %t140, 7
   %t165 = select i1 %t164, i8* %t163, i8* %t162
-  %s166 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.166, i32 0, i32 0
+  %s166 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t167 = icmp eq i8* %t165, %s166
   br label %logical_and_entry_137
 
@@ -26897,7 +26912,7 @@ merge15:
   %t253 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t254 = icmp eq i32 %t230, 7
   %t255 = select i1 %t254, i8* %t253, i8* %t252
-  %s256 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.256, i32 0, i32 0
+  %s256 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t257 = icmp eq i8* %t255, %s256
   br label %logical_and_entry_227
 
@@ -26991,7 +27006,7 @@ merge13:
   %t328 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t329 = icmp eq i32 %t305, 7
   %t330 = select i1 %t329, i8* %t328, i8* %t327
-  %s331 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.331, i32 0, i32 0
+  %s331 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t332 = icmp eq i8* %t330, %s331
   br label %logical_and_entry_302
 
@@ -27145,7 +27160,7 @@ merge1:
   %t44 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t45 = icmp eq i32 %t21, 7
   %t46 = select i1 %t45, i8* %t44, i8* %t43
-  %s47 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.47, i32 0, i32 0
+  %s47 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t48 = icmp eq i8* %t46, %s47
   br label %logical_and_entry_17
 
@@ -27272,7 +27287,7 @@ merge9:
   %t138 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t139 = icmp eq i32 %t115, 7
   %t140 = select i1 %t139, i8* %t138, i8* %t137
-  %s141 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.141, i32 0, i32 0
+  %s141 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t142 = icmp ne i8* %t140, %s141
   %t143 = load %ExpressionTokens, %ExpressionTokens* %l0
   %t144 = load { %ObjectField*, i64 }*, { %ObjectField*, i64 }** %l1
@@ -27348,7 +27363,7 @@ merge13:
   %t200 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t201 = icmp eq i32 %t177, 7
   %t202 = select i1 %t201, i8* %t200, i8* %t199
-  %s203 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.203, i32 0, i32 0
+  %s203 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t204 = icmp ne i8* %t202, %s203
   br label %logical_or_entry_174
 
@@ -27513,7 +27528,7 @@ merge19:
   %t330 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t331 = icmp eq i32 %t307, 7
   %t332 = select i1 %t331, i8* %t330, i8* %t329
-  %s333 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.333, i32 0, i32 0
+  %s333 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t334 = icmp eq i8* %t332, %s333
   br label %logical_and_entry_304
 
@@ -27631,7 +27646,7 @@ merge23:
   %t426 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t427 = icmp eq i32 %t403, 7
   %t428 = select i1 %t427, i8* %t426, i8* %t425
-  %s429 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.429, i32 0, i32 0
+  %s429 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t430 = icmp eq i8* %t428, %s429
   br label %logical_and_entry_400
 
@@ -27728,7 +27743,7 @@ merge21:
   %t504 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t505 = icmp eq i32 %t481, 7
   %t506 = select i1 %t505, i8* %t504, i8* %t503
-  %s507 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.507, i32 0, i32 0
+  %s507 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t508 = icmp eq i8* %t506, %s507
   br label %logical_and_entry_478
 
@@ -27877,7 +27892,7 @@ entry:
   %t1 = alloca %Expression
   %t2 = getelementptr inbounds %Expression, %Expression* %t1, i32 0, i32 0
   store i32 15, i32* %t2
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t4 = getelementptr inbounds %Expression, %Expression* %t1, i32 0, i32 1
   %t5 = bitcast [8 x i8]* %t4 to i8*
   %t6 = bitcast i8* %t5 to i8**
@@ -27988,7 +28003,7 @@ entry:
   %t47 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t48 = icmp eq i32 %t0, 15
   %t49 = select i1 %t48, i8* %t47, i8* %t46
-  %s50 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.50, i32 0, i32 0
+  %s50 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t51 = icmp eq i8* %t49, %s50
   br i1 %t51, label %then0, label %merge1
 then0:
@@ -28044,7 +28059,7 @@ merge1:
   %t99 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t100 = icmp eq i32 %t52, 15
   %t101 = select i1 %t100, i8* %t99, i8* %t98
-  %s102 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.102, i32 0, i32 0
+  %s102 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
   %t103 = icmp eq i8* %t101, %s102
   br i1 %t103, label %then2, label %merge3
 then2:
@@ -28117,7 +28132,7 @@ entry:
   %t47 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t48 = icmp eq i32 %t0, 15
   %t49 = select i1 %t48, i8* %t47, i8* %t46
-  %s50 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.50, i32 0, i32 0
+  %s50 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t51 = icmp eq i8* %t49, %s50
   br i1 %t51, label %then0, label %merge1
 then0:
@@ -28193,7 +28208,7 @@ merge1:
   %t115 = getelementptr inbounds [4 x i8], [4 x i8]* @.enum.Expression.Raw.variant, i32 0, i32 0
   %t116 = icmp eq i32 %t68, 15
   %t117 = select i1 %t116, i8* %t115, i8* %t114
-  %s118 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.118, i32 0, i32 0
+  %s118 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
   %t119 = icmp eq i8* %t117, %s118
   br i1 %t119, label %then2, label %merge3
 then2:
@@ -28257,28 +28272,28 @@ merge3:
 
 define double @binary_precedence(i8* %op) {
 entry:
-  %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428611, i32 0, i32 0
   %t1 = icmp eq i8* %op, %s0
   br i1 %t1, label %then0, label %merge1
 then0:
   %t2 = sitofp i64 0 to double
   ret double %t2
 merge1:
-  %s3 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193516127, i32 0, i32 0
   %t4 = icmp eq i8* %op, %s3
   br i1 %t4, label %then2, label %merge3
 then2:
   %t5 = sitofp i64 1 to double
   ret double %t5
 merge3:
-  %s6 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193419635, i32 0, i32 0
   %t7 = icmp eq i8* %op, %s6
   br i1 %t7, label %then4, label %merge5
 then4:
   %t8 = sitofp i64 2 to double
   ret double %t8
 merge5:
-  %s10 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193445441, i32 0, i32 0
   %t11 = icmp eq i8* %op, %s10
   br label %logical_or_entry_9
 
@@ -28286,7 +28301,7 @@ logical_or_entry_9:
   br i1 %t11, label %logical_or_merge_9, label %logical_or_right_9
 
 logical_or_right_9:
-  %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.12, i32 0, i32 0
+  %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t13 = icmp eq i8* %op, %s12
   br label %logical_or_right_end_9
 
@@ -28308,7 +28323,7 @@ logical_or_entry_16:
   br i1 %t18, label %logical_or_merge_16, label %logical_or_right_16
 
 logical_or_right_16:
-  %s20 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.20, i32 0, i32 0
+  %s20 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193444352, i32 0, i32 0
   %t21 = icmp eq i8* %op, %s20
   br label %logical_or_entry_19
 
@@ -28324,7 +28339,7 @@ logical_or_entry_22:
   br i1 %t24, label %logical_or_merge_22, label %logical_or_right_22
 
 logical_or_right_22:
-  %s25 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.25, i32 0, i32 0
+  %s25 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193446530, i32 0, i32 0
   %t26 = icmp eq i8* %op, %s25
   br label %logical_or_right_end_22
 
@@ -28495,7 +28510,7 @@ merge5:
   %t49 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t50 = icmp eq i32 %t26, 7
   %t51 = select i1 %t50, i8* %t49, i8* %t48
-  %s52 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.52, i32 0, i32 0
+  %s52 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h715288307, i32 0, i32 0
   %t53 = icmp ne i8* %t51, %s52
   br label %logical_and_entry_23
 
@@ -28531,7 +28546,7 @@ logical_and_right_23:
   %t80 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t81 = icmp eq i32 %t57, 7
   %t82 = select i1 %t81, i8* %t80, i8* %t79
-  %s83 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.83, i32 0, i32 0
+  %s83 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h936649884, i32 0, i32 0
   %t84 = icmp ne i8* %t82, %s83
   br label %logical_and_entry_54
 
@@ -28567,7 +28582,7 @@ logical_and_right_54:
   %t110 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t111 = icmp eq i32 %t87, 7
   %t112 = select i1 %t111, i8* %t110, i8* %t109
-  %s113 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.113, i32 0, i32 0
+  %s113 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t114 = icmp ne i8* %t112, %s113
   br label %logical_and_right_end_54
 
@@ -28614,7 +28629,7 @@ define i8* @tokens_to_text({ %Token*, i64 }* %tokens) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca double
-  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s0, i8** %l0
   %t1 = sitofp i64 0 to double
   store double %t1, double* %l1
@@ -28650,7 +28665,7 @@ merge5:
   %t18 = getelementptr %Token, %Token* %t15, i64 %t13
   %t19 = load %Token, %Token* %t18
   %t20 = extractvalue %Token %t19, 1
-  %t21 = add i8* %t11, %t20
+  %t21 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %t20)
   store i8* %t21, i8** %l0
   %t22 = load double, double* %l1
   %t23 = sitofp i64 1 to double
@@ -28900,7 +28915,7 @@ entry:
   %t25 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t26 = icmp eq i32 %t2, 7
   %t27 = select i1 %t26, i8* %t25, i8* %t24
-  %s28 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.28, i32 0, i32 0
+  %s28 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h715288307, i32 0, i32 0
   %t29 = icmp eq i8* %t27, %s28
   br label %logical_or_entry_0
 
@@ -28935,7 +28950,7 @@ logical_or_right_0:
   %t54 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t55 = icmp eq i32 %t31, 7
   %t56 = select i1 %t55, i8* %t54, i8* %t53
-  %s57 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.57, i32 0, i32 0
+  %s57 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h936649884, i32 0, i32 0
   %t58 = icmp eq i8* %t56, %s57
   br label %logical_or_right_end_0
 
@@ -28975,7 +28990,7 @@ merge1:
   %t84 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t85 = icmp eq i32 %t61, 7
   %t86 = select i1 %t85, i8* %t84, i8* %t83
-  %s87 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.87, i32 0, i32 0
+  %s87 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t88 = icmp eq i8* %t86, %s87
   br i1 %t88, label %then2, label %merge3
 then2:
@@ -29089,7 +29104,7 @@ loop.body1:
   %t31 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t32 = icmp eq i32 %t8, 7
   %t33 = select i1 %t32, i8* %t31, i8* %t30
-  %s34 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.34, i32 0, i32 0
+  %s34 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t35 = icmp eq i8* %t33, %s34
   br label %logical_and_entry_5
 
@@ -29175,7 +29190,7 @@ merge5:
   %t100 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t101 = icmp eq i32 %t77, 7
   %t102 = select i1 %t101, i8* %t100, i8* %t99
-  %s103 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.103, i32 0, i32 0
+  %s103 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t104 = icmp eq i8* %t102, %s103
   %t105 = load %Parser, %Parser* %l0
   %t106 = load %Token, %Token* %l1
@@ -29273,7 +29288,7 @@ merge5:
   %t39 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t40 = icmp eq i32 %t16, 7
   %t41 = select i1 %t40, i8* %t39, i8* %t38
-  %s42 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.42, i32 0, i32 0
+  %s42 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t43 = icmp eq i8* %t41, %s42
   %t44 = load %Parser, %Parser* %l0
   %t45 = load %Parser, %Parser* %l1
@@ -29311,7 +29326,7 @@ merge7:
   %t73 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t74 = icmp eq i32 %t50, 7
   %t75 = select i1 %t74, i8* %t73, i8* %t72
-  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.76, i32 0, i32 0
+  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t77 = icmp eq i8* %t75, %s76
   %t78 = load %Parser, %Parser* %l0
   %t79 = load %Parser, %Parser* %l1
@@ -29456,7 +29471,7 @@ merge5:
   %t39 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t40 = icmp eq i32 %t16, 7
   %t41 = select i1 %t40, i8* %t39, i8* %t38
-  %s42 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.42, i32 0, i32 0
+  %s42 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1021477046, i32 0, i32 0
   %t43 = icmp eq i8* %t41, %s42
   %t44 = load %Parser, %Parser* %l0
   %t45 = load %Parser, %Parser* %l1
@@ -29494,7 +29509,7 @@ merge7:
   %t73 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t74 = icmp eq i32 %t50, 7
   %t75 = select i1 %t74, i8* %t73, i8* %t72
-  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.76, i32 0, i32 0
+  %s76 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t77 = icmp eq i8* %t75, %s76
   %t78 = load %Parser, %Parser* %l0
   %t79 = load %Parser, %Parser* %l1
@@ -29709,7 +29724,7 @@ entry:
   %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
@@ -29800,7 +29815,7 @@ merge5:
   %t63 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t64 = icmp eq i32 %t40, 7
   %t65 = select i1 %t64, i8* %t63, i8* %t62
-  %s66 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.66, i32 0, i32 0
+  %s66 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t67 = icmp eq i8* %t65, %s66
   %t68 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t69 = load i8*, i8** %l1
@@ -30230,7 +30245,7 @@ then33:
 merge34:
   %t320 = phi { i8**, i64 }* [ %t319, %then33 ], [ %t307, %then31 ]
   store { i8**, i64 }* %t320, { i8**, i64 }** %l0
-  %s321 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.321, i32 0, i32 0
+  %s321 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s321, i8** %l1
   %t322 = load double, double* %l6
   %t323 = sitofp i64 1 to double
@@ -30265,7 +30280,7 @@ merge7:
   %t336 = load i8*, i8** %l1
   %t337 = load %Token, %Token* %l7
   %t338 = extractvalue %Token %t337, 1
-  %t339 = add i8* %t336, %t338
+  %t339 = call i8* @sailfin_runtime_string_concat(i8* %t336, i8* %t338)
   store i8* %t339, i8** %l1
   %t340 = load double, double* %l6
   %t341 = sitofp i64 1 to double
@@ -30426,7 +30441,7 @@ merge5:
   %t67 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t68 = icmp eq i32 %t44, 7
   %t69 = select i1 %t68, i8* %t67, i8* %t66
-  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.70, i32 0, i32 0
+  %s70 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t71 = icmp eq i8* %t69, %s70
   %t72 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t73 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
@@ -31006,7 +31021,7 @@ merge5:
   %t53 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t54 = icmp eq i32 %t30, 7
   %t55 = select i1 %t54, i8* %t53, i8* %t52
-  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t57 = icmp eq i8* %t55, %s56
   %t58 = load double, double* %l0
   %t59 = load double, double* %l1
@@ -31517,7 +31532,7 @@ merge5:
   %t53 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t54 = icmp eq i32 %t30, 7
   %t55 = select i1 %t54, i8* %t53, i8* %t52
-  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
   %t57 = icmp eq i8* %t55, %s56
   %t58 = load double, double* %l0
   %t59 = load double, double* %l1
@@ -31871,7 +31886,7 @@ merge7:
   %t275 = getelementptr inbounds [10 x i8], [10 x i8]* @.enum.TokenKind.EndOfFile.variant, i32 0, i32 0
   %t276 = icmp eq i32 %t252, 7
   %t277 = select i1 %t276, i8* %t275, i8* %t274
-  %s278 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.278, i32 0, i32 0
+  %s278 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
   %t279 = icmp eq i8* %t277, %s278
   %t280 = load double, double* %l0
   %t281 = load double, double* %l1

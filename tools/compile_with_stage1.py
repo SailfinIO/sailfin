@@ -11,7 +11,8 @@ import pathlib
 import shutil
 import sys
 import tempfile
-from typing import Dict, Iterable, List
+import subprocess
+from typing import Dict, Iterable, List, Optional
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -176,6 +177,52 @@ def stage1_cache_stats() -> Dict[str, int]:
     return dict(_STAGE1_CACHE_STATS)
 
 
+def link_stage2_binary(
+    modules: Iterable[pathlib.Path],
+    output_path: pathlib.Path,
+    *,
+    clang: str = "clang",
+    extra_flags: Optional[List[str]] = None,
+) -> None:
+    module_paths = [pathlib.Path(module) for module in modules]
+    if not module_paths:
+        raise Stage1CompileError("no Stage2 modules available to link")
+
+    output_path = output_path.resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="stage2-link-"))
+    objects: List[pathlib.Path] = []
+    try:
+        for module_path in module_paths:
+            obj_path = temp_dir / f"{module_path.stem}.o"
+            try:
+                subprocess.run([clang, "-c", str(module_path), "-o", str(obj_path)],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except FileNotFoundError as exc:
+                raise Stage1CompileError(f"clang not found at '{clang}': {exc}") from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else ""
+                raise Stage1CompileError(f"failed to compile {module_path.name}: {stderr}") from exc
+            objects.append(obj_path)
+
+        link_cmd = [clang, "-o", str(output_path)] + [str(obj) for obj in objects]
+        if extra_flags:
+            link_cmd.extend(extra_flags)
+        elif sys.platform == "darwin":
+            link_cmd.extend(["-Wl,-undefined,dynamic_lookup"])
+
+        try:
+            subprocess.run(link_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else ""
+            raise Stage1CompileError(f"failed to link Stage2 binary: {stderr}") from exc
+
+        print(f"[stage2] linked compiler binary to {output_path}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compile Sailfin sources with the stage1 pipeline")
     parser.add_argument(
@@ -193,6 +240,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Override the stage1 cache directory (defaults to PYTEST_STAGE1_CACHE_DIR or .pytest-stage1/)")
     parser.add_argument("--debug-cache", action="store_true",
                         help="Print cache hit/miss information while warming the cache.")
+    parser.add_argument("--stage2", action="store_true",
+                        help="Also bootstrap Stage2 LLVM artefacts after compiling Stage1.")
+    parser.add_argument("--stage2-out", dest="stage2_output", type=pathlib.Path,
+                        default=REPO_ROOT / "build" / "stage2",
+                        help="Directory to receive Stage2 LLVM artefacts (default: build/stage2)")
+    parser.add_argument("--stage2-binary", dest="stage2_binary", type=pathlib.Path,
+                        help="Optional path to link a Stage2 compiler executable using clang.")
+    parser.add_argument("--stage2-clang", dest="stage2_clang", default=os.environ.get("SAILFIN_STAGE2_CLANG", "clang"),
+                        help="clang executable to use when linking Stage2 binaries (default: clang or SAILFIN_STAGE2_CLANG).")
+    parser.add_argument("--stage2-ldflag", dest="stage2_ldflags", action="append",
+                        help="Extra linker flag to pass to clang when producing the Stage2 binary (can be specified multiple times).")
+    parser.add_argument("--stage2-quiet", dest="stage2_quiet", action="store_true",
+                        help="Silence Stage2 bootstrap logging.")
     return parser.parse_args(argv)
 
 
@@ -220,6 +280,36 @@ def main(argv: list[str] | None = None) -> int:
     except Stage1CompileError as exc:
         print(f"[stage1][error] {exc}", file=sys.stderr)
         return 1
+
+    stage2_requested = args.stage2 or args.stage2_binary is not None
+    if stage2_requested:
+        from scripts import bootstrap_stage2
+
+        stage2_output = args.stage2_output.resolve()
+        capture_results = True  # always capture for potential linking/tests
+        compilation_result = bootstrap_stage2.compile_compiler_to_stage2(
+            stage2_output,
+            debug=not args.stage2_quiet,
+            quiet=args.stage2_quiet,
+            capture_results=capture_results,
+        )
+
+        if len(compilation_result) == 3:
+            compiled_modules, aggregator, _lowered_map = compilation_result
+        else:
+            compiled_modules, aggregator = compilation_result
+
+        fatal_count = getattr(aggregator, "fatal_count", 0)
+        if fatal_count:
+            raise Stage1CompileError(f"stage2 bootstrap produced {fatal_count} fatal diagnostic(s)")
+
+        module_count = len(compiled_modules)
+        print(f"[stage2] generated {module_count} LLVM module(s) in {stage2_output}")
+
+        if args.stage2_binary:
+            ldflags = args.stage2_ldflags or []
+            link_stage2_binary(compiled_modules, args.stage2_binary, clang=args.stage2_clang, extra_flags=ldflags)
+
     return 0
 
 

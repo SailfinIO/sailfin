@@ -70,55 +70,59 @@ source_filename = "sailfin"
 %NativeInstruction = type { i32, [48 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i1 @sailfin_runtime_is_whitespace_char(i8)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.7 = private unnamed_addr constant [15 x i8] c"import asyncio\00"
-@.str.10 = private unnamed_addr constant [47 x i8] c"from runtime import runtime_support as runtime\00"
-@.str.1 = private unnamed_addr constant [24 x i8] c"print = runtime.console\00"
-@.str.4 = private unnamed_addr constant [22 x i8] c"sleep = runtime.sleep\00"
-@.str.13 = private unnamed_addr constant [22 x i8] c"spawn = runtime.spawn\00"
-@.str.16 = private unnamed_addr constant [16 x i8] c"fs = runtime.fs\00"
-@.str.19 = private unnamed_addr constant [22 x i8] c"serve = runtime.serve\00"
-@.str.22 = private unnamed_addr constant [20 x i8] c"http = runtime.http\00"
-@.str.25 = private unnamed_addr constant [30 x i8] c"websocket = runtime.websocket\00"
-@.str.28 = private unnamed_addr constant [36 x i8] c"logExecution = runtime.logExecution\00"
-@.str.31 = private unnamed_addr constant [30 x i8] c"array_map = runtime.array_map\00"
-@.str.34 = private unnamed_addr constant [36 x i8] c"array_filter = runtime.array_filter\00"
-@.str.37 = private unnamed_addr constant [36 x i8] c"array_reduce = runtime.array_reduce\00"
-@.str.40 = private unnamed_addr constant [30 x i8] c"globals()['t' + 'rue'] = True\00"
-@.str.43 = private unnamed_addr constant [32 x i8] c"globals()['f' + 'alse'] = False\00"
-@.str.3 = private unnamed_addr constant [23 x i8] c" = runtime.enum_type('\00"
-@.str.46 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.18 = private unnamed_addr constant [6 x i8] c"from \00"
-@.str.21 = private unnamed_addr constant [9 x i8] c" import \00"
-@.str.12 = private unnamed_addr constant [5 x i8] c" as \00"
-@.str.125 = private unnamed_addr constant [12 x i8] c"__all__ = [\00"
-@.str.127 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.2 = private unnamed_addr constant [7 x i8] c"class \00"
-@.str.124 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
-@.str.55 = private unnamed_addr constant [29 x i8] c"return runtime.struct_repr('\00"
-@.str.57 = private unnamed_addr constant [5 x i8] c"', [\00"
-@.str.60 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.63 = private unnamed_addr constant [3 x i8] c"])\00"
-@.str.221 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.227 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.232 = private unnamed_addr constant [29 x i8] c"runtime.format_interpolated(\00"
-@.str.236 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.301 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.101 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.102 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.8 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.15 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.0 = private unnamed_addr constant [15 x i8] c"__match_value_\00"
-@.str.6 = private unnamed_addr constant [11 x i8] c"0123456789\00"
+@.str.len14.h165481004 = private unnamed_addr constant [15 x i8] c"import asyncio\00"
+@.str.len46.h744586798 = private unnamed_addr constant [47 x i8] c"from runtime import runtime_support as runtime\00"
+@.str.len23.h225115061 = private unnamed_addr constant [24 x i8] c"print = runtime.console\00"
+@.str.len21.h464873829 = private unnamed_addr constant [22 x i8] c"sleep = runtime.sleep\00"
+@.str.len25.h1882901628 = private unnamed_addr constant [26 x i8] c"channel = runtime.channel\00"
+@.str.len27.h1230134945 = private unnamed_addr constant [28 x i8] c"parallel = runtime.parallel\00"
+@.str.len21.h1480982861 = private unnamed_addr constant [22 x i8] c"spawn = runtime.spawn\00"
+@.str.len15.h2008919863 = private unnamed_addr constant [16 x i8] c"fs = runtime.fs\00"
+@.str.len21.h949071414 = private unnamed_addr constant [22 x i8] c"serve = runtime.serve\00"
+@.str.len19.h190885179 = private unnamed_addr constant [20 x i8] c"http = runtime.http\00"
+@.str.len29.h1075519908 = private unnamed_addr constant [30 x i8] c"websocket = runtime.websocket\00"
+@.str.len35.h207688710 = private unnamed_addr constant [36 x i8] c"logExecution = runtime.logExecution\00"
+@.str.len29.h1468169 = private unnamed_addr constant [30 x i8] c"array_map = runtime.array_map\00"
+@.str.len35.h129830246 = private unnamed_addr constant [36 x i8] c"array_filter = runtime.array_filter\00"
+@.str.len35.h1076062162 = private unnamed_addr constant [36 x i8] c"array_reduce = runtime.array_reduce\00"
+@.str.len29.h29541381 = private unnamed_addr constant [30 x i8] c"globals()['t' + 'rue'] = True\00"
+@.str.len31.h1408297199 = private unnamed_addr constant [32 x i8] c"globals()['f' + 'alse'] = False\00"
+@.str.len22.h1699428905 = private unnamed_addr constant [23 x i8] c" = runtime.enum_type('\00"
+@.str.len2.h193420823 = private unnamed_addr constant [3 x i8] c"')\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len5.h2115689699 = private unnamed_addr constant [6 x i8] c"from \00"
+@.str.len8.h1132499314 = private unnamed_addr constant [9 x i8] c" import \00"
+@.str.len4.h175713983 = private unnamed_addr constant [5 x i8] c" as \00"
+@.str.len11.h1657754115 = private unnamed_addr constant [12 x i8] c"__all__ = [\00"
+@.str.len6.h1267738404 = private unnamed_addr constant [7 x i8] c"class \00"
+@.str.len17.h215787497 = private unnamed_addr constant [18 x i8] c"def __init__(self\00"
+@.str.len19.h1806641125 = private unnamed_addr constant [20 x i8] c"def __repr__(self):\00"
+@.str.len28.h1179318158 = private unnamed_addr constant [29 x i8] c"return runtime.struct_repr('\00"
+@.str.len4.h182022329 = private unnamed_addr constant [5 x i8] c"', [\00"
+@.str.len2.h193479629 = private unnamed_addr constant [3 x i8] c"])\00"
+@.str.len28.h583209964 = private unnamed_addr constant [29 x i8] c"runtime.format_interpolated(\00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len6.h1719661028 = private unnamed_addr constant [7 x i8] c".push(\00"
+@.str.len8.h645367897 = private unnamed_addr constant [9 x i8] c".append(\00"
+@.str.len4.h256486202 = private unnamed_addr constant [5 x i8] c"def \00"
+@.str.len2.h193423562 = private unnamed_addr constant [3 x i8] c"):\00"
+@.str.len14.h1077944870 = private unnamed_addr constant [15 x i8] c"__match_value_\00"
+@.str.len4.h174361445 = private unnamed_addr constant [5 x i8] c" == \00"
+@.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
+@.str.len11.h2001621394 = private unnamed_addr constant [12 x i8] c"[lowering] \00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define %LoweredPythonResult @lower_to_python(%NativeModule %native_module) {
 entry:
@@ -146,10 +150,10 @@ entry:
   br i1 %t9, label %then0, label %merge1
 then0:
   %t12 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s13 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.13, i32 0, i32 0
+  %s13 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.len39.h1262256381, i32 0, i32 0
   %t14 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t12, i8* %s13)
   store { i8**, i64 }* %t14, { i8**, i64 }** %l0
-  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.15, i32 0, i32 0
+  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t16 = insertvalue %LoweredPythonResult undef, i8* %s15, 0
   %t17 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t18 = insertvalue %LoweredPythonResult %t16, { i8**, i64 }* %t17, 1
@@ -218,11 +222,11 @@ entry:
   store i64 0, i64* %t5
   store { i8**, i64 }* %t3, { i8**, i64 }** %l1
   %t6 = load %PythonBuilder, %PythonBuilder* %l0
-  %s7 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h165481004, i32 0, i32 0
   %t8 = call %PythonBuilder @builder_emit(%PythonBuilder %t6, i8* %s7)
   store %PythonBuilder %t8, %PythonBuilder* %l0
   %t9 = load %PythonBuilder, %PythonBuilder* %l0
-  %s10 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [47 x i8], [47 x i8]* @.str.len46.h744586798, i32 0, i32 0
   %t11 = call %PythonBuilder @builder_emit(%PythonBuilder %t9, i8* %s10)
   store %PythonBuilder %t11, %PythonBuilder* %l0
   %t12 = alloca [0 x i8*]
@@ -456,63 +460,63 @@ entry:
   %l0 = alloca %PythonBuilder
   store %PythonBuilder %builder, %PythonBuilder* %l0
   %t0 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.1, i32 0, i32 0
+  %s1 = getelementptr inbounds [24 x i8], [24 x i8]* @.str.len23.h225115061, i32 0, i32 0
   %t2 = call %PythonBuilder @builder_emit(%PythonBuilder %t0, i8* %s1)
   store %PythonBuilder %t2, %PythonBuilder* %l0
   %t3 = load %PythonBuilder, %PythonBuilder* %l0
-  %s4 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.len21.h464873829, i32 0, i32 0
   %t5 = call %PythonBuilder @builder_emit(%PythonBuilder %t3, i8* %s4)
   store %PythonBuilder %t5, %PythonBuilder* %l0
   %t6 = load %PythonBuilder, %PythonBuilder* %l0
-  %s7 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h1882901628, i32 0, i32 0
   %t8 = call %PythonBuilder @builder_emit(%PythonBuilder %t6, i8* %s7)
   store %PythonBuilder %t8, %PythonBuilder* %l0
   %t9 = load %PythonBuilder, %PythonBuilder* %l0
-  %s10 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.len27.h1230134945, i32 0, i32 0
   %t11 = call %PythonBuilder @builder_emit(%PythonBuilder %t9, i8* %s10)
   store %PythonBuilder %t11, %PythonBuilder* %l0
   %t12 = load %PythonBuilder, %PythonBuilder* %l0
-  %s13 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.13, i32 0, i32 0
+  %s13 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.len21.h1480982861, i32 0, i32 0
   %t14 = call %PythonBuilder @builder_emit(%PythonBuilder %t12, i8* %s13)
   store %PythonBuilder %t14, %PythonBuilder* %l0
   %t15 = load %PythonBuilder, %PythonBuilder* %l0
-  %s16 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h2008919863, i32 0, i32 0
   %t17 = call %PythonBuilder @builder_emit(%PythonBuilder %t15, i8* %s16)
   store %PythonBuilder %t17, %PythonBuilder* %l0
   %t18 = load %PythonBuilder, %PythonBuilder* %l0
-  %s19 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.19, i32 0, i32 0
+  %s19 = getelementptr inbounds [22 x i8], [22 x i8]* @.str.len21.h949071414, i32 0, i32 0
   %t20 = call %PythonBuilder @builder_emit(%PythonBuilder %t18, i8* %s19)
   store %PythonBuilder %t20, %PythonBuilder* %l0
   %t21 = load %PythonBuilder, %PythonBuilder* %l0
-  %s22 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h190885179, i32 0, i32 0
   %t23 = call %PythonBuilder @builder_emit(%PythonBuilder %t21, i8* %s22)
   store %PythonBuilder %t23, %PythonBuilder* %l0
   %t24 = load %PythonBuilder, %PythonBuilder* %l0
-  %s25 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.25, i32 0, i32 0
+  %s25 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1075519908, i32 0, i32 0
   %t26 = call %PythonBuilder @builder_emit(%PythonBuilder %t24, i8* %s25)
   store %PythonBuilder %t26, %PythonBuilder* %l0
   %t27 = load %PythonBuilder, %PythonBuilder* %l0
-  %s28 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.28, i32 0, i32 0
+  %s28 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.len35.h207688710, i32 0, i32 0
   %t29 = call %PythonBuilder @builder_emit(%PythonBuilder %t27, i8* %s28)
   store %PythonBuilder %t29, %PythonBuilder* %l0
   %t30 = load %PythonBuilder, %PythonBuilder* %l0
-  %s31 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.31, i32 0, i32 0
+  %s31 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1468169, i32 0, i32 0
   %t32 = call %PythonBuilder @builder_emit(%PythonBuilder %t30, i8* %s31)
   store %PythonBuilder %t32, %PythonBuilder* %l0
   %t33 = load %PythonBuilder, %PythonBuilder* %l0
-  %s34 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.34, i32 0, i32 0
+  %s34 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.len35.h129830246, i32 0, i32 0
   %t35 = call %PythonBuilder @builder_emit(%PythonBuilder %t33, i8* %s34)
   store %PythonBuilder %t35, %PythonBuilder* %l0
   %t36 = load %PythonBuilder, %PythonBuilder* %l0
-  %s37 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.37, i32 0, i32 0
+  %s37 = getelementptr inbounds [36 x i8], [36 x i8]* @.str.len35.h1076062162, i32 0, i32 0
   %t38 = call %PythonBuilder @builder_emit(%PythonBuilder %t36, i8* %s37)
   store %PythonBuilder %t38, %PythonBuilder* %l0
   %t39 = load %PythonBuilder, %PythonBuilder* %l0
-  %s40 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.40, i32 0, i32 0
+  %s40 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h29541381, i32 0, i32 0
   %t41 = call %PythonBuilder @builder_emit(%PythonBuilder %t39, i8* %s40)
   store %PythonBuilder %t41, %PythonBuilder* %l0
   %t42 = load %PythonBuilder, %PythonBuilder* %l0
-  %s43 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.43, i32 0, i32 0
+  %s43 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.len31.h1408297199, i32 0, i32 0
   %t44 = call %PythonBuilder @builder_emit(%PythonBuilder %t42, i8* %s43)
   store %PythonBuilder %t44, %PythonBuilder* %l0
   %t45 = load %PythonBuilder, %PythonBuilder* %l0
@@ -566,8 +570,8 @@ merge5:
   %t20 = call i8* @sanitize_identifier(i8* %t19)
   store i8* %t20, i8** %l3
   %t21 = load i8*, i8** %l3
-  %s22 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.22, i32 0, i32 0
-  %t23 = add i8* %t21, %s22
+  %s22 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t23 = call i8* @sailfin_runtime_string_concat(i8* %t21, i8* %s22)
   store i8* %t23, i8** %l4
   %t24 = load %NativeBinding, %NativeBinding* %l2
   %t25 = extractvalue %NativeBinding %t24, 3
@@ -585,13 +589,13 @@ then6:
   %t34 = load i8*, i8** %l4
   %t35 = load i8*, i8** %l5
   %t36 = call i8* @lower_expression(i8* %t35)
-  %t37 = add i8* %t34, %t36
+  %t37 = call i8* @sailfin_runtime_string_concat(i8* %t34, i8* %t36)
   store i8* %t37, i8** %l4
   br label %merge8
 else7:
   %t38 = load i8*, i8** %l4
-  %s39 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.39, i32 0, i32 0
-  %t40 = add i8* %t38, %s39
+  %s39 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h230766299, i32 0, i32 0
+  %t40 = call i8* @sailfin_runtime_string_concat(i8* %t38, i8* %s39)
   store i8* %t40, i8** %l4
   br label %merge8
 merge8:
@@ -671,7 +675,7 @@ merge5:
   store %NativeImport %t24, %NativeImport* %l3
   %t25 = load %NativeImport, %NativeImport* %l3
   %t26 = extractvalue %NativeImport %t25, 0
-  %s27 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.27, i32 0, i32 0
+  %s27 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h42978514, i32 0, i32 0
   %t28 = icmp eq i8* %t26, %s27
   %t29 = load %PythonBuilder, %PythonBuilder* %l0
   %t30 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -834,12 +838,12 @@ entry:
   %t1 = call i8* @sanitize_identifier(i8* %t0)
   store i8* %t1, i8** %l0
   %t2 = load i8*, i8** %l0
-  %s3 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.3, i32 0, i32 0
-  %t4 = add i8* %t2, %s3
+  %s3 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1699428905, i32 0, i32 0
+  %t4 = call i8* @sailfin_runtime_string_concat(i8* %t2, i8* %s3)
   %t5 = load i8*, i8** %l0
-  %t6 = add i8* %t4, %t5
-  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t4, i8* %t5)
+  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193420823, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
   %t9 = call %PythonBuilder @builder_emit(%PythonBuilder %builder, i8* %t8)
   store %PythonBuilder %t9, %PythonBuilder* %l1
   %t10 = sitofp i64 0 to double
@@ -885,24 +889,24 @@ merge5:
   %t35 = call i8* @sanitize_identifier(i8* %t34)
   store i8* %t35, i8** %l4
   %t36 = load i8*, i8** %l0
-  %s37 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.37, i32 0, i32 0
-  %t38 = add i8* %t36, %s37
+  %s37 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.len31.h568140000, i32 0, i32 0
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t36, i8* %s37)
   %t39 = load i8*, i8** %l0
-  %t40 = add i8* %t38, %t39
-  %s41 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.41, i32 0, i32 0
-  %t42 = add i8* %t40, %s41
+  %t40 = call i8* @sailfin_runtime_string_concat(i8* %t38, i8* %t39)
+  %s41 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2088090973, i32 0, i32 0
+  %t42 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %s41)
   %t43 = load i8*, i8** %l4
-  %t44 = add i8* %t42, %t43
-  %s45 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.45, i32 0, i32 0
-  %t46 = add i8* %t44, %s45
+  %t44 = call i8* @sailfin_runtime_string_concat(i8* %t42, i8* %t43)
+  %s45 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h182022329, i32 0, i32 0
+  %t46 = call i8* @sailfin_runtime_string_concat(i8* %t44, i8* %s45)
   %t47 = load %NativeEnumVariant*, %NativeEnumVariant** %l3
   %t48 = getelementptr %NativeEnumVariant, %NativeEnumVariant* %t47, i32 0, i32 1
   %t49 = load { %NativeEnumVariantField**, i64 }*, { %NativeEnumVariantField**, i64 }** %t48
   %t50 = bitcast { %NativeEnumVariantField**, i64 }* %t49 to { %NativeEnumVariantField*, i64 }*
   %t51 = call i8* @render_enum_variant_fields({ %NativeEnumVariantField*, i64 }* %t50)
-  %t52 = add i8* %t46, %t51
-  %s53 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.53, i32 0, i32 0
-  %t54 = add i8* %t52, %s53
+  %t52 = call i8* @sailfin_runtime_string_concat(i8* %t46, i8* %t51)
+  %s53 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193479629, i32 0, i32 0
+  %t54 = call i8* @sailfin_runtime_string_concat(i8* %t52, i8* %s53)
   store i8* %t54, i8** %l5
   %t55 = load %PythonBuilder, %PythonBuilder* %l1
   %t56 = load i8*, i8** %l5
@@ -931,7 +935,7 @@ entry:
   %t2 = icmp eq i64 %t1, 0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s3
 merge1:
   %t4 = alloca [0 x i8*]
@@ -999,7 +1003,7 @@ loop.latch4:
   br label %loop.header2
 afterloop5:
   %t45 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.46, i32 0, i32 0
+  %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t47 = call i8* @join_with_separator({ i8**, i64 }* %t45, i8* %s46)
   ret i8* %t47
 }
@@ -1017,7 +1021,7 @@ entry:
   %t5 = load i8*, i8** %l0
   br i1 %t4, label %then0, label %merge1
 then0:
-  %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s6
 merge1:
   %t7 = extractvalue %NativeImport %entry, 2
@@ -1027,22 +1031,22 @@ merge1:
   %t11 = load i8*, i8** %l0
   br i1 %t10, label %then2, label %merge3
 then2:
-  %s12 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.12, i32 0, i32 0
+  %s12 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h919609845, i32 0, i32 0
   %t13 = load i8*, i8** %l0
-  %t14 = add i8* %s12, %t13
+  %t14 = call i8* @sailfin_runtime_string_concat(i8* %s12, i8* %t13)
   ret i8* %t14
 merge3:
   %t15 = extractvalue %NativeImport %entry, 2
   %t16 = bitcast { %NativeImportSpecifier**, i64 }* %t15 to { %NativeImportSpecifier*, i64 }*
   %t17 = call i8* @render_python_specifiers({ %NativeImportSpecifier*, i64 }* %t16)
   store i8* %t17, i8** %l1
-  %s18 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.18, i32 0, i32 0
+  %s18 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2115689699, i32 0, i32 0
   %t19 = load i8*, i8** %l0
-  %t20 = add i8* %s18, %t19
-  %s21 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.21, i32 0, i32 0
-  %t22 = add i8* %t20, %s21
+  %t20 = call i8* @sailfin_runtime_string_concat(i8* %s18, i8* %t19)
+  %s21 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1132499314, i32 0, i32 0
+  %t22 = call i8* @sailfin_runtime_string_concat(i8* %t20, i8* %s21)
   %t23 = load i8*, i8** %l1
-  %t24 = add i8* %t22, %t23
+  %t24 = call i8* @sailfin_runtime_string_concat(i8* %t22, i8* %t23)
   ret i8* %t24
 }
 
@@ -1105,7 +1109,7 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t33 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s34 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.34, i32 0, i32 0
+  %s34 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t35 = call i8* @join_with_separator({ i8**, i64 }* %t33, i8* %s34)
   ret i8* %t35
 }
@@ -1141,11 +1145,11 @@ then0:
   ret i8* %t10
 merge1:
   %t11 = load i8*, i8** %l0
-  %s12 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.12, i32 0, i32 0
-  %t13 = add i8* %t11, %s12
+  %s12 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h175713983, i32 0, i32 0
+  %t13 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %s12)
   %t14 = extractvalue %NativeImportSpecifier %specifier, 1
   %t15 = call i8* @sanitize_identifier(i8* %t14)
-  %t16 = add i8* %t13, %t15
+  %t16 = call i8* @sailfin_runtime_string_concat(i8* %t13, i8* %t15)
   ret i8* %t16
 }
 
@@ -1166,7 +1170,7 @@ then0:
   ret i8* %t5
 merge1:
   %t6 = load i8*, i8** %l0
-  %s7 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2085806463, i32 0, i32 0
   %t8 = call i1 @starts_with(i8* %t6, i8* %s7)
   %t9 = load i8*, i8** %l0
   br i1 %t8, label %then2, label %merge3
@@ -1186,13 +1190,13 @@ then2:
   %t18 = getelementptr [2 x i8], [2 x i8]* %t15, i32 0, i32 0
   %t19 = call i8* @replace_all(i8* %t10, i8* %t14, i8* %t18)
   store i8* %t19, i8** %l1
-  %s20 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.20, i32 0, i32 0
+  %s20 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1309566598, i32 0, i32 0
   %t21 = load i8*, i8** %l1
-  %t22 = add i8* %s20, %t21
+  %t22 = call i8* @sailfin_runtime_string_concat(i8* %s20, i8* %t21)
   ret i8* %t22
 merge3:
   %t23 = load i8*, i8** %l0
-  %s24 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.24, i32 0, i32 0
+  %s24 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428644, i32 0, i32 0
   %t25 = call i1 @starts_with(i8* %t23, i8* %s24)
   %t26 = load i8*, i8** %l0
   br i1 %t25, label %then4, label %merge5
@@ -1217,9 +1221,9 @@ then4:
   %t39 = getelementptr [2 x i8], [2 x i8]* %t36, i32 0, i32 0
   %t40 = call i8* @replace_all(i8* %t31, i8* %t35, i8* %t39)
   store i8* %t40, i8** %l2
-  %s41 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.41, i32 0, i32 0
+  %s41 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1309566598, i32 0, i32 0
   %t42 = load i8*, i8** %l2
-  %t43 = add i8* %s41, %t42
+  %t43 = call i8* @sailfin_runtime_string_concat(i8* %s41, i8* %t42)
   ret i8* %t43
 merge5:
   %t44 = load i8*, i8** %l0
@@ -1545,11 +1549,11 @@ loop.latch18:
   %t122 = load double, double* %l1
   br label %loop.header16
 afterloop19:
-  %s125 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.125, i32 0, i32 0
+  %s125 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1657754115, i32 0, i32 0
   %t126 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %s127 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.127, i32 0, i32 0
+  %s127 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t128 = call i8* @join_with_separator({ i8**, i64 }* %t126, i8* %s127)
-  %t129 = add i8* %s125, %t128
+  %t129 = call i8* @sailfin_runtime_string_concat(i8* %s125, i8* %t128)
   %t130 = load i8, i8* %t129
   %t131 = add i8 %t130, 93
   %t132 = alloca [2 x i8], align 1
@@ -1682,9 +1686,9 @@ entry:
   %t0 = extractvalue %NativeStruct %definition, 0
   %t1 = call i8* @sanitize_identifier(i8* %t0)
   store i8* %t1, i8** %l0
-  %s2 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1267738404, i32 0, i32 0
   %t3 = load i8*, i8** %l0
-  %t4 = add i8* %s2, %t3
+  %t4 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %t3)
   %t5 = load i8, i8* %t4
   %t6 = add i8 %t5, 58
   %t7 = alloca [2 x i8], align 1
@@ -1710,7 +1714,7 @@ entry:
   %t20 = bitcast { %NativeStructField**, i64 }* %t19 to { %NativeStructField*, i64 }*
   %t21 = call { i8**, i64 }* @render_struct_parameters({ %NativeStructField*, i64 }* %t20)
   store { i8**, i64 }* %t21, { i8**, i64 }** %l3
-  %s22 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h215787497, i32 0, i32 0
   store i8* %s22, i8** %l4
   %t23 = load { i8**, i64 }*, { i8**, i64 }** %l3
   %t24 = load { i8**, i64 }, { i8**, i64 }* %t23
@@ -1724,12 +1728,12 @@ entry:
   br i1 %t26, label %then0, label %merge1
 then0:
   %t32 = load i8*, i8** %l4
-  %s33 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.33, i32 0, i32 0
-  %t34 = add i8* %t32, %s33
+  %s33 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
+  %t34 = call i8* @sailfin_runtime_string_concat(i8* %t32, i8* %s33)
   %t35 = load { i8**, i64 }*, { i8**, i64 }** %l3
-  %s36 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.36, i32 0, i32 0
+  %s36 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t37 = call i8* @join_with_separator({ i8**, i64 }* %t35, i8* %s36)
-  %t38 = add i8* %t34, %t37
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t34, i8* %t37)
   store i8* %t38, i8** %l4
   br label %merge1
 merge1:
@@ -1772,7 +1776,7 @@ merge1:
   br i1 %t61, label %then2, label %else3
 then2:
   %t67 = load %PythonBuilder, %PythonBuilder* %l1
-  %s68 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.68, i32 0, i32 0
+  %s68 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h270590402, i32 0, i32 0
   %t69 = call %PythonBuilder @builder_emit(%PythonBuilder %t67, i8* %s68)
   store %PythonBuilder %t69, %PythonBuilder* %l1
   br label %merge4
@@ -1826,13 +1830,13 @@ merge10:
   %t101 = call i8* @sanitize_identifier(i8* %t100)
   store i8* %t101, i8** %l7
   %t102 = load %PythonBuilder, %PythonBuilder* %l1
-  %s103 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.103, i32 0, i32 0
+  %s103 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h461434216, i32 0, i32 0
   %t104 = load i8*, i8** %l7
-  %t105 = add i8* %s103, %t104
-  %s106 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.106, i32 0, i32 0
-  %t107 = add i8* %t105, %s106
+  %t105 = call i8* @sailfin_runtime_string_concat(i8* %s103, i8* %t104)
+  %s106 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t107 = call i8* @sailfin_runtime_string_concat(i8* %t105, i8* %s106)
   %t108 = load i8*, i8** %l7
-  %t109 = add i8* %t107, %t108
+  %t109 = call i8* @sailfin_runtime_string_concat(i8* %t107, i8* %t108)
   %t110 = call %PythonBuilder @builder_emit(%PythonBuilder %t102, i8* %t109)
   store %PythonBuilder %t110, %PythonBuilder* %l1
   %t111 = load double, double* %l5
@@ -1856,7 +1860,7 @@ merge4:
   %t122 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t121)
   store %PythonBuilder %t122, %PythonBuilder* %l1
   %t123 = load %PythonBuilder, %PythonBuilder* %l1
-  %s124 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.124, i32 0, i32 0
+  %s124 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h1806641125, i32 0, i32 0
   %t125 = call %PythonBuilder @builder_emit(%PythonBuilder %t123, i8* %s124)
   store %PythonBuilder %t125, %PythonBuilder* %l1
   %t126 = load %PythonBuilder, %PythonBuilder* %l1
@@ -1875,7 +1879,7 @@ merge4:
   %t136 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t135)
   store %PythonBuilder %t136, %PythonBuilder* %l1
   %t137 = load i8*, i8** %l0
-  %s138 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.138, i32 0, i32 0
+  %s138 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h300877395, i32 0, i32 0
   %t139 = icmp eq i8* %t137, %s138
   %t140 = load i8*, i8** %l0
   %t141 = load %PythonBuilder, %PythonBuilder* %l1
@@ -1889,64 +1893,64 @@ then11:
   %t147 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %t146)
   store %PythonBuilder %t147, %PythonBuilder* %l1
   %t148 = load %PythonBuilder, %PythonBuilder* %l1
-  %s149 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.149, i32 0, i32 0
+  %s149 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.len28.h430828782, i32 0, i32 0
   %t150 = call %PythonBuilder @builder_emit(%PythonBuilder %t148, i8* %s149)
   store %PythonBuilder %t150, %PythonBuilder* %l1
   %t151 = load %PythonBuilder, %PythonBuilder* %l1
   %t152 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t151)
   store %PythonBuilder %t152, %PythonBuilder* %l1
   %t153 = load %PythonBuilder, %PythonBuilder* %l1
-  %s154 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.154, i32 0, i32 0
+  %s154 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h320851598, i32 0, i32 0
   %t155 = call %PythonBuilder @builder_emit(%PythonBuilder %t153, i8* %s154)
   store %PythonBuilder %t155, %PythonBuilder* %l1
   %t156 = load %PythonBuilder, %PythonBuilder* %l1
-  %s157 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.157, i32 0, i32 0
+  %s157 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1898426375, i32 0, i32 0
   %t158 = call %PythonBuilder @builder_emit(%PythonBuilder %t156, i8* %s157)
   store %PythonBuilder %t158, %PythonBuilder* %l1
   %t159 = load %PythonBuilder, %PythonBuilder* %l1
   %t160 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t159)
   store %PythonBuilder %t160, %PythonBuilder* %l1
   %t161 = load %PythonBuilder, %PythonBuilder* %l1
-  %s162 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.162, i32 0, i32 0
+  %s162 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h610920064, i32 0, i32 0
   %t163 = call %PythonBuilder @builder_emit(%PythonBuilder %t161, i8* %s162)
   store %PythonBuilder %t163, %PythonBuilder* %l1
   %t164 = load %PythonBuilder, %PythonBuilder* %l1
   %t165 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t164)
   store %PythonBuilder %t165, %PythonBuilder* %l1
   %t166 = load %PythonBuilder, %PythonBuilder* %l1
-  %s167 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.167, i32 0, i32 0
+  %s167 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
   %t168 = call %PythonBuilder @builder_emit(%PythonBuilder %t166, i8* %s167)
   store %PythonBuilder %t168, %PythonBuilder* %l1
   %t169 = load %PythonBuilder, %PythonBuilder* %l1
   %t170 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t169)
   store %PythonBuilder %t170, %PythonBuilder* %l1
   %t171 = load %PythonBuilder, %PythonBuilder* %l1
-  %s172 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.172, i32 0, i32 0
+  %s172 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h1088202076, i32 0, i32 0
   %t173 = call %PythonBuilder @builder_emit(%PythonBuilder %t171, i8* %s172)
   store %PythonBuilder %t173, %PythonBuilder* %l1
   %t174 = load %PythonBuilder, %PythonBuilder* %l1
-  %s175 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.175, i32 0, i32 0
+  %s175 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h983476432, i32 0, i32 0
   %t176 = call %PythonBuilder @builder_emit(%PythonBuilder %t174, i8* %s175)
   store %PythonBuilder %t176, %PythonBuilder* %l1
   %t177 = load %PythonBuilder, %PythonBuilder* %l1
   %t178 = call %PythonBuilder @builder_push_indent(%PythonBuilder %t177)
   store %PythonBuilder %t178, %PythonBuilder* %l1
   %t179 = load %PythonBuilder, %PythonBuilder* %l1
-  %s180 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.180, i32 0, i32 0
+  %s180 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.len18.h1456282769, i32 0, i32 0
   %t181 = call %PythonBuilder @builder_emit(%PythonBuilder %t179, i8* %s180)
   store %PythonBuilder %t181, %PythonBuilder* %l1
   %t182 = load %PythonBuilder, %PythonBuilder* %l1
   %t183 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t182)
   store %PythonBuilder %t183, %PythonBuilder* %l1
   %t184 = load %PythonBuilder, %PythonBuilder* %l1
-  %s185 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.185, i32 0, i32 0
+  %s185 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1977847647, i32 0, i32 0
   %t186 = call %PythonBuilder @builder_emit(%PythonBuilder %t184, i8* %s185)
   store %PythonBuilder %t186, %PythonBuilder* %l1
   %t187 = load %PythonBuilder, %PythonBuilder* %l1
   %t188 = call %PythonBuilder @builder_pop_indent(%PythonBuilder %t187)
   store %PythonBuilder %t188, %PythonBuilder* %l1
   %t189 = load %PythonBuilder, %PythonBuilder* %l1
-  %s190 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.190, i32 0, i32 0
+  %s190 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h1984174475, i32 0, i32 0
   %t191 = call %PythonBuilder @builder_emit(%PythonBuilder %t189, i8* %s190)
   store %PythonBuilder %t191, %PythonBuilder* %l1
   %t192 = load %PythonBuilder, %PythonBuilder* %l1
@@ -2203,8 +2207,8 @@ merge5:
   br i1 %t36, label %then6, label %else7
 then6:
   %t43 = load i8*, i8** %l5
-  %s44 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.44, i32 0, i32 0
-  %t45 = add i8* %t43, %s44
+  %s44 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h468448796, i32 0, i32 0
+  %t45 = call i8* @sailfin_runtime_string_concat(i8* %t43, i8* %s44)
   store i8* %t45, i8** %l5
   %t46 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t47 = load i8*, i8** %l5
@@ -2252,10 +2256,10 @@ entry:
   %t2 = icmp eq i64 %t1, 0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s3 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.3, i32 0, i32 0
-  %t4 = add i8* %s3, %class_name
-  %s5 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.5, i32 0, i32 0
-  %t6 = add i8* %t4, %s5
+  %s3 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.len28.h1179318158, i32 0, i32 0
+  %t4 = call i8* @sailfin_runtime_string_concat(i8* %s3, i8* %class_name)
+  %s5 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h653919037, i32 0, i32 0
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t4, i8* %s5)
   ret i8* %t6
 merge1:
   %t7 = alloca [0 x i8*]
@@ -2304,13 +2308,13 @@ merge7:
   %t32 = call i8* @sanitize_identifier(i8* %t31)
   store i8* %t32, i8** %l3
   %t33 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s34 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.34, i32 0, i32 0
+  %s34 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1038501153, i32 0, i32 0
   %t35 = load i8*, i8** %l3
-  %t36 = add i8* %s34, %t35
-  %s37 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.37, i32 0, i32 0
-  %t38 = add i8* %t36, %s37
+  %t36 = call i8* @sailfin_runtime_string_concat(i8* %s34, i8* %t35)
+  %s37 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h104511138, i32 0, i32 0
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t36, i8* %s37)
   %t39 = load i8*, i8** %l3
-  %t40 = add i8* %t38, %t39
+  %t40 = call i8* @sailfin_runtime_string_concat(i8* %t38, i8* %t39)
   %t41 = load i8, i8* %t40
   %t42 = add i8 %t41, 41
   %t43 = alloca [2 x i8], align 1
@@ -2331,16 +2335,16 @@ loop.latch4:
   %t52 = load double, double* %l1
   br label %loop.header2
 afterloop5:
-  %s55 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.55, i32 0, i32 0
-  %t56 = add i8* %s55, %class_name
-  %s57 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.57, i32 0, i32 0
-  %t58 = add i8* %t56, %s57
+  %s55 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.len28.h1179318158, i32 0, i32 0
+  %t56 = call i8* @sailfin_runtime_string_concat(i8* %s55, i8* %class_name)
+  %s57 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h182022329, i32 0, i32 0
+  %t58 = call i8* @sailfin_runtime_string_concat(i8* %t56, i8* %s57)
   %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s60 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.60, i32 0, i32 0
+  %s60 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t61 = call i8* @join_with_separator({ i8**, i64 }* %t59, i8* %s60)
-  %t62 = add i8* %t58, %t61
-  %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.63, i32 0, i32 0
-  %t64 = add i8* %t62, %s63
+  %t62 = call i8* @sailfin_runtime_string_concat(i8* %t58, i8* %t61)
+  %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193479629, i32 0, i32 0
+  %t64 = call i8* @sailfin_runtime_string_concat(i8* %t62, i8* %s63)
   ret i8* %t64
 }
 
@@ -2483,7 +2487,7 @@ then2:
   ret i8* null
 merge3:
   %t6 = load i8*, i8** %l0
-  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193515005, i32 0, i32 0
   %t8 = call double @find_substring(i8* %t6, i8* %s7)
   %t9 = sitofp i64 0 to double
   %t10 = fcmp olt double %t8, %t9
@@ -2493,7 +2497,7 @@ then4:
   ret i8* null
 merge5:
   %t12 = load i8*, i8** %l0
-  %s13 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.13, i32 0, i32 0
+  %s13 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193517249, i32 0, i32 0
   %t14 = call double @find_substring(i8* %t12, i8* %s13)
   %t15 = sitofp i64 0 to double
   %t16 = fcmp olt double %t14, %t15
@@ -2546,7 +2550,7 @@ then12:
   br label %afterloop11
 merge13:
   %t40 = load i8*, i8** %l0
-  %s41 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.41, i32 0, i32 0
+  %s41 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193515005, i32 0, i32 0
   %t42 = load i64, i64* %l3
   %t43 = sitofp i64 %t42 to double
   %t44 = call double @find_substring_from(i8* %t40, i8* %s41, double %t43)
@@ -2584,7 +2588,7 @@ merge15:
   %t68 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t66, i8* %t67)
   store { i8**, i64 }* %t68, { i8**, i64 }** %l1
   %t69 = load i8*, i8** %l0
-  %s70 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.70, i32 0, i32 0
+  %s70 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193517249, i32 0, i32 0
   %t71 = load double, double* %l4
   %t72 = sitofp i64 2 to double
   %t73 = fadd double %t71, %t72
@@ -2796,24 +2800,24 @@ loop.latch30:
   br label %loop.header28
 afterloop31:
   %t220 = load { i8**, i64 }*, { i8**, i64 }** %l9
-  %s221 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.221, i32 0, i32 0
+  %s221 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t222 = call i8* @join_with_separator({ i8**, i64 }* %t220, i8* %s221)
   %t223 = load i8, i8* %t222
   %t224 = add i8 91, %t223
   %t225 = add i8 %t224, 93
   store i8 %t225, i8* %l12
   %t226 = load { i8**, i64 }*, { i8**, i64 }** %l11
-  %s227 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.227, i32 0, i32 0
+  %s227 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t228 = call i8* @join_with_separator({ i8**, i64 }* %t226, i8* %s227)
   %t229 = load i8, i8* %t228
   %t230 = add i8 91, %t229
   %t231 = add i8 %t230, 93
   store i8 %t231, i8* %l13
-  %s232 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.232, i32 0, i32 0
+  %s232 = getelementptr inbounds [29 x i8], [29 x i8]* @.str.len28.h583209964, i32 0, i32 0
   %t233 = load i8, i8* %l12
   %t234 = load i8, i8* %s232
   %t235 = add i8 %t234, %t233
-  %s236 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.236, i32 0, i32 0
+  %s236 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t237 = load i8, i8* %s236
   %t238 = add i8 %t235, %t237
   %t239 = load i8, i8* %l13
@@ -2877,7 +2881,7 @@ merge3:
 then4:
   ret i8* null
 merge5:
-  %s18 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.18, i32 0, i32 0
+  %s18 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s18, i8** %l1
   store i64 1, i64* %l2
   %t19 = load i8, i8* %l0
@@ -2949,7 +2953,7 @@ merge15:
   store i8 0, i8* %t60
   %t61 = getelementptr [2 x i8], [2 x i8]* %t58, i32 0, i32 0
   %t62 = call i8* @decode_escape_sequence(i8* %t57, i8* %t61)
-  %t63 = add i8* %t51, %t62
+  %t63 = call i8* @sailfin_runtime_string_concat(i8* %t51, i8* %t62)
   store i8* %t63, i8** %l1
   %t64 = load i64, i64* %l2
   %t65 = add i64 %t64, 1
@@ -3076,7 +3080,7 @@ merge5:
   br i1 %t11, label %then6, label %else7
 then6:
   %t15 = load i8, i8* %l0
-  %s16 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.16, i32 0, i32 0
+  %s16 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480223, i32 0, i32 0
   %t17 = load i8, i8* %s16
   %t18 = add i8 %t15, %t17
   store i8 %t18, i8* %l0
@@ -3090,7 +3094,7 @@ else7:
   br i1 %t20, label %then9, label %else10
 then9:
   %t24 = load i8, i8* %l0
-  %s25 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.25, i32 0, i32 0
+  %s25 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193478474, i32 0, i32 0
   %t26 = load i8, i8* %s25
   %t27 = add i8 %t24, %t26
   store i8 %t27, i8* %l0
@@ -3104,7 +3108,7 @@ else10:
   br i1 %t29, label %then12, label %else13
 then12:
   %t33 = load i8, i8* %l0
-  %s34 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.34, i32 0, i32 0
+  %s34 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480817, i32 0, i32 0
   %t35 = load i8, i8* %s34
   %t36 = add i8 %t33, %t35
   store i8 %t36, i8* %l0
@@ -3118,7 +3122,7 @@ else13:
   br i1 %t38, label %then15, label %else16
 then15:
   %t42 = load i8, i8* %l0
-  %s43 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.43, i32 0, i32 0
+  %s43 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480949, i32 0, i32 0
   %t44 = load i8, i8* %s43
   %t45 = add i8 %t42, %t44
   store i8 %t45, i8* %l0
@@ -3132,7 +3136,7 @@ else16:
   br i1 %t47, label %then18, label %else19
 then18:
   %t51 = load i8, i8* %l0
-  %s52 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.52, i32 0, i32 0
+  %s52 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193481015, i32 0, i32 0
   %t53 = load i8, i8* %s52
   %t54 = add i8 %t51, %t53
   store i8 %t54, i8* %l0
@@ -3558,13 +3562,13 @@ merge19:
   %t171 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t160, i8* %t170)
   store { i8**, i64 }* %t171, { i8**, i64 }** %l5
   %t172 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %s173 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.173, i32 0, i32 0
+  %s173 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h728584192, i32 0, i32 0
   %t174 = load i8*, i8** %l13
-  %t175 = add i8* %s173, %t174
-  %s176 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.176, i32 0, i32 0
-  %t177 = add i8* %t175, %s176
+  %t175 = call i8* @sailfin_runtime_string_concat(i8* %s173, i8* %t174)
+  %s176 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087924125, i32 0, i32 0
+  %t177 = call i8* @sailfin_runtime_string_concat(i8* %t175, i8* %s176)
   %t178 = load i8*, i8** %l12
-  %t179 = add i8* %t177, %t178
+  %t179 = call i8* @sailfin_runtime_string_concat(i8* %t177, i8* %t178)
   %t180 = load i8, i8* %t179
   %t181 = add i8 %t180, 41
   %t182 = alloca [2 x i8], align 1
@@ -3693,21 +3697,21 @@ then28:
   %t273 = call i8* @sailfin_runtime_substring(i8* %t266, i64 %t272, i64 %t271)
   store i8* %t273, i8** %l17
   %t274 = load { i8**, i64 }*, { i8**, i64 }** %l6
-  %s275 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.275, i32 0, i32 0
+  %s275 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t276 = call i8* @join_with_separator({ i8**, i64 }* %t274, i8* %s275)
   %t277 = load i8, i8* %t276
   %t278 = add i8 91, %t277
   %t279 = add i8 %t278, 93
   store i8 %t279, i8* %l18
-  %s280 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.280, i32 0, i32 0
+  %s280 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h117462910, i32 0, i32 0
   %t281 = load i8*, i8** %l16
-  %t282 = add i8* %s280, %t281
-  %s283 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.283, i32 0, i32 0
-  %t284 = add i8* %t282, %s283
+  %t282 = call i8* @sailfin_runtime_string_concat(i8* %s280, i8* %t281)
+  %s283 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2088090973, i32 0, i32 0
+  %t284 = call i8* @sailfin_runtime_string_concat(i8* %t282, i8* %s283)
   %t285 = load i8*, i8** %l17
-  %t286 = add i8* %t284, %t285
-  %s287 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.287, i32 0, i32 0
-  %t288 = add i8* %t286, %s287
+  %t286 = call i8* @sailfin_runtime_string_concat(i8* %t284, i8* %t285)
+  %s287 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087924125, i32 0, i32 0
+  %t288 = call i8* @sailfin_runtime_string_concat(i8* %t286, i8* %s287)
   %t289 = load i8, i8* %l18
   %t290 = load i8, i8* %t288
   %t291 = add i8 %t290, %t289
@@ -3724,7 +3728,7 @@ merge29:
   %t298 = load i8, i8* %t297
   %t299 = add i8 %t298, 40
   %t300 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %s301 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.301, i32 0, i32 0
+  %s301 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t302 = call i8* @join_with_separator({ i8**, i64 }* %t300, i8* %s301)
   %t303 = load i8, i8* %t302
   %t304 = add i8 %t299, %t303
@@ -3961,11 +3965,11 @@ afterloop9:
   %t98 = load double, double* %l5
   br i1 %t92, label %then14, label %merge15
 then14:
-  %s99 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.99, i32 0, i32 0
+  %s99 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193479167, i32 0, i32 0
   ret i8* %s99
 merge15:
   %t100 = load { i8**, i64 }*, { i8**, i64 }** %l4
-  %s101 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.101, i32 0, i32 0
+  %s101 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t102 = call i8* @join_with_separator({ i8**, i64 }* %t100, i8* %s101)
   store i8* %t102, i8** %l7
   %t103 = load i8*, i8** %l7
@@ -4029,7 +4033,7 @@ then0:
   ret i1 0
 merge1:
   %t5 = load i8*, i8** %l0
-  %s6 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h757580446, i32 0, i32 0
   %t7 = call i1 @starts_with(i8* %t5, i8* %s6)
   %t8 = xor i1 %t7, 1
   %t9 = load i8*, i8** %l0
@@ -4164,9 +4168,9 @@ merge13:
   store i8* %t65, i8** %l7
   %t66 = load i8*, i8** %l6
   %t67 = load i8*, i8** %l5
-  %t68 = add i8* %t66, %t67
+  %t68 = call i8* @sailfin_runtime_string_concat(i8* %t66, i8* %t67)
   %t69 = load i8*, i8** %l7
-  %t70 = add i8* %t68, %t69
+  %t70 = call i8* @sailfin_runtime_string_concat(i8* %t68, i8* %t69)
   store i8* %t70, i8** %l0
   %t71 = load double, double* %l2
   %t72 = load i8*, i8** %l5
@@ -4538,9 +4542,9 @@ merge39:
   store i8* %t218, i8** %l13
   %t219 = load i8*, i8** %l12
   %t220 = load i8*, i8** %l11
-  %t221 = add i8* %t219, %t220
+  %t221 = call i8* @sailfin_runtime_string_concat(i8* %t219, i8* %t220)
   %t222 = load i8*, i8** %l13
-  %t223 = add i8* %t221, %t222
+  %t223 = call i8* @sailfin_runtime_string_concat(i8* %t221, i8* %t222)
   store i8* %t223, i8** %l0
   %t224 = load double, double* %l5
   %t225 = load i8*, i8** %l11
@@ -4709,7 +4713,7 @@ merge9:
   %t105 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t106 = icmp eq i32 %t55, 16
   %t107 = select i1 %t106, i8* %t105, i8* %t104
-  %s108 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.108, i32 0, i32 0
+  %s108 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
   %t109 = icmp ne i8* %t107, %s108
   %t110 = load i8*, i8** %l0
   %t111 = load i8*, i8** %l1
@@ -4911,7 +4915,7 @@ entry:
 then0:
   ret i8* %expression
 merge1:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s2, i8** %l0
   %t3 = sitofp i64 0 to double
   store double %t3, double* %l1
@@ -4976,7 +4980,7 @@ then8:
   %t35 = fptosi double %t33 to i64
   %t36 = fptosi double %t34 to i64
   %t37 = call i8* @sailfin_runtime_substring(i8* %expression, i64 %t35, i64 %t36)
-  %t38 = add i8* %t32, %t37
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t32, i8* %t37)
   store i8* %t38, i8** %l0
   %t39 = load double, double* %l3
   store double %t39, double* %l1
@@ -5021,8 +5025,8 @@ then12:
   br i1 %t66, label %then14, label %merge15
 then14:
   %t71 = load i8*, i8** %l0
-  %s72 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.72, i32 0, i32 0
-  %t73 = add i8* %t71, %s72
+  %s72 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1503489441, i32 0, i32 0
+  %t73 = call i8* @sailfin_runtime_string_concat(i8* %t71, i8* %s72)
   store i8* %t73, i8** %l0
   %t74 = load double, double* %l1
   %t75 = sitofp i64 2 to double
@@ -5081,8 +5085,8 @@ then18:
   br i1 %t107, label %then20, label %merge21
 then20:
   %t112 = load i8*, i8** %l0
-  %s113 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.113, i32 0, i32 0
-  %t114 = add i8* %t112, %s113
+  %s113 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h176216012, i32 0, i32 0
+  %t114 = call i8* @sailfin_runtime_string_concat(i8* %t112, i8* %s113)
   store i8* %t114, i8** %l0
   %t115 = load double, double* %l1
   %t116 = sitofp i64 2 to double
@@ -5141,8 +5145,8 @@ then24:
   br i1 %t148, label %then26, label %merge27
 then26:
   %t153 = load i8*, i8** %l0
-  %s154 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.154, i32 0, i32 0
-  %t155 = add i8* %t153, %s154
+  %s154 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
+  %t155 = call i8* @sailfin_runtime_string_concat(i8* %t153, i8* %s154)
   store i8* %t155, i8** %l0
   %t156 = load double, double* %l1
   %t157 = sitofp i64 2 to double
@@ -5157,8 +5161,8 @@ merge25:
   store i8* %t159, i8** %l0
   store double %t160, double* %l1
   %t161 = load i8*, i8** %l0
-  %s162 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.162, i32 0, i32 0
-  %t163 = add i8* %t161, %s162
+  %s162 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268720028, i32 0, i32 0
+  %t163 = call i8* @sailfin_runtime_string_concat(i8* %t161, i8* %s162)
   store i8* %t163, i8** %l0
   %t164 = load double, double* %l1
   %t165 = sitofp i64 1 to double
@@ -5168,7 +5172,7 @@ merge25:
 merge23:
   %t167 = load i8*, i8** %l0
   %t168 = load i8*, i8** %l2
-  %t169 = add i8* %t167, %t168
+  %t169 = call i8* @sailfin_runtime_string_concat(i8* %t167, i8* %t168)
   store i8* %t169, i8** %l0
   %t170 = load double, double* %l1
   %t171 = sitofp i64 1 to double
@@ -5199,7 +5203,7 @@ entry:
 then0:
   ret i8* %expression
 merge1:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s2, i8** %l0
   %t3 = sitofp i64 0 to double
   store double %t3, double* %l1
@@ -5264,7 +5268,7 @@ then8:
   %t35 = fptosi double %t33 to i64
   %t36 = fptosi double %t34 to i64
   %t37 = call i8* @sailfin_runtime_substring(i8* %expression, i64 %t35, i64 %t36)
-  %t38 = add i8* %t32, %t37
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t32, i8* %t37)
   store i8* %t38, i8** %l0
   %t39 = load double, double* %l3
   store double %t39, double* %l1
@@ -5337,7 +5341,7 @@ afterloop15:
   %t82 = call i8* @sailfin_runtime_substring(i8* %expression, i64 %t80, i64 %t81)
   store i8* %t82, i8** %l6
   %t83 = load i8*, i8** %l6
-  %s84 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.84, i32 0, i32 0
+  %s84 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
   %t85 = icmp eq i8* %t83, %s84
   %t86 = load i8*, i8** %l0
   %t87 = load double, double* %l1
@@ -5347,13 +5351,13 @@ afterloop15:
   br i1 %t85, label %then20, label %else21
 then20:
   %t91 = load i8*, i8** %l0
-  %s92 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.92, i32 0, i32 0
-  %t93 = add i8* %t91, %s92
+  %s92 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h230766299, i32 0, i32 0
+  %t93 = call i8* @sailfin_runtime_string_concat(i8* %t91, i8* %s92)
   store i8* %t93, i8** %l0
   br label %merge22
 else21:
   %t94 = load i8*, i8** %l6
-  %s95 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.95, i32 0, i32 0
+  %s95 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
   %t96 = icmp eq i8* %t94, %s95
   %t97 = load i8*, i8** %l0
   %t98 = load double, double* %l1
@@ -5363,13 +5367,13 @@ else21:
   br i1 %t96, label %then23, label %else24
 then23:
   %t102 = load i8*, i8** %l0
-  %s103 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.103, i32 0, i32 0
-  %t104 = add i8* %t102, %s103
+  %s103 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h237997259, i32 0, i32 0
+  %t104 = call i8* @sailfin_runtime_string_concat(i8* %t102, i8* %s103)
   store i8* %t104, i8** %l0
   br label %merge25
 else24:
   %t105 = load i8*, i8** %l6
-  %s106 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.106, i32 0, i32 0
+  %s106 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
   %t107 = icmp eq i8* %t105, %s106
   %t108 = load i8*, i8** %l0
   %t109 = load double, double* %l1
@@ -5379,14 +5383,14 @@ else24:
   br i1 %t107, label %then26, label %else27
 then26:
   %t113 = load i8*, i8** %l0
-  %s114 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.114, i32 0, i32 0
-  %t115 = add i8* %t113, %s114
+  %s114 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h843097466, i32 0, i32 0
+  %t115 = call i8* @sailfin_runtime_string_concat(i8* %t113, i8* %s114)
   store i8* %t115, i8** %l0
   br label %merge28
 else27:
   %t116 = load i8*, i8** %l0
   %t117 = load i8*, i8** %l6
-  %t118 = add i8* %t116, %t117
+  %t118 = call i8* @sailfin_runtime_string_concat(i8* %t116, i8* %t117)
   store i8* %t118, i8** %l0
   br label %merge28
 merge28:
@@ -5404,7 +5408,7 @@ merge22:
 merge11:
   %t122 = load i8*, i8** %l0
   %t123 = load i8*, i8** %l2
-  %t124 = add i8* %t122, %t123
+  %t124 = call i8* @sailfin_runtime_string_concat(i8* %t122, i8* %t123)
   store i8* %t124, i8** %l0
   %t125 = load double, double* %l1
   %t126 = sitofp i64 1 to double
@@ -5435,11 +5439,11 @@ entry:
 then0:
   ret i8* %expression
 merge1:
-  %s2 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1719661028, i32 0, i32 0
   store i8* %s2, i8** %l0
-  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h645367897, i32 0, i32 0
   store i8* %s3, i8** %l1
-  %s4 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s4, i8** %l2
   %t5 = sitofp i64 0 to double
   store double %t5, double* %l3
@@ -5510,7 +5514,7 @@ then8:
   %t43 = fptosi double %t41 to i64
   %t44 = fptosi double %t42 to i64
   %t45 = call i8* @sailfin_runtime_substring(i8* %expression, i64 %t43, i64 %t44)
-  %t46 = add i8* %t40, %t45
+  %t46 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %t45)
   store i8* %t46, i8** %l2
   %t47 = load double, double* %l5
   store double %t47, double* %l3
@@ -5554,7 +5558,7 @@ then10:
 then12:
   %t79 = load i8*, i8** %l2
   %t80 = load i8*, i8** %l1
-  %t81 = add i8* %t79, %t80
+  %t81 = call i8* @sailfin_runtime_string_concat(i8* %t79, i8* %t80)
   store i8* %t81, i8** %l2
   %t82 = load double, double* %l3
   %t83 = load i8*, i8** %l0
@@ -5572,7 +5576,7 @@ merge11:
   store double %t88, double* %l3
   %t89 = load i8*, i8** %l2
   %t90 = load i8*, i8** %l4
-  %t91 = add i8* %t89, %t90
+  %t91 = call i8* @sailfin_runtime_string_concat(i8* %t89, i8* %t90)
   store i8* %t91, i8** %l2
   %t92 = load double, double* %l3
   %t93 = sitofp i64 1 to double
@@ -5609,7 +5613,7 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t1 = load i8*, i8** %l0
-  %s2 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h757831264, i32 0, i32 0
   %t3 = call double @index_of(i8* %t1, i8* %s2)
   store double %t3, double* %l1
   %t4 = load double, double* %l1
@@ -5680,7 +5684,7 @@ merge9:
   %t50 = load i8*, i8** %l7
   %t51 = load i8, i8* %t50
   %t52 = add i8 40, %t51
-  %s53 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.53, i32 0, i32 0
+  %s53 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1776141546, i32 0, i32 0
   %t54 = load i8, i8* %s53
   %t55 = add i8 %t52, %t54
   %t56 = load i8*, i8** %l8
@@ -5728,7 +5732,7 @@ loop.header0:
   br label %loop.body1
 loop.body1:
   %t1 = load i8*, i8** %l0
-  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1558772342, i32 0, i32 0
   %t3 = call double @index_of(i8* %t1, i8* %s2)
   store double %t3, double* %l1
   %t4 = load double, double* %l1
@@ -5787,10 +5791,10 @@ then8:
   br label %afterloop3
 merge9:
   %t43 = load i8*, i8** %l3
-  %s44 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.44, i32 0, i32 0
-  %t45 = add i8* %t43, %s44
+  %s44 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h265982546, i32 0, i32 0
+  %t45 = call i8* @sailfin_runtime_string_concat(i8* %t43, i8* %s44)
   %t46 = load i8*, i8** %l5
-  %t47 = add i8* %t45, %t46
+  %t47 = call i8* @sailfin_runtime_string_concat(i8* %t45, i8* %t46)
   %t48 = load i8, i8* %t47
   %t49 = add i8 %t48, 41
   %t50 = load i8*, i8** %l4
@@ -5824,7 +5828,7 @@ entry:
   %t1 = fcmp ole double %dot_index, %t0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t3 = insertvalue %ExtractedSpan undef, i8* %s2, 0
   %t4 = sitofp i64 0 to double
   %t5 = insertvalue %ExtractedSpan %t3, double %t4, 1
@@ -6049,7 +6053,7 @@ afterloop5:
   %t138 = load double, double* %l4
   br i1 %t134, label %then24, label %merge25
 then24:
-  %s139 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.139, i32 0, i32 0
+  %s139 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t140 = insertvalue %ExtractedSpan undef, i8* %s139, 0
   %t141 = load double, double* %l4
   %t142 = insertvalue %ExtractedSpan %t140, double %t141, 1
@@ -6082,7 +6086,7 @@ entry:
   %t2 = fcmp oge double %open_index, %t1
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t4 = insertvalue %ExtractedSpan undef, i8* %s3, 0
   %t5 = insertvalue %ExtractedSpan %t4, double %open_index, 1
   %t6 = insertvalue %ExtractedSpan %t5, double %open_index, 2
@@ -6098,7 +6102,7 @@ merge1:
   %t14 = icmp ne i8 %t13, 40
   br i1 %t14, label %then2, label %merge3
 then2:
-  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.15, i32 0, i32 0
+  %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t16 = insertvalue %ExtractedSpan undef, i8* %s15, 0
   %t17 = insertvalue %ExtractedSpan %t16, double %open_index, 1
   %t18 = insertvalue %ExtractedSpan %t17, double %open_index, 2
@@ -6244,7 +6248,7 @@ loop.latch6:
   %t99 = load double, double* %l0
   br label %loop.header4
 afterloop7:
-  %s102 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.102, i32 0, i32 0
+  %s102 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t103 = insertvalue %ExtractedSpan undef, i8* %s102, 0
   %t104 = insertvalue %ExtractedSpan %t103, double %open_index, 1
   %t105 = insertvalue %ExtractedSpan %t104, double %open_index, 2
@@ -6956,7 +6960,7 @@ entry:
   %t50 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t51 = icmp eq i32 %t0, 16
   %t52 = select i1 %t51, i8* %t50, i8* %t49
-  %s53 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.53, i32 0, i32 0
+  %s53 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
   %t54 = icmp eq i8* %t52, %s53
   br i1 %t54, label %then0, label %merge1
 then0:
@@ -7024,7 +7028,7 @@ merge1:
   %t113 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t114 = icmp eq i32 %t63, 16
   %t115 = select i1 %t114, i8* %t113, i8* %t112
-  %s116 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.116, i32 0, i32 0
+  %s116 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1629914700, i32 0, i32 0
   %t117 = icmp eq i8* %t115, %s116
   br i1 %t117, label %then2, label %merge3
 then2:
@@ -7063,13 +7067,13 @@ entry:
 then0:
   ret i1 0
 merge1:
-  %s2 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193419635, i32 0, i32 0
   %t3 = call i1 @starts_with(i8* %segment, i8* %s2)
   br i1 %t3, label %then2, label %merge3
 then2:
   ret i1 1
 merge3:
-  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193516127, i32 0, i32 0
   %t5 = call i1 @starts_with(i8* %segment, i8* %s4)
   br i1 %t5, label %then4, label %merge5
 then4:
@@ -7362,14 +7366,14 @@ entry:
   %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
   %t7 = sitofp i64 0 to double
   store double %t7, double* %l3
   store i1 0, i1* %l4
-  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s8, i8** %l5
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load i8*, i8** %l1
@@ -7422,7 +7426,7 @@ merge5:
 then6:
   %t35 = load i8*, i8** %l1
   %t36 = load i8*, i8** %l6
-  %t37 = add i8* %t35, %t36
+  %t37 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t36)
   store i8* %t37, i8** %l1
   %t38 = load i8*, i8** %l6
   %t39 = load i8, i8* %t38
@@ -7456,7 +7460,7 @@ then11:
   %t62 = load i8*, i8** %l1
   %t63 = load double, double* %l3
   %t64 = call i8* @char_at(i8* %text, double %t63)
-  %t65 = add i8* %t62, %t64
+  %t65 = call i8* @sailfin_runtime_string_concat(i8* %t62, i8* %t64)
   store i8* %t65, i8** %l1
   br label %merge12
 merge12:
@@ -7528,7 +7532,7 @@ then15:
   store i8* %t99, i8** %l5
   %t100 = load i8*, i8** %l1
   %t101 = load i8*, i8** %l6
-  %t102 = add i8* %t100, %t101
+  %t102 = call i8* @sailfin_runtime_string_concat(i8* %t100, i8* %t101)
   store i8* %t102, i8** %l1
   %t103 = load double, double* %l3
   %t104 = sitofp i64 1 to double
@@ -7690,13 +7694,13 @@ then24:
   %t181 = load i8*, i8** %l1
   %t182 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t180, i8* %t181)
   store { i8**, i64 }* %t182, { i8**, i64 }** %l0
-  %s183 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.183, i32 0, i32 0
+  %s183 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s183, i8** %l1
   br label %merge26
 else25:
   %t184 = load i8*, i8** %l1
   %t185 = load i8*, i8** %l6
-  %t186 = add i8* %t184, %t185
+  %t186 = call i8* @sailfin_runtime_string_concat(i8* %t184, i8* %t185)
   store i8* %t186, i8** %l1
   br label %merge26
 merge26:
@@ -7758,14 +7762,14 @@ entry:
   %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
   %t7 = sitofp i64 0 to double
   store double %t7, double* %l3
   store i1 0, i1* %l4
-  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s8, i8** %l5
   %t9 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t10 = load i8*, i8** %l1
@@ -7818,7 +7822,7 @@ merge5:
 then6:
   %t35 = load i8*, i8** %l1
   %t36 = load i8*, i8** %l6
-  %t37 = add i8* %t35, %t36
+  %t37 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t36)
   store i8* %t37, i8** %l1
   %t38 = load i8*, i8** %l6
   %t39 = load i8, i8* %t38
@@ -7852,7 +7856,7 @@ then11:
   %t62 = load i8*, i8** %l1
   %t63 = load double, double* %l3
   %t64 = call i8* @char_at(i8* %text, double %t63)
-  %t65 = add i8* %t62, %t64
+  %t65 = call i8* @sailfin_runtime_string_concat(i8* %t62, i8* %t64)
   store i8* %t65, i8** %l1
   br label %merge12
 merge12:
@@ -7924,7 +7928,7 @@ then15:
   store i8* %t99, i8** %l5
   %t100 = load i8*, i8** %l1
   %t101 = load i8*, i8** %l6
-  %t102 = add i8* %t100, %t101
+  %t102 = call i8* @sailfin_runtime_string_concat(i8* %t100, i8* %t101)
   store i8* %t102, i8** %l1
   %t103 = load double, double* %l3
   %t104 = sitofp i64 1 to double
@@ -8086,13 +8090,13 @@ then24:
   %t181 = load i8*, i8** %l1
   %t182 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t180, i8* %t181)
   store { i8**, i64 }* %t182, { i8**, i64 }** %l0
-  %s183 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.183, i32 0, i32 0
+  %s183 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s183, i8** %l1
   br label %merge26
 else25:
   %t184 = load i8*, i8** %l1
   %t185 = load i8*, i8** %l6
-  %t186 = add i8* %t184, %t185
+  %t186 = call i8* @sailfin_runtime_string_concat(i8* %t184, i8* %t185)
   store i8* %t186, i8** %l1
   br label %merge26
 merge26:
@@ -9128,18 +9132,18 @@ entry:
   %t6 = bitcast { %NativeParameter**, i64 }* %t5 to { %NativeParameter*, i64 }*
   %t7 = call { i8**, i64 }* @render_python_parameters({ %NativeParameter*, i64 }* %t6)
   store { i8**, i64 }* %t7, { i8**, i64 }** %l2
-  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h256486202, i32 0, i32 0
   %t9 = extractvalue %NativeFunction %function, 0
   %t10 = call i8* @sanitize_identifier(i8* %t9)
-  %t11 = add i8* %s8, %t10
+  %t11 = call i8* @sailfin_runtime_string_concat(i8* %s8, i8* %t10)
   %t12 = load i8, i8* %t11
   %t13 = add i8 %t12, 40
   %t14 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.15, i32 0, i32 0
+  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t16 = call i8* @join_with_separator({ i8**, i64 }* %t14, i8* %s15)
   %t17 = load i8, i8* %t16
   %t18 = add i8 %t13, %t17
-  %s19 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.19, i32 0, i32 0
+  %s19 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193423562, i32 0, i32 0
   %t20 = load i8, i8* %s19
   %t21 = add i8 %t18, %t20
   store i8 %t21, i8* %l3
@@ -9167,11 +9171,11 @@ entry:
   br i1 %t34, label %then0, label %merge1
 then0:
   %t39 = load %PythonBuilder, %PythonBuilder* %l0
-  %s40 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.40, i32 0, i32 0
+  %s40 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1779553665, i32 0, i32 0
   %t41 = extractvalue %NativeFunction %function, 3
-  %s42 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.42, i32 0, i32 0
+  %s42 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t43 = call i8* @join_with_separator({ i8**, i64 }* %t41, i8* %s42)
-  %t44 = add i8* %s40, %t43
+  %t44 = call i8* @sailfin_runtime_string_concat(i8* %s40, i8* %t43)
   %t45 = call %PythonBuilder @builder_emit(%PythonBuilder %t39, i8* %t44)
   store %PythonBuilder %t45, %PythonBuilder* %l0
   br label %merge1
@@ -9189,7 +9193,7 @@ merge1:
   br i1 %t50, label %then2, label %merge3
 then2:
   %t55 = load %PythonBuilder, %PythonBuilder* %l0
-  %s56 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h270590402, i32 0, i32 0
   %t57 = call %PythonBuilder @builder_emit(%PythonBuilder %t55, i8* %s56)
   store %PythonBuilder %t57, %PythonBuilder* %l0
   %t58 = load %PythonBuilder, %PythonBuilder* %l0
@@ -9323,7 +9327,7 @@ merge9:
   %t155 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t156 = icmp eq i32 %t105, 16
   %t157 = select i1 %t156, i8* %t155, i8* %t154
-  %s158 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.158, i32 0, i32 0
+  %s158 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h536277508, i32 0, i32 0
   %t159 = icmp eq i8* %t157, %s158
   %t160 = load %PythonBuilder, %PythonBuilder* %l0
   %t161 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -9371,7 +9375,7 @@ then10:
   br i1 %t191, label %then13, label %else14
 then13:
   %t201 = load %PythonBuilder, %PythonBuilder* %l0
-  %s202 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.202, i32 0, i32 0
+  %s202 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1061063223, i32 0, i32 0
   %t203 = call %PythonBuilder @builder_emit(%PythonBuilder %t201, i8* %s202)
   store %PythonBuilder %t203, %PythonBuilder* %l0
   br label %merge15
@@ -9476,10 +9480,10 @@ merge18:
   store i8* %t279, i8** %l9
   store double %t280, double* %l11
   %t281 = load %PythonBuilder, %PythonBuilder* %l0
-  %s282 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.282, i32 0, i32 0
+  %s282 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h655348872, i32 0, i32 0
   %t283 = load i8*, i8** %l9
   %t284 = call i8* @lower_expression(i8* %t283)
-  %t285 = add i8* %s282, %t284
+  %t285 = call i8* @sailfin_runtime_string_concat(i8* %s282, i8* %t284)
   %t286 = call %PythonBuilder @builder_emit(%PythonBuilder %t281, i8* %t285)
   store %PythonBuilder %t286, %PythonBuilder* %l0
   %t287 = load double, double* %l7
@@ -9549,7 +9553,7 @@ else11:
   %t344 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t345 = icmp eq i32 %t294, 16
   %t346 = select i1 %t345, i8* %t344, i8* %t343
-  %s347 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.347, i32 0, i32 0
+  %s347 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1629914700, i32 0, i32 0
   %t348 = icmp eq i8* %t346, %s347
   %t349 = load %PythonBuilder, %PythonBuilder* %l0
   %t350 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -9727,7 +9731,7 @@ else22:
   %t494 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t495 = icmp eq i32 %t444, 16
   %t496 = select i1 %t495, i8* %t494, i8* %t493
-  %s497 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.497, i32 0, i32 0
+  %s497 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089318639, i32 0, i32 0
   %t498 = icmp eq i8* %t496, %s497
   %t499 = load %PythonBuilder, %PythonBuilder* %l0
   %t500 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -9752,8 +9756,8 @@ then29:
   %t517 = call i8* @sanitize_identifier(i8* %t516)
   store i8* %t517, i8** %l17
   %t518 = load i8*, i8** %l17
-  %s519 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.519, i32 0, i32 0
-  %t520 = add i8* %t518, %s519
+  %s519 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t520 = call i8* @sailfin_runtime_string_concat(i8* %t518, i8* %s519)
   store i8* %t520, i8** %l18
   %t521 = load %NativeInstruction*, %NativeInstruction** %l8
   %t522 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t521, i32 0, i32 0
@@ -9874,7 +9878,7 @@ merge37:
   %t613 = load i8*, i8** %l18
   %t614 = load i8*, i8** %l19
   %t615 = call i8* @lower_expression(i8* %t614)
-  %t616 = add i8* %t613, %t615
+  %t616 = call i8* @sailfin_runtime_string_concat(i8* %t613, i8* %t615)
   store i8* %t616, i8** %l18
   %t617 = load double, double* %l7
   %t618 = load double, double* %l21
@@ -9883,8 +9887,8 @@ merge37:
   br label %merge34
 else33:
   %t620 = load i8*, i8** %l18
-  %s621 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.621, i32 0, i32 0
-  %t622 = add i8* %t620, %s621
+  %s621 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h230766299, i32 0, i32 0
+  %t622 = call i8* @sailfin_runtime_string_concat(i8* %t620, i8* %s621)
   store i8* %t622, i8** %l18
   br label %merge34
 merge34:
@@ -9953,7 +9957,7 @@ else30:
   %t680 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t681 = icmp eq i32 %t630, 16
   %t682 = select i1 %t681, i8* %t680, i8* %t679
-  %s683 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.683, i32 0, i32 0
+  %s683 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193459862, i32 0, i32 0
   %t684 = icmp eq i8* %t682, %s683
   %t685 = load %PythonBuilder, %PythonBuilder* %l0
   %t686 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -9979,9 +9983,9 @@ then40:
   %t704 = call i8* @rewrite_expression_intrinsics(i8* %t703)
   store i8* %t704, i8** %l23
   %t705 = load %PythonBuilder, %PythonBuilder* %l0
-  %s706 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.706, i32 0, i32 0
+  %s706 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090359129, i32 0, i32 0
   %t707 = load i8*, i8** %l23
-  %t708 = add i8* %s706, %t707
+  %t708 = call i8* @sailfin_runtime_string_concat(i8* %s706, i8* %t707)
   %t709 = load i8, i8* %t708
   %t710 = add i8 %t709, 58
   %t711 = alloca [2 x i8], align 1
@@ -10056,7 +10060,7 @@ else41:
   %t773 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t774 = icmp eq i32 %t723, 16
   %t775 = select i1 %t774, i8* %t773, i8* %t772
-  %s776 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.776, i32 0, i32 0
+  %s776 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h219990644, i32 0, i32 0
   %t777 = icmp eq i8* %t775, %s776
   %t778 = load %PythonBuilder, %PythonBuilder* %l0
   %t779 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10090,7 +10094,7 @@ then46:
 else47:
   %t801 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t802 = extractvalue %NativeFunction %function, 0
-  %s803 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.803, i32 0, i32 0
+  %s803 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.len24.h2028465620, i32 0, i32 0
   %t804 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t801, i8* %t802, i8* %s803)
   store { i8**, i64 }* %t804, { i8**, i64 }** %l1
   br label %merge48
@@ -10100,7 +10104,7 @@ merge48:
   store %PythonBuilder %t805, %PythonBuilder* %l0
   store { i8**, i64 }* %t806, { i8**, i64 }** %l1
   %t807 = load %PythonBuilder, %PythonBuilder* %l0
-  %s808 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.808, i32 0, i32 0
+  %s808 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2069574674, i32 0, i32 0
   %t809 = call %PythonBuilder @builder_emit(%PythonBuilder %t807, i8* %s808)
   store %PythonBuilder %t809, %PythonBuilder* %l0
   %t810 = load %PythonBuilder, %PythonBuilder* %l0
@@ -10163,7 +10167,7 @@ else44:
   %t864 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t865 = icmp eq i32 %t814, 16
   %t866 = select i1 %t865, i8* %t864, i8* %t863
-  %s867 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.867, i32 0, i32 0
+  %s867 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h819045845, i32 0, i32 0
   %t868 = icmp eq i8* %t866, %s867
   %t869 = load %PythonBuilder, %PythonBuilder* %l0
   %t870 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10201,7 +10205,7 @@ then52:
 else53:
   %t895 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t896 = extractvalue %NativeFunction %function, 0
-  %s897 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.897, i32 0, i32 0
+  %s897 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h458257002, i32 0, i32 0
   %t898 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t895, i8* %t896, i8* %s897)
   store { i8**, i64 }* %t898, { i8**, i64 }** %l1
   br label %merge54
@@ -10269,7 +10273,7 @@ else50:
   %t954 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t955 = icmp eq i32 %t904, 16
   %t956 = select i1 %t955, i8* %t954, i8* %t953
-  %s957 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.957, i32 0, i32 0
+  %s957 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089113841, i32 0, i32 0
   %t958 = icmp eq i8* %t956, %s957
   %t959 = load %PythonBuilder, %PythonBuilder* %l0
   %t960 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10296,7 +10300,7 @@ then55:
   %t979 = call i8* @rewrite_expression_intrinsics(i8* %t978)
   store i8* %t979, i8** %l24
   %t980 = load %PythonBuilder, %PythonBuilder* %l0
-  %s981 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.981, i32 0, i32 0
+  %s981 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259230482, i32 0, i32 0
   %t982 = load %NativeInstruction*, %NativeInstruction** %l8
   %t983 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t982, i32 0, i32 0
   %t984 = load i32, i32* %t983
@@ -10306,11 +10310,11 @@ then55:
   %t988 = load i8*, i8** %t987
   %t989 = icmp eq i32 %t984, 6
   %t990 = select i1 %t989, i8* %t988, i8* null
-  %t991 = add i8* %s981, %t990
-  %s992 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.992, i32 0, i32 0
-  %t993 = add i8* %t991, %s992
+  %t991 = call i8* @sailfin_runtime_string_concat(i8* %s981, i8* %t990)
+  %s992 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h175996034, i32 0, i32 0
+  %t993 = call i8* @sailfin_runtime_string_concat(i8* %t991, i8* %s992)
   %t994 = load i8*, i8** %l24
-  %t995 = add i8* %t993, %t994
+  %t995 = call i8* @sailfin_runtime_string_concat(i8* %t993, i8* %t994)
   %t996 = load i8, i8* %t995
   %t997 = add i8 %t996, 58
   %t998 = alloca [2 x i8], align 1
@@ -10385,7 +10389,7 @@ else56:
   %t1060 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1061 = icmp eq i32 %t1010, 16
   %t1062 = select i1 %t1061, i8* %t1060, i8* %t1059
-  %s1063 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.1063, i32 0, i32 0
+  %s1063 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1258614714, i32 0, i32 0
   %t1064 = icmp eq i8* %t1062, %s1063
   %t1065 = load %PythonBuilder, %PythonBuilder* %l0
   %t1066 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10423,7 +10427,7 @@ then61:
 else62:
   %t1091 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1092 = extractvalue %NativeFunction %function, 0
-  %s1093 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.1093, i32 0, i32 0
+  %s1093 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.len32.h1370567591, i32 0, i32 0
   %t1094 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1091, i8* %t1092, i8* %s1093)
   store { i8**, i64 }* %t1094, { i8**, i64 }** %l1
   br label %merge63
@@ -10491,7 +10495,7 @@ else59:
   %t1150 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1151 = icmp eq i32 %t1100, 16
   %t1152 = select i1 %t1151, i8* %t1150, i8* %t1149
-  %s1153 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1153, i32 0, i32 0
+  %s1153 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h228395909, i32 0, i32 0
   %t1154 = icmp eq i8* %t1152, %s1153
   %t1155 = load %PythonBuilder, %PythonBuilder* %l0
   %t1156 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10505,7 +10509,7 @@ else59:
   br i1 %t1154, label %then64, label %else65
 then64:
   %t1164 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1165 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.1165, i32 0, i32 0
+  %s1165 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1898426375, i32 0, i32 0
   %t1166 = call %PythonBuilder @builder_emit(%PythonBuilder %t1164, i8* %s1165)
   store %PythonBuilder %t1166, %PythonBuilder* %l0
   %t1167 = load %PythonBuilder, %PythonBuilder* %l0
@@ -10572,7 +10576,7 @@ else65:
   %t1224 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1225 = icmp eq i32 %t1174, 16
   %t1226 = select i1 %t1225, i8* %t1224, i8* %t1223
-  %s1227 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.1227, i32 0, i32 0
+  %s1227 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h739212033, i32 0, i32 0
   %t1228 = icmp eq i8* %t1226, %s1227
   %t1229 = load %PythonBuilder, %PythonBuilder* %l0
   %t1230 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10610,7 +10614,7 @@ then70:
 else71:
   %t1255 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1256 = extractvalue %NativeFunction %function, 0
-  %s1257 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.1257, i32 0, i32 0
+  %s1257 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1122035900, i32 0, i32 0
   %t1258 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1255, i8* %t1256, i8* %s1257)
   store { i8**, i64 }* %t1258, { i8**, i64 }** %l1
   br label %merge72
@@ -10678,7 +10682,7 @@ else68:
   %t1314 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1315 = icmp eq i32 %t1264, 16
   %t1316 = select i1 %t1315, i8* %t1314, i8* %t1313
-  %s1317 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1317, i32 0, i32 0
+  %s1317 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h706445588, i32 0, i32 0
   %t1318 = icmp eq i8* %t1316, %s1317
   %t1319 = load %PythonBuilder, %PythonBuilder* %l0
   %t1320 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10692,7 +10696,7 @@ else68:
   br i1 %t1318, label %then73, label %else74
 then73:
   %t1328 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1329 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1329, i32 0, i32 0
+  %s1329 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
   %t1330 = call %PythonBuilder @builder_emit(%PythonBuilder %t1328, i8* %s1329)
   store %PythonBuilder %t1330, %PythonBuilder* %l0
   br label %merge75
@@ -10752,7 +10756,7 @@ else74:
   %t1383 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1384 = icmp eq i32 %t1333, 16
   %t1385 = select i1 %t1384, i8* %t1383, i8* %t1382
-  %s1386 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1386, i32 0, i32 0
+  %s1386 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h267355070, i32 0, i32 0
   %t1387 = icmp eq i8* %t1385, %s1386
   %t1388 = load %PythonBuilder, %PythonBuilder* %l0
   %t1389 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10766,7 +10770,7 @@ else74:
   br i1 %t1387, label %then76, label %else77
 then76:
   %t1397 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1398 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1398, i32 0, i32 0
+  %s1398 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h528348603, i32 0, i32 0
   %t1399 = call %PythonBuilder @builder_emit(%PythonBuilder %t1397, i8* %s1398)
   store %PythonBuilder %t1399, %PythonBuilder* %l0
   br label %merge78
@@ -10826,7 +10830,7 @@ else77:
   %t1452 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1453 = icmp eq i32 %t1402, 16
   %t1454 = select i1 %t1453, i8* %t1452, i8* %t1451
-  %s1455 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1455, i32 0, i32 0
+  %s1455 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1117315388, i32 0, i32 0
   %t1456 = icmp eq i8* %t1454, %s1455
   %t1457 = load %PythonBuilder, %PythonBuilder* %l0
   %t1458 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10871,10 +10875,10 @@ then79:
   store i8* %t1492, i8** %l26
   %t1493 = load %PythonBuilder, %PythonBuilder* %l0
   %t1494 = load i8*, i8** %l25
-  %s1495 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1495, i32 0, i32 0
-  %t1496 = add i8* %t1494, %s1495
+  %s1495 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t1496 = call i8* @sailfin_runtime_string_concat(i8* %t1494, i8* %s1495)
   %t1497 = load i8*, i8** %l26
-  %t1498 = add i8* %t1496, %t1497
+  %t1498 = call i8* @sailfin_runtime_string_concat(i8* %t1496, i8* %t1497)
   %t1499 = call %PythonBuilder @builder_emit(%PythonBuilder %t1493, i8* %t1498)
   store %PythonBuilder %t1499, %PythonBuilder* %l0
   %t1500 = load i8*, i8** %l25
@@ -10944,7 +10948,7 @@ else80:
   %t1560 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1561 = icmp eq i32 %t1510, 16
   %t1562 = select i1 %t1561, i8* %t1560, i8* %t1559
-  %s1563 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1563, i32 0, i32 0
+  %s1563 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h217223495, i32 0, i32 0
   %t1564 = icmp eq i8* %t1562, %s1563
   %t1565 = load %PythonBuilder, %PythonBuilder* %l0
   %t1566 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -10983,7 +10987,7 @@ then85:
   %t1595 = select i1 %t1594, i8* %t1593, i8* null
   %t1596 = call i8* @trim_text(i8* %t1595)
   store i8* %t1596, i8** %l28
-  %s1597 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.1597, i32 0, i32 0
+  %s1597 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.len39.h2079567388, i32 0, i32 0
   store i8* %s1597, i8** %l29
   %t1598 = load i8*, i8** %l28
   %t1599 = call i64 @sailfin_runtime_string_length(i8* %t1598)
@@ -11002,10 +11006,10 @@ then85:
   br i1 %t1600, label %then88, label %merge89
 then88:
   %t1612 = load i8*, i8** %l29
-  %s1613 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.1613, i32 0, i32 0
-  %t1614 = add i8* %t1612, %s1613
+  %s1613 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1460619898, i32 0, i32 0
+  %t1614 = call i8* @sailfin_runtime_string_concat(i8* %t1612, i8* %s1613)
   %t1615 = load i8*, i8** %l28
-  %t1616 = add i8* %t1614, %t1615
+  %t1616 = call i8* @sailfin_runtime_string_concat(i8* %t1614, i8* %t1615)
   %t1617 = load i8, i8* %t1616
   %t1618 = add i8 %t1617, 41
   %t1619 = alloca [2 x i8], align 1
@@ -11025,7 +11029,7 @@ merge89:
   %t1627 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1624, i8* %t1625, i8* %t1626)
   store { i8**, i64 }* %t1627, { i8**, i64 }** %l1
   %t1628 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1629 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.1629, i32 0, i32 0
+  %s1629 = getelementptr inbounds [42 x i8], [42 x i8]* @.str.len41.h1804821690, i32 0, i32 0
   %t1630 = call %PythonBuilder @builder_emit(%PythonBuilder %t1628, i8* %s1629)
   store %PythonBuilder %t1630, %PythonBuilder* %l0
   br label %merge87
@@ -11109,10 +11113,10 @@ merge91:
   br i1 %t1684, label %then92, label %else93
 then92:
   %t1697 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1698 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.1698, i32 0, i32 0
+  %s1698 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090359129, i32 0, i32 0
   %t1699 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
   %t1700 = extractvalue %LoweredCaseCondition %t1699, 0
-  %t1701 = add i8* %s1698, %t1700
+  %t1701 = call i8* @sailfin_runtime_string_concat(i8* %s1698, i8* %t1700)
   %t1702 = load i8, i8* %t1701
   %t1703 = add i8 %t1702, 58
   %t1704 = alloca [2 x i8], align 1
@@ -11158,16 +11162,16 @@ logical_and_merge_1709:
   br i1 %t1715, label %then95, label %else96
 then95:
   %t1728 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1729 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1729, i32 0, i32 0
+  %s1729 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2069574674, i32 0, i32 0
   %t1730 = call %PythonBuilder @builder_emit(%PythonBuilder %t1728, i8* %s1729)
   store %PythonBuilder %t1730, %PythonBuilder* %l0
   br label %merge97
 else96:
   %t1731 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1732 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1732, i32 0, i32 0
+  %s1732 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2069215535, i32 0, i32 0
   %t1733 = load %LoweredCaseCondition, %LoweredCaseCondition* %l32
   %t1734 = extractvalue %LoweredCaseCondition %t1733, 0
-  %t1735 = add i8* %s1732, %t1734
+  %t1735 = call i8* @sailfin_runtime_string_concat(i8* %s1732, i8* %t1734)
   %t1736 = load i8, i8* %t1735
   %t1737 = add i8 %t1736, 58
   %t1738 = alloca [2 x i8], align 1
@@ -11270,7 +11274,7 @@ else83:
   %t1816 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1817 = icmp eq i32 %t1766, 16
   %t1818 = select i1 %t1817, i8* %t1816, i8* %t1815
-  %s1819 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1819, i32 0, i32 0
+  %s1819 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h794378208, i32 0, i32 0
   %t1820 = icmp eq i8* %t1818, %s1819
   %t1821 = load %PythonBuilder, %PythonBuilder* %l0
   %t1822 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -11300,11 +11304,11 @@ then98:
 then101:
   %t1843 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1844 = extractvalue %NativeFunction %function, 0
-  %s1845 = getelementptr inbounds [38 x i8], [38 x i8]* @.str.1845, i32 0, i32 0
+  %s1845 = getelementptr inbounds [38 x i8], [38 x i8]* @.str.len37.h314404344, i32 0, i32 0
   %t1846 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1843, i8* %t1844, i8* %s1845)
   store { i8**, i64 }* %t1846, { i8**, i64 }** %l1
   %t1847 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1848 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.1848, i32 0, i32 0
+  %s1848 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.len39.h198700275, i32 0, i32 0
   %t1849 = call %PythonBuilder @builder_emit(%PythonBuilder %t1847, i8* %s1848)
   store %PythonBuilder %t1849, %PythonBuilder* %l0
   br label %merge103
@@ -11416,7 +11420,7 @@ else99:
   %t1937 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.NativeInstruction.Unknown.variant, i32 0, i32 0
   %t1938 = icmp eq i32 %t1887, 16
   %t1939 = select i1 %t1938, i8* %t1937, i8* %t1936
-  %s1940 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1940, i32 0, i32 0
+  %s1940 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h230767751, i32 0, i32 0
   %t1941 = icmp eq i8* %t1939, %s1940
   %t1942 = load %PythonBuilder, %PythonBuilder* %l0
   %t1943 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -11430,7 +11434,7 @@ else99:
   br i1 %t1941, label %then106, label %else107
 then106:
   %t1951 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1952 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1952, i32 0, i32 0
+  %s1952 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h270590402, i32 0, i32 0
   %t1953 = call %PythonBuilder @builder_emit(%PythonBuilder %t1951, i8* %s1952)
   store %PythonBuilder %t1953, %PythonBuilder* %l0
   br label %merge108
@@ -11446,7 +11450,7 @@ else107:
   %t1962 = select i1 %t1961, i8* %t1960, i8* null
   %t1963 = call i8* @trim_text(i8* %t1962)
   store i8* %t1963, i8** %l36
-  %s1964 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.1964, i32 0, i32 0
+  %s1964 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.len42.h9444846, i32 0, i32 0
   store i8* %s1964, i8** %l37
   %t1965 = load i8*, i8** %l36
   %t1966 = call i64 @sailfin_runtime_string_length(i8* %t1965)
@@ -11465,10 +11469,10 @@ else107:
   br i1 %t1967, label %then109, label %merge110
 then109:
   %t1979 = load i8*, i8** %l37
-  %s1980 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.1980, i32 0, i32 0
-  %t1981 = add i8* %t1979, %s1980
+  %s1980 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193441217, i32 0, i32 0
+  %t1981 = call i8* @sailfin_runtime_string_concat(i8* %t1979, i8* %s1980)
   %t1982 = load i8*, i8** %l36
-  %t1983 = add i8* %t1981, %t1982
+  %t1983 = call i8* @sailfin_runtime_string_concat(i8* %t1981, i8* %t1982)
   store i8* %t1983, i8** %l37
   br label %merge110
 merge110:
@@ -11480,7 +11484,7 @@ merge110:
   %t1988 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t1985, i8* %t1986, i8* %t1987)
   store { i8**, i64 }* %t1988, { i8**, i64 }** %l1
   %t1989 = load %PythonBuilder, %PythonBuilder* %l0
-  %s1990 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1990, i32 0, i32 0
+  %s1990 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1983072220, i32 0, i32 0
   %t1991 = load %NativeInstruction*, %NativeInstruction** %l8
   %t1992 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t1991, i32 0, i32 0
   %t1993 = load i32, i32* %t1992
@@ -11490,7 +11494,7 @@ merge110:
   %t1997 = load i8*, i8** %t1996
   %t1998 = icmp eq i32 %t1993, 16
   %t1999 = select i1 %t1998, i8* %t1997, i8* null
-  %t2000 = add i8* %s1990, %t1999
+  %t2000 = call i8* @sailfin_runtime_string_concat(i8* %s1990, i8* %t1999)
   %t2001 = call %PythonBuilder @builder_emit(%PythonBuilder %t1989, i8* %t2000)
   store %PythonBuilder %t2001, %PythonBuilder* %l0
   br label %merge108
@@ -11757,7 +11761,7 @@ merge118:
   store %PythonBuilder %t2136, %PythonBuilder* %l0
   %t2137 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t2138 = extractvalue %NativeFunction %function, 0
-  %s2139 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.2139, i32 0, i32 0
+  %s2139 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1409903806, i32 0, i32 0
   %t2140 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t2137, i8* %t2138, i8* %s2139)
   store { i8**, i64 }* %t2140, { i8**, i64 }** %l1
   %t2141 = load { %MatchContext*, i64 }*, { %MatchContext*, i64 }** %l5
@@ -11814,7 +11818,7 @@ merge124:
   store double %t2174, double* %l4
   %t2175 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t2176 = extractvalue %NativeFunction %function, 0
-  %s2177 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.2177, i32 0, i32 0
+  %s2177 = getelementptr inbounds [32 x i8], [32 x i8]* @.str.len31.h1736570074, i32 0, i32 0
   %t2178 = call { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }* %t2175, i8* %t2176, i8* %s2177)
   store { i8**, i64 }* %t2178, { i8**, i64 }** %l1
   br label %loop.latch121
@@ -12003,9 +12007,9 @@ afterloop5:
 
 define i8* @generate_match_subject_name(double %counter) {
 entry:
-  %s0 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1077944870, i32 0, i32 0
   %t1 = call i8* @number_to_string(double %counter)
-  %t2 = add i8* %s0, %t1
+  %t2 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %t1)
   ret i8* %t2
 }
 
@@ -12076,7 +12080,7 @@ then4:
   %t27 = load i8*, i8** %l1
   br i1 %t25, label %then6, label %merge7
 then6:
-  %s28 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.28, i32 0, i32 0
+  %s28 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h237997259, i32 0, i32 0
   %t29 = insertvalue %LoweredCaseCondition undef, i8* %s28, 0
   %t30 = insertvalue %LoweredCaseCondition %t29, i1 1, 1
   %t31 = insertvalue %LoweredCaseCondition %t30, i1 0, 2
@@ -12094,10 +12098,10 @@ merge5:
   %t38 = load i8*, i8** %l0
   %t39 = call i8* @lower_expression(i8* %t38)
   store i8* %t39, i8** %l4
-  %s40 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.40, i32 0, i32 0
-  %t41 = add i8* %subject_name, %s40
+  %s40 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h174361445, i32 0, i32 0
+  %t41 = call i8* @sailfin_runtime_string_concat(i8* %subject_name, i8* %s40)
   %t42 = load i8*, i8** %l4
-  %t43 = add i8* %t41, %t42
+  %t43 = call i8* @sailfin_runtime_string_concat(i8* %t41, i8* %t42)
   store i8* %t43, i8** %l5
   store i1 0, i1* %l6
   %t44 = load i8*, i8** %l1
@@ -12115,7 +12119,7 @@ then8:
   %t53 = load i8*, i8** %l5
   %t54 = load i8, i8* %t53
   %t55 = add i8 40, %t54
-  %s56 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.56, i32 0, i32 0
+  %s56 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1543377657, i32 0, i32 0
   %t57 = load i8, i8* %s56
   %t58 = add i8 %t55, %t57
   %t59 = load i8*, i8** %l7
@@ -12165,10 +12169,10 @@ then0:
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
   ret i8* %t5
 merge1:
-  %s6 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h626550212, i32 0, i32 0
   store i8* %s6, i8** %l0
   store double %value, double* %l1
-  %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s7, i8** %l2
   %t8 = load i8*, i8** %l0
   %t9 = load double, double* %l1
@@ -12247,7 +12251,7 @@ afterloop11:
   store i8* %t50, i8** %l6
   %t51 = load i8*, i8** %l6
   %t52 = load i8*, i8** %l2
-  %t53 = add i8* %t51, %t52
+  %t53 = call i8* @sailfin_runtime_string_concat(i8* %t51, i8* %t52)
   store i8* %t53, i8** %l2
   %t54 = load double, double* %l4
   store double %t54, double* %l1
@@ -12335,11 +12339,11 @@ merge7:
   br i1 %t35, label %then8, label %merge9
 then8:
   %t40 = load i8*, i8** %l3
-  %s41 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.41, i32 0, i32 0
-  %t42 = add i8* %t40, %s41
+  %s41 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t42 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %s41)
   %t43 = load %NativeParameter, %NativeParameter* %l2
   %t44 = extractvalue %NativeParameter %t43, 3
-  %t45 = add i8* %t42, %t44
+  %t45 = call i8* @sailfin_runtime_string_concat(i8* %t42, i8* %t44)
   store i8* %t45, i8** %l3
   br label %merge9
 merge9:
@@ -12391,7 +12395,7 @@ then0:
   %t2 = call %PythonBuilder @builder_emit_blank(%PythonBuilder %builder)
   ret %PythonBuilder %t2
 merge1:
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s3, i8** %l0
   %t4 = sitofp i64 0 to double
   store double %t4, double* %l1
@@ -12415,8 +12419,8 @@ then6:
   br label %afterloop5
 merge7:
   %t12 = load i8*, i8** %l0
-  %s13 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.13, i32 0, i32 0
-  %t14 = add i8* %t12, %s13
+  %s13 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h173287691, i32 0, i32 0
+  %t14 = call i8* @sailfin_runtime_string_concat(i8* %t12, i8* %s13)
   store i8* %t14, i8** %l0
   %t15 = load double, double* %l1
   %t16 = sitofp i64 1 to double
@@ -12429,7 +12433,7 @@ loop.latch4:
   br label %loop.header2
 afterloop5:
   %t22 = load i8*, i8** %l0
-  %t23 = add i8* %t22, %line
+  %t23 = call i8* @sailfin_runtime_string_concat(i8* %t22, i8* %line)
   store i8* %t23, i8** %l2
   %t24 = extractvalue %PythonBuilder %builder, 0
   %t25 = load i8*, i8** %l2
@@ -12446,7 +12450,7 @@ define %PythonBuilder @builder_emit_blank(%PythonBuilder %builder) {
 entry:
   %l0 = alloca { i8**, i64 }*
   %t0 = extractvalue %PythonBuilder %builder, 0
-  %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.1, i32 0, i32 0
+  %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t2 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t0, i8* %s1)
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
   %t3 = load { i8**, i64 }*, { i8**, i64 }** %l0
@@ -12511,7 +12515,7 @@ entry:
   %t9 = load i8*, i8** %l0
   br i1 %t8, label %then0, label %merge1
 then0:
-  %s10 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.10, i32 0, i32 0
+  %s10 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s10
 merge1:
   %t11 = load i8*, i8** %l0
@@ -12531,7 +12535,7 @@ entry:
   %l0 = alloca i8*
   %l1 = alloca double
   %l2 = alloca i8
-  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s0, i8** %l0
   %t1 = sitofp i64 0 to double
   store double %t1, double* %l1
@@ -12628,7 +12632,7 @@ afterloop3:
   %t56 = load double, double* %l1
   br i1 %t54, label %then11, label %merge12
 then11:
-  %s57 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.57, i32 0, i32 0
+  %s57 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.len18.h1387621460, i32 0, i32 0
   ret i8* %s57
 merge12:
   %t58 = load i8*, i8** %l0
@@ -12654,7 +12658,7 @@ then0:
   %t6 = call i8* @sanitize_identifier(i8* %t5)
   ret i8* %t6
 merge1:
-  %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.7, i32 0, i32 0
+  %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s7, i8** %l1
   %t8 = alloca [0 x i8*]
   %t9 = getelementptr [0 x i8*], [0 x i8*]* %t8, i32 0, i32 0
@@ -12723,7 +12727,7 @@ then11:
   %t49 = call i8* @sanitize_identifier(i8* %t48)
   %t50 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t47, i8* %t49)
   store { i8**, i64 }* %t50, { i8**, i64 }** %l2
-  %s51 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.51, i32 0, i32 0
+  %s51 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s51, i8** %l1
   br label %merge12
 merge12:
@@ -13327,7 +13331,7 @@ entry:
 then0:
   ret i8* %value
 merge1:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s2, i8** %l0
   %t3 = sitofp i64 0 to double
   store double %t3, double* %l1
@@ -13427,7 +13431,7 @@ afterloop13:
   br i1 %t56, label %then18, label %merge19
 then18:
   %t61 = load i8*, i8** %l0
-  %t62 = add i8* %t61, %replacement
+  %t62 = call i8* @sailfin_runtime_string_concat(i8* %t61, i8* %replacement)
   store i8* %t62, i8** %l0
   %t63 = load double, double* %l1
   %t64 = call i64 @sailfin_runtime_string_length(i8* %target)
@@ -13445,7 +13449,7 @@ merge9:
   %t69 = load i8*, i8** %l0
   %t70 = load double, double* %l1
   %t71 = call i8* @char_at(i8* %value, double %t70)
-  %t72 = add i8* %t69, %t71
+  %t72 = call i8* @sailfin_runtime_string_concat(i8* %t69, i8* %t71)
   store i8* %t72, i8** %l0
   %t73 = load double, double* %l1
   %t74 = sitofp i64 1 to double
@@ -13470,7 +13474,7 @@ entry:
   %t2 = icmp eq i64 %t1, 0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s3
 merge1:
   %t4 = load { i8**, i64 }, { i8**, i64 }* %values
@@ -13505,7 +13509,7 @@ then6:
   br label %afterloop5
 merge7:
   %t20 = load i8*, i8** %l0
-  %t21 = add i8* %t20, %separator
+  %t21 = call i8* @sailfin_runtime_string_concat(i8* %t20, i8* %separator)
   %t22 = load double, double* %l1
   %t23 = fptosi double %t22 to i64
   %t24 = load { i8**, i64 }, { i8**, i64 }* %values
@@ -13515,7 +13519,7 @@ merge7:
   ; bounds check: %t27 (if true, out of bounds)
   %t28 = getelementptr i8*, i8** %t25, i64 %t23
   %t29 = load i8*, i8** %t28
-  %t30 = add i8* %t21, %t29
+  %t30 = call i8* @sailfin_runtime_string_concat(i8* %t21, i8* %t29)
   store i8* %t30, i8** %l0
   %t31 = load double, double* %l1
   %t32 = sitofp i64 1 to double
@@ -13537,7 +13541,7 @@ entry:
   %l1 = alloca i8*
   %t0 = call i8* @trim_text(i8* %function_name)
   store i8* %t0, i8** %l0
-  %s1 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.1, i32 0, i32 0
+  %s1 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h2001621394, i32 0, i32 0
   store i8* %s1, i8** %l1
   %t2 = load i8*, i8** %l0
   %t3 = call i64 @sailfin_runtime_string_length(i8* %t2)
@@ -13547,16 +13551,16 @@ entry:
   br i1 %t4, label %then0, label %else1
 then0:
   %t7 = load i8*, i8** %l1
-  %t8 = add i8* %t7, %detail
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t7, i8* %detail)
   store i8* %t8, i8** %l1
   br label %merge2
 else1:
   %t9 = load i8*, i8** %l1
   %t10 = load i8*, i8** %l0
-  %t11 = add i8* %t9, %t10
-  %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.12, i32 0, i32 0
-  %t13 = add i8* %t11, %s12
-  %t14 = add i8* %t13, %detail
+  %t11 = call i8* @sailfin_runtime_string_concat(i8* %t9, i8* %t10)
+  %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193441217, i32 0, i32 0
+  %t13 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %s12)
+  %t14 = call i8* @sailfin_runtime_string_concat(i8* %t13, i8* %detail)
   store i8* %t14, i8** %l1
   br label %merge2
 merge2:

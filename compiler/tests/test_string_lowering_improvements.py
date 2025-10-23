@@ -113,5 +113,21 @@ fn test_escape_chars() -> boolean {
     assert 'i8 10' in result.ir or 'i8 9' in result.ir
 
 
+@pytest.mark.stage2
+def test_string_addition_lowering():
+    """Ensure string addition lowers to the runtime concat helper instead of pointer math."""
+    source = '''
+fn join(first -> string, second -> string) -> string {
+    return first + second;
+}
+'''
+    result = main.compile_to_native_llvm(source)
+    assert hasattr(result, 'ir')
+    ir = result.ir
+    assert '@sailfin_runtime_string_concat' in ir
+    assert 'call i8* @sailfin_runtime_string_concat' in ir
+    assert ' = add i8*' not in ir
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

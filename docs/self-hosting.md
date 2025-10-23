@@ -115,6 +115,20 @@ Expected output:
 [stage2-bootstrap] ✓ Stage2 bootstrap completed successfully
 ```
 
+### Linking a Stage2 binary
+
+The Stage1 helper now exposes a Stage2 mode that bundles the generated LLVM
+modules into a standalone executable (using the host `clang` toolchain). Run:
+
+```bash
+python tools/compile_with_stage1.py --stage2 --stage2-binary build/stage2/sailfin-stage2
+```
+
+By default the linker adds `-Wl,-undefined,dynamic_lookup` on macOS so unresolved
+runtime helpers can be provided at load time; additional linker flags may be
+supplied via repeated `--stage2-ldflag` arguments (and the compiler can be
+overridden with `--stage2-clang`).
+
 ### What Gets Generated
 
 For each source file `X.sfn`, the bootstrap process generates:
@@ -153,7 +167,9 @@ Stage2 bootstrap currently:
 - ✅ Compiles all compiler sources to LLVM IR
 - ✅ Generates valid (though incomplete) LLVM modules
 - ✅ Passes validation tests
-- ❌ Does not yet link modules into a single executable
+- ⚠️ Linked binaries rely on dynamic lookup for runtime adapters (the `clang`
+  invocation defaults to `-Wl,-undefined,dynamic_lookup` on macOS); missing adapters
+  will surface at runtime
 - ❌ Does not yet resolve cross-module imports
 - ❌ Does not yet compile IR to native binaries
 - ❌ Cannot yet replace Stage1 as the primary compiler

@@ -9,6 +9,7 @@ source_filename = "sailfin"
 %TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
@@ -16,7 +17,9 @@ declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.6 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define i8* @char_at(i8* %value, double %index) {
 entry:
@@ -24,14 +27,14 @@ entry:
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s2
 merge1:
   %t3 = sitofp i64 0 to double
   %t4 = fcmp olt double %index, %t3
   br i1 %t4, label %then2, label %merge3
 then2:
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s5
 merge3:
   %t6 = call i64 @sailfin_runtime_string_length(i8* %value)
@@ -39,7 +42,7 @@ merge3:
   %t8 = fcmp oge double %index, %t7
   br i1 %t8, label %then4, label %merge5
 then4:
-  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.9, i32 0, i32 0
+  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s9
 merge5:
   %t10 = sitofp i64 1 to double
@@ -227,7 +230,7 @@ then0:
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
   ret i8* %t5
 merge1:
-  %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s6, i8** %l0
   %t7 = sitofp i64 0 to double
   store double %t7, double* %l1

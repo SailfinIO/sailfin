@@ -35,7 +35,17 @@ roadmaps.
   in `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip`,
   which bootstraps the Stage2 artifacts, runs the hello-world example through the
   self-hosted compiler, and asserts the canonical Sailfin output matches the
-  Stage1 reference compile.
+  Stage1 reference compile. The Stage1 harness now exposes a Stage2 mode:
+  `tools/compile_with_stage1.py --stage2 --stage2-binary path/to/sailfin-stage2`
+  bootstraps the LLVM artefacts and links them into a standalone binary via `clang`
+  (defaulting to `-Wl,-undefined,dynamic_lookup` on macOS, with additional flags
+  accepted through `--stage2-ldflag`). Fresh regression coverage verifies the new
+  capabilities: `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_emits_native_artifacts`
+  asserts the Stage2 pipeline produces `sailfin-native-text` and layout-manifest
+  artefacts, `...::test_stage2_generates_valid_llvm` parses the returned LLVM IR
+  to guarantee module validity, and `...::test_stage2_executes_compiled_program`
+  runs the generated IR through MCJIT to confirm that Stage2 and Stage1 agree on
+  program behaviour (`42` in the smoke case).
   The `.sfn-asm`
   intermediate plus `native_llvm_lowering` provide the compilation infrastructure,
   covering local assignments, structured control flow, structs, enums, interfaces,
@@ -199,9 +209,10 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   String literals now fully lower to LLVM global constants, enabling functions
   and interface methods to return string values without Python fallbacks. When
   lowering string literals (e.g., `"Hello, World!"`), the compiler unescapes
-  standard sequences (`\n`, `\t`, `\"`, `\\`), generates a unique global constant
-  name (`@.str.0`, `@.str.1`, etc.), and emits a private unnamed_addr constant
-  declaration in the module preamble (`@.str.N = private unnamed_addr constant
+  standard sequences (`\n`, `\t`, `\"`, `\\`), generates a deterministic global
+  constant name (`@.str.len{length}.h{hash}` derived from the literal’s length and
+  a djb2-style hash of its contents), and emits a private unnamed_addr constant
+  declaration in the module preamble (`@.str.lenX.hY = private unnamed_addr constant
   [length x i8] c"content\00"`). The lowered expression references the global via
   `getelementptr inbounds` to produce an `i8*` pointer suitable for string-typed
   returns and assignments. String constants are automatically deduplicated:
@@ -231,6 +242,15 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   returning function call results (e.g., `return helper(self.data)`) with proper
   call lowering and argument passing. These tests guard against future regressions
   before self-hosting the compiler with Stage2.
+  String concatenation now lowers through the dedicated runtime helper
+  `sailfin_runtime_string_concat` instead of performing undefined pointer arithmetic.
+  When the lowering pipeline encounters `string + string` it harmonises the operands
+  to `i8*` and emits `call i8* @sailfin_runtime_string_concat(i8* lhs, i8* rhs)`,
+  ensuring LLVM modules no longer contain invalid `add i8*` instructions (previously
+  produced by `effect_checker` and other passes). The Stage2 runner registers the
+  helper alongside existing string adapters, so the JIT can materialise concatenated
+  values without falling back to Python. Regression coverage lives in
+  `compiler/tests/test_string_lowering_improvements.py::test_string_addition_lowering`.
   Character literals (single-character string literals like `"a"`, `"t"`, `"\n"`) now
   lower to `i8` type instead of `i8*`, enabling direct character comparisons without
   type coercion errors. The implementation adds `is_character_literal` and

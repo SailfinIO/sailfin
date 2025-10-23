@@ -42,19 +42,30 @@ declare i8* @sailfin_runtime_array_map(i8*, i8*)
 declare i8* @sailfin_runtime_array_filter(i8*, i8*)
 declare i8* @sailfin_runtime_array_reduce(i8*, i8*, i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @sailfin_runtime_grapheme_count(i8*)
 declare i8* @sailfin_runtime_grapheme_at(i8*, double)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.0 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.21 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.5 = private unnamed_addr constant [11 x i8] c"0123456789\00"
-@.str.19 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
-@.str.35 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len9.h1770336441 = private unnamed_addr constant [10 x i8] c"primitive\00"
+@.str.len5.h550282393 = private unnamed_addr constant [6 x i8] c"union\00"
+@.str.len12.h22148892 = private unnamed_addr constant [13 x i8] c"intersection\00"
+@.str.len5.h1920110414 = private unnamed_addr constant [6 x i8] c"array\00"
+@.str.len8.h1603982015 = private unnamed_addr constant [9 x i8] c"function\00"
+@.str.len5.h261050197 = private unnamed_addr constant [6 x i8] c"named\00"
+@.str.len7.h186837049 = private unnamed_addr constant [8 x i8] c"unknown\00"
+@.str.len42.h1658844115 = private unnamed_addr constant [43 x i8] c"Non-exhaustive match for value {{ value }}\00"
+@.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
+@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
+@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define i8* @capability_grant({ i8**, i64 }* %effects) {
 entry:
@@ -146,14 +157,14 @@ entry:
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.2, i32 0, i32 0
+  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s2
 merge1:
   %t3 = sitofp i64 0 to double
   %t4 = fcmp olt double %index, %t3
   br i1 %t4, label %then2, label %merge3
 then2:
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s5
 merge3:
   %t6 = call i64 @sailfin_runtime_string_length(i8* %value)
@@ -161,7 +172,7 @@ merge3:
   %t8 = fcmp oge double %index, %t7
   br i1 %t8, label %then4, label %merge5
 then4:
-  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.9, i32 0, i32 0
+  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s9
 merge5:
   %t10 = fptosi double %index to i64
@@ -585,7 +596,7 @@ merge5:
   br i1 %t11, label %then6, label %merge7
 then6:
   %t14 = load i8, i8* %l0
-  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.15, i32 0, i32 0
+  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t16 = load i8, i8* %s15
   %t17 = add i8 %t14, %t16
   store i8 %t17, i8* %l0
@@ -648,7 +659,7 @@ define i8* @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values) {
 entry:
   %l0 = alloca i8*
   %l1 = alloca i64
-  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s0, i8** %l0
   store i64 0, i64* %l1
   %t1 = load i8*, i8** %l0
@@ -680,7 +691,7 @@ merge5:
   ; bounds check: %t14 (if true, out of bounds)
   %t15 = getelementptr i8*, i8** %t12, i64 %t10
   %t16 = load i8*, i8** %t15
-  %t17 = add i8* %t9, %t16
+  %t17 = call i8* @sailfin_runtime_string_concat(i8* %t9, i8* %t16)
   store i8* %t17, i8** %l0
   %t18 = load i64, i64* %l1
   %t19 = load { i8**, i64 }, { i8**, i64 }* %values
@@ -700,7 +711,7 @@ then6:
   %t30 = getelementptr i8*, i8** %t27, i64 %t25
   %t31 = load i8*, i8** %t30
   %t32 = call i8* @to_debug_string(i8* %t31)
-  %t33 = add i8* %t24, %t32
+  %t33 = call i8* @sailfin_runtime_string_concat(i8* %t24, i8* %t32)
   store i8* %t33, i8** %l0
   br label %merge7
 merge7:
@@ -730,7 +741,7 @@ entry:
 
 define %TypeDescriptor @type_descriptor_primitive(i8* %name) {
 entry:
-  %s0 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1770336441, i32 0, i32 0
   %t1 = alloca [0 x %TypeDescriptor]
   %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
   %t3 = alloca { %TypeDescriptor*, i64 }
@@ -744,21 +755,21 @@ entry:
 
 define %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %descriptors) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h550282393, i32 0, i32 0
   %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
   ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_intersection({ %TypeDescriptor*, i64 }* %descriptors) {
 entry:
-  %s0 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h22148892, i32 0, i32 0
   %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
   ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_array(%TypeDescriptor %inner) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1920110414, i32 0, i32 0
   %t1 = alloca [1 x %TypeDescriptor]
   %t2 = getelementptr [1 x %TypeDescriptor], [1 x %TypeDescriptor]* %t1, i32 0, i32 0
   %t3 = getelementptr %TypeDescriptor, %TypeDescriptor* %t2, i64 0
@@ -774,7 +785,7 @@ entry:
 
 define %TypeDescriptor @type_descriptor_function() {
 entry:
-  %s0 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
   %t1 = alloca [0 x %TypeDescriptor]
   %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
   %t3 = alloca { %TypeDescriptor*, i64 }
@@ -788,7 +799,7 @@ entry:
 
 define %TypeDescriptor @type_descriptor_named(i8* %name) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h261050197, i32 0, i32 0
   %t1 = alloca [0 x %TypeDescriptor]
   %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
   %t3 = alloca { %TypeDescriptor*, i64 }
@@ -802,7 +813,7 @@ entry:
 
 define %TypeDescriptor @type_descriptor_unknown() {
 entry:
-  %s0 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h186837049, i32 0, i32 0
   %t1 = alloca [0 x %TypeDescriptor]
   %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
   %t3 = alloca { %TypeDescriptor*, i64 }
@@ -2286,7 +2297,7 @@ then4:
   ret %TypeDescriptor %t36
 merge5:
   %t37 = load i8*, i8** %l0
-  %s38 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.38, i32 0, i32 0
+  %s38 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193479167, i32 0, i32 0
   %t39 = call i1 @string_ends_with(i8* %t37, i8* %s38)
   %t40 = load i8*, i8** %l0
   %t41 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -2307,7 +2318,7 @@ then6:
   ret %TypeDescriptor %t52
 merge7:
   %t53 = load i8*, i8** %l0
-  %s54 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.54, i32 0, i32 0
+  %s54 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090260294, i32 0, i32 0
   %t55 = call i1 @string_starts_with(i8* %t53, i8* %s54)
   %t56 = load i8*, i8** %l0
   %t57 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -2341,7 +2352,7 @@ then10:
   %t78 = load i8*, i8** %l4
   %t79 = call %TypeDescriptor @parse_type_descriptor(i8* %t78)
   store %TypeDescriptor %t79, %TypeDescriptor* %l5
-  %s80 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.80, i32 0, i32 0
+  %s80 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
   %t81 = call %TypeDescriptor @type_descriptor_primitive(i8* %s80)
   store %TypeDescriptor %t81, %TypeDescriptor* %l6
   %t82 = load %TypeDescriptor, %TypeDescriptor* %l5
@@ -2392,7 +2403,7 @@ merge13:
   %t112 = phi i8* [ %t111, %then12 ], [ %t106, %entry ]
   store i8* %t112, i8** %l8
   %t113 = load i8*, i8** %l8
-  %s114 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.114, i32 0, i32 0
+  %s114 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2085806430, i32 0, i32 0
   %t115 = call i1 @string_starts_with(i8* %t113, i8* %s114)
   %t116 = load i8*, i8** %l0
   %t117 = load { i8**, i64 }*, { i8**, i64 }** %l1
@@ -2414,7 +2425,7 @@ merge15:
   %t128 = phi i8* [ %t127, %then14 ], [ %t120, %entry ]
   store i8* %t128, i8** %l8
   %t130 = load i8*, i8** %l8
-  %s131 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.131, i32 0, i32 0
+  %s131 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
   %t132 = icmp eq i8* %t130, %s131
   br label %logical_or_entry_129
 
@@ -2423,7 +2434,7 @@ logical_or_entry_129:
 
 logical_or_right_129:
   %t134 = load i8*, i8** %l8
-  %s135 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.135, i32 0, i32 0
+  %s135 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
   %t136 = icmp eq i8* %t134, %s135
   br label %logical_or_entry_133
 
@@ -2432,7 +2443,7 @@ logical_or_entry_133:
 
 logical_or_right_133:
   %t138 = load i8*, i8** %l8
-  %s139 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.139, i32 0, i32 0
+  %s139 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
   %t140 = icmp eq i8* %t138, %s139
   br label %logical_or_entry_137
 
@@ -2441,7 +2452,7 @@ logical_or_entry_137:
 
 logical_or_right_137:
   %t141 = load i8*, i8** %l8
-  %s142 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.142, i32 0, i32 0
+  %s142 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
   %t143 = icmp eq i8* %t141, %s142
   br label %logical_or_right_end_137
 
@@ -2482,28 +2493,28 @@ merge17:
 
 define i1 @check_type_primitive(i8* %value, i8* %name) {
 entry:
-  %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
   %t1 = icmp eq i8* %name, %s0
   br i1 %t1, label %then0, label %merge1
 then0:
   %t2 = call i1 @sailfin_runtime_is_string(i8* %value)
   ret i1 %t2
 merge1:
-  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
   %t4 = icmp eq i8* %name, %s3
   br i1 %t4, label %then2, label %merge3
 then2:
   %t5 = call i1 @sailfin_runtime_is_number(i8* %value)
   ret i1 %t5
 merge3:
-  %s6 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.6, i32 0, i32 0
+  %s6 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
   %t7 = icmp eq i8* %name, %s6
   br i1 %t7, label %then4, label %merge5
 then4:
   %t8 = call i1 @sailfin_runtime_is_boolean(i8* %value)
   ret i1 %t8
 merge5:
-  %s9 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.9, i32 0, i32 0
+  %s9 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
   %t10 = icmp eq i8* %name, %s9
   br i1 %t10, label %then6, label %merge7
 then6:
@@ -2521,7 +2532,7 @@ entry:
   %l3 = alloca i64
   %l4 = alloca i8*
   %t0 = extractvalue %TypeDescriptor %descriptor, 0
-  %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1, i32 0, i32 0
+  %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1770336441, i32 0, i32 0
   %t2 = icmp eq i8* %t0, %s1
   br i1 %t2, label %then0, label %merge1
 then0:
@@ -2536,7 +2547,7 @@ merge3:
   ret i1 %t6
 merge1:
   %t7 = extractvalue %TypeDescriptor %descriptor, 0
-  %s8 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h550282393, i32 0, i32 0
   %t9 = icmp eq i8* %t7, %s8
   br i1 %t9, label %then4, label %merge5
 then4:
@@ -2585,7 +2596,7 @@ afterloop9:
   ret i1 0
 merge5:
   %t32 = extractvalue %TypeDescriptor %descriptor, 0
-  %s33 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.33, i32 0, i32 0
+  %s33 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h22148892, i32 0, i32 0
   %t34 = icmp eq i8* %t32, %s33
   br i1 %t34, label %then14, label %merge15
 then14:
@@ -2639,7 +2650,7 @@ afterloop19:
   ret i1 %t61
 merge15:
   %t62 = extractvalue %TypeDescriptor %descriptor, 0
-  %s63 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.63, i32 0, i32 0
+  %s63 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1920110414, i32 0, i32 0
   %t64 = icmp eq i8* %t62, %s63
   br i1 %t64, label %then24, label %merge25
 then24:
@@ -2715,7 +2726,7 @@ afterloop33:
   ret i1 1
 merge25:
   %t103 = extractvalue %TypeDescriptor %descriptor, 0
-  %s104 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.104, i32 0, i32 0
+  %s104 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
   %t105 = icmp eq i8* %t103, %s104
   br i1 %t105, label %then38, label %merge39
 then38:
@@ -2723,7 +2734,7 @@ then38:
   ret i1 %t106
 merge39:
   %t107 = extractvalue %TypeDescriptor %descriptor, 0
-  %s108 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.108, i32 0, i32 0
+  %s108 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h261050197, i32 0, i32 0
   %t109 = icmp eq i8* %t107, %s108
   br i1 %t109, label %then40, label %merge41
 then40:
@@ -2741,7 +2752,7 @@ merge43:
   ret i1 %t115
 merge41:
   %t116 = extractvalue %TypeDescriptor %descriptor, 0
-  %s117 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.117, i32 0, i32 0
+  %s117 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h186837049, i32 0, i32 0
   %t118 = icmp eq i8* %t116, %s117
   br i1 %t118, label %then44, label %merge45
 then44:
@@ -2796,7 +2807,7 @@ entry:
   %t3 = load i64, i64* %l0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s4 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.4, i32 0, i32 0
+  %s4 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s4
 merge1:
   %t5 = load i64, i64* %l0
@@ -2817,12 +2828,12 @@ merge1:
   %t18 = load double, double* %l2
   br i1 %t15, label %then2, label %merge3
 then2:
-  %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.19, i32 0, i32 0
+  %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s19
 merge3:
   %t20 = load double, double* %l1
   store double %t20, double* %l3
-  %s21 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.21, i32 0, i32 0
+  %s21 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s21, i8** %l4
   %t22 = load i64, i64* %l0
   %t23 = load double, double* %l1
@@ -3075,7 +3086,7 @@ afterloop19:
 define void @match_exhaustive_failed(i8* %value) {
 entry:
   %l0 = alloca i8*
-  %s0 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.len42.h1658844115, i32 0, i32 0
   store i8* %s0, i8** %l0
   %t1 = load i8*, i8** %l0
   call void @sailfin_runtime_raise_value_error(i8* %t1)
@@ -3101,7 +3112,7 @@ merge1:
   %t3 = sitofp i64 0 to double
   %t4 = call i8* @char_at(i8* %character, double %t3)
   store i8* %t4, i8** %l0
-  %s5 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h626550212, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = load i8*, i8** %l1
   %t7 = load i8*, i8** %l0
@@ -3121,7 +3132,7 @@ then2:
   %t18 = fadd double %t17, %t16
   ret double %t18
 merge3:
-  %s19 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.19, i32 0, i32 0
+  %s19 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h287370135, i32 0, i32 0
   store i8* %s19, i8** %l3
   %t20 = load i8*, i8** %l3
   %t21 = load i8*, i8** %l0
@@ -3143,7 +3154,7 @@ then4:
   %t34 = fadd double %t33, %t32
   ret double %t34
 merge5:
-  %s35 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.35, i32 0, i32 0
+  %s35 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h645889856, i32 0, i32 0
   store i8* %s35, i8** %l5
   %t36 = load i8*, i8** %l5
   %t37 = load i8*, i8** %l0

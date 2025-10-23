@@ -13,7 +13,9 @@ import pathlib
 import re
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from compiler.build import native_llvm_lowering as stage1_lowering
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -443,6 +445,14 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
             result = None
             native_module = None
 
+            cached_result = first_pass_results.get(source_path)
+            if cached_result is None:
+                raise Stage2BootstrapError(f"first pass result missing for {source_path}")
+
+            fallback_llvm = getattr(cached_result, "llvm", None) if has_full else None
+            fallback_native_module = getattr(cached_result, "native_module", None) if has_full else None
+            native_module = None
+
             if has_context and import_contexts and (any(ctx[0] for ctx in import_contexts) or any(ctx[1] for ctx in import_contexts)):
                 manifests_payload = [ctx[0] for ctx in import_contexts]
                 native_payload = [ctx[1] for ctx in import_contexts]
@@ -455,22 +465,20 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                     result = stage1_main.compile_to_native_llvm_with_manifests(
                         source, manifest_payload)
                 else:
-                    cached = first_pass_results[source_path]
-                    if has_full:
-                        full_result = cached
-                        result = full_result.llvm
-                        native_module = getattr(
-                            full_result, "native_module", None)
+                    if has_full and fallback_llvm is not None:
+                        result = fallback_llvm
+                        native_module = fallback_native_module
                     else:
-                        result = cached
+                        result = cached_result
             else:
-                cached = first_pass_results[source_path]
-                if has_full:
-                    full_result = cached
-                    result = full_result.llvm
-                    native_module = getattr(full_result, "native_module", None)
+                if has_full and fallback_llvm is not None:
+                    result = fallback_llvm
+                    native_module = fallback_native_module
                 else:
-                    result = cached
+                    result = cached_result
+
+            _ensure_module_string_constants(source_path, source, result)
+            _ensure_runtime_helper_declarations(result)
 
             diagnostics = getattr(result, "diagnostics", [])
             if diagnostics:
@@ -495,6 +503,8 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
             compiled_modules.append(output_path)
 
             if lowered_results is not None:
+                if fallback_llvm is not None and result is not fallback_llvm:
+                    _merge_missing_string_constants(result, fallback_llvm)
                 lowered_results[source_path] = result
 
             if native_module is not None and hasattr(native_module, "artifacts"):
@@ -587,6 +597,142 @@ def validate_stage2_artifacts(llvm_modules: List[pathlib.Path], *, debug: bool =
         print("[stage2-bootstrap] all modules validated successfully")
 
 
+_STRING_DEF_PATTERN = re.compile(r"^(@\.str[^\s=]*)\s*=", re.MULTILINE)
+_STRING_REF_PATTERN = re.compile(r"@\.str[0-9A-Za-z_.]*")
+
+
+def verify_string_constants(llvm_modules: List[pathlib.Path], *, debug: bool = False) -> None:
+    """Ensure every referenced @.str.* global has a definition within the module."""
+
+    missing_by_module: Dict[str, List[str]] = {}
+
+    for module_path in llvm_modules:
+        if module_path.name != "native_llvm_lowering.ll":
+            continue
+
+        text = module_path.read_text(encoding="utf-8")
+
+        defined = {match.group(1) for match in _STRING_DEF_PATTERN.finditer(text)}
+        referenced: Set[str] = set()
+        for match in _STRING_REF_PATTERN.finditer(text):
+            pos = match.start()
+            if pos > 0 and text[pos - 1] == "\"":
+                continue
+            referenced.add(match.group(0))
+
+        missing = sorted(name for name in referenced if name not in defined)
+        if missing:
+            missing_by_module[module_path.name] = missing
+            if debug:
+                print(f"[stage2-bootstrap][error] {module_path.name} missing definitions for: {', '.join(missing)}")
+
+    if missing_by_module:
+        message_lines = ["detected missing string constant definitions:"]
+        for module_name, names in sorted(missing_by_module.items()):
+            message_lines.append(f"  {module_name}: {', '.join(names)}")
+        raise Stage2BootstrapError("\n".join(message_lines))
+
+
+def _merge_missing_string_constants(primary, fallback) -> None:
+    """Ensure `primary` exposes all string constants present in `fallback`."""
+    primary_constants = list(getattr(primary, "string_constants", []) or [])
+    fallback_constants = getattr(fallback, "string_constants", []) or []
+    if not fallback_constants:
+        return
+    existing = {getattr(const, "name", "") for const in primary_constants}
+    appended = False
+    for constant in fallback_constants:
+        name = getattr(constant, "name", "")
+        if not name or name in existing:
+            continue
+        primary_constants.append(constant)
+        existing.add(name)
+        appended = True
+    if appended:
+        setattr(primary, "string_constants", primary_constants)
+
+
+_STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+_STRING_REF_RE = re.compile(r'@\.str[0-9A-Za-z_.]*')
+_LITERAL_CACHE: Dict[pathlib.Path, Dict[str, Any]] = {}
+_HELPER_DECLARATIONS: Dict[str, str] = {
+    descriptor.symbol: f"declare {descriptor.return_type} @{descriptor.symbol}({', '.join(descriptor.parameter_types)})"
+    for descriptor in stage1_lowering.runtime_helper_descriptors()
+}
+_HELPER_REF_RE = re.compile(r'@(sailfin_(?:runtime|adapter)_[A-Za-z0-9_]+)')
+
+
+def _string_constants_from_source(source_path: pathlib.Path, source_text: str) -> Dict[str, Any]:
+    resolved = source_path.resolve()
+    cached = _LITERAL_CACHE.get(resolved)
+    if cached is not None:
+        return cached
+    constants: Dict[str, Any] = {}
+    for match in _STRING_LITERAL_RE.finditer(source_text):
+        literal = match.group(0)
+        content = stage1_lowering.unescape_string_literal(literal)
+        name = stage1_lowering.make_string_constant_name(content)
+        if name in constants:
+            continue
+        constants[name] = stage1_lowering.StringConstant(
+            name=name, content=content, byte_count=len(content)
+        )
+    _LITERAL_CACHE[resolved] = constants
+    return constants
+
+
+def _ensure_module_string_constants(source_path: pathlib.Path, source_text: str, lowered) -> None:
+    ir_text = getattr(lowered, "ir", "")
+    if not ir_text:
+        return
+    referenced = set(_STRING_REF_RE.findall(ir_text))
+    if not referenced:
+        return
+    existing = {getattr(constant, "name", "") for constant in getattr(lowered, "string_constants", []) or []}
+    missing = [name for name in referenced if name and name not in existing]
+    if not missing:
+        return
+
+    literal_map = _string_constants_from_source(source_path, source_text)
+    updated_constants = list(getattr(lowered, "string_constants", []) or [])
+    appended = False
+    for name in missing:
+        constant = literal_map.get(name)
+        if constant is None:
+            continue
+        updated_constants.append(constant)
+        appended = True
+
+    if appended:
+        setattr(lowered, "string_constants", updated_constants)
+
+
+def _ensure_runtime_helper_declarations(lowered) -> None:
+    ir_text = getattr(lowered, "ir", "")
+    if not ir_text:
+        return
+    declared_symbols: Set[str] = set()
+    new_lines: Optional[List[str]] = None
+    for line in ir_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("declare"):
+            parts = stripped.split("@", 1)
+            if len(parts) == 2:
+                symbol = parts[1].split("(", 1)[0]
+                declared_symbols.add(symbol)
+    referenced: Set[str] = set(match.group(1) for match in _HELPER_REF_RE.finditer(ir_text))
+    missing = [symbol for symbol in referenced if symbol in _HELPER_DECLARATIONS and symbol not in declared_symbols]
+    if not missing:
+        return
+    lines = ir_text.splitlines()
+    insert_index = 0
+    while insert_index < len(lines) and not lines[insert_index].startswith("define "):
+        insert_index += 1
+    declarations = [_HELPER_DECLARATIONS[symbol] for symbol in missing]
+    new_lines = lines[:insert_index] + declarations + [""] + lines[insert_index:]
+    setattr(lowered, "ir", "\n".join(new_lines))
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Bootstrap Stage2 self-hosted Sailfin compiler"
@@ -626,6 +772,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Save detailed diagnostic report to file",
     )
     parser.add_argument(
+        "--verify-strings",
+        action="store_true",
+        help="Verify that referenced string constants have module-local definitions",
+    )
+    parser.add_argument(
         "--validate",
         action="store_true",
         default=True,
@@ -658,6 +809,9 @@ def main(argv: list[str] | None = None) -> int:
         # Show diagnostic summary if requested
         if args.summary and aggregator.total_count > 0:
             aggregator.print_summary(verbose=args.debug)
+
+        if args.verify_strings:
+            verify_string_constants(llvm_modules, debug=args.debug)
 
         # Save detailed report if requested
         if args.report:

@@ -794,6 +794,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     let direct_effects = collect_direct_function_effects(context_functions);
     let call_graph = collect_function_call_graph(context_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
@@ -2371,7 +2372,42 @@ fn filter_runtime_helper_targets(targets -> string[]) -> string[] {
             break;
         }
         let trimmed = trim_text(targets[index]);
-        let helper = find_runtime_helper(trimmed);
+        let mut helper = find_runtime_helper(trimmed);
+        if helper == null {
+            let dot_index = find_last_index_of_char(trimmed, ".");
+            if dot_index >= 0 && dot_index + 1 < trimmed.length {
+                let suffix = substring(trimmed, dot_index + 1, trimmed.length);
+                helper = find_runtime_helper(suffix);
+            }
+        }
+        if helper == null {
+            let colon_index = find_last_index_of_char(trimmed, ":");
+            if colon_index >= 0 && colon_index + 1 < trimmed.length {
+                let suffix = substring(trimmed, colon_index + 1, trimmed.length);
+                helper = find_runtime_helper(suffix);
+            }
+        }
+        if helper == null {
+            let length_suffix = ".length";
+            if trimmed.length >= length_suffix.length {
+                let maybe_length = substring(trimmed, trimmed.length - length_suffix.length, trimmed.length);
+                if maybe_length == length_suffix {
+                    helper = find_runtime_helper("string.length");
+                    if helper == null {
+                        helper = find_runtime_helper("len(string)");
+                    }
+                }
+            }
+            if helper == null {
+                let concat_suffix = ".concat";
+                if trimmed.length >= concat_suffix.length {
+                    let maybe_concat = substring(trimmed, trimmed.length - concat_suffix.length, trimmed.length);
+                    if maybe_concat == concat_suffix {
+                        helper = find_runtime_helper("concat");
+                    }
+                }
+            }
+        }
         if helper != null {
             results = append_unique_effect(results, helper.target);
         }
@@ -2932,6 +2968,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "sailfin_runtime_string_length",
         return_type: "i64",
         parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.concat",
+        symbol: "sailfin_runtime_string_concat",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -8381,6 +8424,13 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
 
     let left_aligned = harmonised.left;
     let right_aligned = harmonised.right;
+    if match.symbol == "+" && harmonised.result_type == "i8*" {
+        let temp_name = format_temp_name(harmonised.temp_index);
+        let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.value + ", i8* " + right_aligned.value + ")";
+        let updated_lines = append_string(harmonised.lines, line);
+        let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+        return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    }
     let operation = operation_name_for_symbol(match.symbol, harmonised.result_type);
     let temp_name = format_temp_name(harmonised.temp_index);
     let line = "  " + temp_name + " = " + operation + " " + harmonised.result_type + " " + left_aligned.value + ", " + right_aligned.value;
@@ -12439,25 +12489,58 @@ fn number_to_string(value -> number) -> string {
         return "0";
     }
     let digits = "0123456789";
+    let powers -> number[] = [
+        1000000000000000,
+        100000000000000,
+        10000000000000,
+        1000000000000,
+        100000000000,
+        10000000000,
+        1000000000,
+        100000000,
+        10000000,
+        1000000,
+        100000,
+        10000,
+        1000,
+        100,
+        10,
+        1
+    ];
     let mut remaining -> number = value;
+    let mut is_negative -> boolean = false;
+    if remaining < 0 {
+        is_negative = true;
+        remaining = 0 - remaining;
+    }
     let mut output -> string = "";
+    let mut index -> number = 0;
+    let mut started -> boolean = false;
     loop {
-        if remaining <= 0 {
+        if index >= powers.length {
             break;
         }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let power = powers[index];
+        let mut count -> number = 0;
         loop {
-            if temp < 10 {
+            if remaining < power {
                 break;
             }
-            temp -= 10;
-            quotient += 1;
+            remaining -= power;
+            count += 1;
         }
-        let digit = temp;
-        let ch = substring(digits, digit, digit + 1);
-        output = ch + output;
-        remaining = quotient;
+        if started || count > 0 {
+            started = true;
+            let ch = substring(digits, count, count + 1);
+            output = output + ch;
+        }
+        index += 1;
+    }
+    if output.length == 0 {
+        output = "0";
+    }
+    if is_negative {
+        return "-" + output;
     }
     return output;
 }
@@ -12647,9 +12730,45 @@ fn get_character_literal_value(text -> string) -> number {
     return char_code(inner[0]);
 }
 
+fn make_string_constant_name(content -> string) -> string {
+    let hash_value = compute_string_constant_hash(content);
+    let length_part = number_to_string(content.length);
+    let hash_part = number_to_string(hash_value);
+    return "@.str.len" + length_part + ".h" + hash_part;
+}
+
+fn compute_string_constant_hash(content -> string) -> number {
+    // Use a djb2-style rolling hash so identical literals share the same identifier.
+    let mut hash -> number = 5381;
+    let modulus -> number = 2147483647;
+    let mut index -> number = 0;
+    loop {
+        if index >= content.length {
+            break;
+        }
+        let code = char_code(content[index]);
+        hash = hash * 33 + code;
+        loop {
+            if hash < modulus {
+                break;
+            }
+            hash -= modulus;
+        }
+        index += 1;
+    }
+    hash = hash * 33 + content.length;
+    loop {
+        if hash < modulus {
+            break;
+        }
+        hash -= modulus;
+    }
+    return hash;
+}
+
 fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {
     let content = unescape_string_literal(literal);
-    let global_name = "@.str." + number_to_string(temp_index);
+    let global_name = make_string_constant_name(content);
     let constant = StringConstant { name: global_name, content: content, byte_count: content.length };
     let base_constants = empty_string_constant_set();
     let constant_set = append_string_constant(base_constants, constant);

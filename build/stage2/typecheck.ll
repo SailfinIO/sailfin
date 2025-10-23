@@ -38,21 +38,35 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
+declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.153 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.5 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.22 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.0 = private unnamed_addr constant [21 x i8] c" is missing effect '\00"
-@.str.17 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
-@.str.2 = private unnamed_addr constant [8 x i8] c"struct \00"
-@.str.4 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.7 = private unnamed_addr constant [19 x i8] c" but must specify \00"
-@.str.10 = private unnamed_addr constant [16 x i8] c" type arguments\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len20.h1863181231 = private unnamed_addr constant [21 x i8] c" is missing effect '\00"
+@.str.len14.h1876709041 = private unnamed_addr constant [15 x i8] c". hint: add ![\00"
+@.str.len60.h1899438158 = private unnamed_addr constant [61 x i8] c"] to the signature or accept the CLI fix prompt when offered\00"
+@.str.len5.h743728889 = private unnamed_addr constant [6 x i8] c"E0302\00"
+@.str.len7.h289982314 = private unnamed_addr constant [8 x i8] c"struct \00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len18.h1304509209 = private unnamed_addr constant [19 x i8] c" but must specify \00"
+@.str.len15.h1487231025 = private unnamed_addr constant [16 x i8] c" type arguments\00"
+@.str.len16.h302658750 = private unnamed_addr constant [17 x i8] c" but must match \00"
+@.str.len5.h1504944345 = private unnamed_addr constant [6 x i8] c" but \00"
+@.str.len29.h85694398 = private unnamed_addr constant [30 x i8] c" does not take type arguments\00"
+@.str.len5.h743621045 = private unnamed_addr constant [6 x i8] c"E0001\00"
+@.str.len10.h6072819 = private unnamed_addr constant [11 x i8] c"duplicate \00"
+@.str.len2.h193415015 = private unnamed_addr constant [3 x i8] c" `\00"
+@.str.len10.h1855834391 = private unnamed_addr constant [11 x i8] c"` declared\00"
+@.str.len5.h743728856 = private unnamed_addr constant [6 x i8] c"E0301\00"
+@.str.len24.h680377687 = private unnamed_addr constant [25 x i8] c" but is missing member `\00"
+
+declare i64 @sailfin_runtime_string_length(i8*)
 
 define %TypecheckResult @typecheck_program(%Program %program) {
 entry:
@@ -195,7 +209,7 @@ forbody1:
   %t85 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t86 = icmp eq i32 %t17, 22
   %t87 = select i1 %t86, i8* %t85, i8* %t84
-  %s88 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.88, i32 0, i32 0
+  %s88 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h666604742, i32 0, i32 0
   %t89 = icmp eq i8* %t87, %s88
   %t90 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l0
   %t91 = load %Statement*, %Statement** %l2
@@ -378,7 +392,7 @@ entry:
   %t68 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
-  %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.71, i32 0, i32 0
+  %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
   %t72 = icmp eq i8* %t70, %s71
   br i1 %t72, label %then0, label %merge1
 then0:
@@ -404,7 +418,7 @@ then0:
   %t91 = icmp eq i32 %t73, 7
   %t92 = select i1 %t91, %FunctionSignature %t90, %FunctionSignature %t86
   %t93 = extractvalue %FunctionSignature %t92, 0
-  %s94 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.94, i32 0, i32 0
+  %s94 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
   %t95 = extractvalue %Statement %statement, 0
   %t96 = alloca %Statement
   store %Statement %statement, %Statement* %t96
@@ -501,7 +515,7 @@ merge1:
   %t185 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t186 = icmp eq i32 %t117, 22
   %t187 = select i1 %t186, i8* %t185, i8* %t184
-  %s188 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.188, i32 0, i32 0
+  %s188 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
   %t189 = icmp eq i8* %t187, %s188
   br i1 %t189, label %then2, label %merge3
 then2:
@@ -550,7 +564,7 @@ then2:
   %t231 = load i8*, i8** %t230
   %t232 = icmp eq i32 %t190, 11
   %t233 = select i1 %t232, i8* %t231, i8* %t227
-  %s234 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.234, i32 0, i32 0
+  %s234 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789690461, i32 0, i32 0
   %t235 = extractvalue %Statement %statement, 0
   %t236 = alloca %Statement
   store %Statement %statement, %Statement* %t236
@@ -670,7 +684,7 @@ merge3:
   %t348 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t349 = icmp eq i32 %t280, 22
   %t350 = select i1 %t349, i8* %t348, i8* %t347
-  %s351 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.351, i32 0, i32 0
+  %s351 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
   %t352 = icmp eq i8* %t350, %s351
   br i1 %t352, label %then4, label %merge5
 then4:
@@ -719,7 +733,7 @@ then4:
   %t394 = load i8*, i8** %t393
   %t395 = icmp eq i32 %t353, 11
   %t396 = select i1 %t395, i8* %t394, i8* %t390
-  %s397 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.397, i32 0, i32 0
+  %s397 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258014432, i32 0, i32 0
   %t398 = extractvalue %Statement %statement, 0
   %t399 = alloca %Statement
   store %Statement %statement, %Statement* %t399
@@ -839,7 +853,7 @@ merge5:
   %t511 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t512 = icmp eq i32 %t443, 22
   %t513 = select i1 %t512, i8* %t511, i8* %t510
-  %s514 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.514, i32 0, i32 0
+  %s514 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h666604742, i32 0, i32 0
   %t515 = icmp eq i8* %t513, %s514
   br i1 %t515, label %then6, label %merge7
 then6:
@@ -888,7 +902,7 @@ then6:
   %t557 = load i8*, i8** %t556
   %t558 = icmp eq i32 %t516, 11
   %t559 = select i1 %t558, i8* %t557, i8* %t553
-  %s560 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.560, i32 0, i32 0
+  %s560 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1313193687, i32 0, i32 0
   %t561 = extractvalue %Statement %statement, 0
   %t562 = alloca %Statement
   store %Statement %statement, %Statement* %t562
@@ -1008,7 +1022,7 @@ merge7:
   %t674 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t675 = icmp eq i32 %t606, 22
   %t676 = select i1 %t675, i8* %t674, i8* %t673
-  %s677 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.677, i32 0, i32 0
+  %s677 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h2043328844, i32 0, i32 0
   %t678 = icmp eq i8* %t676, %s677
   br i1 %t678, label %then8, label %merge9
 then8:
@@ -1057,7 +1071,7 @@ then8:
   %t720 = load i8*, i8** %t719
   %t721 = icmp eq i32 %t679, 11
   %t722 = select i1 %t721, i8* %t720, i8* %t716
-  %s723 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.723, i32 0, i32 0
+  %s723 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h238194529, i32 0, i32 0
   %t724 = extractvalue %Statement %statement, 0
   %t725 = alloca %Statement
   store %Statement %statement, %Statement* %t725
@@ -1177,7 +1191,7 @@ merge9:
   %t837 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t838 = icmp eq i32 %t769, 22
   %t839 = select i1 %t838, i8* %t837, i8* %t836
-  %s840 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.840, i32 0, i32 0
+  %s840 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
   %t841 = icmp eq i8* %t839, %s840
   br i1 %t841, label %then10, label %merge11
 then10:
@@ -1203,7 +1217,7 @@ then10:
   %t860 = icmp eq i32 %t842, 7
   %t861 = select i1 %t860, %FunctionSignature %t859, %FunctionSignature %t855
   %t862 = extractvalue %FunctionSignature %t861, 0
-  %s863 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.863, i32 0, i32 0
+  %s863 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2003786807, i32 0, i32 0
   %t864 = extractvalue %Statement %statement, 0
   %t865 = alloca %Statement
   store %Statement %statement, %Statement* %t865
@@ -1300,7 +1314,7 @@ merge11:
   %t954 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t955 = icmp eq i32 %t886, 22
   %t956 = select i1 %t955, i8* %t954, i8* %t953
-  %s957 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.957, i32 0, i32 0
+  %s957 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
   %t958 = icmp eq i8* %t956, %s957
   br i1 %t958, label %then12, label %merge13
 then12:
@@ -1326,7 +1340,7 @@ then12:
   %t977 = icmp eq i32 %t959, 7
   %t978 = select i1 %t977, %FunctionSignature %t976, %FunctionSignature %t972
   %t979 = extractvalue %FunctionSignature %t978, 0
-  %s980 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.980, i32 0, i32 0
+  %s980 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275832617, i32 0, i32 0
   %t981 = extractvalue %Statement %statement, 0
   %t982 = alloca %Statement
   store %Statement %statement, %Statement* %t982
@@ -1423,7 +1437,7 @@ merge13:
   %t1071 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1072 = icmp eq i32 %t1003, 22
   %t1073 = select i1 %t1072, i8* %t1071, i8* %t1070
-  %s1074 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1074, i32 0, i32 0
+  %s1074 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
   %t1075 = icmp eq i8* %t1073, %s1074
   br i1 %t1075, label %then14, label %merge15
 then14:
@@ -1472,7 +1486,7 @@ then14:
   %t1117 = load i8*, i8** %t1116
   %t1118 = icmp eq i32 %t1076, 11
   %t1119 = select i1 %t1118, i8* %t1117, i8* %t1113
-  %s1120 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1120, i32 0, i32 0
+  %s1120 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275477867, i32 0, i32 0
   %t1121 = extractvalue %Statement %statement, 0
   %t1122 = alloca %Statement
   store %Statement %statement, %Statement* %t1122
@@ -1592,7 +1606,7 @@ merge15:
   %t1234 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1235 = icmp eq i32 %t1166, 22
   %t1236 = select i1 %t1235, i8* %t1234, i8* %t1233
-  %s1237 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.1237, i32 0, i32 0
+  %s1237 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h1496093543, i32 0, i32 0
   %t1238 = icmp eq i8* %t1236, %s1237
   br i1 %t1238, label %then16, label %merge17
 then16:
@@ -1641,7 +1655,7 @@ then16:
   %t1280 = load i8*, i8** %t1279
   %t1281 = icmp eq i32 %t1239, 11
   %t1282 = select i1 %t1281, i8* %t1280, i8* %t1276
-  %s1283 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1283, i32 0, i32 0
+  %s1283 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h276192845, i32 0, i32 0
   %t1284 = extractvalue %Statement %statement, 0
   %t1285 = alloca %Statement
   store %Statement %statement, %Statement* %t1285
@@ -1761,7 +1775,7 @@ merge17:
   %t1397 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1398 = icmp eq i32 %t1329, 22
   %t1399 = select i1 %t1398, i8* %t1397, i8* %t1396
-  %s1400 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.1400, i32 0, i32 0
+  %s1400 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h1204027478, i32 0, i32 0
   %t1401 = icmp eq i8* %t1399, %s1400
   br i1 %t1401, label %then18, label %merge19
 then18:
@@ -1810,7 +1824,7 @@ then18:
   %t1443 = load i8*, i8** %t1442
   %t1444 = icmp eq i32 %t1402, 11
   %t1445 = select i1 %t1444, i8* %t1443, i8* %t1439
-  %s1446 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1446, i32 0, i32 0
+  %s1446 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1925814595, i32 0, i32 0
   %t1447 = extractvalue %Statement %statement, 0
   %t1448 = alloca %Statement
   store %Statement %statement, %Statement* %t1448
@@ -2019,7 +2033,7 @@ entry:
   %t68 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
-  %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.71, i32 0, i32 0
+  %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h1204027478, i32 0, i32 0
   %t72 = icmp eq i8* %t70, %s71
   br i1 %t72, label %then0, label %merge1
 then0:
@@ -2068,7 +2082,7 @@ then0:
   %t114 = load i8*, i8** %t113
   %t115 = icmp eq i32 %t73, 11
   %t116 = select i1 %t115, i8* %t114, i8* %t110
-  %s117 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.117, i32 0, i32 0
+  %s117 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1925814595, i32 0, i32 0
   %t118 = extractvalue %Statement %statement, 0
   %t119 = alloca %Statement
   store %Statement %statement, %Statement* %t119
@@ -2167,7 +2181,7 @@ merge1:
   %t210 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t211 = icmp eq i32 %t142, 22
   %t212 = select i1 %t211, i8* %t210, i8* %t209
-  %s213 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.213, i32 0, i32 0
+  %s213 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
   %t214 = icmp eq i8* %t212, %s213
   br i1 %t214, label %then2, label %merge3
 then2:
@@ -2193,7 +2207,7 @@ then2:
   %t233 = icmp eq i32 %t215, 7
   %t234 = select i1 %t233, %FunctionSignature %t232, %FunctionSignature %t228
   %t235 = extractvalue %FunctionSignature %t234, 0
-  %s236 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.236, i32 0, i32 0
+  %s236 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
   %t237 = extractvalue %Statement %statement, 0
   %t238 = alloca %Statement
   store %Statement %statement, %Statement* %t238
@@ -2413,7 +2427,7 @@ merge3:
   %t443 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t444 = icmp eq i32 %t375, 22
   %t445 = select i1 %t444, i8* %t443, i8* %t442
-  %s446 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.446, i32 0, i32 0
+  %s446 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
   %t447 = icmp eq i8* %t445, %s446
   br i1 %t447, label %then4, label %merge5
 then4:
@@ -2462,7 +2476,7 @@ then4:
   %t489 = load i8*, i8** %t488
   %t490 = icmp eq i32 %t448, 11
   %t491 = select i1 %t490, i8* %t489, i8* %t485
-  %s492 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.492, i32 0, i32 0
+  %s492 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789690461, i32 0, i32 0
   %t493 = extractvalue %Statement %statement, 0
   %t494 = alloca %Statement
   store %Statement %statement, %Statement* %t494
@@ -2751,7 +2765,7 @@ merge5:
   %t745 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t746 = icmp eq i32 %t677, 22
   %t747 = select i1 %t746, i8* %t745, i8* %t744
-  %s748 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.748, i32 0, i32 0
+  %s748 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
   %t749 = icmp eq i8* %t747, %s748
   br i1 %t749, label %then12, label %merge13
 then12:
@@ -2800,7 +2814,7 @@ then12:
   %t791 = load i8*, i8** %t790
   %t792 = icmp eq i32 %t750, 11
   %t793 = select i1 %t792, i8* %t791, i8* %t787
-  %s794 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.794, i32 0, i32 0
+  %s794 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258014432, i32 0, i32 0
   %t795 = extractvalue %Statement %statement, 0
   %t796 = alloca %Statement
   store %Statement %statement, %Statement* %t796
@@ -2986,7 +3000,7 @@ merge13:
   %t968 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t969 = icmp eq i32 %t900, 22
   %t970 = select i1 %t969, i8* %t968, i8* %t967
-  %s971 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.971, i32 0, i32 0
+  %s971 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h666604742, i32 0, i32 0
   %t972 = icmp eq i8* %t970, %s971
   br i1 %t972, label %then14, label %merge15
 then14:
@@ -3035,7 +3049,7 @@ then14:
   %t1014 = load i8*, i8** %t1013
   %t1015 = icmp eq i32 %t973, 11
   %t1016 = select i1 %t1015, i8* %t1014, i8* %t1010
-  %s1017 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.1017, i32 0, i32 0
+  %s1017 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1313193687, i32 0, i32 0
   %t1018 = extractvalue %Statement %statement, 0
   %t1019 = alloca %Statement
   store %Statement %statement, %Statement* %t1019
@@ -3221,7 +3235,7 @@ merge15:
   %t1191 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1192 = icmp eq i32 %t1123, 22
   %t1193 = select i1 %t1192, i8* %t1191, i8* %t1190
-  %s1194 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.1194, i32 0, i32 0
+  %s1194 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h2043328844, i32 0, i32 0
   %t1195 = icmp eq i8* %t1193, %s1194
   br i1 %t1195, label %then16, label %merge17
 then16:
@@ -3270,7 +3284,7 @@ then16:
   %t1237 = load i8*, i8** %t1236
   %t1238 = icmp eq i32 %t1196, 11
   %t1239 = select i1 %t1238, i8* %t1237, i8* %t1233
-  %s1240 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.1240, i32 0, i32 0
+  %s1240 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h238194529, i32 0, i32 0
   %t1241 = extractvalue %Statement %statement, 0
   %t1242 = alloca %Statement
   store %Statement %statement, %Statement* %t1242
@@ -3415,7 +3429,7 @@ merge17:
   %t1376 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1377 = icmp eq i32 %t1308, 22
   %t1378 = select i1 %t1377, i8* %t1376, i8* %t1375
-  %s1379 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.1379, i32 0, i32 0
+  %s1379 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
   %t1380 = icmp eq i8* %t1378, %s1379
   br i1 %t1380, label %then18, label %merge19
 then18:
@@ -3441,7 +3455,7 @@ then18:
   %t1399 = icmp eq i32 %t1381, 7
   %t1400 = select i1 %t1399, %FunctionSignature %t1398, %FunctionSignature %t1394
   %t1401 = extractvalue %FunctionSignature %t1400, 0
-  %s1402 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.1402, i32 0, i32 0
+  %s1402 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2003786807, i32 0, i32 0
   %t1403 = extractvalue %Statement %statement, 0
   %t1404 = alloca %Statement
   store %Statement %statement, %Statement* %t1404
@@ -3661,7 +3675,7 @@ merge19:
   %t1609 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1610 = icmp eq i32 %t1541, 22
   %t1611 = select i1 %t1610, i8* %t1609, i8* %t1608
-  %s1612 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1612, i32 0, i32 0
+  %s1612 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
   %t1613 = icmp eq i8* %t1611, %s1612
   br i1 %t1613, label %then20, label %merge21
 then20:
@@ -3687,7 +3701,7 @@ then20:
   %t1632 = icmp eq i32 %t1614, 7
   %t1633 = select i1 %t1632, %FunctionSignature %t1631, %FunctionSignature %t1627
   %t1634 = extractvalue %FunctionSignature %t1633, 0
-  %s1635 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1635, i32 0, i32 0
+  %s1635 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275832617, i32 0, i32 0
   %t1636 = extractvalue %Statement %statement, 0
   %t1637 = alloca %Statement
   store %Statement %statement, %Statement* %t1637
@@ -3907,7 +3921,7 @@ merge21:
   %t1842 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t1843 = icmp eq i32 %t1774, 22
   %t1844 = select i1 %t1843, i8* %t1842, i8* %t1841
-  %s1845 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.1845, i32 0, i32 0
+  %s1845 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
   %t1846 = icmp eq i8* %t1844, %s1845
   br i1 %t1846, label %then22, label %merge23
 then22:
@@ -3956,7 +3970,7 @@ then22:
   %t1888 = load i8*, i8** %t1887
   %t1889 = icmp eq i32 %t1847, 11
   %t1890 = select i1 %t1889, i8* %t1888, i8* %t1884
-  %s1891 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.1891, i32 0, i32 0
+  %s1891 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275477867, i32 0, i32 0
   %t1892 = extractvalue %Statement %statement, 0
   %t1893 = alloca %Statement
   store %Statement %statement, %Statement* %t1893
@@ -4155,7 +4169,7 @@ merge23:
   %t2079 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2080 = icmp eq i32 %t2011, 22
   %t2081 = select i1 %t2080, i8* %t2079, i8* %t2078
-  %s2082 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.2082, i32 0, i32 0
+  %s2082 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1925822000, i32 0, i32 0
   %t2083 = icmp eq i8* %t2081, %s2082
   br i1 %t2083, label %then24, label %merge25
 then24:
@@ -4295,7 +4309,7 @@ merge25:
   %t2214 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2215 = icmp eq i32 %t2146, 22
   %t2216 = select i1 %t2215, i8* %t2214, i8* %t2213
-  %s2217 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.2217, i32 0, i32 0
+  %s2217 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h84042670, i32 0, i32 0
   %t2218 = icmp eq i8* %t2216, %s2217
   br i1 %t2218, label %then26, label %merge27
 then26:
@@ -4435,7 +4449,7 @@ merge27:
   %t2349 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2350 = icmp eq i32 %t2281, 22
   %t2351 = select i1 %t2350, i8* %t2349, i8* %t2348
-  %s2352 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.2352, i32 0, i32 0
+  %s2352 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h196308685, i32 0, i32 0
   %t2353 = icmp eq i8* %t2351, %s2352
   br i1 %t2353, label %then28, label %merge29
 then28:
@@ -4598,7 +4612,7 @@ merge29:
   %t2484 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2485 = icmp eq i32 %t2416, 22
   %t2486 = select i1 %t2485, i8* %t2484, i8* %t2483
-  %s2487 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.2487, i32 0, i32 0
+  %s2487 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1566780570, i32 0, i32 0
   %t2488 = icmp eq i8* %t2486, %s2487
   br i1 %t2488, label %then36, label %merge37
 then36:
@@ -4772,7 +4786,7 @@ merge37:
   %t2630 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2631 = icmp eq i32 %t2562, 22
   %t2632 = select i1 %t2631, i8* %t2630, i8* %t2629
-  %s2633 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.2633, i32 0, i32 0
+  %s2633 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1067284810, i32 0, i32 0
   %t2634 = icmp eq i8* %t2632, %s2633
   br i1 %t2634, label %then44, label %merge45
 then44:
@@ -4912,7 +4926,7 @@ merge45:
   %t2765 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
   %t2766 = icmp eq i32 %t2697, 22
   %t2767 = select i1 %t2766, i8* %t2765, i8* %t2764
-  %s2768 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.2768, i32 0, i32 0
+  %s2768 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h1496093543, i32 0, i32 0
   %t2769 = icmp eq i8* %t2767, %s2768
   br i1 %t2769, label %then46, label %merge47
 then46:
@@ -4961,7 +4975,7 @@ then46:
   %t2811 = load i8*, i8** %t2810
   %t2812 = icmp eq i32 %t2770, 11
   %t2813 = select i1 %t2812, i8* %t2811, i8* %t2807
-  %s2814 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.2814, i32 0, i32 0
+  %s2814 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h276192845, i32 0, i32 0
   %t2815 = extractvalue %Statement %statement, 0
   %t2816 = alloca %Statement
   store %Statement %statement, %Statement* %t2816
@@ -5134,7 +5148,7 @@ forbody1:
   %t21 = load %Parameter*, %Parameter** %l3
   %t22 = getelementptr %Parameter, %Parameter* %t21, i32 0, i32 0
   %t23 = load i8*, i8** %t22
-  %s24 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.24, i32 0, i32 0
+  %s24 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1747065903, i32 0, i32 0
   %t25 = load %Parameter*, %Parameter** %l3
   %t26 = getelementptr %Parameter, %Parameter* %t25, i32 0, i32 4
   %t27 = load %SourceSpan*, %SourceSpan** %t26
@@ -5775,7 +5789,7 @@ forbody1:
 then4:
   %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t29 = load i8*, i8** %l4
-  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.30, i32 0, i32 0
+  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h766506979, i32 0, i32 0
   %t31 = load i8*, i8** %l4
   %t32 = load %FieldDeclaration, %FieldDeclaration* %l3
   %t33 = extractvalue %FieldDeclaration %t32, 3
@@ -6236,7 +6250,7 @@ merge5:
   %t150 = load i8, i8* %t149
   %t151 = add i8 %t150, 60
   %t152 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s153 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.153, i32 0, i32 0
+  %s153 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t154 = call i8* @join_with_separator({ i8**, i64 }* %t152, i8* %s153)
   %t155 = load i8, i8* %t154
   %t156 = add i8 %t151, %t155
@@ -6259,7 +6273,7 @@ entry:
   %t2 = icmp eq i64 %t1, 0
   br i1 %t2, label %then0, label %merge1
 then0:
-  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.3, i32 0, i32 0
+  %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s3
 merge1:
   %t4 = load { i8**, i64 }, { i8**, i64 }* %items
@@ -6294,7 +6308,7 @@ then6:
   br label %afterloop5
 merge7:
   %t20 = load i8*, i8** %l0
-  %t21 = add i8* %t20, %separator
+  %t21 = call i8* @sailfin_runtime_string_concat(i8* %t20, i8* %separator)
   %t22 = load double, double* %l1
   %t23 = fptosi double %t22 to i64
   %t24 = load { i8**, i64 }, { i8**, i64 }* %items
@@ -6304,7 +6318,7 @@ merge7:
   ; bounds check: %t27 (if true, out of bounds)
   %t28 = getelementptr i8*, i8** %t25, i64 %t23
   %t29 = load i8*, i8** %t28
-  %t30 = add i8* %t21, %t29
+  %t30 = call i8* @sailfin_runtime_string_concat(i8* %t21, i8* %t29)
   store i8* %t30, i8** %l0
   %t31 = load double, double* %l1
   %t32 = sitofp i64 1 to double
@@ -6507,7 +6521,7 @@ entry:
   %t4 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2, i32 0, i32 1
   store i64 0, i64* %t4
   store { i8**, i64 }* %t2, { i8**, i64 }** %l0
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.5, i32 0, i32 0
+  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s5, i8** %l1
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l2
@@ -6662,7 +6676,7 @@ then19:
 merge20:
   %t104 = phi { i8**, i64 }* [ %t103, %then19 ], [ %t89, %then17 ]
   store { i8**, i64 }* %t104, { i8**, i64 }** %l0
-  %s105 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.105, i32 0, i32 0
+  %s105 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s105, i8** %l1
   %t106 = load double, double* %l3
   %t107 = sitofp i64 1 to double
@@ -6914,10 +6928,10 @@ merge3:
   %t20 = load double, double* %l1
   br i1 %t18, label %then4, label %merge5
 then4:
-  %s21 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.21, i32 0, i32 0
+  %s21 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   ret i8* %s21
 merge5:
-  %s22 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s22, i8** %l2
   %t23 = load double, double* %l0
   store double %t23, double* %l3
@@ -7087,7 +7101,7 @@ forbody1:
 then4:
   %t37 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t38 = load i8*, i8** %l4
-  %s39 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.39, i32 0, i32 0
+  %s39 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1045703541, i32 0, i32 0
   %t40 = load i8*, i8** %l4
   %t41 = load %MethodDeclaration, %MethodDeclaration* %l3
   %t42 = extractvalue %MethodDeclaration %t41, 0
@@ -7195,7 +7209,7 @@ forbody1:
 then4:
   %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t29 = load i8*, i8** %l4
-  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.30, i32 0, i32 0
+  %s30 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h328844387, i32 0, i32 0
   %t31 = load i8*, i8** %l4
   %t32 = load %EnumVariant, %EnumVariant* %l3
   %t33 = extractvalue %EnumVariant %t32, 2
@@ -7310,7 +7324,7 @@ forbody1:
 then4:
   %t35 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t36 = load i8*, i8** %l4
-  %s37 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.37, i32 0, i32 0
+  %s37 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h994638848, i32 0, i32 0
   %t38 = load i8*, i8** %l4
   %t39 = load %FunctionSignature, %FunctionSignature* %l3
   %t40 = extractvalue %FunctionSignature %t39, 6
@@ -7417,7 +7431,7 @@ forbody1:
 then4:
   %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t29 = load i8*, i8** %l4
-  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.30, i32 0, i32 0
+  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h812083909, i32 0, i32 0
   %t31 = load i8*, i8** %l4
   %t32 = load %ModelProperty, %ModelProperty* %l3
   %t33 = extractvalue %ModelProperty %t32, 2
@@ -7532,7 +7546,7 @@ forbody1:
 then4:
   %t28 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
   %t29 = load i8*, i8** %l4
-  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.30, i32 0, i32 0
+  %s30 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h513489323, i32 0, i32 0
   %t31 = load i8*, i8** %l4
   %t32 = load %TypeParameter, %TypeParameter* %l3
   %t33 = extractvalue %TypeParameter %t32, 2
@@ -7692,7 +7706,7 @@ merge11:
   %t60 = call %EffectRequirement* @select_requirement_for_effect({ %EffectRequirement*, i64 }* %t59, i8* %t58)
   store %EffectRequirement* %t60, %EffectRequirement** %l6
   %t61 = load { %Diagnostic*, i64 }*, { %Diagnostic*, i64 }** %l1
-  %s62 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.62, i32 0, i32 0
+  %s62 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h902271367, i32 0, i32 0
   %t63 = insertvalue %Diagnostic undef, i8* %s62, 0
   %t64 = load %EffectViolation, %EffectViolation* %l3
   %t65 = extractvalue %EffectViolation %t64, 0
@@ -7817,9 +7831,9 @@ merge1:
 define i8* @format_effect_message(i8* %routine_name, i8* %effect, %EffectRequirement* %requirement) {
 entry:
   %l0 = alloca i8
-  %s0 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.0, i32 0, i32 0
-  %t1 = add i8* %routine_name, %s0
-  %t2 = add i8* %t1, %effect
+  %s0 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h1863181231, i32 0, i32 0
+  %t1 = call i8* @sailfin_runtime_string_concat(i8* %routine_name, i8* %s0)
+  %t2 = call i8* @sailfin_runtime_string_concat(i8* %t1, i8* %effect)
   %t3 = load i8, i8* %t2
   %t4 = add i8 %t3, 39
   store i8 %t4, i8* %l0
@@ -7828,7 +7842,7 @@ entry:
   br i1 %t5, label %then0, label %merge1
 then0:
   %t7 = load i8, i8* %l0
-  %s8 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.8, i32 0, i32 0
+  %s8 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h980936743, i32 0, i32 0
   %t9 = load i8, i8* %s8
   %t10 = add i8 %t7, %t9
   %t11 = getelementptr %EffectRequirement, %EffectRequirement* %requirement, i32 0, i32 2
@@ -7841,12 +7855,12 @@ merge1:
   %t15 = phi i8 [ %t14, %then0 ], [ %t6, %entry ]
   store i8 %t15, i8* %l0
   %t16 = load i8, i8* %l0
-  %s17 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.17, i32 0, i32 0
+  %s17 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1876709041, i32 0, i32 0
   %t18 = load i8, i8* %s17
   %t19 = add i8 %t16, %t18
   %t20 = load i8, i8* %effect
   %t21 = add i8 %t19, %t20
-  %s22 = getelementptr inbounds [61 x i8], [61 x i8]* @.str.22, i32 0, i32 0
+  %s22 = getelementptr inbounds [61 x i8], [61 x i8]* @.str.len60.h1899438158, i32 0, i32 0
   %t23 = load i8, i8* %s22
   %t24 = add i8 %t21, %t23
   store i8 %t24, i8* %l0
@@ -8101,18 +8115,18 @@ afterfor3:
 
 define %Diagnostic @make_interface_missing_type_arguments_diagnostic(i8* %struct_name, i8* %interface_name, i8* %interface_signature) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h743728889, i32 0, i32 0
   %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
-  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
-  %t3 = add i8* %s2, %struct_name
-  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
-  %t5 = add i8* %t3, %s4
-  %t6 = add i8* %t5, %interface_name
-  %s7 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
-  %t9 = add i8* %t8, %interface_signature
-  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.10, i32 0, i32 0
-  %t11 = add i8* %t9, %s10
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h289982314, i32 0, i32 0
+  %t3 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %struct_name)
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h2084565287, i32 0, i32 0
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t3, i8* %s4)
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %interface_name)
+  %s7 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.len18.h1304509209, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
+  %t9 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %interface_signature)
+  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1487231025, i32 0, i32 0
+  %t11 = call i8* @sailfin_runtime_string_concat(i8* %t9, i8* %s10)
   %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
   %t13 = bitcast i8* null to %Token*
   %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
@@ -8121,18 +8135,18 @@ entry:
 
 define %Diagnostic @make_interface_type_argument_mismatch_diagnostic(i8* %struct_name, i8* %annotation_text, i8* %interface_signature) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h743728889, i32 0, i32 0
   %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
-  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
-  %t3 = add i8* %s2, %struct_name
-  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
-  %t5 = add i8* %t3, %s4
-  %t6 = add i8* %t5, %annotation_text
-  %s7 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
-  %t9 = add i8* %t8, %interface_signature
-  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.10, i32 0, i32 0
-  %t11 = add i8* %t9, %s10
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h289982314, i32 0, i32 0
+  %t3 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %struct_name)
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h2084565287, i32 0, i32 0
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t3, i8* %s4)
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %annotation_text)
+  %s7 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h302658750, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
+  %t9 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %interface_signature)
+  %s10 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1487231025, i32 0, i32 0
+  %t11 = call i8* @sailfin_runtime_string_concat(i8* %t9, i8* %s10)
   %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
   %t13 = bitcast i8* null to %Token*
   %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
@@ -8141,18 +8155,18 @@ entry:
 
 define %Diagnostic @make_interface_no_type_arguments_diagnostic(i8* %struct_name, i8* %annotation_text, i8* %interface_name) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h743728889, i32 0, i32 0
   %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
-  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
-  %t3 = add i8* %s2, %struct_name
-  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
-  %t5 = add i8* %t3, %s4
-  %t6 = add i8* %t5, %annotation_text
-  %s7 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
-  %t9 = add i8* %t8, %interface_name
-  %s10 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.10, i32 0, i32 0
-  %t11 = add i8* %t9, %s10
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h289982314, i32 0, i32 0
+  %t3 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %struct_name)
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h2084565287, i32 0, i32 0
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t3, i8* %s4)
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %annotation_text)
+  %s7 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1504944345, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
+  %t9 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %interface_name)
+  %s10 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h85694398, i32 0, i32 0
+  %t11 = call i8* @sailfin_runtime_string_concat(i8* %t9, i8* %s10)
   %t12 = insertvalue %Diagnostic %t1, i8* %t11, 1
   %t13 = bitcast i8* null to %Token*
   %t14 = insertvalue %Diagnostic %t12, %Token* %t13, 2
@@ -8190,15 +8204,15 @@ merge1:
 
 define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, %Token* %token) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h743621045, i32 0, i32 0
   %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
-  %s2 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.2, i32 0, i32 0
-  %t3 = add i8* %s2, %kind
-  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.4, i32 0, i32 0
-  %t5 = add i8* %t3, %s4
-  %t6 = add i8* %t5, %name
-  %s7 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
+  %s2 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h6072819, i32 0, i32 0
+  %t3 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %kind)
+  %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193415015, i32 0, i32 0
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t3, i8* %s4)
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %name)
+  %s7 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1855834391, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
   %t9 = insertvalue %Diagnostic %t1, i8* %t8, 1
   %t10 = insertvalue %Diagnostic %t9, %Token* %token, 2
   ret %Diagnostic %t10
@@ -8206,16 +8220,16 @@ entry:
 
 define %Diagnostic @make_missing_interface_member_diagnostic(i8* %struct_name, i8* %interface_name, i8* %member_name) {
 entry:
-  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.0, i32 0, i32 0
+  %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h743728856, i32 0, i32 0
   %t1 = insertvalue %Diagnostic undef, i8* %s0, 0
-  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.2, i32 0, i32 0
-  %t3 = add i8* %s2, %struct_name
-  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.4, i32 0, i32 0
-  %t5 = add i8* %t3, %s4
-  %t6 = add i8* %t5, %interface_name
-  %s7 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.7, i32 0, i32 0
-  %t8 = add i8* %t6, %s7
-  %t9 = add i8* %t8, %member_name
+  %s2 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h289982314, i32 0, i32 0
+  %t3 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %struct_name)
+  %s4 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h2084565287, i32 0, i32 0
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t3, i8* %s4)
+  %t6 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %interface_name)
+  %s7 = getelementptr inbounds [25 x i8], [25 x i8]* @.str.len24.h680377687, i32 0, i32 0
+  %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
+  %t9 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %member_name)
   %t10 = load i8, i8* %t9
   %t11 = add i8 %t10, 96
   %t12 = alloca [2 x i8], align 1
