@@ -1,6 +1,6 @@
 # Sailfin Roadmap
 
-Updated: October 18, 2025  
+Updated: October 22, 2025  
 Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
@@ -64,7 +64,8 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [x] Add smoke tests in `compiler/tests/test_stage2_bootstrap.py` that validate the self-hosted compiler modules are generated correctly with valid LLVM IR.
   - [x] Document self-hosting compilation flow, capability requirements, and validation steps in `docs/self-hosting.md`.
   - [ ] Extend `tools/compile_with_stage1.py` to optionally target Stage2 executable output and link all compiler modules into a standalone binary.
-  - [ ] Add execution validation tests that run self-hosted compiler on simple inputs (e.g., `examples/basics/hello.sfn`).
+  - [x] Add execution validation tests that run self-hosted compiler on simple inputs (e.g., `examples/basics/hello-world.sfn`).
+    - [x] `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip` boots the Stage2-generated compiler in-process via `Stage2Runner`, compiles the hello-world example, and asserts the output matches the Stage1 reference implementation.
   - [ ] Validate the self-hosted compiler binary can parse and compile a minimal Sailfin program and generate valid `.sfn-asm` IR and LLVM modules.
   - [ ] Execute compiled programs through Stage2Runner with matching output to Stage1.
 

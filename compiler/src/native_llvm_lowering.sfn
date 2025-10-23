@@ -8148,8 +8148,21 @@ fn format_span_location(span -> NativeSourceSpan) -> string {
 }
 
 fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
-    // TODO(stage2): restore precise location formatting once optional handling in Stage2 lowering is more complete.
-    return "";
+    let mut segments -> string[] = [];
+    if borrow_span != null {
+        segments = append_string(segments, "borrow at " + format_span_location(borrow_span));
+    }
+    if suspension_span != null {
+        let mut label -> string = keyword;
+        if label.length == 0 {
+            label = "suspend";
+        }
+        segments = append_string(segments, label + " at " + format_span_location(suspension_span));
+    }
+    if segments.length == 0 {
+        return "";
+    }
+    return " (" + join_strings(segments, "; ") + ")";
 }
 
 fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {

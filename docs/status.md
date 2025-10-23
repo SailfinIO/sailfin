@@ -1,6 +1,6 @@
 # Sailfin Status
 
-Updated: October 18, 2025
+Updated: October 22, 2025
 
 This document is the source of truth for what ships today in the Python
 bootstrap toolchain and what exists only in the Sailfin-native
@@ -28,7 +28,15 @@ roadmaps.
   modules in `build/stage2/`. The bootstrap script (`scripts/bootstrap_stage2.py`)
   generates 16 LLVM `.ll` files validated by `compiler/tests/test_stage2_bootstrap.py`.
   Stage2 continues to mature with expanded LLVM lowering coverage, cross-module
-  linking, and native binary generation tracked in the roadmap. The `.sfn-asm`
+  linking, and native binary generation tracked in the roadmap. Multi-module
+  execution of the self-hosted compiler is now exercised end-to-end: the
+  runtime `Stage2Runner` can load all emitted LLVM modules, honour capability
+  manifests, and invoke `compile_to_sailfin` directly. Regression coverage lives
+  in `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip`,
+  which bootstraps the Stage2 artifacts, runs the hello-world example through the
+  self-hosted compiler, and asserts the canonical Sailfin output matches the
+  Stage1 reference compile.
+  The `.sfn-asm`
   intermediate plus `native_llvm_lowering` provide the compilation infrastructure,
   covering local assignments, structured control flow, structs, enums, interfaces,
   borrows, and more (see detailed Stage2 feature list below). now covering local assignments, structured

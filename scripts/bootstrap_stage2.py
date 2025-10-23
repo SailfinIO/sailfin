@@ -308,16 +308,21 @@ def load_native_text_for_import(import_path: str, output_dir: pathlib.Path) -> s
 
 
 def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
-                               quiet: bool = False) -> Tuple[List[pathlib.Path], DiagnosticAggregator]:
+                               quiet: bool = False, capture_results: bool = False) -> Tuple[List[pathlib.Path], DiagnosticAggregator] | Tuple[List[pathlib.Path], DiagnosticAggregator, Dict[pathlib.Path, Any]]:
     """Compile all compiler sources to Stage2 LLVM artifacts.
 
     Args:
         output_dir: Directory to write compiled LLVM modules
         debug: Enable verbose output
         quiet: Suppress individual diagnostic output (use with summary)
+        capture_results: When True, retain the lowered LLVM results for each
+            source file and return them alongside the compiled module paths.
 
     Returns:
-        Tuple of (compiled module paths, diagnostic aggregator)
+        Either ``(compiled_modules, aggregator)`` when ``capture_results`` is
+        False, or ``(compiled_modules, aggregator, lowered_results)`` when the
+        lowered results are requested. ``lowered_results`` maps absolute source
+        paths to their corresponding lowered LLVM result objects.
 
     Raises:
         Stage2BootstrapError: If compilation fails
@@ -351,6 +356,8 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     output_dir.mkdir(parents=True, exist_ok=True)
     compiled_modules: List[pathlib.Path] = []
     aggregator = DiagnosticAggregator()
+    lowered_results: Dict[pathlib.Path,
+                          Any] | None = {} if capture_results else None
 
     has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
     has_manifest = hasattr(
@@ -487,6 +494,9 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
             output_path.write_text(ir, encoding="utf-8")
             compiled_modules.append(output_path)
 
+            if lowered_results is not None:
+                lowered_results[source_path] = result
+
             if native_module is not None and hasattr(native_module, "artifacts"):
                 for artifact in native_module.artifacts:
                     if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
@@ -526,6 +536,9 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     if debug and aggregator.total_count > 0:
         print(
             f"[stage2-bootstrap] completed with {aggregator.total_count} diagnostic(s)")
+
+    if lowered_results is not None:
+        return compiled_modules, aggregator, lowered_results
 
     return compiled_modules, aggregator
 
@@ -635,8 +648,9 @@ def main(argv: list[str] | None = None) -> int:
         print("[stage2-bootstrap] starting Stage2 self-hosting compilation...")
 
         # Compile compiler sources to LLVM
-        llvm_modules, aggregator = compile_compiler_to_stage2(
+        compilation_result = compile_compiler_to_stage2(
             args.output, debug=args.debug, quiet=args.quiet)
+        llvm_modules, aggregator = compilation_result[:2]
 
         print(
             f"[stage2-bootstrap] compiled {len(llvm_modules)} module(s) to {args.output}")

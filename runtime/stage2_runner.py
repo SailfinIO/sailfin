@@ -5,7 +5,8 @@ from __future__ import annotations
 import contextvars
 import ctypes
 from dataclasses import dataclass
-from typing import Callable, Dict, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable as ABCIterable
+from typing import Callable, Dict, Iterable, Mapping, Sequence
 
 import llvmlite.binding as llvm
 
@@ -43,7 +44,7 @@ _HELPER_SIGNATURES: Mapping[str, tuple[str, Sequence[type]]] = {
 }
 
 # Adapter signatures for capability-aware runtime operations
-_ADAPTER_SIGNATURES: Mapping[str, tuple[str, Sequence[type], type | None]] = {
+_ADAPTER_SIGNATURES: Mapping[str, tuple[str | None, Sequence[type], type | None]] = {
     # Filesystem adapters
     "sailfin_adapter_fs_read_file": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_write_file": ("io", (ctypes.c_void_p, ctypes.c_void_p), None),
@@ -127,28 +128,137 @@ class Stage2Runner:
         runtime_hooks: Stage2RuntimeHooks | Mapping[str,
                                                     Callable[..., None]] | None = None,
     ) -> None:
-        self._lowered = lowered
-        self._manifest = self._build_manifest_index(
-            getattr(lowered, "capability_manifest", None))
+        self._lowered_modules = self._normalise_lowered(lowered)
+        self._manifest = self._build_manifest_index(self._lowered_modules)
         self._engine = None
-        self._module = None
-        self._registered_helpers: list[ctypes._CFuncPtr] = []
-        self._hooks: MutableMapping[str, Callable[...,
-                                                  None] | None] = _normalise_hooks(runtime_hooks)
+        self._modules = None
+        self._registered_helpers = []
+        self._hooks = _normalise_hooks(runtime_hooks)
+        self._adapter_string_buffers = []
         self._initialise_runtime_helpers()
         self._compile_ir()
 
     @staticmethod
-    def _build_manifest_index(manifest) -> Dict[str, Sequence[str]]:
+    def _normalise_lowered(lowered) -> list:
+        if isinstance(lowered, Sequence) and not isinstance(lowered, (bytes, str)):
+            return list(lowered)
+        return [lowered]
+
+    @staticmethod
+    def _escape_string_for_llvm(value: str) -> str:
+        escaped = []
+        for ch in value:
+            if ch == "\n":
+                escaped.append("\\0A")
+            elif ch == "\r":
+                escaped.append("\\0D")
+            elif ch == "\t":
+                escaped.append("\\09")
+            elif ch == "\"":
+                escaped.append("\\22")
+            elif ch == "\\":
+                escaped.append("\\5C")
+            else:
+                escaped.append(ch)
+        return "".join(escaped)
+
+    @staticmethod
+    def _render_string_constant(constant) -> str | None:
+        name = getattr(constant, "name", "")
+        if not name:
+            return None
+        if not name.startswith("@"):
+            name = f"@{name}"
+        content = getattr(constant, "content", "")
+        byte_count = getattr(constant, "byte_count", None)
+        if byte_count is None:
+            byte_count = len(content.encode("utf-8"))
+        escaped = Stage2Runner._escape_string_for_llvm(str(content))
+        # LLVM string constants include a trailing null terminator.
+        length = byte_count + 1
+        return f"{name} = private unnamed_addr constant [{length} x i8] c\"{escaped}\\00\""
+
+    @staticmethod
+    def _iterate_string_constants(container) -> Iterable:
+        if container is None:
+            return ()
+        if isinstance(container, Mapping):
+            return container.values()
+        if isinstance(container, Sequence) and not isinstance(container, (str, bytes, bytearray)):
+            return container
+        if isinstance(container, ABCIterable) and not isinstance(container, (str, bytes, bytearray)):
+            return tuple(container)
+        return ()
+
+    @staticmethod
+    def _collect_global_constant_definitions(lowered_modules: Iterable) -> Dict[str, str]:
+        definitions: Dict[str, str] = {}
+        for lowered in lowered_modules:
+            module_ir = getattr(lowered, "ir", "")
+            if module_ir:
+                for line in module_ir.splitlines():
+                    stripped = line.strip()
+                    if not stripped.startswith("@") or " = " not in stripped:
+                        continue
+                    if " constant " not in stripped:
+                        continue
+                    if " external " in stripped:
+                        continue
+                    name = stripped.split("=", 1)[0].strip()[1:]
+                    definitions.setdefault(name, line)
+
+            for constant in Stage2Runner._iterate_string_constants(getattr(lowered, "string_constants", None)):
+                rendered = Stage2Runner._render_string_constant(constant)
+                if not rendered:
+                    continue
+                const_name = getattr(constant, "name", "")
+                if const_name.startswith("@"):
+                    const_name = const_name[1:]
+                if not const_name:
+                    continue
+                definitions.setdefault(const_name, rendered)
+        return definitions
+
+    @staticmethod
+    def _extract_defined_globals(module_ir: str) -> set[str]:
+        defined: set[str] = set()
+        for line in module_ir.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("@") or " = " not in stripped:
+                continue
+            name = stripped.split("=", 1)[0].strip()[1:]
+            defined.add(name)
+        return defined
+
+    @staticmethod
+    def _inject_missing_constant_definitions(module_ir: str, *, definitions: Mapping[str, str]) -> str:
+        if not definitions:
+            return module_ir
+        defined = Stage2Runner._extract_defined_globals(module_ir)
+        missing_lines: list[str] = []
+        for name, definition in definitions.items():
+            if name in defined:
+                continue
+            if f"@{name}" not in module_ir:
+                continue
+            missing_lines.append(definition)
+        if not missing_lines:
+            return module_ir
+        return module_ir.rstrip() + "\n" + "\n".join(missing_lines) + "\n"
+
+    @staticmethod
+    def _build_manifest_index(lowered_modules: Iterable) -> Dict[str, Sequence[str]]:
         index: Dict[str, Sequence[str]] = {}
-        if manifest is None:
-            return index
-        entries = getattr(manifest, "entries", ()) or ()
-        for entry in entries:
-            symbol = getattr(entry, "symbol", "")
-            effects = list(getattr(entry, "effects", ()))
-            if symbol:
-                index[symbol] = effects
+        for lowered in lowered_modules:
+            manifest = getattr(lowered, "capability_manifest", None)
+            if manifest is None:
+                continue
+            entries = getattr(manifest, "entries", ()) or ()
+            for entry in entries:
+                symbol = getattr(entry, "symbol", "")
+                effects = list(getattr(entry, "effects", ()))
+                if symbol and symbol not in index:
+                    index[symbol] = effects
         return index
 
     def _initialise_runtime_helpers(self) -> None:
@@ -170,7 +280,7 @@ class Stage2Runner:
         effect: str | None,
         arg_types: Sequence[type],
         delegate: Callable[..., None] | None,
-    ) -> ctypes._CFuncPtr:
+    ):
         def _require(effect_name: str) -> None:
             grant = _ACTIVE_GRANT.get()
             if grant is None:
@@ -198,7 +308,7 @@ class Stage2Runner:
         effect: str | None,
         arg_types: Sequence[type],
         return_type: type | None,
-    ) -> ctypes._CFuncPtr:
+    ):
         """Create an adapter bridge that routes LLVM ABI calls to Python runtime helpers."""
         def _require(effect_name: str) -> None:
             grant = _ACTIVE_GRANT.get()
@@ -211,18 +321,17 @@ class Stage2Runner:
         def _ptr_to_str(ptr: ctypes.c_void_p) -> str:
             if not ptr:
                 return ""
-            return ctypes.cast(ptr, ctypes.c_char_p).value.decode('utf-8')
+            value = ctypes.cast(ptr, ctypes.c_char_p).value
+            return value.decode('utf-8') if value is not None else ""
 
         # Storage for string buffers to keep them alive (stored on runner instance)
-        if not hasattr(self, '_adapter_string_buffers'):
-            self._adapter_string_buffers = []
-
         # Helper to convert Python string to pointer integer
         def _str_to_ptr(s: str) -> int:
             encoded = s.encode('utf-8')
             buf = ctypes.create_string_buffer(encoded + b'\0')
             self._adapter_string_buffers.append(buf)  # Keep buffer alive
-            return ctypes.cast(buf, ctypes.c_void_p).value
+            value = ctypes.cast(buf, ctypes.c_void_p).value
+            return 0 if value is None else value
 
         # Filesystem adapters
         if symbol == "sailfin_adapter_fs_read_file":
@@ -420,8 +529,9 @@ class Stage2Runner:
                 try:
                     if effect:
                         _require(effect)
+                    capacity_value = int(capacity)
                     ch = runtime.channel(
-                        int(capacity) if capacity > 0 else None)
+                        capacity_value if capacity_value > 0 else None)
                     # Return a pointer to the channel (simplified - real implementation needs proper object management)
                     return id(ch)
                 except Exception as exc:
@@ -469,13 +579,26 @@ class Stage2Runner:
 
     def _compile_ir(self) -> None:
         engine = _create_execution_engine()
-        module = llvm.parse_assembly(getattr(self._lowered, "ir", ""))
-        module.verify()
-        engine.add_module(module)
+        constant_definitions = self._collect_global_constant_definitions(
+            self._lowered_modules)
+        modules: list = []
+        for lowered in self._lowered_modules:
+            module_ir = getattr(lowered, "ir", "")
+            if not module_ir:
+                continue
+            patched_ir = self._inject_missing_constant_definitions(
+                module_ir, definitions=constant_definitions
+            )
+            module = llvm.parse_assembly(patched_ir)
+            module.verify()
+            engine.add_module(module)
+            modules.append(module)
+        if not modules:
+            raise ValueError("no LLVM IR provided for Stage2 execution")
         engine.finalize_object()
         engine.run_static_constructors()
         self._engine = engine
-        self._module = module
+        self._modules = modules
 
     @property
     def manifest(self) -> Mapping[str, Sequence[str]]:
