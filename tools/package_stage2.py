@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import pathlib
@@ -12,7 +13,7 @@ import platform
 import shutil
 import sys
 import tempfile
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -150,13 +151,38 @@ def _run_stage2_bootstrap(
     return modules, aggregator
 
 
+def _compute_sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _gather_artifact_inventory(artifacts_dir: pathlib.Path) -> List[Dict[str, object]]:
+    entries: List[Dict[str, object]] = []
+    for file_path in sorted(artifacts_dir.rglob("*")):
+        if not file_path.is_file():
+            continue
+        relative = file_path.relative_to(artifacts_dir).as_posix()
+        entries.append(
+            {
+                "path": f"artifacts/{relative}",
+                "size": file_path.stat().st_size,
+                "sha256": _compute_sha256(file_path),
+            }
+        )
+    return entries
+
+
 def _write_metadata(
     destination: pathlib.Path,
     *,
     version: str,
     target_label: str,
     aggregator: Optional[bootstrap_stage2.DiagnosticAggregator],
-) -> None:
+    artifacts: Optional[List[Dict[str, object]]] = None,
+) -> Dict[str, object]:
     metadata: dict[str, object] = {
         "version": version,
         "target": target_label,
@@ -176,8 +202,38 @@ def _write_metadata(
             "top_categories": categories[:20],
         }
 
+    if artifacts:
+        metadata["artifacts"] = artifacts
+
     destination.write_text(json.dumps(
         metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return metadata
+
+
+def _write_sha256_sidecar(archive_path: pathlib.Path, sha256: str) -> pathlib.Path:
+    sidecar = archive_path.with_name(f"{archive_path.name}.sha256")
+    sidecar.write_text(f"{sha256}  {archive_path.name}\n", encoding="utf-8")
+    return sidecar
+
+
+def _write_manifest_sidecar(
+    output_dir: pathlib.Path,
+    archive_stem: str,
+    archive_name: str,
+    sha256: str,
+    metadata: Dict[str, object],
+) -> pathlib.Path:
+    manifest = {
+        "version": metadata.get("version"),
+        "target": metadata.get("target"),
+        "archive": archive_name,
+        "sha256": sha256,
+        "diagnostics": metadata.get("diagnostics", {}),
+        "artifacts": metadata.get("artifacts", []),
+    }
+    manifest_path = output_dir / f"{archive_stem}.manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest_path
 
 
 def _write_readme(destination: pathlib.Path, *, target_label: str) -> None:
@@ -252,9 +308,15 @@ def package_stage2(
         artifacts_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(stage2_output, artifacts_dir)
 
+        inventory = _gather_artifact_inventory(artifacts_dir)
         metadata_path = archive_root / "metadata.json"
-        _write_metadata(metadata_path, version=version,
-                        target_label=target_label, aggregator=aggregator)
+        metadata = _write_metadata(
+            metadata_path,
+            version=version,
+            target_label=target_label,
+            aggregator=aggregator,
+            artifacts=inventory,
+        )
         _write_readme(archive_root / "README.md", target_label=target_label)
 
         if link_binary:
@@ -278,6 +340,11 @@ def package_stage2(
         output_dir.mkdir(parents=True, exist_ok=True)
         archive_name = f"sailfin-stage2-{target_label}-{version}.tar.gz"
         archive_path = _create_archive(archive_root, output_dir / archive_name)
+        archive_sha = _compute_sha256(archive_path)
+        _write_sha256_sidecar(archive_path, archive_sha)
+        archive_stem = archive_name[:-len(".tar.gz")] if archive_name.endswith(".tar.gz") else archive_path.stem
+        _write_manifest_sidecar(output_dir, archive_stem,
+                                archive_name, archive_sha, metadata)
         return archive_path
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)

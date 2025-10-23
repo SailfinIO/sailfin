@@ -49,11 +49,14 @@ roadmaps.
   Continuous integration now exercises the Stage2 pipeline directly. The
   `tools/package_stage2.py` helper packages the LLVM `.ll`, `.sfn-asm`, and
   layout manifest outputs into per-target tarballs with metadata about the
-  diagnostic profile. The `.github/workflows/stage2-build.yml` workflow runs on
+  diagnostic profile. The helper now records per-artifact SHA256 digests inside
+  the archive, emits sidecar checksum files, and publishes a manifest JSON that
+  mirrors the bundled metadata for release automation. The `.github/workflows/stage2-build.yml` workflow runs on
   every push and pull request, provisions the Conda toolchain, compiles Stage1
   and Stage2 via `tools/compile_with_stage1.py --stage2`, runs the Stage2 pytest
-  suite, and publishes the packaged artifacts for macOS arm64/x86_64 and Linux
-  x86_64 runners so downstream release jobs can consume native outputs.
+  suite, and publishes the packaged artifacts plus their checksum and manifest
+  sidecars for macOS arm64/x86_64 and Linux x86_64 runners so downstream release
+  jobs can consume native outputs.
   The `.sfn-asm`
   intermediate plus `native_llvm_lowering` provide the compilation infrastructure,
   covering local assignments, structured control flow, structs, enums, interfaces,

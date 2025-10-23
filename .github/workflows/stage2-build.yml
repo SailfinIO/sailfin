@@ -57,5 +57,8 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: stage2-${{ matrix.package_label }}
-                  path: dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
+                  path: |
+                      dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
+                      dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
+                      dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
                   if-no-files-found: error

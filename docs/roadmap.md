@@ -43,6 +43,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 - [ ] Distribution packaging
 
   - [x] Introduce `tools/package_stage2.py` to package Stage2 LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
+  - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for Stage2 tarballs so release automation can verify downloads.
   - [ ] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
   - [ ] Update the release workflow to build Stage2 artifacts, run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
   - [ ] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
