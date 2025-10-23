@@ -15,12 +15,12 @@ import sys
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from compiler.build import native_llvm_lowering as stage1_lowering
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from compiler.build import native_llvm_lowering as stage1_lowering
 
 
 class Stage2BootstrapError(RuntimeError):

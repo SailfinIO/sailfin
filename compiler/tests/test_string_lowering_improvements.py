@@ -49,6 +49,7 @@ fn string_length(text -> string) -> int {
     result = main.compile_to_native_llvm(source)
     assert hasattr(result, 'ir')
     ir = result.ir
+    assert 'declare i64 @sailfin_runtime_string_length' in ir
     assert '@sailfin_runtime_string_length' in ir
     assert 'call i64 @sailfin_runtime_string_length' in ir
 

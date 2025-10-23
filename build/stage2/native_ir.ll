@@ -59,6 +59,7 @@ source_filename = "sailfin"
 %NativeInstruction = type { i32, [48 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
@@ -80,8 +81,6 @@ declare noalias i8* @malloc(i64)
 @.str.len6.h1280947313 = private unnamed_addr constant [7 x i8] c".enum \00"
 @.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
 @.str.len5.h2064124065 = private unnamed_addr constant [6 x i8] c".let \00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define %NativeArtifact* @select_text_artifact({ %NativeArtifact*, i64 }* %artifacts) {
 entry:

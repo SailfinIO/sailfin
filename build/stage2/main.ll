@@ -195,6 +195,7 @@ declare void @sailfin_runtime_print_warn(i8*)
 ; intrinsic sailfin_adapter_fs_read_file requires capabilities: ![io]
 declare i8* @sailfin_adapter_fs_read_file(i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -216,8 +217,6 @@ declare noalias i8* @malloc(i64)
 @.str.len12.h1175821684 = private unnamed_addr constant [13 x i8] c"return False\00"
 
 ; fn compile_to_sailfin effects: ![io]
-declare i64 @sailfin_runtime_string_length(i8*)
-
 define i8* @compile_to_sailfin(i8* %source) {
 entry:
   %l0 = alloca i8*

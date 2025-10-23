@@ -69,6 +69,7 @@ source_filename = "sailfin"
 %LiteralValue = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i1 @sailfin_runtime_is_decimal_digit(i8)
@@ -115,8 +116,6 @@ declare noalias i8* @malloc(i64)
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.len4.h279180071 = private unnamed_addr constant [5 x i8] c"with\00"
 @.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define %Program @parse_program(i8* %source) {
 entry:

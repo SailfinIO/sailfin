@@ -38,6 +38,7 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -65,8 +66,6 @@ declare noalias i8* @malloc(i64)
 @.str.len10.h1855834391 = private unnamed_addr constant [11 x i8] c"` declared\00"
 @.str.len5.h743728856 = private unnamed_addr constant [6 x i8] c"E0301\00"
 @.str.len24.h680377687 = private unnamed_addr constant [25 x i8] c" but is missing member `\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define %TypecheckResult @typecheck_program(%Program %program) {
 entry:

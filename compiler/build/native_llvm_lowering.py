@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
 from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
 sleep = runtime.sleep
@@ -1908,25 +1908,41 @@ def collect_function_runtime_helper_targets(function):
 def collect_instruction_runtime_helper_targets(instruction):
     if instruction.variant == "Let":
         if instruction.value != None:
-            return filter_runtime_helper_targets(extract_all_call_targets(instruction.value))
+            helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.value))
+            helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.value))
+            return helpers
         return []
     if instruction.variant == "Expression":
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+        helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.expression))
+        return helpers
     if instruction.variant == "Return":
         trimmed = trim_text(instruction.expression)
         if len(trimmed) > 0:
-            return filter_runtime_helper_targets(extract_all_call_targets(trimmed))
+            helpers = filter_runtime_helper_targets(extract_all_call_targets(trimmed))
+            helpers = merge_effect_lists(helpers, collect_runtime_property_targets(trimmed))
+            return helpers
         return []
     if instruction.variant == "If":
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.condition))
+        helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.condition))
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.condition))
+        return helpers
     if instruction.variant == "For":
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable))
+        helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable))
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.iterable))
+        return helpers
     if instruction.variant == "Match":
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+        helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.expression))
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.expression))
+        return helpers
     if instruction.variant == "Case":
         helpers = filter_runtime_helper_targets(extract_all_call_targets(instruction.pattern))
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.pattern))
         if instruction.guard != None:
-            helpers = merge_effect_lists(helpers, filter_runtime_helper_targets(extract_all_call_targets(instruction.guard)))
+            guard_targets = filter_runtime_helper_targets(extract_all_call_targets(instruction.guard))
+            combined = merge_effect_lists(helpers, guard_targets)
+            combined = merge_effect_lists(combined, collect_runtime_property_targets(instruction.guard))
+            return combined
         return helpers
     return []
 
@@ -2098,6 +2114,80 @@ def filter_runtime_helper_targets(targets):
             results = append_unique_effect(results, helper.target)
         index += 1
     return results
+
+def collect_runtime_property_targets(expression):
+    trimmed = trim_text(expression)
+    if len(trimmed) == 0:
+        return []
+    results = []
+    if contains_dot_property(trimmed, "length"):
+        results = append_unique_effect(results, "len(string)")
+    return results
+
+def contains_dot_property(expression, name):
+    suffix = "." + name
+    suffix_length = len(suffix)
+    if suffix_length == 0  or  len(expression) < suffix_length:
+        return False
+    index = 0
+    in_single = False
+    in_double = False
+    escape_next = False
+    while True:
+        if index >= len(expression):
+            break
+        ch = expression[index]
+        if in_double:
+            if escape_next:
+                escape_next = False
+            else:
+                if ch == "\\":
+                    escape_next = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape_next:
+                escape_next = False
+            else:
+                if ch == "\\":
+                    escape_next = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if index + suffix_length <= len(expression):
+            match_index = 0
+            matches = True
+            while True:
+                if match_index >= suffix_length:
+                    break
+                expr_char = char_at(expression, index + match_index)
+                suffix_char = char_at(suffix, match_index)
+                if len(expr_char) == 0  or  len(suffix_char) == 0  or  expr_char != suffix_char:
+                    matches = False
+                    break
+                match_index += 1
+            if matches:
+                after_index = index + suffix_length
+                after_char = char_at(expression, after_index)
+                if len(after_char) == 0:
+                    return True
+                if not is_identifier_part_char(after_char):
+                    return True
+        index += 1
+    return False
 
 def append_function_call_entry(entries, entry):
     return (entries) + ([entry])
@@ -5557,17 +5647,24 @@ def format_span_location(span):
     return start + "-" + end
 
 def format_suspension_location(keyword, borrow_span, suspension_span):
-    segments = []
+    has_segment = False
+    combined = ""
     if borrow_span != None:
-        segments = append_string(segments, "borrow at " + format_span_location(borrow_span))
+        combined = "borrow at " + format_span_location(borrow_span)
+        has_segment = True
     if suspension_span != None:
         label = keyword
         if len(label) == 0:
             label = "suspend"
-        segments = append_string(segments, label + " at " + format_span_location(suspension_span))
-    if len(segments) == 0:
+        segment = label + " at " + format_span_location(suspension_span)
+        if has_segment:
+            combined = combined + "; " + segment
+        else:
+            combined = segment
+            has_segment = True
+    if not has_segment:
         return ""
-    return " (" + join_strings(segments, "; ") + ")"
+    return " (" + combined + ")"
 
 def detect_borrow_conflicts(ownership, locals, binding_name, function_name):
     diagnostics = []

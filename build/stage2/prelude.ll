@@ -42,6 +42,7 @@ declare i8* @sailfin_runtime_array_map(i8*, i8*)
 declare i8* @sailfin_runtime_array_filter(i8*, i8*)
 declare i8* @sailfin_runtime_array_reduce(i8*, i8*, i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @sailfin_runtime_grapheme_count(i8*)
 declare i8* @sailfin_runtime_grapheme_at(i8*, double)
@@ -64,8 +65,6 @@ declare noalias i8* @malloc(i64)
 @.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define i8* @capability_grant({ i8**, i64 }* %effects) {
 entry:

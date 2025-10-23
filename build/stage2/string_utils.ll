@@ -9,6 +9,7 @@ source_filename = "sailfin"
 %TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -18,8 +19,6 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define i8* @char_at(i8* %value, double %index) {
 entry:

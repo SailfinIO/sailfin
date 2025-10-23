@@ -2152,33 +2152,49 @@ fn collect_function_runtime_helper_targets(function -> NativeFunction) -> string
 fn collect_instruction_runtime_helper_targets(instruction -> NativeInstruction) -> string[] {
     if instruction.variant == "Let" {
         if instruction.value != null {
-            return filter_runtime_helper_targets(extract_all_call_targets(instruction.value));
+            let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.value));
+            helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.value));
+            return helpers;
         }
         return [];
     }
     if instruction.variant == "Expression" {
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+        let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.expression));
+        return helpers;
     }
     if instruction.variant == "Return" {
         let trimmed = trim_text(instruction.expression);
         if trimmed.length > 0 {
-            return filter_runtime_helper_targets(extract_all_call_targets(trimmed));
+            let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(trimmed));
+            helpers = merge_effect_lists(helpers, collect_runtime_property_targets(trimmed));
+            return helpers;
         }
         return [];
     }
     if instruction.variant == "If" {
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.condition));
+        let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.condition));
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.condition));
+        return helpers;
     }
     if instruction.variant == "For" {
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable));
+        let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.iterable));
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.iterable));
+        return helpers;
     }
     if instruction.variant == "Match" {
-        return filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+        let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.expression));
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.expression));
+        return helpers;
     }
     if instruction.variant == "Case" {
         let mut helpers -> string[] = filter_runtime_helper_targets(extract_all_call_targets(instruction.pattern));
+        helpers = merge_effect_lists(helpers, collect_runtime_property_targets(instruction.pattern));
         if instruction.guard != null {
-            helpers = merge_effect_lists(helpers, filter_runtime_helper_targets(extract_all_call_targets(instruction.guard)));
+            let guard_targets = filter_runtime_helper_targets(extract_all_call_targets(instruction.guard));
+            let mut combined -> string[] = merge_effect_lists(helpers, guard_targets);
+            combined = merge_effect_lists(combined, collect_runtime_property_targets(instruction.guard));
+            return combined;
         }
         return helpers;
     }
@@ -2414,6 +2430,96 @@ fn filter_runtime_helper_targets(targets -> string[]) -> string[] {
         index += 1;
     }
     return results;
+}
+
+fn collect_runtime_property_targets(expression -> string) -> string[] {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let mut results -> string[] = [];
+    if contains_dot_property(trimmed, "length") {
+        results = append_unique_effect(results, "string.length");
+    }
+    return results;
+}
+
+fn contains_dot_property(expression -> string, name -> string) -> boolean {
+    let suffix = "." + name;
+    let suffix_length = suffix.length;
+    if suffix_length == 0 || expression.length < suffix_length {
+        return false;
+    }
+    let mut index -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape_next -> boolean = false;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if in_double {
+            if escape_next {
+                escape_next = false;
+            } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+            } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if index + suffix_length <= expression.length {
+            let mut match_index -> number = 0;
+            let mut matches -> boolean = true;
+            loop {
+                if match_index >= suffix_length {
+                    break;
+                }
+                let expr_char = char_at(expression, index + match_index);
+                let suffix_char = char_at(suffix, match_index);
+                if expr_char.length == 0 || suffix_char.length == 0 || expr_char != suffix_char {
+                    matches = false;
+                    break;
+                }
+                match_index += 1;
+            }
+            if matches {
+                let after_index = index + suffix_length;
+                let after_char = char_at(expression, after_index);
+                if after_char.length == 0 {
+                    return true;
+                }
+                if !is_identifier_part_char(after_char) {
+                    return true;
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
 }
 
 fn append_function_call_entry(entries -> FunctionCallEntry[], entry -> FunctionCallEntry) -> FunctionCallEntry[] {
@@ -8191,21 +8297,29 @@ fn format_span_location(span -> NativeSourceSpan) -> string {
 }
 
 fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
-    let mut segments -> string[] = [];
+    let mut has_segment -> boolean = false;
+    let mut combined -> string = "";
     if borrow_span != null {
-        segments = append_string(segments, "borrow at " + format_span_location(borrow_span));
+        combined = "borrow at " + format_span_location(borrow_span);
+        has_segment = true;
     }
     if suspension_span != null {
         let mut label -> string = keyword;
         if label.length == 0 {
             label = "suspend";
         }
-        segments = append_string(segments, label + " at " + format_span_location(suspension_span));
+        let segment = label + " at " + format_span_location(suspension_span);
+        if has_segment {
+            combined = combined + "; " + segment;
+        } else {
+            combined = segment;
+            has_segment = true;
+        }
     }
-    if segments.length == 0 {
+    if !has_segment {
         return "";
     }
-    return " (" + join_strings(segments, "; ") + ")";
+    return " (" + combined + ")";
 }
 
 fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {

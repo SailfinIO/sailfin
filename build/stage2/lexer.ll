@@ -7,6 +7,7 @@ source_filename = "sailfin"
 %TokenKind = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -25,8 +26,6 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
 @.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
 @.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define { %Token*, i64 }* @lex(i8* %source) {
 entry:

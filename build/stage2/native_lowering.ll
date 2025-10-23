@@ -70,6 +70,7 @@ source_filename = "sailfin"
 %NativeInstruction = type { i32, [48 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare i1 @sailfin_runtime_is_whitespace_char(i8)
@@ -121,8 +122,6 @@ declare noalias i8* @malloc(i64)
 @.str.len4.h174361445 = private unnamed_addr constant [5 x i8] c" == \00"
 @.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.len11.h2001621394 = private unnamed_addr constant [12 x i8] c"[lowering] \00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define %LoweredPythonResult @lower_to_python(%NativeModule %native_module) {
 entry:

@@ -36,6 +36,7 @@ source_filename = "sailfin"
 %TokenKind = type { i32, [8 x i8] }
 %LiteralValue = type { i32, [8 x i8] }
 
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -74,8 +75,6 @@ declare noalias i8* @malloc(i64)
 @.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
 @.str.len10.h715288307 = private unnamed_addr constant [11 x i8] c"Whitespace\00"
 @.str.len7.h936649884 = private unnamed_addr constant [8 x i8] c"Comment\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define { %EffectViolation*, i64 }* @validate_effects(%Program %program) {
 entry:

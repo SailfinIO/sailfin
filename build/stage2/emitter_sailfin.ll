@@ -33,6 +33,7 @@ source_filename = "sailfin"
 %TokenKind = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
@@ -105,8 +106,6 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193511276 = private unnamed_addr constant [3 x i8] c"{\0A\00"
 @.str.len2.h193392014 = private unnamed_addr constant [3 x i8] c"\0A}\00"
 @.str.len39.h1477088561 = private unnamed_addr constant [40 x i8] c"// TODO: unsupported lambda statement: \00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define i8* @emit_program(%Program %program) {
 entry:

@@ -47,6 +47,7 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -203,8 +204,6 @@ declare noalias i8* @malloc(i64)
 @.str.len19.h2048588885 = private unnamed_addr constant [20 x i8] c".manifest version=1\00"
 @.str.len22.h401021290 = private unnamed_addr constant [23 x i8] c"module.layout-manifest\00"
 @.str.len23.h668778749 = private unnamed_addr constant [24 x i8] c"sailfin-layout-manifest\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define %LayoutContext @build_layout_context(%Program %program) {
 entry:

@@ -35,6 +35,7 @@ source_filename = "sailfin"
 %TokenKind = type { i32, [8 x i8] }
 
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
+declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @sailfin_runtime_is_whitespace_char(i8)
 declare i1 @sailfin_runtime_is_decimal_digit(i8)
@@ -47,8 +48,6 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 @.str.len2.h193495007 = private unnamed_addr constant [3 x i8] c"io\00"
-
-declare i64 @sailfin_runtime_string_length(i8*)
 
 define { i8**, i64 }* @infer_effects({ i8**, i64 }* %existing, { %DecoratorInfo*, i64 }* %decorators) {
 entry:
