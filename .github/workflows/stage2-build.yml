@@ -1,0 +1,61 @@
+name: Stage2 Build
+
+on:
+    push:
+        branches:
+            - alpha
+    pull_request:
+    workflow_dispatch:
+
+concurrency:
+    group: stage2-build-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    stage2:
+        name: Stage2 (${{ matrix.package_label }})
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: macos-14
+                      package_label: macos-arm64
+                    - os: macos-13
+                      package_label: macos-x86_64
+                    - os: ubuntu-22.04
+                      package_label: linux-x86_64
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Miniconda
+              uses: conda-incubator/setup-miniconda@v3
+              with:
+                  activate-environment: sailfin
+                  environment-file: environment.yml
+                  auto-update-conda: false
+                  use-mamba: true
+
+            - name: Install clang (Linux)
+              if: matrix.os == 'ubuntu-22.04'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y clang
+
+            - name: Build Stage1/Stage2 artifacts
+              run: conda run -n sailfin python tools/compile_with_stage1.py --stage2 --stage2-quiet
+
+            - name: Run Stage2 test suite
+              run: conda run -n sailfin pytest -m stage2
+
+            - name: Package Stage2 artifacts
+              run: conda run -n sailfin python tools/package_stage2.py --skip-build --target ${{ matrix.package_label }} --out dist
+
+            - name: Upload Stage2 artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: stage2-${{ matrix.package_label }}
+                  path: dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
+                  if-no-files-found: error

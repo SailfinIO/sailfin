@@ -1,6 +1,6 @@
 # Sailfin Status
 
-Updated: October 22, 2025
+Updated: October 23, 2025
 
 This document is the source of truth for what ships today in the Python
 bootstrap toolchain and what exists only in the Sailfin-native
@@ -46,6 +46,14 @@ roadmaps.
   to guarantee module validity, and `...::test_stage2_executes_compiled_program`
   runs the generated IR through MCJIT to confirm that Stage2 and Stage1 agree on
   program behaviour (`42` in the smoke case).
+  Continuous integration now exercises the Stage2 pipeline directly. The
+  `tools/package_stage2.py` helper packages the LLVM `.ll`, `.sfn-asm`, and
+  layout manifest outputs into per-target tarballs with metadata about the
+  diagnostic profile. The `.github/workflows/stage2-build.yml` workflow runs on
+  every push and pull request, provisions the Conda toolchain, compiles Stage1
+  and Stage2 via `tools/compile_with_stage1.py --stage2`, runs the Stage2 pytest
+  suite, and publishes the packaged artifacts for macOS arm64/x86_64 and Linux
+  x86_64 runners so downstream release jobs can consume native outputs.
   The `.sfn-asm`
   intermediate plus `native_llvm_lowering` provide the compilation infrastructure,
   covering local assignments, structured control flow, structs, enums, interfaces,

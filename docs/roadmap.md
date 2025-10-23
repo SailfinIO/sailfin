@@ -17,6 +17,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
   - [ ] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
   - [ ] Add a `stage2-build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
+    - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
   - [ ] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries, provenance metadata, and changelog entries in one pass.
   - [ ] Keep pytest-driven harnesses in CI while the Stage2 native test harness is rewritten; document the temporary dual-runtime strategy in `docs/status.md`.
 
@@ -41,6 +42,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] Distribution packaging
 
+  - [x] Introduce `tools/package_stage2.py` to package Stage2 LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
   - [ ] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
   - [ ] Update the release workflow to build Stage2 artifacts, run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
   - [ ] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
