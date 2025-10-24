@@ -27,20 +27,22 @@ As of October 2025, Stage2Runner now registers capability adapters that bridge L
 
 ### Registered Adapters
 
-| Adapter Symbol                             | Effect    | Signature            | Purpose                                                         |
-| ------------------------------------------ | --------- | -------------------- | --------------------------------------------------------------- |
-| `sailfin_adapter_fs_read_file`             | `io`      | `(i8*) -> i8*`       | Reads file contents; bridges to `runtime_support.fs.readFile`   |
-| `sailfin_adapter_fs_write_file`            | `io`      | `(i8*, i8*) -> void` | Writes file contents; bridges to `runtime_support.fs.writeFile` |
-| `sailfin_adapter_fs_list_directory`        | `io`      | `(i8*) -> i8*`       | Lists directory entries; returns JSON array representation      |
-| `sailfin_adapter_http_get`                 | `net`     | `(i8*) -> i8*`       | HTTP GET request; bridges to `runtime_support.http.get`         |
-| `sailfin_adapter_http_post`                | `net`     | `(i8*, i8*) -> i8*`  | HTTP POST request; returns JSON response                        |
-| `sailfin_adapter_model_invoke_with_prompt` | `model`   | `(i8*, i8*) -> i8*`  | Model invocation; mock implementation                           |
-| `sailfin_adapter_serve_start`              | `io`      | `(i8*, i8*) -> void` | Starts HTTP server; mock implementation                         |
-| `sailfin_adapter_serve_handler_dispatch`   | `io`      | `(i8*, i8*) -> i8*`  | Dispatches handler; returns JSON response                       |
-| `sailfin_adapter_spawn_task`               | `spawn`   | `(i8*, i8*) -> void` | Spawns async task; mock implementation                          |
-| `sailfin_adapter_channel_create`           | `channel` | `(i64) -> i8*`       | Creates channel; bridges to `runtime_support.channel`           |
-| `sailfin_adapter_channel_send`             | `channel` | `(i8*, i8*) -> void` | Sends to channel; mock implementation                           |
-| `sailfin_adapter_channel_receive`          | `channel` | `(i8*) -> i8*`       | Receives from channel; mock implementation                      |
+| Adapter Symbol                             | Effect    | Signature            | Purpose                                                                            |
+| ------------------------------------------ | --------- | -------------------- | ---------------------------------------------------------------------------------- |
+| `sailfin_adapter_fs_read_file`             | `io`      | `(i8*) -> i8*`       | Reads file contents; bridges to `runtime_support.fs.readFile`                      |
+| `sailfin_adapter_fs_write_file`            | `io`      | `(i8*, i8*) -> void` | Writes file contents; bridges to `runtime_support.fs.writeFile`                    |
+| `sailfin_adapter_fs_list_directory`        | `io`      | `(i8*) -> i8*`       | Lists directory entries using runtime.fs.listDirectory; returns JSON array         |
+| `sailfin_adapter_fs_delete_file`           | `io`      | `(i8*) -> i1`        | Deletes files via `runtime_support.fs.deleteFile`; returns success flag            |
+| `sailfin_adapter_fs_create_directory`      | `io`      | `(i8*, i1) -> i1`    | Creates directories via `runtime_support.fs.createDirectory`; returns success flag |
+| `sailfin_adapter_http_get`                 | `net`     | `(i8*) -> i8*`       | HTTP GET request; bridges to `runtime_support.http.get`                            |
+| `sailfin_adapter_http_post`                | `net`     | `(i8*, i8*) -> i8*`  | HTTP POST request; returns JSON response                                           |
+| `sailfin_adapter_model_invoke_with_prompt` | `model`   | `(i8*, i8*) -> i8*`  | Model invocation; mock implementation                                              |
+| `sailfin_adapter_serve_start`              | `io`      | `(i8*, i8*) -> void` | Starts HTTP server; mock implementation                                            |
+| `sailfin_adapter_serve_handler_dispatch`   | `io`      | `(i8*, i8*) -> i8*`  | Dispatches handler; returns JSON response                                          |
+| `sailfin_adapter_spawn_task`               | `spawn`   | `(i8*, i8*) -> void` | Spawns async task; mock implementation                                             |
+| `sailfin_adapter_channel_create`           | `channel` | `(i64) -> i8*`       | Creates channel; bridges to `runtime_support.channel`                              |
+| `sailfin_adapter_channel_send`             | `channel` | `(i8*, i8*) -> void` | Sends to channel; mock implementation                                              |
+| `sailfin_adapter_channel_receive`          | `channel` | `(i8*) -> i8*`       | Receives from channel; mock implementation                                         |
 
 ### Capability Enforcement
 

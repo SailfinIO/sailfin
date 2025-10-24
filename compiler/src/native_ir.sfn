@@ -942,6 +942,18 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
             value_span_consumed: true,
         };
     }
+    if starts_with(line, ".return") {
+        let remainder = trim_text(strip_prefix(line, ".return"));
+        let mut expression -> string = "";
+        if remainder.length > 0 {
+            expression = trim_trailing_delimiters(remainder);
+        }
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Return { expression: expression, span: span }],
+            span_consumed: true,
+            value_span_consumed: false,
+        };
+    }
     if starts_with(line, "ret") {
         if line.length == 3 {
             return InstructionParseResult {

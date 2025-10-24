@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import ctypes
+import os
 from dataclasses import dataclass
 from collections.abc import Iterable as ABCIterable
 from typing import Callable, Dict, Iterable, Mapping, Sequence
@@ -49,10 +50,13 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | None, Sequence[type], type | None]
     "sailfin_adapter_fs_read_file": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_write_file": ("io", (ctypes.c_void_p, ctypes.c_void_p), None),
     "sailfin_adapter_fs_list_directory": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_adapter_fs_delete_file": ("io", (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_adapter_fs_create_directory": ("io", (ctypes.c_void_p, ctypes.c_bool), ctypes.c_bool),
     # String helpers
     "sailfin_runtime_string_length": (None, (ctypes.c_void_p,), ctypes.c_longlong),
     "sailfin_runtime_string_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
     "sailfin_runtime_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
     # HTTP adapters
     "sailfin_adapter_http_get": ("net", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_http_post": ("net", (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
@@ -130,6 +134,14 @@ class Stage2Runner:
         runtime_hooks: Stage2RuntimeHooks | Mapping[str,
                                                     Callable[..., None]] | None = None,
     ) -> None:
+        log_path = os.environ.get("SAILFIN_STAGE2_DEBUG_LOG")
+        self._debug_log_path = log_path if log_path else None
+        if self._debug_log_path:
+            try:
+                with open(self._debug_log_path, "w", encoding="utf-8") as handle:
+                    handle.write("")
+            except OSError:
+                self._debug_log_path = None
         self._lowered_modules = self._normalise_lowered(lowered)
         self._manifest = self._build_manifest_index(self._lowered_modules)
         self._engine = None
@@ -145,6 +157,17 @@ class Stage2Runner:
         if isinstance(lowered, Sequence) and not isinstance(lowered, (bytes, str)):
             return list(lowered)
         return [lowered]
+
+    def _debug_log(self, message: str) -> None:
+        path = self._debug_log_path
+        if not path:
+            return
+        try:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(message + "\n")
+        except OSError:
+            # Ignore log errors so diagnostics do not mask compilation issues.
+            pass
 
     @staticmethod
     def _escape_string_for_llvm(value: str) -> str:
@@ -220,6 +243,76 @@ class Stage2Runner:
                     continue
                 definitions.setdefault(const_name, rendered)
         return definitions
+
+    @staticmethod
+    def _rewrite_function_linkage(
+        ir_text: str,
+        defined_symbols: set[str],
+    ) -> tuple[str, list[str]]:
+        """Scope duplicate function definitions to avoid LLVM collisions."""
+
+        non_export_linkages = {
+            "private",
+            "internal",
+            "available_externally",
+            "linkonce",
+            "linkonce_odr",
+            "weak",
+            "weak_odr",
+            "extern_weak",
+            "common",
+        }
+
+        duplicates: list[str] = []
+        lines = ir_text.splitlines()
+        changed = False
+
+        for index, line in enumerate(lines):
+            stripped = line.lstrip()
+            if not stripped.startswith("define "):
+                continue
+
+            at_index = stripped.find("@")
+            if at_index == -1:
+                continue
+            end_index = stripped.find("(", at_index)
+            if end_index == -1:
+                continue
+
+            symbol = stripped[at_index + 1:end_index]
+            if not symbol:
+                continue
+
+            if symbol not in defined_symbols:
+                defined_symbols.add(symbol)
+                continue
+
+            after_define = stripped[len("define "):]
+            first_token = after_define.split(
+                None, 1)[0] if after_define else ""
+            if first_token in non_export_linkages:
+                continue
+
+            indent = line[: len(line) - len(stripped)]
+            lines[index] = indent + "define private " + after_define
+            duplicates.append(symbol)
+            changed = True
+
+        if not changed:
+            return ir_text, duplicates
+
+        return "\n".join(lines), duplicates
+
+    @staticmethod
+    def _sanitize_symbol_suffix(label: str) -> str:
+        characters: list[str] = []
+        for ch in label:
+            if ch.isalnum():
+                characters.append(ch.lower())
+            else:
+                characters.append("_")
+        suffix = "".join(characters).strip("_")
+        return suffix or "module"
 
     @staticmethod
     def _extract_defined_globals(module_ir: str) -> set[str]:
@@ -378,8 +471,13 @@ class Stage2Runner:
                     if effect:
                         _require(effect)
                     path = _ptr_to_str(path_ptr)
-                    # Mock implementation: return a JSON array representation
-                    result = '["file1.txt", "file2.txt"]'
+                    entries = runtime.fs.listDirectory(path or None)
+                    try:
+                        import json
+                        result = json.dumps(entries)
+                    except Exception:  # pragma: no cover - fall back to comma join on JSON issues.
+                        result = "[" + \
+                            ", ".join(f'\"{name}\"' for name in entries) + "]"
                     return _str_to_ptr(result)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
@@ -387,6 +485,39 @@ class Stage2Runner:
                     return 0
 
             return cfunc_type(_fs_list_directory)
+
+        elif symbol == "sailfin_adapter_fs_delete_file":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p)
+
+            def _fs_delete_file(path_ptr: ctypes.c_void_p) -> bool:
+                try:
+                    if effect:
+                        _require(effect)
+                    path = _ptr_to_str(path_ptr)
+                    return bool(runtime.fs.deleteFile(path))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_fs_delete_file)
+
+        elif symbol == "sailfin_adapter_fs_create_directory":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_bool)
+
+            def _fs_create_directory(path_ptr: ctypes.c_void_p, exist_ok: ctypes.c_bool) -> bool:
+                try:
+                    if effect:
+                        _require(effect)
+                    path = _ptr_to_str(path_ptr)
+                    return bool(runtime.fs.createDirectory(path, exist_ok=bool(exist_ok)))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_fs_create_directory)
 
         elif symbol == "sailfin_runtime_string_length":
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p)
@@ -405,7 +536,8 @@ class Stage2Runner:
             return cfunc_type(_string_length)
 
         elif symbol == "sailfin_runtime_string_concat":
-            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
 
             def _string_concat(first_ptr: ctypes.c_void_p, second_ptr: ctypes.c_void_p) -> int:
                 try:
@@ -428,12 +560,14 @@ class Stage2Runner:
                     ("length", ctypes.c_longlong),
                 ]
 
-            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
 
             def _array_to_list(array_ptr: ctypes.c_void_p) -> list[str]:
                 if not array_ptr:
                     return []
-                array = ctypes.cast(array_ptr, ctypes.POINTER(_StringArray)).contents
+                array = ctypes.cast(
+                    array_ptr, ctypes.POINTER(_StringArray)).contents
                 length = int(array.length)
                 if length <= 0 or not array.data:
                     return []
@@ -445,7 +579,8 @@ class Stage2Runner:
                 for index, value in enumerate(values):
                     data[index] = ctypes.c_void_p(_str_to_ptr(value))
                 array_struct = _StringArray()
-                array_struct.data = ctypes.cast(data, ctypes.POINTER(ctypes.c_void_p))
+                array_struct.data = ctypes.cast(
+                    data, ctypes.POINTER(ctypes.c_void_p))
                 array_struct.length = length
                 self._adapter_string_buffers.append(data)
                 self._adapter_string_buffers.append(array_struct)
@@ -463,6 +598,19 @@ class Stage2Runner:
                     return 0
 
             return cfunc_type(_concat)
+
+        elif symbol == "sailfin_runtime_bounds_check":
+            cfunc_type = ctypes.CFUNCTYPE(
+                None, ctypes.c_longlong, ctypes.c_longlong)
+
+            def _bounds_check(index: ctypes.c_longlong, length: ctypes.c_longlong) -> None:
+                try:
+                    runtime.bounds_check(int(index), int(length))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+
+            return cfunc_type(_bounds_check)
 
         # HTTP adapters
         elif symbol == "sailfin_adapter_http_get":
@@ -640,32 +788,165 @@ class Stage2Runner:
             raise ValueError(f"unknown adapter symbol '{symbol}'")
 
     def _compile_ir(self) -> None:
-        engine = _create_execution_engine()
         constant_definitions = self._collect_global_constant_definitions(
             self._lowered_modules)
-        modules: list = []
-        for lowered in self._lowered_modules:
+        self._debug_log(
+            f"[stage2] lowered modules: {len(self._lowered_modules)}")
+
+        candidates: list[tuple[str, str]] = []
+        defined_symbols: set[str] = set()
+        duplicate_registry: Dict[str, list[str]] = {}
+        for index, lowered in enumerate(self._lowered_modules):
             module_ir = getattr(lowered, "ir", "")
             if not module_ir:
                 continue
             patched_ir = self._inject_missing_constant_definitions(
-                module_ir, definitions=constant_definitions
+                module_ir, definitions=constant_definitions)
+            rewritten_ir, duplicates = self._rewrite_function_linkage(
+                patched_ir, defined_symbols)
+            if duplicates:
+                duplicate_registry[str(
+                    getattr(lowered, "module_name", None)
+                    or getattr(lowered, "module", None)
+                    or getattr(lowered, "name", None)
+                    or f"module_{index}"
+                )] = duplicates
+            label = (
+                getattr(lowered, "module_name", None)
+                or getattr(lowered, "module", None)
+                or getattr(lowered, "name", None)
+                or f"module_{index}"
             )
+            candidates.append((str(label), rewritten_ir))
+            source_hint = getattr(lowered, "source_path", None)
+            if source_hint is None:
+                source_hint = getattr(lowered, "path", None)
+            if source_hint is None:
+                source_hint = getattr(lowered, "source", None)
+            if source_hint is not None:
+                self._debug_log(
+                    f"[stage2] candidate {label} from {source_hint}"
+                )
+            else:
+                self._debug_log(f"[stage2] candidate {label}")
+            if duplicates:
+                self._debug_log(
+                    f"[stage2] rewrote {len(duplicates)} duplicate function(s) in {label}"
+                )
+
+        valid_candidates: list[tuple[str, str]] = []
+        skipped: list[tuple[str, str]] = []
+
+        for label, ir_text in candidates:
             try:
-                module = llvm.parse_assembly(patched_ir)
+                module = llvm.parse_assembly(ir_text)
             except RuntimeError:
+                skipped.append((label, "parse"))
+                self._debug_log(
+                    f"[stage2] skipped module {label}: parse failure")
                 continue
+
             try:
                 module.verify()
             except RuntimeError:
-                # Stage2 IR is still under development; allow non-verifying modules.
+                # Tolerate verification failures during filtering; the JIT probe below
+                # determines whether the module can execute safely.
                 pass
+
+            probe_engine = _create_execution_engine()
+            probe_engine.add_module(module)
+            try:
+                probe_engine.finalize_object()
+            except RuntimeError:
+                skipped.append((label, "finalize"))
+                self._debug_log(
+                    f"[stage2] skipped module {label}: probe finalize failure"
+                )
+                continue
+
+            valid_candidates.append((label, ir_text))
+            self._debug_log(f"[stage2] module {label} passed probe")
+
+        if not valid_candidates:
+            raise ValueError("no LLVM IR provided for Stage2 execution")
+
+        engine = _create_execution_engine()
+        modules: list = []
+        seen_functions: set[str] = set()
+        seen_globals: set[str] = set()
+        final_duplicates: list[str] = []
+        for label, ir_text in valid_candidates:
+            module = llvm.parse_assembly(ir_text)
+            try:
+                module.verify()
+            except RuntimeError:
+                pass
+
+            module_suffix = self._sanitize_symbol_suffix(str(label))
+            for function in module.functions:
+                if function.is_declaration:
+                    continue
+                name = function.name
+                if name in seen_functions:
+                    unique_name = name
+                    counter = 1
+                    while unique_name in seen_functions:
+                        unique_name = f"{name}__{module_suffix}" if counter == 1 else f"{name}__{module_suffix}_{counter}"
+                        counter += 1
+                    function.name = unique_name
+                    function.linkage = "internal"
+                    seen_functions.add(unique_name)
+                    final_duplicates.append(f"{name}->{unique_name}")
+                else:
+                    seen_functions.add(name)
+
+            for global_var in module.global_variables:
+                if global_var.is_declaration:
+                    continue
+                name = global_var.name
+                if name in seen_globals:
+                    unique_name = name
+                    counter = 1
+                    while unique_name in seen_globals:
+                        unique_name = f"{name}__{module_suffix}" if counter == 1 else f"{name}__{module_suffix}_{counter}"
+                        counter += 1
+                    global_var.name = unique_name
+                    global_var.linkage = "internal"
+                    seen_globals.add(unique_name)
+                    final_duplicates.append(f"{name}->{unique_name}")
+                else:
+                    seen_globals.add(name)
+
+            self._debug_log(
+                f"[stage2] adding module {label} (functions={len(list(module.functions))}, globals={len(list(module.global_variables))})"
+            )
             engine.add_module(module)
             modules.append(module)
-        if not modules:
-            raise ValueError("no LLVM IR provided for Stage2 execution")
-        engine.finalize_object()
+
+        self._debug_log(
+            f"[stage2] finalizing engine with {len(modules)} module(s)"
+        )
+        try:
+            engine.finalize_object()
+        except RuntimeError as exc:
+            self._debug_log(f"[stage2] finalize failed: {exc}")
+            raise
         engine.run_static_constructors()
+        self._debug_log("[stage2] finalize succeeded")
+
+        if skipped:
+            preview = ", ".join(
+                f"{name} ({reason})" for name, reason in skipped[:5])
+            runtime.console.warn(
+                f"[stage2] skipped {len(skipped)} module(s): {preview}")
+
+        if duplicate_registry or final_duplicates:
+            total_duplicates = sum(len(entries)
+                                   for entries in duplicate_registry.values()) + len(final_duplicates)
+            runtime.console.warn(
+                f"[stage2] scoped {total_duplicates} duplicate symbol definition(s) across modules"
+            )
+
         self._engine = engine
         self._modules = modules
 

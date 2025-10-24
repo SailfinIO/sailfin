@@ -724,6 +724,15 @@ class PhiInputEntry:
     def __repr__(self):
         return runtime.struct_repr('PhiInputEntry', [runtime.struct_field('value', self.value), runtime.struct_field('label', self.label)])
 
+class MutationMaterializationResult:
+    def __init__(self, mutations, lines, temp_index):
+        self.mutations = mutations
+        self.lines = lines
+        self.temp_index = temp_index
+
+    def __repr__(self):
+        return runtime.struct_repr('MutationMaterializationResult', [runtime.struct_field('mutations', self.mutations), runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
+
 class PhiStoreEntry:
     def __init__(self, phi_line, store_line):
         self.phi_line = phi_line
@@ -962,6 +971,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     runtime_helpers = collect_runtime_helper_targets(local_functions)
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")
     direct_effects = collect_direct_function_effects(context_functions)
     call_graph = collect_function_call_graph(context_functions)
     aggregated_effects = propagate_function_effects(direct_effects, call_graph)
@@ -2316,6 +2326,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_number_fn", symbol="sailfin_runtime_is_number", return_type="i1", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_boolean_fn", symbol="sailfin_runtime_is_boolean", return_type="i1", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_void_fn", symbol="sailfin_runtime_is_void", return_type="i1", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime.bounds_check", symbol="sailfin_runtime_bounds_check", return_type="void", parameter_types=["i64", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_array_fn", symbol="sailfin_runtime_is_array", return_type="i1", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_is_callable_fn", symbol="sailfin_runtime_is_callable", return_type="i1", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_resolve_runtime_type_fn", symbol="sailfin_runtime_resolve_type", return_type="i8*", parameter_types=["i8*"], effects=[]))
@@ -2328,6 +2339,10 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.writeFile", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.listDirectory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_delete_file", symbol="sailfin_adapter_fs_delete_file", return_type="i1", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.deleteFile", symbol="sailfin_adapter_fs_delete_file", return_type="i1", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_create_directory", symbol="sailfin_adapter_fs_create_directory", return_type="i1", parameter_types=["i8*", "i1"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.createDirectory", symbol="sailfin_adapter_fs_create_directory", return_type="i1", parameter_types=["i8*", "i1"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http_get", symbol="sailfin_adapter_http_get", return_type="i8*", parameter_types=["i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http_post", symbol="sailfin_adapter_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="model_invoke_with_prompt", symbol="sailfin_adapter_model_invoke_with_prompt", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["model"]))
@@ -2689,7 +2704,7 @@ def validate_borrow_lifetimes(function, regions):
         index += 1
     return diagnostics
 
-def lower_instruction_range(function, start_index, end, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, context, scope_id, scope_depth, current_label):
+def lower_instruction_range(function, start_index, end, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, context, scope_id, scope_depth, initial_label):
     diagnostics = []
     current_lines = lines
     current_allocas = allocas
@@ -2705,6 +2720,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
     collected_lifetime_regions = []
     current_mutations = []
     collected_string_constants = empty_string_constant_set()
+    current_label = initial_label
     while True:
         if index >= end:
             break
@@ -2723,6 +2739,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
             current_mutations = (current_mutations) + (lowered.mutations)
             temp_constants = collected_string_constants
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
+            current_label = find_last_label(current_lines, current_label)
         else:
             if instruction.variant == "Expression":
                 trimmed_expression = trim_text(instruction.expression)
@@ -2761,6 +2778,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                     current_mutations = (current_mutations) + (lowered.mutations)
                     temp_constants = collected_string_constants
                     collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
+                current_label = find_last_label(current_lines, current_label)
             else:
                 if instruction.variant == "Return":
                     lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context)
@@ -2815,6 +2833,7 @@ current_label
                         current_mutations = (current_mutations) + (lowered.mutations)
                         terminated = lowered.terminated
                         index = lowered.next_index
+                        current_label = find_last_label(current_lines, current_label)
                         if terminated:
                             break
                         continue
@@ -2853,6 +2872,7 @@ current_label
                             current_mutations = (current_mutations) + (lowered.mutations)
                             terminated = lowered.terminated
                             index = lowered.next_index
+                            current_label = find_last_label(current_lines, current_label)
                             if terminated:
                                 break
                             continue
@@ -2891,6 +2911,7 @@ current_label
                                 current_mutations = (current_mutations) + (lowered.mutations)
                                 terminated = lowered.terminated
                                 index = lowered.next_index
+                                current_label = find_last_label(current_lines, current_label)
                                 if terminated:
                                     break
                                 continue
@@ -2959,6 +2980,7 @@ current_label
                                                     current_mutations = (current_mutations) + (lowered.mutations)
                                                     terminated = lowered.terminated
                                                     index = lowered.next_index
+                                                    current_label = find_last_label(current_lines, current_label)
                                                     if terminated:
                                                         break
                                                     continue
@@ -3217,6 +3239,47 @@ body_label
     current_lines = final_lines
     current_lines = append_string(current_lines, exit_label + ":")
     current_locals = base_locals
+    exit_loads = []
+    exit_load_idx = 0
+    while True:
+        if exit_load_idx >= len(mutated_names):
+            break
+        name = mutated_names[exit_load_idx]
+        local = find_local_binding(base_locals, name)
+        if local != None:
+            exit_load_temp = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer)
+            exit_loads = append_string(exit_loads, exit_load_temp)
+        else:
+            exit_loads = append_string(exit_loads, "")
+        exit_load_idx += 1
+    exit_mutations = []
+    name_idx = 0
+    while True:
+        if name_idx >= len(mutated_names):
+            break
+        name = mutated_names[name_idx]
+        exit_value = ""
+        if name_idx < len(exit_loads):
+            exit_value = exit_loads[name_idx]
+        if len(exit_value) > 0:
+            original = find_mutation_for_name(collected_mutations, name)
+            llvm_type = ""
+            original_span = None
+            if original != None:
+                llvm_type = original.llvm_type
+                original_span = original.span
+            if len(llvm_type) == 0:
+                local = find_local_binding(base_locals, name)
+                if local != None:
+                    llvm_type = local.llvm_type
+            if len(llvm_type) == 0:
+                llvm_type = "double"
+            exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=exit_label)
+            exit_mutations = (exit_mutations) + ([exit_mutation])
+        name_idx += 1
+    collected_mutations = exit_mutations
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
 
 def lower_for_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
@@ -3425,6 +3488,48 @@ loop_body_label
             diagnostics = append_string(diagnostics, "llvm lowering: unable to increment `.for` iterator in `" + function.name + "`")
         current_lines = append_string(current_lines, "  br label %" + loop_header_label)
         current_lines = append_string(current_lines, loop_exit_label + ":")
+        mutated_names = collect_mutation_names(collected_mutations)
+        exit_loads = []
+        load_idx = 0
+        while True:
+            if load_idx >= len(mutated_names):
+                break
+            name = mutated_names[load_idx]
+            local = find_local_binding(locals, name)
+            if local != None:
+                exit_load_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer)
+                exit_loads = append_string(exit_loads, exit_load_temp)
+            else:
+                exit_loads = append_string(exit_loads, "")
+            load_idx += 1
+        exit_mutations = []
+        exit_idx = 0
+        while True:
+            if exit_idx >= len(mutated_names):
+                break
+            name = mutated_names[exit_idx]
+            exit_value = ""
+            if exit_idx < len(exit_loads):
+                exit_value = exit_loads[exit_idx]
+            if len(exit_value) > 0:
+                original = find_mutation_for_name(collected_mutations, name)
+                llvm_type = ""
+                original_span = None
+                if original != None:
+                    llvm_type = original.llvm_type
+                    original_span = original.span
+                if len(llvm_type) == 0:
+                    local = find_local_binding(locals, name)
+                    if local != None:
+                        llvm_type = local.llvm_type
+                if len(llvm_type) == 0:
+                    llvm_type = "double"
+                exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=loop_exit_label)
+                exit_mutations = (exit_mutations) + ([exit_mutation])
+            exit_idx += 1
+        collected_mutations = exit_mutations
         current_locals = locals
         return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=collected_string_constants)
     iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context, "")
@@ -3546,6 +3651,48 @@ loop_body_label
     current_lines = append_string(current_lines, "  store i64 " + next_index_name + ", i64* " + index_pointer)
     current_lines = append_string(current_lines, "  br label %" + loop_header_label)
     current_lines = append_string(current_lines, loop_exit_label + ":")
+    mutated_names = collect_mutation_names(collected_mutations)
+    exit_loads = []
+    load_idx = 0
+    while True:
+        if load_idx >= len(mutated_names):
+            break
+        name = mutated_names[load_idx]
+        local = find_local_binding(locals, name)
+        if local != None:
+            exit_load_temp = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer)
+            exit_loads = append_string(exit_loads, exit_load_temp)
+        else:
+            exit_loads = append_string(exit_loads, "")
+        load_idx += 1
+    exit_mutations = []
+    exit_idx = 0
+    while True:
+        if exit_idx >= len(mutated_names):
+            break
+        name = mutated_names[exit_idx]
+        exit_value = ""
+        if exit_idx < len(exit_loads):
+            exit_value = exit_loads[exit_idx]
+        if len(exit_value) > 0:
+            original = find_mutation_for_name(collected_mutations, name)
+            llvm_type = ""
+            original_span = None
+            if original != None:
+                llvm_type = original.llvm_type
+                original_span = original.span
+            if len(llvm_type) == 0:
+                local = find_local_binding(locals, name)
+                if local != None:
+                    llvm_type = local.llvm_type
+            if len(llvm_type) == 0:
+                llvm_type = "double"
+            exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=loop_exit_label)
+            exit_mutations = (exit_mutations) + ([exit_mutation])
+        exit_idx += 1
+    collected_mutations = exit_mutations
     current_locals = locals
     empty_constants = empty_string_constant_set()
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=next_index, mutations=collected_mutations, string_constants=empty_constants)
@@ -4010,6 +4157,58 @@ def build_phi_and_store(local, llvm_type, phi_inputs, temp_index):
     store_line = "  store " + llvm_type + " " + phi_temp + ", " + llvm_type + "* " + local.pointer
     return PhiStoreEntry(phi_line=phi_line, store_line=store_line)
 
+def find_last_label(lines, fallback):
+    index = len(lines)
+    while True:
+        if index <= 0:
+            break
+        index -= 1
+        line = lines[index]
+        if len(line) == 0:
+            continue
+        if line[len(line) - 1] == ":":
+            return substring(line, 0, len(line) - 1)
+    return fallback
+
+def retarget_recent_mutations(mutations, start_index, target_label):
+    if len(target_label) == 0:
+        return mutations
+    index = 0
+    result = []
+    while True:
+        if index >= len(mutations):
+            break
+        mutation = mutations[index]
+        if index >= start_index:
+            updated = LocalMutation(name=mutation.name, llvm_type=mutation.llvm_type, value_name=mutation.value_name, span=mutation.span, originating_label=target_label)
+            result = (result) + ([updated])
+        else:
+            result = (result) + ([mutation])
+        index += 1
+    return result
+
+def materialize_mutation_values_at_exit(mutations, locals, lines, temp_index):
+    updated_lines = lines
+    current_temp = temp_index
+    updated_mutations = []
+    index = 0
+    while True:
+        if index >= len(mutations):
+            break
+        mutation = mutations[index]
+        local = find_local_binding(locals, mutation.name)
+        if local != None:
+            load_temp = format_temp_name(current_temp)
+            current_temp += 1
+            load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+            updated_lines = append_string(updated_lines, load_line)
+            updated = LocalMutation(name=mutation.name, llvm_type=mutation.llvm_type, value_name=load_temp, span=mutation.span, originating_label=mutation.originating_label)
+            updated_mutations = (updated_mutations) + ([updated])
+        else:
+            updated_mutations = (updated_mutations) + ([mutation])
+        index += 1
+    return MutationMaterializationResult(mutations=updated_mutations, lines=updated_lines, temp_index=current_temp)
+
 def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_label, then_label, lines, temp_index):
     phi_lines = []
     store_lines = []
@@ -4023,7 +4222,10 @@ def emit_phi_merges_for_straight_if(mutations, locals, preloaded_values, base_la
         if local != None:
             preloaded_value = find_preloaded_value(locals, preloaded_values, mutation.name)
             if preloaded_value != None  and  len(preloaded_value) > 0:
-                phi_inputs = ["[ " + mutation.value_name + ", %" + then_label + " ]", "[ " + preloaded_value + ", %" + base_label + " ]"]
+                then_source_label = mutation.originating_label
+                if len(then_source_label) == 0:
+                    then_source_label = then_label
+                phi_inputs = ["[ " + mutation.value_name + ", %" + then_source_label + " ]", "[ " + preloaded_value + ", %" + base_label + " ]"]
                 entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp)
                 phi_lines = append_string(phi_lines, entry.phi_line)
                 store_lines = append_string(store_lines, entry.store_line)
@@ -4075,13 +4277,19 @@ def emit_phi_merges_for_if_else(then_mutations, else_mutations, locals, preloade
             phi_inputs = []
             if not then_terminated:
                 if then_mutation != None:
-                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_label + " ]")
+                    then_source_label = then_mutation.originating_label
+                    if len(then_source_label) == 0:
+                        then_source_label = then_label
+                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_source_label + " ]")
                 else:
                     if preloaded_value != None:
                         phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]")
             if not else_terminated:
                 if else_mutation != None:
-                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_label + " ]")
+                    else_source_label = else_mutation.originating_label
+                    if len(else_source_label) == 0:
+                        else_source_label = else_label
+                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_source_label + " ]")
                 else:
                     if preloaded_value != None:
                         phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]")
@@ -4219,6 +4427,7 @@ context
         preloaded_locals = append_string(preloaded_locals, preload_temp)
         preload_index += 1
     current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target)
+    branch_label = find_last_label(current_lines, current_label)
     base_locals = current_locals
     base_allocas = current_allocas
     base_temp = current_temp
@@ -4256,7 +4465,13 @@ then_label
     then_bindings = then_result.bindings
     current_next_region = then_result.next_lifetime_region_id
     current_lines = (current_lines) + (then_result.lines)
-    then_mutations = then_result.mutations
+    then_exit_label = find_last_label(current_lines, then_label)
+    then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label)
+    if not then_result.terminated  and  len(then_mutations) > 0:
+        materialized_then = materialize_mutation_values_at_exit(then_mutations, base_locals, current_lines, current_temp)
+        current_lines = materialized_then.lines
+        current_temp = materialized_then.temp_index
+        then_mutations = materialized_then.mutations
     collected_mutations = (collected_mutations) + (then_mutations)
     collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants)
     then_terminated = then_result.terminated
@@ -4298,7 +4513,14 @@ else_label
         current_next_region = else_result.next_lifetime_region_id
         current_lines = (current_lines) + (else_result.lines)
         else_terminated = else_result.terminated
-        else_mutations = else_result.mutations
+        else_exit_label = find_last_label(current_lines, else_label)
+        branch_mutations = retarget_recent_mutations(else_result.mutations, 0, else_exit_label)
+        if not else_terminated  and  len(branch_mutations) > 0:
+            materialized_else = materialize_mutation_values_at_exit(branch_mutations, base_locals, current_lines, current_temp)
+            current_lines = materialized_else.lines
+            current_temp = materialized_else.temp_index
+            branch_mutations = materialized_else.mutations
+        else_mutations = branch_mutations
         collected_mutations = (collected_mutations) + (else_mutations)
         collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants)
         if not else_terminated:
@@ -4330,7 +4552,7 @@ current_temp
 collected_mutations,
 base_locals,
 preloaded_locals,
-current_label,
+branch_label,
 then_label,
 current_lines,
 current_temp
@@ -6650,6 +6872,7 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
         current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value)
         current_temp += 1
         current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)")
+        current_lines = append_string(current_lines, "  call void @sailfin_runtime_bounds_check(i64 " + coerced_index.value + ", i64 " + length_value + ")")
         element_ptr = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value)
         current_temp += 1

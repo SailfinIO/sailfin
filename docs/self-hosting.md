@@ -160,6 +160,12 @@ Tests validate:
 - Generated IR has valid LLVM structure
 - Module sizes are reasonable (not empty or corrupt)
 
+Recent work tightened runtime safety: Stage2 array and slice indexing now emit
+`sailfin_runtime_bounds_check` calls that raise `IndexError` when an index
+escapes the recorded length. This matches Stage1 behaviour during self-hosted
+compilation runs and removes the temporary TODO marker that only logged a
+diagnostic comment.
+
 ### Current Limitations
 
 Stage2 bootstrap currently:

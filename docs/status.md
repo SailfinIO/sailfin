@@ -342,8 +342,10 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   length), generates `getelementptr` to compute the element address, and loads
   the element value. String indexing (e.g., `text[0]` where `text` has type `i8*`)
   works similarly but skips length extraction since strings don't carry stored
-  length metadata. Bounds checks emit comparison instructions and comments marking
-  potential out-of-bounds access (actual trap handling deferred to follow-on work).
+  length metadata. Bounds checks emit comparison instructions and call the
+  `sailfin_runtime_bounds_check` helper to raise an `IndexError` when an index
+  escapes the recorded length, eliminating the previous TODO placeholder that
+  only logged comments.
   Regression coverage lives in
   `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_indexes_primitive_array`
   (validates indexing into `number[]` arrays with variable and literal indices),
@@ -352,10 +354,15 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   `test_native_llvm_execution_checks_array_bounds` (confirms bounds check
   instructions emit in generated IR), and
   `test_native_llvm_execution_indexes_string_character` (validates character
-  access from strings via `text[index]` returning `i8` values). With array
-  indexing implemented, Stage2 bootstrap warnings for `unsupported expression
-  decorators[index]` and `unsupported expression text[0]` are eliminated,
-  unblocking progress on warning-free self-compilation.
+  access from strings via `text[index]` returning `i8` values),
+  `test_native_llvm_execution_checks_array_bounds` (locks the helper call in
+  emitted IR), `test_stage2_runner_bounds_check_helper_sets_runtime_error`
+  (verifies the adapter surfaces `IndexError` during Stage2 execution), and
+  `compiler/tests/test_runtime_prelude.py::test_runtime_bounds_check_rejects_invalid_indices`
+  (unit coverage for the Python helper). With array indexing implemented,
+  Stage2 bootstrap warnings for `unsupported expression decorators[index]` and
+  `unsupported expression text[0]` are eliminated, unblocking progress on
+  warning-free self-compilation.
   Enum member access is now partially supported in Stage2 lowering. When the base
   expression is an enum value, `lower_member_access` materialises stable global
   strings for each variant tag and emits `select` chains keyed off the enum's tag,
@@ -681,7 +688,11 @@ from { Expression, Statement }`), resolves their paths to layout manifest files 
   `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_executes_spawn_and_channel`
   (spawn task and channel communication), and
   `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_enforces_capability_restrictions`
-  (validates `PermissionError` when capabilities are missing). Adapter ABI,
+  (validates `PermissionError` when capabilities are missing). Directory
+  listings now surface real filesystem entries via the adapter, covered by
+  `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_fs_list_directory_returns_real_listing`
+  and `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_fs_create_and_delete`.
+  Adapter ABI,
   registration flow, and capability enforcement documented in
   `docs/runtime_audit.md`.
   Stage2 lowering now rejects suspension points (`await`, `yield`)

@@ -855,6 +855,12 @@ def parse_instruction(line, span, value_span):
         return InstructionParseResult(instructions=[NativeInstruction.EndMatch()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, ".let "):
         return InstructionParseResult(instructions=[parse_let_instruction(line, span, value_span)], span_consumed=True, value_span_consumed=True)
+    if starts_with(line, ".return"):
+        remainder = trim_text(strip_prefix(line, ".return"))
+        expression = ""
+        if len(remainder) > 0:
+            expression = trim_trailing_delimiters(remainder)
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
     if starts_with(line, "ret"):
         if len(line) == 3:
             return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Return', [runtime.enum_field('expression', ""), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)

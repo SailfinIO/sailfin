@@ -6,7 +6,7 @@
 
 import { NativeModule } from "./emit_native";
 import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
-import { substring, char_code } from "./string_utils";
+import { substring, char_code, char_at } from "./string_utils";
 
 struct TraitImplementationDescriptor {
     struct_name -> string;
@@ -795,6 +795,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     let direct_effects = collect_direct_function_effects(context_functions);
     let call_graph = collect_function_call_graph(context_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
@@ -2881,6 +2882,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime.bounds_check",
+        symbol: "sailfin_runtime_bounds_check",
+        return_type: "void",
+        parameter_types: ["i64", "i64"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_is_array_fn",
         symbol: "sailfin_runtime_is_array",
         return_type: "i1",
@@ -2964,6 +2972,34 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "sailfin_adapter_fs_list_directory",
         return_type: "i8*",
         parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_delete_file",
+        symbol: "sailfin_adapter_fs_delete_file",
+        return_type: "i1",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.deleteFile",
+        symbol: "sailfin_adapter_fs_delete_file",
+        return_type: "i1",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_create_directory",
+        symbol: "sailfin_adapter_fs_create_directory",
+        return_type: "i1",
+        parameter_types: ["i8*", "i1"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.createDirectory",
+        symbol: "sailfin_adapter_fs_create_directory",
+        return_type: "i1",
+        parameter_types: ["i8*", "i1"],
         effects: ["io"],
     });
     
@@ -3615,7 +3651,7 @@ fn lower_instruction_range(
     context -> TypeContext,
     scope_id -> string,
     scope_depth -> number,
-    current_label -> string
+    initial_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3632,6 +3668,7 @@ fn lower_instruction_range(
     let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_mutations -> LocalMutation[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut current_label -> string = initial_label;
 
     loop {
         if index >= end {
@@ -3653,6 +3690,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+            current_label = find_last_label(current_lines, current_label);
         } else if instruction.variant == "Expression" {
             let trimmed_expression = trim_text(instruction.expression);
             let mut handled_inline_let -> boolean = false;
@@ -3701,6 +3739,7 @@ fn lower_instruction_range(
                 let temp_constants = collected_string_constants;
                 collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             }
+            current_label = find_last_label(current_lines, current_label);
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -3754,6 +3793,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
+            current_label = find_last_label(current_lines, current_label);
             if terminated {
                 break;
             }
@@ -3792,6 +3832,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
+            current_label = find_last_label(current_lines, current_label);
             if terminated {
                 break;
             }
@@ -3830,6 +3871,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
+            current_label = find_last_label(current_lines, current_label);
             if terminated {
                 break;
             }
@@ -3898,6 +3940,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
+            current_label = find_last_label(current_lines, current_label);
             if terminated {
                 break;
             }
@@ -4343,6 +4386,68 @@ fn lower_loop_instruction(
     current_lines = append_string(current_lines, exit_label + ":");
 
     current_locals = base_locals;
+
+    // Load mutated locals once at the loop exit so phi merges can consume
+    // values that dominate the merge block.
+    let mut exit_loads -> string[] = [];
+    let mut exit_load_idx -> number = 0;
+    loop {
+        if exit_load_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[exit_load_idx];
+        let local = find_local_binding(base_locals, name);
+        if local != null {
+            let exit_load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+            exit_loads = append_string(exit_loads, exit_load_temp);
+        } else {
+            exit_loads = append_string(exit_loads, "");
+        }
+        exit_load_idx += 1;
+    }
+
+    let mut exit_mutations -> LocalMutation[] = [];
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+        let mut exit_value -> string = "";
+        if name_idx < exit_loads.length {
+            exit_value = exit_loads[name_idx];
+        }
+        if exit_value.length > 0 {
+            let original = find_mutation_for_name(collected_mutations, name);
+            let mut llvm_type -> string = "";
+            let mut original_span -> NativeSourceSpan? = null;
+            if original != null {
+                llvm_type = original.llvm_type;
+                original_span = original.span;
+            }
+            if llvm_type.length == 0 {
+                let local = find_local_binding(base_locals, name);
+                if local != null {
+                    llvm_type = local.llvm_type;
+                }
+            }
+            if llvm_type.length == 0 {
+                llvm_type = "double";
+            }
+            let exit_mutation = LocalMutation {
+                name: name,
+                llvm_type: llvm_type,
+                value_name: exit_value,
+                span: original_span,
+                originating_label: exit_label,
+            };
+            exit_mutations = exit_mutations.concat([exit_mutation]);
+        }
+        name_idx += 1;
+    }
+    collected_mutations = exit_mutations;
 
     return BlockLoweringResult {
         lines: current_lines,
@@ -4817,6 +4922,67 @@ fn lower_for_instruction(
         current_lines = append_string(current_lines, "  br label %" + loop_header_label);
         current_lines = append_string(current_lines, loop_exit_label + ":");
 
+        let mutated_names = collect_mutation_names(collected_mutations);
+        let mut exit_loads -> string[] = [];
+        let mut load_idx -> number = 0;
+        loop {
+            if load_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[load_idx];
+            let local = find_local_binding(locals, name);
+            if local != null {
+                let exit_load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+                exit_loads = append_string(exit_loads, exit_load_temp);
+            } else {
+                exit_loads = append_string(exit_loads, "");
+            }
+            load_idx += 1;
+        }
+
+        let mut exit_mutations -> LocalMutation[] = [];
+        let mut exit_idx -> number = 0;
+        loop {
+            if exit_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[exit_idx];
+            let mut exit_value -> string = "";
+            if exit_idx < exit_loads.length {
+                exit_value = exit_loads[exit_idx];
+            }
+            if exit_value.length > 0 {
+                let original = find_mutation_for_name(collected_mutations, name);
+                let mut llvm_type -> string = "";
+                let mut original_span -> NativeSourceSpan? = null;
+                if original != null {
+                    llvm_type = original.llvm_type;
+                    original_span = original.span;
+                }
+                if llvm_type.length == 0 {
+                    let local = find_local_binding(locals, name);
+                    if local != null {
+                        llvm_type = local.llvm_type;
+                    }
+                }
+                if llvm_type.length == 0 {
+                    llvm_type = "double";
+                }
+                let exit_mutation = LocalMutation {
+                    name: name,
+                    llvm_type: llvm_type,
+                    value_name: exit_value,
+                    span: original_span,
+                    originating_label: loop_exit_label,
+                };
+                exit_mutations = exit_mutations.concat([exit_mutation]);
+            }
+            exit_idx += 1;
+        }
+        collected_mutations = exit_mutations;
+
         current_locals = locals;
 
         return BlockLoweringResult {
@@ -5012,10 +5178,71 @@ fn lower_for_instruction(
     current_temp += 1;
 
     current_lines = append_string(current_lines, "  store i64 " + next_index_name + ", i64* " + index_pointer);
-    current_lines = append_string(current_lines, "  br label %" + loop_header_label);
-    current_lines = append_string(current_lines, loop_exit_label + ":");
+        current_lines = append_string(current_lines, "  br label %" + loop_header_label);
+        current_lines = append_string(current_lines, loop_exit_label + ":");
 
-    current_locals = locals;
+        let mutated_names = collect_mutation_names(collected_mutations);
+        let mut exit_loads -> string[] = [];
+        let mut load_idx -> number = 0;
+        loop {
+            if load_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[load_idx];
+            let local = find_local_binding(locals, name);
+            if local != null {
+                let exit_load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+                exit_loads = append_string(exit_loads, exit_load_temp);
+            } else {
+                exit_loads = append_string(exit_loads, "");
+            }
+            load_idx += 1;
+        }
+
+        let mut exit_mutations -> LocalMutation[] = [];
+        let mut exit_idx -> number = 0;
+        loop {
+            if exit_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[exit_idx];
+            let mut exit_value -> string = "";
+            if exit_idx < exit_loads.length {
+                exit_value = exit_loads[exit_idx];
+            }
+            if exit_value.length > 0 {
+                let original = find_mutation_for_name(collected_mutations, name);
+                let mut llvm_type -> string = "";
+                let mut original_span -> NativeSourceSpan? = null;
+                if original != null {
+                    llvm_type = original.llvm_type;
+                    original_span = original.span;
+                }
+                if llvm_type.length == 0 {
+                    let local = find_local_binding(locals, name);
+                    if local != null {
+                        llvm_type = local.llvm_type;
+                    }
+                }
+                if llvm_type.length == 0 {
+                    llvm_type = "double";
+                }
+                let exit_mutation = LocalMutation {
+                    name: name,
+                    llvm_type: llvm_type,
+                    value_name: exit_value,
+                    span: original_span,
+                    originating_label: loop_exit_label,
+                };
+                exit_mutations = exit_mutations.concat([exit_mutation]);
+            }
+            exit_idx += 1;
+        }
+        collected_mutations = exit_mutations;
+
+        current_locals = locals;
 
     let empty_constants = empty_string_constant_set();
     return BlockLoweringResult {
@@ -5718,6 +5945,12 @@ struct PhiInputEntry {
     label -> string;
 }
 
+struct MutationMaterializationResult {
+    mutations -> LocalMutation[];
+    lines -> string[];
+    temp_index -> number;
+}
+
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals -> LocalBinding[], preloaded_values -> string[], name -> string) -> string? {
     let mut local_index -> number = 0;
@@ -5814,6 +6047,109 @@ fn build_phi_and_store(
     return PhiStoreEntry { phi_line: phi_line, store_line: store_line };
 }
 
+// Helper: determine the label of the current basic block by scanning the existing lines
+fn find_last_label(lines -> string[], fallback -> string) -> string {
+    let mut index -> number = lines.length;
+    loop {
+        if index <= 0 {
+            break;
+        }
+        index -= 1;
+        let line = lines[index];
+        if line.length == 0 {
+            continue;
+        }
+        if line[line.length - 1] == ":" {
+            return substring(line, 0, line.length - 1);
+        }
+    }
+    return fallback;
+}
+
+fn retarget_recent_mutations(
+    mutations -> LocalMutation[],
+    start_index -> number,
+    target_label -> string
+) -> LocalMutation[] {
+    if target_label.length == 0 {
+        return mutations;
+    }
+
+    let mut index -> number = 0;
+    let mut result -> LocalMutation[] = [];
+
+    loop {
+        if index >= mutations.length {
+            break;
+        }
+
+        let mutation = mutations[index];
+        if index >= start_index {
+            let updated = LocalMutation {
+                name: mutation.name,
+                llvm_type: mutation.llvm_type,
+                value_name: mutation.value_name,
+                span: mutation.span,
+                originating_label: target_label,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([mutation]);
+        }
+
+        index += 1;
+    }
+
+    return result;
+}
+
+fn materialize_mutation_values_at_exit(
+    mutations -> LocalMutation[],
+    locals -> LocalBinding[],
+    lines -> string[],
+    temp_index -> number
+) -> MutationMaterializationResult {
+    let mut updated_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut updated_mutations -> LocalMutation[] = [];
+
+    let mut index -> number = 0;
+    loop {
+        if index >= mutations.length {
+            break;
+        }
+
+        let mutation = mutations[index];
+        let local = find_local_binding(locals, mutation.name);
+
+        if local != null {
+            let load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+            updated_lines = append_string(updated_lines, load_line);
+
+            let updated = LocalMutation {
+                name: mutation.name,
+                llvm_type: mutation.llvm_type,
+                value_name: load_temp,
+                span: mutation.span,
+                originating_label: mutation.originating_label,
+            };
+            updated_mutations = updated_mutations.concat([updated]);
+        } else {
+            updated_mutations = updated_mutations.concat([mutation]);
+        }
+
+        index += 1;
+    }
+
+    return MutationMaterializationResult {
+        mutations: updated_mutations,
+        lines: updated_lines,
+        temp_index: current_temp,
+    };
+}
+
 fn emit_phi_merges_for_straight_if(
     mutations -> LocalMutation[],
     locals -> LocalBinding[],
@@ -5840,8 +6176,12 @@ fn emit_phi_merges_for_straight_if(
             let preloaded_value = find_preloaded_value(locals, preloaded_values, mutation.name);
 
             if preloaded_value != null && preloaded_value.length > 0 {
+                let mut then_source_label -> string = mutation.originating_label;
+                if then_source_label.length == 0 {
+                    then_source_label = then_label;
+                }
                 let phi_inputs = [
-                    "[ " + mutation.value_name + ", %" + then_label + " ]",
+                    "[ " + mutation.value_name + ", %" + then_source_label + " ]",
                     "[ " + preloaded_value + ", %" + base_label + " ]",
                 ];
                 let entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp);
@@ -5933,7 +6273,11 @@ fn emit_phi_merges_for_if_else(
 
             if !then_terminated {
                 if then_mutation != null {
-                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_label + " ]");
+                    let mut then_source_label -> string = then_mutation.originating_label;
+                    if then_source_label.length == 0 {
+                        then_source_label = then_label;
+                    }
+                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_source_label + " ]");
                 } else if preloaded_value != null {
                     phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]");
                 }
@@ -5941,7 +6285,11 @@ fn emit_phi_merges_for_if_else(
 
             if !else_terminated {
                 if else_mutation != null {
-                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_label + " ]");
+                    let mut else_source_label -> string = else_mutation.originating_label;
+                    if else_source_label.length == 0 {
+                        else_source_label = else_label;
+                    }
+                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_source_label + " ]");
                 } else if preloaded_value != null {
                     phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]");
                 }
@@ -6189,6 +6537,10 @@ fn lower_if_instruction(
 
     current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target);
 
+    // Track the actual source block for the conditional branch so downstream phi nodes
+    // reference the correct predecessor even when the condition introduced helper blocks
+    let branch_label = find_last_label(current_lines, current_label);
+
     let base_locals = current_locals;
     let base_allocas = current_allocas;
     let base_temp = current_temp;
@@ -6227,7 +6579,14 @@ fn lower_if_instruction(
     then_bindings = then_result.bindings;
     current_next_region = then_result.next_lifetime_region_id;
     current_lines = current_lines.concat(then_result.lines);
-    let then_mutations = then_result.mutations;
+    let then_exit_label = find_last_label(current_lines, then_label);
+    let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
+    if !then_result.terminated && then_mutations.length > 0 {
+        let materialized_then = materialize_mutation_values_at_exit(then_mutations, base_locals, current_lines, current_temp);
+        current_lines = materialized_then.lines;
+        current_temp = materialized_then.temp_index;
+        then_mutations = materialized_then.mutations;
+    }
     collected_mutations = collected_mutations.concat(then_mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants);
     let then_terminated = then_result.terminated;
@@ -6271,7 +6630,15 @@ fn lower_if_instruction(
         current_next_region = else_result.next_lifetime_region_id;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
-        else_mutations = else_result.mutations;
+        let else_exit_label = find_last_label(current_lines, else_label);
+        let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, else_exit_label);
+        if !else_terminated && branch_mutations.length > 0 {
+            let materialized_else = materialize_mutation_values_at_exit(branch_mutations, base_locals, current_lines, current_temp);
+            current_lines = materialized_else.lines;
+            current_temp = materialized_else.temp_index;
+            branch_mutations = materialized_else.mutations;
+        }
+        else_mutations = branch_mutations;
         collected_mutations = collected_mutations.concat(else_mutations);
         collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants);
         if !else_terminated {
@@ -6313,7 +6680,7 @@ fn lower_if_instruction(
                     collected_mutations,
                     base_locals,
                     preloaded_locals,
-                    current_label,
+                    branch_label,
                     then_label,
                     current_lines,
                     current_temp
@@ -9733,14 +10100,12 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         current_temp += 1;
         length_value = length_temp;
         
-        // Bounds check: if index >= length, trap
-        let bounds_check = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
-        current_temp += 1;
-        
-        // For now, we'll skip the actual trap and just emit a comment
-        // TODO: Implement proper trap/error handling
-        current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
+    // Bounds check: if index >= length, raise at runtime via helper
+    let bounds_check = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_bounds_check(i64 " + coerced_index.value + ", i64 " + length_value + ")");
 
         // Compute element address using getelementptr
         let element_ptr = format_temp_name(current_temp);

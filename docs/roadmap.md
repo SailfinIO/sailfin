@@ -517,9 +517,11 @@ Move checked tasks here with links to PRs / status updates for traceability.
       - [x] Recognizes `base[index]` syntax and splits into base expression and index expression.
       - [x] Lowers base expression to get array operand with `{ element_type*, i64 }` or `[N x element_type]` LLVM type.
       - [x] Lowers index expression to get `i64` index value.
-      - [x] Emits bounds check (compare index against array length) with trap on out-of-bounds access.
-      - [x] Generates `getelementptr` to compute element address.
-      - [x] Loads element value and returns operand with correct element type.
+
+  - [x] Emits bounds check (compare index against array length) and routes failures through the `sailfin_runtime_bounds_check` helper to raise `IndexError` on out-of-bounds access.
+
+    - [x] Generates `getelementptr` to compute element address.
+    - [x] Loads element value and returns operand with correct element type.
     - [x] Integrate index expression recognition into `lower_expression` after member access but before fallback.
     - [x] Handle both heap-allocated arrays (`{ element_type*, i64 }*`) and stack arrays (`[N x element_type]`).
     - [x] Add tests validating array indexing compiles and executes correctly:

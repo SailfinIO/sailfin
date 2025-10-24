@@ -1,4 +1,5 @@
 import ctypes
+import json
 import textwrap
 
 import llvmlite.binding as llvm
@@ -6,7 +7,8 @@ import pytest
 
 from compiler.build.emit_native import NativeArtifact, NativeModule
 from compiler.build.native_llvm_lowering import lower_to_llvm
-from runtime.stage2_runner import Stage2Runner, current_capability_grant
+from runtime import runtime_support as runtime
+from runtime.stage2_runner import Stage2Runner, _LAST_RUNTIME_ERROR, current_capability_grant
 
 pytestmark = [pytest.mark.stage2,
               pytest.mark.usefixtures("stage1_environment")]
@@ -127,6 +129,23 @@ def _build_pair_array(values):
     buffer = pair_array_type(*pairs)
     struct = _ArrayPair(data=buffer, length=len(values))
     return buffer, struct
+
+
+def _register_bounds_check_symbol():
+    def _bounds_check_stub(index: ctypes.c_longlong, length: ctypes.c_longlong) -> None:
+        runtime.bounds_check(int(index), int(length))
+
+    stub = ctypes.CFUNCTYPE(None, ctypes.c_longlong, ctypes.c_longlong)(
+        _bounds_check_stub
+    )
+    llvm.add_symbol(
+        "sailfin_runtime_bounds_check",
+        ctypes.cast(stub, ctypes.c_void_p).value,
+    )
+    return stub
+
+
+_BOUNDS_CHECK_HELPER = _register_bounds_check_symbol()
 
 
 def _invoke(engine, name: str, restype, arg_types, *args):
@@ -2654,7 +2673,7 @@ def test_native_llvm_execution_calls_fs_adapter() -> None:
     """
     Verify that filesystem adapter declarations emit correctly.
 
-    Tests that fs_read_file, fs_write_file, and fs_list_directory adapters:
+    Tests that filesystem adapters (read/write/list/delete/create):
     1. Generate proper LLVM declare statements
     2. Include capability metadata comments showing required effects
     """
@@ -2667,6 +2686,8 @@ def test_native_llvm_execution_calls_fs_adapter() -> None:
         .let content = fs_read_file(path)
         .let _ignored1 = fs_write_file(path, content)
         .let _ignored2 = fs_list_directory(path)
+        .let _ignored3 = fs_delete_file(path)
+        .let _ignored4 = fs_create_directory(path, true)
         .return content
         .endfn
     """
@@ -2698,6 +2719,16 @@ def test_native_llvm_execution_calls_fs_adapter() -> None:
         "fs_list_directory should emit capability metadata for io"
     assert "declare i8* @sailfin_adapter_fs_list_directory(i8*)" in ir, \
         "fs_list_directory should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_fs_delete_file requires capabilities: ![io]" in ir, \
+        "fs_delete_file should emit capability metadata for io"
+    assert "declare i1 @sailfin_adapter_fs_delete_file(i8*)" in ir, \
+        "fs_delete_file should emit adapter declaration"
+
+    assert "; intrinsic sailfin_adapter_fs_create_directory requires capabilities: ![io]" in ir, \
+        "fs_create_directory should emit capability metadata for io"
+    assert "declare i1 @sailfin_adapter_fs_create_directory(i8*, i1)" in ir, \
+        "fs_create_directory should emit adapter declaration"
 
 
 def test_native_llvm_execution_calls_http_adapter() -> None:
@@ -2921,6 +2952,40 @@ def test_stage2_runner_executes_fs_operations() -> None:
         "should have registered runtime helpers and adapters"
 
 
+def test_stage2_runner_bounds_check_helper_sets_runtime_error() -> None:
+    """Bounds check helper should surface IndexError via the runtime context."""
+
+    artifact_text = """
+        .fn noop
+        .meta return number
+
+        .return 0.0
+        .endfn
+    """
+    lowered = _lower_native_text(artifact_text)
+    runner = Stage2Runner(lowered)
+
+    helper = runner._make_adapter(
+        "sailfin_runtime_bounds_check",
+        None,
+        (ctypes.c_longlong, ctypes.c_longlong),
+        None,
+    )
+
+    token = _LAST_RUNTIME_ERROR.set(None)
+    try:
+        helper(ctypes.c_longlong(0), ctypes.c_longlong(0))
+        error = _LAST_RUNTIME_ERROR.get()
+        assert isinstance(error, IndexError)
+        assert "out of bounds" in str(error)
+
+        _LAST_RUNTIME_ERROR.set(None)
+        helper(ctypes.c_longlong(0), ctypes.c_longlong(5))
+        assert _LAST_RUNTIME_ERROR.get() is None
+    finally:
+        _LAST_RUNTIME_ERROR.reset(token)
+
+
 def test_stage2_runner_executes_http_request() -> None:
     """
     Verify that HTTP adapters are registered in Stage2Runner
@@ -2951,6 +3016,70 @@ def test_stage2_runner_executes_http_request() -> None:
     # Verify adapters were registered
     assert len(runner._registered_helpers) > 10, \
         "should have registered runtime helpers and adapters"
+
+
+def test_stage2_runner_fs_list_directory_returns_real_listing(tmp_path) -> None:
+    """fs_list_directory adapter should surface real directory contents."""
+
+    listing_root = tmp_path / "fs_listing"
+    listing_root.mkdir()
+    (listing_root / "first.txt").write_text("a", encoding="utf-8")
+    (listing_root / "second.txt").write_text("b", encoding="utf-8")
+
+    path_literal = json.dumps(str(listing_root))
+    artifact_text = f"""
+        .fn list_directory_test
+        .meta return string
+        .meta effects io
+
+        .let entries = fs_list_directory({path_literal})
+        .return entries
+        .endfn
+    """
+
+    lowered = _lower_native_text(artifact_text)
+    runner = Stage2Runner(lowered)
+    runner.set_manifest_effects("list_directory_test", ["io"])
+
+    result_ptr = runner.invoke("list_directory_test", restype=ctypes.c_void_p)
+    assert result_ptr, "fs_list_directory should return pointer to JSON data"
+
+    json_bytes = ctypes.cast(result_ptr, ctypes.c_char_p).value
+    assert json_bytes is not None
+    entries = json.loads(json_bytes.decode("utf-8"))
+    assert entries == ["first.txt", "second.txt"]
+
+
+def test_stage2_runner_fs_create_and_delete(tmp_path) -> None:
+    """fs_create_directory and fs_delete_file should mutate the real filesystem."""
+
+    base_dir = tmp_path / "fs_mutation"
+    target_dir = base_dir / "nested"
+    target_file = target_dir / "data.txt"
+
+    dir_literal = json.dumps(str(target_dir))
+    file_literal = json.dumps(str(target_file))
+
+    artifact_text = f"""
+        .fn fs_mutation_test
+        .meta return number
+        .meta effects io
+
+        .let created = fs_create_directory({dir_literal}, true)
+        .let _write = fs_write_file({file_literal}, "payload")
+        .let removed = fs_delete_file({file_literal})
+        .return 0.0
+        .endfn
+    """
+
+    lowered = _lower_native_text(artifact_text)
+    runner = Stage2Runner(lowered)
+    runner.set_manifest_effects("fs_mutation_test", ["io"])
+
+    runner.invoke("fs_mutation_test")
+
+    assert target_dir.exists(), "fs_create_directory should create the directory"
+    assert not target_file.exists(), "fs_delete_file should remove the target file"
 
 
 def test_stage2_runner_executes_model_prompt() -> None:
@@ -3530,6 +3659,10 @@ fn main() -> number {
 
     # Check for bounds check comment
     assert "bounds check" in ir, "Bounds check comment should be present"
+
+    # Check for runtime helper invocation
+    assert "call void @sailfin_runtime_bounds_check" in ir, \
+        "Bounds check helper call should be emitted"
 
     # Verify it compiles successfully
     _compile_ir(ir)

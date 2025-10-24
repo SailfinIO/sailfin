@@ -369,6 +369,17 @@ _PRIMITIVE_TYPE_ALIASES: Dict[str, tuple[type, ...]] = {
 }
 
 
+def bounds_check(index: int, length: int) -> None:
+    """Raise IndexError when an index lies outside the provided bounds."""
+
+    if length < 0:
+        length = 0
+    if index < 0 or index >= length:
+        raise IndexError(
+            f"array index {index} out of bounds for length {length}"
+        )
+
+
 class _FileSystem:
     def __init__(self) -> None:
         self._writes: Dict[str, str] = {}
@@ -398,6 +409,67 @@ class _FileSystem:
     def writeFile(self, path: str, contents: str) -> None:
         self._writes[path] = contents
         console.info(f"[fs] wrote {len(contents)} bytes to {path}")
+
+    def listDirectory(self, path: str | None = None) -> List[str]:
+        """Return directory entries combining on-disk and in-memory files."""
+
+        target = pathlib.Path(path or ".")
+        entries: set[str] = set()
+
+        try:
+            for child in target.iterdir():
+                entries.add(child.name)
+        except OSError:
+            # Mirror bootstrap behaviour by tolerating missing directories.
+            pass
+
+        try:
+            target_abs = target.resolve(strict=False)
+        except TypeError:  # pragma: no cover - fallback for older Python versions.
+            target_abs = (pathlib.Path.cwd() / target).resolve(strict=False)
+        except OSError:
+            target_abs = (pathlib.Path.cwd() / target).resolve(strict=False)
+
+        for stored_path in self._writes:
+            stored = pathlib.Path(stored_path)
+            if not stored.is_absolute():
+                stored = (pathlib.Path.cwd() / stored).resolve(strict=False)
+            try:
+                parent = stored.parent
+            except RuntimeError:  # pragma: no cover - defensive guard.
+                continue
+            if parent == target_abs:
+                entries.add(stored.name)
+
+        return sorted(entries)
+
+    def deleteFile(self, path: str) -> bool:
+        """Delete a file, returning True when removed or buffered."""
+
+        removed = self._writes.pop(path, None) is not None
+        target = pathlib.Path(path)
+        try:
+            target.unlink(missing_ok=True)  # type: ignore[arg-type]
+            removed = True
+        except AttributeError:
+            try:
+                target.unlink()
+                removed = True
+            except FileNotFoundError:
+                pass
+        except OSError:
+            pass
+        return removed
+
+    def createDirectory(self, path: str, *, exist_ok: bool = True) -> bool:
+        """Create a directory on disk; returns True on success."""
+
+        target = pathlib.Path(path)
+        try:
+            target.mkdir(parents=True, exist_ok=exist_ok)
+            return True
+        except OSError:
+            return False
 
 
 fs = _FileSystem()
@@ -441,6 +513,14 @@ class FilesystemBridge:
     def write_text(self, path: str, contents: str) -> None:
         self._grant.require("io")
         self._delegate.writeFile(path, contents)
+
+    def delete_file(self, path: str) -> bool:
+        self._grant.require("io")
+        return self._delegate.deleteFile(path)
+
+    def create_directory(self, path: str, *, exist_ok: bool = True) -> bool:
+        self._grant.require("io")
+        return self._delegate.createDirectory(path, exist_ok=exist_ok)
 
 
 def create_filesystem_bridge(
