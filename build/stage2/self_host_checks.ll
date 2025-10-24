@@ -8,6 +8,7 @@ source_filename = "sailfin"
 %ProjectCompilation = type { { %CompiledModule**, i64 }*, { %ModuleDiagnostics**, i64 }* }
 %LLVMCompilationResult = type { %LoweredLLVMResult, %NativeModule }
 
+declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -46,61 +47,64 @@ entry:
   br i1 %t10, label %then0, label %merge1
 then0:
   store i1 0, i1* %l3
+  %t15 = load i1, i1* %l3
   br label %merge1
 merge1:
-  %t15 = phi i1 [ 0, %then0 ], [ %t14, %entry ]
-  store i1 %t15, i1* %l3
-  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t17 = load { i8**, i64 }, { i8**, i64 }* %t16
-  %t18 = extractvalue { i8**, i64 } %t17, 1
-  %t19 = icmp sgt i64 %t18, 0
-  %t20 = load %ProjectCompilation, %ProjectCompilation* %l0
-  %t21 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t23 = load i1, i1* %l3
-  br i1 %t19, label %then2, label %merge3
+  %t16 = phi i1 [ %t15, %then0 ], [ %t14, %entry ]
+  store i1 %t16, i1* %l3
+  %t17 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t18 = load { i8**, i64 }, { i8**, i64 }* %t17
+  %t19 = extractvalue { i8**, i64 } %t18, 1
+  %t20 = icmp sgt i64 %t19, 0
+  %t21 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t22 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t24 = load i1, i1* %l3
+  br i1 %t20, label %then2, label %merge3
 then2:
   store i1 0, i1* %l3
+  %t25 = load i1, i1* %l3
   br label %merge3
 merge3:
-  %t24 = phi i1 [ 0, %then2 ], [ %t23, %entry ]
-  store i1 %t24, i1* %l3
-  %t25 = load %ProjectCompilation, %ProjectCompilation* %l0
-  %t26 = extractvalue %ProjectCompilation %t25, 0
-  %t27 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t26
-  %t28 = extractvalue { %CompiledModule**, i64 } %t27, 1
-  %t29 = load { i8**, i64 }, { i8**, i64 }* %sources
-  %t30 = extractvalue { i8**, i64 } %t29, 1
-  %t31 = icmp ne i64 %t28, %t30
-  %t32 = load %ProjectCompilation, %ProjectCompilation* %l0
-  %t33 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t35 = load i1, i1* %l3
-  br i1 %t31, label %then4, label %merge5
+  %t26 = phi i1 [ %t25, %then2 ], [ %t24, %merge1 ]
+  store i1 %t26, i1* %l3
+  %t27 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t28 = extractvalue %ProjectCompilation %t27, 0
+  %t29 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t28
+  %t30 = extractvalue { %CompiledModule**, i64 } %t29, 1
+  %t31 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t32 = extractvalue { i8**, i64 } %t31, 1
+  %t33 = icmp ne i64 %t30, %t32
+  %t34 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t35 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t37 = load i1, i1* %l3
+  br i1 %t33, label %then4, label %merge5
 then4:
   store i1 0, i1* %l3
+  %t38 = load i1, i1* %l3
   br label %merge5
 merge5:
-  %t36 = phi i1 [ 0, %then4 ], [ %t35, %entry ]
-  store i1 %t36, i1* %l3
-  %t37 = load i1, i1* %l3
-  %t38 = insertvalue %SelfHostCheckResult undef, i1 %t37, 0
-  %t39 = load %ProjectCompilation, %ProjectCompilation* %l0
-  %t40 = extractvalue %ProjectCompilation %t39, 0
-  %t41 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t40
-  %t42 = extractvalue { %CompiledModule**, i64 } %t41, 1
-  %t43 = sitofp i64 %t42 to double
-  %t44 = insertvalue %SelfHostCheckResult %t38, double %t43, 1
-  %t45 = load { i8**, i64 }, { i8**, i64 }* %sources
-  %t46 = extractvalue { i8**, i64 } %t45, 1
-  %t47 = sitofp i64 %t46 to double
-  %t48 = insertvalue %SelfHostCheckResult %t44, double %t47, 2
-  %t49 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t50 = bitcast { %ModuleDiagnostics*, i64 }* %t49 to { %ModuleDiagnostics**, i64 }*
-  %t51 = insertvalue %SelfHostCheckResult %t48, { %ModuleDiagnostics**, i64 }* %t50, 3
-  %t52 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t53 = insertvalue %SelfHostCheckResult %t51, { i8**, i64 }* %t52, 4
-  ret %SelfHostCheckResult %t53
+  %t39 = phi i1 [ %t38, %then4 ], [ %t37, %merge3 ]
+  store i1 %t39, i1* %l3
+  %t40 = load i1, i1* %l3
+  %t41 = insertvalue %SelfHostCheckResult undef, i1 %t40, 0
+  %t42 = load %ProjectCompilation, %ProjectCompilation* %l0
+  %t43 = extractvalue %ProjectCompilation %t42, 0
+  %t44 = load { %CompiledModule**, i64 }, { %CompiledModule**, i64 }* %t43
+  %t45 = extractvalue { %CompiledModule**, i64 } %t44, 1
+  %t46 = sitofp i64 %t45 to double
+  %t47 = insertvalue %SelfHostCheckResult %t41, double %t46, 1
+  %t48 = load { i8**, i64 }, { i8**, i64 }* %sources
+  %t49 = extractvalue { i8**, i64 } %t48, 1
+  %t50 = sitofp i64 %t49 to double
+  %t51 = insertvalue %SelfHostCheckResult %t47, double %t50, 2
+  %t52 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t53 = bitcast { %ModuleDiagnostics*, i64 }* %t52 to { %ModuleDiagnostics**, i64 }*
+  %t54 = insertvalue %SelfHostCheckResult %t51, { %ModuleDiagnostics**, i64 }* %t53, 3
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t56 = insertvalue %SelfHostCheckResult %t54, { i8**, i64 }* %t55, 4
+  ret %SelfHostCheckResult %t56
 }
 
 define { %ModuleDiagnostics*, i64 }* @collect_fatal_diagnostics({ %ModuleDiagnostics*, i64 }* %entries) {
@@ -122,10 +126,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t47 = phi { %ModuleDiagnostics*, i64 }* [ %t6, %entry ], [ %t45, %loop.latch2 ]
-  %t48 = phi double [ %t7, %entry ], [ %t46, %loop.latch2 ]
-  store { %ModuleDiagnostics*, i64 }* %t47, { %ModuleDiagnostics*, i64 }** %l0
-  store double %t48, double* %l1
+  %t48 = phi { %ModuleDiagnostics*, i64 }* [ %t6, %entry ], [ %t46, %loop.latch2 ]
+  %t49 = phi double [ %t7, %entry ], [ %t47, %loop.latch2 ]
+  store { %ModuleDiagnostics*, i64 }* %t48, { %ModuleDiagnostics*, i64 }** %l0
+  store double %t49, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -146,6 +150,7 @@ merge5:
   %t19 = extractvalue { %ModuleDiagnostics*, i64 } %t17, 1
   %t20 = icmp uge i64 %t16, %t19
   ; bounds check: %t20 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t16, i64 %t19)
   %t21 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t18, i64 %t16
   %t22 = load %ModuleDiagnostics, %ModuleDiagnostics* %t21
   store %ModuleDiagnostics %t22, %ModuleDiagnostics* %l2
@@ -174,22 +179,25 @@ then6:
   %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t38, { i8**, i64 }* %t35)
   %t40 = bitcast { i8**, i64 }* %t39 to { %ModuleDiagnostics*, i64 }*
   store { %ModuleDiagnostics*, i64 }* %t40, { %ModuleDiagnostics*, i64 }** %l0
+  %t41 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
   br label %merge7
 merge7:
-  %t41 = phi { %ModuleDiagnostics*, i64 }* [ %t40, %then6 ], [ %t25, %loop.body1 ]
-  store { %ModuleDiagnostics*, i64 }* %t41, { %ModuleDiagnostics*, i64 }** %l0
-  %t42 = load double, double* %l1
-  %t43 = sitofp i64 1 to double
-  %t44 = fadd double %t42, %t43
-  store double %t44, double* %l1
+  %t42 = phi { %ModuleDiagnostics*, i64 }* [ %t41, %then6 ], [ %t25, %merge5 ]
+  store { %ModuleDiagnostics*, i64 }* %t42, { %ModuleDiagnostics*, i64 }** %l0
+  %t43 = load double, double* %l1
+  %t44 = sitofp i64 1 to double
+  %t45 = fadd double %t43, %t44
+  store double %t45, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t45 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t46 = load double, double* %l1
+  %t46 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t47 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t49 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  ret { %ModuleDiagnostics*, i64 }* %t49
+  %t50 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t51 = load double, double* %l1
+  %t52 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  ret { %ModuleDiagnostics*, i64 }* %t52
 }
 
 define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, %ProjectCompilation %compilation) {
@@ -211,10 +219,10 @@ entry:
   %t7 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t46 = phi { i8**, i64 }* [ %t6, %entry ], [ %t44, %loop.latch2 ]
-  %t47 = phi double [ %t7, %entry ], [ %t45, %loop.latch2 ]
-  store { i8**, i64 }* %t46, { i8**, i64 }** %l0
-  store double %t47, double* %l1
+  %t47 = phi { i8**, i64 }* [ %t6, %entry ], [ %t45, %loop.latch2 ]
+  %t48 = phi double [ %t7, %entry ], [ %t46, %loop.latch2 ]
+  store { i8**, i64 }* %t47, { i8**, i64 }** %l0
+  store double %t48, double* %l1
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l1
@@ -235,6 +243,7 @@ merge5:
   %t19 = extractvalue { i8**, i64 } %t17, 1
   %t20 = icmp uge i64 %t16, %t19
   ; bounds check: %t20 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t16, i64 %t19)
   %t21 = getelementptr i8*, i8** %t18, i64 %t16
   %t22 = load i8*, i8** %t21
   store i8* %t22, i8** %l2
@@ -261,22 +270,25 @@ then6:
   store i64 1, i64* %t38
   %t39 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t31, { i8**, i64 }* %t36)
   store { i8**, i64 }* %t39, { i8**, i64 }** %l0
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %merge7
 merge7:
-  %t40 = phi { i8**, i64 }* [ %t39, %then6 ], [ %t28, %loop.body1 ]
-  store { i8**, i64 }* %t40, { i8**, i64 }** %l0
-  %t41 = load double, double* %l1
-  %t42 = sitofp i64 1 to double
-  %t43 = fadd double %t41, %t42
-  store double %t43, double* %l1
+  %t41 = phi { i8**, i64 }* [ %t40, %then6 ], [ %t28, %merge5 ]
+  store { i8**, i64 }* %t41, { i8**, i64 }** %l0
+  %t42 = load double, double* %l1
+  %t43 = sitofp i64 1 to double
+  %t44 = fadd double %t42, %t43
+  store double %t44, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t44 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t45 = load double, double* %l1
+  %t45 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t46 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t48 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t48
+  %t49 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t50 = load double, double* %l1
+  %t51 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t51
 }
 
 define i1 @module_present(i8* %target, { %CompiledModule*, i64 }* %modules) {
@@ -308,6 +320,7 @@ merge5:
   %t12 = extractvalue { %CompiledModule*, i64 } %t10, 1
   %t13 = icmp uge i64 %t9, %t12
   ; bounds check: %t13 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t9, i64 %t12)
   %t14 = getelementptr %CompiledModule, %CompiledModule* %t11, i64 %t9
   %t15 = load %CompiledModule, %CompiledModule* %t14
   %t16 = extractvalue %CompiledModule %t15, 0
@@ -326,6 +339,7 @@ loop.latch2:
   %t22 = load double, double* %l0
   br label %loop.header0
 afterloop3:
+  %t24 = load double, double* %l0
   ret i1 0
 }
 

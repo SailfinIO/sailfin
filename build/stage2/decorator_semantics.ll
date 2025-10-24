@@ -34,6 +34,7 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
+declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
@@ -48,6 +49,59 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 @.str.len2.h193495007 = private unnamed_addr constant [3 x i8] c"io\00"
+@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
+@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
+@.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
 
 define { i8**, i64 }* @infer_effects({ i8**, i64 }* %existing, { %DecoratorInfo*, i64 }* %decorators) {
 entry:
@@ -68,10 +122,10 @@ entry:
   %t7 = load double, double* %l2
   br label %loop.header0
 loop.header0:
-  %t50 = phi i1 [ %t6, %entry ], [ %t48, %loop.latch2 ]
-  %t51 = phi double [ %t7, %entry ], [ %t49, %loop.latch2 ]
-  store i1 %t50, i1* %l1
-  store double %t51, double* %l2
+  %t51 = phi i1 [ %t6, %entry ], [ %t49, %loop.latch2 ]
+  %t52 = phi double [ %t7, %entry ], [ %t50, %loop.latch2 ]
+  store i1 %t51, i1* %l1
+  store double %t52, double* %l2
   br label %loop.body1
 loop.body1:
   %t8 = load double, double* %l2
@@ -93,6 +147,7 @@ merge5:
   %t20 = extractvalue { %DecoratorInfo*, i64 } %t18, 1
   %t21 = icmp uge i64 %t17, %t20
   ; bounds check: %t21 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t17, i64 %t20)
   %t22 = getelementptr %DecoratorInfo, %DecoratorInfo* %t19, i64 %t17
   %t23 = load %DecoratorInfo, %DecoratorInfo* %t22
   store %DecoratorInfo %t23, %DecoratorInfo* %l3
@@ -141,53 +196,57 @@ logical_or_merge_24:
   br i1 %t39, label %then6, label %merge7
 then6:
   store i1 1, i1* %l1
+  %t44 = load i1, i1* %l1
   br label %merge7
 merge7:
-  %t44 = phi i1 [ 1, %then6 ], [ %t41, %loop.body1 ]
-  store i1 %t44, i1* %l1
-  %t45 = load double, double* %l2
-  %t46 = sitofp i64 1 to double
-  %t47 = fadd double %t45, %t46
-  store double %t47, double* %l2
+  %t45 = phi i1 [ %t44, %then6 ], [ %t41, %logical_or_merge_24 ]
+  store i1 %t45, i1* %l1
+  %t46 = load double, double* %l2
+  %t47 = sitofp i64 1 to double
+  %t48 = fadd double %t46, %t47
+  store double %t48, double* %l2
   br label %loop.latch2
 loop.latch2:
-  %t48 = load i1, i1* %l1
-  %t49 = load double, double* %l2
+  %t49 = load i1, i1* %l1
+  %t50 = load double, double* %l2
   br label %loop.header0
 afterloop3:
   %t53 = load i1, i1* %l1
-  br label %logical_and_entry_52
+  %t54 = load double, double* %l2
+  %t56 = load i1, i1* %l1
+  br label %logical_and_entry_55
 
-logical_and_entry_52:
-  br i1 %t53, label %logical_and_right_52, label %logical_and_merge_52
+logical_and_entry_55:
+  br i1 %t56, label %logical_and_right_55, label %logical_and_merge_55
 
-logical_and_right_52:
-  %t54 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s55 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193495007, i32 0, i32 0
-  %t56 = call i1 @contains_effect({ i8**, i64 }* %t54, i8* %s55)
-  %t57 = xor i1 %t56, 1
-  br label %logical_and_right_end_52
+logical_and_right_55:
+  %t57 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s58 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193495007, i32 0, i32 0
+  %t59 = call i1 @contains_effect({ i8**, i64 }* %t57, i8* %s58)
+  %t60 = xor i1 %t59, 1
+  br label %logical_and_right_end_55
 
-logical_and_right_end_52:
-  br label %logical_and_merge_52
+logical_and_right_end_55:
+  br label %logical_and_merge_55
 
-logical_and_merge_52:
-  %t58 = phi i1 [ false, %logical_and_entry_52 ], [ %t57, %logical_and_right_end_52 ]
-  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t60 = load i1, i1* %l1
-  %t61 = load double, double* %l2
-  br i1 %t58, label %then8, label %merge9
-then8:
+logical_and_merge_55:
+  %t61 = phi i1 [ false, %logical_and_entry_55 ], [ %t60, %logical_and_right_end_55 ]
   %t62 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193495007, i32 0, i32 0
-  %t64 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t62, i8* %s63)
-  store { i8**, i64 }* %t64, { i8**, i64 }** %l0
+  %t63 = load i1, i1* %l1
+  %t64 = load double, double* %l2
+  br i1 %t61, label %then8, label %merge9
+then8:
+  %t65 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s66 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193495007, i32 0, i32 0
+  %t67 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t65, i8* %s66)
+  store { i8**, i64 }* %t67, { i8**, i64 }** %l0
+  %t68 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br label %merge9
 merge9:
-  %t65 = phi { i8**, i64 }* [ %t64, %then8 ], [ %t59, %entry ]
-  store { i8**, i64 }* %t65, { i8**, i64 }** %l0
-  %t66 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t66
+  %t69 = phi { i8**, i64 }* [ %t68, %then8 ], [ %t62, %logical_and_merge_55 ]
+  store { i8**, i64 }* %t69, { i8**, i64 }** %l0
+  %t70 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t70
 }
 
 define { %DecoratorInfo*, i64 }* @evaluate_decorators({ %Decorator*, i64 }* %decorators) {
@@ -234,6 +293,7 @@ merge5:
   %t19 = extractvalue { %Decorator*, i64 } %t17, 1
   %t20 = icmp uge i64 %t16, %t19
   ; bounds check: %t20 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t16, i64 %t19)
   %t21 = getelementptr %Decorator, %Decorator* %t18, i64 %t16
   %t22 = load %Decorator, %Decorator* %t21
   store %Decorator %t22, %Decorator* %l2
@@ -262,7 +322,9 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t42 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
-  ret { %DecoratorInfo*, i64 }* %t42
+  %t43 = load double, double* %l1
+  %t44 = load { %DecoratorInfo*, i64 }*, { %DecoratorInfo*, i64 }** %l0
+  ret { %DecoratorInfo*, i64 }* %t44
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @evaluate_arguments({ %DecoratorArgument*, i64 }* %arguments) {
@@ -309,6 +371,7 @@ merge5:
   %t19 = extractvalue { %DecoratorArgument*, i64 } %t17, 1
   %t20 = icmp uge i64 %t16, %t19
   ; bounds check: %t20 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t16, i64 %t19)
   %t21 = getelementptr %DecoratorArgument, %DecoratorArgument* %t18, i64 %t16
   %t22 = load %DecoratorArgument, %DecoratorArgument* %t21
   store %DecoratorArgument %t22, %DecoratorArgument* %l2
@@ -335,7 +398,9 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t40 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
-  ret { %DecoratorArgumentInfo*, i64 }* %t40
+  %t41 = load double, double* %l1
+  %t42 = load { %DecoratorArgumentInfo*, i64 }*, { %DecoratorArgumentInfo*, i64 }** %l0
+  ret { %DecoratorArgumentInfo*, i64 }* %t42
 }
 
 define %LiteralValue @evaluate_expression(%Expression %expr) {
@@ -1243,55 +1308,57 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t25 = load double, double* %l0
-  %t26 = load double, double* %l1
+  %t26 = load double, double* %l0
+  %t27 = load double, double* %l1
   br label %loop.header8
 loop.header8:
-  %t50 = phi double [ %t26, %entry ], [ %t49, %loop.latch10 ]
-  store double %t50, double* %l1
+  %t51 = phi double [ %t27, %afterloop3 ], [ %t50, %loop.latch10 ]
+  store double %t51, double* %l1
   br label %loop.body9
 loop.body9:
-  %t27 = load double, double* %l1
-  %t28 = load double, double* %l0
-  %t29 = fcmp ole double %t27, %t28
-  %t30 = load double, double* %l0
-  %t31 = load double, double* %l1
-  br i1 %t29, label %then12, label %merge13
+  %t28 = load double, double* %l1
+  %t29 = load double, double* %l0
+  %t30 = fcmp ole double %t28, %t29
+  %t31 = load double, double* %l0
+  %t32 = load double, double* %l1
+  br i1 %t30, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t32 = load double, double* %l1
-  %t33 = sitofp i64 1 to double
-  %t34 = fsub double %t32, %t33
-  store double %t34, double* %l3
-  %t35 = load double, double* %l3
-  %t36 = fptosi double %t35 to i64
-  %t37 = getelementptr i8, i8* %value, i64 %t36
-  %t38 = load i8, i8* %t37
-  %t39 = sext i8 %t38 to i64
-  store i64 %t39, i64* %l4
-  %t40 = load i64, i64* %l4
-  %t41 = call i1 @sailfin_runtime_is_whitespace_char(i64 %t40)
-  %t42 = load double, double* %l0
-  %t43 = load double, double* %l1
-  %t44 = load double, double* %l3
-  %t45 = load i64, i64* %l4
-  br i1 %t41, label %then14, label %merge15
+  %t33 = load double, double* %l1
+  %t34 = sitofp i64 1 to double
+  %t35 = fsub double %t33, %t34
+  store double %t35, double* %l3
+  %t36 = load double, double* %l3
+  %t37 = fptosi double %t36 to i64
+  %t38 = getelementptr i8, i8* %value, i64 %t37
+  %t39 = load i8, i8* %t38
+  %t40 = sext i8 %t39 to i64
+  store i64 %t40, i64* %l4
+  %t41 = load i64, i64* %l4
+  %t42 = call i1 @sailfin_runtime_is_whitespace_char(i64 %t41)
+  %t43 = load double, double* %l0
+  %t44 = load double, double* %l1
+  %t45 = load double, double* %l3
+  %t46 = load i64, i64* %l4
+  br i1 %t42, label %then14, label %merge15
 then14:
-  %t46 = load double, double* %l1
-  %t47 = sitofp i64 1 to double
-  %t48 = fsub double %t46, %t47
-  store double %t48, double* %l1
+  %t47 = load double, double* %l1
+  %t48 = sitofp i64 1 to double
+  %t49 = fsub double %t47, %t48
+  store double %t49, double* %l1
   br label %loop.latch10
 merge15:
   br label %afterloop11
 loop.latch10:
-  %t49 = load double, double* %l1
+  %t50 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t51 = load double, double* %l0
   %t52 = load double, double* %l1
-  %t53 = call i8* @slice_text(i8* %value, double %t51, double %t52)
-  ret i8* %t53
+  %t53 = load double, double* %l0
+  %t54 = load double, double* %l1
+  %t55 = call i8* @slice_text(i8* %value, double %t53, double %t54)
+  ret i8* %t55
 }
 
 define i1 @looks_like_quoted_string(i8* %text) {
@@ -1373,83 +1440,86 @@ then4:
 merge5:
   %t16 = sitofp i64 1 to double
   store double %t16, double* %l1
+  %t17 = load double, double* %l1
   br label %merge3
 merge3:
-  %t17 = phi double [ %t16, %then2 ], [ %t9, %entry ]
-  store double %t17, double* %l1
-  %t18 = load i1, i1* %l0
-  %t19 = load double, double* %l1
-  %t20 = load i64, i64* %l2
+  %t18 = phi double [ %t17, %merge5 ], [ %t9, %merge1 ]
+  store double %t18, double* %l1
+  %t19 = load i1, i1* %l0
+  %t20 = load double, double* %l1
+  %t21 = load i64, i64* %l2
   br label %loop.header6
 loop.header6:
-  %t59 = phi i1 [ %t18, %entry ], [ %t57, %loop.latch8 ]
-  %t60 = phi double [ %t19, %entry ], [ %t58, %loop.latch8 ]
-  store i1 %t59, i1* %l0
-  store double %t60, double* %l1
+  %t60 = phi i1 [ %t19, %merge3 ], [ %t58, %loop.latch8 ]
+  %t61 = phi double [ %t20, %merge3 ], [ %t59, %loop.latch8 ]
+  store i1 %t60, i1* %l0
+  store double %t61, double* %l1
   br label %loop.body7
 loop.body7:
-  %t21 = load double, double* %l1
-  %t22 = call i64 @sailfin_runtime_string_length(i8* %text)
-  %t23 = sitofp i64 %t22 to double
-  %t24 = fcmp oge double %t21, %t23
-  %t25 = load i1, i1* %l0
-  %t26 = load double, double* %l1
-  %t27 = load i64, i64* %l2
-  br i1 %t24, label %then10, label %merge11
+  %t22 = load double, double* %l1
+  %t23 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t24 = sitofp i64 %t23 to double
+  %t25 = fcmp oge double %t22, %t24
+  %t26 = load i1, i1* %l0
+  %t27 = load double, double* %l1
+  %t28 = load i64, i64* %l2
+  br i1 %t25, label %then10, label %merge11
 then10:
   br label %afterloop9
 merge11:
-  %t28 = load double, double* %l1
-  %t29 = fptosi double %t28 to i64
-  %t30 = getelementptr i8, i8* %text, i64 %t29
-  %t31 = load i8, i8* %t30
-  %t32 = sext i8 %t31 to i64
-  store i64 %t32, i64* %l3
-  %t33 = load i64, i64* %l3
-  %t34 = icmp eq i64 %t33, 46
-  %t35 = load i1, i1* %l0
-  %t36 = load double, double* %l1
-  %t37 = load i64, i64* %l2
-  %t38 = load i64, i64* %l3
-  br i1 %t34, label %then12, label %merge13
+  %t29 = load double, double* %l1
+  %t30 = fptosi double %t29 to i64
+  %t31 = getelementptr i8, i8* %text, i64 %t30
+  %t32 = load i8, i8* %t31
+  %t33 = sext i8 %t32 to i64
+  store i64 %t33, i64* %l3
+  %t34 = load i64, i64* %l3
+  %t35 = icmp eq i64 %t34, 46
+  %t36 = load i1, i1* %l0
+  %t37 = load double, double* %l1
+  %t38 = load i64, i64* %l2
+  %t39 = load i64, i64* %l3
+  br i1 %t35, label %then12, label %merge13
 then12:
-  %t39 = load i1, i1* %l0
   %t40 = load i1, i1* %l0
-  %t41 = load double, double* %l1
-  %t42 = load i64, i64* %l2
-  %t43 = load i64, i64* %l3
-  br i1 %t39, label %then14, label %merge15
+  %t41 = load i1, i1* %l0
+  %t42 = load double, double* %l1
+  %t43 = load i64, i64* %l2
+  %t44 = load i64, i64* %l3
+  br i1 %t40, label %then14, label %merge15
 then14:
   ret i1 0
 merge15:
   store i1 1, i1* %l0
-  %t44 = load double, double* %l1
-  %t45 = sitofp i64 1 to double
-  %t46 = fadd double %t44, %t45
-  store double %t46, double* %l1
+  %t45 = load double, double* %l1
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  store double %t47, double* %l1
   br label %loop.latch8
 merge13:
-  %t47 = load i64, i64* %l3
-  %t48 = call i1 @sailfin_runtime_is_decimal_digit(i64 %t47)
-  %t49 = xor i1 %t48, 1
-  %t50 = load i1, i1* %l0
-  %t51 = load double, double* %l1
-  %t52 = load i64, i64* %l2
-  %t53 = load i64, i64* %l3
-  br i1 %t49, label %then16, label %merge17
+  %t48 = load i64, i64* %l3
+  %t49 = call i1 @sailfin_runtime_is_decimal_digit(i64 %t48)
+  %t50 = xor i1 %t49, 1
+  %t51 = load i1, i1* %l0
+  %t52 = load double, double* %l1
+  %t53 = load i64, i64* %l2
+  %t54 = load i64, i64* %l3
+  br i1 %t50, label %then16, label %merge17
 then16:
   ret i1 0
 merge17:
-  %t54 = load double, double* %l1
-  %t55 = sitofp i64 1 to double
-  %t56 = fadd double %t54, %t55
-  store double %t56, double* %l1
+  %t55 = load double, double* %l1
+  %t56 = sitofp i64 1 to double
+  %t57 = fadd double %t55, %t56
+  store double %t57, double* %l1
   br label %loop.latch8
 loop.latch8:
-  %t57 = load i1, i1* %l0
-  %t58 = load double, double* %l1
+  %t58 = load i1, i1* %l0
+  %t59 = load double, double* %l1
   br label %loop.header6
 afterloop9:
+  %t62 = load i1, i1* %l0
+  %t63 = load double, double* %l1
   ret i1 1
 }
 
@@ -1571,6 +1641,7 @@ merge5:
   %t20 = extractvalue { i8**, i64 } %t18, 1
   %t21 = icmp uge i64 %t17, %t20
   ; bounds check: %t21 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t17, i64 %t20)
   %t22 = getelementptr i8*, i8** %t19, i64 %t17
   %t23 = load i8*, i8** %t22
   %t24 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t15, i8* %t23)
@@ -1586,7 +1657,9 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t32 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  ret { i8**, i64 }* %t32
+  %t33 = load double, double* %l1
+  %t34 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  ret { i8**, i64 }* %t34
 }
 
 define i1 @contains_effect({ i8**, i64 }* %effects, i8* %effect) {
@@ -1618,6 +1691,7 @@ merge5:
   %t12 = extractvalue { i8**, i64 } %t10, 1
   %t13 = icmp uge i64 %t9, %t12
   ; bounds check: %t13 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t9, i64 %t12)
   %t14 = getelementptr i8*, i8** %t11, i64 %t9
   %t15 = load i8*, i8** %t14
   %t16 = icmp eq i8* %t15, %effect
@@ -1635,6 +1709,7 @@ loop.latch2:
   %t21 = load double, double* %l0
   br label %loop.header0
 afterloop3:
+  %t23 = load double, double* %l0
   ret i1 0
 }
 

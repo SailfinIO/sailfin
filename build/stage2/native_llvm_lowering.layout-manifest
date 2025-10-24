@@ -432,6 +432,11 @@
 .layout field value type=string offset=0 size=8 align=8
 .layout field label type=string offset=8 size=8 align=8
 
+.layout struct name=MutationMaterializationResult size=24 align=8
+.layout field mutations type=LocalMutation[] offset=0 size=8 align=8
+.layout field lines type=string[] offset=8 size=8 align=8
+.layout field temp_index type=number offset=16 size=8 align=8
+
 .layout struct name=PhiStoreEntry size=16 align=8
 .layout field phi_line type=string offset=0 size=8 align=8
 .layout field store_line type=string offset=8 size=8 align=8

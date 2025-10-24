@@ -6206,6 +6206,8 @@ fn emit_phi_merges_for_if_else(
     preloaded_values -> string[],
     then_label -> string,
     else_label -> string,
+    then_exit_label -> string,
+    else_exit_label -> string,
     then_terminated -> boolean,
     else_terminated -> boolean,
     lines -> string[],
@@ -6275,11 +6277,19 @@ fn emit_phi_merges_for_if_else(
                 if then_mutation != null {
                     let mut then_source_label -> string = then_mutation.originating_label;
                     if then_source_label.length == 0 {
-                        then_source_label = then_label;
+                        if then_exit_label.length > 0 {
+                            then_source_label = then_exit_label;
+                        } else {
+                            then_source_label = then_label;
+                        }
                     }
                     phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_source_label + " ]");
                 } else if preloaded_value != null {
-                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + then_label + " ]");
+                    let mut fallback_label -> string = then_exit_label;
+                    if fallback_label.length == 0 {
+                        fallback_label = then_label;
+                    }
+                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + fallback_label + " ]");
                 }
             }
 
@@ -6287,11 +6297,19 @@ fn emit_phi_merges_for_if_else(
                 if else_mutation != null {
                     let mut else_source_label -> string = else_mutation.originating_label;
                     if else_source_label.length == 0 {
-                        else_source_label = else_label;
+                        if else_exit_label.length > 0 {
+                            else_source_label = else_exit_label;
+                        } else {
+                            else_source_label = else_label;
+                        }
                     }
                     phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_source_label + " ]");
                 } else if preloaded_value != null {
-                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + else_label + " ]");
+                    let mut fallback_label -> string = else_exit_label;
+                    if fallback_label.length == 0 {
+                        fallback_label = else_label;
+                    }
+                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + fallback_label + " ]");
                 }
             }
 
@@ -6596,6 +6614,7 @@ fn lower_if_instruction(
 
     let mut else_terminated -> boolean = false;
     let mut else_mutations -> LocalMutation[] = [];
+    let mut else_exit_label -> string = else_label;
     if structure.has_else {
         current_lines = append_string(current_lines, else_label + ":");
         let else_scope_id = make_child_scope_id(scope_id, else_label);
@@ -6630,8 +6649,9 @@ fn lower_if_instruction(
         current_next_region = else_result.next_lifetime_region_id;
         current_lines = current_lines.concat(else_result.lines);
         else_terminated = else_result.terminated;
-        let else_exit_label = find_last_label(current_lines, else_label);
-        let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, else_exit_label);
+        let exit_label = find_last_label(current_lines, else_label);
+        else_exit_label = exit_label;
+        let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, exit_label);
         if !else_terminated && branch_mutations.length > 0 {
             let materialized_else = materialize_mutation_values_at_exit(branch_mutations, base_locals, current_lines, current_temp);
             current_lines = materialized_else.lines;
@@ -6665,6 +6685,8 @@ fn lower_if_instruction(
                     preloaded_locals,
                     then_label,
                     else_label,
+                    then_exit_label,
+                    else_exit_label,
                     then_terminated,
                     else_terminated,
                     current_lines,

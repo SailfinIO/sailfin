@@ -31,6 +31,7 @@ source_filename = "sailfin"
 %Statement = type { i32, [56 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
+declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
