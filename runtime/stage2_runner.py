@@ -6,6 +6,7 @@ import contextvars
 import ctypes
 import os
 from dataclasses import dataclass
+from collections import OrderedDict
 from collections.abc import Iterable as ABCIterable
 from typing import Callable, Dict, Iterable, Mapping, Sequence
 
@@ -245,9 +246,141 @@ class Stage2Runner:
         return definitions
 
     @staticmethod
+    def _extract_function_symbol_and_signature(line: str) -> tuple[str | None, str | None]:
+        stripped = line.lstrip()
+        if not stripped.startswith("define "):
+            return None, None
+        brace_index = stripped.rfind("{")
+        if brace_index == -1:
+            return None, None
+        after_define = stripped[len("define "):brace_index].strip()
+        at_index = stripped.find("@")
+        if at_index == -1 or at_index > brace_index:
+            return None, None
+        end_index = stripped.find("(", at_index)
+        if end_index == -1:
+            return None, None
+        symbol = stripped[at_index + 1: end_index]
+        if not symbol:
+            return None, None
+        return symbol, after_define
+
+    @staticmethod
+    def _extract_function_symbol_from_declaration(line: str) -> str | None:
+        stripped = line.lstrip()
+        if not stripped.startswith("declare "):
+            return None
+        at_index = stripped.find("@")
+        if at_index == -1:
+            return None
+        end_index = stripped.find("(", at_index)
+        if end_index == -1:
+            return None
+        symbol = stripped[at_index + 1: end_index]
+        return symbol or None
+
+    @staticmethod
+    def _register_type_definitions(ir_text: str, registry: "OrderedDict[str, str]") -> None:
+        for line in ir_text.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("%") or " = type" not in stripped:
+                continue
+            name = stripped.split("=", 1)[0].strip()[1:]
+            if not name:
+                continue
+            registry.setdefault(name, stripped)
+
+    @staticmethod
+    def _find_type_insertion_index(lines: list[str]) -> int:
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("; ModuleID") or stripped.startswith("source_filename"):
+                continue
+            if stripped.startswith("%") and " = type" in stripped:
+                continue
+            return index
+        return len(lines)
+
+    @staticmethod
+    def _inject_missing_type_definitions(
+        ir_text: str,
+        known_types: "OrderedDict[str, str]",
+    ) -> str:
+        if not known_types:
+            return ir_text
+        lines = ir_text.splitlines()
+        defined: set[str] = set()
+        for line in lines:
+            stripped = line.strip()
+            if not stripped.startswith("%") or " = type" not in stripped:
+                continue
+            name = stripped.split("=", 1)[0].strip()[1:]
+            if name:
+                defined.add(name)
+        missing = [definition for name,
+                   definition in known_types.items() if name not in defined]
+        if not missing:
+            return ir_text
+        insert_index = Stage2Runner._find_type_insertion_index(lines)
+        new_lines = lines[:insert_index] + missing + lines[insert_index:]
+        return "\n".join(new_lines)
+
+    @staticmethod
+    def _find_declaration_insertion_index(lines: list[str]) -> int:
+        insert_index = Stage2Runner._find_type_insertion_index(lines)
+        while insert_index < len(lines):
+            stripped = lines[insert_index].strip()
+            if not stripped:
+                insert_index += 1
+                continue
+            if stripped.startswith("declare "):
+                insert_index += 1
+                continue
+            break
+        return insert_index
+
+    @staticmethod
+    def _inject_missing_function_declarations(
+        ir_text: str,
+        known_signatures: "OrderedDict[str, str]",
+    ) -> str:
+        if not known_signatures:
+            return ir_text
+        lines = ir_text.splitlines()
+        defined: set[str] = set()
+        declared: set[str] = set()
+        for line in lines:
+            stripped = line.lstrip()
+            if stripped.startswith("define "):
+                symbol, _ = Stage2Runner._extract_function_symbol_and_signature(
+                    line)
+                if symbol:
+                    defined.add(symbol)
+            elif stripped.startswith("declare "):
+                symbol = Stage2Runner._extract_function_symbol_from_declaration(
+                    line)
+                if symbol:
+                    declared.add(symbol)
+        missing: list[str] = []
+        for symbol, signature in known_signatures.items():
+            if symbol in defined or symbol in declared:
+                continue
+            if f"@{symbol}" not in ir_text:
+                continue
+            missing.append("declare " + signature)
+        if not missing:
+            return ir_text
+        insert_index = Stage2Runner._find_declaration_insertion_index(lines)
+        new_lines = lines[:insert_index] + missing + lines[insert_index:]
+        return "\n".join(new_lines)
+
+    @staticmethod
     def _rewrite_function_linkage(
         ir_text: str,
         defined_symbols: set[str],
+        known_signatures: "OrderedDict[str, str]",
     ) -> tuple[str, list[str]]:
         """Scope duplicate function definitions to avoid LLVM collisions."""
 
@@ -272,16 +405,13 @@ class Stage2Runner:
             if not stripped.startswith("define "):
                 continue
 
-            at_index = stripped.find("@")
-            if at_index == -1:
-                continue
-            end_index = stripped.find("(", at_index)
-            if end_index == -1:
-                continue
-
-            symbol = stripped[at_index + 1:end_index]
+            symbol, signature = Stage2Runner._extract_function_symbol_and_signature(
+                line)
             if not symbol:
                 continue
+
+            if signature and symbol not in known_signatures:
+                known_signatures[symbol] = signature
 
             if symbol not in defined_symbols:
                 defined_symbols.add(symbol)
@@ -795,6 +925,8 @@ class Stage2Runner:
 
         candidates: list[tuple[str, str]] = []
         defined_symbols: set[str] = set()
+        function_signatures: "OrderedDict[str, str]" = OrderedDict()
+        type_definitions: "OrderedDict[str, str]" = OrderedDict()
         duplicate_registry: Dict[str, list[str]] = {}
         for index, lowered in enumerate(self._lowered_modules):
             module_ir = getattr(lowered, "ir", "")
@@ -803,7 +935,12 @@ class Stage2Runner:
             patched_ir = self._inject_missing_constant_definitions(
                 module_ir, definitions=constant_definitions)
             rewritten_ir, duplicates = self._rewrite_function_linkage(
-                patched_ir, defined_symbols)
+                patched_ir, defined_symbols, function_signatures)
+            rewritten_ir = self._inject_missing_type_definitions(
+                rewritten_ir, type_definitions)
+            rewritten_ir = self._inject_missing_function_declarations(
+                rewritten_ir, function_signatures)
+            self._register_type_definitions(rewritten_ir, type_definitions)
             if duplicates:
                 duplicate_registry[str(
                     getattr(lowered, "module_name", None)
