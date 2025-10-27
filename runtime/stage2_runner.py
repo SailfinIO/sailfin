@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from collections import OrderedDict
 from collections.abc import Iterable as ABCIterable
-from typing import Callable, Dict, Iterable, Mapping, Sequence
+from typing import Callable, Dict, Iterable, Mapping, Sequence, cast
 
 import llvmlite.binding as llvm
 
@@ -47,18 +47,51 @@ _HELPER_SIGNATURES: Mapping[str, tuple[str, Sequence[type]]] = {
 }
 
 # Adapter signatures for capability-aware runtime operations
-_ADAPTER_SIGNATURES: Mapping[str, tuple[str | None, Sequence[type], type | None]] = {
+_ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[type], type | None]] = {
     # Filesystem adapters
     "sailfin_adapter_fs_read_file": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_write_file": ("io", (ctypes.c_void_p, ctypes.c_void_p), None),
     "sailfin_adapter_fs_list_directory": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_delete_file": ("io", (ctypes.c_void_p,), ctypes.c_bool),
     "sailfin_adapter_fs_create_directory": ("io", (ctypes.c_void_p, ctypes.c_bool), ctypes.c_bool),
+    # Capability helpers
+    "sailfin_runtime_create_capability_grant": (None, (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_create_filesystem_bridge": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_create_http_bridge": ("net", (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_create_model_bridge": ("model", (ctypes.c_void_p,), ctypes.c_void_p),
     # String helpers
+    "sailfin_runtime_substring": (None, (ctypes.c_void_p, ctypes.c_longlong, ctypes.c_longlong), ctypes.c_void_p),
     "sailfin_runtime_string_length": (None, (ctypes.c_void_p,), ctypes.c_longlong),
     "sailfin_runtime_string_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
     "sailfin_runtime_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_append_string": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
+    "sailfin_runtime_is_decimal_digit": (None, (ctypes.c_byte,), ctypes.c_bool),
+    "sailfin_runtime_grapheme_count": (None, (ctypes.c_void_p,), ctypes.c_double),
+    "sailfin_runtime_grapheme_at": (None, (ctypes.c_void_p, ctypes.c_double), ctypes.c_void_p),
+    "sailfin_runtime_is_whitespace_char": (None, (ctypes.c_byte,), ctypes.c_bool),
+    "char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
     "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
+    # Generic runtime helpers
+    "sailfin_runtime_channel": ("io", (ctypes.c_double,), ctypes.c_void_p),
+    "sailfin_runtime_parallel": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_spawn": ("io", (ctypes.c_void_p, ctypes.c_void_p), None),
+    "sailfin_runtime_log_execution": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_to_debug_string": (None, (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_raise_value_error": (None, (ctypes.c_void_p,), None),
+    "sailfin_runtime_is_string": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_is_number": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_is_boolean": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_is_void": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_is_array": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_is_callable": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sailfin_runtime_resolve_type": (None, (ctypes.c_void_p,), ctypes.c_void_p),
+    "sailfin_runtime_instance_of": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_bool),
+    "sailfin_runtime_serve": (("io", "net"), (ctypes.c_void_p, ctypes.c_void_p), None),
+    "sailfin_runtime_array_map": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_array_filter": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_array_reduce": (None, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_get_field": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
     # HTTP adapters
     "sailfin_adapter_http_get": ("net", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_http_post": ("net", (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
@@ -151,6 +184,8 @@ class Stage2Runner:
         self._registered_helpers = []
         self._hooks = _normalise_hooks(runtime_hooks)
         self._adapter_string_buffers = []
+        self._adapter_object_handles: dict[int, object] = {}
+        self._function_info_cache = {}
         self._initialise_runtime_helpers()
         self._compile_ir()
 
@@ -254,7 +289,8 @@ class Stage2Runner:
                     continue
                 definitions.setdefault(const_name, (rendered, length))
         for name in referenced_enum_constants:
-            definition, length = Stage2Runner._synthesize_enum_variant_constant(name)
+            definition, length = Stage2Runner._synthesize_enum_variant_constant(
+                name)
             definitions.setdefault(name, (definition, length))
         return definitions
 
@@ -552,7 +588,8 @@ class Stage2Runner:
                 continue
             if already_defined is not None and name in already_defined:
                 if f"@{name}" not in module_ir:
-                    missing_lines.append(f"@{name} = external constant [{length} x i8]")
+                    missing_lines.append(
+                        f"@{name} = external constant [{length} x i8]")
                     injected.add(name)
                 continue
             if f"@{name}" not in module_ir:
@@ -579,6 +616,131 @@ class Stage2Runner:
                     index[symbol] = effects
         return index
 
+    def _lookup_function_return(self, symbol: str) -> tuple[object, str] | None:
+        if symbol in self._function_info_cache:
+            return self._function_info_cache[symbol]
+        modules = self._modules or ()
+        for module in modules:
+            try:
+                text = str(module)
+            except Exception:
+                continue
+            for line in text.splitlines():
+                stripped = line.lstrip()
+                if not stripped.startswith("define "):
+                    continue
+                if f"@{symbol}" not in stripped:
+                    continue
+                after_define = stripped[len("define "):]
+                at_index = after_define.find("@")
+                if at_index == -1:
+                    continue
+                segment = after_define[:at_index].strip()
+                if not segment:
+                    continue
+                if "{" in segment:
+                    brace_index = segment.find("{")
+                    return_type = segment[brace_index:].strip()
+                else:
+                    tokens = segment.split()
+                    if not tokens:
+                        continue
+                    return_type = tokens[-1]
+                info = (module, return_type)
+                self._function_info_cache[symbol] = info
+                return info
+        self._function_info_cache[symbol] = None
+        return None
+
+    def _allocate_sret_buffer(self, module, return_type: str) -> tuple[int, ctypes.Array, int]:
+        pointer_size = ctypes.sizeof(ctypes.c_void_p)
+        struct_size = pointer_size
+        alignment = pointer_size
+        target_data = getattr(self._engine, "target_data", None)
+
+        type_ref = None
+        type_name = return_type.strip()
+        if type_name.startswith("%"):
+            lookup = type_name[1:].strip()
+            candidates = [lookup]
+            if lookup.startswith("struct."):
+                candidates.append(lookup.split("struct.", 1)[1])
+            module_candidates = []
+            if module is not None:
+                module_candidates.append(module)
+            for mod in self._modules or ():
+                if mod is module:
+                    continue
+                module_candidates.append(mod)
+            for candidate in candidates:
+                for mod in module_candidates:
+                    try:
+                        type_ref = mod.get_struct_type(candidate)
+                    except Exception:
+                        type_ref = None
+                    if type_ref is not None:
+                        break
+                if type_ref is not None:
+                    break
+        elif type_name.startswith("{"):
+            try:
+                tmp_module = llvm.parse_assembly(
+                    f"%__sret_tmp = type {type_name}\n")
+                type_ref = tmp_module.get_struct_type("__sret_tmp")
+            except Exception:
+                type_ref = None
+
+        if target_data is not None and type_ref is not None:
+            try:
+                computed_size = int(target_data.get_abi_size(type_ref))
+                if computed_size:
+                    struct_size = max(struct_size, computed_size)
+                computed_alignment = int(
+                    target_data.get_abi_alignment(type_ref))
+                if computed_alignment:
+                    alignment = max(alignment, computed_alignment)
+            except Exception:
+                pass
+
+        if struct_size <= 0:
+            struct_size = pointer_size
+        if alignment <= 0:
+            alignment = pointer_size
+
+        raw_buffer = ctypes.create_string_buffer(struct_size + alignment)
+        raw_address = ctypes.addressof(raw_buffer)
+        aligned_address = (raw_address + (alignment - 1)) & ~(alignment - 1)
+        self._adapter_string_buffers.append(raw_buffer)
+        return aligned_address, raw_buffer, struct_size
+
+    @staticmethod
+    def _extract_sret_result(address: int, size: int, restype):
+        if restype is None:
+            return None
+        if restype is ctypes.c_void_p:
+            return ctypes.c_void_p.from_address(address).value
+        from_address = getattr(restype, "from_address", None)
+        if callable(from_address):
+            try:
+                instance = from_address(address)
+                return getattr(instance, "value", instance)
+            except Exception:
+                pass
+        return ctypes.string_at(address, size)
+
+    @staticmethod
+    def _is_aggregate_return_type(return_type: str | None) -> bool:
+        if not return_type:
+            return False
+        stripped = return_type.strip()
+        if not stripped:
+            return False
+        if stripped.endswith("*"):
+            return False
+        if stripped[0] in {"%", "{", "["}:
+            return True
+        return False
+
     def _initialise_runtime_helpers(self) -> None:
         for symbol, (effect, arg_types) in _HELPER_SIGNATURES.items():
             delegate = self._hooks.get(symbol)
@@ -595,7 +757,7 @@ class Stage2Runner:
     def _make_helper(
         self,
         symbol: str,
-        effect: str | None,
+        effect: str | Sequence[str] | None,
         arg_types: Sequence[type],
         delegate: Callable[..., None] | None,
     ):
@@ -606,12 +768,21 @@ class Stage2Runner:
                     f"{symbol} invoked without an active capability grant")
             grant.require(effect_name)
 
+        def _require_effects() -> None:
+            if not effect:
+                return
+            targets = (effect,) if isinstance(effect, str) else tuple(effect)
+            for effect_name in targets:
+                _require(effect_name)
         cfunc_type = ctypes.CFUNCTYPE(None, *arg_types)
 
         def _wrapper(*args) -> None:
             try:
                 if effect:
-                    _require(effect)
+                    targets = (effect,) if isinstance(
+                        effect, str) else tuple(effect)
+                    for effect_name in targets:
+                        _require(effect_name)
                 if delegate is not None:
                     delegate(*args)
             except Exception as exc:  # pragma: no cover - propagated after invocation
@@ -623,7 +794,7 @@ class Stage2Runner:
     def _make_adapter(
         self,
         symbol: str,
-        effect: str | None,
+        effect: str | Sequence[str] | None,
         arg_types: Sequence[type],
         return_type: type | None,
     ):
@@ -634,6 +805,46 @@ class Stage2Runner:
                 raise PermissionError(
                     f"{symbol} invoked without an active capability grant")
             grant.require(effect_name)
+
+        def _require_effects() -> None:
+            if not effect:
+                return
+            targets = (effect,) if isinstance(effect, str) else tuple(effect)
+            for effect_name in targets:
+                _require(effect_name)
+
+        def _default_return():
+            if return_type is None:
+                return None
+            if return_type is ctypes.c_void_p:
+                return 0
+            if return_type is ctypes.c_bool:
+                return False
+            if return_type is ctypes.c_double:
+                return 0.0
+            if return_type is ctypes.c_longlong:
+                return 0
+            try:
+                return return_type()
+            except Exception:
+                return 0
+
+        def _store_handle(value: object | None) -> int:
+            if value is None:
+                return 0
+            handle = id(value)
+            self._adapter_object_handles[handle] = value
+            stored = ctypes.c_void_p(handle).value
+            return 0 if stored is None else int(stored)
+
+        def _load_handle(ptr: int | ctypes.c_void_p) -> object | None:
+            if isinstance(ptr, ctypes.c_void_p):
+                address = int(ptr.value or 0)
+            else:
+                address = int(ptr or 0)
+            if address == 0:
+                return None
+            return self._adapter_object_handles.get(address)
 
         # Helper to convert c_void_p to Python string
         def _ptr_to_str(ptr: ctypes.c_void_p) -> str:
@@ -651,14 +862,171 @@ class Stage2Runner:
             value = ctypes.cast(buf, ctypes.c_void_p).value
             return 0 if value is None else value
 
+        class _StringArray(ctypes.Structure):
+            _fields_ = [
+                ("data", ctypes.POINTER(ctypes.c_void_p)),
+                ("length", ctypes.c_longlong),
+            ]
+
+        def _array_to_list(array_ptr: ctypes.c_void_p) -> list[str]:
+            if not array_ptr:
+                return []
+            array = ctypes.cast(
+                array_ptr, ctypes.POINTER(_StringArray)
+            ).contents
+            length = int(array.length)
+            if length <= 0 or not array.data:
+                return []
+            return [_ptr_to_str(array.data[i]) for i in range(length)]
+
+        def _array_to_handles(array_ptr: ctypes.c_void_p) -> list[int]:
+            if not array_ptr:
+                return []
+            array = ctypes.cast(
+                array_ptr, ctypes.POINTER(_StringArray)
+            ).contents
+            length = int(array.length)
+            if length <= 0 or not array.data:
+                return []
+            return [int(array.data[i]) for i in range(length)]
+
+        def _list_to_array(values: list[str]) -> int:
+            length = len(values)
+            data = (ctypes.c_void_p * length)()
+            for index, value in enumerate(values):
+                data[index] = ctypes.c_void_p(_str_to_ptr(value))
+            array_struct = _StringArray()
+            array_struct.data = ctypes.cast(
+                data, ctypes.POINTER(ctypes.c_void_p)
+            )
+            array_struct.length = length
+            self._adapter_string_buffers.append(data)
+            self._adapter_string_buffers.append(array_struct)
+            return ctypes.cast(ctypes.pointer(array_struct), ctypes.c_void_p).value or 0
+
+        def _handles_to_array(handles: Sequence[int]) -> int:
+            length = len(handles)
+            data = (ctypes.c_void_p * length)()
+            for index, handle in enumerate(handles):
+                data[index] = ctypes.c_void_p(handle)
+            array_struct = _StringArray()
+            array_struct.data = ctypes.cast(
+                data, ctypes.POINTER(ctypes.c_void_p)
+            )
+            array_struct.length = length
+            self._adapter_string_buffers.append(data)
+            self._adapter_string_buffers.append(array_struct)
+            return ctypes.cast(ctypes.pointer(array_struct), ctypes.c_void_p).value or 0
+
+        def _build_fallback():
+            cfunc_type = (
+                ctypes.CFUNCTYPE(return_type, *arg_types)
+                if return_type is not None
+                else ctypes.CFUNCTYPE(None, *arg_types)
+            )
+
+            def _unimplemented(*_args):
+                try:
+                    _require_effects()
+                    raise NotImplementedError(
+                        f"adapter for {symbol} not implemented"
+                    )
+                except Exception as exc:  # pragma: no cover - surfaced after call
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return _default_return()
+
+            return cfunc_type(_unimplemented)
+
+        # Capability helpers
+        if symbol == "sailfin_runtime_create_capability_grant":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+
+            def _create_capability_grant(effects_ptr: ctypes.c_void_p) -> int:
+                try:
+                    effect_names = _array_to_list(effects_ptr)
+                    grant = runtime.create_capability_grant(effect_names)
+                    return _store_handle(grant)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_create_capability_grant)
+
+        elif symbol == "sailfin_runtime_create_filesystem_bridge":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+
+            def _create_filesystem_bridge(grant_ptr: ctypes.c_void_p) -> int:
+                try:
+                    _require_effects()
+                    grant = _load_handle(grant_ptr)
+                    if grant is None:
+                        raise ValueError(
+                            "filesystem bridge requires capability grant handle"
+                        )
+                    bridge = runtime.create_filesystem_bridge(
+                        cast(runtime.CapabilityGrant, grant)
+                    )
+                    return _store_handle(bridge)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_create_filesystem_bridge)
+
+        elif symbol == "sailfin_runtime_create_http_bridge":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+
+            def _create_http_bridge(grant_ptr: ctypes.c_void_p) -> int:
+                try:
+                    _require_effects()
+                    grant = _load_handle(grant_ptr)
+                    if grant is None:
+                        raise ValueError(
+                            "HTTP bridge requires capability grant handle"
+                        )
+                    bridge = runtime.create_http_bridge(
+                        cast(runtime.CapabilityGrant, grant)
+                    )
+                    return _store_handle(bridge)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_create_http_bridge)
+
+        elif symbol == "sailfin_runtime_create_model_bridge":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+
+            def _create_model_bridge(grant_ptr: ctypes.c_void_p) -> int:
+                try:
+                    _require_effects()
+                    grant = _load_handle(grant_ptr)
+                    if grant is None:
+                        raise ValueError(
+                            "model bridge requires capability grant handle"
+                        )
+                    bridge = runtime.create_model_bridge(
+                        cast(runtime.CapabilityGrant, grant)
+                    )
+                    return _store_handle(bridge)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_create_model_bridge)
+
         # Filesystem adapters
-        if symbol == "sailfin_adapter_fs_read_file":
+        elif symbol == "sailfin_adapter_fs_read_file":
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
 
             def _fs_read_file(path_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     path = _ptr_to_str(path_ptr)
                     contents = runtime.fs.readFile(path)
                     return _str_to_ptr(contents)
@@ -675,8 +1043,7 @@ class Stage2Runner:
 
             def _fs_write_file(path_ptr: ctypes.c_void_p, contents_ptr: ctypes.c_void_p) -> None:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     path = _ptr_to_str(path_ptr)
                     contents = _ptr_to_str(contents_ptr)
                     runtime.fs.writeFile(path, contents)
@@ -691,8 +1058,7 @@ class Stage2Runner:
 
             def _fs_list_directory(path_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     path = _ptr_to_str(path_ptr)
                     entries = runtime.fs.listDirectory(path or None)
                     try:
@@ -714,8 +1080,7 @@ class Stage2Runner:
 
             def _fs_delete_file(path_ptr: ctypes.c_void_p) -> bool:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     path = _ptr_to_str(path_ptr)
                     return bool(runtime.fs.deleteFile(path))
                 except Exception as exc:
@@ -731,8 +1096,7 @@ class Stage2Runner:
 
             def _fs_create_directory(path_ptr: ctypes.c_void_p, exist_ok: ctypes.c_bool) -> bool:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     path = _ptr_to_str(path_ptr)
                     return bool(runtime.fs.createDirectory(path, exist_ok=bool(exist_ok)))
                 except Exception as exc:
@@ -747,8 +1111,7 @@ class Stage2Runner:
 
             def _string_length(value_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     text = _ptr_to_str(value_ptr)
                     return len(text)
                 except Exception as exc:
@@ -758,14 +1121,31 @@ class Stage2Runner:
 
             return cfunc_type(_string_length)
 
+        elif symbol == "sailfin_runtime_substring":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_longlong, ctypes.c_longlong
+            )
+
+            def _substring(text_ptr: ctypes.c_void_p, start: ctypes.c_longlong, end: ctypes.c_longlong) -> int:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(text_ptr)
+                    result = runtime.substring(text, int(start), int(end))
+                    return _str_to_ptr(result)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_substring)
+
         elif symbol == "sailfin_runtime_string_concat":
             cfunc_type = ctypes.CFUNCTYPE(
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
 
             def _string_concat(first_ptr: ctypes.c_void_p, second_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     first = _ptr_to_str(first_ptr)
                     second = _ptr_to_str(second_ptr)
                     return _str_to_ptr(first + second)
@@ -777,37 +1157,8 @@ class Stage2Runner:
             return cfunc_type(_string_concat)
 
         elif symbol == "sailfin_runtime_concat":
-            class _StringArray(ctypes.Structure):
-                _fields_ = [
-                    ("data", ctypes.POINTER(ctypes.c_void_p)),
-                    ("length", ctypes.c_longlong),
-                ]
-
             cfunc_type = ctypes.CFUNCTYPE(
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
-
-            def _array_to_list(array_ptr: ctypes.c_void_p) -> list[str]:
-                if not array_ptr:
-                    return []
-                array = ctypes.cast(
-                    array_ptr, ctypes.POINTER(_StringArray)).contents
-                length = int(array.length)
-                if length <= 0 or not array.data:
-                    return []
-                return [_ptr_to_str(array.data[i]) for i in range(length)]
-
-            def _list_to_array(values: list[str]) -> int:
-                length = len(values)
-                data = (ctypes.c_void_p * length)()
-                for index, value in enumerate(values):
-                    data[index] = ctypes.c_void_p(_str_to_ptr(value))
-                array_struct = _StringArray()
-                array_struct.data = ctypes.cast(
-                    data, ctypes.POINTER(ctypes.c_void_p))
-                array_struct.length = length
-                self._adapter_string_buffers.append(data)
-                self._adapter_string_buffers.append(array_struct)
-                return ctypes.cast(ctypes.pointer(array_struct), ctypes.c_void_p).value or 0
 
             def _concat(first_ptr: ctypes.c_void_p, second_ptr: ctypes.c_void_p) -> int:
                 try:
@@ -822,6 +1173,23 @@ class Stage2Runner:
 
             return cfunc_type(_concat)
 
+        elif symbol == "sailfin_runtime_append_string":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+
+            def _append_string(array_ptr: ctypes.c_void_p, value_ptr: ctypes.c_void_p) -> int:
+                try:
+                    existing = _array_to_list(array_ptr)
+                    appended = list(existing or [])
+                    appended.append(_ptr_to_str(value_ptr))
+                    return _list_to_array(appended)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_append_string)
+
         elif symbol == "sailfin_runtime_bounds_check":
             cfunc_type = ctypes.CFUNCTYPE(
                 None, ctypes.c_longlong, ctypes.c_longlong)
@@ -835,14 +1203,93 @@ class Stage2Runner:
 
             return cfunc_type(_bounds_check)
 
+        elif symbol == "sailfin_runtime_char_code":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_void_p)
+
+            def _runtime_char_code(value_ptr: ctypes.c_void_p) -> float:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(value_ptr)
+                    ch = text[0] if text else "\0"
+                    return float(runtime.char_code(ch))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0.0
+
+            return cfunc_type(_runtime_char_code)
+
+        elif symbol == "sailfin_runtime_is_decimal_digit":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_byte)
+
+            def _is_decimal_digit(value: ctypes.c_byte) -> bool:
+                try:
+                    code = int(value) & 0xFF
+                    ch = chr(code)
+                    return '0' <= ch <= '9'
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_is_decimal_digit)
+
+        elif symbol == "sailfin_runtime_grapheme_count":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_void_p)
+
+            def _grapheme_count(text_ptr: ctypes.c_void_p) -> float:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(text_ptr)
+                    return float(runtime.grapheme_count(text))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0.0
+
+            return cfunc_type(_grapheme_count)
+
+        elif symbol == "sailfin_runtime_grapheme_at":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double)
+
+            def _grapheme_at(text_ptr: ctypes.c_void_p, index: ctypes.c_double) -> int:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(text_ptr)
+                    position = int(index)
+                    result = runtime.grapheme_at(text, position)
+                    return _str_to_ptr(result or "")
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0
+
+            return cfunc_type(_grapheme_at)
+
+        elif symbol == "sailfin_runtime_is_whitespace_char":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_byte)
+
+            def _is_whitespace_char(value: ctypes.c_byte) -> bool:
+                try:
+                    code = int(value) & 0xFF
+                    ch = chr(code)
+                    # Match ASCII whitespace plus newline and carriage return.
+                    return ch.isspace()
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_is_whitespace_char)
+
         # HTTP adapters
         elif symbol == "sailfin_adapter_http_get":
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
 
             def _http_get(url_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     url = _ptr_to_str(url_ptr)
                     # Use the mock HTTP module
                     import asyncio
@@ -865,8 +1312,7 @@ class Stage2Runner:
 
             def _http_post(url_ptr: ctypes.c_void_p, body_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     url = _ptr_to_str(url_ptr)
                     body = _ptr_to_str(body_ptr)
                     # Mock HTTP POST - just echo back
@@ -888,8 +1334,7 @@ class Stage2Runner:
 
             def _model_invoke(prompt_ptr: ctypes.c_void_p, options_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     prompt = _ptr_to_str(prompt_ptr)
                     # Mock model invocation
                     result = f"[mock:model] Response to: {prompt}"
@@ -908,8 +1353,7 @@ class Stage2Runner:
 
             def _serve_start(handler_ptr: ctypes.c_void_p, config_ptr: ctypes.c_void_p) -> None:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     # Mock serve start
                     runtime.console.info("[serve] mock server started")
                 except Exception as exc:
@@ -924,8 +1368,7 @@ class Stage2Runner:
 
             def _serve_dispatch(handler_ptr: ctypes.c_void_p, request_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     # Mock handler dispatch
                     result = '{"status": 200, "body": "OK"}'
                     return _str_to_ptr(result)
@@ -943,8 +1386,7 @@ class Stage2Runner:
 
             def _spawn_task(task_ptr: ctypes.c_void_p, name_ptr: ctypes.c_void_p) -> None:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     # Mock spawn
                     name = _ptr_to_str(name_ptr) if name_ptr else ""
                     runtime.console.info(
@@ -960,8 +1402,7 @@ class Stage2Runner:
 
             def _channel_create(capacity: ctypes.c_longlong) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     capacity_value = int(capacity)
                     ch = runtime.channel(
                         capacity_value if capacity_value > 0 else None)
@@ -980,8 +1421,7 @@ class Stage2Runner:
 
             def _channel_send(channel_ptr: ctypes.c_void_p, value_ptr: ctypes.c_void_p) -> None:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     # Mock channel send
                     runtime.console.info("[channel] value sent")
                 except Exception as exc:
@@ -995,8 +1435,7 @@ class Stage2Runner:
 
             def _channel_receive(channel_ptr: ctypes.c_void_p) -> int:
                 try:
-                    if effect:
-                        _require(effect)
+                    _require_effects()
                     # Mock channel receive
                     result = "mock_value"
                     return _str_to_ptr(result)
@@ -1007,8 +1446,23 @@ class Stage2Runner:
 
             return cfunc_type(_channel_receive)
 
-        else:
-            raise ValueError(f"unknown adapter symbol '{symbol}'")
+        elif symbol == "char_code":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_void_p)
+
+            def _char_code(value_ptr: ctypes.c_void_p) -> float:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(value_ptr)
+                    ch = text[0] if text else "\0"
+                    return float(runtime.char_code(ch))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return 0.0
+
+            return cfunc_type(_char_code)
+
+        return _build_fallback()
 
     def _compile_ir(self) -> None:
         constant_definitions = self._collect_global_constant_definitions(
@@ -1217,19 +1671,66 @@ class Stage2Runner:
                 raise ValueError(
                     "argtypes must be specified when invoking with positional arguments")
             argtypes = ()
-        cfunc_type = ctypes.CFUNCTYPE(
-            restype, *argtypes) if restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
-        function = cfunc_type(address)
+        function_info = self._lookup_function_return(entry_point)
+        aggregate_module = None
+        aggregate_return_type = None
+        aggregate_address = 0
+        aggregate_buffer: ctypes.Array | None = None
+        aggregate_size = 0
+        use_aggregate = False
+        if function_info is not None:
+            aggregate_module, aggregate_return_type = function_info
+            if self._is_aggregate_return_type(aggregate_return_type):
+                aggregate_address, aggregate_buffer, aggregate_size = self._allocate_sret_buffer(
+                    aggregate_module, aggregate_return_type)
+                aggregate_size = max(1, aggregate_size)
+                aggregate_restype = ctypes.c_ubyte * aggregate_size
+                cfunc_type = ctypes.CFUNCTYPE(aggregate_restype, *argtypes)
+                function = cfunc_type(address)
+                self._debug_log(
+                    f"[stage2] aggregate entry {entry_point}: declared={aggregate_return_type} size={aggregate_size}"
+                )
+                use_aggregate = True
+        if not use_aggregate:
+            cfunc_type = ctypes.CFUNCTYPE(
+                restype, *argtypes) if restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
+            function = cfunc_type(address)
         effects = self._manifest.get(entry_point, ())
         grant = runtime.create_capability_grant(effects)
         token = _ACTIVE_GRANT.set(grant)
         error_token = _LAST_RUNTIME_ERROR.set(None)
+        aggregate_result = None
         try:
-            result = function(*args)
+            self._debug_log(
+                f"[stage2] invoke {entry_point}: aggregate={use_aggregate}"
+            )
+            if use_aggregate:
+                aggregate_result = function(*args)
+            else:
+                result = function(*args)
         finally:
             _ACTIVE_GRANT.reset(token)
             runtime_error = _LAST_RUNTIME_ERROR.get()
             _LAST_RUNTIME_ERROR.reset(error_token)
         if runtime_error is not None:
             raise runtime_error
+        if use_aggregate:
+            if aggregate_result is None:
+                return None
+            source_address = ctypes.addressof(aggregate_result)
+            if aggregate_address == 0 or source_address == 0:
+                raise RuntimeError(
+                    f"aggregate invocation for {entry_point} produced null buffer (dest={aggregate_address}, src={source_address})"
+                )
+            self._debug_log(
+                f"[stage2] aggregate copy {entry_point}: size={aggregate_size} dest=0x{aggregate_address:x} src=0x{source_address:x}"
+            )
+            ctypes.memmove(
+                aggregate_address,
+                source_address,
+                aggregate_size,
+            )
+            if restype is None:
+                return aggregate_address
+            return self._extract_sret_result(aggregate_address, aggregate_size, restype)
         return result

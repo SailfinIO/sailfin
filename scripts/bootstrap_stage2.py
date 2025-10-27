@@ -574,8 +574,6 @@ def validate_stage2_artifacts(llvm_modules: List[pathlib.Path], *, debug: bool =
         print(
             f"[stage2-bootstrap] validating {len(llvm_modules)} LLVM module(s)...")
 
-    llvm.initialize()
-
     for module_path in llvm_modules:
         if debug:
             print(f"[stage2-bootstrap]   validating {module_path.name}...")
